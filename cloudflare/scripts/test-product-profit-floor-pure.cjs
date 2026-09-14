@@ -117,7 +117,7 @@ function loadTs(relativePath, exactStubs = {}) {
 // RESTOCKED_RETURN_LINE ever change, this test moves with them instead of
 // certifying a stale transcription.
 const businessDateWindow = loadTs('lib/businessDateWindow.ts')
-const salesAnalytics = loadTs('lib/salesAnalytics.ts', { './businessDateWindow': businessDateWindow })
+const salesAnalytics = loadTs('lib/salesAnalytics.ts', { './removalLosses': loadTs('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow })
 const productSalesLedger = loadTs('lib/productSalesLedger.ts', { './salesAnalytics': salesAnalytics })
 const inventory = loadTs('routes/inventory.ts', {
   hono: { Hono },

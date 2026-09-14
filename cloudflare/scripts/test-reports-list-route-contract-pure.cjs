@@ -70,7 +70,7 @@ const reportMoneyPrecision=load('lib/reportMoneyPrecision.ts',{'./moneyPrecision
 const saleTotals=load('lib/saleTotals.ts')
 const financialPrecision=load('lib/financialPrecision.ts')
 const nativeSaleChange=load('lib/nativeSaleChange.ts',{'./financialPrecision':financialPrecision,'./saleTotals':saleTotals})
-const analytics=load('lib/salesAnalytics.ts',{'./db':{getDb:()=>db},'./businessDateWindow':dates,'./reportMoneyPrecision':reportMoneyPrecision})
+const analytics=load('lib/salesAnalytics.ts',{'./db':{getDb:()=>db},'./removalLosses': load('lib/removalLosses.ts'), './businessDateWindow':dates,'./reportMoneyPrecision':reportMoneyPrecision})
 const reportsModule=load('routes/reports.ts',{
  '../lib/db':{getDb:()=>db},'../lib/businessDateWindow':dates,'../lib/salesAnalytics':analytics,
  '../lib/reportMoneyPrecision':reportMoneyPrecision,

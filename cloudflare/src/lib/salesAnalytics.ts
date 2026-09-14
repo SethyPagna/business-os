@@ -157,6 +157,17 @@ import {
 } from './customerReturnEntitlement'
 import { validateRefundMoneySnapshot } from './refundMoneyPrecision'
 import { validateSaleMoneySnapshot } from './saleMoneyPrecision'
+import {
+  EMPTY_REMOVAL_LOSS,
+  REMOVAL_LOSS_FROM,
+  REMOVAL_LOSS_SELECT,
+  removalLossMovementWhere,
+  removalLossTotals,
+  removalLossesByBucket,
+  summarizeRemovalLosses,
+  type RemovalLossRow,
+  type RemovalLossSummary,
+} from './removalLosses'
 
 export interface SalesFilters {
   startDate?: string | null
@@ -387,6 +398,21 @@ export interface SalesTotals {
   cost_usd: number
   profit_usd: number
   avg_order_usd: number
+  // ---- stock removed entirely, valued at cost (owner, Sep 14 2026) --------
+  // OPTIONAL because they are attached only where the window is a plain
+  // date/branch window: a report filtered to one payment method or to
+  // cancelled receipts has no meaningful stock-removal figure, and a grouped
+  // row (per customer, per method) has none either. Absent means "not
+  // applicable / not sent", never 0 -- the same absence contract cost_usd uses
+  // for a non-admin caller, so the client can tell the two apart.
+  //
+  // revenue_usd / profit_usd above are the CANONICAL figures and are not
+  // touched by any of this; these are the "including the losses" companions.
+  removal_loss_usd?: number
+  removal_loss_qty?: number
+  removal_loss_unvalued_rows?: number
+  revenue_after_losses_usd?: number
+  profit_after_losses_usd?: number
 }
 
 export interface SalesPeriodRow {
@@ -736,6 +762,119 @@ export function whereActiveSales(alias: string, f: SalesFilters) {
     clauses.push(localTimeRangeClause(`${alias}.created_at`))
   }
   return { sql: clauses.join(' AND '), params }
+}
+
+// ---- stock removed entirely, priced at cost (owner, Sep 14 2026) ----------
+//
+// The removal ledger lives in inventory_movements, not in `sales`, so it gets
+// its own window builder -- but it is built from the SAME businessDateWindow
+// helpers whereActiveSales uses, so "this month" means the same UTC+7 calendar
+// month on both sides and the two figures are always comparable.
+//
+// Sale-only filters (status, paymentMethod, maxSaleId) have no meaning for a
+// stock movement. Rather than silently ignoring them and printing a loss that
+// does not belong to the filtered receipt set, `removalLossesFor` refuses the
+// window entirely -- see there.
+//
+// maxSaleId itself is set by exactly one caller, the paginated
+// business-summary export freezing its receipt set across pages
+// (routes/sales.ts ~6013-6017); ordinary callers -- getSalesTotals, the
+// day report, and /api/sales/stats-strip -- never set it and so are never
+// excluded by this branch (F2, Sep 15 2026: /stats-strip went unwired for
+// an unrelated reason -- salesTotalsFromSnapshot never called
+// removalLossesFor at all -- not because of anything in this file).
+
+/** True when `f` scopes the report to a receipt SUBSET that a stock movement
+ *  cannot be matched against. Losses are then not reported at all. */
+function removalLossWindowApplies(f: SalesFilters): boolean {
+  const status = typeof f.status === 'string' ? f.status.trim() : ''
+  const paymentMethod = typeof f.paymentMethod === 'string' ? f.paymentMethod.trim() : ''
+  const maxSaleId = Number(f.maxSaleId)
+  return !status && !paymentMethod && !(Number.isSafeInteger(maxSaleId) && maxSaleId > 0)
+}
+
+function whereRemovalMovements(f: SalesFilters): { sql: string; params: Record<string, unknown> } {
+  const params: Record<string, unknown> = {}
+  const clauses: string[] = [removalLossMovementWhere('m')]
+  if (f.startDate && f.endDate) {
+    params.startDate = f.startDate
+    params.endDate = f.endDate
+    clauses.push(localDateRangeClause('m.created_at'))
+  } else if (f.startDate) {
+    params.startDate = f.startDate
+    clauses.push(localDateAtOrAfter('m.created_at'))
+  } else if (f.endDate) {
+    params.endDate = f.endDate
+    clauses.push(localDateAtOrBefore('m.created_at'))
+  }
+  if (f.branchId) {
+    clauses.push('m.branch_id = @branchId')
+    params.branchId = f.branchId
+  }
+  // Shift window. inventory_movements records the ACTING account as user_id
+  // (there is no cashier_id column), which is the same person the shift is
+  // scoped to -- so a removal made during someone else's shift stays on theirs.
+  const createdFrom = shiftWindowBound(f.createdFrom)
+  if (createdFrom) {
+    clauses.push('datetime(m.created_at) >= @createdFrom')
+    params.createdFrom = createdFrom
+  }
+  const createdTo = shiftWindowBound(f.createdTo)
+  if (createdTo) {
+    clauses.push('datetime(m.created_at) < @createdTo')
+    params.createdTo = createdTo
+  }
+  if (f.cashierId != null && String(f.cashierId).trim() !== '') {
+    clauses.push('m.user_id = @cashierId')
+    params.cashierId = f.cashierId
+  }
+  const validTime = (v: unknown): v is string => typeof v === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v)
+  if (validTime(f.startTime) && validTime(f.endTime)) {
+    params.startTime = f.startTime
+    params.endTime = f.endTime
+    clauses.push(localTimeRangeClause('m.created_at'))
+  }
+  return { sql: clauses.join(' AND '), params }
+}
+
+/** The removal rows in this window, already filtered to the loss set. */
+export async function readRemovalLossRows(env: Env, f: SalesFilters): Promise<RemovalLossRow[]> {
+  if (!removalLossWindowApplies(f)) return []
+  const { sql, params } = whereRemovalMovements(f)
+  const rows = await getDb(env)
+    .prepare(`SELECT ${REMOVAL_LOSS_SELECT} ${REMOVAL_LOSS_FROM} WHERE ${sql}`)
+    .all<RemovalLossRow>(params)
+  return rows || []
+}
+
+/**
+ * The window's removal losses, or null when the figure is unavailable. null
+ * propagates as ABSENT fields, never as zero -- so "we could not read the
+ * removal ledger" never renders as "nothing was lost".
+ *
+ * Fail-soft on purpose. This block is an ADDITIVE memo beside the canonical
+ * revenue/profit; a second query against a different table must not be able to
+ * take down the figure the whole Reports hub, Dashboard and shift report are
+ * built on. Same reasoning routes/shifts.ts's figuresFor() already applies to
+ * the reconciliation half.
+ */
+export async function removalLossesFor(env: Env, f: SalesFilters): Promise<RemovalLossSummary | null> {
+  if (!removalLossWindowApplies(f)) return null
+  try {
+    return summarizeRemovalLosses(await readRemovalLossRows(env, f))
+  } catch {
+    return null
+  }
+}
+
+/** Attach the five loss fields to a totals object. A null summary leaves the
+ *  totals byte-for-byte unchanged. Exported so every totals-shaped caller --
+ *  getSalesTotals here and routes/sales.ts's /stats-strip -- attaches the
+ *  block the same way instead of each re-deriving revenue_after_losses_usd /
+ *  profit_after_losses_usd by hand. */
+export function withRemovalLosses<T extends SalesTotals>(totals: T, loss: RemovalLossSummary | null): T {
+  if (!loss) return totals
+  return { ...totals, ...removalLossTotals(totals.revenue_usd, totals.profit_usd, loss) }
 }
 
 type ReportScalarRow = Record<string, unknown> & { id: number }
@@ -1591,6 +1730,10 @@ export interface DeriveTotalsOptions {
   cancelledTxCount?: number
   /** COGS on recognized-but-unvalued receipts, held out of cost_usd. */
   unvaluedCostUsd?: number
+  /** Stock removed entirely in this bucket, priced at cost (lib/removalLosses.ts).
+   *  Omitted -> the five loss fields stay ABSENT, which is how a caller whose
+   *  window cannot be matched to movements reports "not applicable". */
+  removalLoss?: RemovalLossSummary | null
 }
 
 export function deriveTotals(level: Record<string, number>, costUsd: number, returnedCostUsd: number, options: DeriveTotalsOptions): SalesTotals {
@@ -1656,6 +1799,12 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
   const pendingDeliveryUsd = num(level.pending_delivery_usd)
   const pendingDeliveryCostUsd = num(level.pending_delivery_cost_usd)
   const pendingProfitUsd = pendingRevenueUsd - pendingCostUsd + (pendingDeliveryUsd - pendingDeliveryCostUsd)
+  // Stock removed entirely, at cost. Spread LAST so the two after-losses
+  // figures are derived from the very revenue/profit this object reports, and
+  // absent altogether when the caller supplied no summary.
+  const removalLoss = options.removalLoss
+    ? removalLossTotals(round2(revenueUsd), round2(profitUsd), options.removalLoss)
+    : null
   return {
     tx_count: txCount,
     gross_sales_usd: round2(grossSalesUsd),
@@ -1700,6 +1849,7 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
     cost_usd: round2(netCostUsd),
     profit_usd: round2(profitUsd),
     avg_order_usd: txCount > 0 ? round2(revenueUsd / txCount) : 0,
+    ...(removalLoss || {}),
   }
 }
 
@@ -1718,8 +1868,14 @@ function unionBuckets(levelKeys: Iterable<string>, cancelled: Map<string, number
 const VOID_ONLY_LEVEL: Record<string, number> = { tx_count: 0, recognized_net_usd: 0 }
 
 export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTotals> {
-  const snapshot = await readSalesReportSnapshot(env, f)
-  return exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot)
+  const [snapshot, loss] = await Promise.all([
+    readSalesReportSnapshot(env, f),
+    removalLossesFor(env, f),
+  ])
+  return withRemovalLosses(
+    exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot),
+    loss,
+  )
 }
 
 // Period-bucketed trend series (for the Dashboard revenue/cost/profit line
@@ -2277,9 +2433,15 @@ export async function getSalesDayReport(
 ): Promise<SalesDayReport> {
   const f: SalesFilters = { startDate: day, endDate: day, ...opts }
   {
-    const snapshot = await readSalesReportSnapshot(env, f, true)
+    const [snapshot, loss] = await Promise.all([
+      readSalesReportSnapshot(env, f, true),
+      removalLossesFor(env, f),
+    ])
     const facts = reportSaleFacts(snapshot)
-    const totals = exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot)
+    const totals = withRemovalLosses(
+      exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot),
+      loss,
+    )
     const paymentMethods = paymentMethodBreakdownFromSnapshot(snapshot)
     let storeTx = 0, membershipTx = 0
     for (const fact of facts) {
@@ -2954,14 +3116,30 @@ export async function getBusinessSummaryPeriodRows(env: Env, f: SalesFilters, gr
   for (const sale of [...snapshot.sales, ...snapshot.voidSales]) {
     const key = periodFor(sale); const days = daySets.get(key) || new Set<string>(); days.add(dayFor(sale)); daySets.set(key, days)
   }
-  return [...aggregateReportSnapshot(snapshot, periodFor).entries()].map(([period, bucket]) => {
+  // Removal losses bucketed by the SAME period key the sales are bucketed by,
+  // derived from the movement's own created_at through the same UTC+7 shift --
+  // so a removal and a sale made in the same minute land in the same row.
+  const lossRows = removalLossWindowApplies(f)
+    ? await readRemovalLossRows(env, f).catch((): RemovalLossRow[] | null => null)
+    : null
+  const lossBuckets = lossRows
+    ? removalLossesByBucket(lossRows, (row) => periodFor({ id: 0, created_at: row.created_at }))
+    : null
+  const buckets = aggregateReportSnapshot(snapshot, periodFor)
+  // A period whose only activity was a stock removal has no sales bucket at
+  // all, so it used to vanish -- and the per-period losses would then not sum
+  // to the range's loss total. Union those periods back in as zero-money rows,
+  // the same repair unionBuckets() makes for a void-only bucket.
+  if (lossBuckets) for (const period of lossBuckets.keys()) if (!buckets.has(period)) buckets.set(period, reportBucket())
+  return [...buckets.entries()].map(([period, bucket]) => {
     const totals = exactReportTotals(bucket, snapshot); const diagnostic = reportMoneyDiagnostic(totals)!
     const day = granularity === 'day' ? period : granularity === 'month' ? `${period}-01` : period
     const from = new Date(`${day}T00:00:00Z`)
     const to = granularity === 'month' ? new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 0))
       : granularity === 'week' ? new Date(from.getTime() + 6 * 86_400_000) : from
     return attachReportDiagnostic({ period, date_from: day, date_to: to.toISOString().slice(0, 10), days: daySets.get(period)?.size || 0,
-      cost_missing_snapshot_lines: diagnostic.unknown_cost_lines, ...totals }, diagnostic)
+      cost_missing_snapshot_lines: diagnostic.unknown_cost_lines,
+      ...withRemovalLosses(totals, lossBuckets ? lossBuckets.get(period) || EMPTY_REMOVAL_LOSS : null) }, diagnostic)
   }).sort((a, b) => a.period.localeCompare(b.period))
 }
 

@@ -17,6 +17,7 @@ import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertStat
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { gateTotals } from './reports'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 const DASHBOARD_STOCK_ALERT_PAGE_SIZE = 10
@@ -357,7 +358,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
   }
 }
 
-async function dashboardAnalytics(env: Env, query: Record<string, string>) {
+async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdmin: boolean) {
   const db = getDb(env)
   const range = dateRange(query)
   const { startDate, endDate, granularity } = range
@@ -487,8 +488,14 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
     `).all(analyticsParams),
   ])
   return {
-    totals: totals || {},
-    prevTotals: prevTotals || {},
+    // cost_usd / profit_usd and the removal-loss pair are the SAME admin-only
+    // money reports.ts's gateTotals already gates -- reused rather than
+    // re-implemented so the two surfaces cannot drift apart (F1, Sep 15
+    // 2026: this endpoint previously ran its own five-key strip and left
+    // cost_usd / profit_usd ungated, so a non-admin dashboard permission
+    // still saw COGS and profit).
+    totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin),
+    prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin),
     periodReturns: periodReturns || {},
     periodSupplierReturns: periodSupplierReturns || {},
     periodData: periodData || [],
@@ -535,14 +542,14 @@ app.get('/dashboard/stock-alerts', async (c) => {
 app.get('/analytics', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
-  return c.json(await dashboardAnalytics(c.env, c.req.query()))
+  return c.json(await dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user'))))
 })
 app.get('/dashboard/startup', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
   const [summary, analytics] = await Promise.all([
     dashboardSummary(c.env, c.req.query()),
-    dashboardAnalytics(c.env, c.req.query()),
+    dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user'))),
   ])
   return c.json({ summary, analytics })
 })

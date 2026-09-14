@@ -212,11 +212,19 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
   // value, and the part of a return's cost that had no counted cost to come
   // off. They are the same money as cost_usd, reported separately so the
   // repair is auditable rather than silent, so they leave by the same door.
+  // The removal-loss block (owner, Sep 14 2026) is COST money by construction
+  // -- stock priced at what it cost -- so it leaves by the same door. That
+  // includes revenue_after_losses_usd: revenue itself is not admin-only, so
+  // sending it beside the canonical revenue would let any caller recover the
+  // loss (and therefore cost) by subtraction. All five travel together, and
+  // they are OMITTED rather than zeroed, like every other gated key here.
   const {
     cost_usd, profit_usd, cost_missing_snapshot_lines, pending_cost_usd, pending_profit_usd,
     unvalued_cost_usd, returned_cost_usd, returned_cost_shortfall_usd,
     delivery_actual_cost_usd, delivery_actual_cost_count, delivery_margin_usd, delivery_net_usd,
     recognized_delivery_cost_usd, pending_delivery_cost_usd, margin_pct,
+    removal_loss_usd, removal_loss_qty, removal_loss_unvalued_rows,
+    revenue_after_losses_usd, profit_after_losses_usd,
     money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...rest
   } = row as Record<string, unknown>
   if (!isAdmin) return rest
@@ -239,6 +247,17 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
     delivery_net_usd: round2(num(delivery_net_usd)),
     recognized_delivery_cost_usd: round2(num(recognized_delivery_cost_usd)),
     pending_delivery_cost_usd: round2(num(pending_delivery_cost_usd)),
+    // Absent stays absent: the kernel omits these when the window cannot be
+    // matched to stock movements (a payment-method or status filter, a grouped
+    // row), and turning that into 0 would print "no losses" for a question
+    // that was never asked.
+    ...(removal_loss_usd === undefined ? {} : {
+      removal_loss_usd: round2(num(removal_loss_usd)),
+      removal_loss_qty: num(removal_loss_qty),
+      removal_loss_unvalued_rows: num(removal_loss_unvalued_rows),
+      revenue_after_losses_usd: round2(num(revenue_after_losses_usd)),
+      profit_after_losses_usd: round2(num(profit_after_losses_usd)),
+    }),
     ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
       money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
       : money_precision_mode !== undefined ? { money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows } : {}),

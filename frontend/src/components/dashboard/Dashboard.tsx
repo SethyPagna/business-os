@@ -1210,10 +1210,31 @@ export default function Dashboard() {
   // profit by the server kernel. Showing it here must never add or subtract
   // it from either headline.
   const aCredit = analytics?.totals?.pending_revenue_usd || 0
+  // Stock removed entirely, priced at cost (owner, Sep 14 2026: "i want in
+  // stat a break down of revenue/profit excluding the losses caused by this.
+  // and including caused by this"). PRESENCE-signalled, never defaulted to 0:
+  // the server omits the block for a non-admin caller and for a window it
+  // cannot match to stock movements, and a 0 there would read as "nothing was
+  // removed". The headline revenue and profit above stay the canonical
+  // figures -- this is reported beside them, never subtracted from them.
+  const aHasLosses = typeof analytics?.totals?.removal_loss_usd === 'number'
+  const aRemovalLoss = analytics?.totals?.removal_loss_usd || 0
+  const aRevenueInclLosses = analytics?.totals?.revenue_after_losses_usd ?? (aRevenue - aRemovalLoss)
   const aPrevRevenue = analytics?.prevTotals?.revenue_usd || 0
   const aTxCount  = analytics?.totals?.tx_count || 0
   const aPrevTxCount = analytics?.prevTotals?.tx_count || 0
+  // PRESENCE-signalled like aHasLosses just above: cost_usd / profit_usd are
+  // admin-only money (routes/reports.ts's gateTotals, reused verbatim by
+  // routes/compat.ts's dashboardAnalytics -- F1, Sep 15 2026) and are OMITTED
+  // for a non-admin dashboard permission, never sent as 0. `|| 0` on an
+  // absent profit_usd used to read as a real zero-profit period; the Gross
+  // Profit card is hidden below instead when this is false.
+  const aHasProfit = typeof analytics?.totals?.profit_usd === 'number'
   const aProfit   = analytics?.totals?.profit_usd || 0
+  // Unclamped: a period that destroyed more stock than it earned really is
+  // negative here, and hiding that is the one thing this view exists to stop.
+  // The no-negative rule governs the canonical aProfit above, not this.
+  const aProfitInclLosses = analytics?.totals?.profit_after_losses_usd ?? (aProfit - aRemovalLoss)
   const aCost     = analytics?.totals?.cost_usd   || 0
   const aAvgOrder = analytics?.totals?.avg_order_usd || 0
   // "What actually changed hands" = net revenue + tax + customer-paid
@@ -1427,6 +1448,13 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
         ...(aGrossSales !== aRevenue ? [{ label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) }] : []),
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
+        // The owner's excluding/including pair, inside this card rather than as
+        // a new one. The headline above IS the excluding figure, so only the
+        // loss and the including figure need naming.
+        ...(aHasLosses ? [
+          { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: fmtUSD(aRemovalLoss) },
+          { label: translateOr('rpt_revenue_after_losses', 'Revenue incl. losses'), value: fmtUSD(aRevenueInclLosses) },
+        ] : []),
       ],
     },
     {
@@ -1447,7 +1475,13 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
     // The standalone COGS card is gone (Part 388: it held a single row --
     // "cogs only shows one stat inside"); COGS now lives inside Revenue
     // above and in Profit's own formula below.
-    {
+    //
+    // Omitted entirely (not a $0.00 placeholder) for a non-admin dashboard
+    // permission, the same way Reports hides its profit column/row when
+    // hasProfit() is false (reportModel.ts, GroupedReport.tsx / PeriodReport.tsx)
+    // -- cost/profit are admin-only money and a hidden card cannot be read
+    // as "this period broke even".
+    ...(aHasProfit ? [{
       id: 'profit',
       // The delivery pair replaces the old `− Store-paid delivery` term: the
       // waived fee was never charged, so there is no cash to take off profit
@@ -1472,8 +1506,12 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
         { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_usd) || 0) },
         { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_cost_usd) || 0) },
         { label: translateOr('profit_margin', 'Profit margin'), value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
+        ...(aHasLosses ? [
+          { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: fmtUSD(aRemovalLoss) },
+          { label: translateOr('rpt_profit_after_losses', 'Profit incl. losses'), value: fmtUSD(aProfitInclLosses) },
+        ] : []),
       ],
-    },
+    }] : []),
     {
       id: 'transactions',
       info: translateOr('dash_info_transactions', "How many completed sales happened in this period."),
@@ -1561,6 +1599,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
     aPrevRevenue,
     aPrevTxCount,
     aProfit,
+    aHasProfit,
     aRefundUsd,
     aReturns,
     aRevenue,

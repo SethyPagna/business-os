@@ -53,6 +53,27 @@ test('business rows exclude drawer counts and keep Credit positive once', () => 
   assert.ok(rows.every((row) => row.usd !== 999), 'registered drawer counts never enter business rows')
 })
 
+test('removal losses are three rows directly below unpaid, omitted when the Worker sent none', () => {
+  // Owner, Sep 14 2026: "also add one row below unpaid in reports as well."
+  const rows = shiftFigureRows({ ...figures, removal_loss_usd: 30, revenue_after_losses_usd: 70, profit_after_losses_usd: -2 })
+  assert.deepEqual(rows.map((row) => row.key), [
+    'sales', 'cogs', 'profit', 'delivery_fees', 'delivery_actual_cost',
+    'shift_other_expenses', 'refunds', 'credit_awaiting_payment',
+    'rpt_removal_loss', 'rpt_revenue_after_losses', 'rpt_profit_after_losses',
+  ])
+  // The canonical figures above stay exactly what they were.
+  assert.equal(rows.find((row) => row.key === 'sales')?.usd, 100)
+  assert.equal(rows.find((row) => row.key === 'profit')?.usd, 58)
+  assert.equal(rows.find((row) => row.key === 'rpt_removal_loss')?.usd, 30)
+  assert.equal(rows.find((row) => row.key === 'rpt_revenue_after_losses')?.usd, 70)
+  // Unclamped: a shift that destroyed more than it earned must be visible.
+  assert.equal(rows.find((row) => row.key === 'rpt_profit_after_losses')?.usd, -2)
+  assert.equal(rows.find((row) => row.key === 'rpt_profit_after_losses')?.tone, 'negative')
+
+  // Absence is the contract -- no keys means no rows, not three $0.00 rows.
+  assert.equal(shiftFigureRows(figures).filter((row) => row.key.startsWith('rpt_')).length, 0)
+})
+
 test('negative stale Credit is floored without changing any other figure', () => {
   const rows = shiftFigureRows({ ...figures, credit_usd: -4 })
   assert.equal(rows.find((row) => row.key === 'credit_awaiting_payment')?.usd, 0)

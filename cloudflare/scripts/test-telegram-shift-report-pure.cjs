@@ -69,7 +69,7 @@ const analyticsPrecision = { './saleMoneyPrecision': saleMoneyPrecision, './repo
 const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': noDb, './businessDateWindow': businessDateWindow, ...analyticsPrecision })
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': noDb, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': noDb })
 const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 // The drawer arithmetic is the REAL shared one (lib/shiftReconciliation.ts):

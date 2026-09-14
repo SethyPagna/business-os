@@ -52,7 +52,7 @@ const analyticsPrecision = { './saleMoneyPrecision': saleMoneyPrecision, './repo
 const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, ...analyticsPrecision })
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 // Sep 6 2026: the owner's low-stock alert setting reaches this module through
 // lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
 // asserted below are the ones it composes -- while the settings READ answers
@@ -394,6 +394,57 @@ assert.deepEqual(telegram.formatReturnTelegramLines({
 const writeoff = telegram.formatReturnTelegramLines({ kind: 'supplier', returnNumber: 'SRET-2', settlement: 'writeoff', items: [{ product: 'A', quantity: 1 }], compensationUsd: 0, compensationKhr: 0, lossUsd: 0, lossKhr: 0 }).filter(Boolean)
 assert.ok(writeoff.includes('Supplier pays: $0.00'))
 assert.ok(!writeoff.some((line) => line.startsWith('Loss:') || line.startsWith('Refund:')))
+
+// --- stock removed entirely is ONE "Loss" row directly below Not Paid ---
+// Owner, Sep 14 2026: "also add one row below unpaid in reports as well" and
+// "if remove directly it also counts toward losses. as cost price no selling
+// price means loss". It is a POSITIVE memo: Sales and Profit above stay the
+// canonical kernel figures and are never reduced by it, exactly like Credit.
+const lossFigures = { ...cancelledFigures, creditUsd: 12, removalLossUsd: 30 }
+const lossReport = telegram.formatShiftReport('Shop', closedThenCancelled, lossFigures, Date.parse('2026-09-05T12:00:00.000Z'))
+const lossLines = lossReport.split('\n')
+const unpaidAt = lossLines.findIndex((line) => line.startsWith('Not Paid / ប្រាក់ជំពាក់:'))
+const lossAt = lossLines.findIndex((line) => line.startsWith('Loss / ខាតបង់:'))
+assert.ok(unpaidAt > 0, lossReport)
+assert.equal(lossAt, unpaidAt + 1, 'the Loss row sits DIRECTLY below Not Paid')
+assert.equal(lossLines[lossAt], 'Loss / ខាតបង់: $30.00', lossReport)
+// Numbers only -- no sentence explaining what a loss is (the owner's standing
+// "no explanation just arrange all reports more concise").
+assert.equal(lossLines[lossAt].split(':').length, 2, lossLines[lossAt])
+// The canonical totals above are untouched by it.
+assert.ok(lossLines.includes('Sales / ការលក់: $25.00'), lossReport)
+assert.ok(lossLines.includes('Profit / ចំណេញ: $15.00'), lossReport)
+
+// Zero, and ABSENT, both print nothing: a $0.00 Loss row would assert that
+// nothing was destroyed, and the kernel omits the key entirely when it could
+// not scope the window (older Worker, or a filtered/non-admin totals reply).
+for (const variant of [{ ...lossFigures, removalLossUsd: 0 }, cancelledFigures]) {
+  const quiet = telegram.formatShiftReport('Shop', closedThenCancelled, variant, Date.parse('2026-09-05T12:00:00.000Z'))
+  assert.ok(!quiet.includes('Loss / ខាតបង់:'), quiet)
+}
+
+// The day summary carries the same row in the same place, through the same
+// glossary key -- one label for one figure across both reports.
+const daySales = {
+  count: 4, usd: 100, cancelled: 0, refundUsd: 0, profitUsd: 40,
+  deliveryFeeUsd: 0, creditUsd: 12, deliveryCostUsd: 0, deliveryCostRecorded: 0,
+  removalLossUsd: 30,
+}
+const zeroBucket = { count: 0, usd: 0, khr: 0, quantity: 0 }
+const dayWithLoss = telegram.formatDaySummary({ date: '2026-09-14', sales: daySales, fees: zeroBucket, stockIn: zeroBucket, stockOut: zeroBucket }, [])
+const dayLines = dayWithLoss.split('\n')
+const dayUnpaid = dayLines.findIndex((line) => line.startsWith('Not Paid / ប្រាក់ជំពាក់:'))
+assert.ok(dayUnpaid > 0, dayWithLoss)
+assert.equal(dayLines[dayUnpaid + 1], 'Loss / ខាតបង់: $30.00', dayWithLoss)
+// Turning the sales category off takes the Loss row with it, like every other
+// sales-derived line -- it is not a second switch.
+const dayNoSales = telegram.formatDaySummary({ date: '2026-09-14', sales: daySales, fees: zeroBucket, stockIn: zeroBucket, stockOut: zeroBucket }, [], { sales: false })
+assert.ok(!dayNoSales.includes('Loss / ខាតបង់:'), dayNoSales)
+// And the "Stock out" line is NOT this figure: it counts quantity across
+// remove + transfer_out + move_out, and a transfer between branches is not a
+// loss. Pinned so the two can never be conflated into one number.
+assert.match(telegramSource, /movement_type IN \('remove', 'transfer_out', 'move_out'\)/, 'stockOut stays a movement count, separate from the costed loss')
+assert.ok(/removalLossUsd: totals\.removal_loss_usd/.test(telegramSource), 'both reports read the ONE kernel field, never a second definition')
 
 // --- the event heading is the route's, the enable switch stays the category ---
 assert.ok(/heading: string/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')) === false, 'heading is optional on TelegramEvent')

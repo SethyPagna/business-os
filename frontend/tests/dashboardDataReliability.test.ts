@@ -94,4 +94,14 @@ assert.match(branchesHub, /navigateTo\('products'\)/, 'the Branches hub should n
 assert.match(products, /bos:dashboard:products-focus/, 'the Products page should consume the forwarded dashboard stock drill')
 assert.match(products, /setStockFilter\(stockState\)/, 'the Products page should apply the forwarded stock filter')
 
+// F1 (Sep 15 2026): cost_usd / profit_usd are admin-only money, gated by the
+// SAME reports.ts gateTotals routes/compat.ts's dashboardAnalytics now reuses
+// (test-reports-cost-visibility-pure.cjs pins the server side). A non-admin
+// dashboard permission gets no profit_usd at all -- never a real 0 -- so the
+// Gross Profit card must be omitted rather than print $0.00 or NaN.
+assert.match(dashboard, /const aHasProfit = typeof analytics\?\.totals\?\.profit_usd === 'number'/,
+  'the Gross Profit card must be presence-signalled, not defaulted with || 0')
+assert.match(dashboard, /\.\.\.\(aHasProfit \? \[\{\s*\n\s*id: 'profit'/,
+  'the profit card must be omitted entirely (like Reports hides its profit column) when the server sent no profit_usd')
+
 console.log('PASS dashboard data reliability guards')

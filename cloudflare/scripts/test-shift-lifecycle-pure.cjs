@@ -119,7 +119,7 @@ async function main() {
   const paymentMethodRegistry = loadReal('lib/paymentMethodRegistry.ts')
   const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
     './db': dbModule,
-    './businessDateWindow': businessDateWindow,
+    './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
     ...analyticsPrecision,
   })
   const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {

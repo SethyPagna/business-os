@@ -48,6 +48,12 @@ const sensitiveTotals = [
   'unvalued_cost_usd','returned_cost_usd','returned_cost_shortfall_usd','delivery_actual_cost_usd',
   'delivery_actual_cost_count','delivery_margin_usd','delivery_net_usd','recognized_delivery_cost_usd',
   'pending_delivery_cost_usd','margin_pct',
+  // P3-L5 (owner, Sep 14 2026): stock removed entirely, priced at COST. All
+  // five leave by the cost/profit door -- including revenue_after_losses_usd,
+  // because revenue_usd itself stays visible and the pair would hand a
+  // non-admin the loss (and therefore the cost) by subtraction.
+  'removal_loss_usd','removal_loss_qty','removal_loss_unvalued_rows',
+  'revenue_after_losses_usd','profit_after_losses_usd',
   'money_precision_mode','money_complete','money_unknown_cost_lines','money_contributing_rows',
 ]
 const totals = { revenue_usd: 20, recognized_delivery_usd: 3, pending_delivery_usd: 2 }
@@ -71,6 +77,65 @@ for (const key of sensitiveTotals.filter((key) => key !== 'margin_pct')) {
   assert.equal(Object.hasOwn(admin, key), true, `admin retains ${key}`)
 }
 assert.equal(Object.hasOwn(admin, 'margin_pct'), true)
+
+// The kernel OMITS the removal-loss block when the window cannot be matched to
+// stock movements (a payment-method/status filter, a grouped row). The gate
+// must carry that absence through instead of printing "$0.00 of losses" for a
+// question nobody asked -- the same absence-is-the-contract rule above.
+{
+  const noLosses = { revenue_usd: 20, cost_usd: 5, profit_usd: 15 }
+  const adminNoLosses = reports.gateTotals(noLosses, true)
+  for (const key of ['removal_loss_usd', 'removal_loss_qty', 'removal_loss_unvalued_rows',
+    'revenue_after_losses_usd', 'profit_after_losses_usd']) {
+    assert.equal(Object.hasOwn(adminNoLosses, key), false, `${key} stays absent when the kernel sent none`)
+  }
+  // ...and a real ZERO loss is still reported, so "no removals happened" and
+  // "not applicable" stay distinguishable on the wire.
+  const adminZero = reports.gateTotals({
+    ...noLosses, removal_loss_usd: 0, removal_loss_qty: 0, removal_loss_unvalued_rows: 0,
+    revenue_after_losses_usd: 20, profit_after_losses_usd: 15,
+  }, true)
+  assert.equal(adminZero.removal_loss_usd, 0)
+  assert.equal(adminZero.profit_after_losses_usd, 15)
+}
+
+// routes/reports.ts is not the only door these figures leave by. routes/sales.ts
+// keeps its OWN non-admin gate, gateSalesReportMoney, and /api/sales/day-report
+// reaches it with the removal block populated (getSalesDayReport carries it).
+// A key added to one gate and not the other is a live leak, not a theoretical
+// one -- this is exactly how it shipped broken once. Pin both.
+{
+  const salesSource = fs.readFileSync(path.join(root, 'src', 'routes', 'sales.ts'), 'utf8')
+  const start = salesSource.indexOf('export function gateSalesReportMoney')
+  assert.ok(start > 0, 'gateSalesReportMoney still exists in routes/sales.ts')
+  const body = salesSource.slice(start, salesSource.indexOf('...publicRow}=row', start))
+  for (const key of ['removal_loss_usd', 'removal_loss_qty', 'removal_loss_unvalued_rows',
+    'revenue_after_losses_usd', 'profit_after_losses_usd']) {
+    assert.ok(new RegExp(`\\b${key}\\b`).test(body), `routes/sales.ts gateSalesReportMoney must also strip ${key} for non-admins`)
+  }
+  // The control: a public key the gate deliberately does NOT strip fails the
+  // same check, so a pattern that matched anything would be caught here.
+  assert.equal(/\btx_count\b/.test(body), false,
+    'the transaction count stays public -- the checks above discriminate')
+}
+
+// routes/compat.ts's /api/compat/analytics and /api/compat/dashboard/startup
+// are a THIRD door for the same cost_usd/profit_usd/removal-loss block
+// (getSalesTotals is their source too). F1 (Sep 15 2026): this endpoint used
+// to run its OWN five-key-only strip (gateRemovalLosses) that never touched
+// cost_usd / profit_usd, so any role holding only the 'dashboard' permission
+// -- not 'reports' or 'sales' -- still received COGS and profit on the
+// Dashboard. Pin that it reuses THIS gate instead of a second bespoke one, so
+// the two surfaces cannot drift apart again.
+{
+  const compatSource = fs.readFileSync(path.join(root, 'src', 'routes', 'compat.ts'), 'utf8')
+  assert.match(compatSource, /import \{ gateTotals \} from '\.\/reports'/,
+    'routes/compat.ts must reuse reports.ts gateTotals, not a second bespoke gate')
+  assert.match(compatSource, /totals: gateTotals\(/, 'dashboardAnalytics totals must be gated through gateTotals')
+  assert.match(compatSource, /prevTotals: gateTotals\(/, 'dashboardAnalytics prevTotals must be gated through gateTotals')
+  assert.equal(/function gateRemovalLosses/.test(compatSource), false,
+    'the old five-key-only gate must be retired, not left beside gateTotals as a second door')
+}
 
 for (const input of [productSensitive, JSON.parse(JSON.stringify(productSensitive))]) {
   const employee = reports.gateProductRow({ line_sales_usd: 20, ...input }, false)

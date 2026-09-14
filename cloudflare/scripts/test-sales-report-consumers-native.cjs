@@ -13,8 +13,18 @@ const h=harness.exports
  f.raw.prepare("UPDATE sales SET created_at='2026-09-13 01:00:00',is_delivery=1,delivery_actual_cost_usd=2 WHERE id=?").run([created.body.id])
  const paths=['/stats-strip?startDate=2026-09-13&endDate=2026-09-13','/daily-report?startDate=2026-09-13&endDate=2026-09-13','/day-report?date=2026-09-13']
  const get=async url=>{const response=await h.app.request(url,{}, {DB:f.route},h.executionCtx);const text=await response.text();assert.equal(response.status,200,text);return JSON.parse(text)}
- const privateKeys=['cost_usd','profit_usd','pending_cost_usd','pending_profit_usd','delivery_actual_cost_usd','delivery_net_usd','delivery_margin_usd','recognized_delivery_cost_usd','pending_delivery_cost_usd','actual_cost_usd','linked_expense_usd','margin_usd']
+ // P3-L5/F2 (Sep 15 2026): /stats-strip now wires the same removal-loss block
+ // getSalesTotals attaches (previously it never queried it at all), gated by
+ // the same gateSalesReportMoney door as cost_usd/profit_usd. Cover both here.
+ const privateKeys=['cost_usd','profit_usd','pending_cost_usd','pending_profit_usd','delivery_actual_cost_usd','delivery_net_usd','delivery_margin_usd','recognized_delivery_cost_usd','pending_delivery_cost_usd','actual_cost_usd','linked_expense_usd','margin_usd',
+   'removal_loss_usd','removal_loss_qty','removal_loss_unvalued_rows','revenue_after_losses_usd','profit_after_losses_usd']
  const admin=await get(paths[0]);assert.equal(admin.totals.cost_usd,4);assert.equal(admin.totals.revenue_usd,10,'header adjustment recognized exactly once')
+ // No removal happened in this fixture's window, so the block is a real zero
+ // (PRESENT, not omitted) and the two "including losses" figures equal the
+ // canonical ones exactly -- /stats-strip agrees with getSalesTotals' shape.
+ assert.equal(admin.totals.removal_loss_usd,0)
+ assert.equal(admin.totals.revenue_after_losses_usd,10)
+ assert.equal(admin.totals.profit_after_losses_usd,admin.totals.profit_usd)
  h.setUser({...h.USER,permissions:'{"sales":true}'})
  const inspect=value=>{if(!value||typeof value!=='object')return;for(const key of privateKeys)assert.equal(Object.prototype.hasOwnProperty.call(value,key),false,key);for(const child of Object.values(value))inspect(child)}
  for(const url of paths){const payload=await get(url);inspect(payload)}

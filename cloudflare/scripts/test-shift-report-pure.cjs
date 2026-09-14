@@ -91,7 +91,7 @@ const lang = loadReal('lib/telegramLang.ts')
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const analytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => { throw new Error('no DB in this test') } },
-  './businessDateWindow': businessDateWindow,
+  './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
   ...analyticsPrecision,
 })
 let mappingTotalsCalls = 0
@@ -530,7 +530,7 @@ const stubDb = {
   },
 }
 const stubAnalytics = loadReal('lib/salesAnalytics.ts', {
-  './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow, ...analyticsPrecision,
+  './db': { getDb: () => stubDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision,
 })
 const wired = loadReal('lib/telegram.ts', {
   './lowStockSettings': lowStockStub,
@@ -593,8 +593,8 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './telegramLang': lang,
     './saleTotals': saleTotals,
     './nativeSaleChange': nativeSaleChange,
-    './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './businessDateWindow': businessDateWindow, ...analyticsPrecision }),
-    './shiftReconciliation': reconciliationFor(() => emptyDb, loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './businessDateWindow': businessDateWindow, ...analyticsPrecision })),
+    './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision }),
+    './shiftReconciliation': reconciliationFor(() => emptyDb, loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })),
   })
   return wiredEmpty.telegramCommandReply({}, '/shift 03/09/2026', NOW)
 }).then((reply) => {
@@ -666,7 +666,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   }
   const mappingAnalyticsReal = loadReal('lib/salesAnalytics.ts', {
     './db': { getDb: () => mappingDb },
-    './businessDateWindow': businessDateWindow,
+    './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
     ...analyticsPrecision,
   })
   mappingTotalsCalls = 0

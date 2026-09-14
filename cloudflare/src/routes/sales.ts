@@ -39,7 +39,7 @@ import {
 } from '../lib/saleSettlementAction'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
 import { CUSTOMER_REFUND_JOIN, getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr } from '../lib/salesAnalytics'
-import { readSalesReportSnapshot, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot } from '../lib/salesAnalytics'
+import { readSalesReportSnapshot, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
 import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
 import { allocateAcrossLots, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
@@ -5586,7 +5586,15 @@ export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean)
   if(isAdmin)return row
   const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,unvalued_cost_usd,returned_cost_usd,
     cost,gross_profit,delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,
-    returned_cost_shortfall_usd,cost_missing_snapshot_lines,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,...publicRow}=row
+    returned_cost_shortfall_usd,cost_missing_snapshot_lines,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,
+    // Stock removed entirely, priced at COST, and the two figures derived from
+    // it. They are cost money and leak the same thing profit_usd does: with
+    // revenue_usd public, revenue_after_losses_usd hands a non-admin the exact
+    // cost of every removal by subtraction. /day-report reaches this gate with
+    // the block populated (getSalesDayReport carries it), so this is a live
+    // path, not a precaution.
+    removal_loss_usd,removal_loss_qty,removal_loss_unvalued_rows,revenue_after_losses_usd,profit_after_losses_usd,
+    ...publicRow}=row
   return publicRow
 }
 export function gateSalesCourierMoney(row:Record<string,unknown>,isAdmin:boolean):Record<string,unknown> {
@@ -5673,10 +5681,20 @@ app.get('/stats-strip', async (c) => {
     // Both activity images enclose the shared reader's own coherent snapshot.
     // Refuse mixed images rather than combining money from different reads.
     const before=await readActivity()
-    const snapshot=await readSalesReportSnapshot(c.env,filters)
+    // Same admin-only stock-removal block getSalesTotals attaches (F2, Sep 15
+    // 2026: this strip previously never queried it at all, so the Sales page
+    // never showed the excluding/including pair the day-report and Dashboard
+    // already carry for the identical range). `filters` here is the plain
+    // date/branch/time window removalLossWindowApplies expects -- no status
+    // or paymentMethod filter reaches this endpoint -- so the block is never
+    // silently dropped.
+    const [snapshot,loss]=await Promise.all([
+      readSalesReportSnapshot(c.env,filters),
+      removalLossesFor(c.env,filters),
+    ])
     const after=await readActivity()
     if(JSON.stringify(before)!==JSON.stringify(after))throw new ReportMoneyPrecisionError('snapshot_changed')
-    const totals=salesTotalsFromSnapshot(snapshot)
+    const totals=withRemovalLosses(salesTotalsFromSnapshot(snapshot),loss)
     const byPayment=paymentMethodBreakdownFromSnapshot(snapshot)
     const statuses=new Map<string,{count:number,total:ReportExactDecimal}>()
     for(const row of before.status){
