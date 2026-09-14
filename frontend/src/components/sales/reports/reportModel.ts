@@ -422,6 +422,20 @@ export interface ReportTotals {
   cost_missing_snapshot_lines?: number
   pending_cost_usd?: number
   pending_profit_usd?: number
+  // ---- stock removed entirely, priced at cost (owner, Sep 14 2026) ---------
+  // "for the losses due to remove stock actions, i want in stat a break down of
+  // revenue/profit excluding the losses caused by this. and including caused by
+  // this ... this way i can see and understand both."
+  //
+  // Admin-only (they are cost money), and presence-signalled like cost_usd:
+  // the server also omits them when the window cannot be matched to stock
+  // movements (a payment-method/status filter, a grouped row). A 0 there would
+  // print "nothing was lost" for a question that was never asked.
+  removal_loss_usd?: number
+  removal_loss_qty?: number
+  removal_loss_unvalued_rows?: number
+  revenue_after_losses_usd?: number
+  profit_after_losses_usd?: number
 }
 
 // Every field here is copied by normalizeTotals and SUMMED by sumTotals. A
@@ -462,11 +476,32 @@ export function normalizeTotals(raw: unknown): ReportTotals | null {
     out.pending_cost_usd = num(r.pending_cost_usd)
     out.pending_profit_usd = num(r.pending_profit_usd)
   }
+  // Its own presence signal, NOT the cost one: the server can send cost and
+  // profit while withholding the removal block, because the two answer
+  // different questions about different windows.
+  if (typeof r.removal_loss_usd === 'number') {
+    out.removal_loss_usd = round2(num(r.removal_loss_usd))
+    out.removal_loss_qty = num(r.removal_loss_qty)
+    out.removal_loss_unvalued_rows = num(r.removal_loss_unvalued_rows)
+    out.revenue_after_losses_usd = round2(num(r.revenue_after_losses_usd))
+    out.profit_after_losses_usd = round2(num(r.profit_after_losses_usd))
+  }
   return out
 }
 
 export function hasProfit(t: ReportTotals | null | undefined): t is ReportTotals & { profit_usd: number; cost_usd: number } {
   return !!t && typeof t.profit_usd === 'number'
+}
+
+/**
+ * Did the server report stock removed entirely for this window? Presence, not
+ * value -- a real $0.00 of losses is a fact worth printing, while an absent
+ * block means "not applicable / not permitted" and prints nothing at all.
+ */
+export function hasRemovalLosses(
+  t: ReportTotals | null | undefined,
+): t is ReportTotals & { removal_loss_usd: number; revenue_after_losses_usd: number; profit_after_losses_usd: number } {
+  return !!t && typeof t.removal_loss_usd === 'number'
 }
 
 export function basisValue(t: ReportTotals | null | undefined, basis: ReportBasis): number {
@@ -499,6 +534,13 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
   let missing = 0
   let pendingCost = 0
   let pendingProfit = 0
+  // Same all-or-nothing rule the profit keys use: one row that never carried
+  // the removal block would make the summed loss quietly short, so the absence
+  // propagates instead of being filled with a zero nobody measured.
+  const allLosses = rows.length > 0 && rows.every((r) => hasRemovalLosses(r))
+  let removalLoss = 0
+  let removalQty = 0
+  let removalUnvalued = 0
   for (const r of rows) {
     for (const k of TOTAL_KEYS) {
       if (k === 'avg_order_usd') continue
@@ -511,6 +553,11 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
       missing += num(r.cost_missing_snapshot_lines)
       pendingCost += num(r.pending_cost_usd)
       pendingProfit += num(r.pending_profit_usd)
+    }
+    if (allLosses) {
+      removalLoss += num(r.removal_loss_usd)
+      removalQty += num(r.removal_loss_qty)
+      removalUnvalued += num(r.removal_loss_unvalued_rows)
     }
   }
   for (const k of TOTAL_KEYS) {
@@ -525,6 +572,18 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
     out.cost_missing_snapshot_lines = missing
     out.pending_cost_usd = round2(pendingCost)
     out.pending_profit_usd = round2(pendingProfit)
+  }
+  if (allLosses) {
+    out.removal_loss_usd = round2(removalLoss)
+    out.removal_loss_qty = round2(removalQty)
+    out.removal_loss_unvalued_rows = removalUnvalued
+    // Re-derived from THIS object's revenue/profit, never summed from the
+    // rows': the summed totals are round2'd independently, and re-deriving is
+    // what keeps `revenue - losses` on screen equal to the line above it.
+    out.revenue_after_losses_usd = round2(out.revenue_usd - out.removal_loss_usd)
+    // Only when profit itself survived the sum -- a profit_after_losses built
+    // on an absent profit would be the loss printed as a business result.
+    if (allProfit) out.profit_after_losses_usd = round2(num(out.profit_usd) - out.removal_loss_usd)
   }
   return out
 }
@@ -544,7 +603,7 @@ export interface MoneyPair {
  * distinction the residual "Store-paid delivery" row destroyed.
  */
 export type StatementKind = 'add' | 'sub' | 'total' | 'memo'
-export type StatementGroup = 'revenue' | 'collected' | 'profit' | 'delivery' | 'pending'
+export type StatementGroup = 'revenue' | 'collected' | 'profit' | 'delivery' | 'pending' | 'losses'
 
 /**
  * A qualifier rendered beside the amount when the figure is incomplete,
@@ -646,6 +705,14 @@ function statementFigures(t: ReportTotals): Record<string, number> {
     pending_revenue: t.pending_revenue_usd,
     pending_delivery_collected: t.pending_delivery_usd,
     pending_delivery_paid: t.pending_delivery_cost_usd,
+  }
+  if (hasRemovalLosses(t)) {
+    // Three figures, no arithmetic role in anything above: the canonical
+    // revenue and profit stay exactly what they were, and these say what the
+    // same window looks like once the destroyed stock is taken off.
+    fig.removal_loss = t.removal_loss_usd
+    fig.revenue_after_losses = t.revenue_after_losses_usd
+    if (typeof t.profit_after_losses_usd === 'number') fig.profit_after_losses = t.profit_after_losses_usd
   }
   if (hasProfit(t)) {
     // The bridge from revenue to gross profit, written as the kernel computes
@@ -790,6 +857,7 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
   }
   lines.push(...deliveryReconciliationLines(sales, line))
   lines.push(...pendingLines(sales, line))
+  lines.push(...removalLossLines(sales, line))
   return lines
 }
 
@@ -853,20 +921,56 @@ function pendingLines(t: ReportTotals, line: LineFactory): StatementLine[] {
 }
 
 /**
+ * Stock removed entirely, priced at cost -- the owner's "one row below unpaid"
+ * (Sep 14 2026). Three memo figures: what was destroyed, and what the SAME
+ * window's revenue and profit look like with it taken off. None of them is a
+ * term of anything above; the canonical revenue and profit are untouched,
+ * which is the whole request ("this way i can see and understand both").
+ *
+ * Unlike the pending block this renders even at zero, because a window where
+ * nothing was removed is a real and useful answer -- the block is omitted only
+ * when the server did not send it at all (not admin, or a window that cannot
+ * be matched to stock movements).
+ */
+function removalLossLines(t: ReportTotals, line: LineFactory): StatementLine[] {
+  if (!hasRemovalLosses(t)) return []
+  const lines = [
+    line('removal_loss', 'rpt_removal_loss', 'Losses (stock removed)', 'memo', 'losses', ['rpt_hint_removal_loss', 'Stock removed entirely from inventory, valued at its cost price. It is not a sale, so it never reduced the revenue and profit above; the two lines below show the same period with it taken off.'], removalLossNote(t)),
+    line('revenue_after_losses', 'rpt_revenue_after_losses', 'Revenue incl. losses', 'memo', 'losses'),
+  ]
+  if (typeof t.profit_after_losses_usd === 'number') {
+    const profit = line('profit_after_losses', 'rpt_profit_after_losses', 'Profit incl. losses', 'memo', 'losses')
+    lines.push({ ...profit, tone: profit.usd > 0 ? 'positive' : profit.usd < 0 ? 'negative' : undefined })
+  }
+  return lines
+}
+
+/** Removal rows that carried no cost anywhere: the loss is understated by
+ *  whatever they were worth, and the report says so rather than implying the
+ *  figure is complete. */
+function removalLossNote(t: ReportTotals): StatementNote | undefined {
+  const unvalued = num(t.removal_loss_unvalued_rows)
+  if (unvalued <= 0) return undefined
+  return { key: 'rpt_note_removal_unvalued', fallback: '{count} removed row(s) had no recorded cost', count: unvalued }
+}
+
+/**
  * Render order for the statement's groups. The three surfaces that render a
  * statement (Overview, and the per-row folds in By period / grouped views) all
  * read this ONE list -- they each carried their own `['revenue','collected',
  * 'profit'] as const`, so a new group appeared on none of them until all three
- * were edited. PENDING is last on purpose: the awaiting-payment block sits
- * BELOW the final realised total (user ruling, Sep 4 2026).
+ * were edited. PENDING is below the final realised total (user ruling, Sep 4
+ * 2026) and LOSSES sits directly below PENDING, which is where the owner asked
+ * for it (Sep 14 2026: "also add one row below unpaid in reports as well").
  */
-export const STATEMENT_GROUPS: readonly StatementGroup[] = ['revenue', 'collected', 'profit', 'delivery', 'pending']
+export const STATEMENT_GROUPS: readonly StatementGroup[] = ['revenue', 'collected', 'profit', 'delivery', 'pending', 'losses']
 
 export function statementGroupLabel(group: StatementGroup, tr: (key: string, fallback: string) => string): string {
   if (group === 'revenue') return tr('revenue', 'Revenue')
   if (group === 'collected') return tr('rpt_collected_group', 'Collected')
   if (group === 'delivery') return tr('rpt_delivery_breakdown', 'Delivery fees: charged vs actual cost')
   if (group === 'pending') return tr('rpt_pending_credit', 'Not Paid')
+  if (group === 'losses') return tr('rpt_removal_loss', 'Losses (stock removed)')
   return tr('profit', 'Profit')
 }
 
