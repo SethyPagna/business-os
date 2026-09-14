@@ -43,6 +43,9 @@ export type ReceiveBatchPayload = {
   expiryDate?: string | null
   receivedDate?: string | null
   notes?: string | null
+  // P3-L2: the operator's reason for this receipt, stored on the movement as
+  // typed; null keeps the Worker's own "Stock received (<lot>)" label.
+  reason?: string | null
   // D4b: explicit existing lot to top up (the same picker every adjust
   // surface has). When set it always wins over date matching; the server
   // validates the lot belongs to this product and keeps its received_at.
@@ -153,6 +156,7 @@ export function receiveBatchStock(payload: ReceiveBatchPayload): Promise<{ succe
       received_date: payload.receivedDate || null,
       batch_id: payload.batchId ?? null,
       notes: payload.notes || null,
+      reason: payload.reason || null,
       supplier_id: payload.supplierId ?? null,
       supplier_name: payload.supplierName || null,
       unit_cost_usd: payload.unitCostUsd ?? null,

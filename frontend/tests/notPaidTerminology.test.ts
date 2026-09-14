@@ -70,8 +70,8 @@ assert.equal(km.pos_status_awaiting_payment_desc, 'ប្រាក់ជំព�
 // overpayment are balances rather than another sale status.
 assert.equal(en.supplier_credit, 'Supplier balance')
 assert.equal(km.supplier_credit, 'សមតុល្យអ្នកផ្គត់ផ្គង់')
-assert.equal(en.on_credit, 'Not Paid to supplier')
-assert.equal(km.on_credit, 'មិនទាន់បង់អ្នកផ្គត់ផ្គង់')
+assert.equal(en.on_credit, 'Not Yet Paid')
+assert.equal(km.on_credit, 'មិនទាន់បង់')
 assert.equal(en.settlement_credit, 'Store balance')
 assert.equal(km.settlement_credit, 'សមតុល្យហាង')
 assert.equal(en.ar_overpaid, 'Customer balance')

@@ -21,11 +21,11 @@ function loadStockSession(entry = 'lib/stockSession.ts', actor = user) {
     const mod = { exports: {} }
     cache.set(normalized, mod)
     const req = (name) => {
-      if (['routes/inventory.ts', 'routes/actionHistory.ts'].includes(normalized) && name === '../lib/auth') return {
+      if (['routes/inventory.ts', 'routes/actionHistory.ts', 'routes/batches.ts'].includes(normalized) && name === '../lib/auth') return {
         requireAuth: async (c, next) => { c.set('user', actor); await next() },
       }
-      if (normalized === 'routes/inventory.ts' && name.startsWith('../') && !['../lib/stockSession', '../lib/permissions'].includes(name)) return {}
-      if (name === './cache') return { bumpVersion: async () => {} }
+      if (normalized === 'routes/inventory.ts' && name.startsWith('../') && !['../lib/stockSession', '../lib/permissions', '../lib/stockReason'].includes(name)) return {}
+      if (name === './cache' || name === '../lib/cache') return { bumpVersion: async () => {} }
       if (name === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
       if (name.startsWith('./')) return load(`lib/${name.slice(2)}.ts`)
       if (name.startsWith('../')) return load(`${name.slice(3)}.ts`)

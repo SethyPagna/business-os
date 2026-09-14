@@ -32,6 +32,8 @@ type MovementGroup = {
   branchSummary?: string
   userSummary?: string
   reasonSummary?: string
+  reasonPrimary?: string
+  reasonExtraCount?: number
 }
 
 type MovementGroupPageOptions = {
@@ -357,7 +359,19 @@ export function buildMovementGroups(movements: unknown[] = []): MovementGroup[] 
         productSummary: uniqueProducts.length <= 2 ? uniqueProducts.join(', ') : `${uniqueProducts.slice(0, 2).join(', ')} +${uniqueProducts.length - 2}`,
         branchSummary: uniqueBranches.length <= 1 ? (uniqueBranches[0] || '') : `${uniqueBranches[0]} +${uniqueBranches.length - 1}`,
         userSummary: uniqueUsers.length <= 1 ? (uniqueUsers[0] || '') : `${uniqueUsers[0]} +${uniqueUsers.length - 1}`,
-        reasonSummary: allReasons[0] || '',
+        // Same +N convention as the branch and user summaries above. Printing
+        // only the first reason hid every other one in the group, which is
+        // exactly the case per-line reasons create: one stock-in session can
+        // now carry a different reason on every line.
+        //
+        // Given in PARTS as well as pre-joined. The row has to truncate the
+        // reason text on a narrow screen but must never truncate the "+2"
+        // that says there are more, and a single string cannot express that
+        // -- CSS clips the end of it first. The joined form stays for the
+        // CSV export, which has no width to run out of.
+        reasonPrimary: allReasons[0] || '',
+        reasonExtraCount: Math.max(0, allReasons.length - 1),
+        reasonSummary: allReasons.length <= 1 ? (allReasons[0] || '') : `${allReasons[0]} +${allReasons.length - 1}`,
       }
     })
     .sort((a, b) => {

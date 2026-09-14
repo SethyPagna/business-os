@@ -64,6 +64,41 @@ await runTest('transfer in and out rows with same reference become one net-zero 
   assert.equal(groups[0]?.branchSummary, 'A +1')
 })
 
+await runTest('a group whose lines carry different reasons says so, like the branch and user summaries', () => {
+  // P3-L2: a stock-in session can now carry a different reason on every
+  // line, so printing allReasons[0] alone silently hid the rest -- the row
+  // claimed the whole group was "Damaged in transit".
+  const groups = buildMovementGroups([
+    { id: 1, product_id: 1, product_name: 'A', movement_type: 'add', quantity: 1, reason: 'Damaged in transit', branch_name: 'Shop', user_name: 'aza', reference_id: 'session_9', created_at: '2026-09-14 10:00:00' },
+    { id: 2, product_id: 2, product_name: 'B', movement_type: 'add', quantity: 2, reason: 'Recount after audit', branch_name: 'Shop', user_name: 'aza', reference_id: 'session_9', created_at: '2026-09-14 10:00:01' },
+    { id: 3, product_id: 3, product_name: 'C', movement_type: 'add', quantity: 3, reason: 'Sample from rep', branch_name: 'Shop', user_name: 'aza', reference_id: 'session_9', created_at: '2026-09-14 10:00:02' },
+  ])
+
+  assert.equal(groups.length, 1)
+  assert.equal(groups[0]?.reasonSummary, 'Damaged in transit +2')
+  // The row renders the parts, not the joined string: the reason text is
+  // what may be clipped on a narrow screen, never the count of the ones it
+  // is standing in for. The joined form is the CSV export's.
+  assert.equal(groups[0]?.reasonPrimary, 'Damaged in transit')
+  assert.equal(groups[0]?.reasonExtraCount, 2)
+  assert.equal(groups[0]?.reasonSummary, `${groups[0]?.reasonPrimary} +${groups[0]?.reasonExtraCount}`)
+  // One reason (or a repeated one) still reads as itself, with no +0.
+  const single = buildMovementGroups([
+    { id: 4, product_id: 1, product_name: 'A', movement_type: 'add', quantity: 1, reason: 'Opening stock', reference_id: 'session_10', created_at: '2026-09-14 11:00:00' },
+    { id: 5, product_id: 2, product_name: 'B', movement_type: 'add', quantity: 1, reason: 'Opening stock', reference_id: 'session_10', created_at: '2026-09-14 11:00:01' },
+  ])
+  assert.equal(single[0]?.reasonSummary, 'Opening stock')
+  assert.equal(single[0]?.reasonPrimary, 'Opening stock')
+  assert.equal(single[0]?.reasonExtraCount, 0, 'one reason renders no +N at all')
+  // A group with no reason at all stays blank, so the row renders nothing.
+  const none = buildMovementGroups([
+    { id: 6, product_id: 1, product_name: 'A', movement_type: 'add', quantity: 1, reference_id: 'session_11', created_at: '2026-09-14 12:00:00' },
+  ])
+  assert.equal(none[0]?.reasonSummary, '')
+  assert.equal(none[0]?.reasonPrimary, '')
+  assert.equal(none[0]?.reasonExtraCount, 0)
+})
+
 await runTest('movement timestamp falls back to server created_at when imported date is invalid', () => {
   assert.equal(
     normalizeMovementTimestamp({ movement_date: 'Invalid Date', created_at: '2026-05-05 12:34:56' }),
@@ -157,6 +192,21 @@ await runTest('grouped movements keep the resolved reference on their items, and
   // A group that names no record stays honest -- no invented receipt.
   const bare = buildMovementGroups([{ id: 3, movement_type: 'add', quantity: 5, created_at: '2026-09-01 08:00:00' }])
   assert.deepEqual(historyGroupReference(bare[0].items), { kind: null, label: '' })
+})
+
+// P3-5: a bare `truncate` + `title=` cell is a dead end on touch -- hover
+// never fires there, so the reason silently had no reveal at all on a
+// phone. The individual movement row's reason must go through the shared
+// TruncatedText component, the same as the group header's reasonPrimary and
+// every other reveal-on-click cell in the app.
+await runTest('the individual movement row reason renders through the shared TruncatedText, not a bare truncate + title', () => {
+  const surface = readFileSync(new URL('../src/components/inventory/InventoryMovementsSurface.tsx', import.meta.url), 'utf8')
+  assert.match(surface, /import TruncatedText from ['"]\.\.\/shared\/TruncatedText\.tsx['"]/)
+  const cellIndex = surface.indexOf('max-w-[14rem] text-gray-500 dark:text-gray-400')
+  assert.ok(cellIndex >= 0, 'the reason cell for the individual movement row must still exist')
+  const cellBody = surface.slice(cellIndex, cellIndex + 300)
+  assert.match(cellBody, /<TruncatedText\s+text=\{historyField\(movement\.reason\)\}/, 'the reason cell must render through TruncatedText, not a bare truncate span')
+  assert.doesNotMatch(cellBody, /className="block max-w-full truncate"/, 'a bare truncate + title span is a dead end on touch -- click/long-press must reveal the full reason too')
 })
 
 if (failed > 0) {

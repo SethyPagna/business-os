@@ -96,6 +96,9 @@ const batchRoute = loadReal('routes/batches.ts', {
   '../lib/batchCode': batchCode,
   '../lib/conflictControl': conflictControl,
   '../lib/stockReceiptGate': { appendReceiptNotes: (value) => value, FREE_GOODS_REASON_NOTE: '', stockReceiptGateCode: () => null, stockReceiptGateMessage: () => '' },
+  // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
+  // stub: the point of the module is that every wire measures the same way.
+  '../lib/stockReason': loadReal('lib/stockReason.ts'),
   '../lib/actorSnapshot': { actorSnapshot: () => 'Tester' },
 }).default
 

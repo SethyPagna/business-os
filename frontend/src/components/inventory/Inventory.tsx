@@ -1289,7 +1289,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     }
     const isStockIn = isStockInSubmission(adjustForm.type, qty, previousQuantity)
     if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
-      notify(tr('fast_stockin_credit_due', 'Not Paid supplier stock needs a due date'), 'error')
+      notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error')
       return
     }
     // The lot this submission actually names, derived from the one shared

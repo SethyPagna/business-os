@@ -182,6 +182,9 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
+  // stub: the point of the module is that every wire measures the same way.
+  '../lib/stockReason': loadReal('lib/stockReason.ts'),
   '../lib/moneyPrecision': moneyPrecision,
   '../lib/sqlBinding': sqlBinding,
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },
@@ -254,6 +257,9 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
+  // stub: the point of the module is that every wire measures the same way.
+  '../lib/stockReason': loadReal('lib/stockReason.ts'),
   '../lib/moneyPrecision': moneyPrecision,
   // K2 Part 416: routes/batches.ts gained the damaged-lots POS lookup;
   // these tests exercise receive/adjust, so an empty stub is honest.

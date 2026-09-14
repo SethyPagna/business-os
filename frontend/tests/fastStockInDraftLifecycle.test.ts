@@ -32,7 +32,7 @@ assert.match(modal, /freeGoods\?: boolean/)
 assert.match(modal, /batchChoice\?: 'new' \| number/)
 assert.match(modal, /setFreeGoods\]\s*=\s*useState\(Boolean\(draft\?\.freeGoods\)\)/, 'free-goods choice must restore')
 assert.match(modal, /pendingBatchRestoreRef = useRef<'new' \| number \| null>\(draft\?\.batchChoice \?\? null\)/, 'a parked lot choice must be revalidated by the existing options effect')
-assert.match(modal, /unitCost, freeGoods, createPriceVariant, expiryDate, batchChoice, lines: received/, 'both debounced and synchronous drafts preserve in-progress receipt values')
+assert.match(modal, /unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received/, 'both debounced and synchronous drafts preserve in-progress receipt values')
 
 const createStart = modal.indexOf('  const createProductForScannedBarcode = async')
 const createEnd = modal.indexOf('  const addLine', createStart)

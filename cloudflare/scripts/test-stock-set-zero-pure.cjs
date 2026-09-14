@@ -144,6 +144,9 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
+  // stub: the point of the module is that every wire measures the same way.
+  '../lib/stockReason': loadReal('lib/stockReason.ts'),
   '../lib/sqlBinding': sqlBinding,
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },
   '../lib/familyStockStats': { getFamilyStockStats: async () => ({}) },

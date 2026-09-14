@@ -71,6 +71,9 @@ let routeAudits = []
 let routeWaits = []
 const noop = () => null
 const asyncNoop = async () => null
+// The one shared reason-length cap. REAL, not a stub: the point of the
+// module is that every reason wire measures the same way.
+const stockReason = loadModule('lib/stockReason.ts', require)
 const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
   if (id === '../lib/moneyPrecision') return moneyPrecision
   if (id === 'hono') return require('hono')
@@ -121,6 +124,7 @@ const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
   if (id === '../lib/stockRevert') return { applyMovementRevert: asyncNoop }
   if (id === '../lib/movementCostSnapshot') return movementCostSnapshot
   if (id === '../lib/batchCode') return { ...batchCode, normalizeTypedDate: noop }
+  if (id === '../lib/stockReason') return stockReason
   if (id === '../lib/stockReceiptGate') return { appendReceiptNotes: noop, FREE_GOODS_REASON_NOTE: '', stockReceiptGateCode: noop, stockReceiptGateMessage: noop }
   if (id === '../lib/datedStockCountRoute') return { parseDatedStockCountEntries: noop, buildDatedStockCountPlan: asyncNoop }
   if (id === '../lib/datedStockCountApply') return { applyDatedStockCountPlan: asyncNoop }

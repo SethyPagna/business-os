@@ -23,6 +23,7 @@ import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
 import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
 import InfoHint from '../../shared/InfoHint.tsx'
+import StockReasonField from '../../shared/StockReasonField.tsx'
 import { bulkActionCanReceive, bulkStockReceiptWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import UnsavedChangesPrompt from '../../shared/UnsavedChangesPrompt.tsx'
@@ -582,39 +583,23 @@ export default function BulkAddStockModal({ productIds, products, branches, user
               </div>
             </div>
           ) : null}
-          <div>
-            <label htmlFor="bulk-add-stock-reason" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t('reason') || 'Reason'}
-            </label>
-            {reasonsByType.adjust.length ? (
-              <div className="mb-1.5 flex flex-wrap gap-1">
-                {reasonsByType.adjust.map((entry) => (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
-                    onClick={() => setReason(entry.label)}
-                  >
-                    {entry.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <input
-              id="bulk-add-stock-reason"
-              className="input text-sm"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              placeholder={t('reason_placeholder') || 'Choose a saved reason or type your own'}
-            />
-            <button
-              type="button"
-              className="mt-1 text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400"
-              onClick={() => setReasonManager({ open: true, type: 'adjust' })}
-            >
-              {t('manage_reasons') || 'Manage reasons'}
-            </button>
-          </div>
+          {/* P3-L2: the one shared reason control -- same chips, same free
+              text box, same 500-character stop as the adjust form, the fast
+              flow and the two session modals. This surface used to hand-roll
+              its own copy, which drifted: no maxLength at all, so a paste
+              longer than the wire accepts was only refused after submit. */}
+          <StockReasonField
+            id="bulk-add-stock-reason"
+            name="bulk_add_stock_reason"
+            label={t('reason') || 'Reason'}
+            labelClassName="block text-sm font-medium text-gray-700 dark:text-gray-300"
+            value={reason}
+            onChange={setReason}
+            savedReasons={reasonsByType.adjust}
+            placeholder={t('reason_placeholder') || 'Choose a saved reason or type your own'}
+            onManage={() => setReasonManager({ open: true, type: 'adjust' })}
+            manageLabel={t('manage_reasons') || 'Manage reasons'}
+          />
           {msg ? <p className="text-sm text-red-600 dark:text-red-400">{msg}</p> : null}
           {/* Per-product outcomes: what committed (excluded from any retry)
               and what refused, with the server's own reason inline. */}

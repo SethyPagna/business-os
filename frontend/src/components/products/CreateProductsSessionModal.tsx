@@ -9,6 +9,8 @@ import AppSelect from '../shared/AppSelect.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
+import StockReasonField from '../shared/StockReasonField.tsx'
+import { useSavedStockReasons } from '../../utils/useSavedStockReasons.ts'
 import { suggestionEmptyState } from '../../utils/suggestionMatching.ts'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import {
@@ -89,6 +91,10 @@ type SessionLine = {
   // toggled again for later lines, and each queued line must keep the answer
   // that was true when it was added.
   freeGoods: boolean
+  // P3-L2: the reason written onto this line's stock movement, as typed.
+  // Frozen at queue time for the same reason freeGoods is -- the shared
+  // details can be edited again for later lines.
+  reason: string
   status: 'queued' | 'saved'
   detail: string
 }
@@ -100,6 +106,7 @@ type UnifiedSessionDraft = Omit<CreateProductsSessionDraft, 'rows'> & {
   query?: string
   clientRequestId?: string
   freeGoods?: boolean
+  reason?: string
   submittedItems?: InventoryStockSessionLine[] | null
   submissionErrorCode?: string
 }
@@ -205,6 +212,7 @@ function legacyLines(rows: CreateProductsSessionRow[] = []): SessionLine[] {
     // A pre-N14-D draft never declared it, and a resumed draft must not
     // acquire a declaration nobody made.
     freeGoods: false,
+    reason: '',
     status: 'saved',
     detail: row.detail,
   }))
@@ -259,6 +267,11 @@ export default function CreateProductsSessionModal({
   // once-entered shared details rather than being asked per line. Each queued
   // line still freezes its own copy.
   const [freeGoods, setFreeGoods] = useState(draft?.freeGoods === true)
+  // P3-L2: the reason every line of this session records on its stock
+  // movement, entered once with the other shared details. Each queued line
+  // freezes its own copy, so editing it later only changes later lines.
+  const [reason, setReason] = useState(draft?.reason || '')
+  const savedReasons = useSavedStockReasons()
   const [rows, setRows] = useState<SessionLine[]>(() => draft?.lines || legacyLines(draft?.rows))
   const [submittedItems, setSubmittedItems] = useState<InventoryStockSessionLine[] | null>(() => draft?.submittedItems || null)
   const [submissionErrorCode, setSubmissionErrorCode] = useState(draft?.submissionErrorCode || '')
@@ -338,8 +351,8 @@ export default function CreateProductsSessionModal({
 
   useEffect(() => scheduleWorkDraftWrite<UnifiedSessionDraft>(draftKey, {
     sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header, rows: [], lines: rows,
-    step, receivedDate, freeGoods, mode, query, submittedItems, submissionErrorCode,
-  }), [draftKey, header, rows, step, receivedDate, freeGoods, mode, query, submittedItems, submissionErrorCode])
+    step, receivedDate, freeGoods, reason, mode, query, submittedItems, submissionErrorCode,
+  }), [draftKey, header, rows, step, receivedDate, freeGoods, reason, mode, query, submittedItems, submissionErrorCode])
 
   useEffect(() => {
     if (!resolvedDefaultBranchId) return
@@ -484,7 +497,7 @@ export default function CreateProductsSessionModal({
       branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: lineReceivedDate || receivedDate,
       expiryDate: lineExpiryDate, batchId: chosenBatch ? Number(chosenBatch.id) : null,
       batchLabel: chosenBatch ? batchDisplayLabel(chosenBatch, tr('batch', 'Received date')) : tr('new_batch', '+ New received date'),
-      quantity, unitCostUsd, freeGoods,
+      quantity, unitCostUsd, freeGoods, reason: reason.trim(),
       status: 'queued', detail: tr('ready_to_receive', 'Ready'),
     }
     setRows((prev) => replaceLineId ? prev.map((entry) => entry.lineId === replaceLineId ? row : entry) : [row, ...prev])
@@ -494,7 +507,7 @@ export default function CreateProductsSessionModal({
 
   const writeDraft = () => writeWorkDraft<UnifiedSessionDraft>(draftKey, {
     sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header, rows: [], lines: rows,
-    step, receivedDate, freeGoods, mode, query, submittedItems, submissionErrorCode,
+    step, receivedDate, freeGoods, reason, mode, query, submittedItems, submissionErrorCode,
   })
   const openItemForm = () => {
     if (submissionLocked) return
@@ -581,7 +594,7 @@ export default function CreateProductsSessionModal({
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: null,
           supplierName: String(payload.supplier ?? header.supplierName ?? '').trim(), branchId: String(branchId), branchName: branchNameFor(String(branchId)),
           receivedDate: String(payload.received_date || receivedDate), expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: '', quantity: 0,
-          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, status: 'saved', detail: tr('product_created', 'Product created'),
+          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, reason: reason.trim(), status: 'saved', detail: tr('product_created', 'Product created'),
         }
         setRows((prev) => [row, ...prev]); onDone()
       } else {
@@ -597,7 +610,7 @@ export default function CreateProductsSessionModal({
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: sameSupplier ? header.supplierId : null,
           supplierName, branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: String(payload.received_date || receivedDate),
           expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: quantity > 0 ? tr('new_batch', '+ New received date') : '', quantity,
-          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, status: 'queued', detail: tr('ready_to_receive', 'Ready'),
+          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, reason: reason.trim(), status: 'queued', detail: tr('ready_to_receive', 'Ready'),
         }
         setRows((prev) => [row, ...prev])
       }
@@ -701,6 +714,10 @@ export default function CreateProductsSessionModal({
       received_date: line.receivedDate,
       expiry_date: line.expiryDate || null,
       notes: tr('create_products_session_title', 'Add/Create Products Session'),
+      // P3-L2: the frozen reason becomes this line's movement reason, as
+      // typed. Sent only when there is one, so a session without a reason
+      // serializes exactly as before and an in-flight retry cannot 409.
+      ...(line.reason ? { reason: line.reason } : {}),
       unit_cost_usd: Number(line.unitCostUsd),
       free_goods: line.freeGoods === true,
       payment_status: null,
@@ -740,7 +757,7 @@ export default function CreateProductsSessionModal({
       setSubmittedItems(attemptItems)
       writeWorkDraft<UnifiedSessionDraft>(draftKey, {
         sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header,
-        rows: [], lines: rows, step: 'items', receivedDate, mode, query, submittedItems: attemptItems, submissionErrorCode: '',
+        rows: [], lines: rows, step: 'items', receivedDate, freeGoods, reason, mode, query, submittedItems: attemptItems, submissionErrorCode: '',
       })
     }
     setSaving(true); setCommitError(''); setSubmissionErrorCode('')
@@ -761,13 +778,13 @@ export default function CreateProductsSessionModal({
         setSubmissionErrorCode('')
         writeWorkDraft<UnifiedSessionDraft>(draftKey, {
           sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header,
-          rows: [], lines: rows, step: 'items', receivedDate, mode, query, submittedItems: null, submissionErrorCode: '',
+          rows: [], lines: rows, step: 'items', receivedDate, freeGoods, reason, mode, query, submittedItems: null, submissionErrorCode: '',
         })
       } else {
         setSubmissionErrorCode(errorCode)
         writeWorkDraft<UnifiedSessionDraft>(draftKey, {
           sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header,
-          rows: [], lines: rows, step: 'items', receivedDate, mode, query,
+          rows: [], lines: rows, step: 'items', receivedDate, freeGoods, reason, mode, query,
           submittedItems: attemptItems, submissionErrorCode: errorCode,
         })
       }
@@ -875,11 +892,24 @@ export default function CreateProductsSessionModal({
                   <label><span className="mb-1 block text-[11px] text-gray-500">{tr('branch', 'Branch')}</span><AppSelect value={header.branchId} onChange={(next) => setHeader((prev) => ({ ...prev, branchId: next }))} ariaLabel={tr('branch', 'Branch')} buttonClassName="h-9 w-full text-sm" options={branchSelectOptions} /></label>
                   <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('received_date', 'Received date')} value={receivedDate} onChange={setReceivedDate} /></label>
                   <label className="flex items-center gap-2 text-xs text-gray-600 sm:col-span-2 dark:text-gray-300"><input type="checkbox" className="h-4 w-4" checked={freeGoods} onChange={(event) => setFreeGoods(event.target.checked)} /><span>{tr('stock_receipt_free_goods', 'Free goods (no cost)')}</span><InfoHint label={tr('stock_receipt_free_goods', 'Free goods (no cost)')} text={tr('stock_receipt_free_goods_hint', 'Tick this only when the goods really arrived at no cost. It is the declaration that lets a $0.00 unit cost be recorded; without it a blank or zero cost is refused.')} /></label>
+                  {/* P3-L2: the same reason control the fast stock-in flow
+                      and the adjust form render -- entered once here, frozen
+                      onto every line this session queues. */}
+                  <StockReasonField
+                    id="create-products-reason"
+                    className="sm:col-span-2"
+                    label={<span className="inline-flex items-center gap-1">{tr('reason', 'Reason')}<InfoHint label={tr('reason', 'Reason')} text={tr('fast_stock_reason_hint', "Written on each line's stock movement exactly as typed. Leave blank to use the session label.")} /></span>}
+                    labelClassName="text-[11px] text-gray-500"
+                    value={reason}
+                    onChange={setReason}
+                    savedReasons={savedReasons}
+                    placeholder={tr('reason_placeholder', 'e.g. Physical count, Damaged goods…')}
+                  />
                 </div>
                 <div className="mt-3 flex justify-end"><button type="button" className="btn-primary flex h-10 items-center gap-1.5 px-4 text-sm disabled:opacity-50" disabled={!canStart || (!allowNew && !allowExisting) || submissionLocked} onClick={() => setStep('items')}><PackagePlus className="h-4 w-4" />{tr('create_products_start', 'Add items')}</button></div>
               </>
             ) : (
-              <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4"><div><dt className="text-[11px] text-gray-500">{tr('brand', 'Brand')}</dt><dd className="truncate font-medium">{summary.brand}</dd></div><div><dt className="text-[11px] text-gray-500">{tr('supplier', 'Supplier')}</dt><dd className="truncate font-medium">{summary.supplier}</dd></div><div><dt className="text-[11px] text-gray-500">{tr('branch', 'Branch')}</dt><dd className="truncate font-medium">{summary.branch}</dd></div><div><dt className="text-[11px] text-gray-500">{tr('received_date', 'Received date')}</dt><dd className="truncate font-medium tabular-nums">{receivedDate}</dd></div></dl>
+              <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4"><div><dt className="text-[11px] text-gray-500">{tr('brand', 'Brand')}</dt><dd className="truncate font-medium">{summary.brand}</dd></div><div><dt className="text-[11px] text-gray-500">{tr('supplier', 'Supplier')}</dt><dd className="truncate font-medium">{summary.supplier}</dd></div><div><dt className="text-[11px] text-gray-500">{tr('branch', 'Branch')}</dt><dd className="truncate font-medium">{summary.branch}</dd></div><div><dt className="text-[11px] text-gray-500">{tr('received_date', 'Received date')}</dt><dd className="truncate font-medium tabular-nums">{receivedDate}</dd></div>{reason ? <div className="col-span-2 sm:col-span-4"><dt className="text-[11px] text-gray-500">{tr('reason', 'Reason')}</dt><dd className="break-words font-medium">{reason}</dd></div> : null}</dl>
             )}
           </div>
           {step === 'items' ? (
@@ -896,6 +926,10 @@ export default function CreateProductsSessionModal({
                     <span className="block break-words">{row.status === 'saved' ? '✅' : '•'} {row.name}</span>
                     {row.barcode ? <span className="block break-all dense-id text-[10px] text-gray-400">{row.barcode}</span> : null}
                     <span className="block break-words text-[10px] text-gray-500">{row.brand || tr('none', 'None')} · {row.supplierName || tr('none', 'None')} · {row.branchName || tr('none', 'None')} · {row.receivedDate} · {row.batchLabel || tr('product_created', 'Product created')}</span>
+                    {/* Same as the fast flow's queue: the frozen reason is
+                        shown on the line that carries it, wrapping rather
+                        than truncating. */}
+                    {row.reason ? <span className="block break-words text-[10px] text-gray-500 dark:text-gray-400">{row.reason}</span> : null}
                   </button>
                   <span className="flex shrink-0 items-center gap-1"><span className="text-[11px] tabular-nums">× {row.quantity} · {usdSymbol}{(row.quantity * row.unitCostUsd).toFixed(2)}</span>{row.status === 'queued' ? <button type="button" disabled={submissionLocked} aria-label={tr('remove', 'Remove')} className="rounded p-1 text-gray-400 hover:text-red-600 disabled:opacity-40" onClick={() => removeLine(row.lineId)}><Trash2 className="h-4 w-4" /></button> : null}</span>
                 </div>

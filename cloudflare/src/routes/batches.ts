@@ -10,6 +10,7 @@ import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
+import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
@@ -174,6 +175,10 @@ app.post('/', async (c) => {
     // keeps the lot's own received_at (first attribution sticks).
     batch_id?: number | null
     notes?: string | null
+    // P3-L2: the operator's own reason for this receipt, written onto the
+    // inventory_movements row as typed. Optional: a caller that sends none
+    // keeps the generated "Stock received (<lot>)" label below.
+    reason?: string | null
     supplier_id?: number | null
     supplier_name?: string | null
     unit_cost_usd?: number | null
@@ -205,13 +210,17 @@ app.post('/', async (c) => {
   const paymentStatus = body.payment_status === 'paid' || body.payment_status === 'credit' ? body.payment_status : null
   const creditDueDate = String(body.credit_due_date || '').slice(0, 10) || null
   if (paymentStatus === 'credit' && !creditDueDate) {
-    return c.json({ error: 'A credit purchase needs its due date — that is what the admin reminder is built on.' }, 400)
+    return c.json({ error: 'A Not Yet Paid purchase needs its due date — that is what the admin reminder is built on.' }, 400)
   }
   // N14-D: this is the THIRD receipt wire (FastStockInModal's ordinary lines
   // and ReceiveBatchModal both land here, not on /api/inventory/adjust), so it
   // runs the same gate -- supplier and unit cost required, $0.00 only as
   // declared free goods. A rule enforced on two of three wires is not enforced.
   const freeGoods = body.free_goods === true
+  const reason = String(body.reason ?? '').trim() || null
+  // The one cap every reason writer shares (lib/stockReason.ts): a receipt
+  // reason this wire accepted unbounded could not be edited afterwards.
+  if (stockReasonTooLong(reason)) return c.json({ error: `Reason is too long (max ${STOCK_REASON_MAX_LENGTH} characters)`, code: 'reason_too_long' }, 400)
   // A top-up of an existing lot inherits that lot's supplier: first attribution
   // sticks, so ReceiveBatchModal deliberately sends none for an attributed lot.
   const topUpBatchId = Number.isSafeInteger(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null
@@ -284,7 +293,7 @@ app.post('/', async (c) => {
     // report each receipt accurately without mutating the product's cost.
     unitCostUsd,
     totalCostUsd,
-    reason: appendReceiptNotes(`Stock received (${lotCode})`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
+    reason: appendReceiptNotes(reason || `Stock received (${lotCode})`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
     referenceId: Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null,
     userId: user?.id ?? null,
     userName: actorSnapshot(user),
@@ -298,6 +307,7 @@ app.post('/', async (c) => {
     quantity,
     expiry_date: body.expiry_date || null,
     lot_code: lotCode,
+    reason,
   })
   c.executionCtx.waitUntil(Promise.all([
     bumpVersion(c.env, 'products'),
@@ -370,7 +380,7 @@ app.patch('/:id', async (c) => {
   if (bodyExtra.payment_status !== undefined) {
     const nextStatus = bodyExtra.payment_status === 'paid' || bodyExtra.payment_status === 'credit' ? bodyExtra.payment_status : null
     const nextDue = String(bodyExtra.credit_due_date || '').slice(0, 10) || null
-    if (nextStatus === 'credit' && !nextDue) return c.json({ error: 'A credit purchase needs its due date.' }, 400)
+    if (nextStatus === 'credit' && !nextDue) return c.json({ error: 'A Not Yet Paid purchase needs its due date.' }, 400)
     updates.push('payment_status = @payment_status', 'credit_due_date = @credit_due_date')
     params.payment_status = nextStatus
     params.credit_due_date = nextStatus === 'credit' ? nextDue : null
