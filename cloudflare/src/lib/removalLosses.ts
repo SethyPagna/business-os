@@ -39,15 +39,13 @@
  *   'out'                     inventory CSV import remove -- a data
  *                             correction, not a business event (see
  *                             importEngine.ts classifyInventory)
- *   'write_off' / 'delete'    product deletion (productDelete.ts /
- *                             bulkDeleteEngine.ts). Real destroyed value, but
- *                             their UNDO writes a fresh 'add' row instead of a
- *                             'revert:<id>' counter-movement, so an undone
- *                             delete cannot be excluded here and would be
- *                             over-reported as a permanent loss. Left out
- *                             until that undo carries a marker; over-counting
- *                             the owner's losses is worse than omitting a
- *                             class they did not name.
+ *   'delete'                  bulkDeleteEngine.ts's bulk product delete. A
+ *                             DIFFERENT type than 'write_off' below and left
+ *                             out for the exact reason 'write_off' used to be:
+ *                             its undo writes a fresh row with no revert
+ *                             marker this module can key off. Not this
+ *                             lane's ruling to extend; see 'write_off' below
+ *                             for the shape a fix would take.
  *   'adjustment'              duplicate-product merge write-off
  *                             (routes/products.ts, the `writeOffStock` branch)
  *                             -- a NEGATIVE-quantity row cleaning up a phantom
@@ -56,14 +54,28 @@
  *                             `quantity > 0` guard below.
  *
  * On the condition-tag transition table (p3/tag, Sep 14 2026): a tagged HOLD
- * writes 'damage_out' and is correctly NOT a loss here; a direct removal writes
- * 'remove' and IS; disposing a held row writes 'write_off'. That last one
- * cannot simply be added to the set above, because 'write_off' is ALSO
- * productDelete.ts's type and productDelete's undo has no 'revert:' marker --
- * adding it today would permanently over-count every undone product deletion.
- * Adding 'write_off' therefore needs a discriminator between the two writers
- * first (a reference_id on the dispose row would be enough); that is named as
- * an owner/lane ruling, not silently assumed.
+ * writes 'damage_out' and is correctly NOT a loss here (the units are still
+ * owned, still held); a direct removal writes 'remove' and IS; disposing a
+ * held row (damagedLotActions.ts planDisposeTagged) writes 'write_off', and a
+ * product delete that destroys OPEN held lots or sellable stock
+ * (productDelete.ts) also writes 'write_off'. Both are real destroyed value
+ * per the owner's ruling above, and BOTH commit set (p3/losses-writeoff, Sep
+ * 15 2026): a write_off's undo now carries a discriminator this module can
+ * exclude by --
+ *   - DISPOSE stamps `reference_id = 'damaged_lot:<lotId>'` (stockCondition.ts
+ *     damagedLotReference) and today has NO undo path at all (the ledger's
+ *     generic revert refuses anything carrying that marker -- stockRevert.ts
+ *     -- and there is no "un-dispose" action), so its write_off can never be
+ *     reverted and always counts once booked.
+ *   - productDelete's write_off(s) (one per drained branch_stock aggregate,
+ *     one per drained held lot -- see productRemoveWriteOffReferenceId) share
+ *     one `reference_id = 'product_remove:<operationId>:<generation>'` per
+ *     apply/redo, and undo writes a counter stamped `revert:` + that same
+ *     string, so an undone delete is excluded and a later redo (a NEW
+ *     generation, a NEW string) is a fresh, uncounted-until-booked loss again.
+ * See the second NOT EXISTS clause below -- it is keyed on `reference_id`,
+ * not `id`, ONLY for 'write_off' rows, because unlike every other writer here
+ * these two can post more than one loss-bearing row per real-world event.
  *
  * VALUATION IS AT READ TIME, not at write time. Several removal writers book
  * no cost columns at all (productDelete.ts, datedStockCountApply.ts, the
@@ -75,7 +87,7 @@
  * and a row that is uncostable everywhere is counted in `unvalued_rows` rather
  * than being silently valued at zero.
  */
-export const REMOVAL_LOSS_MOVEMENT_TYPES = ['remove'] as const
+export const REMOVAL_LOSS_MOVEMENT_TYPES = ['remove', 'write_off'] as const
 
 /**
  * Removal movements whose `reason` is one of these are NOT losses.
@@ -99,7 +111,7 @@ function quoted(values: readonly string[]): string {
  * The WHERE fragment selecting the loss-bearing removal movements under
  * `alias`. The caller AND-s its own date/branch window onto this.
  *
- * Four guards, each for a writer that would otherwise be mis-counted:
+ * Five guards, each for a writer that would otherwise be mis-counted:
  *
  *  1. `movement_type IN (...)`      the loss set above.
  *  2. `quantity > 0`                stockSession.ts's session UNDO writes a
@@ -111,11 +123,23 @@ function quoted(values: readonly string[]): string {
  *                                   writing a 'remove' stamped
  *                                   reference_id 'revert:<id>'. That undoes an
  *                                   inflow; nothing was lost.
- *  4. no revert exists FOR this row
+ *  4. no revert exists FOR this row (keyed by its own numeric id)
  *                                   a removal that was later reverted put the
  *                                   goods back on the shelf, so it must not
  *                                   count. Same correlated lookup
  *                                   stockInSessionsQuery.ts already uses.
+ *  5. no revert exists FOR this row's reference_id (write_off only)
+ *                                   DISPOSE and productDelete's write_off
+ *                                   rows are the identified exception: their
+ *                                   own numeric id is never what their undo
+ *                                   references (productDelete can post SEVERAL
+ *                                   write_off rows per delete and reverses
+ *                                   them all with ONE counter -- see the
+ *                                   comment on REMOVAL_LOSS_MOVEMENT_TYPES).
+ *                                   Scoped to `movement_type = 'write_off'`
+ *                                   ONLY, so every other writer's behaviour
+ *                                   (in particular guard 4 above, keyed on
+ *                                   numeric id) is completely unchanged.
  *
  *  plus the excluded-reason set above.
  */
@@ -127,6 +151,9 @@ export function removalLossMovementWhere(alias = 'm'): string {
     `COALESCE(${alias}.reason, '') NOT IN (${quoted(REMOVAL_LOSS_EXCLUDED_REASONS)})`,
     `NOT EXISTS (SELECT 1 FROM inventory_movements rv
        WHERE rv.reference_id = 'revert:' || CAST(${alias}.id AS TEXT))`,
+    `(${alias}.movement_type != 'write_off' OR ${alias}.reference_id IS NULL
+       OR NOT EXISTS (SELECT 1 FROM inventory_movements rv2
+         WHERE rv2.reference_id = 'revert:' || CAST(${alias}.reference_id AS TEXT)))`,
   ].join(' AND ')
 }
 
