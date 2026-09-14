@@ -73,6 +73,8 @@ type MovementGroup = {
   branchSummary?: string
   userSummary?: string
   reasonSummary?: string
+  reasonPrimary?: string
+  reasonExtraCount?: number
   totalQuantity: number
   totalCostUsd?: number
   items: MovementRecord[]
@@ -267,8 +269,16 @@ export default function InventoryMovementsSurface({
               : <span>{t('reference') || 'Reference'}: <span className="text-gray-700 dark:text-gray-200">{String(group.reference_id || '—')}</span></span>
           })()}
           <span>{t('recorded_at') || 'Recorded at'}: <span className="text-gray-700 dark:text-gray-200">{fmtTime(group.created_at)}</span></span>
-          {group.reasonSummary ? (
-            <span className="min-w-0 max-w-full truncate" title={group.reasonSummary}>{t('reason') || 'Reason'}: <span className="text-gray-700 dark:text-gray-200">{group.reasonSummary}</span></span>
+          {/* Three spans, not one: only the reason TEXT may be clipped. A
+              single truncating span ate the " +2" first -- the narrower the
+              screen, the more certain the operator was that the group had
+              one reason. The label and the count are shrink-0 beside it. */}
+          {group.reasonPrimary ? (
+            <span className="flex min-w-0 max-w-full items-baseline gap-1" title={group.reasonSummary}>
+              <span className="shrink-0">{t('reason') || 'Reason'}:</span>
+              <span className="min-w-0 truncate leading-normal text-gray-700 dark:text-gray-200">{group.reasonPrimary}</span>
+              {group.reasonExtraCount ? <span className="shrink-0 text-gray-700 dark:text-gray-200">+{group.reasonExtraCount}</span> : null}
+            </span>
           ) : null}
         </div>
         <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">

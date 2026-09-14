@@ -76,17 +76,27 @@ await runTest('a group whose lines carry different reasons says so, like the bra
 
   assert.equal(groups.length, 1)
   assert.equal(groups[0]?.reasonSummary, 'Damaged in transit +2')
+  // The row renders the parts, not the joined string: the reason text is
+  // what may be clipped on a narrow screen, never the count of the ones it
+  // is standing in for. The joined form is the CSV export's.
+  assert.equal(groups[0]?.reasonPrimary, 'Damaged in transit')
+  assert.equal(groups[0]?.reasonExtraCount, 2)
+  assert.equal(groups[0]?.reasonSummary, `${groups[0]?.reasonPrimary} +${groups[0]?.reasonExtraCount}`)
   // One reason (or a repeated one) still reads as itself, with no +0.
   const single = buildMovementGroups([
     { id: 4, product_id: 1, product_name: 'A', movement_type: 'add', quantity: 1, reason: 'Opening stock', reference_id: 'session_10', created_at: '2026-09-14 11:00:00' },
     { id: 5, product_id: 2, product_name: 'B', movement_type: 'add', quantity: 1, reason: 'Opening stock', reference_id: 'session_10', created_at: '2026-09-14 11:00:01' },
   ])
   assert.equal(single[0]?.reasonSummary, 'Opening stock')
+  assert.equal(single[0]?.reasonPrimary, 'Opening stock')
+  assert.equal(single[0]?.reasonExtraCount, 0, 'one reason renders no +N at all')
   // A group with no reason at all stays blank, so the row renders nothing.
   const none = buildMovementGroups([
     { id: 6, product_id: 1, product_name: 'A', movement_type: 'add', quantity: 1, reference_id: 'session_11', created_at: '2026-09-14 12:00:00' },
   ])
   assert.equal(none[0]?.reasonSummary, '')
+  assert.equal(none[0]?.reasonPrimary, '')
+  assert.equal(none[0]?.reasonExtraCount, 0)
 })
 
 await runTest('movement timestamp falls back to server created_at when imported date is invalid', () => {
