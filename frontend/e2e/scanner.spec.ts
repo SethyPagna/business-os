@@ -7,12 +7,13 @@ import { E2E_ACCOUNTS, gotoAdminPage, signIn } from './support/session'
  *
  * WHAT THIS PROVES
  *  - Pressing the scan button beside the POS search box starts the camera with
- *    no further tap (the one-tap contract). EXPECTED RED on this source -- see
- *    the fixme below, which names the exact lines that decide it.
- *  - The camera really can start here, so the red above is a statement about
- *    the product and not about the harness.
+ *    no further tap (the one-tap contract, 8e6371cb + c2185071): the modal
+ *    opens in status 'starting' and calls getUserMedia from the open gesture.
+ *  - The camera really can start here: a real MediaStream arrives and decodes
+ *    on the fake device, so "one tap" is measured, not assumed.
  *  - The scanner modal is never a blank black box: every state it can land in
- *    carries a message and at least one control.
+ *    carries a message and at least one control -- the live view counts its
+ *    video as the control, every other state offers "Scan from photo".
  *  - On WebKit, where Playwright grants no camera, the unsupported/denied state
  *    is explained and offers a way forward.
  *
@@ -57,6 +58,12 @@ const CAMERA_ACTION = 'button:text-is("Start camera"), button:text-is("Request c
  *   scan_failed                     en.json:4584
  */
 const SCANNER_MESSAGE = new RegExp([
+  // The LIVE view (status 'scanning' / 'starting') renders none of the
+  // deriveScannerPresentation() strings: its one instruction line is the
+  // overlay hint scanner_live_hint (en.json "Center the barcode inside the
+  // frame. We will scan it automatically.") -- BarcodeScannerModal.tsx, the
+  // comment above the video shell explains why the status bar was removed.
+  'Center the barcode inside the frame',
   'We need camera access to scan barcodes',
   'Camera permission is saved',
   'Camera access is blocked',
@@ -80,74 +87,45 @@ async function openPosScanner(page: Parameters<typeof signIn>[0]) {
 
 test.describe('POS barcode scanner', () => {
   test('grants the camera and can actually start it', async ({ page, context, browserName }) => {
-    // This test exists to make the fixme below TRUSTWORTHY. If the camera could
-    // not start here at all, "one tap does not start the camera" would be a
-    // statement about Playwright, not about the product. So: take the extra
-    // tap the current implementation demands, and prove a real MediaStream
-    // arrives and paints.
+    // Proves the camera path is real on this harness: the ONE tap in
+    // openPosScanner() must end with a MediaStream that decodes frames. Without
+    // this, the one-tap test below could pass on a <video> that never played.
     test.skip(browserName === 'webkit', 'Playwright WebKit exposes no camera; the WebKit contract is asserted in its own test below')
     test.setTimeout(120_000)
     await context.grantPermissions(['camera'])
     const health = collectPageHealth(page)
     await openPosScanner(page)
 
-    const cameraAction = page.locator(CAMERA_ACTION).first()
-    await cameraAction.click({ timeout: 30_000 })
-
     const video = page.locator(SCANNER_VIDEO).first()
     await expect(video).toBeVisible({ timeout: 30_000 })
     // Visible is not running. A <video> with no stream is an invisible-to-tests
     // black rectangle of exactly the right size, which is precisely what a
-    // broken camera path looks like.
+    // broken camera path looks like. Nothing is re-tapped here: the modal owns
+    // the start, and a "Start camera" button appearing would be the one-tap
+    // regression the next test exists to catch.
     //
-    // The poll re-taps the start button while it is still on screen. Measured
-    // at --workers=4: the first tap landed while the modal was still resolving
-    // permissions, the status stayed on 'manual', and hasStream was false for
-    // the whole 30 s poll -- with the button sitting there untouched. Retrying
-    // what a cashier would retry keeps this test's claim ("the camera CAN start
-    // here, so the one-tap fixme below is about the product") honest; the
-    // assertion that a real MediaStream arrives and decodes is unchanged.
+    // Both facts are polled together: srcObject is set the instant getUserMedia
+    // resolves, while videoWidth stays 0 until the first frame decodes a few
+    // hundred ms later. Measured at --workers=4 on android-chromium: a poll that
+    // stopped at hasStream saw width 0 on the very next evaluate.
     await expect.poll(
-      async () => {
-        const state = await video.evaluate((node: HTMLVideoElement) => ({
-          hasStream: !!node.srcObject,
-          width: node.videoWidth,
-          ready: node.readyState,
-        }))
-        if (!state.hasStream && await cameraAction.isVisible().catch(() => false)) {
-          await cameraAction.click({ timeout: 10_000 }).catch(() => { /* the modal may be mid-transition */ })
-        }
-        return state
-      },
-      { message: 'the fake camera must produce a real stream', timeout: 60_000 },
-    ).toMatchObject({ hasStream: true })
-    expect(await video.evaluate((node: HTMLVideoElement) => node.videoWidth), 'decoded frame width').toBeGreaterThan(0)
+      async () => video.evaluate((node: HTMLVideoElement) => ({
+        hasStream: !!node.srcObject,
+        decodedFrame: node.videoWidth > 0,
+        ready: node.readyState,
+      })),
+      { message: 'the fake camera must produce a real stream that decodes a frame', timeout: 60_000 },
+    ).toMatchObject({ hasStream: true, decodedFrame: true })
 
     expectNoRuntimeErrors(health)
   })
 
-  test.fixme('one tap on the scan button starts the camera', async ({ page, context, browserName }) => {
-    // EXPECTED RED ON THIS SOURCE -- deliberately, and not because of the
-    // harness. The test immediately above proves the camera starts here.
-    //
-    // The current implementation requires a SECOND tap by design.
-    // frontend/src/components/products/scanning/BarcodeScannerModal.tsx:426
-    //
-    //     // Permission is durable browser state; a MediaStream is not. Never
-    //     // start the camera just because permission is already granted.
-    //     // getUserMedia is reached only from the visible Start/Request
-    //     // camera button below.
-    //     setStatus('manual')
-    //
-    // So opening the modal lands on status 'manual' with a "Start camera"
-    // button, even when permission is already 'granted'.
-    //
-    // The owner's contract is ONE TAP: a cashier holding a product and a phone
-    // should not have to tap twice. A parallel lane is changing the modal from
-    // two-step to one-tap. When it lands, the branch above becomes
-    // "permission granted -> start immediately", DELETE THE `.fixme` HERE --
-    // every assertion below is already written against the intended behaviour
-    // and needs no other change.
+  test('one tap on the scan button starts the camera', async ({ page, context, browserName }) => {
+    // The owner's contract: a cashier holding a product and a phone taps ONCE.
+    // BarcodeScannerModal.tsx opens in status 'starting' and its open effect
+    // calls startCamera() from the tap gesture (8e6371cb); before that it
+    // parked on status 'manual' behind a "Start camera" button and this test
+    // was an expected red.
     //
     // The discriminating detail is the word "without": the test never clicks
     // the camera action, so an implementation that still shows it fails here
@@ -183,10 +161,13 @@ test.describe('POS barcode scanner', () => {
     // One of the states deriveScannerPresentation() can produce -- never none.
     await expect(dialog.getByText(SCANNER_MESSAGE).first()).toBeVisible({ timeout: 15_000 })
 
-    // ...and a control that does something about it. "Scan from photo" is
-    // always offered, so this can never be vacuously satisfied by the close
-    // button alone.
-    await expect(dialog.getByRole('button', { name: 'Scan from photo' })).toBeVisible()
+    // ...and a control that does something about it. Every non-live state
+    // offers "Scan from photo"; the live view offers the camera itself, whose
+    // <video> is the only thing a cashier needs. Either way the close button
+    // alone can never satisfy this.
+    const photo = dialog.getByRole('button', { name: 'Scan from photo' })
+    const video = dialog.locator(SCANNER_VIDEO)
+    await expect(photo.or(video).first()).toBeVisible({ timeout: 15_000 })
 
     expectNoRuntimeErrors(health)
   })
@@ -197,8 +178,17 @@ test.describe('POS barcode scanner', () => {
     // in a view without camera permission -- and on that path the cashier must
     // get a sentence they can act on plus a retry, never a dead modal.
     //
-    // Chromium runs this too, with permission deliberately NOT granted, so the
-    // contract is covered on both engines rather than only where it is easy.
+    // Chromium runs this too. Its projects launch with a fake camera that
+    // auto-accepts the prompt, so "not granted" would silently become "live";
+    // instead getUserMedia is made to reject with the browser's own denial
+    // shape (NotAllowedError), which is what a real refused prompt produces.
+    if (browserName === 'chromium') {
+      await page.addInitScript(() => {
+        const devices = navigator.mediaDevices
+        if (!devices) return
+        devices.getUserMedia = () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError'))
+      })
+    }
     const health = collectPageHealth(page)
     await openPosScanner(page)
 

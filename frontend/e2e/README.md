@@ -201,7 +201,6 @@ not skipped noise; each one names the exact lines that decide it.
 | `admin-boot` | the admin login screen renders when site data is blocked | `AppContext.tsx:425 getStoredUserPayload()` / `:429 getStoredUserExpiry()` evaluate `sessionStorage`/`localStorage` as arguments, outside the `safeStorageGet` guard |
 | `admin-boot` | a signed-out boot raises no unhandled rejection | `vite.config.ts` builds an `/api/auth/bootstrap` prefetch into `index.html` with no `.catch()` at the creation site |
 | `ios-layout` | every text field is ≥16px, so Safari never zooms the till | `PaginationControls.tsx:264/352/419` render the page-number input at `text-xs` / `text-[10px]` |
-| `scanner` | one tap on the scan button starts the camera | today the scan button opens a modal that then needs a second action |
 | `storage-isolation` | B opens an empty till, not A's | the POS draft/filter keys are re-read for the new account |
 | `storage-isolation` | the till is wiped of A's **unprefixed** keys too | `clientRuntime.ts:46/221` clears only `businessos_` / `business_os_` prefixes, leaving `pos_search`, the seven `pos_*` filters, the legacy `bos_pos_*` keys (still read by `POS.tsx:700`) and `bos_dashboard_filters:<id>` |
 | `storage-isolation` | signing out is not an error | `POS.tsx:1436` logs `console.error` and sets `catalogLoadError` on the 401 caused by a deliberate logout; `Dashboard.tsx:844` guards the identical case with `isInvalidSessionError` |
