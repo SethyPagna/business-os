@@ -18,11 +18,19 @@ import { isStandaloneDisplayMode } from './standaloneDisplay.ts'
 // a thrown error -- removes it. Nothing here creates an object URL (the
 // document is written straight into the frame), so there is none to revoke.
 let activePrintFrame: HTMLIFrameElement | null = null
+// The frame's own cleanup, so discarding it also cancels the pending cleanup
+// timer. Without this the timer below outlives the frame it was scheduled for
+// and holds that detached document (fonts, decoded images) alive for two more
+// minutes -- on the device with the least memory of any client we have.
+let releaseActivePrintFrame: (() => void) | null = null
 
 function discardActivePrintFrame(): void {
-  if (!activePrintFrame) return
-  activePrintFrame.remove()
+  const frame = activePrintFrame
+  const release = releaseActivePrintFrame
   activePrintFrame = null
+  releaseActivePrintFrame = null
+  if (release) release()
+  else if (frame) frame.remove()
 }
 
 // A slow webfont must never be the reason a receipt does not print: after this
@@ -90,9 +98,13 @@ function removeFrameAfterPrinting(frame: HTMLIFrameElement, frameWindow: Window)
     removed = true
     clearTimeout(timer)
     frame.remove()
-    if (activePrintFrame === frame) activePrintFrame = null
+    if (activePrintFrame === frame) {
+      activePrintFrame = null
+      releaseActivePrintFrame = null
+    }
   }
   timer = setTimeout(remove, PRINT_FRAME_CLEANUP_MS) as unknown as number
+  releaseActivePrintFrame = remove
   frameWindow.addEventListener?.('afterprint', remove, { once: true })
 }
 
