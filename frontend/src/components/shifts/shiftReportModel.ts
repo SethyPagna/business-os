@@ -14,6 +14,16 @@ export type ShiftFiguresShape = {
   refunds_usd: number
   delivery_cost: { usd: number; khr: number }
   other_expenses: { usd: number; khr: number }
+  /**
+   * Stock removed entirely during the shift, priced at cost, plus the same
+   * window's revenue and profit with it taken off (owner, Sep 14 2026: "also
+   * add one row below unpaid in reports as well"). Optional: an older Worker,
+   * or a window the kernel could not scope to stock movements, sends none and
+   * the rows are omitted rather than printed as $0.00.
+   */
+  removal_loss_usd?: number
+  revenue_after_losses_usd?: number
+  profit_after_losses_usd?: number
 }
 
 type ShiftWithFigures = Shift & { figures?: ShiftFiguresShape | null }
@@ -63,6 +73,22 @@ export type ShiftFigureRow = {
 /** Business results in reading order. Credit is a positive memo already inside sales/profit. */
 export function shiftFigureRows(figures: ShiftFiguresShape | null | undefined): ShiftFigureRow[] {
   if (!figures) return []
+  // Stock removed entirely, at cost -- the owner's "one row below unpaid"
+  // (Sep 14 2026), with the two after-losses figures beside it. Like credit it
+  // is a POSITIVE amount and is never subtracted from sales/profit above:
+  // those stay the canonical figures and these say what the same shift looks
+  // like including the loss. Rendered only when the server sent the block.
+  const losses: ShiftFigureRow[] = typeof figures.removal_loss_usd !== 'number' ? [] : [
+    { key: 'rpt_removal_loss', usd: figures.removal_loss_usd, hintKey: 'rpt_hint_removal_loss' },
+    { key: 'rpt_revenue_after_losses', usd: figures.revenue_after_losses_usd ?? 0 },
+    ...(typeof figures.profit_after_losses_usd === 'number' ? [{
+      key: 'rpt_profit_after_losses',
+      usd: figures.profit_after_losses_usd,
+      // Unclamped on purpose: a shift that destroyed more than it earned is
+      // exactly the case the owner asked to be able to see.
+      tone: (figures.profit_after_losses_usd > 0 ? 'positive' : figures.profit_after_losses_usd < 0 ? 'negative' : undefined) as ShiftFigureRow['tone'],
+    }] : []),
+  ]
   return [
     { key: 'sales', usd: figures.sales_usd },
     { key: 'cogs', usd: figures.cogs_usd },
@@ -72,5 +98,6 @@ export function shiftFigureRows(figures: ShiftFiguresShape | null | undefined): 
     { key: 'shift_other_expenses', usd: figures.other_expenses.usd, khr: figures.other_expenses.khr },
     { key: 'refunds', usd: figures.refunds_usd },
     { key: 'credit_awaiting_payment', usd: Math.max(0, figures.credit_usd), hintKey: 'shift_credit_hint' },
+    ...losses,
   ]
 }
