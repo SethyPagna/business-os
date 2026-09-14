@@ -1,3 +1,33 @@
+# Free-plan deployable config. HAND-MAINTAINED copy of wrangler.toml.
+#
+#   npm run deploy:free        (= deploy.cjs --config wrangler.free.toml)
+#   npm run dry-run:free       (local bundle only, no upload)
+#
+# It deploys the SAME Worker name, the SAME D1 database ids, the SAME R2
+# bucket, KV namespace, queues, Durable Objects, routes and crons as
+# wrangler.toml. It is not a second environment and not a second deployment:
+# it is the same deployment, configured for an account on the Workers Free
+# plan. Exactly one of the two files is ever deployed at a time.
+#
+# There are EXACTLY FOUR differences from wrangler.toml, each marked "DIFF n
+# of 4" at its site below:
+#   1. no [limits] block            (cpu_ms / subrequests are Paid-only)
+#   2. business-os-import consumer  max_batch_size 5 -> 1
+#   3. business-os-media consumer   max_batch_size 5 -> 1
+#   4. [vars] PLAN_TIER             "paid" -> "free"
+#
+# scripts/test-wrangler-config-drift-pure.cjs enforces that list: every
+# binding, id, queue, route, cron and var in wrangler.toml must be present
+# here with the same value, and no fifth difference may appear. When you edit
+# wrangler.toml, edit this file in the same commit -- that test is how you
+# find out you did not.
+#
+# Deliberately NOT diffed: the business-os-backup-assets consumer (already
+# max_batch_size = 1 on both plans), the DLQ consumer (one D1 UPDATE per
+# message), [observability] (Workers Logs works on Free at 200k events/day),
+# the Durable Object bindings and migrations (SQLite DOs work on Free), and
+# every queue binding (Queues work on Free).
+#
 name = "business-os"
 main = "src/index.ts"
 compatibility_date = "2026-07-01"
@@ -74,9 +104,25 @@ crons = ["0 */6 * * *"]
 # statement (plan-independent), MAX_HISTORICAL_SALE_LINES = 100 (data
 # bound: largest real receipt is 86 lines), STOCK_ACTION_CLASSIFY_WINDOW /
 # DISPATCH_READ (M4's windowed continuation, already Paid-sized).
-[limits]
-cpu_ms = 300000
-subrequests = 10_000
+# DIFF 1 of 4 vs wrangler.toml: NO [limits] BLOCK.
+#
+# wrangler.toml has:
+#   [limits]
+#   cpu_ms = 300000
+#   subrequests = 10_000
+#
+# Both keys are Workers Paid-only. Deploying a config that carries them to a
+# Free account fails outright with error 100328 -- this is the ONE key in the
+# whole file that is fatal on Free, which is why this file exists at all.
+# Without the block, Free applies its fixed budgets: 10 ms CPU per invocation
+# (including per cron trigger), 50 external subrequests, 1,000 to Cloudflare
+# services. Every in-app ceiling is re-sized for those budgets by
+# src/lib/planTier.ts, keyed off PLAN_TIER below.
+#
+# Why this is a second top-level file and not an [env.free] section: wrangler
+# 4.116 cannot DROP an inherited [limits] block from an environment, its
+# bindings are non-inheritable (every binding would have to be copied anyway),
+# and an environment name suffixes the Worker name to 'business-os-free'.
 
 [[d1_databases]]
 binding = "DB"
@@ -166,7 +212,14 @@ queue = "business-os-import"
 # one invocation and Free's fixed 10ms CPU budget is per INVOCATION, so a
 # larger batch silently repacked several chunks' CPU into one 10ms window.
 # With a 5-minute budget, batching is a pure throughput win again.
-max_batch_size = 5
+# DIFF 2 of 4 vs wrangler.toml (which has max_batch_size = 5).
+# handleImportQueue processes a batch SEQUENTIALLY inside ONE invocation, and
+# Free's 10 ms CPU budget is per INVOCATION -- a batch of 5 repacks five
+# chunks of real classify/write CPU into one 10 ms window. 1 gives each chunk
+# its own fresh budget and its own retry. This is the value this line held
+# while the account was on Free; the comment above records why it went back
+# to 5 on Paid.
+max_batch_size = 1
 max_batch_timeout = 5
 # Once a message has thrown on every one of Cloudflare's default max_retries
 # attempts, it's moved here instead of silently dropped -- queue.ts's
@@ -203,7 +256,11 @@ max_retries = 2
 
 [[queues.consumers]]
 queue = "business-os-media"
-max_batch_size = 5
+# DIFF 3 of 4 vs wrangler.toml (which has max_batch_size = 5).
+# Same reason as the import consumer: handleMediaQueue does real per-message
+# work (R2 get, normalize, R2 put) rather than one cheap D1 write, so batching
+# it packs CPU into a single 10 ms invocation instead of amortising latency.
+max_batch_size = 1
 max_batch_timeout = 30
 
 [[queues.consumers]]
@@ -259,7 +316,13 @@ new_sqlite_classes = ["BroadcastHub"]
 # Pinned EXPLICITLY here rather than left to the code default so the two
 # configs state their own tier and wrangler.free.toml's only differ by value;
 # see that file's header for the complete list of diffs between them.
-PLAN_TIER = "paid"
+# DIFF 4 of 4 vs wrangler.toml (which has PLAN_TIER = "paid").
+# This is the switch src/lib/planTier.ts reads. Everything above is what the
+# PLATFORM needs; this is what the APPLICATION needs -- import chunk sizes,
+# stock-action ceilings, backup asset caps, retention batch sizes and the
+# free-plan refusals all follow from it. Deploying this file without it would
+# produce a Worker that boots on Free and then throws Paid-sized work at it.
+PLAN_TIER = "free"
 BUSINESS_OS_PUBLIC_URL = "https://leangbeauty.com"
 BUSINESS_OS_ADMIN_URL = "https://admin.leangbeauty.com"
 # The one organization this deployment serves. The login screen pins to it

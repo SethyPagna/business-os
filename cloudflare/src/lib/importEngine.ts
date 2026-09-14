@@ -4769,7 +4769,14 @@ async function finalizeImportApply(
 // per-invocation dispatch window (see the dispatch loop), so raising it
 // widens how much one continuation invocation dispatches -- budgeted in
 // the subrequest math above.
-export const STOCK_ACTION_MAX_ROWS = 1920 // 240 maximum groups x the writer's 8-line receipt ceiling
+// 1920 = the 240-group ceiling this cap was set against x the writer's 8-line
+// receipt ceiling. It was NOT re-derived when STOCK_ACTION_MAX_UNITS went 240
+// -> 480 in the same A4 pass (the two were raised separately and this
+// comment was left saying 240), so at 480 units the row cap is the binding
+// one for sheets averaging more than 4 lines per receipt -- deliberate, and
+// still a safe Paid-side ceiling. Recorded here rather than silently
+// "corrected" to 3840, which would raise a live ceiling nobody measured.
+export const STOCK_ACTION_MAX_ROWS = 1920
 export const STOCK_ACTION_MAX_UNITS = 480
 // DIRECT-mode continuation (M4): a direct sheet is not capped at the unit
 // ceiling at all -- it classifies and dispatches in windows across
