@@ -214,8 +214,24 @@ async function resolveBranch(db: D1Compat, branchId: number | null): Promise<{ i
   if (branchId == null) return null
   return (await db.prepare('SELECT id, name FROM branches WHERE id=@id AND is_active=1').get<{ id: number; name: string }>({ id: branchId })) ?? null
 }
+/**
+ * D1/SQLite datetime columns are written without a timezone suffix
+ * ("YYYY-MM-DD HH:MM:SS", always UTC by SQLite's own convention -- see
+ * lib/auth.ts's asUtc and the same idiom in lib/salesAnalytics.ts). Passing
+ * that bare form straight to `new Date()` parses it as LOCAL time, which is
+ * harmless in the deployed Worker (workerd always runs UTC) but silently
+ * wrong anywhere the route runs on a non-UTC host -- this file's own pure
+ * test harness among them, where it read a shift opened seven hours before
+ * local midnight as if it were opened seven hours before UTC midnight and
+ * failed the business-date check on a shift the caller had every right to
+ * amend. Every raw D1 timestamp goes through this before arithmetic.
+ */
+function utcMs(value: string): number {
+  const text = value.trim()
+  return Date.parse(/[zZ]|[+-]\d{2}:?\d{2}$/.test(text) ? text.replace(' ', 'T') : `${text.replace(' ', 'T')}Z`)
+}
 function businessDateFor(iso: string): string {
-  return new Date(new Date(iso).getTime() + BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000).toISOString().slice(0, 10)
+  return new Date(utcMs(iso) + BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000).toISOString().slice(0, 10)
 }
 function shiftCode(nowIso: string): string {
   const local = new Date(new Date(nowIso).getTime() + 7 * 60 * 60 * 1000)
