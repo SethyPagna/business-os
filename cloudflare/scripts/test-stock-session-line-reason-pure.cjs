@@ -85,8 +85,12 @@ async function main() {
     assert.equal(reasonsByLine(f, blankReceipt.operationId)[0].reason, `Stock-in session ${blankReceipt.operationId}`)
   })
 
-  await check('a reason that is not text, or is over 500 bytes, is refused before anything is written', async () => {
-    for (const [reason, code] of [[42, 'invalid_request'], ['x'.repeat(501), 'request_too_large']]) {
+  // The length half of this is measured and bounded in
+  // scripts/test-reason-length-cap-pure.cjs, against all four reason wires at
+  // once; what matters here is only that a refused line writes nothing.
+  await check('a reason that is not text, or is longer than the shared cap, is refused before anything is written', async () => {
+    const tooLong = 'x'.repeat(loadStockSession('lib/stockReason.ts').STOCK_REASON_MAX_LENGTH + 1)
+    for (const [reason, code] of [[42, 'invalid_request'], [tooLong, 'reason_too_long']]) {
       const f = fixture()
       const request = receiveRequest('reason-bad-001')
       request.items[0].reason = reason

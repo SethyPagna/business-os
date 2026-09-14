@@ -62,10 +62,12 @@ export default function StockReasonField({
       <input
         id={id}
         name={name}
-        // What every reason writer accepts (POST /api/inventory/adjust, POST
-        // /api/batches, the session parser, PATCH /movements/:id/reason): the
-        // box stops at the limit instead of letting a long paste be refused
-        // after the operator has finished the rest of the line.
+        // Deliberately 500 while every reason wire accepts 512
+        // (cloudflare/src/lib/stockReason.ts). The box stops before the
+        // server limit instead of letting a long paste be refused after the
+        // operator has finished the rest of the line, and the 12 characters of
+        // headroom are what lets undo/redo prepend 'Undo: ' to a maximum-length
+        // reason and still be accepted by the wire that stored it.
         maxLength={500}
         className={`input w-full ${inputClassName}`}
         placeholder={placeholder}

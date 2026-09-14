@@ -21,6 +21,7 @@ import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '.
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
+import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -1480,11 +1481,11 @@ app.post('/adjust', async (c) => {
   // existing caller -- it only closes the gap where a hand-typed request
   // omitted `reason` entirely.
   if (!reason) return c.json({ error: 'A reason is required for stock adjustments' }, 400)
-  // ... and no longer than the 500 characters PATCH /movements/:id/reason
-  // and the session parser both cap at. Two of the three writers accepted an
-  // unbounded string, so a reason could be written that the editor could then
-  // never save back.
-  if (reason && reason.length > 500) return c.json({ error: 'Reason is too long (max 500 characters)', code: 'reason_too_long' }, 400)
+  // ... and no longer than the shared cap in lib/stockReason.ts, which the
+  // editor and the session parser measure the same way. Two of the writers
+  // once accepted an unbounded string, so a reason could be written that the
+  // editor could then never save back.
+  if (stockReasonTooLong(reason)) return c.json({ error: `Reason is too long (max ${STOCK_REASON_MAX_LENGTH} characters)`, code: 'reason_too_long' }, 400)
 
   const db = getDb(c.env)
   const product = unlockPricing
@@ -2427,7 +2428,9 @@ app.patch('/movements/:id/reason', async (c) => {
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const reason = body.reason != null ? String(body.reason).trim() : ''
   if (!reason) return c.json({ error: 'A reason is required' }, 400)
-  if (reason.length > 500) return c.json({ error: 'Reason is too long' }, 400)
+  // Same cap, same measure and same code as the wires that WROTE the reason
+  // (lib/stockReason.ts), so the editor can always save back what they stored.
+  if (stockReasonTooLong(reason)) return c.json({ error: `Reason is too long (max ${STOCK_REASON_MAX_LENGTH} characters)`, code: 'reason_too_long' }, 400)
   const db = getDb(c.env)
   const mv = await db.prepare('SELECT id, product_id, reason FROM inventory_movements WHERE id = @id')
     .get<{ id: number; product_id: number; reason: string | null }>({ id })

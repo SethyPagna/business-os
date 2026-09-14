@@ -95,6 +95,15 @@ runTest('the fast flow and the adjust form share ONE reason control, fed by the 
   assert.doesNotMatch(modal, /savedReasons\.map/)
   assert.equal((field.match(/savedReasons\.map/g) || []).length, 1)
   assert.match(field, /aria-pressed=\{value === entry\.label\}/)
+  // The box stops BELOW the Worker cap (STOCK_REASON_MAX_LENGTH in
+  // cloudflare/src/lib/stockReason.ts) on purpose: the headroom is what lets
+  // undo/redo prepend 'Undo: ' to a full-length reason and still be accepted
+  // by the same wire that stored it. Close the gap and every undo of a
+  // maximum-length reason starts failing.
+  const boxCap = Number((field.match(/maxLength=\{(\d+)\}/) || [])[1])
+  const workerCap = Number((read('../../cloudflare/src/lib/stockReason.ts').match(/STOCK_REASON_MAX_LENGTH = (\d+)/) || [])[1])
+  assert.ok(boxCap > 0 && workerCap > 0, 'both caps must be readable')
+  assert.ok(boxCap + 'Undo: '.length <= workerCap, `the reason box (${boxCap}) must leave room for the undo prefix under the Worker cap (${workerCap})`)
   // the explanation is a tooltip, not prose in the form
   assert.match(modal, /tr\('fast_stock_reason_hint'/)
   assert.doesNotMatch(modal, /<p[^>]*>\{tr\('fast_stock_reason_hint'/)

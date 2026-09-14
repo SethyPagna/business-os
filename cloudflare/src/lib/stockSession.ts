@@ -15,6 +15,7 @@ import { buildInClause, chunkForBinding, D1_MAX_BOUND_PARAMS } from './sqlBindin
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
+import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
 
 export const STOCK_SESSION_KIND = 'stock.session'
@@ -308,7 +309,14 @@ function parseRequest(rawValue: unknown, maxImages: number): StockSessionRequest
     // accept what the other refuses.
     const supplierName = text(expanded('supplier_name'), 'supplier_name', 240)
     const notes = text(expanded('notes'), 'notes', 1000)
-    const reason = text(expanded('reason'), 'reason', 500)
+    // The reason is the one text field NOT measured in bytes. text() spends a
+    // UTF-8 byte budget, and Khmer costs three bytes a character, so a 167-
+    // character Khmer reason the input box accepted was refused here with
+    // request_too_large while the three other reason wires took the same
+    // string. It shares their code-unit cap instead (lib/stockReason.ts); the
+    // payload as a whole still has its byte ceiling, checked above.
+    const reason = text(expanded('reason'), 'reason', STOCK_SESSION_MAX_BYTES)
+    if (stockReasonTooLong(reason)) fail(`reason is too long (max ${STOCK_REASON_MAX_LENGTH} characters).`, 400, 'reason_too_long')
     const unitCostUsd = finite(expanded('unit_cost_usd'), 'unit_cost_usd', true)
     const freeGoods = expanded('free_goods') === true
     // A line that names an existing batch_id defers the SUPPLIER half only.

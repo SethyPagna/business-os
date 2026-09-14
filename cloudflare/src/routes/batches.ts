@@ -10,6 +10,7 @@ import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
+import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
@@ -217,10 +218,9 @@ app.post('/', async (c) => {
   // declared free goods. A rule enforced on two of three wires is not enforced.
   const freeGoods = body.free_goods === true
   const reason = String(body.reason ?? '').trim() || null
-  // The same 500-character cap PATCH /movements/:id/reason and the stock
-  // session parser enforce: a receipt reason this wire accepted unbounded
-  // could not be edited afterwards.
-  if (reason && reason.length > 500) return c.json({ error: 'Reason is too long (max 500 characters)', code: 'reason_too_long' }, 400)
+  // The one cap every reason writer shares (lib/stockReason.ts): a receipt
+  // reason this wire accepted unbounded could not be edited afterwards.
+  if (stockReasonTooLong(reason)) return c.json({ error: `Reason is too long (max ${STOCK_REASON_MAX_LENGTH} characters)`, code: 'reason_too_long' }, 400)
   // A top-up of an existing lot inherits that lot's supplier: first attribution
   // sticks, so ReceiveBatchModal deliberately sends none for an attributed lot.
   const topUpBatchId = Number.isSafeInteger(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null
