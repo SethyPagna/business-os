@@ -12,6 +12,7 @@ import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { isBatchPickerVisible, isSetDownSubmission, isStockInSubmission } from '../../utils/stockReceiptFields.ts'
 import InfoHint from '../shared/InfoHint.tsx'
+import StockReasonField from '../shared/StockReasonField.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt, { type UnsavedChangesPromptItem } from '../shared/UnsavedChangesPrompt.tsx'
@@ -738,34 +739,19 @@ export default function InventoryStockModals({
                   />
                 </div>
               ) : null}
-              <div>
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">{t('reason')}</label>
-                  <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'adjust' })}>
-                    {tr('manage_reasons', 'Manage reasons')}
-                  </button>
-                </div>
-                {reasonsByType.adjust.length ? (
-                  <div className="mb-2 flex flex-wrap gap-1">
-                    {reasonsByType.adjust.map((entry) => (
-                      <button
-                        key={entry.id}
-                        type="button"
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${adjustForm.reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
-                        onClick={() => setAdjustForm((current) => ({ ...current, reason: entry.label }))}
-                      >
-                        {entry.label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <input
-                  id="inventory-adjust-reason"
-                  name="inventory_adjust_reason"
-                  className="input text-sm"
-                  placeholder={t('reason_placeholder')}
-                  value={adjustForm.reason} onChange={e => setAdjustForm(f=>({...f, reason:e.target.value}))} />
-              </div>
+              {/* P3-L2: the shared chips + text box; FastStockInModal renders the
+                  same control on every queued line. */}
+              <StockReasonField
+                id="inventory-adjust-reason"
+                name="inventory_adjust_reason"
+                label={t('reason')}
+                value={adjustForm.reason}
+                onChange={(next) => setAdjustForm((current) => ({ ...current, reason: next }))}
+                savedReasons={reasonsByType.adjust}
+                placeholder={t('reason_placeholder')}
+                onManage={() => setReasonManager({ open: true, type: 'adjust' })}
+                manageLabel={tr('manage_reasons', 'Manage reasons')}
+              />
               {/* The failed-submit reason sits with the values that produced
                   it, above the actions, so it survives the toast. */}
               {adjustNotice}

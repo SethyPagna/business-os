@@ -18,7 +18,7 @@ import DateEntryInput from '../shared/DateEntryInput.tsx'
 import Modal from '../shared/Modal.tsx'
 import { receiveBatchStock, getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
-import { searchProducts } from '../../api/methods.ts'
+import { getInventoryReasons, searchProducts } from '../../api/methods.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
@@ -29,6 +29,8 @@ import { buildProductGroups, type ProductGroup, type ProductRecord } from '../..
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import InfoHint from '../shared/InfoHint.tsx'
+import StockReasonField, { type SavedStockReason } from '../shared/StockReasonField.tsx'
+import { stockLineReason } from '../../utils/stockLineReason.ts'
 import { findSessionProductDuplicate } from '../../utils/createProductsSession.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
@@ -93,6 +95,10 @@ interface ReceivedLine {
   batchLabel: string
   // N27: frozen with the line -- the switch may move on to the next line.
   mode: StockMode
+  // P3-L2: the operator's reason, frozen with the line and written to its
+  // movement exactly as typed. Blank -> stockLineReason() supplies the
+  // session label the write path carried before (N27 hardcoded it).
+  reason: string
   // True when THIS session created the product (scan -> create), so the queue
   // can tag New / Existing the way the session receipt does.
   createdProduct: boolean
@@ -137,6 +143,7 @@ type FastStockInDraft = {
   freeGoods?: boolean
   createPriceVariant?: boolean
   expiryDate: string
+  reason?: string
   batchChoice?: 'new' | number
   lines?: ReceivedLine[]
   // Only set by a camera/scan-button result. Typed text must not turn every
@@ -147,7 +154,7 @@ type FastStockInDraft = {
 type FastStockInCloseState = Pick<FastStockInDraft,
   'mode' | 'createdProductIds' | 'branchId' | 'receivedDate' | 'supplier' |
   'paymentStatus' | 'creditDueDate' | 'query' | 'picked' | 'quantity' |
-  'unitCost' | 'freeGoods' | 'createPriceVariant' | 'expiryDate' | 'batchChoice' |
+  'unitCost' | 'freeGoods' | 'createPriceVariant' | 'expiryDate' | 'reason' | 'batchChoice' |
   'lines' | 'scannedBarcode'>
 
 export function fastStockInHasUnsavedWork(current: FastStockInCloseState, pristine: FastStockInCloseState): boolean {
@@ -196,6 +203,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     freeGoods: false,
     createPriceVariant: false,
     expiryDate: '',
+    reason: '',
     batchChoice: 'new',
     lines: [],
     scannedBarcode: '',
@@ -226,6 +234,10 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const [freeGoods, setFreeGoods] = useState(Boolean(draft?.freeGoods))
   const [createPriceVariant, setCreatePriceVariant] = useState(Boolean(draft?.createPriceVariant))
   const [expiryDate, setExpiryDate] = useState(draft?.expiryDate || '')
+  // P3-L2: sticky across lines like the mode switch -- a damaged-goods removal
+  // of five products is typed once. Frozen onto each line as it queues.
+  const [reason, setReason] = useState(draft?.reason || '')
+  const [savedReasons, setSavedReasons] = useState<SavedStockReason[]>([])
   const [scannedBarcode, setScannedBarcode] = useState(draft?.scannedBarcode || '')
   // Deliberately NOT persisted in the draft, same reasoning as
   // ReceiveBatchModal: a lot id can go stale between sessions (merged,
@@ -241,7 +253,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const [saving, setSaving] = useState(false)
   // A draft saved before the mode switch existed holds add lines that never
   // recorded a mode; they stay adds rather than reading as 'changes'.
-  const [received, setReceived] = useState<ReceivedLine[]>(() => (draft?.lines || []).map((line) => ({ ...line, mode: line.mode || 'add', createdProduct: Boolean(line.createdProduct) })))
+  const [received, setReceived] = useState<ReceivedLine[]>(() => (draft?.lines || []).map((line) => ({ ...line, mode: line.mode || 'add', reason: line.reason || '', createdProduct: Boolean(line.createdProduct) })))
   const [editingKey, setEditingKey] = useState('')
   const duplicateRows = useMemo(() => received.map((line) => ({
     ...line,
@@ -291,9 +303,9 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     return scheduleWorkDraftWrite<FastStockInDraft>(fastStockInDraftKey, {
       sessionId: sessionIdRef.current, mode, createdProductIds,
       branchId, receivedDate, supplier, paymentStatus, creditDueDate,
-      query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, batchChoice, lines: received, scannedBarcode,
+      query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received, scannedBarcode,
     })
-  }, [branchId, receivedDate, supplier, paymentStatus, creditDueDate, query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, batchChoice, received, scannedBarcode, mode, createdProductIds])
+  }, [branchId, receivedDate, supplier, paymentStatus, creditDueDate, query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice, received, scannedBarcode, mode, createdProductIds])
 
   useEffect(() => {
     const text = query.trim()
@@ -363,6 +375,20 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       .finally(() => { if (!cancelled) setBatchLoading(false) })
     return () => { cancelled = true }
   }, [picked?.id, branchId])
+
+  // P3-L2: the same saved-reason catalog the adjust form offers (type
+  // 'adjust'); a failed read leaves the free-text box, never blocks a line.
+  useEffect(() => {
+    let cancelled = false
+    getInventoryReasons()
+      .then((result) => {
+        if (cancelled) return
+        const items = Array.isArray((result as { items?: unknown })?.items) ? (result as { items: Array<{ id?: unknown; type?: unknown; label?: unknown }> }).items : []
+        setSavedReasons(items.flatMap((item) => item?.type === 'adjust' && typeof item.label === 'string' && item.label.trim() ? [{ id: String(item.id ?? item.label), label: item.label }] : []))
+      })
+      .catch(() => { if (!cancelled) setSavedReasons([]) })
+    return () => { cancelled = true }
+  }, [])
 
   // ProductForm needs the same lookup data as the normal catalog-create
   // surface. Fetch it only when a real unmatched scan asks to create; empty
@@ -452,7 +478,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     writeWorkDraft<FastStockInDraft>(fastStockInDraftKey, {
       sessionId: sessionIdRef.current,
       mode, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
-      query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, batchChoice, lines: received, scannedBarcode,
+      query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received, scannedBarcode,
     })
   }
 
@@ -559,6 +585,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               ? (branchOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'Branch'))
               : tr('new_batch', '+ New received date'),
         mode,
+        reason: reason.trim(),
         createdProduct: createdProductIds.includes(String(picked.id)),
         status: 'queued',
         detail: tr('ready_to_receive', 'Ready'),
@@ -581,6 +608,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     setFreeGoods(line.freeGoods)
     setCreatePriceVariant(line.createPriceVariant)
     setExpiryDate(line.expiryDate)
+    setReason(line.reason)
     // Parked rather than set: the options effect is about to re-key on this
     // product and would overwrite a direct set.
     pendingBatchRestoreRef.current = line.batchChoice
@@ -624,7 +652,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         const result = line.mode === 'remove'
           ? await adjustStock({
               productId: Number(line.product.id), type: 'remove', quantity: line.quantity,
-              reason: tr('stock_change_session_reason', 'Stock change session'), branchId: Number(branchId),
+              reason: stockLineReason(line, tr), branchId: Number(branchId),
               // A chosen lot is drained by id; otherwise the oldest lots first.
               batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
               sessionId: sessionIdRef.current,
@@ -632,7 +660,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           : line.mode === 'set'
           ? await adjustStock({
               productId: Number(line.product.id), type: 'set', quantity: line.quantity,
-              reason: tr('stock_change_session_reason', 'Stock change session'), branchId: Number(branchId),
+              reason: stockLineReason(line, tr), branchId: Number(branchId),
               // Receipt fields ride along: a set that RAISES stock is an add
               // server-side and is gated like one; a set that lowers it
               // ignores them.
@@ -646,7 +674,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           : line.createPriceVariant
           ? await adjustStock({
               productId: Number(line.product.id), type: 'add', quantity: line.quantity,
-              reason: tr('stock_in_session_reason', 'Stock-in session'), branchId: Number(branchId),
+              reason: stockLineReason(line, tr), branchId: Number(branchId),
               unlockPricing: true,
               receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
               supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
@@ -666,6 +694,9 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
               unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
               freeGoods: line.freeGoods,
+              // Typed text or null: a blank line keeps the Worker's own
+              // "Stock received (<lot>)" label (see utils/stockLineReason.ts).
+              reason: line.reason.trim() || null,
               paymentStatus, creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
               sessionId: sessionIdRef.current,
             })
@@ -739,7 +770,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   ), 0)
   const closeState: FastStockInCloseState = {
     mode, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
-    query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, batchChoice,
+    query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice,
     lines: received, scannedBarcode,
   }
   const closeDirty = fastStockInHasUnsavedWork(closeState, pristineCloseStateRef.current)
@@ -928,6 +959,19 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                   </label>
                 ) : null}
                 </> : null}
+                {/* P3-L2: the reason, per line. A full row for add and set;
+                    beside Qty for a remove, whose row has the room. */}
+                <StockReasonField
+                  id="fast-stockin-reason"
+                  className={`col-span-2 ${mode === 'remove' ? 'sm:col-span-1' : 'sm:col-span-4'}`}
+                  label={<span className="inline-flex items-center gap-1">{tr('reason', 'Reason')}<InfoHint label={tr('reason', 'Reason')} text={tr('fast_stock_reason_hint', "Written on each line's stock movement exactly as typed. Leave blank to use the session label.")} /></span>}
+                  labelClassName="text-[11px] font-medium text-gray-600 dark:text-gray-400"
+                  value={reason}
+                  onChange={setReason}
+                  onEnter={addLine}
+                  savedReasons={savedReasons}
+                  placeholder={tr('reason_placeholder', 'e.g. Physical count, Damaged goods…')}
+                />
               </div>
               {/* Its own row: this queues a line, Complete in the footer is
                   what writes. Sharing a grid cell with the running total made
@@ -1012,6 +1056,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                     <span className="min-w-0 flex-1 text-gray-700 dark:text-gray-300">
                       <span className="block break-words">{line.status === 'saved' ? '✅' : line.status === 'error' ? '⚠️' : line.status === 'saving' ? '⏳' : '•'} {line.productName} <span className={`ml-1 inline-block rounded px-1 py-0.5 align-middle text-[10px] font-semibold ${line.createdProduct ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300'}`}>{line.createdProduct ? tr('stock_session_new_product', 'New') : tr('stock_session_existing_product', 'Existing')}</span> <span className={`whitespace-nowrap ${line.mode === 'remove' ? 'text-red-600 dark:text-red-400' : line.mode === 'set' ? 'text-amber-700 dark:text-amber-300' : ''}`}>{line.mode === 'remove' ? '−' : line.mode === 'set' ? '=' : '×'} {line.quantity} · {line.batchLabel}</span></span>
                       {line.product.barcode ? <span className="block break-all dense-id text-[10px] text-gray-400">{line.product.barcode}</span> : null}
+                      {line.reason ? <span className="block break-words text-[10px] text-gray-500 dark:text-gray-400">{line.reason}</span> : null}
                     </span>
                     <span className="flex min-w-0 flex-wrap items-center justify-end gap-1">
                       {/* A server error reason wraps rather than being squeezed

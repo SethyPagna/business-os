@@ -174,6 +174,10 @@ app.post('/', async (c) => {
     // keeps the lot's own received_at (first attribution sticks).
     batch_id?: number | null
     notes?: string | null
+    // P3-L2: the operator's own reason for this receipt, written onto the
+    // inventory_movements row as typed. Optional: a caller that sends none
+    // keeps the generated "Stock received (<lot>)" label below.
+    reason?: string | null
     supplier_id?: number | null
     supplier_name?: string | null
     unit_cost_usd?: number | null
@@ -212,6 +216,7 @@ app.post('/', async (c) => {
   // runs the same gate -- supplier and unit cost required, $0.00 only as
   // declared free goods. A rule enforced on two of three wires is not enforced.
   const freeGoods = body.free_goods === true
+  const reason = String(body.reason ?? '').trim() || null
   // A top-up of an existing lot inherits that lot's supplier: first attribution
   // sticks, so ReceiveBatchModal deliberately sends none for an attributed lot.
   const topUpBatchId = Number.isSafeInteger(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null
@@ -284,7 +289,7 @@ app.post('/', async (c) => {
     // report each receipt accurately without mutating the product's cost.
     unitCostUsd,
     totalCostUsd,
-    reason: appendReceiptNotes(`Stock received (${lotCode})`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
+    reason: appendReceiptNotes(reason || `Stock received (${lotCode})`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
     referenceId: Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null,
     userId: user?.id ?? null,
     userName: actorSnapshot(user),
@@ -298,6 +303,7 @@ app.post('/', async (c) => {
     quantity,
     expiry_date: body.expiry_date || null,
     lot_code: lotCode,
+    reason,
   })
   c.executionCtx.waitUntil(Promise.all([
     bumpVersion(c.env, 'products'),
