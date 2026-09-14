@@ -259,6 +259,19 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error || 'unknown error')
 }
 
+// A refusal the Worker has coded (api/http.ts copies the body's `code` onto
+// the thrown error, e.g. reset_images_unavailable_free) has a key of the same
+// name in both language packs; anything else keeps its message. t() returns
+// the key itself for an unknown key, which is how an uncoded error is told
+// apart from a translated one.
+function describeError(error: unknown, T: (key: string, fallback: string) => string): string {
+  const message = getErrorMessage(error)
+  const code = (error as { code?: unknown } | null)?.code
+  if (typeof code !== 'string' || !code) return message
+  const localized = T(code, message)
+  return localized === code ? message : localized
+}
+
 // The three optional "also clear" toggles that only a PRODUCTS reset has.
 // Extracted so the products reset can live in the page-reset grid below
 // (where it belongs -- it clears one page's data, exactly like the contact
@@ -372,7 +385,7 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
         notify(`${T('error', 'Error')}: ${result?.error || 'unknown'}`, 'error')
       }
     } catch (error: unknown) {
-      notify(`${T('error', 'Error')}: ${getErrorMessage(error)}`, 'error')
+      notify(`${T('error', 'Error')}: ${describeError(error, T)}`, 'error')
     } finally {
       finishSingleAction(resetInFlightRef)
       setWorking(false)
@@ -582,7 +595,7 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
         notify(`${T('error', 'Error')}: ${result?.error || 'unknown'}`, 'error')
       }
     } catch (error: unknown) {
-      notify(`${T('error', 'Error')}: ${getErrorMessage(error)}`, 'error')
+      notify(`${T('error', 'Error')}: ${describeError(error, T)}`, 'error')
     } finally {
       finishSingleAction(sectionResetInFlightRef)
       setWorking(false)
@@ -673,7 +686,7 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
         setTyped('')
       }
     } catch (error: unknown) {
-      notify(`${T('factory_reset_label', 'Factory Reset')} ${T('failed', 'failed')}: ${getErrorMessage(error)}`, 'error')
+      notify(`${T('factory_reset_label', 'Factory Reset')} ${T('failed', 'failed')}: ${describeError(error, T)}`, 'error')
       setStep(0)
       setTyped('')
     } finally {
@@ -811,7 +824,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
         notify(`${T('error', 'Error')}: ${result?.error || 'unknown'}`, 'error')
       }
     } catch (error: unknown) {
-      notify(`${T('error', 'Error')}: ${getErrorMessage(error)}`, 'error')
+      notify(`${T('error', 'Error')}: ${describeError(error, T)}`, 'error')
     } finally {
       finishSingleAction(inFlightRef)
       setWorking(false)
