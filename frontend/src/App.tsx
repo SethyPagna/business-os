@@ -14,6 +14,7 @@ import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
 import { ensureTextAffordances } from './components/shared/textAffordances.ts'
+import InfoHint from './components/shared/InfoHint.tsx'
 import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
@@ -174,6 +175,8 @@ interface AppContextValue {
   theme: string
   notify: (message: string, type?: string, durationMs?: number) => void
   t: TranslateFn
+  /** C5: navigator.storage.persist()'s answer, null until AppContext has asked. */
+  storagePersisted: boolean | null
   clearSyncError?: () => void
 }
 
@@ -237,6 +240,11 @@ interface OfflineModeBannerProps {
   conflictsNeedReview: WriteConflictDetail | null
 }
 
+interface StorageEvictionBandProps {
+  pendingSync: PendingSyncState | null
+  storagePersisted: boolean | null
+}
+
 interface PageSlotProps {
   accessDenied: ReactNode
   activePageId: AdminPageId
@@ -250,6 +258,21 @@ interface NotificationCenterFallbackProps {
 }
 
 const useApp = useAppHook as () => AppContextValue
+
+// The shell's bottom advisory stack, and the clearance it needs.
+//
+// The mobile bottom nav is `fixed` at the bottom edge, so anything else
+// pinned there lands ON TOP of it and every nav destination underneath stops
+// being tappable -- measured live on rc/p2-9-pwa (394919ba) at 375x812, where
+// a 49px install band covered the nav completely. The clearance below is the
+// SAME measurement <main> already carries as its own bottom padding
+// (`pb-[calc(3.55rem+env(safe-area-inset-bottom))]`); iosInstallAndPersistence
+// .test.ts asserts the two stay equal rather than trusting them by eye.
+// Tailwind scans literal class strings, so these are whole class names rather
+// than a shared number interpolated into a template.
+const BOTTOM_STACK_CLEARS_NAV_CLASS = 'bottom-[calc(3.55rem+env(safe-area-inset-bottom))]'
+/** Pages-mode compact navigation has no bottom nav: only the safe area. */
+const BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS = 'bottom-[env(safe-area-inset-bottom)]'
 
 function asPageModule(importer: () => Promise<unknown>): ChunkImporter {
   return () => importer() as Promise<{ default: ComponentType<Record<string, unknown>> }>
@@ -1203,6 +1226,67 @@ function AppUpdateBanner({ update, onDismiss }: AppUpdateBannerProps) {
   return typeof document !== 'undefined' ? createPortal(node, document.body) : node
 }
 
+// C5: the one place the browser's "I may delete your offline data" answer is
+// ever shown to the person it can cost money.
+//
+// web-api.ts already computed 'persistent' | 'eviction_possible' inside
+// unlockOfflineVault and wrote it to IndexedDB, where nothing read it back,
+// and the persist() request itself only ran once a sale was ALREADY queued
+// offline (saleWriteTransport.ts). AppContext now asks at boot instead and
+// hands the answer down as `storagePersisted`.
+//
+// BOTH conditions are required before this band appears:
+//   - storagePersisted === false: the browser refused (or has no Storage
+//     Manager). `null` means not asked yet and must stay silent -- a band
+//     that flashes on every boot before the answer arrives is noise.
+//   - a non-empty outbox: a granted-or-not origin with nothing queued has
+//     nothing to lose today, and on a shop till the band would then be
+//     permanent furniture. The count is the same pendingSync.total the
+//     offline indicator above already reads.
+//
+// Dismissal is per page session on purpose, not persisted: the risk is not a
+// one-time device fact, it is "there are unsynced sales on a device whose
+// storage can be evicted", and that comes back every time it is true.
+function StorageEvictionBand({ pendingSync, storagePersisted }: StorageEvictionBandProps) {
+  const { t } = useApp()
+  const [dismissed, setDismissed] = useState(false)
+  const pending = Number(pendingSync?.total || 0)
+
+  if (storagePersisted !== false || pending <= 0 || dismissed) return null
+
+  return (
+    <div
+      className="pointer-events-auto flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-900 shadow-lg dark:border-amber-700 dark:bg-amber-950/90 dark:text-amber-100"
+      role="status"
+      aria-live="polite"
+    >
+      <span aria-hidden="true" className="shrink-0 text-sm leading-6">!</span>
+      {/* No truncation: Khmer is longer than the English here, and a clipped
+          warning is exactly the dead-end "..." the project forbids. The band
+          grows downward instead -- leading-6 gives Khmer glyphs their room. */}
+      <span className="min-w-0 flex-1 break-words font-semibold">
+        {t('storage_eviction_title') || 'Offline data may be cleared'}
+      </span>
+      <span className="shrink-0 rounded-full border border-current/30 px-2 leading-6">
+        {pending} {t('pending') || 'pending'}
+      </span>
+      <InfoHint
+        className="shrink-0"
+        label={t('storage_eviction_title') || 'Offline data may be cleared'}
+        text={t('storage_eviction_detail') || 'Add to Home Screen keeps sales safe: offline sales waiting to sync can be deleted by the browser when space runs low, but browsers keep data for installed apps.'}
+      />
+      <button
+        type="button"
+        onClick={() => setDismissed(true)}
+        aria-label={t('dismiss_notification') || 'Dismiss notification'}
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-base leading-none opacity-70 hover:bg-current/10 hover:opacity-100"
+      >
+        <span aria-hidden="true">×</span>
+      </button>
+    </div>
+  )
+}
+
 function SyncErrorBanner({ error, onDismiss, onGoToServer }: SyncErrorBannerProps) {
   const { t, canAccessPage, user } = useApp()
   const locallyPresented = useSyncExternalStore(subscribeSyncProblemPresentation,
@@ -1795,6 +1879,7 @@ export default function App() {
     theme,
     notify,
     t,
+    storagePersisted,
   } = useApp()
   const offlineNoticeRef = useRef({ queued: '', synced: '' })
   const {
@@ -2130,6 +2215,14 @@ export default function App() {
       </NotesProvider>
 
       <Notification notification={notification} onDismiss={dismissNotification} />
+      {/* One bottom stack for the shell's persistent advisories, so two of
+          them can never land on top of each other, and so the clearance over
+          the mobile bottom nav is decided once. Inert where empty. */}
+      <div
+        className={`pointer-events-none fixed inset-x-2 z-[1200] flex flex-col gap-2 ${inlineMobileNavigation ? BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS : BOTTOM_STACK_CLEARS_NAV_CLASS} md:inset-x-auto md:bottom-4 md:right-4 md:w-[24rem]`}
+      >
+        <StorageEvictionBand pendingSync={pendingSync} storagePersisted={storagePersisted} />
+      </div>
       <GlobalScrollControls mobileBottomNavVisible={!inlineMobileNavigation} />
       {writeConflict ? (
         <Suspense fallback={null}>

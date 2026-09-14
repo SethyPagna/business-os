@@ -6563,5 +6563,7 @@
   "sale_recorded_pricing": "Recorded pricing",
   "sale_recorded_unit_fallback": "Line total derived from the recorded unit price and quantity.",
   "money_rounding_down": "Rounding down",
-  "money_rounding_up": "Rounding up"
+  "money_rounding_up": "Rounding up",
+  "storage_eviction_title": "Offline data may be cleared",
+  "storage_eviction_detail": "Add to Home Screen keeps sales safe: offline sales waiting to sync, and the saved app pages, can be deleted by the browser when the device runs low on space. Browsers keep data for apps opened from the Home Screen."
 }
