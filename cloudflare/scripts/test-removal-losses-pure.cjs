@@ -1,4 +1,4 @@
-// P3-L5. STOCK REMOVED ENTIRELY IS A LOSS, AT COST PRICE.
+// P3-L5 / P3-losses-writeoff. STOCK REMOVED ENTIRELY IS A LOSS, AT COST PRICE.
 //
 // Owner, Sep 14 2026: "for the losses due to remove stock actions, i want in
 // stat a break down of revenue/profit excluding the losses caused by this. and
@@ -26,6 +26,13 @@
 //   #9  a remove with NO movement cost but a lot cost of $4.00, 2 u  -> $8.00
 //  #10  a remove with no cost anywhere, 6 units                      -> unvalued
 //  #11  a remove OUTSIDE the date window                             -> not in range
+//  #12  P3-losses-writeoff (Sep 15 2026): a LEGACY product-delete write_off,
+//       8 units, no cost anywhere, no reference_id -> COUNTS now (write_off
+//       moved INTO the loss set once its writers' undo carries a revert
+//       marker -- see REMOVAL_LOSS_MOVEMENT_TYPES), but stays UNVALUED
+//       (product 3 has no cost_price_usd either). This is the fixture that
+//       used to pin write_off as excluded outright; it still proves a
+//       legacy/unmarked write_off is never silently valued at $0.
 //
 // "Sum every LEDGER_OUT_TYPES row"        would report 7.50+10+12.50+?+... -- fails #2/#3/#4.
 // "Ignore reverts"                        would add #5's $25 -- fails case 2.
@@ -33,6 +40,12 @@
 // "SUM(total_cost_usd) in SQL"            would subtract #7's negative cost -- fails case 3.
 // "Treat DEFAULT-0 cost as a real $0"     would report #9 as $0 -- fails case 4.
 // "Silently drop uncostable rows"         would report unvalued_rows 0 -- fails case 5.
+//
+// A SECOND, isolated fixture (branch 5, section 8 below) drives the two
+// write_off writers this lane wired a revert marker for: DISPOSE
+// (damagedLotActions.ts) and productDelete.ts's held-lot/sellable-stock
+// drain. Kept off branch 2 on purpose so none of the arithmetic above has to
+// change to make room for it.
 //
 // Run (from cloudflare/): node scripts/test-removal-losses-pure.cjs
 const assert = require('node:assert/strict')
@@ -98,14 +111,46 @@ INSERT INTO inventory_movements
   ( 9,2,2,'remove',        2, 0.00,  0.00,'Broken, removed entirely', NULL,9,'2026-09-10 07:00:00',77),
   (10,3,2,'remove',        6, 0.00,  0.00,'No cost anywhere',   NULL, 9,'2026-09-10 08:00:00',NULL),
   (11,1,2,'remove',      100, 2.50,250.00,'Next month',         NULL, 9,'2026-10-02 03:00:00',NULL),
-  -- Writers the condition-tag lane named (p3/tag, Sep 14 2026). Both are
-  -- removals in the ledger and NEITHER is a loss here:
-  (12,1,2,'write_off',     8, 0.00,  0.00,'Removed product Widget',   NULL,9,'2026-09-10 09:00:00',NULL),
+  -- #12: P3-losses-writeoff (Sep 15 2026) -- write_off moved INTO the loss
+  -- set (REMOVAL_LOSS_MOVEMENT_TYPES) once its writers' undo carries a
+  -- revert marker this module can key off (see removalLossMovementWhere's
+  -- 5th guard). This row has none (reference_id NULL, a legacy/unmarked
+  -- write_off), so it is presumed NEVER reverted and now COUNTS -- but on
+  -- product 3, which has no cost_price_usd anywhere, so it lands in
+  -- unvalued_rows, never priced at $0.00. Was previously pinned excluded
+  -- outright by movement_type alone; that pin is gone, deliberately, by this
+  -- ruling -- see section 1 below.
+  (12,3,2,'write_off',     8, 0.00,  0.00,'Removed product Widget',   NULL,9,'2026-09-10 09:00:00',NULL),
   (13,1,2,'adjustment',   -4, 0.00,  0.00,'Merged duplicate into #1', NULL,9,'2026-09-10 09:30:00',NULL),
   -- #14: no movement cost snapshot, no batch, and the product's OWN cost_price_usd
   -- sits at the column's real production DEFAULT 0 -- not a genuinely free item,
   -- an uncosted one. Must be unvalued, exactly like #10, never priced at $0.00.
-  (14,4,2,'remove',        3, 0.00,  0.00,'No cost anywhere, zero-cost product', NULL,9,'2026-09-10 09:45:00',NULL);
+  (14,4,2,'remove',        3, 0.00,  0.00,'No cost anywhere, zero-cost product', NULL,9,'2026-09-10 09:45:00',NULL),
+  -- ----------------------------------------------------------------------
+  -- Branch 5: isolated from every assertion above (readRows() defaults to
+  -- branch 2), driving the two write_off writers whose revert marker this
+  -- lane wired.
+  --
+  --  #15 DISPOSE (damagedLotActions.ts planDisposeTagged): reference_id
+  --      'damaged_lot:<lotId>' (stockCondition.ts damagedLotReference), own
+  --      cost snapshot from the lot -> COUNTS, at its own $18.00.
+  --  #16 the SAME shape, but with a hypothetical future revert (#17) --
+  --      DISPOSE has NO real undo path today (the ledger's generic revert
+  --      refuses anything carrying this marker -- stockRevert.ts -- and
+  --      there is no "un-dispose" action), so this pair only proves the
+  --      exclusion mechanism is generic, not that this scenario happens yet.
+  --  #17 the hypothetical revert counter for #16 ('add', 'revert:damaged_lot:502').
+  --  #18 productDelete.ts, a LIVE (never undone) delete's write_off ->
+  --      COUNTS, valued from product 1's cost_price_usd fallback ($12.50).
+  --  #19 productDelete.ts, a delete's write_off that WAS undone (#20 is its
+  --      counter) -> excluded.
+  --  #20 the undo counter for #19 ('add', 'revert:product_remove:op-undone:0').
+  (15,1,5,'write_off',     3, 6.00, 18.00,'Broken, disposed', 'damaged_lot:501',9,'2026-09-10 10:00:00',NULL),
+  (16,1,5,'write_off',     2, 5.00, 10.00,'Broken, disposed', 'damaged_lot:502',9,'2026-09-10 10:10:00',NULL),
+  (17,1,5,'add',           2, 5.00, 10.00,'Hypothetical restore of #16', 'revert:damaged_lot:502',9,'2026-09-10 10:11:00',NULL),
+  (18,1,5,'write_off',     5, 0.00,  0.00,'Removed product Gadget', 'product_remove:op-live:0',9,'2026-09-10 10:20:00',NULL),
+  (19,1,5,'write_off',     9, 0.00,  0.00,'Removed product Gizmo',  'product_remove:op-undone:0',9,'2026-09-10 10:30:00',NULL),
+  (20,1,5,'add',           9, 0.00,  0.00,'Undo: Removed product Gizmo', 'revert:product_remove:op-undone:0',9,'2026-09-10 10:31:00',NULL);
 `)
 
 // The business-day clause, byte-copied from lib/businessDateWindow.ts's
@@ -129,21 +174,27 @@ function readRows(params = { startDate: '2026-09-10', endDate: '2026-09-10', bra
 {
   const rows = readRows()
   const ids = rows.map((r) => Number(r.id)).sort((a, b) => a - b)
-  assert.deepEqual(ids, [1, 9, 10, 14], `only the real removals are selected, got ${JSON.stringify(ids)}`)
+  assert.deepEqual(ids, [1, 9, 10, 12, 14], `only the real removals are selected, got ${JSON.stringify(ids)}`)
   ok('SQL: sale, transfer_out and damage_out are not losses')
   ok('SQL: a reverted removal (#5) and the revert row itself (#6) are both excluded')
   ok('SQL: a negative-quantity stock-session undo (#7) is excluded')
   ok('SQL: a dated stock-count import removal (#8) is excluded')
   ok('SQL: a removal outside the window (#11) is excluded')
-  ok('SQL: a product-deletion write_off (#12) is excluded -- its undo writes a plain "add", with no revert marker to exclude it by, so counting it would over-report every undone deletion as a permanent loss')
+  ok('SQL: a LEGACY product-deletion write_off with no revert marker (#12) COUNTS now (P3-losses-writeoff), presumed live since nothing ever marked it reverted -- but stays unvalued, product 3 has no cost anywhere')
   ok('SQL: a duplicate-merge adjustment (#13) is excluded -- a negative-quantity catalog cleanup, not destroyed goods')
 
   // The set is ONE constant so an owner ruling moves the boundary in one edit,
-  // and the two types above are outside it by NAME, not by accident.
-  assert.deepEqual([...lib.REMOVAL_LOSS_MOVEMENT_TYPES], ['remove'])
-  for (const type of ['write_off', 'adjustment', 'damage_out', 'transfer_out', 'sale']) {
+  // and the types below are outside it by NAME, not by accident.
+  assert.deepEqual([...lib.REMOVAL_LOSS_MOVEMENT_TYPES], ['remove', 'write_off'])
+  for (const type of ['adjustment', 'damage_out', 'transfer_out', 'sale']) {
     assert.equal(lib.REMOVAL_LOSS_MOVEMENT_TYPES.includes(type), false, `${type} is not a removal loss`)
   }
+  // P3-losses-writeoff (Sep 15 2026), owner ruling: "if remove directly it
+  // also counts toward losses" applies just as much to disposing a tagged
+  // (broken/damaged/...) row and to a product delete that destroys held or
+  // sellable stock -- both write 'write_off', and both now carry a revert
+  // marker their own undo can exclude by (section 8 below proves it).
+  assert.equal(lib.REMOVAL_LOSS_MOVEMENT_TYPES.includes('write_off'), true, 'write_off IS a removal loss now')
 }
 
 // ---------------------------------------------------------------------------
@@ -189,9 +240,12 @@ function readRows(params = { startDate: '2026-09-10', endDate: '2026-09-10', bra
 {
   sql.exec('UPDATE inventory_movements SET reference_id = NULL WHERE id = 6')
   const ids = readRows().map((r) => Number(r.id)).sort((a, b) => a - b)
-  assert.deepEqual(ids, [1, 5, 9, 10, 14], 'with the revert unlinked, #5 is a loss again')
+  assert.deepEqual(ids, [1, 5, 9, 10, 12, 14], 'with the revert unlinked, #5 is a loss again')
   const withRevertGone = lib.summarizeRemovalLosses(readRows())
-  assert.equal(withRevertGone.removal_loss_usd, 40.5, '7.50 + 25.00 + 8.00')
+  // #12 is unvalued (product 3 has no cost anywhere) so it adds $0 to the
+  // dollar total -- only the ids list and unvalued_rows count change.
+  assert.equal(withRevertGone.removal_loss_usd, 40.5, '7.50 + 25.00 + 8.00, #12 contributes $0')
+  assert.equal(withRevertGone.removal_loss_unvalued_rows, 3, '#10, #12 and #14')
   sql.exec(`UPDATE inventory_movements SET reference_id = 'revert:5' WHERE id = 6`)
   ok('the revert exclusion changes the answer (positive control)')
 }
@@ -204,10 +258,11 @@ function readRows(params = { startDate: '2026-09-10', endDate: '2026-09-10', bra
   //  #1 = 3 x 2.50 from its own snapshot ($7.50)
   //  #9 = 2 x 4.00 from the LOT, because its own columns sit at the DEFAULT 0
   // #10 = 6 units that nothing can price (product cost_price_usd is NULL)
+  // #12 = 8 units that nothing can price (product 3 has no cost anywhere either)
   // #14 = 3 units that nothing can price (product cost_price_usd is a literal 0)
-  assert.equal(summary.removal_loss_usd, 15.5, '7.50 + 8.00, and #10/#14 add nothing they cannot prove')
-  assert.equal(summary.removal_loss_qty, 14, '3 + 2 + 6 + 3 units left the shelf')
-  assert.equal(summary.removal_loss_unvalued_rows, 2, 'both uncostable rows are REPORTED, not dropped silently')
+  assert.equal(summary.removal_loss_usd, 15.5, '7.50 + 8.00, and #10/#12/#14 add nothing they cannot prove')
+  assert.equal(summary.removal_loss_qty, 22, '3 + 2 + 6 + 8 + 3 units left the shelf')
+  assert.equal(summary.removal_loss_unvalued_rows, 3, 'all three uncostable rows are REPORTED, not dropped silently')
   ok('cost comes from the movement snapshot, then the lot, then is declared unknown')
 }
 
@@ -273,10 +328,45 @@ function readRows(params = { startDate: '2026-09-10', endDate: '2026-09-10', bra
   // two types whose inclusion would be a real accounting error.
   const types = [...lib.REMOVAL_LOSS_MOVEMENT_TYPES]
   assert.ok(types.includes('remove'), 'the stock-change remove action is a loss')
+  // P3-losses-writeoff (Sep 15 2026): write_off is IN the set now that DISPOSE
+  // and productDelete's undo both carry a revert marker (section 8 below).
+  assert.ok(types.includes('write_off'), 'a disposed tagged row or a deleted product with drained stock is a loss')
   assert.ok(!types.includes('sale'), 'a sale is never a loss')
   assert.ok(!types.includes('damage_out'), 'damage_out is a DRAW from the damaged lot, i.e. a sale')
   assert.ok(!types.includes('transfer_out'), 'transferred stock is still ours')
   ok('the excluded-reason and movement-type constants agree with their sources')
+}
+
+// ---------------------------------------------------------------------------
+// 8. write_off, isolated on branch 5 so nothing above has to change: DISPOSE
+//    (damagedLotActions.ts) and productDelete.ts both count once live, and
+//    both are excluded once their own undo marks them reverted.
+// ---------------------------------------------------------------------------
+{
+  const rows = readRows({ startDate: '2026-09-10', endDate: '2026-09-10', branchId: 5 })
+  const ids = rows.map((r) => Number(r.id)).sort((a, b) => a - b)
+  assert.deepEqual(ids, [15, 18], `only the live (never-reverted) write_offs are selected, got ${JSON.stringify(ids)}`)
+  ok('a disposed tagged lot (#15) counts, at its own cost snapshot')
+  ok('a live product-delete write_off (#18) counts, valued from the product fallback')
+  ok('a disposed lot with a matching revert counter (#16/#17) is excluded')
+  ok('a product-delete write_off with a matching undo counter (#19/#20) is excluded')
+
+  const summary = lib.summarizeRemovalLosses(rows)
+  assert.equal(summary.removal_loss_usd, 30.5, "18.00 (#15, own snapshot) + 12.50 (#18, 5 x product 1's $2.50 fallback)")
+  assert.equal(summary.removal_loss_qty, 8, '3 + 5 units')
+  assert.equal(summary.removal_loss_unvalued_rows, 0)
+
+  // Positive control: break the marker match (typo the revert's reference) and
+  // #16/#19 come back as losses -- proving the exclusion is doing the work,
+  // not that these rows were unreachable some other way.
+  sql.exec(`UPDATE inventory_movements SET reference_id = 'revert:damaged_lot:WRONG' WHERE id = 17`)
+  sql.exec(`UPDATE inventory_movements SET reference_id = 'revert:product_remove:op-undone:WRONG' WHERE id = 20`)
+  const withMarkersBroken = readRows({ startDate: '2026-09-10', endDate: '2026-09-10', branchId: 5 })
+    .map((r) => Number(r.id)).sort((a, b) => a - b)
+  assert.deepEqual(withMarkersBroken, [15, 16, 18, 19], 'with the revert markers broken, #16 and #19 are losses again')
+  sql.exec(`UPDATE inventory_movements SET reference_id = 'revert:damaged_lot:502' WHERE id = 17`)
+  sql.exec(`UPDATE inventory_movements SET reference_id = 'revert:product_remove:op-undone:0' WHERE id = 20`)
+  ok('the reference_id-keyed revert exclusion changes the answer (positive control)')
 }
 
 console.log(`\nOK - ${checks} checks passed`)

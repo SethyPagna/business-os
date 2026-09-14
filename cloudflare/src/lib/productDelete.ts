@@ -262,6 +262,75 @@ function legacyPlanDamagedLots(plan: ProductRemovePlan): Array<Record<string, un
   return Array.isArray(plan.damaged_lots) ? plan.damaged_lots : null
 }
 
+/**
+ * P3-losses-writeoff (Sep 15 2026), owner ruling: "if remove directly it also
+ * counts toward losses. as cost price no selling price means loss." Deleting a
+ * product with OPEN held (tagged) lots destroys those units exactly as
+ * finally as a tagged row's own "Remove entirely" (damagedLotActions.ts
+ * planDisposeTagged) does -- the held quantity_remaining is zeroed and never
+ * comes back on its own. It must be booked as a loss the same way: one
+ * write_off row per lot, at the lot's own stamped cost, carrying its batch_id
+ * so removalLosses.ts can value it.
+ *
+ * This intentionally does NOT touch branch_stock's write-off (the sellable
+ * units) -- those are a separate, already-booked loss (see the INSERT this
+ * sits beside in productRemoveApplyStatements/productRemoveReplayStatements).
+ * A lot with quantity_remaining already at 0 (previously disposed, or a
+ * legacy plan) contributes no row -- nothing left to destroy twice.
+ */
+function damagedLotWriteOffStatements(args: {
+  plan: ProductRemovePlan
+  movementType: 'write_off' | 'add'
+  referenceId: string
+  reason: string
+  stamp: string
+  userId: number | string
+  userName: string | null
+}): ProductRemoveStatement[] {
+  const lots = legacyPlanDamagedLots(args.plan) || []
+  return lots
+    .filter((row) => Number(row.quantity_remaining) > 0)
+    .map((row) => {
+      const quantity = Number(row.quantity_remaining)
+      const unitCostUsd = row.unit_cost_usd != null ? Number(row.unit_cost_usd) : null
+      return {
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity,
+          unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name, created_at, batch_id)
+          VALUES (@productId, @productName, @branchId, @movementType, @quantity,
+            @unitCostUsd, @totalCostUsd, @reason, @referenceId, @userId, @userName, @stamp, @batchId)`,
+        params: {
+          productId: args.plan.product_id,
+          productName: (args.plan.product.name as string) ?? null,
+          branchId: row.branch_id != null ? Number(row.branch_id) : null,
+          movementType: args.movementType,
+          quantity,
+          unitCostUsd,
+          totalCostUsd: unitCostUsd != null ? unitCostUsd * quantity : null,
+          reason: args.reason,
+          referenceId: args.referenceId,
+          userId: args.userId,
+          userName: args.userName,
+          stamp: args.stamp,
+          batchId: row.batch_id != null ? Number(row.batch_id) : null,
+        },
+      }
+    })
+}
+
+/**
+ * The shared reference_id every write_off row from ONE apply/redo of a
+ * product removal carries -- both the branch_stock write-off and the held-lot
+ * write-off(s), so a SINGLE undo counter (reference_id 'revert:' + this
+ * string) excludes all of them together in removalLosses.ts, the same
+ * numeric-id 'revert:<id>' scheme stockRevert.ts uses, generalized to a
+ * string because this operation can write more than one row per transition.
+ * Keyed by generation (0 = the initial apply; redo's nextGeneration after
+ * that) so a later re-delete after an undo is a FRESH, uncounted loss again.
+ */
+function productRemoveWriteOffReferenceId(operationId: string, generation: number): string {
+  return `product_remove:${operationId}:${generation}`
+}
+
 function expectedDeletedPlan(plan: ProductRemovePlan, transitionStamp: string): ProductRemovePlan {
   const damagedLots = legacyPlanDamagedLots(plan)
   return {
@@ -465,13 +534,17 @@ export function productRemoveApplyStatements(args: {
     sql: `UPDATE product_remove_operations SET action_history_id=last_insert_rowid() WHERE operation_id=@operation AND status='ready'`,
     params: { operation: args.operationId },
   }, {
-    sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,user_id,user_name,created_at)
+    sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,reference_id,user_id,user_name,created_at)
       SELECT @product,@productName,CAST(json_extract(value,'$.branch_id') AS INTEGER),json_extract(value,'$.branch_name'),
-        'write_off',CAST(json_extract(value,'$.quantity') AS REAL),@reason,@actor,@actorName,@stamp
+        'write_off',CAST(json_extract(value,'$.quantity') AS REAL),@reason,@referenceId,@actor,@actorName,@stamp
       FROM json_each(@rows) WHERE CAST(json_extract(value,'$.quantity') AS REAL)>0`,
     params: { product: plan.product_id, productName: plan.product.name ?? null, reason: plan.reason,
+      referenceId: productRemoveWriteOffReferenceId(args.operationId, 0),
       actor: args.user.id, actorName: userName, stamp: args.transitionStamp, rows: JSON.stringify(plan.branch_stock) },
-  }, {
+  }, ...damagedLotWriteOffStatements({
+    plan, movementType: 'write_off', referenceId: productRemoveWriteOffReferenceId(args.operationId, 0),
+    reason: plan.reason, stamp: args.transitionStamp, userId: args.user.id, userName,
+  }), {
     sql: `UPDATE products SET is_active=0,stock_quantity=0,rfid_confirmed_qty=0,updated_at=@stamp WHERE id=@product`,
     params: { stamp: args.transitionStamp, product: plan.product_id },
   }, {
@@ -485,9 +558,11 @@ export function productRemoveApplyStatements(args: {
     sql: `UPDATE product_batches SET is_active=0,updated_at=@stamp WHERE variant_product_id=@product`,
     params: { stamp: args.transitionStamp, product: plan.product_id },
   }, ...(legacyPlanDamagedLots(plan) ? [{
-    // P3-L6: the held units go with the product. No write_off is booked --
-    // they already left sellable stock as damage_out when they were tagged,
-    // and a delete is a data removal, not a disposal.
+    // P3-losses-writeoff: the held units go with the product, and the
+    // write_off booked just above (damagedLotWriteOffStatements) is their
+    // loss -- they are destroyed here exactly as finally as the tagged row's
+    // own "Remove entirely" would destroy them. Only the stock-side zeroing
+    // happens in this statement now; the loss is already on the ledger.
     sql: `UPDATE damaged_stock_lots SET quantity_remaining=0,updated_at=@stamp WHERE product_id=@product`,
     params: { stamp: args.transitionStamp, product: plan.product_id },
   }] : []), {
@@ -607,6 +682,12 @@ export function productRemoveReplayStatements(args: {
   const pointer = JSON.stringify({ applier: PRODUCT_REMOVE_ACTION_KIND, operation_id: operation.operation_id, generation: nextGeneration })
   const details = JSON.stringify({ operation_id: operation.operation_id, reason: plan.reason, generation: args.expectedGeneration,
     direction, via: 'undo_applier' })
+  // Undo compensates the generation that was JUST live (expectedGeneration,
+  // the write-off's own tag); redo re-drains at the NEW generation it is
+  // about to enter, so a later undo of THIS redo compensates the right one.
+  const writeOffReferenceId = undo
+    ? `revert:${productRemoveWriteOffReferenceId(operation.operation_id, args.expectedGeneration)}`
+    : productRemoveWriteOffReferenceId(operation.operation_id, nextGeneration)
   const mutation: ProductRemoveStatement[] = undo ? [restoreProductStatement(plan), {
     sql: `UPDATE branch_stock SET
       quantity=(SELECT json_extract(value,'$.quantity') FROM json_each(@rows) WHERE json_extract(value,'$.id')=branch_stock.id),
@@ -662,14 +743,19 @@ export function productRemoveReplayStatements(args: {
       generation: args.expectedGeneration, snapshot: operation.undo_snapshot_id, history: args.historyId,
       kind: PRODUCT_REMOVE_ACTION_KIND, snapshotStatus: snapshotFrom, historyStatus: historyFrom },
   }, ...productRemoveGraphGuards(plan, undo ? 'deleted' : 'source', snapshot.transition_stamp), ...mutation, {
-    sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,user_id,user_name,created_at)
+    sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,reference_id,user_id,user_name,created_at)
       SELECT @product,@productName,CAST(json_extract(value,'$.branch_id') AS INTEGER),json_extract(value,'$.branch_name'),
-        @movement,CAST(json_extract(value,'$.quantity') AS REAL),@reason,@actor,@actorName,@stamp
+        @movement,CAST(json_extract(value,'$.quantity') AS REAL),@reason,@referenceId,@actor,@actorName,@stamp
       FROM json_each(@rows) WHERE CAST(json_extract(value,'$.quantity') AS REAL)>0`,
     params: { product: plan.product_id, productName: plan.product.name ?? null, movement: undo ? 'add' : 'write_off',
-      reason: `${undo ? 'Undo' : 'Redo'}: ${plan.reason}`, actor: args.user.id, actorName, stamp: args.transitionStamp,
+      reason: `${undo ? 'Undo' : 'Redo'}: ${plan.reason}`, referenceId: writeOffReferenceId,
+      actor: args.user.id, actorName, stamp: args.transitionStamp,
       rows: JSON.stringify(plan.branch_stock) },
-  }, {
+  }, ...damagedLotWriteOffStatements({
+    plan, movementType: undo ? 'add' : 'write_off', referenceId: writeOffReferenceId,
+    reason: `${undo ? 'Undo' : 'Redo'}: ${plan.reason}`, stamp: args.transitionStamp,
+    userId: args.user.id, userName: actorName,
+  }), {
     sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
       VALUES(@actor,@actorName,@action,'product',@product,@details,'products',@product,@details)`,
     params: { actor: args.user.id, actorName, action: undo ? 'action_undo' : 'action_redo', product: String(plan.product_id), details },

@@ -5862,7 +5862,7 @@
   "rpt_removal_loss": "Losses (stock removed)",
   "rpt_revenue_after_losses": "Revenue incl. losses",
   "rpt_profit_after_losses": "Profit incl. losses",
-  "rpt_hint_removal_loss": "Stock removed entirely from inventory, valued at its cost price. It is not a sale, so it never reduced the revenue and profit above; the two lines below show the same period with it taken off.",
+  "rpt_hint_removal_loss": "Stock removed entirely from inventory -- direct removals and disposed tagged (broken, damaged, expired ...) stock, including from a deleted product -- valued at its cost price. It is not a sale, so it never reduced the revenue and profit above; the two lines below show the same period with it taken off.",
   "rpt_note_removal_unvalued": "{count} removed row(s) had no recorded cost",
   "rpt_weeks": "Weeks",
   "rpt_months": "Months",

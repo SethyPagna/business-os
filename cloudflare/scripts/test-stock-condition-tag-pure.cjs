@@ -130,12 +130,19 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
   './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision,
   './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision,
 })
+// P3-losses-writeoff: salesAnalytics.ts pulls in removalLosses.ts (p3/losses)
+// -- a merge-time wiring gap left this override out, which died at load time
+// for EVERY check in this file, not just the ones this lane touches.
+// removalLosses.ts is deliberately import-free (see its own header), so it
+// loads with no overrides of its own.
+const removalLosses = loadReal('lib/removalLosses.ts')
 const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => db },
   './businessDateWindow': businessDateWindow,
   './reportMoneyPrecision': reportMoneyPrecision,
   './customerReturnEntitlement': customerReturnEntitlement,
   './refundMoneyPrecision': refundMoneyPrecision, './saleMoneyPrecision': saleMoneyPrecision,
+  './removalLosses': removalLosses,
 })
 // routes/inventory.ts's per-product revenue/COGS SQL moved into this shared
 // ledger (audit sibling:F14); the REAL module, so the route builds real SQL.
@@ -745,13 +752,25 @@ const ADD = (extra) => ({
     // Nothing is left open against a product that no longer exists.
     assert.equal(Number(rawDb.prepare(`SELECT COUNT(*) AS c FROM damaged_stock_lots d
       JOIN products p ON p.id = d.product_id WHERE d.quantity_remaining > 0 AND p.is_active = 0`).get({}).c), 0)
-    // And the held units are NOT charged a second time. They already left
-    // sellable stock as damage_out when they were tagged; the delete books its
-    // one write_off for the 6 sellable units and no more. A write_off per held
-    // lot here would double-count a unit that is still physically on the shelf.
+    // P3-losses-writeoff (Sep 15 2026), owner ruling: "if remove directly it
+    // also counts toward losses. as cost price no selling price means loss."
+    // Deleting the product destroys the held units exactly as finally as
+    // disposing the tagged row would, so it books TWO write-offs now: the 6
+    // sellable units (unchanged) AND the 4 held units, at the lot's own
+    // stamped cost -- this used to book only the first, silently destroying
+    // the held units' value with no loss ever recorded for them.
     const writeOffs = movements('write_off').slice(writeOffsBefore)
-    assert.equal(writeOffs.length, 1)
-    assert.equal(Number(writeOffs[0].quantity), 6)
+    assert.equal(writeOffs.length, 2)
+    assert.deepEqual(writeOffs.map((row) => Number(row.quantity)).sort((a, b) => a - b), [4, 6])
+    const heldWriteOff = writeOffs.find((row) => Number(row.quantity) === 4)
+    assert.equal(Number(heldWriteOff.unit_cost_usd), 2, 'valued at the lot cost stamped when it was held, not a guess')
+    assert.equal(Number(heldWriteOff.total_cost_usd), 8)
+    // Both rows share ONE reference marker for this apply -- so a single undo
+    // counter excludes both from removalLosses.ts together (see
+    // productRemoveWriteOffReferenceId in lib/productDelete.ts).
+    const sellableWriteOff = writeOffs.find((row) => Number(row.quantity) === 6)
+    assert.equal(sellableWriteOff.reference_id, heldWriteOff.reference_id)
+    assert.equal(sellableWriteOff.reference_id, 'product_remove:op-tagged-1:0')
 
     // --- undo, replayed server-side from the snapshot alone -----------------
     const operation = rawDb.prepare("SELECT * FROM product_remove_operations WHERE operation_id = 'op-tagged-1'").get({})
@@ -775,6 +794,27 @@ const ADD = (extra) => ({
     // Restored all the way to the surface the owner sees.
     const listed = await req('GET', '/tagged-lots?productIds=1')
     assert.deepEqual(listed.json.items.map((item) => [item.condition_tag, item.quantity]), [['broken', 4]])
+
+    // The undo wrote ONE 'add' counter for the held units too (mirroring the
+    // one it already wrote for sellable), both stamped 'revert:' + the shared
+    // marker -- proof removalLosses.ts's exclusion (reference_id-keyed, since
+    // this operation writes more than one row per generation) actually
+    // matches, not just that the number "looks right".
+    const undoCounters = movements('add').filter((row) => row.reference_id === 'revert:product_remove:op-tagged-1:0')
+    assert.deepEqual(undoCounters.map((row) => Number(row.quantity)).sort((a, b) => a - b), [4, 6])
+
+    // --- redo: re-drains with FRESH rows, a new generation, a new marker ----
+    await db.batch(productDelete.productRemoveReplayStatements({
+      snapshot, operation: { ...operation, status: 'reversed', generation: 1 }, direction: 'redo',
+      historyId: Number(operation.action_history_id), expectedGeneration: 1,
+      user: FAKE_USER, transitionStamp: '2026-09-14T12:00:00.000Z', transitionRequestId: 'redo-1',
+    }))
+    const redoWriteOffs = movements('write_off').slice(writeOffsBefore + 2)
+    assert.equal(redoWriteOffs.length, 2, 'redo books a fresh write_off pair, not a reuse of the undone ones')
+    assert.deepEqual(redoWriteOffs.map((row) => Number(row.quantity)).sort((a, b) => a - b), [4, 6])
+    assert.equal(redoWriteOffs[0].reference_id, 'product_remove:op-tagged-1:2', 'tagged at the NEW generation, not the original')
+    assert.deepEqual(sellable(), { product: 0, branch: 0 })
+    assert.equal(Number(heldLots()[0].quantity_remaining), 0)
   })
 
   await check('a removal plan written before held lots existed still applies, and still leaves them alone', async () => {
