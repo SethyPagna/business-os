@@ -46,7 +46,9 @@ interface RootErrorBoundaryState {
 }
 
 const panelStyle = {
-  minHeight: '100vh',
+  // The viewport a phone can actually show (styles/main.css --app-vh); main.css
+  // is imported by index.tsx before either root mounts, so the property exists.
+  minHeight: 'calc(100 * var(--app-vh))',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
