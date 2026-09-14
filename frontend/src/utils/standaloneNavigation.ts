@@ -69,34 +69,53 @@ export function isSameOriginNewTabLink(href: string, target: string, baseUrl: st
 
 let externalLinkGuardInstalled = false
 
+function handleStandaloneAnchorClick(event: MouseEvent): void {
+  if (event.defaultPrevented || event.button !== 0) return
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  const target = event.target
+  if (!(target instanceof Element)) return
+  const anchor = target.closest('a[href]')
+  if (!(anchor instanceof HTMLAnchorElement)) return
+  // A download link's whole point is to NOT navigate the window.
+  if (anchor.hasAttribute('download')) return
+  if (!isSameOriginNewTabLink(anchor.href, anchor.target, window.location.href)) return
+  event.preventDefault()
+  window.location.assign(anchor.href)
+}
+
 /**
  * Installs the document-level click guard. No-op in an ordinary browser tab
  * (where the back button already makes every link reversible) and idempotent
- * -- only the first call attaches a listener.
+ * -- only the first call attaches a listener, so a re-render can never stack
+ * a second one. Returns the teardown its caller's effect cleanup runs, which
+ * also clears the installed flag so a remount re-arms it.
  */
-export function installStandaloneExternalLinkGuard(): void {
-  if (typeof document === 'undefined' || typeof window === 'undefined') return
-  if (externalLinkGuardInstalled) return
-  if (!isStandaloneDisplayMode()) return
+export function installStandaloneExternalLinkGuard(): () => void {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return () => {}
+  if (externalLinkGuardInstalled) return () => {}
+  if (!isStandaloneDisplayMode()) return () => {}
   externalLinkGuardInstalled = true
-  document.addEventListener('click', (event) => {
-    if (event.defaultPrevented || event.button !== 0) return
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-    const target = event.target
-    if (!(target instanceof Element)) return
-    const anchor = target.closest('a[href]')
-    if (!(anchor instanceof HTMLAnchorElement)) return
-    // A download link's whole point is to NOT navigate the window.
-    if (anchor.hasAttribute('download')) return
-    if (!isSameOriginNewTabLink(anchor.href, anchor.target, window.location.href)) return
-    event.preventDefault()
-    window.location.assign(anchor.href)
-  }, true)
+  document.addEventListener('click', handleStandaloneAnchorClick, true)
+  return () => {
+    if (!externalLinkGuardInstalled) return
+    externalLinkGuardInstalled = false
+    document.removeEventListener('click', handleStandaloneAnchorClick, true)
+  }
 }
 
 // -- iOS "Add to Home Screen" hint ----------------------------------------
 
-const IOS_INSTALL_HINT_DISMISSED_KEY = `${STORAGE_KEYS.DEVICE_SETTINGS}:ios_install_hint_dismissed_at`
+// DEVICE-scoped on purpose, not account-scoped: shop devices are shared by
+// several staff accounts, and "this iPad is already on its home screen" is a
+// fact about the iPad, not about whoever is signed in. Re-asking the next
+// cashier to install an app that is already installed would be noise. It
+// stores a timestamp only -- never anything about a user, a sale or a
+// balance -- so nothing leaks between accounts.
+//
+// `-v1` so a later shape change (say, a count as well as a timestamp) can be
+// migrated instead of misread; an old or malformed value is silently treated
+// as "never dismissed" by readIosInstallHintDismissedAt below.
+const IOS_INSTALL_HINT_DISMISSED_KEY = `${STORAGE_KEYS.DEVICE_SETTINGS}:ios-install-hint-dismissed-at-v1`
 /** A dismissal is a "not now", not a "never": the hint returns after this. */
 export const IOS_INSTALL_HINT_SNOOZE_MS = 14 * 24 * 60 * 60 * 1000
 
@@ -130,8 +149,13 @@ export function shouldOfferIosInstallHint(): boolean {
 
 function readIosInstallHintDismissedAt(): number {
   try {
-    const raw = Number(window.localStorage.getItem(IOS_INSTALL_HINT_DISMISSED_KEY))
-    return Number.isFinite(raw) ? raw : 0
+    const stored = window.localStorage.getItem(IOS_INSTALL_HINT_DISMISSED_KEY)
+    const raw = Number(stored)
+    // A value written by an older/other shape (an object, '1', '') is not a
+    // usable timestamp. Fall back silently to "never dismissed" rather than
+    // trusting a number that means something else.
+    if (!stored || !Number.isFinite(raw) || raw <= 0) return 0
+    return raw
   } catch {
     // Private mode / blocked storage: treat as never dismissed. Showing the
     // hint again is a much smaller cost than never showing it at all.
@@ -168,18 +192,33 @@ const INSTALL_PROMPT_AVAILABLE_EVENT = 'businessos:install-prompt-available'
 let deferredInstallPrompt: BeforeInstallPromptEvent | null = null
 let installCaptureInstalled = false
 
-/** Idempotent: only the first call attaches listeners. */
-export function installBeforeInstallPromptCapture(): void {
-  if (typeof window === 'undefined' || installCaptureInstalled) return
+function handleBeforeInstallPrompt(event: Event): void {
+  event.preventDefault()
+  deferredInstallPrompt = event as BeforeInstallPromptEvent
+  window.dispatchEvent(new Event(INSTALL_PROMPT_AVAILABLE_EVENT))
+}
+
+function handleAppInstalled(): void {
+  deferredInstallPrompt = null
+}
+
+/**
+ * Idempotent: only the first call attaches listeners, so a re-render cannot
+ * stack a second pair. Returns the teardown its caller's effect cleanup runs;
+ * the captured prompt itself is module state and deliberately survives it, so
+ * a remount finds the event that already fired instead of losing it.
+ */
+export function installBeforeInstallPromptCapture(): () => void {
+  if (typeof window === 'undefined' || installCaptureInstalled) return () => {}
   installCaptureInstalled = true
-  window.addEventListener('beforeinstallprompt', (event) => {
-    event.preventDefault()
-    deferredInstallPrompt = event as BeforeInstallPromptEvent
-    window.dispatchEvent(new Event(INSTALL_PROMPT_AVAILABLE_EVENT))
-  })
-  window.addEventListener('appinstalled', () => {
-    deferredInstallPrompt = null
-  })
+  window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+  window.addEventListener('appinstalled', handleAppInstalled)
+  return () => {
+    if (!installCaptureInstalled) return
+    installCaptureInstalled = false
+    window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    window.removeEventListener('appinstalled', handleAppInstalled)
+  }
 }
 
 /** Subscribe to the moment a deferred prompt appears. Returns an unsubscribe. */

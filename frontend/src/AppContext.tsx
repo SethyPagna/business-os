@@ -1879,10 +1879,20 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // to protect). The ref makes it once per session, and syncRuntime.ts
   // memoises the promise besides, so the sale path's later call is the same
   // single real request rather than a second one.
+  //
+  // Shop devices are shared by several staff accounts, so the answer is
+  // recomputed per authenticated session and CLEARED on sign-out: a stale
+  // `false` left behind by the previous cashier would otherwise put a
+  // warning in front of the next one before their own session was measured.
   useEffect(() => {
     const actorId = user?.id == null ? null : Number(user.id)
-    if (actorId == null || !Number.isFinite(actorId)) return undefined
+    if (actorId == null || !Number.isFinite(actorId)) {
+      persistentStorageAskedForRef.current = null
+      setStoragePersisted(null)
+      return undefined
+    }
     if (persistentStorageAskedForRef.current === actorId) return undefined
+    setStoragePersisted(null)
     persistentStorageAskedForRef.current = actorId
     let cancelled = false
     void requestPersistentAppStorage().then((persisted) => {

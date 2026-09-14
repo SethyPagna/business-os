@@ -1248,7 +1248,19 @@ function AppUpdateBanner({ update, onDismiss }: AppUpdateBannerProps) {
 //
 // Dismissal is per page session on purpose, not persisted: the risk is not a
 // one-time device fact, it is "there are unsynced sales on a device whose
-// storage can be evicted", and that comes back every time it is true.
+// storage can be evicted", and that comes back every time it is true. It is
+// component state, so signing out unmounts it and the next cashier starts
+// clean.
+//
+// SHARED DEVICE, SEVERAL ACCOUNTS. Both inputs are already session-scoped and
+// neither is stored: `storagePersisted` is re-measured per authenticated
+// session and reset to null on sign-out (AppContext), and `pendingSync` is
+// set to null and refetched whenever `user` changes (useSyncErrorBanner
+// above). The count itself is the device's IndexedDB outbox, which this app
+// deliberately preserves across sign-out (clearLocalBusinessState's
+// preserveOfflineWork) and which the existing OfflineModeBanner already shows
+// the same way -- this band reads the identical source rather than inventing
+// a second, differently-scoped count.
 function StorageEvictionBand({ pendingSync, storagePersisted }: StorageEvictionBandProps) {
   const { t } = useApp()
   const [dismissed, setDismissed] = useState(false)
@@ -1959,9 +1971,16 @@ export default function App() {
   // no-op in an ordinary browser tab. Deliberately above the
   // isPublicCatalogRoute early return: the storefront can be installed too,
   // and most of the affected links live on it.
+  // Both installers are idempotent and both return their own teardown, so
+  // the listeners are attached exactly once and removed on unmount rather
+  // than accumulating a pair per render.
   useEffect(() => {
-    installBeforeInstallPromptCapture()
-    installStandaloneExternalLinkGuard()
+    const stopInstallPromptCapture = installBeforeInstallPromptCapture()
+    const stopExternalLinkGuard = installStandaloneExternalLinkGuard()
+    return () => {
+      stopInstallPromptCapture()
+      stopExternalLinkGuard()
+    }
   }, [])
 
   // G10: hand appUpdate.ts the shell's own non-blocking notice, so the

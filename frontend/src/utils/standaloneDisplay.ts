@@ -12,9 +12,8 @@
 export function isStandaloneDisplayMode(): boolean {
   if (typeof window === 'undefined') return false
   try {
-    const nav = window.navigator as Navigator & { standalone?: boolean }
-    if (nav?.standalone === true) return true
-    return window.matchMedia?.('(display-mode: standalone)')?.matches === true
+    if ((navigator as Navigator & { standalone?: boolean }).standalone === true) return true
+    return typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches
   } catch {
     return false
   }
