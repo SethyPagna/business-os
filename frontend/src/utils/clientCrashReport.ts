@@ -5,11 +5,8 @@
 // real requests, all wrong for the last thing that runs after a page has
 // already crashed. Every failure mode here ends in silence on purpose.
 //
-// This lives outside App.tsx so the ROOT boundary (which mounts above every
-// provider, and therefore above App.tsx itself) can report through the exact
-// same endpoint. App.tsx:187 still carries an identical private copy; that
-// file belongs to another lane in this release, so collapsing it onto this
-// module is left as a one-line follow-up rather than an edit from here.
+// This lives outside App.tsx so both the ROOT boundary (mounted above every
+// provider) and the per-page boundary in App.tsx report through one function.
 export async function reportClientCrash(error: Error, page: string): Promise<void> {
   try {
     await fetch('/api/system/client-error', {

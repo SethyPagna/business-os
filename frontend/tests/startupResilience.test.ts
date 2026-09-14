@@ -433,7 +433,11 @@ await runTest('PageErrorBoundary renders non-empty text and a working action for
 
 await runTest('componentDidCatch reports the crash but a reporting failure can never become a second crash', () => {
   const app = read('src/App.tsx')
-  assert.match(app, /async function reportClientCrash[\s\S]*?catch \{\s*\n\s*\/\/ Intentionally silent/, 'crash reporting must swallow its own network failure')
+  // One reporter for both boundaries: the per-page one here and the root one in shared/RootErrorBoundary.tsx.
+  assert.match(app, /import \{ reportClientCrash \} from '\.\/utils\/clientCrashReport\.ts'/, 'App.tsx must import the shared crash reporter, not carry a private twin')
+  assert.doesNotMatch(app, /function reportClientCrash\(/, 'no private copy of the reporter may drift from the util')
+  const reporter = read('src/utils/clientCrashReport.ts')
+  assert.match(reporter, /export async function reportClientCrash[\s\S]*?catch \{\s*\n\s*\/\/ Intentionally silent/, 'crash reporting must swallow its own network failure')
   assert.match(app, /componentDidCatch\(error: Error, info: ErrorInfo\): void \{[\s\S]*?void reportClientCrash\(error, this\.props\.pageId\)/, 'reporting must be fire-and-forget, never awaited into the render path')
 })
 
