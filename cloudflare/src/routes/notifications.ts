@@ -255,7 +255,10 @@ async function buildExpirySection(env: Env, days: number): Promise<NotificationS
 // Supplier credit reminders (migration 0065; user, Aug 28): a batch received
 // ON CREDIT carries a due date exactly so the admin is reminded — overdue
 // first, then anything due within the window. Marking the batch paid
-// (PATCH /api/batches/:id payment_status='paid') clears it from here.
+// (PATCH /api/batches/:id payment_status='paid') clears it from here. So does
+// reverting every receipt on the lot: the row keeps 'credit' for a possible
+// un-revert, but with nothing received and no money there is nothing owed
+// (lib/productBatches.ts planUnreceiveBatchStock; untracked NULL lots stay).
 async function buildSupplierCreditSection(env: Env, days: number): Promise<NotificationSection | null> {
   const db = getDb(env)
   const rows = await db.prepare(`
@@ -266,6 +269,7 @@ async function buildSupplierCreditSection(env: Env, days: number): Promise<Notif
     JOIN products p ON p.id = pb.variant_product_id
     WHERE pb.is_active = 1
       AND pb.payment_status = 'credit'
+      AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
       AND pb.credit_due_date IS NOT NULL AND trim(pb.credit_due_date) != ''
       AND julianday(pb.credit_due_date) - julianday('now') <= @days
     ORDER BY pb.credit_due_date ASC

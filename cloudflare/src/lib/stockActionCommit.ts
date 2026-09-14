@@ -329,13 +329,16 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // The add may land on an EXISTING lot (INSERT OR IGNORE above). A lot
       // with no supplier/cost yet adopts this row's; values already recorded
       // on the lot win — first attribution sticks, imports never rewrite it.
+      // Same exception as lib/productBatches.ts LOT_ATTRIBUTION_SET_SQL: a lot
+      // whose receipts were all reverted (received_quantity 0) keeps its old
+      // supplier only until a receipt that carries one lands on it.
       // A matching inactive lot is reactivated in this same atomic batch so
       // the received stock remains reachable from POS/FIFO reads.
       sql: `UPDATE product_batches SET
               is_active = 1,
-              supplier_name = COALESCE(supplier_name, @supplierName),
-              supplier_id = COALESCE(supplier_id, @supplierId),
-              unit_cost_usd = COALESCE(unit_cost_usd, @costPriceUsd)
+              supplier_name = CASE WHEN received_quantity = 0 AND (@supplierId IS NOT NULL OR @supplierName IS NOT NULL) THEN @supplierName ELSE COALESCE(supplier_name, @supplierName) END,
+              supplier_id = CASE WHEN received_quantity = 0 AND (@supplierId IS NOT NULL OR @supplierName IS NOT NULL) THEN @supplierId ELSE COALESCE(supplier_id, @supplierId) END,
+              unit_cost_usd = CASE WHEN received_quantity = 0 AND @costPriceUsd IS NOT NULL THEN @costPriceUsd ELSE COALESCE(unit_cost_usd, @costPriceUsd) END
             WHERE variant_product_id = @productId AND batch_key = @batchKey
               AND ${guard}`,
       params,
@@ -356,7 +359,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // instead of borrowing a sibling receipt's price.
       sql: `UPDATE product_batches SET received_quantity = COALESCE(received_quantity, 0) + @quantity,
               received_cost_usd = COALESCE(received_cost_usd, 0) + COALESCE(@totalCostUsd, 0),
-              received_branch_id = COALESCE(received_branch_id, @branchId)
+              received_branch_id = CASE WHEN received_quantity = 0 THEN @branchId ELSE COALESCE(received_branch_id, @branchId) END
             WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}`,
       params,
     },

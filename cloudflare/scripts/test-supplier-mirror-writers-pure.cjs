@@ -195,13 +195,14 @@ function readers(sql) {
   assert.equal(read.reminders(), 0, 'W4: the "not paid to supplier" reminder is gone')
   assert.deepEqual(read.invoiceLines(), [], 'W4: no invoice line, not even under "no supplier"')
   assert.deepEqual(lotOf(w3.batchId), {
-    is_active: 0, supplier_id: null, supplier_name: null, unit_cost_usd: null, payment_status: null, credit_due_date: null,
-    received_quantity: 0, received_cost_usd: 0, received_branch_id: null,
-  })
+    is_active: 0, supplier_id: SUPPLIER.id, supplier_name: SUPPLIER.name, unit_cost_usd: 4, payment_status: 'credit', credit_due_date: '2026-10-01',
+    received_quantity: 0, received_cost_usd: 0, received_branch_id: 1,
+  }, 'W4: the row keeps its attribution (for an un-revert); the readers treat "nothing received, no money" as no purchase')
   ok(true, 'W4 revert of a receipt: purchase, credit reminder and invoice line all leave the supplier automatically')
 
   // A same-day receipt AFTER the revert reuses the row and carries ITS OWN
-  // supplier -- the cleared attribution is what makes that possible.
+  // supplier: a lot with received_quantity 0 adopts the incoming attribution
+  // (LOT_ATTRIBUTION_SET_SQL) instead of first-attribution-sticks.
   db.prepare(`INSERT INTO suppliers (id, name) VALUES (42, 'Other Trading')`).run({})
   const w4b = await productBatches.receiveBatchStock(db, {
     productId: 501, branchId: 1, quantity: 3, receivedDate: '2026-09-01', supplierId: 42, supplierName: 'Other Trading', unitCostUsd: 6, paymentStatus: 'paid',
@@ -265,6 +266,49 @@ function readers(sql) {
   assert.deepEqual(read.totals(), { batches: 1, units: 100, cost: 500, creditOpen: 0, creditBatches: 0 }, 'W7: the 100 units bought and sold are still a purchase')
   assert.deepEqual(read.invoiceLines(), [{ key: `id:${SUPPLIER.id}`, qty: 100, cost: 500 }], 'W7: the invoice line stays')
   ok(true, 'W7 DELETE deactivation of a sold-out lot keeps its purchase: is_active is picker visibility, not an un-purchase')
+
+  // W8: revert, then revert of the revert -- the purchase, the credit reminder
+  // and the invoice line come back under the SAME supplier (review pREAD
+  // shape 1: on e3bf6fbf the un-revert re-received under "No supplier
+  // recorded", key 'none'). A third revert takes it away again (shape 2).
+  // Fourth reader: the product detail report's Suppliers rows
+  // (routes/products.ts, "bought from"), extracted the same way
+  // test-detail-report-supplier-split-pure.cjs does.
+  const productsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'products.ts'), 'utf8').replace(/\r\n/g, '\n')
+  const resolvedIdSql = productsSource.match(/const RESOLVED_SUPPLIER_ID_SQL\s*=\s*`([\s\S]*?)`/)[1]
+  const supplierKeySql = productsSource.match(/const SUPPLIER_KEY_SQL\s*=\s*`([\s\S]*?)`/)[1].replace('${RESOLVED_SUPPLIER_ID_SQL}', resolvedIdSql)
+  const detailSuppliersSql = productsSource.match(/const suppliers = await db\.prepare\(`([\s\S]*?)`\)\.all</)[1]
+    .split('${SUPPLIER_KEY_SQL}').join(supplierKeySql).split('${RESOLVED_SUPPLIER_ID_SQL}').join(resolvedIdSql)
+  const detailSuppliers = (productId) => raw.prepare(detailSuppliersSql).all({ productId })
+    .filter((r) => r.supplier_key === `id:${SUPPLIER.id}`).map((r) => ({ key: r.supplier_key, lots: Number(r.lot_count) }))
+  const readAll = () => ({ totals: read.totals(), reminders: read.reminders(), invoice: read.invoiceLines(), detail: detailSuppliers(505) })
+  // W7's sold-out lot is still Acme's purchase; W8 adds one receipt on top of it.
+  const gone = readAll()
+  const live = {
+    totals: { batches: gone.totals.batches + 1, units: gone.totals.units + 10, cost: gone.totals.cost + 40, creditOpen: gone.totals.creditOpen + 40, creditBatches: gone.totals.creditBatches + 1 },
+    reminders: gone.reminders + 1,
+    invoice: [...gone.invoice, { key: `id:${SUPPLIER.id}`, qty: 10, cost: 40 }],
+    detail: [{ key: `id:${SUPPLIER.id}`, lots: 1 }],
+  }
+  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (505, 'Cream', 'C-1', 'pcs', 0, 1)`).run({})
+  const w8 = await productBatches.receiveBatchStock(db, {
+    productId: 505, branchId: 1, quantity: 10, receivedDate: '2026-09-05',
+    supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 4, paymentStatus: 'credit', creditDueDate: '2026-10-05',
+  })
+  const w8Movement = recordReceiptMovement(505, w8.batchId, 10, 4)
+  assert.deepEqual(readAll(), live)
+  const r8a = await stockRevert.applyMovementRevert(db, movementById(w8Movement), actor)
+  assert.equal(r8a.ok, true, r8a.error)
+  assert.deepEqual(readAll(), gone, 'W8: reverted -> gone from the supplier')
+  const counter8 = db.prepare('SELECT * FROM inventory_movements WHERE reference_id = @ref').get({ ref: `revert:${w8Movement}` })
+  const r8b = await stockRevert.applyMovementRevert(db, counter8, actor)
+  assert.equal(r8b.ok, true, r8b.error)
+  assert.deepEqual(readAll(), live, 'W8: un-reverted -> back under Acme with its credit, not under "no supplier"')
+  const counter8b = db.prepare('SELECT * FROM inventory_movements WHERE reference_id = @ref').get({ ref: `revert:${counter8.id}` })
+  const r8c = await stockRevert.applyMovementRevert(db, counter8b, actor)
+  assert.equal(r8c.ok, true, r8c.error)
+  assert.deepEqual(readAll(), gone, 'W8: level 3 -> gone again, no phantom line')
+  ok(true, 'W8 revert-of-revert restores the purchase under the same supplier on all four readers; a third revert removes it again')
 
   console.log(`\nAll ${checks} supplier-mirror writer checks passed`)
 })().catch((err) => { console.error(err); process.exitCode = 1 })

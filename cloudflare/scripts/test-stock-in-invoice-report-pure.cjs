@@ -363,9 +363,12 @@ const GROUPS_SQL = (where) => `
     assert.ok(/invoices_without_branch/.test(contactsSource), 'the branch filter reports what it cannot see')
     assert.ok(/received_day <> '' AND t\.received_day >=/.test(contactsSource.replace(/t\.received_day <> ''/g, "received_day <> ''")) || /received_day <> ''/.test(contactsSource), 'date bounds exclude the no-date group')
     const receiveSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'productBatches.ts'), 'utf8')
-    assert.ok(/received_branch_id = COALESCE\(received_branch_id, @receivedBranchId\)/.test(receiveSource), 'receiveBatchStock top-ups fill-if-NULL')
+    // The fill-if-NULL clause sits in the ELSE of a CASE since P3-L1 (a lot
+    // whose receipts were all reverted adopts the new receipt's branch); the
+    // top-up behaviour itself is asserted above, this only locks the clause.
+    assert.ok(/ELSE COALESCE\(received_branch_id, @receivedBranchId\) END/.test(receiveSource), 'receiveBatchStock top-ups fill-if-NULL')
     const commitSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'stockActionCommit.ts'), 'utf8')
-    assert.ok(/received_branch_id = COALESCE\(received_branch_id, @branchId\)/.test(commitSource), 'the import add writer fills-if-NULL too')
+    assert.ok(/ELSE COALESCE\(received_branch_id, @branchId\) END/.test(commitSource), 'the import add writer fills-if-NULL too')
     console.log('PASS source locks on the route + both writers')
   }
 
