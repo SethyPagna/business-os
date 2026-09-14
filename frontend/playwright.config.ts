@@ -80,21 +80,44 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 2 : 4,
+  // E2E_WORKERS exists because this repository is worked by several sessions at
+  // once: a run that shares the machine with a dozen other browsers is slower
+  // per action, and `E2E_WORKERS=2` buys back the headroom without changing a
+  // single assertion. 4 is the default because that is what the budgets in
+  // perf-budget.spec.ts were measured under.
+  workers: process.env.E2E_WORKERS ? Number(process.env.E2E_WORKERS) : (process.env.CI ? 2 : 4),
   reporter: [
     ['list'],
     ['html', { outputFolder: 'e2e-report', open: 'never' }],
   ],
   outputDir: 'test-results',
-  timeout: 60_000,
-  expect: { timeout: 10_000 },
+  // These four numbers are HARNESS budgets -- how long the runner waits before
+  // giving up -- and deliberately NOT a claim about how fast the app is. The
+  // only timing claims in this suite live in perf-budget.spec.ts, which
+  // measures explicitly, keeps its own budgets, and is unaffected by anything
+  // here.
+  //
+  // They were raised (test 60->90 s, action 15->30 s, navigation 30->45 s,
+  // expect 10->15 s) after a measured failure mode, not defensively: on a
+  // machine shared with other sessions (161 chrome + 79 node processes at the
+  // time) one full run lost 5 ios-webkit tests, every one of them a
+  // `locator.click: Timeout 15000ms exceeded` on an element Playwright had
+  // already resolved and was merely waiting to settle. Re-running the same
+  // files in isolation immediately passed 5/6, and the one straggler passed
+  // alone in 4.7 s. Nothing in the product was slow; the CPU was.
+  //
+  // The cost of the larger numbers is that a genuine hang takes longer to
+  // report. The cost of the smaller ones was failures that say nothing about
+  // the app, which is worse: a suite that cries wolf stops being read.
+  timeout: 90_000,
+  expect: { timeout: 15_000 },
   use: {
     // Evidence on failure only: a green run should cost nothing.
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
-    actionTimeout: 15_000,
-    navigationTimeout: 30_000,
+    actionTimeout: 30_000,
+    navigationTimeout: 45_000,
     ...SHARED_CONTEXT_USE,
   },
 
