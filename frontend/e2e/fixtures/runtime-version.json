@@ -1,0 +1,11 @@
+{
+  "_provenance": "cloudflare/src/routes/runtime.ts GET /api/runtime/version -> c.json({ success: true, ...getRuntimeVersion(env) }). packageVersion is the human-maintained RUNTIME_APP_VERSION marker; revision/sourceHash/builtAt come from getBuildStamp() and are the real build provenance. Values below are synthetic and deliberately NOT any deployed revision -- nothing in this suite may be mistaken for evidence about production.",
+  "success": true,
+  "app": "business-os",
+  "runtime": "cloudflare-workers",
+  "packageVersion": "cloudflare-2026-08",
+  "revision": "e2efixture0001",
+  "sourceHash": "e2e0000000000000",
+  "builtAt": "2026-09-14T00:00:00.000Z",
+  "bootedAt": "2026-09-14T00:00:00.000Z"
+}

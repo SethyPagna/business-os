@@ -1,0 +1,77 @@
+[
+  {
+    "_provenance": "cloudflare/src/routes/sales.ts GET /api/sales returns a BARE ARRAY (c.json(payload.map(...))), not a {items,total} envelope -- a fixture that wrapped it would hide a real consumer bug. The query is SELECT s.* plus joined branch_name/customer/cashier and a projected items[] per sale, so the column set below is a documented SUBSET of s.*: the columns the Sales list and receipt actually read. Receipt id format is the bare YYYYMMDD-HHMMSS the project mints (no @date suffix).",
+    "id": 9001,
+    "receipt_number": "20260914-101500",
+    "created_at": "2026-09-14T03:15:00.000Z",
+    "branch_id": 1,
+    "branch_name": "Shop",
+    "customer_id": null,
+    "customer_name": "",
+    "cashier_name": "e2e_admin",
+    "user_id": 1,
+    "sale_status": "completed",
+    "payment_method": "Cash",
+    "subtotal_usd": 24.5,
+    "discount_usd": 0,
+    "tax_usd": 0,
+    "delivery_fee_usd": 0,
+    "total_usd": 24.5,
+    "total_khr": 100500,
+    "exchange_rate": 4100,
+    "is_delivery": 0,
+    "money_precision_version": 1,
+    "items": [
+      {
+        "id": 70001,
+        "sale_id": 9001,
+        "product_id": 1000,
+        "product_name": "E2E Product 001 Aurelia",
+        "branch_id": 1,
+        "branch_name": "Shop",
+        "quantity": 1,
+        "unit_price_usd": 24.5,
+        "total_usd": 24.5,
+        "barcode": "",
+        "category": "Skincare"
+      }
+    ]
+  },
+  {
+    "id": 9002,
+    "receipt_number": "20260914-112200",
+    "created_at": "2026-09-14T04:22:00.000Z",
+    "branch_id": 1,
+    "branch_name": "Shop",
+    "customer_id": null,
+    "customer_name": "",
+    "cashier_name": "e2e_admin",
+    "user_id": 1,
+    "sale_status": "completed",
+    "payment_method": "ABA Bank",
+    "subtotal_usd": 11.75,
+    "discount_usd": 0,
+    "tax_usd": 0,
+    "delivery_fee_usd": 0,
+    "total_usd": 11.75,
+    "total_khr": 48200,
+    "exchange_rate": 4100,
+    "is_delivery": 0,
+    "money_precision_version": 1,
+    "items": [
+      {
+        "id": 70002,
+        "sale_id": 9002,
+        "product_id": 1001,
+        "product_name": "E2E Product 002 Belle Roux",
+        "branch_id": 1,
+        "branch_name": "Shop",
+        "quantity": 1,
+        "unit_price_usd": 11.75,
+        "total_usd": 11.75,
+        "barcode": "",
+        "category": "Makeup"
+      }
+    ]
+  }
+]

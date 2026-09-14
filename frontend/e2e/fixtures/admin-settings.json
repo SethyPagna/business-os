@@ -1,0 +1,19 @@
+{
+  "_provenance": "cloudflare/src/routes/settings.ts GET /api/settings returns a FLAT key -> value map read straight from the settings table (stripSensitiveSettings removes the Drive OAuth keys). Values are strings in the real payload -- SQLite stores them as TEXT -- so they are strings here too: a fixture that used real booleans would hide every place the app forgets to normalize.",
+  "business_name": "Leang Beauty",
+  "business_phone": "+855 12 345 678",
+  "business_email": "hello@leangbeauty.test",
+  "business_address": "12 Street 271, Phnom Penh, Cambodia",
+  "business_legal_name": "Leang Beauty Co., Ltd.",
+  "business_registration_number": "KH-E2E-0001",
+  "exchange_rate": "4100",
+  "display_currency": "USD",
+  "language": "en",
+  "theme": "light",
+  "login_session_duration": "8h",
+  "loyalty_points_enabled": "1",
+  "customer_portal_show_catalog": "1",
+  "customer_portal_show_prices": "1",
+  "customer_portal_grid_columns_mobile": "1",
+  "customer_portal_grid_columns_desktop": "4"
+}
