@@ -21,7 +21,7 @@ import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { restartIntoLatestApp } from './utils/appUpdate.ts'
-import { installBeforeInstallPromptCapture } from './utils/standaloneNavigation.ts'
+import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from './utils/standaloneNavigation.ts'
 import { persistentNoticeFingerprint, shouldRenderPersistentNotice } from './utils/persistentNoticeDismissal.ts'
 import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGuard.ts'
 import { hasDirtyWork } from './utils/dirtyWork.ts'
@@ -1952,7 +1952,17 @@ export default function App() {
   // is lost if nothing calls preventDefault() on it; capturing here (and not
   // in the component) means an event that fires during sign-in is still
   // replayable afterwards. Idempotent, so the effect re-running is harmless.
-  useEffect(() => { installBeforeInstallPromptCapture() }, [])
+  //
+  // B9: the same boot moment installs the standalone external-link guard, so
+  // a same-origin _blank link cannot strand an installed-app user in a
+  // chromeless second window with no back button. Also idempotent, and a
+  // no-op in an ordinary browser tab. Deliberately above the
+  // isPublicCatalogRoute early return: the storefront can be installed too,
+  // and most of the affected links live on it.
+  useEffect(() => {
+    installBeforeInstallPromptCapture()
+    installStandaloneExternalLinkGuard()
+  }, [])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined

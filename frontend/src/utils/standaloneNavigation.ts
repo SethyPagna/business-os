@@ -11,10 +11,88 @@
 //     its own. Android/Chromium fires beforeinstallprompt instead, which
 //     this app captured nowhere, so the browser's own mini-infobar was the
 //     only offer the user ever got.
+//   - Not being STRANDED once inside it. See
+//     installStandaloneExternalLinkGuard below.
 //   - Knowing which of the two you are in, so neither offer is ever made to
 //     somebody already running the installed app.
 import { STORAGE_KEYS } from '../constants.ts'
 import { isStandaloneDisplayMode } from './standaloneDisplay.ts'
+
+// -- B9: the standalone external-link guard --------------------------------
+//
+// Installed to a home screen, this app runs in its own window with no browser
+// chrome at all -- no back button, no address bar, no tab strip. A
+// `target="_blank"` link there opens a SECOND chromeless surface, and on iOS
+// the user's only way back to the till is to kill the app and relaunch it
+// from the icon. Eight such sites exist today; six are anchors (catalog
+// editor, catalog preview, catalog products, catalog secondary tabs, the
+// portal embed map-consent fallback, the files responses citations) and none
+// of them is worth editing individually: this is one delegated listener for
+// all of them, and for every one added later.
+//
+// WHAT IT DOES AND DELIBERATELY DOES NOT DO:
+//
+//   - SAME-ORIGIN `_blank` (the public portal preview, a privacy page, an
+//     app route): navigated IN PLACE. It is this same app, so the installed
+//     window can just go there and the app's own navigation brings the user
+//     back. This is the case that strands somebody for no reason at all.
+//   - CROSS-ORIGIN (a supplier's site, a Google Maps pin, an uploaded image
+//     on another host): left exactly as it is. Those must leave the app
+//     whatever happens, and iOS hands them to an in-app browser with a Done
+//     control; forcing them into the installed window instead would replace
+//     the app with somebody else's page and remove the only way back. The
+//     residual "I am now looking at Safari" is unavoidable, not a defect
+//     this guard can fix.
+//
+// It also cannot see a direct `window.open(...)` call, which is not a click
+// on an anchor: PortalPromotionsBanner.tsx:159 and LoyaltyPointsPage.tsx:992
+// are the remaining two of the eight, and both already hand the URL to the
+// browser, which is the behaviour this guard would have chosen for them
+// anyway (PortalPromotionsBanner already routes relative links through
+// window.location.assign on its own).
+
+/**
+ * Whether a click on this anchor is a same-origin new-tab link -- the one
+ * case the standalone guard rewrites. Pure, so the decision is testable
+ * without a DOM.
+ */
+export function isSameOriginNewTabLink(href: string, target: string, baseUrl: string): boolean {
+  if (String(target || '').toLowerCase() !== '_blank') return false
+  try {
+    const url = new URL(href, baseUrl)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+    return url.origin === new URL(baseUrl).origin
+  } catch {
+    return false
+  }
+}
+
+let externalLinkGuardInstalled = false
+
+/**
+ * Installs the document-level click guard. No-op in an ordinary browser tab
+ * (where the back button already makes every link reversible) and idempotent
+ * -- only the first call attaches a listener.
+ */
+export function installStandaloneExternalLinkGuard(): void {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return
+  if (externalLinkGuardInstalled) return
+  if (!isStandaloneDisplayMode()) return
+  externalLinkGuardInstalled = true
+  document.addEventListener('click', (event) => {
+    if (event.defaultPrevented || event.button !== 0) return
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    const target = event.target
+    if (!(target instanceof Element)) return
+    const anchor = target.closest('a[href]')
+    if (!(anchor instanceof HTMLAnchorElement)) return
+    // A download link's whole point is to NOT navigate the window.
+    if (anchor.hasAttribute('download')) return
+    if (!isSameOriginNewTabLink(anchor.href, anchor.target, window.location.href)) return
+    event.preventDefault()
+    window.location.assign(anchor.href)
+  }, true)
+}
 
 // -- iOS "Add to Home Screen" hint ----------------------------------------
 
