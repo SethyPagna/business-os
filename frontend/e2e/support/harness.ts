@@ -153,28 +153,51 @@ export const KNOWN_STALE_READ_SCOPE_LOG = 'Read belongs to an earlier account'
 export const KNOWN_SIGNED_OUT_POS_CATALOG_LOG = '[POS] catalog load failed: Not authenticated'
 
 /**
- * A HARNESS artifact, not app output: under parallel load the single-threaded
- * fixture server occasionally drops the /sw.js fetch, and WebKit reports that
- * as a page-level "Cannot load ... due to access control checks." that no
- * application code can catch (index.tsx:96 already wraps register() in
- * try/catch and .catch()es every update()).
+ * A HARNESS artifact, not app output: under parallel load the fixture server
+ * occasionally does not answer a request in time, and WebKit reports the
+ * failed fetch as a PAGE-level "Cannot load ... due to access control checks."
+ * that no application code can catch.
  *
- * Measured before quarantining: 1 occurrence in 36 scanner runs at
- * --workers=3, and 0 in 6 consecutive ios-webkit runs of the same file in
- * isolation, including 3 that navigated away mid-registration on purpose.
- * Scoped to /sw.js so nothing else hides behind it, and pwa-update.spec.ts
- * still asserts POSITIVELY that a worker reaches 'activated', so a real
- * service-worker failure cannot pass unnoticed.
+ * Exactly two requests have ever produced it, and both are already guarded in
+ * the product:
+ *   /sw.js   -- index.tsx:96 wraps register() in try/catch and .catch()es
+ *               every update().
+ *   /health  -- both call sites are inside try/catch
+ *               (frontend/src/api/http.ts:1022 and
+ *               frontend/src/api/systemRuntime.ts:106), and a failed probe is
+ *               simply "the server looks offline", which the app handles.
+ *
+ * MEASURED, and one hypothesis REFUTED before quarantining:
+ *  - /sw.js: 1 occurrence in 36 scanner runs at --workers=3, 0 in 6
+ *    consecutive ios-webkit runs of that file in isolation, including 3 that
+ *    navigated away mid-registration on purpose.
+ *  - /health: 2 occurrences in 8 full suite runs, ios-webkit only, both in
+ *    ios-layout.spec.ts. The obvious explanation -- that WebKit rejects the
+ *    probe's `redirect: 'manual'` + `credentials: 'include'` combination -- was
+ *    tested directly and is WRONG: in WebKit, plain, credentialed,
+ *    manual-redirect and the exact combination http.ts sends all returned
+ *    200/basic from the same page. It is a dropped connection under load,
+ *    nothing about the request.
+ *
+ * Scoped to those two paths on the fixture origin so nothing else can hide
+ * behind it. The positive claims still stand elsewhere: pwa-update.spec.ts
+ * asserts a worker reaches 'activated', and every spec still fails on any
+ * other page error.
  */
 // NB: Playwright renders a WebKit page error as `${name}: ${message}`, and
 // WebKit puts the whole sentence in the name, so the recorded string reads
 // "Cannot load http: /127.0.0.1:4318/sw.js due to access control checks." --
 // the "//" of the URL becomes ": /". Matched loosely for that reason.
-const FIXTURE_SW_FETCH_ARTIFACT = /Cannot load [^\n]*\/sw\.js due to access control checks/
+const FIXTURE_AUTHORITIES = [ADMIN_ORIGIN, STOREFRONT_ORIGIN]
+  .map((origin) => origin.replace(/^https?:\/\//, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  .join('|')
+const FIXTURE_BLOCKED_FETCH_ARTIFACT = new RegExp(
+  `(?:Cannot load|Fetch API cannot load)[^\\n]*(?:${FIXTURE_AUTHORITIES})/(?:sw\\.js|health)\\b[^\\n]*due to access control checks`,
+)
 
 export function pageErrorsExcludingKnown(health: PageHealth): string[] {
   return health.pageErrors.filter((entry) => (
-    !entry.includes(KNOWN_SIGNED_OUT_BOOTSTRAP_REJECTION) && !FIXTURE_SW_FETCH_ARTIFACT.test(entry)
+    !entry.includes(KNOWN_SIGNED_OUT_BOOTSTRAP_REJECTION) && !FIXTURE_BLOCKED_FETCH_ARTIFACT.test(entry)
   ))
 }
 
