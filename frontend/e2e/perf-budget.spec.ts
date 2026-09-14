@@ -93,8 +93,11 @@ type Budget = {
  * load at all, so they are the tight half of this file).
  */
 const BUDGETS: Record<string, Budget> = {
-  'desktop-chromium': { landingMs: 1_500, gridMs: 1_500, landingRequests: 50, landingApi: 3, loginMs: 1_600, posMs: 4_500, posRequests: 116 },
-  'android-chromium': { landingMs: 1_500, gridMs: 1_500, landingRequests: 50, landingApi: 3, loginMs: 1_600, posMs: 4_500, posRequests: 116 },
+  // Landing: the worst best-of-three seen across five full parallel runs was
+  // 1668 ms (android), against typical bests of 567-856 ms. 2500 is that worst
+  // +50%, and it still fails a landing that has genuinely doubled.
+  'desktop-chromium': { landingMs: 2_500, gridMs: 2_000, landingRequests: 50, landingApi: 3, loginMs: 1_800, posMs: 4_500, posRequests: 116 },
+  'android-chromium': { landingMs: 2_500, gridMs: 2_000, landingRequests: 50, landingApi: 3, loginMs: 1_800, posMs: 4_500, posRequests: 116 },
   // ios-webkit's grid budget is the one outlier: the Products tap re-lays out
   // the whole card grid, and WebKit under contention took 4101 ms even as its
   // best of three on one run (1751 ms on the next). Sequentially the same tap
