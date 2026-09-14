@@ -1,4 +1,5 @@
 import ProductNameRail from '../shared/ProductNameRail'
+import TruncatedText from '../shared/TruncatedText.tsx'
 import { Fragment } from 'react'
 import type { ComponentType, Dispatch, RefObject, SetStateAction } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
@@ -315,7 +316,7 @@ export default function InventoryMovementsSurface({
                   <td className={`${cellClass} text-gray-600 dark:text-gray-300`}>{historyActor(movement.user_name)}</td>
                   <td className={`${cellClass} whitespace-nowrap tabular-nums text-gray-600 dark:text-gray-300`}>{fmtTime(movement.created_at)}</td>
                   <td className={`${cellClass} max-w-[14rem] text-gray-500 dark:text-gray-400`}>
-                    <span className="block max-w-full truncate" title={historyField(movement.reason)}>{historyField(movement.reason)}</span>
+                    <TruncatedText text={historyField(movement.reason)} className="block max-w-full" />
                   </td>
                 </tr>
               ))}

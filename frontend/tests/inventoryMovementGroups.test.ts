@@ -194,6 +194,21 @@ await runTest('grouped movements keep the resolved reference on their items, and
   assert.deepEqual(historyGroupReference(bare[0].items), { kind: null, label: '' })
 })
 
+// P3-5: a bare `truncate` + `title=` cell is a dead end on touch -- hover
+// never fires there, so the reason silently had no reveal at all on a
+// phone. The individual movement row's reason must go through the shared
+// TruncatedText component, the same as the group header's reasonPrimary and
+// every other reveal-on-click cell in the app.
+await runTest('the individual movement row reason renders through the shared TruncatedText, not a bare truncate + title', () => {
+  const surface = readFileSync(new URL('../src/components/inventory/InventoryMovementsSurface.tsx', import.meta.url), 'utf8')
+  assert.match(surface, /import TruncatedText from ['"]\.\.\/shared\/TruncatedText\.tsx['"]/)
+  const cellIndex = surface.indexOf('max-w-[14rem] text-gray-500 dark:text-gray-400')
+  assert.ok(cellIndex >= 0, 'the reason cell for the individual movement row must still exist')
+  const cellBody = surface.slice(cellIndex, cellIndex + 300)
+  assert.match(cellBody, /<TruncatedText\s+text=\{historyField\(movement\.reason\)\}/, 'the reason cell must render through TruncatedText, not a bare truncate span')
+  assert.doesNotMatch(cellBody, /className="block max-w-full truncate"/, 'a bare truncate + title span is a dead end on touch -- click/long-press must reveal the full reason too')
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
