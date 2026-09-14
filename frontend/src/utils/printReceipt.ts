@@ -7,6 +7,7 @@ import type { ReceiptPrintSettings } from '../types/receiptContracts'
 import { computeFixedSheetFit, computeImagePageSegments, computeImagePdfLayout, isSingleSheetPaperSize } from './receiptPdfLayout.ts'
 import { RECEIPT_ITEM_COLUMN_GAP_EM, RECEIPT_ROW_GRID_TEMPLATE, receiptItemGridTemplate } from './receiptItemColumns.ts'
 import { receiptPreviewDiagnosticLines, receiptPreviewSettings, type ReceiptPreviewSettings, type ReceiptPreviewTranslate } from './receiptPreviewDiagnostics.ts'
+import { openPrintPreviewWindow, printHtmlInHiddenFrame } from './printSurface.ts'
 
 export const PRINT_DEFAULTS = { ...DEFAULT_RECEIPT_PRINT_SETTINGS }
 const RECEIPT_ASSET_INLINE_CONCURRENCY = 3
@@ -28,6 +29,12 @@ type ReceiptPrintOptions = {
   autoPrintOnPreviewFallback?: boolean
   previewFallbackNote?: string
   previewTranslate?: ReceiptPreviewTranslate
+  // The preview window the CALLER opened inside the user's tap, before its own
+  // awaits (Receipt.tsx lazy-loads this module first, and after that await iOS
+  // no longer treats window.open as user-initiated). `null` means "this device
+  // gave no second window" and selects the same-document print path;
+  // `undefined` means "not a gesture-critical caller, open one here".
+  previewWindow?: Window | null
   // Text colour for the last-resort text-only canvas fallback in
   // createReceiptImageBlob (used only when the primary html2canvas render of
   // the already-styled DOM clone fails). Callers pass '#000000' when the
@@ -1375,16 +1382,38 @@ function attachPrintablePreviewActions(previewWindow: Window | null, { autoPrint
 }
 
 export async function openPrintableReceiptPreview(content: ReceiptContent, options: ReceiptPrintOptions = {}) {
-  const layout = await createPrintableReceiptMarkup(content, options)
-  const html = buildPrintablePreviewDocument(layout, options)
-  const previewWindow = window.open('', '_blank')
-  if (!previewWindow) throw new Error('Popup blocked. Allow popups for this page and try again.')
-  previewWindow.document.open()
-  previewWindow.document.write(html)
-  previewWindow.document.close()
-  attachPrintablePreviewActions(previewWindow, { autoPrint: !!options.autoPrint })
-  previewWindow.focus?.()
-  return { opened: true, mode: 'preview' }
+  // The window is opened BEFORE the first await, not after it. Building the
+  // markup awaits fonts, images and a requestAnimationFrame, and by then the
+  // user's tap is over: iOS blocks window.open, and an installed iOS PWA has
+  // no address bar to un-block it and would hand the blank window to Safari
+  // anyway -- which is why the receipt never reached the printer on iPhone.
+  const previewWindow = options.previewWindow !== undefined ? options.previewWindow : openPrintPreviewWindow()
+  try {
+    const layout = await createPrintableReceiptMarkup(content, options)
+    const html = buildPrintablePreviewDocument(layout, options)
+    if (!previewWindow) {
+      // No second window on this device. Print the SAME document -- identical
+      // markup, identical embedded stylesheet, so the thermal layout is byte
+      // for byte the one the preview would have shown -- from a hidden iframe
+      // in this document. On iOS the platform print sheet is itself the
+      // preview (and its Save to Files is the PDF), so this path prints even
+      // when the caller only asked to preview: there is nowhere else to show
+      // it, and silently doing nothing is what people reported as broken.
+      const printed = await printHtmlInHiddenFrame(html)
+      if (!printed) throw new Error('This browser could not open the receipt for printing.')
+      return { opened: true, mode: 'frame-print' }
+    }
+    previewWindow.document.open()
+    previewWindow.document.write(html)
+    previewWindow.document.close()
+    attachPrintablePreviewActions(previewWindow, { autoPrint: !!options.autoPrint })
+    previewWindow.focus?.()
+    return { opened: true, mode: 'preview' }
+  } catch (error) {
+    // Never leave the blank tab this function opened stranded on screen.
+    try { previewWindow?.close?.() } catch { /* already closed by the user */ }
+    throw error
+  }
 }
 
 function downloadBlob(blob: Blob, fileName: string): string {

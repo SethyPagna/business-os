@@ -24,6 +24,7 @@ import {
   receiptItemGridTemplate,
 } from '../../utils/receiptItemColumns.ts'
 import { customerDisplayName as displayCustomerName, isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
+import { openPrintPreviewWindow } from '../../utils/printSurface.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
 // PDF is a deterministic physical-size artifact. Unlike the HTML Print
@@ -906,7 +907,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const defaultVariant: ReceiptVariant = 'full'
   const variantTitle = (variant: ReceiptVariant) => `${receiptTitle} - ${variant === 'compact' ? '80x50mm' : `${fullReceiptWidthMm}mm`}`
 
-  const exportReceiptVariant = async (printTools: ReceiptPrintModule, mode: ReceiptExportMode, variant: ReceiptVariant) => {
+  const exportReceiptVariant = async (printTools: ReceiptPrintModule, mode: ReceiptExportMode, variant: ReceiptVariant, previewWindow?: Window | null) => {
     const target = variant === 'compact' ? compactPrintRef.current : printRef.current
     const variantSettings = variant === 'compact' ? compactPrintSettings : fullPrintSettings
     if (!target) return
@@ -933,15 +934,22 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         title,
         printSettings: variantSettings,
         previewTranslate: t,
+        previewWindow,
       })
     }
   }
 
   const exportReceiptPdf = async (mode: ReceiptExportMode, variant: ReceiptVariant = defaultVariant) => {
+    // Opened HERE, still inside the tap that triggered this handler: the
+    // module load below is a dynamic import, and once it has been awaited iOS
+    // and Safari no longer accept window.open as user-initiated. null (an
+    // installed iOS app, or a blocked popup) is not an error -- printReceipt
+    // then prints from a hidden iframe in this document instead.
+    const previewWindow = mode === 'print' ? openPrintPreviewWindow() : null
     setPdfBusy(mode)
     try {
       const printTools = await loadReceiptPrintModule()
-      await exportReceiptVariant(printTools, mode, variant)
+      await exportReceiptVariant(printTools, mode, variant, previewWindow)
     } catch (error) {
       window.alert(getErrorMessage(error, t?.('unable_generate_receipt_pdf') || 'Unable to generate receipt PDF'))
     } finally {

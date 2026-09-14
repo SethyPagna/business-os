@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import settingsRoute from './routes/settings'
 import productsRoute from './routes/products'
 import portalRoute from './routes/portal'
@@ -48,6 +48,7 @@ import { maybeRunScheduledImageAudit } from './lib/imageAudit'
 import { maybeRunScheduledEphemeralRetention } from './lib/ephemeralRetention'
 import { reapStalledImportJobs } from './routes/importJobs'
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from './lib/reportMoneyPrecision'
+import { ADMIN_DOCUMENT_REWRITES, APP_DOCUMENT_ROUTES, shouldRewriteAdminDocument } from './lib/adminDocumentIdentity'
 
 export type Env = {
   DB: D1Database
@@ -60,6 +61,12 @@ export type Env = {
   // optional-binding-with-fallback pattern as BACKUP_QUEUE below.
   IMPORT_DB?: D1Database
   ASSETS: R2Bucket
+  // The Workers static-asset binding (wrangler.toml [assets]) -- the built
+  // frontend. Distinct from ASSETS above, which is the R2 bucket holding
+  // UPLOADED files. Optional so a deployment or test harness without the
+  // binding degrades to an explicit 503 on document routes instead of
+  // failing to type-check the whole Worker.
+  STATIC_ASSETS?: Fetcher
   CACHE: KVNamespace
   // Sentry DSN. Optional: absent means reporting is simply skipped, so a
   // local or misconfigured environment behaves exactly as before rather
@@ -223,6 +230,73 @@ app.use('*', async (c, next) => {
   c.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=(self), payment=(), usb=()')
   c.header('Strict-Transport-Security', 'max-age=15552000; includeSubDomains')
 })
+
+// G4: the app document itself, for the SPA routes wrangler.toml's
+// run_worker_first sends here.
+//
+// One built index.html serves both hosts with a storefront-first <head> and
+// an inline script that swaps in the admin identity before first paint. On
+// iOS that script is not always early enough: Add to Home Screen can read the
+// raw HTML, so installing the ADMIN app could produce a home-screen icon
+// called Leang Beauty pointing at the storefront manifest. Rewriting the tags
+// here means the bytes iOS reads are already correct, on every SPA route
+// someone can be sitting on when they install, without touching index.html or
+// the storefront host.
+//
+// Registered ABOVE the body-guard/seeding middleware on purpose: a static
+// document must not carry a D1 bootstrap, and Hono runs matched handlers in
+// registration order, so this terminal handler keeps the security headers set
+// above and skips everything below. Anything it cannot rewrite -- a 304, a
+// non-HTML response, the storefront host -- is passed through untouched.
+const APP_DOCUMENT_CACHE_CONTROL = 'public, max-age=0, must-revalidate'
+
+async function serveAppDocument(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const assets = c.env.STATIC_ASSETS
+  // Only reachable if run_worker_first routes a document here on a deployment
+  // whose [assets] block has no binding; say so instead of serving a 404 page.
+  if (!assets) return c.text('Static assets are not bound to this Worker deployment.', 503)
+
+  const response = await assets.fetch(c.req.raw)
+  const shouldRewrite = shouldRewriteAdminDocument({
+    hostname: new URL(c.req.url).hostname,
+    method: c.req.method,
+    accept: c.req.header('accept'),
+    contentType: response.headers.get('content-type'),
+    ok: response.ok,
+  })
+  // The storefront, a HEAD probe, a 304, an error page: returned exactly as
+  // the asset layer produced it, with no body handling at all.
+  if (!shouldRewrite) return response
+
+  const headers = new Headers(response.headers)
+  // The rewritten body has a different length, and the asset layer already
+  // set one for the original.
+  headers.delete('content-length')
+  // Mirrors frontend/public/_headers for '/' and '/index.html'. Set here
+  // explicitly because this response is produced by the Worker rather than by
+  // the asset layer that applies that file; the pure test fails if the two
+  // ever disagree. It matters at deploy time: a client still running the old
+  // build revalidates its navigation instead of replaying a cached shell, and
+  // so picks up this rewritten document.
+  headers.set('Cache-Control', APP_DOCUMENT_CACHE_CONTROL)
+
+  // STREAMED, never buffered: on the free plan this handler has 10 ms of CPU,
+  // and HTMLRewriter parses the document as it passes through instead of
+  // materialising it. It also cannot touch the inline bootstrap script, which
+  // names the same URLs inside quoted selectors -- those are text, not tags.
+  let rewriter = new HTMLRewriter()
+  for (const rule of ADMIN_DOCUMENT_REWRITES) rewriter = rewriter.on(rule.selector, { element: rule.element })
+  return rewriter.transform(new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  }))
+}
+
+// GET and HEAD: run_worker_first hands this Worker every method on these
+// paths, and a HEAD that fell through to Hono's 404 would report the app's
+// own pages as missing.
+for (const route of APP_DOCUMENT_ROUTES) app.on(['GET', 'HEAD'], route, serveAppDocument)
 
 // Security headers must wrap every early response. Public small envelopes are
 // admitted before even bootstrap/maintenance DB work. Other body classes are
