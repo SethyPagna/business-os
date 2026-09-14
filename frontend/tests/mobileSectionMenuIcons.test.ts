@@ -5,6 +5,7 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { createServer, transformWithEsbuild } from 'vite'
+import { finishBrowserTest, removeBrowserProfile } from './browserProfileTeardown.ts'
 
 const root = path.resolve(import.meta.dirname, '..')
 const browserCandidates = process.platform === 'win32'
@@ -260,5 +261,6 @@ try {
   pending.clear()
   socket?.close()
   await vite.close()
-  fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  removeBrowserProfile(profile)
 }
+finishBrowserTest()
