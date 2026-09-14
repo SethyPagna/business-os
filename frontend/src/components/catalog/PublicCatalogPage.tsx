@@ -133,8 +133,6 @@ type PortalConfig = LooseRecord & {
   businessName?: string
   businessPhone?: string
   businessTagline?: string
-  publicationReady?: boolean
-  publicationMissing?: string[]
   contactLinkLabels?: Record<string, string>
   contactLinks?: Record<string, string>
   exchangeRate?: string | number

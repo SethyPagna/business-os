@@ -316,6 +316,17 @@ function CatalogEditorSurfaceContent() {
     uploadPromoItemMedia,
   } = useCatalogPageContext<CatalogEditorSurfaceContext>()
   const [showAnnouncementStripModal, setShowAnnouncementStripModal] = useState(false)
+  // The seller-identity fields the public site's legal pages print, named
+  // in the words of their own inputs below so the owner never has to guess
+  // which of the five is empty. This summary is the ONLY place the gap is
+  // shown: the storefront renders no notice (owner, 2026-09-14).
+  const missingSellerFieldLabels = [
+    [editorDraft.business_legal_name, copy('portal_legal_editor_legal_name', 'Registered business name')],
+    [editorDraft.business_registration_number, copy('portal_legal_editor_registration', 'Business registration number')],
+    [editorDraft.business_address, copy('address', 'Address')],
+    [editorDraft.business_phone, copy('phone', 'Phone')],
+    [editorDraft.business_email, copy('email', 'Email')],
+  ].filter(([value]) => !String(value || '').trim()).map(([, label]) => label)
 
   return (
     <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-4 overflow-x-hidden pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
@@ -1268,18 +1279,16 @@ function CatalogEditorSurfaceContent() {
                 <div className="text-sm font-semibold text-slate-800">{copy('portal_legal_editor_block', 'Legal & business details')}</div>
                 <InfoHint label={copy('portal_legal_editor_block', 'Legal & business details')} text={copy('portal_legal_editor_hint', 'These verified details appear in the storefront policies. Publication stays paused while a required field is blank.')} />
               </div>
-              {[
-                editorDraft.business_legal_name,
-                editorDraft.business_registration_number,
-                editorDraft.business_address,
-                editorDraft.business_phone,
-                editorDraft.business_email,
-              ].some((value) => !String(value || '').trim()) ? (
+              {missingSellerFieldLabels.length ? (
                 <p role="status" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
                   {copy(
                     'portalPublicationReadinessWarning',
                     'Publication is paused until the registered name, registration number, address, phone, and email are all verified and completed.',
                   )}
+                  {' '}
+                  <span className="font-semibold">
+                    {copy('portalPublicationMissingFields', 'Missing: {fields}').replace('{fields}', missingSellerFieldLabels.join(', '))}
+                  </span>
                 </p>
               ) : null}
               <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">

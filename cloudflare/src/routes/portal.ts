@@ -196,9 +196,13 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     // Separate from businessName, which is the display/brand name.
     businessLegalName: settings.business_legal_name || '',
     businessRegistrationNumber: settings.business_registration_number || '',
-    // Public catalogue data is withheld until the operator can identify the
-    // seller and give customers both a physical and electronic contact point.
-    // The display name is deliberately not accepted as a registered identity.
+    // An ADMIN-EDITOR hint only: which of the five seller-identity fields
+    // are still empty. Nothing on the public storefront reads these any
+    // more and no visitor feature is switched off by them -- the owner ruled
+    // (2026-09-14) that the storefront never renders a system-generated
+    // notice and that AI chat / share submissions follow their own settings
+    // (aiEnabled, submissionEnabled). The display name is deliberately not
+    // accepted as a registered identity.
     publicationReady: publicationMissing.length === 0,
     publicationMissing,
     businessTagline: settings.customer_portal_business_tagline || '',
@@ -823,7 +827,7 @@ app.get('/ai/status', async (c) => {
   // for response-shape stability with the client's existing handling.
   return c.json({
     success: true,
-    enabled: !!config.publicationReady && !!config.aiEnabled && !!provider,
+    enabled: !!config.aiEnabled && !!provider,
     title: config.aiTitle,
     disclaimer: config.aiDisclaimer,
     provider: provider?.provider || '',
@@ -953,9 +957,6 @@ app.post('/ai/chat', async (c) => {
 
     const settings = await loadSettingsMap(c.env)
     const config = buildPortalConfig(settings, c.env)
-    if (!config.publicationReady) {
-      return c.json({ error: 'The storefront is not ready for publication', code: 'portal_publication_not_ready' }, 503)
-    }
     if (!config.aiEnabled) {
       return c.json({ error: 'Portal AI is currently disabled' }, 403)
     }
@@ -1542,9 +1543,6 @@ app.post('/submissions', async (c) => {
   // database round-trip; the session check is what actually gates the write.
   const settings = await loadSettingsMap(c.env)
   const config = buildPortalConfig(settings, c.env)
-  if (!config.publicationReady) {
-    return c.json({ error: 'The storefront is not ready for publication', code: 'portal_publication_not_ready' }, 503)
-  }
   if (!config.submissionEnabled) return c.json({ error: 'Customer submissions are currently disabled' }, 403)
 
   const rejection = await admitRequestBody(c, PORTAL_SCREENSHOT_BODY_BYTES)

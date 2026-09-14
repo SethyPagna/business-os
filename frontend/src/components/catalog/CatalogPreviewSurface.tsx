@@ -25,8 +25,6 @@ type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => str
 type DisplayConfig = {
   businessName?: string
   businessTagline?: string
-  publicationReady?: boolean
-  publicationMissing?: string[]
   logoFit?: string
   logoPositionX?: number
   logoPositionY?: number
@@ -596,21 +594,14 @@ export default function CatalogPreviewSurface({
               </div>
             </nav>
 
-            {displayConfig.publicationReady === false ? (
-              <div role="status" className="mx-1 mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-100">
-                <div className="font-semibold">
-                  {copy('portalPublicationReadinessTitle', 'Some online features are unavailable', 'មុខងារអនឡាញមួយចំនួនមិនអាចប្រើបាន')}
-                </div>
-                <p className="mt-1">
-                  {copy(
-                    'portalPublicationReadinessBody',
-                    'Browse the catalogue or contact the store while we complete our seller details.',
-                    'សូមមើលកាតាឡុក ឬទាក់ទងហាង ខណៈយើងកំពុងបំពេញព័ត៌មានអ្នកលក់។',
-                  )}
-                </p>
-              </div>
-            ) : null}
-
+            {/* No system-generated notice is rendered here on purpose. The
+                amber "seller details" banner that used to sit between the
+                tabs and the content was removed at the owner's direction
+                (2026-09-14: "remove the notice in the public website. i
+                don't want it. if i want to add i will in the editor"). The
+                storefront shows owner-written content only; the empty seller
+                fields are still named to the owner inside the editor
+                (CatalogEditorSurface.tsx's publication summary). */}
             <main id="portal-main-content" tabIndex={-1}>
               {promotionsSection}
               {catalogSection}
