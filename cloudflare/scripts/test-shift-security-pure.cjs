@@ -96,7 +96,7 @@ async function main() {
 
   sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr)
-    VALUES ('S-FOREIGN','per_account',8,'Other cashier',1,'Canonical Shop',date('now','+7 hours'),datetime('now','-1 hour'),5,1000)`).run()
+    VALUES ('S-FOREIGN','per_account',8,'Other cashier',1,'Canonical Shop',date(datetime('now','-1 hour'),'+7 hours'),datetime('now','-1 hour'),5,1000)`).run()
   const foreignId = sqlite.prepare("SELECT id FROM shift_sessions WHERE shift_code='S-FOREIGN'").get().id
   // O8 -- under the default per_account policy a cashier sees ONLY their own
   // shifts. Each row carries the opening float and the counted drawer, so
@@ -138,7 +138,7 @@ async function main() {
   // active is not reachable at all, and says "not found" rather than naming it.
   sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr)
-    VALUES ('S-OFFBRANCH','per_account',7,'Cashier',2,'Inactive',date('now','+7 hours'),datetime('now','-1 hour'),5,1000)`).run()
+    VALUES ('S-OFFBRANCH','per_account',7,'Cashier',2,'Inactive',date(datetime('now','-1 hour'),'+7 hours'),datetime('now','-1 hour'),5,1000)`).run()
   const offBranchId = sqlite.prepare("SELECT id FROM shift_sessions WHERE shift_code='S-OFFBRANCH'").get().id
   assert.equal((await call('PATCH', `/${offBranchId}`, { expected_revision: 0, reason: 'out of scope', opening_float_usd: 6 })).status, 404,
     'a shift outside the caller branch scope cannot be amended')
@@ -228,7 +228,7 @@ async function main() {
   sqlite.prepare("UPDATE settings SET value='shop_wide' WHERE key='shift_scope_mode'").run()
   sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr)
-    VALUES ('S-SHOP','shop_wide',8,'Shop opener',1,'Canonical Shop',date('now','+7 hours'),datetime('now','-2 hours'),9,9000)`).run()
+    VALUES ('S-SHOP','shop_wide',8,'Shop opener',1,'Canonical Shop',date(datetime('now','-2 hours'),'+7 hours'),datetime('now','-2 hours'),9,9000)`).run()
   // shift_scope_mode=shop_wide is honoured on the READ side too: the shift
   // belongs to the branch, so the branch's staff may see it.
   const shopWideList = await call('GET', '/?branch_id=1')
