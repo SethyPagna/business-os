@@ -47,17 +47,29 @@ function readKeyboardInset(): number {
   return hidden >= KEYBOARD_MIN_PX ? Math.round(hidden) : 0
 }
 
+// The in-memory DOM doubles this repo's React tests render Modal against
+// (tests/filePickerModalLifecycle.test.ts, tests/createProductsSession.test.ts)
+// expose `style` as a plain object with no CSSOM methods on it, and so does
+// any host that is not a browser. Feature-detect rather than assume, exactly
+// as utils/useViewport.ts does for MediaQueryList.addEventListener.
+function readableRootStyle(): CSSStyleDeclaration | null {
+  if (typeof document === 'undefined') return null
+  const style = document.documentElement?.style
+  if (!style || typeof style.setProperty !== 'function' || typeof style.removeProperty !== 'function') return null
+  return style
+}
+
 function publishKeyboardInset(): void {
-  if (typeof document === 'undefined') return
+  const style = readableRootStyle()
+  if (!style) return
   const inset = readKeyboardInset()
   // Writing an identical value would still invalidate style for the whole
   // document. Desktop sits at 0 forever, so it must cost exactly one compare
   // per event and never a style write.
   if (inset === published) return
   published = inset
-  const root = document.documentElement
-  if (inset === 0) root.style.removeProperty(KEYBOARD_INSET_PROPERTY)
-  else root.style.setProperty(KEYBOARD_INSET_PROPERTY, `${inset}px`)
+  if (inset === 0) style.removeProperty(KEYBOARD_INSET_PROPERTY)
+  else style.setProperty(KEYBOARD_INSET_PROPERTY, `${inset}px`)
 }
 
 function attachViewportListeners(): void {
@@ -99,9 +111,7 @@ export function useVisualViewportInset(): void {
       detach?.()
       detach = null
       published = 0
-      if (typeof document !== 'undefined') {
-        document.documentElement.style.removeProperty(KEYBOARD_INSET_PROPERTY)
-      }
+      readableRootStyle()?.removeProperty(KEYBOARD_INSET_PROPERTY)
     }
   }, [])
 }
