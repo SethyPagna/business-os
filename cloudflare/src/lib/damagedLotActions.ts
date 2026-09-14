@@ -30,6 +30,7 @@ import type { D1Compat } from './db'
 import { incrementBatchStockStatement, type StockWriteStatement } from './productBatches'
 import { createDamagedLotStatement } from './returnsStock'
 import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
+import { buildInClause, selectInChunks } from './sqlBinding'
 import {
   damagedLotReference,
   taggedReasonText,
@@ -326,21 +327,29 @@ export type TaggedLotGroup = {
 export async function readTaggedLotGroups(db: D1Compat, productIds: number[]): Promise<TaggedLotGroup[]> {
   const ids = [...new Set(productIds.map((id) => Number(id)).filter((id) => Number.isSafeInteger(id) && id > 0))]
   if (!ids.length) return []
-  const placeholders = ids.map(() => '?').join(',')
-  return await db.prepare(`
-    SELECT d.product_id AS product_id,
-           d.product_name AS product_name,
-           d.branch_id AS branch_id,
-           b.name AS branch_name,
-           COALESCE(d.condition_tag, 'damaged') AS condition_tag,
-           SUM(d.quantity_remaining) AS quantity,
-           COUNT(*) AS lot_count
-    FROM damaged_stock_lots d
-    LEFT JOIN branches b ON b.id = d.branch_id
-    WHERE d.product_id IN (${placeholders}) AND d.quantity_remaining > 0
-    GROUP BY d.product_id, d.branch_id, COALESCE(d.condition_tag, 'damaged')
-    ORDER BY d.product_id ASC, COALESCE(d.condition_tag, 'damaged') ASC, d.branch_id ASC
-  `).all<TaggedLotGroup>(ids)
+  // D1 caps bound parameters at 100 (lib/sqlBinding.ts) -- a page of
+  // products plus pinned recently-edited ones can exceed that, so this
+  // chunks the IN(...) list the same way datedStockCountApply.ts does
+  // rather than binding the whole id array in one statement. Each id
+  // lands in exactly one chunk, so the per-chunk GROUP BY never needs to
+  // be merged across chunks -- concatenating the chunk results is enough.
+  return await selectInChunks(ids, 0, async (chunk) => {
+    const { sql, params } = buildInClause('productId', chunk)
+    return await db.prepare(`
+      SELECT d.product_id AS product_id,
+             d.product_name AS product_name,
+             d.branch_id AS branch_id,
+             b.name AS branch_name,
+             COALESCE(d.condition_tag, 'damaged') AS condition_tag,
+             SUM(d.quantity_remaining) AS quantity,
+             COUNT(*) AS lot_count
+      FROM damaged_stock_lots d
+      LEFT JOIN branches b ON b.id = d.branch_id
+      WHERE d.product_id IN (${sql}) AND d.quantity_remaining > 0
+      GROUP BY d.product_id, d.branch_id, COALESCE(d.condition_tag, 'damaged')
+      ORDER BY d.product_id ASC, COALESCE(d.condition_tag, 'damaged') ASC, d.branch_id ASC
+    `).all<TaggedLotGroup>(params)
+  })
 }
 
 /** Open lots for ONE (product, branch, tag), oldest first -- the allocation

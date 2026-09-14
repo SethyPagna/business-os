@@ -164,6 +164,10 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   './stockCondition': stockCondition,
   './movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision }),
   './returnsStock': loadReal('lib/returnsStock.ts', { './productBatches': productBatches, './stockCondition': stockCondition }),
+  // readTaggedLotGroups now chunks its IN(...) list through this helper
+  // (D1's 100-bound-parameter fix); without the override the transpiled
+  // require resolves against scripts/ and the whole loader dies.
+  './sqlBinding': sqlBinding,
 })
 const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/stockCondition': stockCondition,

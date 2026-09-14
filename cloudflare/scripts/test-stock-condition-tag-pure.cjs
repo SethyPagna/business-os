@@ -184,6 +184,10 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   './stockCondition': stockCondition,
   './movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision }),
   './returnsStock': loadReal('lib/returnsStock.ts', { './productBatches': productBatches, './stockCondition': stockCondition }),
+  // readTaggedLotGroups chunks its IN(...) list through this helper (the
+  // D1 bound-parameter fix); without the override the transpiled require
+  // resolves against scripts/ and the whole harness dies at load time.
+  './sqlBinding': sqlBinding,
 })
 const audits = []
 // The REAL ledger revert. Its refusal of a damaged_lot: movement is one of
@@ -631,6 +635,59 @@ const ADD = (extra) => ({
 
     // And the held units were never part of sellable stock: 12 in, 6 held out.
     assert.deepEqual(sellable(), { product: 6, branch: 6 })
+  })
+
+  // P3-L6 (bound-parameter fix): D1 refuses any statement bound with more
+  // than 100 parameters (lib/sqlBinding.ts). A server page of products (up
+  // to 100) plus pinned recently-edited rows routinely asks GET
+  // /tagged-lots for just over 100 ids, so readTaggedLotGroups has to chunk
+  // its `product_id IN (...)` itself rather than binding the whole id list
+  // in one statement. Driven directly (not through the route, which merely
+  // caps the id count) with an instrumented db that counts bound
+  // parameters per statement -- the same class of check
+  // test-d1-bound-params-repro.cjs runs, but against this reader's own SQL.
+  await check('readTaggedLotGroups chunks a 151-id read and never binds more than 100 parameters per statement', async () => {
+    seed()
+    const returnsStockForCheck = loadReal('lib/returnsStock.ts', { './productBatches': productBatches, './stockCondition': stockCondition })
+    // seed() already inserted product id 1; add 150 more (2..151) so the
+    // read has to cover 151 ids total -- one more than one unchunked
+    // IN(...) can bind.
+    const ids = [1]
+    const lotStatements = [returnsStockForCheck.createDamagedLotStatement({
+      productId: 1, productName: 'Widget', branchId: 1, batchId: null, returnIdSql: 'NULL',
+      quantity: 1, reason: 'seed', userId: 1, userName: 'tester', conditionTag: 'broken', source: 'remove', unitCostUsd: 1,
+    })]
+    for (let i = 2; i <= 151; i++) {
+      rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
+        VALUES (@id, @name, @barcode, 1, 0, 3, 12000)`).run({ id: i, name: `Widget ${i}`, barcode: `TAG${i}` })
+      lotStatements.push(returnsStockForCheck.createDamagedLotStatement({
+        productId: i, productName: `Widget ${i}`, branchId: 1, batchId: null, returnIdSql: 'NULL',
+        quantity: 1, reason: 'seed', userId: 1, userName: 'tester', conditionTag: 'broken', source: 'remove', unitCostUsd: 1,
+      }))
+      ids.push(i)
+    }
+    await db.batch(lotStatements)
+
+    const boundCounts = []
+    const countingDb = {
+      prepare(sql) {
+        const bound = (sql.match(/@\w+/g) || []).length
+        const real = db.prepare(sql)
+        return {
+          get: (params) => real.get(params),
+          all: (params) => { boundCounts.push(bound); return real.all(params) },
+          run: (params) => real.run(params),
+        }
+      },
+    }
+    const groups = await damagedLotActions.readTaggedLotGroups(countingDb, ids)
+
+    assert.ok(boundCounts.length >= 2, 'a 151-id read must run more than one chunked statement, not one unchunked IN(...)')
+    for (const bound of boundCounts) {
+      assert.ok(bound <= 100, `a single statement bound ${bound} parameters -- past D1's 100-bound-parameter limit`)
+    }
+    assert.equal(new Set(groups.map((g) => g.product_id)).size, 151, 'every one of the 151 products must come back, not just the first chunk')
+    assert.equal(groups.reduce((sum, g) => sum + Number(g.quantity), 0), 151, 'no lot silently dropped by the chunking')
   })
 
   await check('a held-row action still demands a reason, like every other stock change', async () => {

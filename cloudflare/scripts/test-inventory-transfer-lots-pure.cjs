@@ -83,6 +83,10 @@ const taggedLotActions = loadModule('lib/damagedLotActions.ts', (id) => {
   if (id === './productBatches') return productBatches
   if (id === './movementCostSnapshot') return movementCostSnapshot
   if (id === './returnsStock') return taggedReturnsStock
+  // readTaggedLotGroups now chunks its IN(...) list through this helper
+  // (D1's 100-bound-parameter fix); without the override the transpiled
+  // require resolves against scripts/ and the whole loader dies.
+  if (id === './sqlBinding') return sqlBinding
   return require(id)
 })
 const inventoryRoute = loadModule('routes/inventory.ts', (id) => {

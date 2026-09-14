@@ -2558,8 +2558,12 @@ app.get('/tagged-lots', async (c) => {
     .map((part) => Number.parseInt(part.trim(), 10))
     .filter((id) => Number.isSafeInteger(id) && id > 0)
   if (!ids.length) return c.json({ items: [] })
-  // Bounded like every other id-list read here; the Products page asks for
-  // the ids it is currently rendering, never the whole catalog.
+  // The 500 cap here is a sanity ceiling on the request, not what keeps D1
+  // happy -- a server page (up to 100 products) plus pinned recently-edited
+  // rows routinely asks for just over 100 ids, past D1's 100-bound-parameter
+  // limit (lib/sqlBinding.ts). readTaggedLotGroups is the one that actually
+  // stays inside that limit: it chunks the IN(...) list itself, so this
+  // route never needs to.
   const items = await readTaggedLotGroups(getDb(c.env), ids.slice(0, 500))
   return c.json({ items })
 })
