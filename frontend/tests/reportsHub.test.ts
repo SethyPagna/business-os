@@ -473,7 +473,41 @@ test('buildIncomeStatement: Not Paid is one positive memo below business totals'
   assert.equal(groups.filter((group) => group === 'pending').length, 1, 'Not Paid appears as exactly one memo row')
   assert.ok(groups.slice(firstPending).every((g) => g === 'pending'), 'nothing realised follows the unpaid block')
   assert.ok(groups.lastIndexOf('profit') < firstPending, 'the final realised total precedes it')
-  assert.equal(STATEMENT_GROUPS[STATEMENT_GROUPS.length - 1], 'pending', 'and the render order the three surfaces share agrees')
+  // The render order the three surfaces share agrees: unpaid is the last
+  // realised-money group, and the removal-loss memo block sits directly below
+  // it (owner, Sep 14 2026: "also add one row below unpaid in reports as well").
+  assert.deepEqual(
+    STATEMENT_GROUPS.slice(-2),
+    ['pending', 'losses'],
+    'losses renders directly below the unpaid block on Overview, PeriodReport and GroupedReport alike',
+  )
+})
+
+test('removal losses render as their own memo block below unpaid, and only when the server sent them', () => {
+  const withLosses = buildIncomeStatement({
+    sales: normalizeTotals({ ...adminTotals, removal_loss_usd: 12.5, removal_loss_qty: 3, removal_loss_unvalued_rows: 1, revenue_after_losses_usd: 87.5, profit_after_losses_usd: -2.5 }),
+    profitMode: 'gross',
+    khrToUsd,
+  })
+  const groups = withLosses.map((l) => l.group)
+  const firstLoss = groups.indexOf('losses')
+  assert.ok(firstLoss > 0, 'the loss block exists once the Worker sends the figures')
+  assert.ok(groups.slice(firstLoss).every((g) => g === 'losses'), 'nothing else follows the loss block')
+  assert.ok(groups.lastIndexOf('pending') < firstLoss, 'and it sits below unpaid, not above it')
+  const m = lineMap(withLosses)
+  assert.equal(m.removal_loss.usd, 12.5)
+  assert.equal(m.revenue_after_losses.usd, 87.5)
+  // Unclamped on purpose: destroying more stock than the window earned is the
+  // exact case the owner asked to be able to see.
+  assert.equal(m.profit_after_losses.usd, -2.5)
+  for (const key of ['removal_loss', 'revenue_after_losses', 'profit_after_losses']) {
+    assert.equal(m[key].kind, 'memo', `${key} is a memo, never a realised total`)
+  }
+
+  // Absence is the contract: an older Worker, or a non-admin reply, sends no
+  // loss keys and the rows are omitted rather than printed as $0.00.
+  const plain = buildIncomeStatement({ sales: normalizeTotals(adminTotals), profitMode: 'gross', khrToUsd })
+  assert.equal(plain.filter((l) => l.group === 'losses').length, 0, 'no loss keys means no loss rows')
 })
 
 test('buildIncomeStatement: previous-period figures ride the same lines; none without a previous block', () => {
