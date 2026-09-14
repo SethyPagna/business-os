@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type { SavedStockReason } from '../../utils/useSavedStockReasons.ts'
 
 // The one reason control for stock writes: the saved-reason chips from
 // settings.inventory_saved_reasons (GET /api/inventory/reasons) above a free
@@ -6,7 +7,9 @@ import type { ReactNode } from 'react'
 // typed. InventoryStockModals' adjust form and FastStockInModal's line entry
 // both render this -- the fast flow used to write a hardcoded label per line
 // (N27) and the owner asked for the reasons back on every add / remove / set.
-export type SavedStockReason = { id: string; label: string }
+// The chip list itself is loaded by utils/useSavedStockReasons, which owns
+// the catalog shape; re-exported here so a call site needs one import.
+export type { SavedStockReason }
 
 type StockReasonFieldProps = {
   id?: string

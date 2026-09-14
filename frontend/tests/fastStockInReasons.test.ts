@@ -23,6 +23,7 @@ const transport = read('../src/api/batchesTransport.ts')
 const batchesRoute = read('../../cloudflare/src/routes/batches.ts')
 const inventoryRoute = read('../../cloudflare/src/routes/inventory.ts')
 const sessionsSection = read('../src/components/products/StockInSessionsSection.tsx')
+const productsSession = read('../src/components/products/CreateProductsSessionModal.tsx')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
 
@@ -101,6 +102,29 @@ runTest('the queued line and the sessions list show the reason where the line is
   assert.match(sessionsSection, /tr\('reason', 'Reason'\)/)
   // clicking a session line reveals its reason in the line detail panel
   assert.match(sessionsSection, /selectedLine\.reason/, 'the clicked line detail carries the reason')
+})
+
+runTest("the Add/Create Products session asks for a reason and its payload builder sends it", () => {
+  // The second session surface: the Worker has taken a session-default and a
+  // per-line reason since the line-reason commit, but this modal produced
+  // neither, so every product added from the Products page still landed on
+  // the generated 'Stock-in session <id>' label.
+  assert.match(productsSession, /import StockReasonField from '\.\.\/shared\/StockReasonField\.tsx'/)
+  assert.match(productsSession, /import \{ useSavedStockReasons \} from '\.\.\/\.\.\/utils\/useSavedStockReasons\.ts'/)
+  assert.match(productsSession, /<StockReasonField\n\s+id="create-products-reason"[^]*?savedReasons=\{savedReasons\}/, 'the shared control, in the shared details')
+  assert.doesNotMatch(productsSession, /savedReasons\.map/, 'no second copy of the chip markup')
+  // Frozen per line exactly like the free-goods declaration, so editing the
+  // shared details later only changes lines queued after the edit.
+  assert.match(productsSession, /type SessionLine = \{[^]*?\n  reason: string\n[^]*?\n\}/)
+  assert.equal((productsSession.match(/freeGoods, reason: reason\.trim\(\)/g) || []).length, 3, 'every queued line freezes the reason')
+  // The payload builder sends it, and only when there is one -- a session
+  // without a reason must serialize exactly as before (idempotency).
+  assert.match(productsSession, /\.\.\.\(line\.reason \? \{ reason: line\.reason \} : \{\}\),/)
+  // The draft carries it across a reload like every other shared detail.
+  assert.match(productsSession, /type UnifiedSessionDraft = [^]*?\n  reason\?: string\n/)
+  assert.match(productsSession, /const \[reason, setReason\] = useState\(draft\?\.reason \|\| ''\)/)
+  // Visible where the line is, same as the fast flow's queue.
+  assert.match(productsSession, /\{row\.reason \? <span className="block break-words text-\[10px\] text-gray-500 dark:text-gray-400">\{row\.reason\}<\/span> : null\}/)
 })
 
 runTest('Worker parity: /inventory/adjust still refuses a missing reason; /batches takes an optional one', () => {
