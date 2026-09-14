@@ -1356,3 +1356,41 @@ body[data-density='spacious'] th, body[data-density='spacious'] td { padding-top
   min-width: 0;
   max-width: 100%;
 }
+
+/* ---------------------------------------------------------------------------
+   iOS focus-zoom floor. Must stay at the END of this file -- see the
+   specificity note below.
+
+   iOS Safari zooms the whole page in when a focused text field's COMPUTED
+   font-size is under 16px, and it never zooms back out: the layout is left
+   scaled up with the action row pushed outside the viewport, which is the
+   "everything jumps when I tap a field and I can't reach the buttons" report.
+
+   This rule is the PRIMARY mechanism. `maximum-scale=1, user-scalable=no` on
+   index.html's viewport meta is belt and braces only: Safari has ignored
+   user-scalable on the open web since iOS 10 (an accessibility decision) and
+   honours it only in an installed home-screen PWA, so a build that relies on
+   the meta tag alone still zooms for anyone using the site in a browser tab.
+
+   `.input` already carried `font-size: max(16px, ...)` (see the .input rule
+   far above) but WITHOUT !important, while `.text-xs`/`.text-sm` in this file
+   ARE !important -- so `<input className="input text-sm">`, of which there
+   were 74 single-line occurrences, resolved to 14px and zoomed. That is the
+   same trap `input.date-entry-input` documents: a class rule (0-1-0) beats a
+   bare type rule (0-0-1) when both are !important, so the selectors here are
+   deliberately element-plus-pseudo-class (0-1-1 and up) AND placed last.
+
+   Scoped to the types that actually raise a keyboard. Checkbox/radio/range/
+   color/file are excluded because their intrinsic box can be font-size
+   derived, and resizing them would change layout for no iOS benefit.
+   `.date-entry-input` is excluded by name so the dedicated rule above (which
+   guarantees the same 16px floor on phones and additionally pins 13px from
+   768px up) keeps winning instead of tying with this one on source order. */
+@media (max-width: 767px) {
+  input:is([type='text'], [type='search'], [type='email'], [type='url'], [type='tel'], [type='number'], [type='password'], :not([type])):not(.date-entry-input),
+  select:not([multiple]),
+  textarea:not([hidden]),
+  [contenteditable='true']:not([hidden]) {
+    font-size: max(16px, 1em) !important;
+  }
+}
