@@ -54,6 +54,9 @@ export type InventoryStockSessionLine = {
   received_date: string
   expiry_date?: string | null
   notes?: string | null
+  // P3-L2: the reason written onto this line's movement, as typed; omitted
+  // keeps the Worker's generated "Stock-in session <id>" label.
+  reason?: string | null
   unit_cost_usd?: number | null
   // A $0.00 receipt is only accepted as a DECLARED gift. The flag is what
   // distinguishes it from a cost nobody entered (lib/stockReceiptGate.ts).

@@ -37,12 +37,12 @@ const PRODUCT_FIELDS = [
 ] as const
 const DEFAULT_FIELDS = [
   'branch_id', 'supplier_id', 'supplier_name', 'received_date', 'expiry_date', 'notes',
-  'unit_cost_usd', 'payment_status', 'credit_due_date', 'brand', 'free_goods',
+  'unit_cost_usd', 'payment_status', 'credit_due_date', 'brand', 'free_goods', 'reason',
 ] as const
 const ITEM_FIELDS = [
   'line_id', 'kind', 'product_id', 'product', 'batch_id', 'branch_id', 'quantity',
   'supplier_id', 'supplier_name', 'received_date', 'expiry_date', 'notes',
-  'unit_cost_usd', 'payment_status', 'credit_due_date', 'free_goods',
+  'unit_cost_usd', 'payment_status', 'credit_due_date', 'free_goods', 'reason',
 ] as const
 
 type Row = Record<string, unknown>
@@ -61,6 +61,10 @@ type CanonicalLine = {
   received_date: string
   expiry_date: string | null
   notes: string | null
+  // P3-L2: the operator's own reason for this line's movement, as typed.
+  // Present only when given: the canonical JSON is the idempotency
+  // fingerprint, so a request without one must serialize exactly as before.
+  reason?: string
   unit_cost_usd: number | null
   free_goods: boolean
   payment_status: 'paid' | 'credit' | null
@@ -304,6 +308,7 @@ function parseRequest(rawValue: unknown, maxImages: number): StockSessionRequest
     // accept what the other refuses.
     const supplierName = text(expanded('supplier_name'), 'supplier_name', 240)
     const notes = text(expanded('notes'), 'notes', 1000)
+    const reason = text(expanded('reason'), 'reason', 500)
     const unitCostUsd = finite(expanded('unit_cost_usd'), 'unit_cost_usd', true)
     const freeGoods = expanded('free_goods') === true
     // A line that names an existing batch_id defers the SUPPLIER half only.
@@ -328,6 +333,7 @@ function parseRequest(rawValue: unknown, maxImages: number): StockSessionRequest
       received_date: receivedDate,
       expiry_date: date(expanded('expiry_date'), 'expiry_date'),
       notes: freeGoods && unitCostUsd === 0 ? appendReceiptNotes(notes, [FREE_GOODS_REASON_NOTE]) : notes,
+      ...(reason ? { reason } : {}),
       unit_cost_usd: unitCostUsd,
       free_goods: freeGoods,
       payment_status: paymentStatus,
@@ -839,10 +845,12 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     // digest, all of which filter on 'add'. Rows already written under the
     // old string are covered by STOCK_RECEIPT_MOVEMENT_TYPES until migration
     // 0128 normalises them.
+    // P3-L2: the line's own reason (as typed) is the movement reason; a line
+    // without one keeps the generated session label.
     statements.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
       SELECT m.product_id,p.name,m.branch_id,b.name,'add',m.quantity,m.unit_cost_usd,0,CASE WHEN m.unit_cost_usd IS NULL THEN NULL ELSE @totalCostUsd END,0,@reason,o.rowid,@actor,@actorName,m.batch_id
       FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id JOIN stock_session_operations o ON o.id=m.operation_id
-      WHERE m.operation_id=@operationId AND m.line_id=@lineId`, params: { reason: `Stock-in session ${operationId}`, actor: user.id, actorName: actorSnapshot(user), operationId, lineId: line.line_id, totalCostUsd: plan.params.receivedCostUsd } })
+      WHERE m.operation_id=@operationId AND m.line_id=@lineId`, params: { reason: line.reason || `Stock-in session ${operationId}`, actor: user.id, actorName: actorSnapshot(user), operationId, lineId: line.line_id, totalCostUsd: plan.params.receivedCostUsd } })
     statements.push({ sql: 'UPDATE stock_session_members SET movement_id=last_insert_rowid() WHERE operation_id=@operationId AND line_id=@lineId', params: { operationId, lineId: line.line_id } })
   }
   statements.push({ sql: `UPDATE stock_session_operations SET receipt_json=json_object(
