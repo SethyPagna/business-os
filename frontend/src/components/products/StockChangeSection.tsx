@@ -49,6 +49,7 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { buildHistoryRowModel, formatHistoryReference, historyExportField, historyField } from '../../utils/historyRowModel.ts'
 import {
   isRevertibleStockMovement,
+  isStockSessionGenerationMovement,
   recordedMovementCosts,
   showReceiptAccounting,
 } from '../../utils/stockMovementDetail.ts'
@@ -878,7 +879,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
 
   const detailCosts = detail ? recordedMovementCosts(detail) : null
   const detailShowsReceiptAccounting = detail ? showReceiptAccounting(detail.movement_type) : false
-  const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type) : false
+  const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type) && !isStockSessionGenerationMovement(detail) : false
 
   return (
     <div className="space-y-3">

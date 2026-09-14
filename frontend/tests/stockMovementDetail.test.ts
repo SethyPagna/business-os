@@ -5,6 +5,7 @@ import {
   STOCK_RECEIPT_MOVEMENT_TYPES,
   isRevertibleStockMovement,
   isStockReceiptMovement,
+  isStockSessionGenerationMovement,
   recordedMovementCosts,
   showReceiptAccounting,
 } from '../src/utils/stockMovementDetail.ts'
@@ -60,6 +61,18 @@ test('frontend revert eligibility mirrors the backend allowlist', () => {
   for (const type of ['sale', 'return', 'supplier_return', 'transfer_in', 'transfer_out', 'correction_in', 'correction_out', 'future_type']) {
     assert.equal(isRevertibleStockMovement(type), false, type)
   }
+})
+
+test('a stock-in session undo/redo counter-movement is not offered for revert', () => {
+  assert.equal(isStockSessionGenerationMovement({ reason: 'Stock session op-1 undo generation 1', reference_id: 12 }), true)
+  assert.equal(isStockSessionGenerationMovement({ reason: 'Stock session op-1 redo generation 2', reference_id: '12' }), true)
+  assert.equal(isStockSessionGenerationMovement({ reason: 'Stock-in session op-1', reference_id: 12 }), false, 'the session receipt itself stays revertible')
+  assert.equal(isStockSessionGenerationMovement({ reason: 'Stock session op-1 undo generation 1', reference_id: 'revert:5' }), false)
+  assert.equal(isStockSessionGenerationMovement({ reason: null, reference_id: null }), false)
+  const sessionSource = readFileSync(new URL('../../cloudflare/src/lib/stockSession.ts', import.meta.url), 'utf8')
+  assert.ok(sessionSource.includes('`Stock session ${op.id} ${direction} generation ${generation + 1}`'), 'Worker undo/redo reason template located')
+  const section = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
+  assert.match(section, /isRevertibleStockMovement\(detail\.movement_type\) && !isStockSessionGenerationMovement\(detail\)/)
 })
 
 test('frontend movement allowlists stay in source parity with the Worker', () => {
