@@ -1,3 +1,5 @@
+import { useMemo } from 'react'
+import AppSelect from '../shared/AppSelect'
 import { STOCK_CONDITION_TAGS } from '../../utils/stockCondition.ts'
 
 // P3-L6. The owner's control, in ONE row on every screen size: "Make it option
@@ -13,8 +15,8 @@ import { STOCK_CONDITION_TAGS } from '../../utils/stockCondition.ts'
 // the row never grows a second line and never reflows when the choice changes.
 //
 // The tag text is NEVER translated -- the owner's rule is "the tag remains
-// english even in khmer" -- so the <option> labels below render the raw
-// constant. Only the two segment labels go through the packs.
+// english even in khmer" -- so each option's label below IS the raw constant.
+// Only the two segment labels go through the packs.
 
 type Translate = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 
@@ -44,6 +46,8 @@ export default function StockConditionTagRow({ mode, value, onChange, tr, disabl
   // Choosing the tagged segment with nothing picked yet lands on the first
   // constant rather than an empty select the person has to notice and fill.
   const selectedTag = tagged ? value : STOCK_CONDITION_TAGS[0]
+  // The label IS the constant -- no tr(), in any language.
+  const tagOptions = useMemo(() => STOCK_CONDITION_TAGS.map((tag) => ({ value: tag, label: tag })), [])
 
   return (
     <div className="flex w-full min-w-0 items-center gap-1.5" data-stock-condition-row={mode}>
@@ -63,19 +67,17 @@ export default function StockConditionTagRow({ mode, value, onChange, tr, disabl
       >
         {taggedLabel}
       </button>
-      <select
+      <AppSelect
         id={id}
-        className="input h-9 w-[7.5rem] shrink-0 px-2 text-xs"
-        disabled={disabled || !tagged}
         value={selectedTag}
-        aria-label={taggedLabel}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {STOCK_CONDITION_TAGS.map((tag) => (
-          // Raw constant, not tr(tag) -- see the file header.
-          <option key={tag} value={tag}>{tag}</option>
-        ))}
-      </select>
+        options={tagOptions}
+        disabled={disabled || !tagged}
+        ariaLabel={taggedLabel}
+        onChange={onChange}
+        className="w-[7.5rem] shrink-0"
+        buttonClassName="h-9 px-2 text-xs"
+        optionClassName="text-xs"
+      />
     </div>
   )
 }

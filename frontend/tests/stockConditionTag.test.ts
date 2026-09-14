@@ -111,10 +111,13 @@ runTest('no pack entry exists for translating a condition tag', () => {
 
 runTest('the tag option label never goes through the translator', () => {
   const control = readSource('frontend/src/components/inventory/StockConditionTagRow.tsx')
-  // The <option> body is the constant itself. Anything of the shape
-  // tr(tag) / t(tag) / tr(`...${tag}...`) is the regression this guards.
-  assert.match(control, /<option[^>]*>\{tag\}<\/option>/)
+  // Each option's label IS the constant. A translator call wrapped around it
+  // is the regression this guards -- checked against the CODE, with comments
+  // stripped, because the comments in that file deliberately name the very
+  // shape being forbidden.
+  assert.match(control, /STOCK_CONDITION_TAGS\.map\(\(tag\) => \(\{ value: tag, label: tag \}\)\)/)
   assert.doesNotMatch(stripComments(control), /\bt?r?\(\s*tag\s*[,)]/)
+  assert.doesNotMatch(stripComments(control), /label:\s*t?r?\(/)
   const rows = readSource('frontend/src/components/products/TaggedStockRows.tsx')
   assert.match(rows, /stockConditionLabel\(row\.condition_tag\)/)
   assert.doesNotMatch(stripComments(rows), /tr\([^)]*stockConditionLabel/)
