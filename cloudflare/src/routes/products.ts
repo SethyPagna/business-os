@@ -1127,7 +1127,11 @@ app.get('/:id/detail-report', async (c) => {
   // id-attributed and name-only lots of one supplier merge into ONE group
   // (key = supplier_id when present, else the lowercased name). Costs sum
   // only where recorded; lots_without_cost says the rest -- never a
-  // fabricated zero total presented as complete.
+  // fabricated zero total presented as complete. A lot whose tracked
+  // receipts were all reverted (received_quantity 0, no money;
+  // lib/productBatches.ts planUnreceiveBatchStock) keeps its supplier for a
+  // possible un-revert but was not bought -- the same rule Contacts'
+  // purchases, the stock-in invoice report and the credit reminder apply.
   const suppliers = await db.prepare(`
     SELECT
       ${SUPPLIER_KEY_SQL} AS supplier_key,
@@ -1146,6 +1150,7 @@ app.get('/:id/detail-report', async (c) => {
     WHERE pb.variant_product_id = @productId
       AND pb.is_active = 1
       AND (pb.supplier_id IS NOT NULL OR trim(COALESCE(pb.supplier_name, '')) <> '')
+      AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
     GROUP BY supplier_key
     ORDER BY last_received_at DESC
   `).all<Record<string, unknown>>({ productId })

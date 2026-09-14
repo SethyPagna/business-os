@@ -68,3 +68,15 @@ export function recordedMovementCosts(row: {
 export function showReceiptAccounting(value: unknown): boolean {
   return isStockReceiptMovement(value)
 }
+
+// A stock-in session's undo/redo writes its own counter-movement (Worker
+// lib/stockSession.ts: reason `Stock session <id> undo|redo generation <n>`,
+// reference_id = the session operation, a bare number). The Worker refuses
+// to revert those rows from the ledger (409: the session's own redo/undo is
+// the path), so the action is hidden here rather than offered and refused.
+// The session's original receipt rows (reason "Stock-in session <id>") stay
+// revertible.
+const SESSION_GENERATION_REASON = /^Stock session \S+ (undo|redo) generation \d+$/
+export function isStockSessionGenerationMovement(row: { reason?: unknown; reference_id?: unknown }): boolean {
+  return /^\d+$/.test(String(row.reference_id ?? '')) && SESSION_GENERATION_REASON.test(String(row.reason ?? '').trim())
+}

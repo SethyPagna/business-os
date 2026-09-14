@@ -1767,9 +1767,15 @@ app.get('/suppliers/:id/purchases', async (c) => {
   const pageSize = clampInt(query.page_size ?? query.pageSize, 50, 1, 200)
   const offset = (page - 1) * pageSize
   const params = { id, name: String(supplier.name || '').trim().toLowerCase() }
+  // A lot whose tracked receipts were all reverted or undone (received
+  // quantity 0 and no money; lib/productBatches.ts planUnreceiveBatchStock)
+  // keeps its supplier so the revert can itself be reverted, but is not a
+  // purchase -- the same rule the stock-in invoice report and the credit
+  // reminder apply. Untracked pre-0067 lots (NULL) stay.
   const supplierWhere = `(
-    pb.supplier_id = @id
-    OR (pb.supplier_id IS NULL AND pb.supplier_name IS NOT NULL AND lower(trim(pb.supplier_name)) = @name)
+    (pb.supplier_id = @id
+      OR (pb.supplier_id IS NULL AND pb.supplier_name IS NOT NULL AND lower(trim(pb.supplier_name)) = @name))
+    AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
   )`
 
   // Totals are calculated across the COMPLETE supplier history, independently
@@ -1862,6 +1868,13 @@ app.get('/suppliers/:id/purchases', async (c) => {
 // must not become a giant "No supplier recorded" invoice merely because
 // the catalog was imported that day. Keep genuine no-supplier receipts;
 // exclude only the unmistakable all-null catalog placeholder shape.
+// Likewise a lot whose tracked receipts were all reverted or undone
+// (received_quantity 0 and no money; lib/productBatches.ts
+// planUnreceiveBatchStock, lib/stockSession.ts's undo target): it keeps its
+// supplier so the revert can itself be reverted, but nothing was bought, so
+// there is no invoice line -- under the supplier or under "no supplier".
+// Untracked pre-0067 lots (NULL) stay. The reverts themselves stay visible
+// in the stock ledger.
 const STOCK_IN_REPORT_SOURCE = `
   SELECT pb.id, pb.variant_product_id, pb.batch_number, pb.lot_code, pb.received_at,
          pb.received_quantity, pb.unit_cost_usd, pb.received_cost_usd, pb.payment_status, pb.credit_due_date,
@@ -1885,6 +1898,7 @@ const STOCK_IN_REPORT_SOURCE = `
     AND pb.unit_cost_usd IS NULL
     AND pb.received_branch_id IS NULL
   )
+  AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
 `
 
 // Builds the WHERE clause + params both endpoints share. A date bound also

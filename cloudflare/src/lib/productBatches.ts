@@ -172,6 +172,32 @@ export type ReceiveBatchStatementPlan = {
   params: Record<string, unknown>
 }
 
+// First attribution sticks on a top-up: a lot's recorded supplier / cost /
+// payment is only filled where still NULL. The one exception is a lot that
+// is fully reverted (received_quantity = 0 AND is_active = 0: every receipt
+// on it was reverted or undone AND nothing of it remains in any branch's
+// stock, see planUnreceiveBatchStock). A NEW receipt landing on such a lot
+// (same product, same date code) is a different purchase, so it takes the
+// row over completely -- supplier, cost and payment state all come from the
+// new receipt, including a supplier-less receipt clearing the old supplier
+// to NULL, so the old supplier's purchases list never keeps units it never
+// sold. A lot that is merely zeroed but still "live" (is_active = 1,
+// because stock of it still sits somewhere) is NOT this case and keeps
+// first-attribution-sticks like any other lot.
+// Known limit, not changed here: two same-day receipts from DIFFERENT
+// suppliers share one lot (batch_key is the date code), and the first
+// attribution outlives the receipt it belonged to once a second receipt
+// has topped the lot up. Attribution is per lot, not per receipt.
+// Unqualified names are the stored row both in an UPDATE and in an upsert's
+// DO UPDATE SET, so one fragment serves both receipt shapes below.
+const LOT_ATTRIBUTION_SET_SQL = `
+          supplier_name = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @supplierName ELSE COALESCE(supplier_name, @supplierName) END,
+          supplier_id = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @supplierId ELSE COALESCE(supplier_id, @supplierId) END,
+          unit_cost_usd = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @unitCostUsd ELSE COALESCE(unit_cost_usd, @unitCostUsd) END,
+          credit_due_date = CASE WHEN payment_status IS NULL OR (received_quantity = 0 AND is_active = 0) THEN @creditDueDate ELSE credit_due_date END,
+          payment_status = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @paymentStatus ELSE COALESCE(payment_status, @paymentStatus) END,
+          received_branch_id = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @receivedBranchId ELSE COALESCE(received_branch_id, @receivedBranchId) END`
+
 // Side-effect-free receipt planner. Stock-session commands use this inside
 // their one operation batch; the legacy helper below uses the same plan so
 // metadata can no longer commit ahead of stock even on older endpoints.
@@ -233,15 +259,10 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
           is_active = 1,
           expiry_date = CASE WHEN @expiryProvided = 1 THEN @expiryDate ELSE expiry_date END,
           notes = CASE WHEN @notesProvided = 1 THEN @notes ELSE notes END,
-          supplier_name = COALESCE(supplier_name, @supplierName),
-          supplier_id = COALESCE(supplier_id, @supplierId),
-          unit_cost_usd = COALESCE(unit_cost_usd, @unitCostUsd),
-          credit_due_date = CASE WHEN payment_status IS NULL THEN @creditDueDate ELSE credit_due_date END,
-          payment_status = COALESCE(payment_status, @paymentStatus),
+          ${LOT_ATTRIBUTION_SET_SQL},
           received_quantity = COALESCE(received_quantity, 0) + @quantity,
           received_cost_usd = CASE WHEN @receivedCostUsd IS NULL THEN received_cost_usd
             ELSE @receivedCostAfter END,
-          received_branch_id = COALESCE(received_branch_id, @receivedBranchId),
           updated_at = CURRENT_TIMESTAMP
         WHERE id = @batchId AND variant_product_id = ${productIdSql}`,
         params,
@@ -260,15 +281,10 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
           is_active = 1,
           expiry_date = CASE WHEN @expiryProvided = 1 THEN @expiryDate ELSE expiry_date END,
           notes = CASE WHEN @notesProvided = 1 THEN @notes ELSE notes END,
-          supplier_name = COALESCE(supplier_name, @supplierName),
-          supplier_id = COALESCE(supplier_id, @supplierId),
-          unit_cost_usd = COALESCE(unit_cost_usd, @unitCostUsd),
-          credit_due_date = CASE WHEN product_batches.payment_status IS NULL THEN @creditDueDate ELSE credit_due_date END,
-          payment_status = COALESCE(payment_status, @paymentStatus),
+          ${LOT_ATTRIBUTION_SET_SQL},
           received_quantity = COALESCE(received_quantity, 0) + excluded.received_quantity,
           received_cost_usd = CASE WHEN excluded.received_cost_usd IS NULL THEN product_batches.received_cost_usd
             ELSE @receivedCostAfter END,
-          received_branch_id = COALESCE(product_batches.received_branch_id, excluded.received_branch_id),
           updated_at = CURRENT_TIMESTAMP`,
         params,
       }
@@ -479,8 +495,9 @@ export async function receiveBatchStock(db: D1Compat, input: {
   // Migration 0062/0065: who this lot was bought from, what one unit cost,
   // and whether it is paid or on credit (with the due date the admin is
   // reminded about). First attribution sticks on top-ups, same rule as the
-  // import writer: a lot's recorded supplier/cost is never overwritten by a
-  // later receive, only filled where still NULL.
+  // import writer: a lot's recorded supplier/cost is only filled where still
+  // NULL -- except on a lot whose receipts were all reverted (see
+  // LOT_ATTRIBUTION_SET_SQL), where the new receipt supplies its own.
   supplierId?: number | null
   supplierName?: string | null
   unitCostUsd?: number | null
@@ -583,6 +600,64 @@ export function planRemoveStockFromBatch(input: RemoveBatchStockPlanInput): { st
       params,
     },
   ] }
+}
+
+// The compensating side of a receipt, for the writers that reverse one
+// (lib/stockRevert.ts today; anything that un-receives a lot-stamped inflow
+// tomorrow). A lot's supplier-facing columns -- received_quantity (0067),
+// received_cost_usd (0080), payment_status/credit_due_date (0065) and the
+// first-attribution supplier/cost (0062/0065) -- are what Contacts derives
+// purchases, stock-in invoices, "not paid" balances and credit reminders
+// from, so a reverted receipt that leaves them untouched keeps showing as a
+// purchase. Rules, matching the stock-session undo's own lot target in
+// lib/stockSession.ts:
+//   - subtract THIS receipt's own units and money, never zero the row: two
+//     same-day receipts share one lot (batch_key is the date code), and the
+//     other receipt's purchase must survive.
+//   - a lot that never tracked receipts (NULL received_quantity, pre-0067)
+//     stays NULL rather than being guessed to 0; its payment state is left
+//     alone because nothing says this was its only receipt.
+//   - once the lot's tracked receipts are fully reverted (received_quantity
+//     reaches 0) nothing was bought: the money resets to 0. The supplier,
+//     unit cost, payment state and receiving branch STAY on the row -- they
+//     are not on the movement, and reverting the revert (re-receiving) must
+//     bring the purchase back under the same supplier and payment state.
+//     Every purchase reader (Contacts purchases, the stock-in invoice report,
+//     the credit reminder) treats "received_quantity 0 and no money" as "not
+//     a purchase", so nothing is owed or listed meanwhile; and a new receipt
+//     on the row supplies its own attribution (LOT_ATTRIBUTION_SET_SQL).
+//   - once it is ALSO empty everywhere it leaves the pickers (is_active 0);
+//     receiving on it again reactivates it.
+// Run inside the caller's atomic db.batch AFTER the stock decrement so the
+// emptiness test sees the post-revert quantities.
+export function planUnreceiveBatchStock(input: { batchId: number; quantity: number; totalCostUsd: number | null }): StockWriteStatement[] {
+  const batchId = Number(input.batchId)
+  const quantity = Number(input.quantity)
+  if (!Number.isSafeInteger(batchId) || batchId <= 0) throw new Error('A valid received date is required')
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be a positive number')
+  const totalCostUsd = input.totalCostUsd == null ? null : roundMoney4(Number(input.totalCostUsd))
+  const params = { batchId, quantity, totalCostUsd }
+  return [
+    {
+      sql: `UPDATE product_batches SET
+              received_quantity = CASE WHEN received_quantity IS NULL THEN NULL ELSE MAX(0, received_quantity - @quantity) END,
+              received_cost_usd = CASE WHEN received_cost_usd IS NULL THEN NULL ELSE MAX(0, ROUND(received_cost_usd - COALESCE(@totalCostUsd, 0), 4)) END,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = @batchId`,
+      params,
+    },
+    {
+      sql: `UPDATE product_batches SET received_cost_usd = 0
+            WHERE id = @batchId AND received_quantity = 0 AND received_cost_usd IS NOT NULL`,
+      params,
+    },
+    {
+      sql: `UPDATE product_batches SET is_active = 0
+            WHERE id = @batchId AND received_quantity = 0
+              AND NOT EXISTS (SELECT 1 FROM branch_batch_stock WHERE batch_id = @batchId AND quantity > 0)`,
+      params,
+    },
+  ]
 }
 
 // Mirror of receiveBatchStock for the remove side of mandatory batch
