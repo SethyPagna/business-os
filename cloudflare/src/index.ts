@@ -268,6 +268,19 @@ async function serveAppDocument(c: Context<{ Bindings: Env }>): Promise<Response
   // the asset layer produced it, with no body handling at all.
   if (!shouldRewrite) return response
 
+  // Everything from here on is best-effort identity polish. The document
+  // itself must never depend on it: before this handler existed the asset
+  // layer answered these routes on its own, and a throw here would turn the
+  // storefront's front page into Hono's JSON 500. So any failure in the
+  // rewrite set-up hands back the asset response exactly as produced.
+  try {
+    return rewriteAdminDocument(response)
+  } catch {
+    return response
+  }
+}
+
+function rewriteAdminDocument(response: Response): Response {
   const headers = new Headers(response.headers)
   // The rewritten body has a different length, and the asset layer already
   // set one for the original.
