@@ -22,6 +22,7 @@ import {
   fmtInt,
   fmtPct,
   hasProfit,
+  hasRemovalLosses,
   joinSummary,
   normalizeTotals,
   num,
@@ -77,6 +78,10 @@ export default function PeriodReport(p: ReportViewProps) {
   )
   const totals = useMemo(() => sumTotals(rows), [rows])
   const showProfit = rows.length > 0 && rows.every((r) => hasProfit(r))
+  // Same all-or-nothing rule as profit: one period without the removal block
+  // would make the column silently short, so the columns appear only when
+  // EVERY row carries it.
+  const showLosses = rows.length > 0 && rows.every((r) => hasRemovalLosses(r))
   const basisLabel = tr(BASIS_LABELS[options.basis].key, BASIS_LABELS[options.basis].fallback)
   const fmtDate = (iso: string) => fmtDateOnly(iso)
 
@@ -95,9 +100,19 @@ export default function PeriodReport(p: ReportViewProps) {
       showProfit ? { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r) => r.cost_usd ?? null, defaultVisible: false } : null,
       showProfit ? { key: 'profit_usd', label: tr('rpt_gross_profit', 'Gross profit'), kind: 'money', value: (r) => r.profit_usd ?? null } : null,
       showProfit ? { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r) => pct(num(r.profit_usd), basisValue(r, options.basis)) } : null,
+      // Stock removed entirely, at cost, per period -- the same three figures
+      // the row's own fold and the Overview statement show, as columns so the
+      // periods can be compared side by side. Hidden by default (the column
+      // chooser reveals them) because the table's default density is the
+      // canonical money, and these are a memo beside it, never a term of it.
+      showLosses ? { key: 'removal_loss_usd', label: tr('rpt_removal_loss', 'Losses (stock removed)'), kind: 'money', value: (r) => r.removal_loss_usd ?? null, defaultVisible: false } : null,
+      showLosses ? { key: 'revenue_after_losses_usd', label: tr('rpt_revenue_after_losses', 'Revenue incl. losses'), kind: 'money', value: (r) => r.revenue_after_losses_usd ?? null, defaultVisible: false } : null,
+      // Only when profit itself survived: a profit-including-losses built on an
+      // absent profit would be the loss printed as a business result.
+      showLosses && showProfit ? { key: 'profit_after_losses_usd', label: tr('rpt_profit_after_losses', 'Profit incl. losses'), kind: 'money', value: (r) => r.profit_after_losses_usd ?? null, defaultVisible: false } : null,
     ]
     return list.filter((c): c is ReportColumn<PeriodRow> => !!c)
-  }, [tr, g, options.basis, showProfit])
+  }, [tr, g, options.basis, showProfit, showLosses])
 
   const [sort, setSort] = useState<SortState | null>({ key: 'period', dir: 'asc' })
   const [openRow, setOpenRow] = useState<PeriodRow | null>(null)
@@ -111,6 +126,11 @@ export default function PeriodReport(p: ReportViewProps) {
         `${basisLabel} ${fmtMoney(basisValue(totals, options.basis))}`,
         totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null,
         hasProfit(totals) ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(totals.profit_usd)} (${fmtPct(pct(totals.profit_usd, basisValue(totals, options.basis)))})` : null,
+        // Only when there was a loss: a "$0.00 removed" term on every quiet
+        // range is the kind of noise the summary row exists to avoid.
+        hasRemovalLosses(totals) && totals.removal_loss_usd
+          ? `${tr('rpt_removal_loss', 'Losses (stock removed)')} ${fmtMoney(totals.removal_loss_usd)}`
+          : null,
       ])
     : ''
 
