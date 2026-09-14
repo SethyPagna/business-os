@@ -446,6 +446,10 @@ Object.defineProperty(globalThis, 'window', { configurable: true, value: {
   dispatchEvent: events.dispatchEvent.bind(events),
 } })
 const scope = await import('../src/api/actorReadScope.ts')
+// A fresh module instance per scenario, so nothing carries over in module
+// scope. The specifier is built at runtime: a literal '...ts?query' is not a
+// resolvable module path for tsc, only for the ESM loader.
+const reimportScope = (label: string): Promise<typeof scope> => import(`../src/api/actorReadScope.ts?${label}`)
 
 // (A) the iOS standalone PWA comes back in a FRESH browsing context.
 const marker = await scope.beginActorCookieMutation()
@@ -455,7 +459,7 @@ assert.equal(returnedMarker, marker, 'the marker travels in the server-signed re
 assert.equal(session.get(OWNER_KEY), marker, 'sessionStorage holds the marker for a normal tab')
 assert.equal(local.get(OWNER_KEY), marker, 'and localStorage mirrors it for a context swap')
 session = new Map()
-const afterRedirect = await import('../src/api/actorReadScope.ts?fresh-browsing-context')
+const afterRedirect = await reimportScope('fresh-browsing-context')
 assert.equal(afterRedirect.finishActorOauthCookieRedirect('auth-pending:someone-elses-marker'), false,
   'a value that does not match the signed marker is never accepted')
 assert.equal(local.get(OWNER_KEY), marker,
@@ -469,7 +473,7 @@ assert.equal(afterRedirect.finishActorOauthCookieRedirect(returnedMarker), false
 
 // (B) a shop phone shared by several staff accounts.
 local.set(OWNER_KEY, 'auth-pending:another-accounts-abandoned-attempt')
-const sharedDevice = await import('../src/api/actorReadScope.ts?shared-device')
+const sharedDevice = await reimportScope('shared-device')
 assert.equal(sharedDevice.finishActorOauthCookieRedirect('auth-pending:another-accounts-abandoned-attempt'), false,
   'a stale marker is rejected even when the returned value matches it: it no longer owns the pending cookie phase')
 assert.equal(local.has(OWNER_KEY), false, 'and it is deleted, not left in localStorage for a later redirect to meet')
