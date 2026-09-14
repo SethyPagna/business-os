@@ -675,6 +675,51 @@ function asNumber(value: unknown): number {
   return Number(value || 0)
 }
 
+// iOS Safari with "Block All Cookies" (and older private-mode Safari)
+// throws SecurityError on the very act of TOUCHING window.localStorage or
+// window.sessionStorage -- not only on the getItem call -- so a bare
+// `sessionStorage.getItem(...)` inside a useState initializer takes the whole
+// till down to a blank page before a single product renders. Every storage
+// access in this file goes through these three helpers instead. A till with
+// blocked storage still renders and still sells; it only forgets its filters
+// and cart drafts between visits. readPosDraft/writePosDraft below build on
+// the same primitives so there is one guarded family here, not two.
+type PosStore = 'local' | 'session'
+
+function posStorage(kind: PosStore): Storage | null {
+  try {
+    return (kind === 'local' ? window.localStorage : window.sessionStorage) || null
+  } catch {
+    return null
+  }
+}
+
+function readPosStorage(kind: PosStore, key: string): string | null {
+  try {
+    return posStorage(kind)?.getItem(key) ?? null
+  } catch {
+    return null
+  }
+}
+
+function writePosStorage(kind: PosStore, key: string, value: string): void {
+  try {
+    posStorage(kind)?.setItem(key, value)
+  } catch {
+    // Blocked or quota-full: the value simply is not durable. Callers that
+    // REQUIRE durability (checkout below) verify with a read-back instead of
+    // trusting this call.
+  }
+}
+
+function removePosStorage(kind: PosStore, key: string): void {
+  try {
+    posStorage(kind)?.removeItem(key)
+  } catch {
+    // Nothing to clean up if the store was never writable in the first place.
+  }
+}
+
 function paymentMethodSummary(details: PaymentDetail[]): string {
   const methods = Array.from(new Set(details.map((detail) => detail.method.trim()).filter(Boolean)))
   return methods.join(' + ') || 'Cash'
@@ -697,12 +742,12 @@ export default function POS() {
   const posOrdersStorageKey = `businessos_pos_orders_${posStorageScope}`
   const posActiveStorageKey = `businessos_pos_active_${posStorageScope}`
   const posCounterStorageKey = `businessos_pos_counter_${posStorageScope}`
-  const readPosDraft = (key: string, legacyKey: string): string | null => {
-    try { return localStorage.getItem(key) || sessionStorage.getItem(key) || sessionStorage.getItem(legacyKey) } catch { return null }
-  }
+  const readPosDraft = (key: string, legacyKey: string): string | null => (
+    readPosStorage('local', key) || readPosStorage('session', key) || readPosStorage('session', legacyKey)
+  )
   const writePosDraft = (key: string, value: string): void => {
-    try { localStorage.setItem(key, value) } catch {}
-    try { sessionStorage.setItem(key, value) } catch {}
+    writePosStorage('local', key, value)
+    writePosStorage('session', key, value)
   }
 
 // Remote data shared across all orders
@@ -725,20 +770,20 @@ export default function POS() {
   // away whatever the person had typed, while every OTHER filter dimension
   // survived the same reload. Reported as "sometimes it causes the page to
   // refresh thus losing search results".
-  const [search,          setSearch]          = useState(() => sessionStorage.getItem('pos_search') || '')
+  const [search,          setSearch]          = useState(() => readPosStorage('session', 'pos_search') || '')
   // AND/OR toggle restored (Aug 20 2026) -- no longer a standalone button
   // next to the search box (that's still gone, per the Aug 19 2026 UI
   // request), but reachable again from inside the Filter menu itself, via
   // buildSearchModeFilterSection (components/shared/SearchModeFilterOptions.tsx).
   // AND stays the default, matching the initial state below.
   const [searchMode, setSearchMode] = useState<'AND' | 'OR'>('AND')
-  const [categoryFilter,  setCategoryFilter]  = useState(() => sessionStorage.getItem('pos_cat')      || 'all')
-  const [brandFilter,     setBrandFilter]     = useState(() => sessionStorage.getItem('pos_brand')    || 'all')
-  const [branchFilter,    setBranchFilter]    = useState(() => sessionStorage.getItem('pos_branch')   || 'all')
-  const [stockFilter,     setStockFilter]     = useState(() => sessionStorage.getItem('pos_stock')    || 'all')
-  const [groupFilter,     setGroupFilter]     = useState(() => sessionStorage.getItem('pos_group')    || 'all')
-  const [supplierFilter,  setSupplierFilter]  = useState(() => sessionStorage.getItem('pos_supplier') || 'all')
-  const [initialFilter,   setInitialFilter]   = useState(() => sessionStorage.getItem('pos_initial')  || 'all')
+  const [categoryFilter,  setCategoryFilter]  = useState(() => readPosStorage('session', 'pos_cat')      || 'all')
+  const [brandFilter,     setBrandFilter]     = useState(() => readPosStorage('session', 'pos_brand')    || 'all')
+  const [branchFilter,    setBranchFilter]    = useState(() => readPosStorage('session', 'pos_branch')   || 'all')
+  const [stockFilter,     setStockFilter]     = useState(() => readPosStorage('session', 'pos_stock')    || 'all')
+  const [groupFilter,     setGroupFilter]     = useState(() => readPosStorage('session', 'pos_group')    || 'all')
+  const [supplierFilter,  setSupplierFilter]  = useState(() => readPosStorage('session', 'pos_supplier') || 'all')
+  const [initialFilter,   setInitialFilter]   = useState(() => readPosStorage('session', 'pos_initial')  || 'all')
   const [filterOpen,      setFilterOpen]      = useState(false)
 
   const [productPage, setProductPage] = useState(1)
@@ -772,19 +817,19 @@ export default function POS() {
   const [batchTrackingReloadKey, setBatchTrackingReloadKey] = useState(0)
   // Persist filter changes. Each setter now *toggles* the given value in/out
   // of a comma-joined multi-select set (passing 'all' clears the whole filter).
-  const setPersistedCat      = (v: string) => { const next = toggleMultiValue(categoryFilter, v); sessionStorage.setItem('pos_cat',      next); setCategoryFilter(next) }
+  const setPersistedCat      = (v: string) => { const next = toggleMultiValue(categoryFilter, v); writePosStorage('session', 'pos_cat',      next); setCategoryFilter(next) }
   // Batch variant of setPersistedCat -- applies one checked/unchecked state
   // to several category values at once (selecting a whole "Main - Sub"
   // hierarchical group from the Category filter in one tap, same as
   // Products/Inventory). See utils/multiSelect.ts's toggleMultiValues and
   // components/shared/CategoryFilterOptions.tsx.
-  const setPersistedCatBatch = (values: string[], checked: boolean) => { const next = toggleMultiValues(categoryFilter, values, checked); sessionStorage.setItem('pos_cat', next); setCategoryFilter(next) }
-  const setPersistedBrand    = (v: string) => { const next = toggleMultiValue(brandFilter,    v); sessionStorage.setItem('pos_brand',    next); setBrandFilter(next) }
-  const setPersistedBranch   = (v: string) => { const next = toggleMultiValue(branchFilter,   v); sessionStorage.setItem('pos_branch', next); setBranchFilter(next); window.dispatchEvent(new Event(SHIFT_BRANCH_CHANGED_EVENT)) }
-  const setPersistedStock    = (v: string) => { const next = toggleMultiValue(stockFilter,    v); sessionStorage.setItem('pos_stock',    next); setStockFilter(next) }
-  const setPersistedGroup    = (v: string) => { const next = toggleMultiValue(groupFilter,    v); sessionStorage.setItem('pos_group',    next); setGroupFilter(next) }
-  const setPersistedSupplier = (v: string) => { const next = toggleMultiValue(supplierFilter, v); sessionStorage.setItem('pos_supplier', next); setSupplierFilter(next) }
-  const setPersistedInitial  = (v: string) => { sessionStorage.setItem('pos_initial',  v); setInitialFilter(v) }
+  const setPersistedCatBatch = (values: string[], checked: boolean) => { const next = toggleMultiValues(categoryFilter, values, checked); writePosStorage('session', 'pos_cat', next); setCategoryFilter(next) }
+  const setPersistedBrand    = (v: string) => { const next = toggleMultiValue(brandFilter,    v); writePosStorage('session', 'pos_brand',    next); setBrandFilter(next) }
+  const setPersistedBranch   = (v: string) => { const next = toggleMultiValue(branchFilter,   v); writePosStorage('session', 'pos_branch', next); setBranchFilter(next); window.dispatchEvent(new Event(SHIFT_BRANCH_CHANGED_EVENT)) }
+  const setPersistedStock    = (v: string) => { const next = toggleMultiValue(stockFilter,    v); writePosStorage('session', 'pos_stock',    next); setStockFilter(next) }
+  const setPersistedGroup    = (v: string) => { const next = toggleMultiValue(groupFilter,    v); writePosStorage('session', 'pos_group',    next); setGroupFilter(next) }
+  const setPersistedSupplier = (v: string) => { const next = toggleMultiValue(supplierFilter, v); writePosStorage('session', 'pos_supplier', next); setSupplierFilter(next) }
+  const setPersistedInitial  = (v: string) => { writePosStorage('session', 'pos_initial',  v); setInitialFilter(v) }
   // A stale filter value (e.g. a category/brand/supplier that was renamed or
   // deleted, or an old branch selection) silently matches zero products
   // server-side forever, since these persist in sessionStorage across visits
@@ -793,7 +838,7 @@ export default function POS() {
   // hunting for which one is the culprit.
   const clearAllPosFilters = () => {
     setSearch('')
-    ;['pos_cat', 'pos_brand', 'pos_branch', 'pos_stock', 'pos_group', 'pos_supplier', 'pos_initial', 'pos_search'].forEach((key) => sessionStorage.removeItem(key))
+    ;['pos_cat', 'pos_brand', 'pos_branch', 'pos_stock', 'pos_group', 'pos_supplier', 'pos_initial', 'pos_search'].forEach((key) => removePosStorage('session', key))
     setCategoryFilter('all')
     setBrandFilter('all')
     setBranchFilter('all')
@@ -992,12 +1037,12 @@ export default function POS() {
   // POS display toggles (pos_cat, pos_branch, etc.) are.
   const [cartViewMode, setCartViewMode] = useState<'all' | 'products' | 'details'>(
     () => {
-      const stored = sessionStorage.getItem('pos_cart_view')
+      const stored = readPosStorage('session', 'pos_cart_view')
       return stored === 'products' || stored === 'details' ? stored : 'all'
     },
   )
   const setPersistedCartViewMode = (mode: 'all' | 'products' | 'details') => {
-    sessionStorage.setItem('pos_cart_view', mode)
+    writePosStorage('session', 'pos_cart_view', mode)
     setCartViewMode(mode)
   }
 
@@ -1015,7 +1060,7 @@ export default function POS() {
   const CART_WIDTH_MAX_PX = 860       // was 720 -- some cashiers want the cart
   // to take most of the screen while reconciling a large order
   const [cartWidthPx, setCartWidthPx] = useState<number>(() => {
-    const stored = Number(window.localStorage.getItem(CART_WIDTH_STORAGE_KEY))
+    const stored = Number(readPosStorage('local', CART_WIDTH_STORAGE_KEY))
     return Number.isFinite(stored) && stored >= CART_WIDTH_MIN_PX && stored <= CART_WIDTH_MAX_PX
       ? stored
       : CART_WIDTH_DEFAULT_PX
@@ -1069,7 +1114,7 @@ export default function POS() {
       document.body.style.cursor = previousCursor
       setCartResizing(false)
       setCartWidthPx((current) => {
-        window.localStorage.setItem(CART_WIDTH_STORAGE_KEY, String(current))
+        writePosStorage('local', CART_WIDTH_STORAGE_KEY, String(current))
         return current
       })
     }
@@ -1082,7 +1127,7 @@ export default function POS() {
 
   const resetCartWidth = useCallback(() => {
     setCartWidthPx(CART_WIDTH_DEFAULT_PX)
-    window.localStorage.setItem(CART_WIDTH_STORAGE_KEY, String(CART_WIDTH_DEFAULT_PX))
+    writePosStorage('local', CART_WIDTH_STORAGE_KEY, String(CART_WIDTH_DEFAULT_PX))
   }, [])
 
   // --- Cart 'All' view: draggable products/details split (user, Aug 29:
@@ -1099,7 +1144,7 @@ export default function POS() {
   const CART_SPLIT_MAX_PCT = 78
   const cartPanelRef = useRef<HTMLDivElement | null>(null)
   const [cartDetailsPct, setCartDetailsPct] = useState<number>(() => {
-    const stored = Number(window.localStorage.getItem(CART_SPLIT_STORAGE_KEY))
+    const stored = Number(readPosStorage('local', CART_SPLIT_STORAGE_KEY))
     return Number.isFinite(stored) && stored >= CART_SPLIT_MIN_PCT && stored <= CART_SPLIT_MAX_PCT
       ? stored
       : CART_SPLIT_DEFAULT_PCT
@@ -1131,7 +1176,7 @@ export default function POS() {
       window.removeEventListener('touchend', stop)
       document.body.style.userSelect = previousUserSelect
       setCartSplitResizing(false)
-      window.localStorage.setItem(CART_SPLIT_STORAGE_KEY, String(Math.round(cartDetailsPctRef.current)))
+      writePosStorage('local', CART_SPLIT_STORAGE_KEY, String(Math.round(cartDetailsPctRef.current)))
     }
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup', stop)
@@ -1140,7 +1185,7 @@ export default function POS() {
   }, [])
   const resetCartSplit = useCallback(() => {
     setCartDetailsPct(CART_SPLIT_DEFAULT_PCT)
-    window.localStorage.setItem(CART_SPLIT_STORAGE_KEY, String(CART_SPLIT_DEFAULT_PCT))
+    writePosStorage('local', CART_SPLIT_STORAGE_KEY, String(CART_SPLIT_DEFAULT_PCT))
   }, [])
 
   // Re-clamp a stored/dragged width against the window itself resizing
@@ -1322,23 +1367,23 @@ export default function POS() {
 
     const nextBranch = pruneBranch(branchFilter)
     if (nextBranch !== branchFilter) {
-      sessionStorage.setItem('pos_branch', nextBranch)
+      writePosStorage('session', 'pos_branch', nextBranch)
       setBranchFilter(nextBranch)
       window.dispatchEvent(new Event(SHIFT_BRANCH_CHANGED_EVENT))
     }
     const nextBrand = pruneAgainst(brandFilter, knownBrands)
     if (nextBrand !== brandFilter) {
-      sessionStorage.setItem('pos_brand', nextBrand)
+      writePosStorage('session', 'pos_brand', nextBrand)
       setBrandFilter(nextBrand)
     }
     const nextSupplier = pruneAgainst(supplierFilter, knownSuppliers)
     if (nextSupplier !== supplierFilter) {
-      sessionStorage.setItem('pos_supplier', nextSupplier)
+      writePosStorage('session', 'pos_supplier', nextSupplier)
       setSupplierFilter(nextSupplier)
     }
     const nextCategory = pruneAgainst(categoryFilter, knownCategories)
     if (nextCategory !== categoryFilter) {
-      sessionStorage.setItem('pos_cat', nextCategory)
+      writePosStorage('session', 'pos_cat', nextCategory)
       setCategoryFilter(nextCategory)
     }
     // Deliberately only keyed on the *metadata* inputs (branches, brands,
@@ -2591,7 +2636,7 @@ export default function POS() {
     // time I tap a product" report). Gated on the same `isDesktopViewport`
     // media-query flag already used elsewhere in this file.
     if (isDesktopViewport) {
-      sessionStorage.removeItem('pos_search')
+      removePosStorage('session', 'pos_search')
       setSearch('')
       searchRef.current?.focus()
     }
@@ -3269,7 +3314,7 @@ export default function POS() {
       const durableOrders = ordersRef.current.map(order => order.id === resolvedActiveId ? { ...order, checkoutRequestId: clientRequestId, checkoutPayload: frozen } : order)
       const serialized = JSON.stringify(durableOrders)
       writePosDraft(posOrdersStorageKey, serialized)
-      if (localStorage.getItem(posOrdersStorageKey) !== serialized && sessionStorage.getItem(posOrdersStorageKey) !== serialized) throw new SaleCheckoutRecoveryRequiredError()
+      if (readPosStorage('local', posOrdersStorageKey) !== serialized && readPosStorage('session', posOrdersStorageKey) !== serialized) throw new SaleCheckoutRecoveryRequiredError()
       assertActorSessionDispatchAllowed(checkoutScope)
       checkoutRequestIdsRef.current.set(orderKey, clientRequestId)
       ordersRef.current = durableOrders
@@ -3354,7 +3399,7 @@ export default function POS() {
       const next = ordersRef.current.map(entry => entry.id === orderId ? { ...entry, cart, checkoutRequestId: '', checkoutPayload: undefined, checkoutReviewRequestId: undefined } : entry)
       const serialized = JSON.stringify(next)
       writePosDraft(posOrdersStorageKey, serialized)
-      if (localStorage.getItem(posOrdersStorageKey) !== serialized && sessionStorage.getItem(posOrdersStorageKey) !== serialized) throw new SaleCheckoutRecoveryRequiredError()
+      if (readPosStorage('local', posOrdersStorageKey) !== serialized && readPosStorage('session', posOrdersStorageKey) !== serialized) throw new SaleCheckoutRecoveryRequiredError()
       assertActorSessionDispatchAllowed(scope)
       checkoutRequestIdsRef.current.delete(orderId)
       ordersRef.current = next
@@ -3408,7 +3453,7 @@ export default function POS() {
                   ? (t('search_mode_and_hint') || 'Matching ALL terms - change in Filters to match ANY term instead')
                   : (t('search_mode_or_hint') || 'Matching ANY term - change in Filters to match ALL terms instead')}
                 value={search}
-                onChange={e => { const next = e.target.value; sessionStorage.setItem('pos_search', next); setSearch(next) }}
+                onChange={e => { const next = e.target.value; writePosStorage('session', 'pos_search', next); setSearch(next) }}
               />
               <ScanSearchButton onDetected={setSearch} t={t} />
               {/* AND/OR toggle no longer sits here as its own button (Aug
