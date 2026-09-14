@@ -305,11 +305,14 @@ function contactBulkDeleteEntityType(config: ContactConfig): BulkDeleteEntityTyp
 }
 
 function duplicateAllowedActions(matches: ContactDuplicateMatch[]): Array<'use_existing' | 'create_separate'> {
+  // A phone conflict is the one severity with no second option: two names
+  // cannot own one phone. Everything else is a genuine choice the caller
+  // gets to make -- including a name-only match (P3-9), which used to offer
+  // only 'use_existing' even though creating a separate record was in fact
+  // what happened when the caller ignored it.
   return matches.some((match) => match.severity === 'phone_conflict')
     ? ['use_existing']
-    : matches.some((match) => match.severity === 'exact_match')
-      ? ['use_existing', 'create_separate']
-      : ['use_existing']
+    : ['use_existing', 'create_separate']
 }
 
 function duplicateErrorResponse(
@@ -353,6 +356,19 @@ function duplicateErrorResponse(
       },
     }
   }
+  if (match.severity === 'name_only') {
+    return {
+      status: 409,
+      body: {
+        error: `A ${entityLabel} named "${match.name}" already exists. Use that record, or confirm you are creating a separate one.`,
+        code: 'contact_duplicate_decision_required',
+        duplicate,
+        matches,
+        duplicateReview: review,
+        allowedActions,
+      },
+    }
+  }
   return {
     status: 409,
     body: {
@@ -380,6 +396,7 @@ async function checkContactDuplicateBlock(
   config: ContactConfig,
   subject: { id?: number | string | null; name: string; phone: unknown; address: unknown },
   decisionInput: unknown,
+  options: { allowDuplicateName?: boolean } = {},
 ): Promise<{
   block: { body: Record<string, unknown>; status: number } | null
   decision: ContactDuplicateCreateSeparateDecision | null
@@ -411,6 +428,24 @@ async function checkContactDuplicateBlock(
   if (phoneConflict) return { block: duplicateErrorResponse(config.entity, phoneConflict, matches, review), decision: null, matches, review, snapshots, phones }
   const exactMatch = matches.find((m) => m.severity === 'exact_match')
   if (exactMatch && !decision) return { block: duplicateErrorResponse(config.entity, exactMatch, matches, review), decision: null, matches, review, snapshots, phones }
+  // P3-9: a name-only duplicate used to pass straight through, which is how
+  // the removed `ensureSupplierExists()` writer minted ten "j secrat" rows
+  // and six "lang" rows without anybody ever seeing a warning. A supplier is
+  // a company, so a second row with the identical name is almost always the
+  // same company -- the caller must now say which it is, either by echoing
+  // the reviewed candidates (duplicateDecision) or by sending
+  // allow_duplicate_name: true, which is what a replay of a write the user
+  // already confirmed (undo/redo of a create or delete) carries.
+  //
+  // Customers and delivery contacts are deliberately NOT gated here: people
+  // legitimately share a name, walk-ins are registered by name alone all day,
+  // and the POS creates them mid-sale where there is nobody to answer a
+  // prompt. Their name-only matches stay advisory (DuplicateFlagBanner) and
+  // land in the Conflicts tab.
+  const nameOnly = config.table === 'suppliers' ? matches.find((m) => m.severity === 'name_only') : undefined
+  if (nameOnly && !decision && options.allowDuplicateName !== true) {
+    return { block: duplicateErrorResponse(config.entity, nameOnly, matches, review), decision: null, matches, review, snapshots, phones }
+  }
   if (decision && !contactDuplicateDecisionMatches(review, decision)) {
     const top = exactMatch || matches[0]
     if (top) return { block: duplicateErrorResponse(config.entity, top, matches, review, 'contact_duplicate_candidates_changed'), decision: null, matches, review, snapshots, phones }
@@ -1218,7 +1253,7 @@ function registerContactRoutes(config: ContactConfig) {
       payload.phone_normalized = canonicalizePhone(payload.phone)
     }
 
-    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.duplicateDecision)
+    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.duplicateDecision, { allowDuplicateName: body.allow_duplicate_name === true })
     if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
     const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
 
@@ -1424,7 +1459,7 @@ function registerContactRoutes(config: ContactConfig) {
     // to check the phones already on `current`, not an empty set.
     const effectivePhone = Object.prototype.hasOwnProperty.call(payload, 'phone') ? payload.phone : current.phone
     const effectiveAddress = Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address
-    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { id, name, phone: effectivePhone, address: effectiveAddress }, body.duplicateDecision)
+    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { id, name, phone: effectivePhone, address: effectiveAddress }, body.duplicateDecision, { allowDuplicateName: body.allow_duplicate_name === true })
     if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
     const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
 

@@ -29,6 +29,34 @@ function loadTs(file, stubs = {}) {
   return mod.exports
 }
 
+// The route file cannot be imported (it builds a Hono app over bindings this
+// harness has no business creating), so the three functions that ARE the
+// duplicate gate are sliced out of the shipped source and executed with their
+// dependencies injected. This is the real code: if the gate changes, these
+// checks change with it instead of testing a copy.
+function loadDuplicateGate(deps) {
+  const routePath = path.join(__dirname, '..', 'src', 'routes', 'contacts.ts')
+  const source = fs.readFileSync(routePath, 'utf8').replace(/\r\n/g, '\n')
+  const start = source.indexOf('function duplicateAllowedActions(')
+  const end = source.indexOf('async function duplicateBlockAfterGuardFailure(')
+  assert.ok(start >= 0 && end > start, 'contacts.ts still defines the duplicate gate')
+  const slice = source.slice(start, end)
+  assert.match(slice, /async function checkContactDuplicateBlock\(/, 'the slice contains the gate itself')
+  const factorySource = [
+    '(function (deps) {',
+    'const { getDb, collectContactPhones, findContactDuplicateState, excludeAnonymousCustomerDuplicateState,',
+    '  parseContactDuplicateCreateSeparateDecision, contactDuplicateDecisionMatches } = deps',
+    slice,
+    'return { checkContactDuplicateBlock, duplicateAllowedActions, duplicateErrorResponse }',
+    '})',
+  ].join('\n')
+  const compiled = ts.transpileModule(factorySource, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText
+  // eslint-disable-next-line no-eval
+  return eval(compiled)(deps)
+}
+
 const contactOptions = loadTs('contactOptions.ts')
 const phone = loadTs('phone.ts')
 const subject = loadTs('contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone })
@@ -150,6 +178,90 @@ async function main() {
     assert.match(route, /code: 'contact_duplicate_decision_required'/)
     assert.doesNotMatch(route, /code: 'possible_duplicate'/)
     assert.doesNotMatch(route, /code: 'phone_conflict'/)
+  })
+
+  // ---- P3-9: a same-name supplier now needs an explicit decision --------
+  // Ten "j secrat" rows and six "lang" rows reached production because the
+  // gate let every name_only match through silently.
+  const SUPPLIERS = { table: 'suppliers', path: '/suppliers', entity: 'supplier', columns: [], channel: 'suppliers', optionMode: 'address' }
+  const CUSTOMERS = { table: 'customers', path: '/customers', entity: 'customer', columns: [], channel: 'customers', optionMode: 'address' }
+  const DELIVERY = { table: 'delivery_contacts', path: '/delivery-contacts', entity: 'delivery_contact', columns: [], channel: 'deliveryContacts', optionMode: 'area' }
+  function gateFor(db) {
+    return loadDuplicateGate({
+      getDb: () => db,
+      collectContactPhones: subject.collectContactPhones,
+      findContactDuplicateState: subject.findContactDuplicateState,
+      // Orthogonal to this gate (it only drops the house anonymous customer
+      // from a customers review), so it is passed through untouched here.
+      excludeAnonymousCustomerDuplicateState: async (_db, _config, state) => state,
+      parseContactDuplicateCreateSeparateDecision: subject.parseContactDuplicateCreateSeparateDecision,
+      contactDuplicateDecisionMatches: subject.contactDuplicateDecisionMatches,
+    })
+  }
+
+  await check('a name-only supplier duplicate is refused until the caller decides', async () => {
+    const db = openDb(loadAll())
+    db.prepare("INSERT INTO suppliers(id,name,phone) VALUES(20,'j secrat',NULL)").run()
+    const gate = gateFor(db)
+    const blocked = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { name: 'J Secrat', phone: null, address: null }, null)
+    assert.ok(blocked.block, 'the exact shape that minted the production cluster must stop')
+    assert.equal(blocked.block.status, 409)
+    assert.equal(blocked.block.body.code, 'contact_duplicate_decision_required')
+    assert.deepEqual(blocked.block.body.allowedActions, ['use_existing', 'create_separate'], 'both choices are offered')
+    assert.equal(blocked.block.body.matches[0].severity, 'name_only')
+    assert.match(String(blocked.block.body.error), /already exists/)
+    assert.doesNotMatch(String(blocked.block.body.error), /phone number/, 'the exact-match wording does not leak into a name-only block')
+  })
+
+  await check('an echoed review or an explicit allow_duplicate_name lets the separate supplier through', async () => {
+    const db = openDb(loadAll())
+    db.prepare("INSERT INTO suppliers(id,name,phone) VALUES(20,'j secrat',NULL)").run()
+    const gate = gateFor(db)
+    const { review } = await exactReview(db, 'suppliers', 'j secrat', [])
+    const decided = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { name: 'j secrat', phone: null, address: null }, createDecision(review))
+    assert.equal(decided.block, null, 'reviewing the candidates is a valid answer')
+    assert.ok(decided.decision, 'and the decision is carried into the write guard')
+    const replayed = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { name: 'j secrat', phone: null, address: null }, null, { allowDuplicateName: true })
+    assert.equal(replayed.block, null, 'an undo/redo replay of a confirmed write is not re-prompted')
+    assert.equal(replayed.decision, null, 'the escape hatch is not a create-separate decision')
+  })
+
+  await check('renaming a supplier onto an existing name is gated the same way', async () => {
+    const db = openDb(loadAll())
+    db.prepare("INSERT INTO suppliers(id,name,phone) VALUES(20,'j secrat',NULL),(21,'Lang',NULL)").run()
+    const gate = gateFor(db)
+    const rename = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { id: 21, name: 'j secrat', phone: null, address: null }, null)
+    assert.ok(rename.block, 'a rename can create a duplicate just as easily as a create')
+    assert.equal(rename.block.body.code, 'contact_duplicate_decision_required')
+    const keptName = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { id: 21, name: 'Lang', phone: null, address: null }, null)
+    assert.equal(keptName.block, null, 'a record never counts as its own duplicate')
+  })
+
+  await check('customers and delivery contacts keep sharing a name without a prompt', async () => {
+    const db = openDb(loadAll())
+    db.prepare("INSERT INTO customers(id,name,phone,membership_number) VALUES(1,'Sok',NULL,'LC-00001')").run()
+    db.prepare("INSERT INTO delivery_contacts(id,name,phone) VALUES(1,'Sok',NULL)").run()
+    const gate = gateFor(db)
+    const customer = await gate.checkContactDuplicateBlock({}, CUSTOMERS, { name: 'Sok', phone: null, address: null }, null)
+    assert.equal(customer.block, null, 'walk-ins share names all day and the POS has nobody to answer a prompt')
+    assert.equal(customer.matches.length, 1, 'it is still reported as a possible duplicate for the banner')
+    const rider = await gate.checkContactDuplicateBlock({}, DELIVERY, { name: 'Sok', phone: null, address: null }, null)
+    assert.equal(rider.block, null)
+  })
+
+  await check('a phone conflict is still not a choice, on any table', async () => {
+    const db = openDb(loadAll())
+    db.prepare("INSERT INTO suppliers(id,name,phone) VALUES(20,'Other Name','012 345 678')").run()
+    const gate = gateFor(db)
+    const blocked = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { name: 'j secrat', phone: '012 345 678', address: null }, null, { allowDuplicateName: true })
+    assert.ok(blocked.block, 'allow_duplicate_name must never unlock a phone conflict')
+    assert.deepEqual(blocked.block.body.allowedActions, ['use_existing'])
+  })
+
+  await check('the create and update routes both pass the escape hatch through', async () => {
+    const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8')
+    assert.equal((route.match(/allowDuplicateName: body\.allow_duplicate_name === true/g) || []).length, 2, 'create AND update')
+    assert.match(route, /config\.table === 'suppliers' \? matches\.find\(\(m\) => m\.severity === 'name_only'\)/)
   })
 
   console.log(`\n${passed} check(s) passed.`)

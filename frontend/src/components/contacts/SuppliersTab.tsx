@@ -124,6 +124,9 @@ interface SupplierPayload {
   userName?: string | null
   duplicateDecision?: ContactDuplicateDecision
   __rename_cascade?: 'carry' | 'record_only'
+  // P3-9: replays of a write the user already confirmed skip the server's
+  // same-name decision prompt; the Add form itself never sends this.
+  allow_duplicate_name?: boolean
 }
 
 interface SupplierMutationResult {
@@ -245,8 +248,13 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
   const duplicateCheck = useContactDuplicateFlag('suppliers', form.name || '', [form.phone || '', ...options.map((option) => option.phone)], supplier?.id)
   const activeDuplicateCheck = serverDuplicateCheck || duplicateCheck
   const duplicateMatches = activeDuplicateCheck.matches
-  const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
-  const pendingExactMatch = pendingDuplicateCheck?.matches.find((match) => match.severity === 'exact_match')
+  // P3-9: a same-name supplier now needs an explicit choice, not just an
+  // advisory banner -- the server refuses a name-only duplicate create or
+  // rename without one (routes/contacts.ts checkContactDuplicateBlock). A
+  // phone conflict is not a choice at all and is refused above, so the
+  // decision match is simply the worst non-conflict match.
+  const decisionMatch = duplicateMatches.find((match) => match.severity !== 'phone_conflict')
+  const pendingDecisionMatch = pendingDuplicateCheck?.matches.find((match) => match.severity !== 'phone_conflict')
   const clearServerDuplicateCheck = () => setServerDuplicateCheck(null)
   const set = (key: keyof SupplierPayload, value: string) => { clearServerDuplicateCheck(); setForm((current) => ({ ...current, [key]: value })) }
   const addOption = () => {
@@ -266,7 +274,7 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
       return
     }
     setLocalError('')
-    setPendingDuplicateCheck(exactMatch ? activeDuplicateCheck : null)
+    setPendingDuplicateCheck(decisionMatch ? activeDuplicateCheck : null)
     setConfirmOpen(true)
   }
 
@@ -430,9 +438,13 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
           title={supplier ? (t('edit_supplier') || 'Edit Supplier') : (t('add_supplier') || 'Add Supplier')}
           message={String(form.name || '').trim()}
           items={buildSupplierReviewItems()}
-          note={pendingExactMatch ? (t('contact_duplicate_possible_message') || 'A contact already has this name and phone number. Use the existing record or create a separate one.') : undefined}
-          danger={!!pendingExactMatch}
-          confirmLabel={pendingExactMatch ? (t('contact_duplicate_create_separately') || 'Create separately') : supplier ? (t('save') || 'Save') : (t('add_supplier') || 'Add Supplier')}
+          note={pendingDecisionMatch
+            ? (pendingDecisionMatch.severity === 'name_only'
+              ? (t('contact_duplicate_same_name_message') || 'A supplier with this exact name already exists. Use that record, or confirm this is a separate one.')
+              : (t('contact_duplicate_possible_message') || 'A contact already has this name and phone number. Use the existing record or create a separate one.'))
+            : undefined}
+          danger={!!pendingDecisionMatch}
+          confirmLabel={pendingDecisionMatch ? (t('contact_duplicate_create_separately') || 'Create separately') : supplier ? (t('save') || 'Save') : (t('add_supplier') || 'Add Supplier')}
           cancelLabel={t('cancel') || 'Cancel'}
           working={saving}
           workingLabel={t('saving') || 'Saving...'}
@@ -703,6 +715,11 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     userId: user?.id,
     userName: user?.name,
     __rename_cascade: 'carry',
+    // Only undo/redo replays build a payload this way (the Add/Edit form
+    // builds its own). Re-applying a create or a rename the user already
+    // confirmed must not stop on the P3-9 same-name prompt -- restoring two
+    // deleted same-name suppliers would otherwise fail on the second one.
+    allow_duplicate_name: true,
   }), [user?.id, user?.name])
 
   const runSupplierMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<SupplierMutationResult> => (
@@ -1009,6 +1026,9 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
                 notes: snapshot.notes || '',
                 userId: user?.id,
                 userName: user?.name,
+                // Same replay rule as buildSupplierPayload: a bulk restore
+                // re-creates rows the user already had, same names included.
+                allow_duplicate_name: true,
               }), 'Restore deleted suppliers')
               return { restoredId: Number(result?.id || result?.data?.id || 0) }
             })
