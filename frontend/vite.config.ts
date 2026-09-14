@@ -112,9 +112,17 @@ function emitBuildManifest(): Plugin {
   return {
     name: 'business-os-build-manifest',
     generateBundle(_options, bundle) {
+      // woff2 belongs here with the JS and CSS. The Khmer UI font is
+      // SELF-HOSTED (@fontsource/noto-sans-khmer, three weights), and a font
+      // file that is only cached opportunistically is not cached at all on a
+      // phone that installs the app and is then taken offline: iOS falls back
+      // to whatever Khmer face the system has, which renders the app in a
+      // different, taller face than the one every line box is sized for. Only
+      // woff2 -- the .woff twins beside it exist for browsers this app does
+      // not support, and precaching both would double the bytes for nothing.
       const offlineAssetUrls = Object.values(bundle)
         .map((output) => `/${output.fileName.replace(/\\/g, '/')}`)
-        .filter((fileName) => /\.(?:js|css)$/i.test(fileName))
+        .filter((fileName) => /\.(?:js|css|woff2)$/i.test(fileName))
         .sort()
       this.emitFile({
         type: 'asset',
