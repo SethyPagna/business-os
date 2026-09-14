@@ -775,6 +775,14 @@ export function whereActiveSales(alias: string, f: SalesFilters) {
 // stock movement. Rather than silently ignoring them and printing a loss that
 // does not belong to the filtered receipt set, `removalLossesFor` refuses the
 // window entirely -- see there.
+//
+// maxSaleId itself is set by exactly one caller, the paginated
+// business-summary export freezing its receipt set across pages
+// (routes/sales.ts ~6013-6017); ordinary callers -- getSalesTotals, the
+// day report, and /api/sales/stats-strip -- never set it and so are never
+// excluded by this branch (F2, Sep 15 2026: /stats-strip went unwired for
+// an unrelated reason -- salesTotalsFromSnapshot never called
+// removalLossesFor at all -- not because of anything in this file).
 
 /** True when `f` scopes the report to a receipt SUBSET that a stock movement
  *  cannot be matched against. Losses are then not reported at all. */
@@ -860,8 +868,11 @@ export async function removalLossesFor(env: Env, f: SalesFilters): Promise<Remov
 }
 
 /** Attach the five loss fields to a totals object. A null summary leaves the
- *  totals byte-for-byte unchanged. */
-function withRemovalLosses<T extends SalesTotals>(totals: T, loss: RemovalLossSummary | null): T {
+ *  totals byte-for-byte unchanged. Exported so every totals-shaped caller --
+ *  getSalesTotals here and routes/sales.ts's /stats-strip -- attaches the
+ *  block the same way instead of each re-deriving revenue_after_losses_usd /
+ *  profit_after_losses_usd by hand. */
+export function withRemovalLosses<T extends SalesTotals>(totals: T, loss: RemovalLossSummary | null): T {
   if (!loss) return totals
   return { ...totals, ...removalLossTotals(totals.revenue_usd, totals.profit_usd, loss) }
 }

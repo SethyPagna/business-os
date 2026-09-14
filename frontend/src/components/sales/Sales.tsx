@@ -1706,6 +1706,16 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const refundUsd = Number(stripReturns.refund_usd) || 0
     const cogsUsd = Number(totals.cost_usd) || 0
     const profitUsd = Number(totals.profit_usd) || 0
+    // Stock removed entirely, at cost (owner, Sep 14 2026), wired into this
+    // strip's kernel call (F2, Sep 15 2026) the same way the Dashboard cards
+    // already carry it. PRESENCE-signalled like cost_usd itself: the server
+    // omits the block for a non-admin caller and for a window it cannot match
+    // to stock movements, never sends 0 for "no losses" -- so `|| 0` on an
+    // absent value would misreport a real absence as a real zero.
+    const hasLosses = typeof totals.removal_loss_usd === 'number'
+    const removalLossUsd = Number(totals.removal_loss_usd) || 0
+    const revenueInclLosses = Number(totals.revenue_after_losses_usd ?? (revenueUsd - removalLossUsd))
+    const profitInclLosses = Number(totals.profit_after_losses_usd ?? (profitUsd - removalLossUsd))
     // The two figures the cards below print equations for. net_sales_usd
     // arrived with the Sep 6 kernel; read the identity backwards if an
     // older Worker is answering, rather than print a sum that will not foot.
@@ -1756,6 +1766,12 @@ ${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenu
           { label: translateOr('stats_tax', 'Tax'), value: fmtUSD(Number(totals.tax_usd) || 0) },
           { label: translateOr('stats_delivery_fees', 'Delivery fees'), value: fmtUSD(Number(totals.delivery_usd) || 0) },
           { label: translateOr('stats_collected', 'Collected'), value: fmtUSD(Number(totals.collected_total_usd) || 0), tone: 'ok' as const },
+          // Same excluding/including pair the Dashboard's Revenue card shows,
+          // same keys/labels (Dashboard.tsx), never a new pair of strings.
+          ...(hasLosses ? [
+            { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: fmtUSD(removalLossUsd), tone: 'warn' as const },
+            { label: translateOr('rpt_revenue_after_losses', 'Revenue incl. losses'), value: fmtUSD(revenueInclLosses) },
+          ] : []),
         ],
       },
       {
@@ -1788,6 +1804,12 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(totals.recognized_delivery_usd) || 0) },
           { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(totals.recognized_delivery_cost_usd) || 0), tone: 'warn' as const },
           { label: t('gross_profit') || 'Gross profit', value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
+          // Same excluding/including pair the Dashboard's Profit card shows,
+          // same keys/labels (Dashboard.tsx), never a new pair of strings.
+          ...(hasLosses ? [
+            { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: fmtUSD(removalLossUsd), tone: 'warn' as const },
+            { label: translateOr('rpt_profit_after_losses', 'Profit incl. losses'), value: fmtUSD(profitInclLosses), tone: profitInclLosses < 0 ? ('crit' as const) : undefined },
+          ] : []),
         ],
       },
       {
