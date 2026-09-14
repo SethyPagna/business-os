@@ -211,9 +211,36 @@ function sendJson(res, status, payload, extraHeaders = {}) {
   res.end(body)
 }
 
+/**
+ * Read a dist file ONCE and keep it in memory.
+ *
+ * This server is a single Node process answering three browsers and four
+ * Playwright workers at the same time, and readFileSync blocks the event loop
+ * for every byte -- with the built bundles that is milliseconds per request,
+ * per request, while other sockets wait. Measured symptom before this cache:
+ * ios-webkit reported seven page-level "Fetch API cannot load
+ * http://127.0.0.1:4318/health due to access control checks." errors in one
+ * run, which is WebKit's wording for a connection the server never got to,
+ * and the perf samples carried spikes of several seconds on a localhost load.
+ *
+ * The mtime+size check keeps it honest across a rebuild mid-session: dist is
+ * not supposed to change while the suite runs, but a stale bundle served from
+ * memory would be the single most confusing failure this harness could
+ * produce.
+ */
+const distFileCache = new Map()
+function readDistFile(filePath) {
+  const stat = statSync(filePath)
+  const cached = distFileCache.get(filePath)
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.body
+  const body = readFileSync(filePath)
+  distFileCache.set(filePath, { body, mtimeMs: stat.mtimeMs, size: stat.size })
+  return body
+}
+
 function sendFile(res, filePath, extraHeaders = {}) {
   const ext = path.extname(filePath).toLowerCase()
-  const body = readFileSync(filePath)
+  const body = readDistFile(filePath)
   res.writeHead(200, {
     'Content-Type': CONTENT_TYPES[ext] || 'application/octet-stream',
     'Content-Length': body.length,
@@ -247,7 +274,7 @@ function sendFile(res, filePath, extraHeaders = {}) {
  * how the app boots.
  */
 function sendIndexHtml(res, swGeneration) {
-  const source = readFileSync(path.join(distDir, 'index.html'), 'utf8')
+  const source = readDistFile(path.join(distDir, 'index.html')).toString('utf8')
   const body = swGeneration === 0
     ? source
     : source.replace('<head>', `<head><meta name="e2e-build-generation" content="${swGeneration}">`)
@@ -260,7 +287,7 @@ function sendIndexHtml(res, swGeneration) {
 }
 
 function readServiceWorker(swGeneration) {
-  const source = readFileSync(path.join(distDir, 'sw.js'), 'utf8')
+  const source = readDistFile(path.join(distDir, 'sw.js')).toString('utf8')
   if (swGeneration === 0) return source
   const marker = `/* e2e build generation ${swGeneration} */\n`
   // Retarget every cache name at once by rewriting the hash the built file
