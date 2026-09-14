@@ -108,7 +108,15 @@ async function main() {
     // balance formula. Inactive lots are intentionally not filtered there.
     const contacts = fs.readFileSync(path.join(__dirname, '../src/routes/contacts.ts'), 'utf8')
     const supplierWhere = contacts.match(/const supplierWhere = `([\s\S]*?)`/)[1]
-    const apSql = contacts.match(/const totalsRow = await db\.prepare\(`\s*(SELECT COUNT\(\*\) AS batches,[\s\S]*?WHERE \$\{supplierWhere\})\s*`\)/)[1].replace('${supplierWhere}', supplierWhere)
+    // P3-10 gave the purchases route an optional received_at range, so its
+    // statements now interpolate `purchasesWhere`. With no from/to sent that
+    // composes to exactly supplierWhere -- the unbounded supplier history this
+    // check wants. The composition is pinned rather than assumed, so a change
+    // that silently widened or narrowed it fails here instead of quietly
+    // changing what this AP balance is measured over.
+    const purchasesWhereExpr = contacts.match(/const purchasesWhere = (.+)/)[1].trim()
+    assert.equal(purchasesWhereExpr, "[supplierWhere, ...rangeConditions].join(' AND ')")
+    const apSql = contacts.match(/const totalsRow = await db\.prepare\(`\s*(SELECT COUNT\(\*\) AS batches,[\s\S]*?WHERE \$\{purchasesWhere\})\s*`\)/)[1].replace('${purchasesWhere}', supplierWhere)
     const ap = id => f.sql.prepare(apSql).get({ id, name: id === 1 ? 'supplier a' : 'supplier b' })
     const aRequest = receiveRequest('supplier-a-credit', 5)
     Object.assign(aRequest.items[0], { supplier_id: 1, supplier_name: 'Supplier A', unit_cost_usd: 2, payment_status: 'credit', credit_due_date: '2026-09-30', expiry_date: '2027-01-01', notes: 'A purchase' })

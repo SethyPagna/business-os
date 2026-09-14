@@ -305,11 +305,14 @@ function contactBulkDeleteEntityType(config: ContactConfig): BulkDeleteEntityTyp
 }
 
 function duplicateAllowedActions(matches: ContactDuplicateMatch[]): Array<'use_existing' | 'create_separate'> {
+  // A phone conflict is the one severity with no second option: two names
+  // cannot own one phone. Everything else is a genuine choice the caller
+  // gets to make -- including a name-only match (P3-9), which used to offer
+  // only 'use_existing' even though creating a separate record was in fact
+  // what happened when the caller ignored it.
   return matches.some((match) => match.severity === 'phone_conflict')
     ? ['use_existing']
-    : matches.some((match) => match.severity === 'exact_match')
-      ? ['use_existing', 'create_separate']
-      : ['use_existing']
+    : ['use_existing', 'create_separate']
 }
 
 function duplicateErrorResponse(
@@ -353,6 +356,19 @@ function duplicateErrorResponse(
       },
     }
   }
+  if (match.severity === 'name_only') {
+    return {
+      status: 409,
+      body: {
+        error: `A ${entityLabel} named "${match.name}" already exists. Use that record, or confirm you are creating a separate one.`,
+        code: 'contact_duplicate_decision_required',
+        duplicate,
+        matches,
+        duplicateReview: review,
+        allowedActions,
+      },
+    }
+  }
   return {
     status: 409,
     body: {
@@ -380,6 +396,7 @@ async function checkContactDuplicateBlock(
   config: ContactConfig,
   subject: { id?: number | string | null; name: string; phone: unknown; address: unknown },
   decisionInput: unknown,
+  options: { allowDuplicateName?: boolean } = {},
 ): Promise<{
   block: { body: Record<string, unknown>; status: number } | null
   decision: ContactDuplicateCreateSeparateDecision | null
@@ -411,6 +428,24 @@ async function checkContactDuplicateBlock(
   if (phoneConflict) return { block: duplicateErrorResponse(config.entity, phoneConflict, matches, review), decision: null, matches, review, snapshots, phones }
   const exactMatch = matches.find((m) => m.severity === 'exact_match')
   if (exactMatch && !decision) return { block: duplicateErrorResponse(config.entity, exactMatch, matches, review), decision: null, matches, review, snapshots, phones }
+  // P3-9: a name-only duplicate used to pass straight through, which is how
+  // the removed `ensureSupplierExists()` writer minted ten "j secrat" rows
+  // and six "lang" rows without anybody ever seeing a warning. A supplier is
+  // a company, so a second row with the identical name is almost always the
+  // same company -- the caller must now say which it is, either by echoing
+  // the reviewed candidates (duplicateDecision) or by sending
+  // allow_duplicate_name: true, which is what a replay of a write the user
+  // already confirmed (undo/redo of a create or delete) carries.
+  //
+  // Customers and delivery contacts are deliberately NOT gated here: people
+  // legitimately share a name, walk-ins are registered by name alone all day,
+  // and the POS creates them mid-sale where there is nobody to answer a
+  // prompt. Their name-only matches stay advisory (DuplicateFlagBanner) and
+  // land in the Conflicts tab.
+  const nameOnly = config.table === 'suppliers' ? matches.find((m) => m.severity === 'name_only') : undefined
+  if (nameOnly && !decision && options.allowDuplicateName !== true) {
+    return { block: duplicateErrorResponse(config.entity, nameOnly, matches, review), decision: null, matches, review, snapshots, phones }
+  }
   if (decision && !contactDuplicateDecisionMatches(review, decision)) {
     const top = exactMatch || matches[0]
     if (top) return { block: duplicateErrorResponse(config.entity, top, matches, review, 'contact_duplicate_candidates_changed'), decision: null, matches, review, snapshots, phones }
@@ -1218,7 +1253,7 @@ function registerContactRoutes(config: ContactConfig) {
       payload.phone_normalized = canonicalizePhone(payload.phone)
     }
 
-    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.duplicateDecision)
+    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.duplicateDecision, { allowDuplicateName: body.allow_duplicate_name === true })
     if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
     const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
 
@@ -1424,7 +1459,7 @@ function registerContactRoutes(config: ContactConfig) {
     // to check the phones already on `current`, not an empty set.
     const effectivePhone = Object.prototype.hasOwnProperty.call(payload, 'phone') ? payload.phone : current.phone
     const effectiveAddress = Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address
-    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { id, name, phone: effectivePhone, address: effectiveAddress }, body.duplicateDecision)
+    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { id, name, phone: effectivePhone, address: effectiveAddress }, body.duplicateDecision, { allowDuplicateName: body.allow_duplicate_name === true })
     if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
     const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
 
@@ -1766,7 +1801,7 @@ app.get('/suppliers/:id/purchases', async (c) => {
   const page = clampInt(query.page, 1, 1, 100000)
   const pageSize = clampInt(query.page_size ?? query.pageSize, 50, 1, 200)
   const offset = (page - 1) * pageSize
-  const params = { id, name: String(supplier.name || '').trim().toLowerCase() }
+  const params: Record<string, unknown> = { id, name: String(supplier.name || '').trim().toLowerCase() }
   // A lot whose tracked receipts were all reverted or undone (received
   // quantity 0 and no money; lib/productBatches.ts planUnreceiveBatchStock)
   // keeps its supplier so the revert can itself be reverted, but is not a
@@ -1777,6 +1812,24 @@ app.get('/suppliers/:id/purchases', async (c) => {
       OR (pb.supplier_id IS NULL AND pb.supplier_name IS NOT NULL AND lower(trim(pb.supplier_name)) = @name))
     AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
   )`
+
+  // P3-10: the Start->End range the purchases float sends. `received_at` holds
+  // the operator's recorded receive DATE, not a UTC timestamp, so it is bounded
+  // by plain day-string comparison exactly the way the stock-in invoice report
+  // does it (stockInReportFilters below) -- localDateAtOrAfter() would shift a
+  // bare date by the business timezone and drop the edge day. A bound also
+  // requires a recorded date, so a filtered window never silently counts lots
+  // that have no receive date at all; with no range set the endpoint still
+  // reports the supplier's complete history, exactly as before.
+  const from = String(query.from || '').slice(0, 10)
+  const to = String(query.to || '').slice(0, 10)
+  const receivedDay = "substr(COALESCE(pb.received_at, ''), 1, 10)"
+  const rangeConditions: string[] = []
+  if (from) { rangeConditions.push(`${receivedDay} <> '' AND ${receivedDay} >= @from`); params.from = from }
+  if (to) { rangeConditions.push(`${receivedDay} <> '' AND ${receivedDay} <= @to`); params.to = to }
+  // The totals below stay independent of the visible PAGE, but they do honour
+  // this range, so the headline numbers always describe the filtered rows.
+  const purchasesWhere = [supplierWhere, ...rangeConditions].join(' AND ')
 
   // Totals are calculated across the COMPLETE supplier history, independently
   // of the visible page. The old endpoint capped the row array at 1,000 and
@@ -1791,7 +1844,7 @@ app.get('/suppliers/:id/purchases', async (c) => {
            SUM(CASE WHEN pb.payment_status = 'credit' THEN 1 ELSE 0 END) AS credit_batches,
            SUM(CASE WHEN pb.received_cost_usd IS NULL THEN 1 ELSE 0 END) AS batches_without_cost
     FROM product_batches pb
-    WHERE ${supplierWhere}
+    WHERE ${purchasesWhere}
   `).get<{
     batches: number; products: number; units_received: number; cost_usd: number
     credit_open_usd: number; credit_batches: number; batches_without_cost: number
@@ -1809,7 +1862,7 @@ app.get('/suppliers/:id/purchases', async (c) => {
       FROM branch_batch_stock
       GROUP BY batch_id
     ) bbs ON bbs.batch_id = pb.id
-    WHERE ${supplierWhere}
+    WHERE ${purchasesWhere}
     ORDER BY pb.received_at DESC, pb.id DESC
     LIMIT @limit OFFSET @offset
   `).all<{

@@ -83,5 +83,13 @@ assert.doesNotMatch(stockIn, /invoice_no/, 'Stock-In does not invent a historica
 assert.match(stockIn, /<time dateTime=\{group\.received_day\}>\{fmtDateOnly\(group\.received_day\)\}<\/time>/)
 assert.match(stockIn, /supplierLabel\(group\)/)
 assert.match(stockIn, /label: tr\('purchase_cost'[\s\S]*value: money\(totals\.cost_usd\)/)
-assert.match(stockIn, /aria-expanded=\{Boolean\(linesState\)\}/, 'existing expandable group accessibility remains')
+// P3-2 replaced the inline expand with a float (user: "i meant float when
+// clicked on the invoice rows click to view details and sections etc..."), so
+// the row no longer owns an expanded region -- it announces the dialog it
+// opens. The lines table itself did not move out of this file; it is handed to
+// InvoiceDetailFloat as the Lines section's content, which is why the
+// data-invoice-ledger-scroll and min-w-[860px] checks above still hold.
+assert.doesNotMatch(stockIn, /aria-expanded/, 'the group row no longer expands in place')
+assert.match(stockIn, /aria-haspopup="dialog"/, 'the group row announces the detail float it opens')
+assert.match(stockIn, /onClick=\{\(\) => openGroup\(group\)\}/, 'clicking the invoice row opens its float')
 console.log('PASS invoice dates and IDs remain truthful and existing API totals are only formatted')

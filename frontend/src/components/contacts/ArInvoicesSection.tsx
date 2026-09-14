@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import AppSelect from '../shared/AppSelect.tsx'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import type { TableColumnDef } from '../shared/columnPreferences.ts'
@@ -8,10 +8,11 @@ import type { TableColumnDef } from '../shared/columnPreferences.ts'
 // the old system's Bangkok wall clock (same as the AP ledger), so the calendar
 // day must be read in the business timezone.
 import { fmtDate } from '../../utils/formatters'
-import { todayStr } from '../../utils/dateHelpers.ts'
 import { getCustomerReceivables } from '../../api/contactReadTransport.ts'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
+import InvoiceDetailFloat from './InvoiceDetailFloat.tsx'
+import CopyableId from '../shared/CopyableId.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -70,15 +71,23 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [customer, setCustomer] = useState('all')
   const [status, setStatus] = useState('all')
-  const initialToday = todayStr()
-  const [fromDate, setFromDate] = useState(initialToday)
-  const [toDate, setToDate] = useState(initialToday)
+  // P3-10: ALL TIME on first open, not Today -- same reason as the AP ledger
+  // it mirrors. `customer_receivables` is the legacy AR import (migration
+  // 0094) and nothing writes a row dated today, so Today opened the section
+  // empty every time. Empty bounds are dropped by buildQueryString and the
+  // Worker adds its invoice_date conditions only when from/to arrive.
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)
   const [data, setData] = useState<ArPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  // P3-2: the receivable the detail float is open on. Fed from the row the
+  // list already holds -- there is no per-receivable endpoint, and the list
+  // response carries every column the imported document has.
+  const [detail, setDetail] = useState<ArInvoice | null>(null)
   const aliveRef = useRef(true)
   const requestRef = useRef(0)
 
@@ -130,7 +139,12 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
 
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
   const anyFilter = customer !== 'all' || status !== 'all' || fromDate !== '' || toDate !== ''
-  const changeFilter = (apply: () => void) => { apply(); setPage(1) }
+  // The open receivable may not survive the new filter, so the float closes
+  // with the list it was opened from rather than outliving its row.
+  const changeFilter = (apply: () => void) => { apply(); setPage(1); setDetail(null) }
+
+  /** What the old system printed on the document, falling back to its row id. */
+  const invoiceLabel = (row: ArInvoice): string => String(row.invoice_no || '').trim() || `#${row.legacy_id}`
 
   const statusChip = (row: ArInvoice) => {
     const outstanding = Number(row.outstanding_balance_usd)
@@ -151,7 +165,16 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
           offset the Customers/Suppliers/Delivery search rows use one level
           up. The sticky wrapper is outside the overflow-x-auto row because a
           horizontally scrolling box cannot itself be the sticky element. */}
-      <div className="sticky top-2 z-30 -mx-3 -mt-3 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
+      <div className="sticky top-2 z-30 -mx-3 -mt-3 space-y-1.5 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
+      {/* P3-10: the Start→End range leads the pinned block on its own
+          full-width row with its preset chips, instead of being the third
+          control inside the horizontally scrolling filter line below -- the
+          position a phone never scrolled to. */}
+      <StatsRangeRow
+        range={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
+        onRangeChange={(range) => changeFilter(() => { setFromDate(range.startDate || ''); setToDate(range.endDate || '') })}
+        t={t}
+      />
       <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
         <AppSelect
           ariaLabel={tr('customer', 'Customer')}
@@ -174,13 +197,6 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
             { value: 'overpaid', label: tr('ar_overpaid', 'Customer balance') },
             { value: 'settled', label: tr('paid', 'Paid') },
           ]}
-        />
-        <DateTimeRangePicker
-          value={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
-          onChange={(range) => changeFilter(() => { setFromDate(range.startDate || ''); setToDate(range.endDate || '') })}
-          t={t}
-          showTime={false}
-          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
         />
         {anyFilter ? (
           <button type="button" className="btn-secondary py-1 text-xs" onClick={() => changeFilter(() => { setCustomer('all'); setStatus('all'); setFromDate(''); setToDate('') })}>
@@ -231,7 +247,12 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
           {invoices.length === 0 ? (
             <div className="py-6 text-center text-sm text-gray-400">{tr('ar_invoices_empty', 'No customer receivables match these filters.')}</div>
           ) : (
-            <div data-invoice-ledger-scroll className="max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-gray-200 dark:border-gray-700">
+            <>
+            {/* Large screens keep the full excel-style ledger with its column
+                chooser; the phone gets the wrapped card list below instead of
+                an 820px table it has to drag sideways -- the same split the
+                Sales list uses. */}
+            <div data-invoice-ledger-scroll className="hidden max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-gray-200 dark:border-gray-700 md:block">
               <table className="w-full min-w-[820px] text-left text-xs tabular-nums">
                 <thead className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                   <tr>
@@ -250,7 +271,11 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
                   {invoices.map((row) => {
                     const outstanding = Number(row.outstanding_balance_usd)
                     return (
-                      <tr key={row.id} className="border-t border-gray-100 dark:border-gray-800">
+                      <tr
+                        key={row.id}
+                        className="cursor-pointer border-t border-gray-100 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-700/40"
+                        onClick={() => setDetail(row)}
+                      >
                         <td className="whitespace-nowrap px-3 py-2 text-gray-800 dark:text-gray-100"><time dateTime={row.invoice_date}>{fmtDate(row.invoice_date)}</time></td>
                         <td className="px-3 py-2 text-gray-800 dark:text-gray-100">{row.customer_name || '--'}</td>
                         {cols.isVisible('invoice_no') ? (
@@ -271,6 +296,41 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
                 </tbody>
               </table>
             </div>
+            <div className="space-y-2 md:hidden">
+              {invoices.map((row) => (
+                <div
+                  key={row.id}
+                  role="button"
+                  tabIndex={0}
+                  className="cursor-pointer rounded-xl border border-gray-200 px-3 py-2 active:bg-gray-50 dark:border-gray-700 dark:active:bg-gray-700/40"
+                  onClick={() => setDetail(row)}
+                  onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setDetail(row) } }}
+                >
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    <time dateTime={row.invoice_date} className="whitespace-nowrap text-xs leading-5 tabular-nums text-gray-500">{fmtDate(row.invoice_date)}</time>
+                    <span className="min-w-0 flex-1 truncate text-sm leading-6 text-gray-900 dark:text-white">{row.customer_name || '--'}</span>
+                    <span className="text-sm font-semibold leading-6 tabular-nums text-gray-900 dark:text-white">{money(row.total_amount_usd)}</span>
+                  </div>
+                  <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    {/* The invoice id wraps to a second line rather than being
+                        truncated, and a hold copies it. */}
+                    <CopyableId
+                      value={invoiceLabel(row)}
+                      copyLabel={tr('copy', 'Copy')}
+                      copiedLabel={tr('copied', 'Copied')}
+                      valueClassName="text-xs leading-5 text-gray-500"
+                    />
+                    {Number(row.outstanding_balance_usd) !== 0 ? (
+                      <span className={`text-xs leading-5 tabular-nums ${Number(row.outstanding_balance_usd) > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-sky-700 dark:text-sky-300'}`}>
+                        {tr('ar_outstanding', 'Owed')}: {money(row.outstanding_balance_usd)}
+                      </span>
+                    ) : null}
+                    <span className="ml-auto">{statusChip(row)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            </>
           )}
 
           <div className="flex justify-center">
@@ -278,6 +338,49 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
           </div>
         </>
       )}
+
+      {detail ? (
+        <InvoiceDetailFloat
+          t={t}
+          onClose={() => setDetail(null)}
+          title={`${tr('invoice_details', 'Invoice details')} -- ${detail.customer_name || tr('customer', 'Customer')}`}
+          idLabel={tr('invoice_no', 'Invoice #')}
+          idValue={invoiceLabel(detail)}
+          badge={statusChip(detail)}
+          sections={[
+            {
+              key: 'document',
+              title: tr('details', 'Details'),
+              facts: [
+                { key: 'invoice_date', label: tr('invoice_date', 'Invoice date'), value: <time dateTime={detail.invoice_date}>{fmtDate(detail.invoice_date)}</time> },
+                { key: 'customer', label: tr('customer', 'Customer'), value: detail.customer_name || '--' },
+                { key: 'customer_code', label: tr('customer_code', 'Customer code'), value: detail.customer_code || '--' },
+                { key: 'legacy_id', label: tr('legacy_record_id', 'Legacy record id'), value: `#${detail.legacy_id}` },
+              ],
+            },
+            {
+              key: 'amounts',
+              title: tr('invoice_amounts', 'Amounts'),
+              facts: [
+                { key: 'taxable', label: tr('ap_taxable', 'Taxable'), value: money(detail.taxable_amount_usd) },
+                { key: 'vat', label: tr('ap_vat', 'VAT'), value: money(detail.vat_amount_usd) },
+                { key: 'total', label: tr('total', 'Total'), value: money(detail.total_amount_usd) },
+                { key: 'paid', label: tr('paid', 'Paid'), value: money(detail.amount_paid_usd) },
+                { key: 'outstanding', label: tr('ar_outstanding', 'Owed'), value: money(detail.outstanding_balance_usd) },
+              ],
+            },
+            {
+              key: 'lines',
+              title: tr('invoice_lines', 'Lines'),
+              // Migration 0094 imported these as balances only -- an AR row
+              // never rewrites a sale's payment and holds no item linkage --
+              // so there is nothing to fetch. Said out loud instead of
+              // rendering an empty frame.
+              note: tr('ar_invoice_no_lines_note', 'Customer receivables are imported balances from the old system and carry no product lines. The matching items are on the sale itself.'),
+            },
+          ]}
+        />
+      ) : null}
     </div>
   )
 }

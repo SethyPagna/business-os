@@ -118,6 +118,44 @@ test('the Worker response cannot trigger an older cached POS auto-retry or auto-
   assert.doesNotMatch(route, /body\.confirmDuplicate/)
 })
 
+// ---- P3-9: a same-name supplier is a decision, not a silent create -------
+
+test('a name-only supplier duplicate can be answered with create-separate', () => {
+  const nameOnlyMatch = { ...match, matchedPhone: null, severity: 'name_only' as const }
+  const nameOnlyCheck: ContactDuplicateCheck = {
+    matches: [nameOnlyMatch],
+    duplicateReview: review,
+    allowedActions: ['use_existing', 'create_separate'],
+  }
+  assert.deepEqual(createSeparateContactDecision(nameOnlyCheck), { action: 'create_separate', ...review },
+    'the server now offers both choices for a name-only match, so the form can echo the review')
+})
+
+test('the supplier form asks for a decision on ANY blocking match, not just an exact one', () => {
+  const suppliers = read('../src/components/contacts/SuppliersTab.tsx')
+  assert.match(suppliers, /const decisionMatch = duplicateMatches\.find\(\(match\) => match\.severity !== 'phone_conflict'\)/,
+    'a same-name supplier must reach the confirm dialog -- otherwise the 409 loops forever')
+  assert.match(suppliers, /setPendingDuplicateCheck\(decisionMatch \? activeDuplicateCheck : null\)/)
+  assert.doesNotMatch(suppliers, /const exactMatch = duplicateMatches\.find/, 'the exact-only gate is gone')
+  assert.match(suppliers, /contact_duplicate_same_name_message/, 'and the dialog says what the duplicate actually is')
+})
+
+test('only replays of an already-confirmed write carry allow_duplicate_name', () => {
+  const suppliers = read('../src/components/contacts/SuppliersTab.tsx')
+  assert.equal((suppliers.match(/allow_duplicate_name: true/g) || []).length, 2,
+    'buildSupplierPayload (undo/redo) and the bulk restore -- and nothing else')
+  const commit = suppliers.slice(suppliers.indexOf('const commitSupplier'), suppliers.indexOf('const commitSupplier') + 1200)
+  assert.doesNotMatch(commit, /allow_duplicate_name/, 'the Add/Edit form itself must face the prompt')
+})
+
+test('customers and delivery keep their advisory name-only banner', () => {
+  const banner = read('../src/components/contacts/DuplicateFlagBanner.tsx')
+  assert.match(banner, /name_only:/, 'a name-only match is still shown, on every contact table')
+  for (const file of ['../src/components/contacts/CustomerFormModal.tsx', '../src/components/contacts/DeliveryTab.tsx']) {
+    assert.doesNotMatch(read(file), /allow_duplicate_name/, `${file} needs no escape hatch -- its name-only matches are not gated`)
+  }
+})
+
 test('all duplicate-decision copy is available in both languages', () => {
   const en = JSON.parse(read('../src/lang/en.json')) as Record<string, unknown>
   const km = JSON.parse(read('../src/lang/km.json')) as Record<string, unknown>
@@ -131,6 +169,7 @@ test('all duplicate-decision copy is available in both languages', () => {
     'contact_duplicate_review_changed',
     'contact_duplicate_existing_load_failed',
     'contact_duplicate_existing_choices',
+    'contact_duplicate_same_name_message',
   ]) {
     assert.equal(typeof en[key], 'string', `English ${key}`)
     assert.equal(typeof km[key], 'string', `Khmer ${key}`)
