@@ -970,7 +970,7 @@
   "bulk_edit_update_pricing_for_count": "ធ្វើបច្ចុប្បន្នភាពតម្លៃសម្រាប់ផលិតផលចំនួន {count}",
   "bulk_import": "នាំចូលច្រើន",
   "bulk_merge_partial_failure": "{count} មិនអាចបញ្ចូលគ្នាបានទេ",
-  "bulk_merge_skipped_multiway": "ក្រុម {count} ដែលមានកំណត់ត្រា ៣ ឬច្រើនជាងនេះត្រូវបានរំលង -- សូមបញ្ចូលគ្នាម្ដងមួយៗ",
+  "bulk_merge_skipped_single": "ក្រុម {count} គ្មានអ្វីត្រូវបញ្ចូលគ្នាទៀតទេ",
   "bulk_merge_success": "បានបញ្ចូលគ្នានៃទិន្នន័យស្ទួនដែលបានជ្រើសរើស",
   "bulk_out_of_stock": "ដាក់ជាអស់ស្តុក",
   "bulk_price_adjust_title": "ឬបង្កើន/បន្ថយតម្លៃតាមចំនួន",

@@ -242,6 +242,59 @@ export async function mergeContacts(
   )
 }
 
+// ---- Bulk merge planning (pure) ----------------------------------------
+// P3-9. The Conflicts tab's Bulk Merge used to run only on clusters of
+// EXACTLY two records and silently skip everything bigger, on the reasoning
+// that a 3+-way cluster needs a human to pick the survivor. That reasoning
+// did not survive contact with the data the hidden `ensureSupplierExists()`
+// writer left behind: production carries a "j secrat" cluster of ten rows and
+// a "lang" cluster of six, all created by the same accident, all identical
+// apart from their ids. Those are exactly the clusters Bulk Merge exists for,
+// and they were the only ones it refused.
+//
+// So the plan is computed for a cluster of ANY size, by a rule that is stated
+// rather than guessed at, and it is pure so it can be tested without a server.
+
+export type BulkContactMergePlan = {
+  cluster: ContactDuplicateCluster
+  keeperId: number
+  /** Merged into the keeper in this order, one mergeContacts() call each. */
+  loserIds: number[]
+}
+
+/**
+ * Which record of a cluster survives, in priority order:
+ *
+ *   1. The one member that carries a phone number, when exactly one does. A
+ *      duplicate minted by a hidden writer has no phone (nothing typed one),
+ *      so the row that has one is the contact somebody actually created.
+ *   2. Otherwise the lowest id -- created first, so the most history already
+ *      points at it and the merge moves the least.
+ *
+ * Returns null for a cluster with nothing to merge.
+ */
+export function chooseBulkMergeKeeper(contacts: ContactDuplicateClusterEntry[]): ContactDuplicateClusterEntry | null {
+  if (!Array.isArray(contacts) || contacts.length < 2) return null
+  const byId = [...contacts].sort((a, b) => a.id - b.id)
+  const withPhone = byId.filter((contact) => String(contact.phone || '').trim() !== '')
+  return withPhone.length === 1 ? withPhone[0] : byId[0]
+}
+
+/** One plan per mergeable cluster; clusters with nothing to merge are dropped. */
+export function planBulkContactMerges(clusters: ContactDuplicateCluster[]): BulkContactMergePlan[] {
+  const plans: BulkContactMergePlan[] = []
+  for (const cluster of clusters || []) {
+    const keeper = chooseBulkMergeKeeper(cluster?.contacts || [])
+    if (!keeper) continue
+    plans.push({
+      cluster,
+      keeperId: keeper.id,
+      loserIds: [...cluster.contacts].sort((a, b) => a.id - b.id).filter((contact) => contact.id !== keeper.id).map((contact) => contact.id),
+    })
+  }
+  return plans
+}
+
 // ---- Sale-link conflicts (the Conflicts tab's fourth section) ----------
 // Sales whose customer link disagrees with the phone printed on the sale,
 // and sales naming a customer that has no contact record at all (see

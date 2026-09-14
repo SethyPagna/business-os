@@ -6,7 +6,7 @@ import ArrowRightCircle from 'lucide-react/dist/esm/icons/arrow-right-circle.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
-import { dismissContactDuplicateCluster, undismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts } from './contactDuplicates'
+import { dismissContactDuplicateCluster, undismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts, planBulkContactMerges } from './contactDuplicates'
 import type { ContactDuplicateCluster, ContactDuplicateClusterEntry, ContactDuplicateSeverity, ContactTableKind } from './contactDuplicates'
 import SaleLinkConflictsSection from './SaleLinkConflictsSection'
 import { useApp } from '../../AppContext.tsx'
@@ -455,26 +455,32 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     }
   }
 
-  // Bulk Merge -- only safe to automate for exactly-2-contact clusters,
-  // where "keep the older record" (lower id, i.e. created first) is an
-  // unambiguous, defensible default. A 3+-way cluster genuinely needs a
-  // human to pick which one survives (see ClusterCard's per-row "Keep
-  // this" flow), so those are skipped here and left for individual
-  // resolution rather than guessing at a keeper.
+  // Bulk Merge -- P3-9: runs on a cluster of ANY size, not just exactly two.
+  // The old two-only rule left the exact clusters this action exists for
+  // untouched: production holds a ten-row and a six-row supplier cluster minted
+  // by a hidden writer, identical apart from their ids, and Bulk Merge refused
+  // all sixteen rows. planBulkContactMerges() states the survivor rule (the one
+  // member with a phone, else the lowest id) instead of guessing, and the
+  // per-row "Keep this" flow on each card still overrides it by hand.
+  //
+  // A cluster's own losers merge in id order and STOP at the first failure, so
+  // a half-merged group is reported as one failure rather than being retried
+  // against a keeper that may no longer be the right one.
   const bulkMerge = async () => {
     if (!canBulkContactsRef.current || !canMergeDuplicates) return
     const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(table, cluster)))
     if (!targets.length) return
-    const mergeable = targets.filter((cluster) => cluster.contacts.length === 2)
-    const skipped = targets.length - mergeable.length
+    const plans = planBulkContactMerges(targets)
+    const skipped = targets.length - plans.length
     setBulkBusy(true)
     let failed = 0
-    for (const cluster of mergeable) {
+    for (const plan of plans) {
       if (!canBulkContactsRef.current) break
-      const id = clusterKey(table, cluster)
-      const [first, second] = [...cluster.contacts].sort((a, b) => a.id - b.id)
+      const id = clusterKey(table, plan.cluster)
       try {
-        await mergeContacts(table, first.id, second.id)
+        for (const loserId of plan.loserIds) {
+          await mergeContacts(table, plan.keeperId, loserId)
+        }
         removeCluster(id)
       } catch {
         failed += 1
@@ -485,7 +491,9 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     if (failed || skipped) {
       const parts = []
       if (failed) parts.push(replaceVars(t('bulk_merge_partial_failure') || '{count} could not be merged', { count: failed }))
-      if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_multiway') || '{count} group(s) with 3+ records were skipped -- merge those individually', { count: skipped }))
+      // Only a degenerate cluster (nothing left to merge into) can land here
+      // now; it is still counted out loud rather than dropped silently.
+      if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_single') || '{count} group(s) had nothing left to merge', { count: skipped }))
       notify(parts.join('. '), failed ? 'error' : 'info')
     } else {
       notify(t('bulk_merge_success') || 'Merged the selected duplicates')

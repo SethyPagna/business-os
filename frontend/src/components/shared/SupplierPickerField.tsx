@@ -32,7 +32,36 @@ export type SupplierChoice = {
   supplierName: string
 }
 
-type SupplierNameRow = { id: number; name: string }
+export type SupplierNameRow = { id: number; name: string }
+
+/** Case- and whitespace-insensitive supplier-name key. */
+function supplierNameKey(name: unknown): string {
+  return String(name ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/**
+ * P3-9. The loaded supplier whose name the operator just typed, matched
+ * ignoring case and whitespace -- or null when nothing matches, or when the
+ * name is ambiguous.
+ *
+ * Why this exists: typing an existing supplier's name exactly and pressing
+ * Enter (or just tabbing away) without clicking the suggestion used to drop
+ * the id and record a name-only attribution, so the same supplier ended up
+ * attributed two different ways depending on whether the operator reached for
+ * the mouse. The id is still never invented -- it is only ever an id that is
+ * already in the loaded list.
+ *
+ * Ambiguity returns null on purpose: while duplicate supplier rows share a
+ * name (the ten-row "j secrat" cluster in production), there is no single
+ * right id, and guessing one would pick a duplicate at random. Name-only is
+ * the honest answer until the cluster is merged.
+ */
+export function resolveSupplierByExactName(rows: SupplierNameRow[], typed: string): SupplierNameRow | null {
+  const key = supplierNameKey(typed)
+  if (!key) return null
+  const matches = (rows || []).filter((row) => supplierNameKey(row.name) === key)
+  return matches.length === 1 ? matches[0] : null
+}
 
 let supplierNamesCache: { rows: SupplierNameRow[]; at: number; scope: ActorReadScope } | null = null
 const SUPPLIER_NAMES_TTL_MS = 60_000
@@ -187,11 +216,22 @@ export default function SupplierPickerField({
         inputClassName="input min-h-11 w-full text-sm"
         placeholder={tr('supplier_optional_placeholder', 'Who this received date was bought from')}
         onChange={(next, option) => {
-          // A pick carries the contact id; anything else is typing, and
-          // typing breaks the link -- the id only ever comes from an explicit
-          // pick, so an edited name can't ride on a stale id.
-          if (option) onChange({ supplierId: Number(option.payload), supplierName: option.value })
-          else onChange({ supplierId: null, supplierName: next })
+          // A pick carries the contact id outright. Typing does NOT carry a
+          // stale id forward -- it is re-resolved from the typed text every
+          // keystroke, so an edited name can never ride on the previous pick's
+          // id. P3-9: typing an existing supplier's name exactly now resolves
+          // to that contact instead of falling through to a name-only
+          // attribution, which is what made the same supplier get recorded two
+          // different ways depending on whether the suggestion was clicked.
+          if (option) {
+            onChange({ supplierId: Number(option.payload), supplierName: option.value })
+            return
+          }
+          // Same scope guard the suggestion list uses: rows captured for a
+          // different actor never resolve an id here either.
+          const resolvable = rowsScope.current && isActorReadScopeCurrent(rowsScope.current) ? rows : []
+          const resolved = resolveSupplierByExactName(resolvable, next)
+          onChange({ supplierId: resolved ? resolved.id : null, supplierName: next })
         }}
       />
       {hint && hintDisplay === 'inline' ? <span className="mt-1 block text-[11px] text-gray-400">{hint}</span> : null}

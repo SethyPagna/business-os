@@ -970,7 +970,7 @@
   "bulk_edit_update_pricing_for_count": "Update pricing for {count} products",
   "bulk_import": "Bulk Import",
   "bulk_merge_partial_failure": "{count} could not be merged",
-  "bulk_merge_skipped_multiway": "{count} group(s) with 3+ records were skipped -- merge those individually",
+  "bulk_merge_skipped_single": "{count} group(s) had nothing left to merge",
   "bulk_merge_success": "Merged the selected duplicates",
   "bulk_out_of_stock": "Set Out of Stock",
   "bulk_price_adjust_title": "Or raise / lower prices by an amount",
