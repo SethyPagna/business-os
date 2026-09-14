@@ -40,6 +40,53 @@ export function shiftFiguresOf(shift: Shift): ShiftFiguresShape | null {
 export type ShiftRegisteredRow = { key: string; fallback: string; usd: number | null; khr: number | null; added?: true }
 
 /**
+ * The extra change actually put into the drawer during a shift, or NULL when
+ * none was -- the ONE rule for "was there a top-up".
+ *
+ * Every surface that prints this figure must agree on when the line exists:
+ * the report figures block, the Reports CSV/print export and the POS close
+ * summary strip. The strip used to print `?? 0` unconditionally, so a shift
+ * that never needed more change showed "+ $0.00 · 0៛" on the till while the
+ * report beside it showed no such row at all.
+ *
+ * Reads the admin `figures` when the response carries them and the shift row
+ * otherwise: a cashier's close response has no figures block (admin only) but
+ * does carry the amount they just typed.
+ */
+export function shiftAdditionalCash(shift: Shift): { usd: number; khr: number } | null {
+  const figures = shiftFiguresOf(shift)?.additional_cash
+  const usd = figures?.usd ?? shift.additional_cash_usd ?? 0
+  const khr = figures?.khr ?? shift.additional_cash_khr ?? 0
+  return usd || khr ? { usd, khr } : null
+}
+
+/**
+ * The expected drawer to SHOW before a close is written, when the cashier has
+ * typed an additional the server has not recorded yet.
+ *
+ * The reconciliation formula is not reproduced here. It lives once, on the
+ * server (cloudflare/src/lib/shiftReconciliation.ts: opening + additional +
+ * cash sales - refunds - expenses - courier), and this adjusts the ONE term
+ * that the open form can still change: expected - recorded additional + typed
+ * additional. Every other component stays the server's.
+ *
+ * A currency the shift never registered comes back null (unknown stays
+ * unknown, it does not become a number), and a blank field adds nothing.
+ */
+export function shiftExpectedWithTypedAdditional(
+  reconciliation: { expected: ShiftCountPairValue; additional_cash?: { usd: number; khr: number } } | null | undefined,
+  typed: ShiftCountPairValue,
+): ShiftCountPairValue {
+  const adjust = (currency: 'usd' | 'khr'): number | null => {
+    const expected = reconciliation?.expected?.[currency] ?? null
+    if (expected == null) return null
+    const recorded = reconciliation?.additional_cash?.[currency] ?? 0
+    return Math.round((expected - recorded + (typed[currency] ?? 0)) * 100) / 100
+  }
+  return { usd: adjust('usd'), khr: adjust('khr') }
+}
+
+/**
  * The registration block in the owner's reading order: the change float the
  * drawer opened with, the extra change put in mid-shift when that float ran
  * out, then what was left at the end. One order for every surface that prints
@@ -52,10 +99,10 @@ export type ShiftRegisteredRow = { key: string; fallback: string; usd: number | 
  */
 export function shiftRegisteredRows(shift: Shift): ShiftRegisteredRow[] {
   const registered = shiftRegisteredCash(shift)
-  const additional = shiftFiguresOf(shift)?.additional_cash
+  const additional = shiftAdditionalCash(shift)
   return [
     { key: 'shift_registered_open', fallback: 'OPEN', usd: registered.open.usd, khr: registered.open.khr },
-    ...(additional && (additional.usd || additional.khr)
+    ...(additional
       ? [{ key: 'shift_recon_additional_cash', fallback: 'Additional change used', usd: additional.usd, khr: additional.khr, added: true as const }]
       : []),
     { key: 'shift_registered_end', fallback: 'END', usd: registered.end.usd, khr: registered.end.khr },

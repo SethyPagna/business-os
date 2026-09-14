@@ -20,7 +20,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
 import type { Shift } from '../src/api/shiftTransport.ts'
-import { shiftRegisteredRows, type ShiftFiguresShape } from '../src/components/shifts/shiftReportModel.ts'
+import {
+  shiftAdditionalCash,
+  shiftExpectedWithTypedAdditional,
+  shiftRegisteredRows,
+  type ShiftFiguresShape,
+} from '../src/components/shifts/shiftReportModel.ts'
 
 const read = (rel: string): string => fs.readFileSync(new URL(rel, import.meta.url), 'utf8')
 const enText = read('../src/lang/en.json')
@@ -122,17 +127,78 @@ test('the form label, the report row and the breakdown say one thing, in both pa
   assert.match(en.shift_additional_khr, /KHR/)
 })
 
-test('the hint carries the owner\'s example and the report-only rule', () => {
-  for (const hint of [en.shift_additional_cash_hint, km.shift_additional_cash_hint]) {
-    assert.ok(hint.includes('10,000'), 'the hint shows the opening-spent-then-topped-up example')
-    assert.ok(/0/.test(hint), 'and the closing 0 that goes with it')
+test('the owner\'s example and the report-only rule live behind the InfoHint, not inline', () => {
+  // Standing density rule: an explanation goes into the tooltip, not into the
+  // layout. The inline hint had grown to ~232 characters -- about three lines
+  // of prose under one field on a 375px till, pushing the End button off the
+  // screen the cashier is trying to finish.
+  for (const [lang, hint] of [['en', en.shift_additional_cash_hint], ['km', km.shift_additional_cash_hint]] as const) {
+    assert.ok(hint.length <= 80, `${lang}: the inline hint is one short line, not a paragraph (${hint.length} chars)`)
+    assert.ok(!hint.includes('10,000'), `${lang}: the worked example belongs in the InfoHint`)
   }
-  assert.match(en.shift_additional_cash_hint, /Report only/)
-  assert.match(en.shift_additional_cash_hint, /never changes sales/)
-  assert.ok(km.shift_additional_cash_hint.includes('សម្រាប់របាយការណ៍តែប៉ុណ្ណោះ'))
+  for (const example of [en.shift_additional_cash_example, km.shift_additional_cash_example]) {
+    assert.ok(example.includes('10,000'), 'the detail shows the opening-spent-then-topped-up example')
+    assert.ok(/0/.test(example), 'and the closing 0 that goes with it')
+  }
+  assert.match(en.shift_additional_cash_example, /Report only/)
+  assert.match(en.shift_additional_cash_example, /never changes sales/)
+  assert.ok(km.shift_additional_cash_example.includes('សម្រាប់របាយការណ៍តែប៉ុណ្ណោះ'))
+  // Every surface that shows the short hint also offers the detail, or the
+  // owner's example would simply be gone from the app.
+  for (const rel of ['../src/components/pos/ShiftGate.tsx', '../src/components/shifts/ShiftHistoryModal.tsx']) {
+    const source = read(rel)
+    const hints = source.split("hint={t('shift_additional_cash_hint')}").length - 1
+    const details = source.split("hintDetail={t('shift_additional_cash_example')}").length - 1
+    assert.ok(hints > 0 && hints === details, `${rel}: ${hints} additional hints but ${details} InfoHints`)
+  }
+  assert.match(read('../src/components/shifts/ShiftCountFields.tsx'), /hintDetail \? <InfoHint/, 'the pair renders the detail as an InfoHint')
   // The difference formula names the same term as the field it sums.
   assert.match(en.shift_difference_hint, /additional change used/)
   assert.ok(km.shift_difference_hint.includes(km.shift_additional_cash))
+})
+
+// ---- one rule for "was there a top-up" ------------------------------------
+
+test('a shift with no top-up has no additional line anywhere', () => {
+  // ONE rule, shared. The POS close summary strip used to print the row
+  // unconditionally with `?? 0`, so a shift that never needed extra change
+  // showed "+ $0.00 · 0៛" on the till while the report block beside it and
+  // the Reports export showed no such row at all.
+  assert.equal(shiftAdditionalCash({ additional_cash_usd: 0, additional_cash_khr: 0 } as Shift), null)
+  assert.equal(shiftAdditionalCash({} as Shift), null, 'a row that does not carry the field has nothing to print')
+  assert.deepEqual(shiftAdditionalCash({ additional_cash_usd: 0, additional_cash_khr: 5000 } as Shift), { usd: 0, khr: 5000 },
+    'one currency is enough for the line to exist')
+  // The cashier's own close response carries no admin `figures` block, so the
+  // rule has to fall back to the shift row or their top-up would vanish.
+  assert.deepEqual(shiftAdditionalCash({ additional_cash_usd: 3, additional_cash_khr: 0, figures: null } as unknown as Shift), { usd: 3, khr: 0 })
+  const gate = read('../src/components/pos/ShiftGate.tsx')
+  assert.match(gate, /closedAdditional = closed \? shiftAdditionalCash\(closed\)/, 'the POS strip reads the shared rule')
+  assert.doesNotMatch(gate, /additional_cash_usd \?\? 0/, 'and never prints a fabricated zero of its own')
+})
+
+// ---- what the drawer should hold BEFORE the close is written --------------
+
+test('the pre-close expected drawer moves with the additional being typed', () => {
+  // The stored reconciliation was computed from the additional RECORDED on the
+  // shift (none, on an open one). A cashier who puts another 20,000 riel of
+  // change in and types it must see Expected move, or they will be told the
+  // till is 20,000 over.
+  const reconciliation = { expected: { usd: 250.5, khr: 105_000 }, additional_cash: { usd: 10, khr: 5_000 } }
+  assert.deepEqual(shiftExpectedWithTypedAdditional(reconciliation, { usd: 10, khr: 5_000 }), { usd: 250.5, khr: 105_000 },
+    'retyping what was already recorded changes nothing')
+  assert.deepEqual(shiftExpectedWithTypedAdditional(reconciliation, { usd: 12.25, khr: 25_000 }), { usd: 252.75, khr: 125_000 },
+    'only the additional term moves: expected - recorded + typed')
+  assert.deepEqual(shiftExpectedWithTypedAdditional(reconciliation, { usd: null, khr: null }), { usd: 240.5, khr: 100_000 },
+    'clearing the field takes the recorded amount back out, it does not keep it')
+  assert.deepEqual(shiftExpectedWithTypedAdditional({ expected: { usd: null, khr: 100_000 } }, { usd: 5, khr: 0 }), { usd: null, khr: 100_000 },
+    'a currency the shift never registered stays unknown instead of becoming a number')
+  assert.deepEqual(shiftExpectedWithTypedAdditional(null, { usd: 5, khr: 0 }), { usd: null, khr: null },
+    'and no reconciliation at all is not an expectation of zero')
+  assert.equal(shiftExpectedWithTypedAdditional({ expected: { usd: 0.1, khr: 0 }, additional_cash: { usd: 0.3, khr: 0 } }, { usd: 0.2, khr: 0 }).usd, 0,
+    'cents do not drift into binary noise')
+  const gate = read('../src/components/pos/ShiftGate.tsx')
+  assert.match(gate, /shiftExpectedWithTypedAdditional\(shift\?\.reconciliation, typedAdditional\)/, 'the close form shows the adjusted figure')
+  assert.doesNotMatch(gate, /reconciliation\.expected\.usd/, 'and no longer prints the stored expected beside the field that changes it')
 })
 
 test('the retired "added" wording is gone from both packs and both fallbacks', () => {

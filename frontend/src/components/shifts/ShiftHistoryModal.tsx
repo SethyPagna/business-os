@@ -129,7 +129,9 @@ function jsonRecord(raw: string): Record<string, unknown> {
   } catch { return {} }
 }
 
-function AmendmentList({ rows }: { rows: ShiftAmendment[] }) {
+/** Exported for tests/shiftAmendForm.test.ts, which renders the real
+ * before -> after list rather than grepping this file for it. */
+export function AmendmentList({ rows, segments = [] }: { rows: ShiftAmendment[]; segments?: Shift[] }) {
   const { t, fmtUSD, fmtKHR } = useApp() as {
     t: (key: string) => string
     fmtUSD: (value: unknown) => string
@@ -152,7 +154,13 @@ function AmendmentList({ rows }: { rows: ShiftAmendment[] }) {
         return (
           <li key={row.id} className="text-xs leading-relaxed">
             <div className="font-medium text-gray-800 dark:text-gray-100">{row.reason}</div>
-            <div className="text-gray-500 dark:text-gray-400">{row.actor_name || `${t('shift_staff')} ${row.actor_user_id}`} · {fmtDateTime24(row.created_at)}</div>
+            {/* Which segment this record belongs to -- only worth printing
+                when the record has more than one, which is exactly when the
+                timeline mixes them. */}
+            <div className="text-gray-500 dark:text-gray-400">
+              {row.actor_name || `${t('shift_staff')} ${row.actor_user_id}`} · {fmtDateTime24(row.created_at)}
+              {segments.length > 1 ? ` · ${segments.find((segment) => segment.id === row.shift_session_id)?.shift_code || ''}` : ''}
+            </div>
             {changes.length ? (
               <dl className="mt-1.5 space-y-1 rounded-lg bg-slate-50 p-2 dark:bg-zinc-800/70">
                 {changes.map(([field, label]) => (
@@ -185,6 +193,9 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<Shift | null>(null)
   const [amendments, setAmendments] = useState<ShiftAmendment[]>([])
+  // Every segment of the selected record, oldest first. A reopened shift is
+  // ONE row in the list, so its float has to show what that row stands for.
+  const [segments, setSegments] = useState<Shift[]>([])
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [detailsError, setDetailsError] = useState('')
   const [action, setAction] = useState<ActionMode>(null)
@@ -243,6 +254,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
     setSelected(shift)
     setEdit(editDraft(shift))
     setAmendments([])
+    setSegments([])
     setAction(null)
     setDetailsLoading(true)
     setDetailsError('')
@@ -252,6 +264,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
         setSelected(result.shift)
         setEdit(editDraft(result.shift))
         setAmendments(result.amendments)
+        setSegments(result.segments || [result.shift])
         const saved = pendingShiftMutation(app.user?.id, shift.id)
         if (saved) {
           const value = (key: string) => saved.body[key] == null ? '' : String(saved.body[key])
@@ -284,6 +297,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
       if (requestId === detailsRequest.current) {
         replaceRow(history.shift)
         setAmendments(history.amendments)
+        setSegments(history.segments || [history.shift])
         setDetailsError('')
       }
     } catch (cause) {
@@ -479,7 +493,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                         <div className="text-xs"><span className="block">{t('shift_opened_at')}</span><DateTimeEntryInput className="mt-1" value={edit.openedAt} onChange={(next) => setEdit({ ...edit, openedAt: next })} t={t} dateAriaLabel={`${t('shift_opened_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_opened_at')} · ${t('time')}`} /></div>
                         <div className="text-xs"><span className="block">{t('shift_closed_at')}</span><DateTimeEntryInput className="mt-1" value={edit.closedAt} disabled={!selected.closed_at} onChange={(next) => setEdit({ ...edit, closedAt: next })} t={t} dateAriaLabel={`${t('shift_closed_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_closed_at')} · ${t('time')}`} /></div>
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')} usd={edit.openingUsd} khr={edit.openingKhr} onUsd={(value) => setEdit({ ...edit, openingUsd: value })} onKhr={(value) => setEdit({ ...edit, openingKhr: value })} />
-                        <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} usd={edit.additionalUsd} khr={edit.additionalKhr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, additionalUsd: value })} onKhr={(value) => setEdit({ ...edit, additionalKhr: value })} />
+                        <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')} usd={edit.additionalUsd} khr={edit.additionalKhr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, additionalUsd: value })} onKhr={(value) => setEdit({ ...edit, additionalKhr: value })} />
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={edit.closingUsd} khr={edit.closingKhr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, closingUsd: value })} onKhr={(value) => setEdit({ ...edit, closingKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_opening_note')}<input className="input mt-1" value={edit.openingNote} onChange={(event) => setEdit({ ...edit, openingNote: event.target.value })} /></label>
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={edit.closingNote} disabled={!edit.closedAt} onChange={(event) => setEdit({ ...edit, closingNote: event.target.value })} /></label>
@@ -494,7 +508,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                       <div><h3 className="text-sm font-semibold">{t('shift_close_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_close_time_hint')}</p></div>
                       <fieldset disabled={saving || pending} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
                         <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} /></div>
-                        <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} usd={close.additionalUsd} khr={close.additionalKhr} onUsd={(value) => setClose({ ...close, additionalUsd: value })} onKhr={(value) => setClose({ ...close, additionalKhr: value })} />
+                        <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')} usd={close.additionalUsd} khr={close.additionalKhr} onUsd={(value) => setClose({ ...close, additionalUsd: value })} onKhr={(value) => setClose({ ...close, additionalKhr: value })} />
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={close.closingUsd} khr={close.closingKhr} onUsd={(value) => setClose({ ...close, closingUsd: value })} onKhr={(value) => setClose({ ...close, closingKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={close.closingNote} onChange={(event) => setClose({ ...close, closingNote: event.target.value })} /></label>
                       </fieldset>
@@ -524,9 +538,35 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                 </section>
               ) : null}
 
+              {/* The SEGMENTS of this record, oldest first. A reopen continues
+                  a shift into a new row and the list shows the record as one
+                  row, so the float is where the chain is readable -- and each
+                  segment opens as its own detail. Shown only when there is
+                  more than one: a shift that was never reopened has nothing
+                  to chain. */}
+              {!detailsLoading && !detailsError && segments.length > 1 ? (
+                <section>
+                  <h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">{t('shift_segments')}</h3>
+                  <ol className="space-y-2">
+                    {segments.map((segment) => (
+                      <li key={segment.id}>
+                        <button
+                          type="button"
+                          onClick={() => { if (segment.id !== selected.id) void openDetails(segment) }}
+                          disabled={saving || dirty}
+                          className={`block w-full rounded-xl text-left outline-none ring-blue-500 transition focus-visible:ring-2 ${segment.id === selected.id ? 'ring-2' : 'hover:bg-blue-50 dark:hover:bg-blue-950/20'}`}
+                        >
+                          <ShiftSummary shift={segment} />
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              ) : null}
+
               <section aria-busy={detailsLoading}>
                 <h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">{t('shift_amendments')}</h3>
-                {!detailsLoading && !detailsError ? <AmendmentList rows={amendments} /> : null}
+                {!detailsLoading && !detailsError ? <AmendmentList rows={amendments} segments={segments} /> : null}
               </section>
             </div>
           ) : (
