@@ -109,8 +109,26 @@ check('the raw storefront document carries the link-preview tags', () => {
   assert.ok(fs.existsSync(path.join(REPO, 'frontend', 'public', 'leang-cosmetics-icon-512.png')), 'the preview image ships')
 })
 
+check('the document declares its canonical URL on the primary host, so the alias cannot rank on its own', () => {
+  const head = indexHtml.slice(0, indexHtml.indexOf('<script>'))
+  const canonical = head.match(/<link rel="canonical" href="([^"]*)"/)
+  assert.ok(canonical, 'the static head carries no canonical URL')
+  assert.equal(canonical[1], 'https://leangbeauty.com/', 'the canonical is absolute, on the primary host')
+  const ogUrl = head.match(/<meta property="og:url" content="([^"]*)"/)
+  assert.ok(ogUrl, 'the static head carries no og:url')
+  assert.equal(ogUrl[1], canonical[1], 'og:url and the canonical must be the same address')
+  // leangcosmetics.dpdns.org serves this exact document. Its own sitemap and
+  // robots stay on the request origin (each host answers for itself), and the
+  // canonical above is what folds it into leangbeauty.com -- so the alias must
+  // never appear in the tag.
+  for (const host of PUBLIC_HOSTS.filter((candidate) => candidate !== 'leangbeauty.com')) {
+    assert.ok(!canonical[1].includes(host), host + ' must canonicalise to the primary host, not to itself')
+  }
+  assert.ok(seo.sitemapXml('leangcosmetics.dpdns.org', 'https://leangcosmetics.dpdns.org').includes('https://leangcosmetics.dpdns.org/'), 'the alias still answers for its own URLs')
+})
+
 check('the admin host rewrites every preview tag away from the storefront', () => {
-  for (const property of ['og:site_name', 'og:title', 'og:description', 'og:image']) {
+  for (const property of ['og:site_name', 'og:title', 'og:description', 'og:image', 'og:url']) {
     const rule = identity.ADMIN_DOCUMENT_REWRITES.find((candidate) => candidate.selector === 'meta[property="' + property + '"]')
     assert.ok(rule, 'no admin rewrite for ' + property)
     const writes = []
@@ -122,6 +140,17 @@ check('the admin host rewrites every preview tag away from the storefront', () =
     assert.ok(writes.length === 1 && writes[0], property + ' writes one value')
     assert.doesNotMatch(writes[0], /leang/i, property + ' still names the storefront')
   }
+  // The canonical too: an admin document telling a crawler its canonical
+  // address is the shop's front page is the same leak in a different tag.
+  const canonicalRule = identity.ADMIN_DOCUMENT_REWRITES.find((candidate) => candidate.selector === 'link[rel="canonical"]')
+  assert.ok(canonicalRule, 'no admin rewrite for the canonical URL')
+  const canonicalWrites = []
+  canonicalRule.element({
+    getAttribute: () => 'https://leangbeauty.com/',
+    setAttribute: (_name, value) => canonicalWrites.push(value),
+    setInnerContent: (value) => canonicalWrites.push(value),
+  })
+  assert.deepEqual(canonicalWrites, ['/'], 'the admin canonical is its own document, never the storefront')
 })
 
 console.log('\ntest-public-seo-pure: ' + checks + ' checks passed')

@@ -179,6 +179,43 @@ check('every favicon size maps to its admin twin', () => {
   assert.doesNotMatch(unknown.attributes.href, /leang/i)
 })
 
+check('the admin document never advertises the storefront address', () => {
+  // index.html ships an ABSOLUTE canonical and og:url on leangbeauty.com (they
+  // are what folds the alias host into the primary one -- test-public-seo-pure
+  // .cjs). Left alone, every admin page would tell a crawler or a chat preview
+  // that its canonical address is the shop's front page.
+  const canonical = stubElement({ rel: 'canonical', href: 'https://leangbeauty.com/' })
+  ruleFor('link[rel="canonical"]').element(canonical)
+  assert.strictEqual(canonical.attributes.href, '/')
+
+  const ogUrl = stubElement({ property: 'og:url', content: 'https://leangbeauty.com/' })
+  ruleFor('meta[property="og:url"]').element(ogUrl)
+  assert.strictEqual(ogUrl.attributes.content, '/')
+
+  // Relative on purpose: an absolute value would have to name ONE of the four
+  // admin hosts. It is only defensible because nothing indexes the admin app --
+  // robots.txt answers Disallow: / on every admin host, pinned in
+  // test-public-seo-pure.cjs.
+})
+
+check('every tag index.html publishes for the storefront has an admin answer', () => {
+  // A new storefront-branded head tag that nobody rewrites is the G4 bug
+  // class returning: the raw HTML on the admin host keeps naming Leang Beauty.
+  const head = read(path.join(REPO, 'frontend', 'index.html')).split('<script>')[0]
+  const published = [
+    ...[...head.matchAll(/<meta property="(og:[a-z_]+)"/g)].map((match) => 'meta[property="' + match[1] + '"]'),
+    ...(head.includes('<link rel="canonical"') ? ['link[rel="canonical"]'] : []),
+  ]
+  assert.ok(published.length >= 6, 'the storefront head was read, not missed')
+  const rewritten = new Set(identity.ADMIN_DOCUMENT_REWRITES.map((rule) => rule.selector))
+  for (const selector of published) {
+    // og:type is 'website' on both hosts: a value with no storefront identity
+    // in it is the one tag that needs no answer.
+    if (selector === 'meta[property="og:type"]') continue
+    assert.ok(rewritten.has(selector), selector + ' names the storefront in the raw HTML and no admin rule replaces it')
+  }
+})
+
 check('no rule leaves a storefront value behind', () => {
   for (const rule of identity.ADMIN_DOCUMENT_REWRITES) {
     const element = stubElement({ href: '/leang-cosmetics-icon-512.png', content: 'Leang Beauty', sizes: '192x192' })
