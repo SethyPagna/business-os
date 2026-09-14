@@ -68,10 +68,48 @@ routes = [
   { pattern = "admin.leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
 ]
 
+# Copied VERBATIM from wrangler.toml (not a diff site). The document-route
+# list is asset-layer routing, identical on both plans: run_worker_first is
+# what makes the Worker see a page request at all, and the admin-host
+# identity rewrite in src/lib/adminDocumentIdentity.ts has to run on Free
+# too. scripts/test-admin-host-document-rewrite-pure.cjs pins the paid file
+# against APP_DOCUMENT_ROUTES; the drift test pins this file against that.
 [assets]
 directory = "../frontend/dist"
 not_found_handling = "single-page-application"
-run_worker_first = ["/api/*", "/uploads/*", "/health", "/ws"]
+# The built frontend, also bound so the Worker itself can read a document it
+# has been asked to serve (src/index.ts's serveAppDocument). The binding name
+# is STATIC_ASSETS because ASSETS is already taken by the R2 bucket holding
+# uploaded files.
+binding = "STATIC_ASSETS"
+# Everything after /ws is a DOCUMENT route: the asset layer would otherwise
+# answer it from index.html without ever invoking this Worker, and G4's
+# admin-host identity rewrite has to happen before iOS reads those bytes (see
+# src/lib/adminDocumentIdentity.ts). The list mirrors that file's
+# APP_DOCUMENT_ROUTES exactly -- scripts/test-admin-host-document-rewrite-pure
+# .cjs fails if they drift, because a path listed here without a handler there
+# 404s a whole page, and a handler there without a path here never runs.
+run_worker_first = [
+  "/api/*", "/uploads/*", "/health", "/ws",
+  "/", "/index.html", "/admin", "/admin/*",
+  "/app", "/app/*", "/login", "/login/*",
+  "/audit", "/audit/*", "/audit-log", "/audit-log/*",
+  "/backup", "/backup/*", "/backups", "/backups/*",
+  "/branches", "/branches/*", "/catalog", "/catalog/*",
+  "/contacts", "/contacts/*", "/dashboard", "/dashboard/*",
+  "/delivery-contacts", "/delivery-contacts/*", "/fees", "/fees/*",
+  "/files", "/files/*", "/inventory", "/inventory/*",
+  "/library", "/library/*", "/loyalty", "/loyalty/*",
+  "/loyalty-points", "/loyalty-points/*", "/notes", "/notes/*",
+  "/point-of-sale", "/point-of-sale/*", "/pos", "/pos/*",
+  "/product", "/product/*", "/products", "/products/*",
+  "/promos", "/promos/*", "/promotions", "/promotions/*",
+  "/receipt-settings", "/receipt-settings/*", "/receipts", "/receipts/*",
+  "/returns", "/returns/*", "/review", "/review/*",
+  "/review-queue", "/review-queue/*", "/sales", "/sales/*",
+  "/server", "/server/*", "/settings", "/settings/*",
+  "/users", "/users/*",
+]
 
 [triggers]
 crons = ["0 */6 * * *"]
