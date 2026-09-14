@@ -5586,7 +5586,15 @@ export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean)
   if(isAdmin)return row
   const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,unvalued_cost_usd,returned_cost_usd,
     cost,gross_profit,delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,
-    returned_cost_shortfall_usd,cost_missing_snapshot_lines,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,...publicRow}=row
+    returned_cost_shortfall_usd,cost_missing_snapshot_lines,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,
+    // Stock removed entirely, priced at COST, and the two figures derived from
+    // it. They are cost money and leak the same thing profit_usd does: with
+    // revenue_usd public, revenue_after_losses_usd hands a non-admin the exact
+    // cost of every removal by subtraction. /day-report reaches this gate with
+    // the block populated (getSalesDayReport carries it), so this is a live
+    // path, not a precaution.
+    removal_loss_usd,removal_loss_qty,removal_loss_unvalued_rows,revenue_after_losses_usd,profit_after_losses_usd,
+    ...publicRow}=row
   return publicRow
 }
 export function gateSalesCourierMoney(row:Record<string,unknown>,isAdmin:boolean):Record<string,unknown> {

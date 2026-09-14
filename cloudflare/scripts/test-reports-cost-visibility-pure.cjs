@@ -99,6 +99,26 @@ assert.equal(Object.hasOwn(admin, 'margin_pct'), true)
   assert.equal(adminZero.profit_after_losses_usd, 15)
 }
 
+// routes/reports.ts is not the only door these figures leave by. routes/sales.ts
+// keeps its OWN non-admin gate, gateSalesReportMoney, and /api/sales/day-report
+// reaches it with the removal block populated (getSalesDayReport carries it).
+// A key added to one gate and not the other is a live leak, not a theoretical
+// one -- this is exactly how it shipped broken once. Pin both.
+{
+  const salesSource = fs.readFileSync(path.join(root, 'src', 'routes', 'sales.ts'), 'utf8')
+  const start = salesSource.indexOf('export function gateSalesReportMoney')
+  assert.ok(start > 0, 'gateSalesReportMoney still exists in routes/sales.ts')
+  const body = salesSource.slice(start, salesSource.indexOf('...publicRow}=row', start))
+  for (const key of ['removal_loss_usd', 'removal_loss_qty', 'removal_loss_unvalued_rows',
+    'revenue_after_losses_usd', 'profit_after_losses_usd']) {
+    assert.ok(new RegExp(`\\b${key}\\b`).test(body), `routes/sales.ts gateSalesReportMoney must also strip ${key} for non-admins`)
+  }
+  // The control: a public key the gate deliberately does NOT strip fails the
+  // same check, so a pattern that matched anything would be caught here.
+  assert.equal(/\btx_count\b/.test(body), false,
+    'the transaction count stays public -- the checks above discriminate')
+}
+
 for (const input of [productSensitive, JSON.parse(JSON.stringify(productSensitive))]) {
   const employee = reports.gateProductRow({ line_sales_usd: 20, ...input }, false)
   for (const key of Object.keys(productSensitive)) assert.equal(Object.hasOwn(employee, key), false, `product ${key} hidden`)
