@@ -1299,6 +1299,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     viewerPageSizeRef.current || Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE
   ))
   const [portalProductInitial, setPortalProductInitial] = useState('all')
+  // Same promo facet as PublicCatalogPage.tsx ('' | 'promoted' | 'rule:<id>')
+  // so the preview's "only deals" toggle and campaign chips behave like the shop.
+  const [promoFacet, setPromoFacet] = useState('')
   const [portalProductInitials, setPortalProductInitials] = useState<PortalInitialOption[]>(() => normalizePortalInitialOptions(cachedPortal?.catalog?.initials))
   const [portalProductRefreshing, setPortalProductRefreshing] = useState(false)
   const [portalConfigReady, setPortalConfigReady] = useState(() => !!cachedPortal?.config || !publicView)
@@ -1924,7 +1927,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   useEffect(() => {
     setPortalProductPage(1)
-  }, [brandFilter, branchFilter, categoryFilter, portalProductInitial, portalSearchQuery, stockFilter])
+  }, [brandFilter, branchFilter, categoryFilter, portalProductInitial, portalSearchQuery, promoFacet, stockFilter])
 
   // The viewer's 20/50/100 choice from the pager -- identical to the
   // standalone storefront's handler, including the page-1 reset and the
@@ -1957,6 +1960,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       // buildPortalProductFilters), but dropping it here as well keeps a
       // stale selection from ever being sent in the first place.
       stockState: previewConfig.showStockStatus === false ? '' : stockFilter.join(','),
+      promo: promoFacet,
       initial: portalProductInitial,
     }
 
@@ -2328,6 +2332,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setBrandFilter([])
     setBranchFilter([])
     setStockFilter([])
+    setPromoFacet('')
     setPortalProductInitial('all')
   }
 
@@ -3136,7 +3141,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   const promotionsSection = activeTab === 'products' ? (
     <Suspense fallback={null}>
-      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} />
+      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} onOpenProduct={openProductById} />
     </Suspense>
   ) : null
 
@@ -3153,7 +3158,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const compactTwoColumnMobile = mobileGridColumns === 2
   const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(desktopGridColumns)}`
   const compactCatalogCards = desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
-  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (previewConfig.showStockStatus === false ? 0 : stockFilter.length) + (portalProductInitial === 'all' ? 0 : 1)
+  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (previewConfig.showStockStatus === false ? 0 : stockFilter.length) + (portalProductInitial === 'all' ? 0 : 1) + (promoFacet ? 1 : 0)
   const selectedStockBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
   const recommendedProductById = useMemo(() => {
     const map = new Map<number, CatalogProduct>()
@@ -3200,6 +3205,39 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices })
   }
   const closeProductDetailView = () => setProductDetailView((prev) => ({ ...prev, open: false }))
+  // Preview twin of PublicCatalogPage.tsx's openProductById, and the SAME
+  // three steps: the loaded page, then the by-id search, then a name search.
+  // `products` is one server page (the search effect above replaces it on
+  // every page/filter change), not the whole catalog -- so a promo card
+  // pointing at a product on any other page used to fall straight through to
+  // a name search while a visitor got the flyout. What the owner sees while
+  // editing has to be what a visitor gets.
+  //
+  // A function declaration because the promotions banner above renders before
+  // this point in the component body.
+  function openProductById(productId: number, productName: string) {
+    const loaded = products.find((product) => Number(product.id) === productId)
+    if (loaded) {
+      openProductDetail(loaded)
+      return
+    }
+    withLoaderTimeout(
+      () => getCatalogApi().searchPortalCatalogProducts({ productId, pageSize: 1 }),
+      'Portal product lookup',
+      CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS,
+    )
+      .then((result) => {
+        if (!aliveRef.current) return
+        // Same shaping as this preview's own product search above: the items
+        // array as the endpoint returned it, no second grouping pass.
+        const [product] = Array.isArray(result?.items) ? result.items as CatalogProduct[] : []
+        if (product) openProductDetail(product)
+        else setSearch(productName)
+      })
+      .catch(() => {
+        if (aliveRef.current) setSearch(productName)
+      })
+  }
 
   const catalogTabProps = {
     copy,
@@ -3233,6 +3271,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setBranchFilter,
     stockFilter,
     setStockFilter,
+    promoFacet,
+    setPromoFacet,
     toggleFilterValue,
     toggleFilterValues,
     previewConfig: displayConfig,
@@ -3247,6 +3287,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     normalizeProductGallery,
     openProductGallery,
     openProductDetail,
+    openProductById,
     openPortalImage,
     formatPortalPrice,
     replaceVars,

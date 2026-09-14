@@ -16,6 +16,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#1e3a8a" />
     <meta name="description" content="Leang Beauty — product catalog, prices and store contact" />
+    <!-- Canonical URL and link previews (Open Graph / Twitter card) for the
+         storefront. All three absolute values name the PRIMARY host, for two
+         reasons: crawlers do not resolve relative URLs, and the alias host
+         leangcosmetics.dpdns.org serves this very same document -- an absolute
+         canonical is what folds the alias into leangbeauty.com without any
+         per-host work at all.
+
+         The storefront's indexable URLs are the home page and the three
+         query-addressed legal readers (?legal=privacy|terms|cookies, which the
+         sitemap lists). Those readers are VIEWS of this one document -- the
+         raw HTML a crawler receives is byte-identical -- so they share its
+         canonical. If a policy ever becomes its own document, the canonical
+         has to become per-URL, and that means a Worker rewrite.
+
+         On admin hosts the Worker replaces canonical and og:* along with the
+         title and icons (cloudflare/src/lib/adminDocumentIdentity.ts). It
+         replaces them with RELATIVE values on purpose: nothing should ever
+         preview or index the admin app, and the point there is only that it is
+         not Leang Beauty. The inline bootstrap below leaves all of these
+         alone. -->
+    <link rel="canonical" href="https://leangbeauty.com/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Leang Beauty" />
+    <meta property="og:title" content="Leang Beauty" />
+    <meta property="og:description" content="Leang Beauty — product catalog, prices and store contact" />
+    <meta property="og:url" content="https://leangbeauty.com/" />
+    <meta property="og:image" content="https://leangbeauty.com/leang-cosmetics-icon-512.png" />
+    <meta name="twitter:card" content="summary" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <!-- `default`, not `black-translucent`. black-translucent paints the iOS

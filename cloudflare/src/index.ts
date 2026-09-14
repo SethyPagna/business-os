@@ -49,6 +49,7 @@ import { maybeRunScheduledEphemeralRetention } from './lib/ephemeralRetention'
 import { reapStalledImportJobs } from './routes/importJobs'
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from './lib/reportMoneyPrecision'
 import { ADMIN_DOCUMENT_REWRITES, APP_DOCUMENT_ROUTES, shouldRewriteAdminDocument } from './lib/adminDocumentIdentity'
+import { robotsTxt, sitemapXml } from './lib/publicSeo'
 
 export type Env = {
   DB: D1Database
@@ -322,6 +323,25 @@ function rewriteAdminDocument(response: Response): Response {
 // paths, and a HEAD that fell through to Hono's 404 would report the app's
 // own pages as missing.
 for (const route of APP_DOCUMENT_ROUTES) app.on(['GET', 'HEAD'], route, serveAppDocument)
+
+// P3-L3 (E): robots.txt and sitemap.xml, split by host (lib/publicSeo.ts).
+// The storefront is indexable and points at a minimal sitemap; the admin
+// host answers "Disallow: /" and has no sitemap. Registered here, above the
+// D1 middleware, for the same reason as the document handler: a crawler's
+// probe must never cost a database round trip. Both paths are in
+// run_worker_first (wrangler.toml and wrangler.free.toml) or the asset
+// layer would answer them with the SPA document instead.
+const PUBLIC_SEO_CACHE_CONTROL = 'public, max-age=3600'
+app.on(['GET', 'HEAD'], '/robots.txt', (c) => {
+  const url = new URL(c.req.url)
+  return c.text(robotsTxt(url.hostname, url.origin), 200, { 'Cache-Control': PUBLIC_SEO_CACHE_CONTROL })
+})
+app.on(['GET', 'HEAD'], '/sitemap.xml', (c) => {
+  const url = new URL(c.req.url)
+  const body = sitemapXml(url.hostname, url.origin)
+  if (body === null) return c.notFound()
+  return c.body(body, 200, { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': PUBLIC_SEO_CACHE_CONTROL })
+})
 
 // Security headers must wrap every early response. Public small envelopes are
 // admitted before even bootstrap/maintenance DB work. Other body classes are

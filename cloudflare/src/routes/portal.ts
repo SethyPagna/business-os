@@ -18,7 +18,7 @@ import { generatePortalAiResponse } from '../lib/portalAi'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
-import { loadActivePromotionRules, productPromotedSql } from '../lib/promotionRulesSql'
+import { loadActivePromotionRules, productPromotedSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { PORTAL_CONSENT_VERSION, signupPortalAccount, signinPortalAccount } from '../lib/portalAccounts'
 import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccountState } from '../lib/portalSession'
@@ -68,6 +68,56 @@ function normalizePortalFaqItems(value: unknown): Array<{ id: string; question: 
       }
     })
     .filter((item) => item.question && item.answer)
+}
+
+// The editor's "Promotions and posts" cards (customer_portal_promo_items,
+// serialised by frontend portalEditorUtils.ts's serializePromoItems). Same
+// field set the storefront's CatalogProductsSection reads; a card links to
+// a product (linkProductId, opened in the product detail flyout) OR to a
+// URL, and BOTH of the card's URLs -- the link it navigates to and the image
+// it renders -- are sanitised ONCE here with the same allowlist the
+// announcement strip's link_url goes through (lib/safeLinkUrl.ts), so an
+// unsafe value stored before that guard existed can never reach a visitor.
+//
+// mediaUrl goes through the same allowlist as linkUrl rather than a looser
+// image-only rule: a real card image is either an uploaded /uploads/... path
+// or an https:// URL, which is exactly what the allowlist admits, and an
+// <img src> is not a harmless place for javascript:/data:/protocol-relative
+// values either (a data: document behind an onerror, a //evil.example beacon
+// that leaks every visitor's IP and referrer to a third party).
+//
+// Malformed JSON fails closed to no cards, like the FAQ above.
+export function normalizePortalPromoItems(value: unknown) {
+  let parsed: unknown = value
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value)
+    } catch (_) {
+      return []
+    }
+  }
+  if (!Array.isArray(parsed)) return []
+
+  return parsed
+    .slice(0, 50)
+    .map((item, index) => {
+      const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+      const text = (key: string) => String(row[key] || '').trim()
+      const linkProductId = Number.parseInt(String(row.linkProductId || ''), 10)
+      return {
+        id: text('id') || `promo-${index + 1}`,
+        eyebrow: text('eyebrow'),
+        title: text('title'),
+        subtitle: text('subtitle'),
+        body: text('body'),
+        mediaUrl: normalizeSafeLinkUrl(row.mediaUrl) || '',
+        ctaLabel: text('ctaLabel'),
+        linkUrl: normalizeSafeLinkUrl(row.linkUrl) || '',
+        linkProductId: Number.isFinite(linkProductId) && linkProductId > 0 ? linkProductId : null,
+        linkProductName: text('linkProductName'),
+      }
+    })
+    .filter((item) => item.title || item.subtitle || item.body || item.mediaUrl)
 }
 
 // Ported from backend/src/routes/portal.ts's normalizeUrl, minus the
@@ -184,7 +234,6 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     : 'usd'
   const pointsPerUsd = toNumber(settings.customer_portal_points_per_usd, 1)
   const derivedPointsPerKhr = pointsPerUsd > 0 && exchangeRate > 0 ? pointsPerUsd / exchangeRate : 0
-  const publicationMissing = getPortalPublicationMissingFields(settings)
 
   return {
     businessName: settings.business_name || 'Business OS',
@@ -193,14 +242,13 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     businessAddress: settings.business_address || '',
     // N45: the registered identity an online seller has to display (Cambodia's
     // 2019 e-commerce law) and that the privacy/terms/cookie templates fill in.
-    // Separate from businessName, which is the display/brand name.
+    // Separate from businessName, which is the display/brand name. WHICH of
+    // them are still blank stays an editor-side hint computed from the draft
+    // (CatalogEditorSurface.tsx) and is deliberately NOT published here: no
+    // visitor feature depends on it, and internal readiness has no business
+    // on an anonymous response (owner, 2026-09-14).
     businessLegalName: settings.business_legal_name || '',
     businessRegistrationNumber: settings.business_registration_number || '',
-    // Public catalogue data is withheld until the operator can identify the
-    // seller and give customers both a physical and electronic contact point.
-    // The display name is deliberately not accepted as a registered identity.
-    publicationReady: publicationMissing.length === 0,
-    publicationMissing,
     businessTagline: settings.customer_portal_business_tagline || '',
     businessLogo: settings.customer_portal_logo_image || '',
     businessFavicon: settings.customer_portal_favicon_image || '',
@@ -218,6 +266,17 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     showFaq: normalizeBoolean(settings.customer_portal_show_faq, true),
     faqTitle: settings.customer_portal_faq_title || 'Frequently asked questions',
     faqItems: normalizePortalFaqItems(settings.customer_portal_faq_items),
+    // The editor's "Promotions and posts" cards. Same "editor saves it,
+    // buildPortalConfig never sent it" gap as the toggles and contact
+    // blocks below: PublicCatalogPage.tsx read displayConfig.promoItems /
+    // promotionsTitle / promotionsIntro / showPromotions, and the live
+    // /config never carried any of them, so the cards (and every product
+    // link on them) only ever showed in the editor's own preview. An empty
+    // title lets the storefront use its localised "Featured offers".
+    showPromotions: normalizeBoolean(settings.customer_portal_show_promotions, true),
+    promotionsTitle: settings.customer_portal_promotions_title || '',
+    promotionsIntro: settings.customer_portal_promotions_intro || '',
+    promoItems: normalizePortalPromoItems(settings.customer_portal_promo_items),
     showPrices: normalizeBoolean(settings.customer_portal_show_prices, true),
     showOutOfStockProducts: normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true),
     // Master switch for the In Stock/Low Stock/Out of Stock badge on each
@@ -361,20 +420,22 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     submissionRewardPoints: Math.max(0, Math.floor(toNumber(settings.customer_portal_submission_reward_points, 5))),
     submissionInstructions: settings.customer_portal_submission_instructions
       || 'Share the business on social media, then upload screenshots here for staff review.',
+    // Same "editor saves it, buildPortalConfig never sends it" gap already
+    // fixed above for translateWidgetEnabled, the per-field show* toggles,
+    // and the whole contact-links block: CatalogPage.tsx (Aug 24 request,
+    // Part 326 backlog item 3) saves these under
+    // customer_portal_product_caution_default/_need_more_details_default,
+    // and ProductDetailFlyout.tsx already renders them as the portal-wide
+    // Caution/Need-More-Details fallback on every product -- but this
+    // function never read them back out, so the real public storefront
+    // always fell back to the frontend's hardcoded generic copy
+    // ("Contact us for more product details." / no caution shown) instead
+    // of the merchant's own saved text, even though the editor's own live
+    // preview (which builds displayConfig straight from its own draft
+    // state, not a round trip through this endpoint) showed it correctly.
+    productCautionDefault: settings.customer_portal_product_caution_default || '',
+    productNeedMoreDetailsDefault: settings.customer_portal_product_need_more_details_default || '',
   }
-}
-
-export type PortalPublicationField = 'business_legal_name' | 'business_registration_number' | 'business_address' | 'business_phone' | 'business_email'
-
-export function getPortalPublicationMissingFields(settings: SettingsMap): PortalPublicationField[] {
-  const required: PortalPublicationField[] = [
-    'business_legal_name',
-    'business_registration_number',
-    'business_address',
-    'business_phone',
-    'business_email',
-  ]
-  return required.filter((key) => !String(settings[key] || '').trim())
 }
 
 // Root cause of "brand/category filter showing irrelevant/empty options":
@@ -690,7 +751,7 @@ const PORTAL_CATALOG_TTL_SECONDS = 30
 
 const PORTAL_SEARCH_CACHE_PARAMS = [
   'page', 'pageSize', 'query', 'q', 'brand', 'category', 'branchId', 'branch_id',
-  'stockState', 'initial', 'promo',
+  'stockState', 'initial', 'promo', 'productId',
 ] as const
 
 // Consume Hono's SAME parsed first-value query object as the producer. Keep
@@ -808,7 +869,7 @@ app.get('/ai/status', async (c) => {
   // for response-shape stability with the client's existing handling.
   return c.json({
     success: true,
-    enabled: !!config.publicationReady && !!config.aiEnabled && !!provider,
+    enabled: !!config.aiEnabled && !!provider,
     title: config.aiTitle,
     disclaimer: config.aiDisclaimer,
     provider: provider?.provider || '',
@@ -938,9 +999,6 @@ app.post('/ai/chat', async (c) => {
 
     const settings = await loadSettingsMap(c.env)
     const config = buildPortalConfig(settings, c.env)
-    if (!config.publicationReady) {
-      return c.json({ error: 'The storefront is not ready for publication', code: 'portal_publication_not_ready' }, 503)
-    }
     if (!config.aiEnabled) {
       return c.json({ error: 'Portal AI is currently disabled' }, 403)
     }
@@ -1527,9 +1585,6 @@ app.post('/submissions', async (c) => {
   // database round-trip; the session check is what actually gates the write.
   const settings = await loadSettingsMap(c.env)
   const config = buildPortalConfig(settings, c.env)
-  if (!config.publicationReady) {
-    return c.json({ error: 'The storefront is not ready for publication', code: 'portal_publication_not_ready' }, 503)
-  }
   if (!config.submissionEnabled) return c.json({ error: 'Customer submissions are currently disabled' }, 403)
 
   const rejection = await admitRequestBody(c, PORTAL_SCREENSHOT_BODY_BYTES)
@@ -1932,22 +1987,37 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   const initialClause = initial && initial.toLowerCase() !== 'all'
     ? "upper(substr(trim(COALESCE(p.brand, '')), 1, 1)) = @initial"
     : undefined
-  if (initialClause) {
-    params.initial = initial.toUpperCase()
-    where.push(initialClause)
-  }
+  if (initialClause) params.initial = initial.toUpperCase()
   const joinSql = joins.join('\n')
-  // G1 promoted ordering + the public promo filter (G1b), hoisted ABOVE
+  // G1 promoted ordering + the public promo facet (G1b), hoisted ABOVE
   // whereSql so the COUNT and the page query see the same condition. The
-  // storefront exposes exactly ONE promo facet -- 'promoted' (a live
-  // discount or any active rule); rule-id filtering stays admin-only and
-  // internal facets (supplier etc.) never reach the portal (standing
-  // surface rule).
+  // facet is 'promoted' (a live discount or any active rule) or
+  // 'rule:<id>' -- the campaign chip on the storefront's promo strip
+  // narrows the grid to that one rule's products. Only an id in the ACTIVE
+  // rule set can match (singleRuleAppliesSql answers '0' for any other), so
+  // nothing internal is reachable through it; supplier-style admin facets
+  // still never reach the portal (standing surface rule).
   const searchRules = await loadActivePromotionRules(db)
   const searchPromotedRankSql = `CASE WHEN ${productPromotedSql(searchRules, params)} THEN 1 ELSE 0 END`
-  if (String(query.promo || '').trim().toLowerCase() === 'promoted') {
-    where.push(productPromotedSql(searchRules, params))
-  }
+  const promoFacet = String(query.promo || '').trim().toLowerCase()
+  const promoClause = promoFacet === 'promoted'
+    ? productPromotedSql(searchRules, params)
+    : /^rule:\d+$/.test(promoFacet)
+      ? singleRuleAppliesSql(searchRules, Number(promoFacet.slice('rule:'.length)), params)
+      : undefined
+  // One product by id: how the announcement strip and the promotion cards
+  // open a product that is not on the loaded page. It goes through this
+  // endpoint on purpose -- same visibility, stock and redaction rules as
+  // every other hit -- rather than a by-id route with its own copy of them.
+  const productId = Number.parseInt(String(query.productId || ''), 10)
+  const productIdClause = Number.isFinite(productId) && productId > 0 ? 'p.id = @productId' : undefined
+  if (productIdClause) params.productId = productId
+  // Applied after buildPortalProductFilters returned (so not in its
+  // baseWhere), which is why the fuzzy fallback below re-applies the same
+  // list: a fuzzy hit must not surface a product outside the alphabet
+  // letter, the promo facet or the requested id.
+  const postFilterClauses = [initialClause, promoClause, productIdClause].filter((clause): clause is string => !!clause)
+  where.push(...postFilterClauses)
   const whereSql = `WHERE ${where.join(' AND ')}`
 
   // Same field set as buildPortalCatalog's initial (unfiltered, page-1)
@@ -2037,7 +2107,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // column list above (brand/category dropped for the same reasoning --
   // see PRODUCT_SEARCH_COLUMNS's comment in lib/searchMatch.ts).
   if (total === 0 && filters.searchTerms.length) {
-    const fallbackBaseWhere = initialClause ? [...filters.baseWhere, initialClause] : filters.baseWhere
+    const fallbackBaseWhere = [...filters.baseWhere, ...postFilterClauses]
     const candidateRows = await db.prepare(`
       SELECT p.id AS id, p.name AS name, p.sku AS sku, p.barcode AS barcode
       FROM products p

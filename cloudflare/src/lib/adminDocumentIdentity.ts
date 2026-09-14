@@ -14,10 +14,11 @@
  * The Worker fixes it where the raw bytes are produced. FREE PLAN RULES apply
  * here (10 ms CPU, no custom cpu_ms): the document is never buffered, parsed
  * or copied -- src/index.ts pipes the asset response through HTMLRewriter,
- * which streams, and these rules only set attributes on six elements. There is
- * no KV, D1 or subrequest on this path, and nothing but a document response on
- * an admin host reaches it: shouldRewriteAdminDocument() below is the single
- * gate, and every other request falls through to the asset binding untouched.
+ * which streams, and these rules only set attributes on a handful of head
+ * elements. There is no KV, D1 or subrequest on this path, and nothing but a
+ * document response on an admin host reaches it: shouldRewriteAdminDocument()
+ * below is the single gate, and every other request falls through to the asset
+ * binding untouched.
  *
  * The rules are expressed against a minimal element shape rather than
  * HTMLRewriter's own type so that scripts/test-admin-host-document-rewrite-
@@ -99,7 +100,25 @@ export type DocumentElementRewrite = {
   element(element: RewritableElement): void
 }
 
-/** The six tags iOS reads when it installs a home-screen app. */
+// Open Graph and the canonical URL on the admin host: index.html's og:* tags
+// and its <link rel="canonical"> all name the storefront on its primary host
+// (a link to the shop pasted into a chat should preview as the shop, and the
+// alias host folds into the primary one), and a crawler or chat app reading
+// the ADMIN host's raw HTML must not get that preview -- or be told that this
+// document's canonical address is the shop's front page.
+//
+// Both replacements are RELATIVE, which is the same deliberate asymmetry
+// index.html's head comment records: an absolute value would have to name one
+// admin host, and there are four (two domains plus localhost and 127.0.0.1).
+// Nothing should ever preview or index the admin app -- robots.txt answers
+// `Disallow: /` on every admin host (lib/publicSeo.ts) -- so the only thing
+// that matters here is that the value is not Leang Beauty.
+const ADMIN_DOCUMENT_OG_IMAGE = '/icon-512.png'
+const ADMIN_DOCUMENT_SELF_URL = '/'
+
+/** The six tags iOS reads when it installs a home-screen app, plus the
+ * Open Graph tags a link preview reads and the canonical URL a search
+ * crawler reads. */
 export const ADMIN_DOCUMENT_REWRITES: readonly DocumentElementRewrite[] = [
   {
     selector: 'title',
@@ -128,6 +147,30 @@ export const ADMIN_DOCUMENT_REWRITES: readonly DocumentElementRewrite[] = [
       element.setAttribute('href', icon.href)
       element.setAttribute('type', icon.type)
     },
+  },
+  {
+    selector: 'meta[property="og:site_name"]',
+    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_TITLE) },
+  },
+  {
+    selector: 'meta[property="og:title"]',
+    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_TITLE) },
+  },
+  {
+    selector: 'meta[property="og:description"]',
+    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_DESCRIPTION) },
+  },
+  {
+    selector: 'meta[property="og:image"]',
+    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_OG_IMAGE) },
+  },
+  {
+    selector: 'meta[property="og:url"]',
+    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_SELF_URL) },
+  },
+  {
+    selector: 'link[rel="canonical"]',
+    element(element) { element.setAttribute('href', ADMIN_DOCUMENT_SELF_URL) },
   },
 ]
 

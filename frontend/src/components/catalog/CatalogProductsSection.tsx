@@ -17,6 +17,7 @@ import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
 import CatalogPaginationControls, { CATALOG_DEFAULT_PAGE_SIZE, paginateCatalogItems } from './catalogPagination'
 import { SectionShell, StatusPill } from './catalogUi'
+import { safeLinkUrl } from '../../utils/safeLinkUrl.ts'
 import PortalFilterCombobox from './PortalFilterCombobox'
 import PortalPromoStrip from './PortalPromoStrip.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
@@ -127,10 +128,11 @@ type CatalogProductsSectionProps = {
   setBranchFilter: StringListSetter
   stockFilter: string[]
   setStockFilter: StringListSetter
-  // G1b: the one public promo facet ("only deals"); optional so the
-  // admin preview surface can omit it.
-  promoOnly?: boolean
-  setPromoOnly?: (value: boolean) => void
+  // G1b: the public promo facet -- '' (off), 'promoted' (the "only deals"
+  // toggle below) or 'rule:<id>' (a campaign chip on the promo strip).
+  // Optional so a surface without server-side search can omit it.
+  promoFacet?: string
+  setPromoFacet?: (value: string) => void
   toggleFilterValue: (currentValues: string[], setter: StringListSetter, value: string) => void
   // Optional: batch-select a whole "Main - Sub" hierarchical category group
   // in one tap (see utils/categoryGrouping.ts / PortalFilterCombobox's
@@ -155,6 +157,11 @@ type CatalogProductsSectionProps = {
   // a public-portal-only affordance, same optionality pattern as
   // onAddToBucket below.
   openProductDetail?: (product: CatalogProduct) => void
+  // A promotion card links to a product by id, and that product may not be
+  // on the loaded page; the page owner resolves it (loaded list, then one
+  // by-id search) and opens the same detail flyout. Without it the card
+  // falls back to searching the product's name.
+  openProductById?: (productId: number, productName: string) => void
   openPortalImage?: (title: string, images: string[]) => void
   formatPortalPrice: PriceFormatter
   replaceVars: ReplaceVarsFn
@@ -234,8 +241,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     setBranchFilter,
     stockFilter,
     setStockFilter,
-    promoOnly = false,
-    setPromoOnly,
+    promoFacet = '',
+    setPromoFacet,
     toggleFilterValue,
     toggleFilterValues,
     previewConfig,
@@ -250,6 +257,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     normalizeProductGallery,
     openProductGallery,
     openProductDetail,
+    openProductById,
     openPortalImage,
     formatPortalPrice,
     replaceVars,
@@ -379,22 +387,23 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   // sites can never drift apart.
   const renderFilterFields = () => (
     <>
-      {/* G1b: the storefront's ONE promo facet -- a single "only deals"
-          toggle. Deliberately no rule-by-rule or admin facets here
-          (supplier etc. never reach the portal -- standing surface rule). */}
-      {setPromoOnly ? (
+      {/* G1b: the "only deals" toggle. A campaign chip on the promo strip
+          sets the narrower 'rule:<id>' facet; this toggle reads as on for
+          either and switches any promo facet off. Admin facets (supplier
+          etc.) never reach the portal -- standing surface rule. */}
+      {setPromoFacet ? (
         <button
           type="button"
-          onClick={() => setPromoOnly(!promoOnly)}
-          aria-pressed={promoOnly}
+          onClick={() => setPromoFacet(promoFacet ? '' : 'promoted')}
+          aria-pressed={!!promoFacet}
           className={`mb-2 flex w-full items-center justify-between rounded-[1.1rem] px-3 py-2 text-xs font-bold uppercase tracking-wide ring-1 transition-colors ${
-            promoOnly
+            promoFacet
               ? 'bg-rose-600 text-white ring-rose-600'
               : 'bg-slate-50 text-gray-500 ring-slate-100 hover:text-rose-600 dark:bg-neutral-800 dark:text-neutral-400 dark:ring-neutral-700'
           }`}
         >
           <span>{copy('promotionsFilter', 'Promotions only')}</span>
-          <span aria-hidden="true">{promoOnly ? '✓' : ''}</span>
+          <span aria-hidden="true">{promoFacet ? '✓' : ''}</span>
         </button>
       ) : null}
       <div className="rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-neutral-800 dark:ring-neutral-700">
@@ -537,6 +546,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           copy={copy}
           formatPrice={(usd, khr) => formatPortalPrice(usd, khr, previewConfig)}
           openProductDetail={openProductDetail}
+          promoFacet={promoFacet}
+          setPromoFacet={setPromoFacet}
         />
       ) : null}
       <div className="mb-5 space-y-3">
@@ -669,15 +680,21 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     {item.linkProductId && item.linkProductName ? (
                       <button
                         type="button"
-                        onClick={() => setSearch(item.linkProductName || '')}
+                        onClick={() => (openProductById
+                          ? openProductById(Number(item.linkProductId), item.linkProductName || '')
+                          : setSearch(item.linkProductName || ''))}
                         className="mt-4 inline-flex w-fit items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
                       >
                         {item.ctaLabel || copy('viewProduct', 'View product')}
                         <ArrowRight className="h-4 w-4" />
                       </button>
-                    ) : item.linkUrl ? (
+                    ) : safeLinkUrl(item.linkUrl) ? (
+                      // The Worker sanitises the saved card link at config
+                      // build, but the editor preview renders the DRAFT card
+                      // without that round trip, so the same allowlist is
+                      // applied at the anchor (N45, as the announcement strip).
                       <a
-                        href={item.linkUrl}
+                        href={safeLinkUrl(item.linkUrl) || undefined}
                         target="_blank"
                         rel="noreferrer"
                         className="mt-4 inline-flex w-fit items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"

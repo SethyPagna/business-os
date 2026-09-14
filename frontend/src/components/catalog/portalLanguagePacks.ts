@@ -857,6 +857,32 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
     scrollToBottom: 'ទៅផ្នែកខាងក្រោម',
     map: 'ផែនទី',
     close: 'បិទ',
+    // Product detail flyout (ProductDetailFlyout.tsx). These keys exist in
+    // neither lang pack, so before this every one of them fell through to
+    // its English fallback for a Khmer visitor. Terms follow the words the
+    // packs already use for the same concept (product_details, category,
+    // brand, assistantCaution, assistantIngredients, contactUs).
+    productDetails: 'ព័ត៌មានលម្អិតផលិតផល',
+    productShopName: 'ឈ្មោះផលិតផលរបស់ហាង',
+    productOfficialName: 'ឈ្មោះផលិតផលផ្លូវការ',
+    productIntroduction: 'សេចក្តីផ្តើម',
+    productDetailNotProvided: 'មិនទាន់មានព័ត៌មាន។',
+    productCategory: 'ប្រភេទ',
+    productBrand: 'ម៉ាក',
+    productFeatures: 'លក្ខណៈពិសេស',
+    productBenefits: 'អត្ថប្រយោជន៍',
+    productFeaturesBenefits: 'លក្ខណៈពិសេស និងអត្ថប្រយោជន៍',
+    productWhoFor: 'សម្រាប់អ្នកណា?',
+    productIngredients: 'គ្រឿងផ្សំ',
+    productCaution: 'ការប្រុងប្រយ័ត្ន',
+    productCautionNotProvided: 'មិនទាន់មានការប្រុងប្រយ័ត្នជាក់លាក់សម្រាប់ផលិតផលនេះទេ។',
+    productNeedMoreDetails: 'ត្រូវការព័ត៌មានបន្ថែម',
+    productNeedMoreDetailsFallback: 'ទាក់ទងយើងសម្រាប់ព័ត៌មានផលិតផលបន្ថែម។',
+    viewImages: 'មើលរូបភាព',
+    discounts: 'បញ្ចុះតម្លៃ',
+    prevImage: 'រូបភាពមុន',
+    nextImage: 'រូបភាពបន្ទាប់',
+    dotsLabel: 'រូបភាព {current} នៃ {total}',
   },
   'zh-CN': {
     liveCatalog: '实时库存,仅显示适合顾客查看的资料。',

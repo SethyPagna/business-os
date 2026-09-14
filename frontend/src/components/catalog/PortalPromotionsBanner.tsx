@@ -84,9 +84,13 @@ function SkeletonCard() {
 export type PortalPromotionsBannerProps = {
   copy: CopyFunction
   onOpenImage?: (title: string, images: string[]) => void
+  // "View <product>" opens the product's detail flyout (the page owner
+  // resolves the id: loaded list, then one by-id search). The image
+  // lightbox below is only the fallback for a surface that cannot.
+  onOpenProduct?: (productId: number, productName: string) => void
 }
 
-export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalPromotionsBannerProps) {
+export default function PortalPromotionsBanner({ copy, onOpenImage, onOpenProduct }: PortalPromotionsBannerProps) {
   const [promotions, setPromotions] = useState<PortalPromotion[]>([])
   const [loaded, setLoaded] = useState(false)
   const [showLeftFade, setShowLeftFade] = useState(false)
@@ -140,6 +144,10 @@ export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalProm
 
   const handleActivate = (promo: PortalPromotion) => {
     if (promo.link_type === 'product' && promo.link_product_id) {
+      if (onOpenProduct) {
+        onOpenProduct(promo.link_product_id, promo.link_product_name || promo.title)
+        return
+      }
       const imageUrl = promo.image_path || promo.link_product_image
       if (imageUrl) {
         onOpenImage?.(promo.link_product_name || promo.title, [resolvePublicAssetUrl(imageUrl)])
@@ -188,7 +196,7 @@ export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalProm
         {!loaded
           ? [0, 1, 2].map((key) => <SkeletonCard key={key} />)
           : promotions.map((promo) => {
-              const clickable = (promo.link_type === 'product' && promo.link_product_id && (promo.image_path || promo.link_product_image)) || (promo.link_type === 'url' && promo.link_url)
+              const clickable = (promo.link_type === 'product' && promo.link_product_id && (onOpenProduct || promo.image_path || promo.link_product_image)) || (promo.link_type === 'url' && promo.link_url)
               const imageUrl = promo.image_path ? resolvePublicAssetUrl(promo.image_path) : ''
               // badge_color is typed by the merchant, so the ink cannot be a
               // hardcoded white -- pick it, and darken/lighten the fill only
