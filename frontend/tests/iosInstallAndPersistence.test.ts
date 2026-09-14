@@ -166,6 +166,11 @@ check('G5 the dismissal is a versioned, device-scoped, snoozed key', () => {
   // permanent "never show again", which leaves a till that is still not
   // installed two weeks later with no nudge at all.
   assert.match(standaloneNavigation, /ios-install-hint-dismissed-at-v1/, 'the storage key must be versioned')
+  // Catches: a logout wiping the device-scoped snooze. clearStorage() deletes
+  // every businessos_* key it does not explicitly preserve, so the key has to
+  // be on the preserve list or the hint returns at the next cashier's sign-in.
+  const clientRuntime = read('src/platform/runtime/clientRuntime.ts')
+  assert.match(clientRuntime, /localPreserveKeys\.add\(`\$\{STORAGE_KEYS\.DEVICE_SETTINGS\}:ios-install-hint-dismissed-at-v1`\)/, 'the snooze key must survive logout')
   assert.match(standaloneNavigation, /IOS_INSTALL_HINT_SNOOZE_MS = 14 \* 24 \* 60 \* 60 \* 1000/, 'the snooze must be 14 days')
   assert.match(standaloneNavigation, /if \(!stored \|\| !Number\.isFinite\(raw\) \|\| raw <= 0\) return 0/, 'a malformed or old value must fall back silently')
 })
