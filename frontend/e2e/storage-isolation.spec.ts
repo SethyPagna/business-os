@@ -94,7 +94,34 @@ async function leaveTracesOfCashierA(page: Page): Promise<void> {
   })
 }
 
+/**
+ * Bring the cart into view.
+ *
+ * On a phone the cart lives behind its own tab, so the empty-state copy is in
+ * the DOM but off-screen (measured: android-chromium and ios-webkit both
+ * resolved the node as `hidden`). Tapping the tab is what a cashier does.
+ *
+ * The wait for a product tile FIRST is the part that matters. An earlier
+ * version asked `cartTab.count()` immediately after navigating, which is an
+ * instantaneous check with no retry: under --workers=4 the till had not
+ * finished mounting, the tab did not exist yet, the tap was silently skipped
+ * and the test then failed on a cart it had never opened -- a harness defect
+ * wearing the costume of a product defect.
+ */
+async function showCartPane(page: Page): Promise<void> {
+  await expect(page.getByText('E2E Product 001 Aurelia').first(), 'the till must be mounted before its tabs exist').toBeVisible({ timeout: 60_000 })
+  const cartTab = page.getByRole('button', { name: 'Cart', exact: true })
+  if (await cartTab.count()) await cartTab.first().click()
+}
+
 test.describe('same-device account handover', () => {
+  // Every test here signs in TWICE, walks to the till twice, and signs out in
+  // between -- the most navigation-heavy file in the suite. The default 60 s
+  // is enough in isolation (measured: 58 s for all three projects together)
+  // and is not enough when four workers share one fixture server, where the
+  // failure reads as a timeout rather than as the contention it is.
+  test.describe.configure({ timeout: 150_000 })
+
   test('cashier A leaves no scoped state behind for cashier B', async ({ page }) => {
     // CATCHES: a logout that forgets the per-user POS cart or the per-user
     // work draft. Discriminating because it first PROVES those keys existed
@@ -155,12 +182,7 @@ test.describe('same-device account handover', () => {
     await signIn(page, E2E_ACCOUNTS.cashierB)
     await gotoAdminPage(page, '/pos')
 
-    // On a phone the cart lives behind its own tab, so the empty-state copy is
-    // in the DOM but off-screen (measured: android-chromium and ios-webkit both
-    // resolved the node as `hidden`). Open it the way a cashier does before
-    // asserting on what a cashier sees.
-    const cartTab = page.getByRole('button', { name: 'Cart', exact: true })
-    if (await cartTab.count()) await cartTab.first().click()
+    await showCartPane(page)
     await expect(page.getByText('Cart is empty').first(), "B must start from an empty cart").toBeVisible({ timeout: 30_000 })
 
     expectNoRuntimeErrors(health)

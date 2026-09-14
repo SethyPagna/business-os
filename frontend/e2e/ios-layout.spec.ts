@@ -95,6 +95,12 @@ async function overflowingElements(page: Page) {
 }
 
 test.describe('iPhone layout', () => {
+  // Each test signs in and then walks several admin pages at three viewport
+  // sizes, measuring geometry on every one. Under four parallel workers that
+  // outgrew the default 60 s timeout (measured: the 390 px row on ios-webkit),
+  // and a timeout there says nothing about layout.
+  test.describe.configure({ timeout: 150_000 })
+
   test.skip(({ browserName, isMobile }) => !isMobile && browserName === 'chromium', 'phone contracts; see the file header')
 
   for (const size of IPHONE_WIDTHS) {

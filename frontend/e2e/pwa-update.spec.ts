@@ -43,6 +43,22 @@ const UPDATE_BAR = '[role="alert"]:has-text("Restart now")'
 const USERNAME_FIELD = '#login-username'
 
 /**
+ * Tap "Restart now".
+ *
+ * The generous timeout is not padding: this click deliberately RELOADS the
+ * document, and Playwright's post-click settle waits for that reload. Under
+ * full parallel load (measured at --workers=4) the reload took longer than the
+ * default 15 s action timeout and the call log ended with "click action done"
+ * followed by a timeout -- i.e. the product did the right thing and the test
+ * gave up on it. The reload is still PROVEN, by the __e2eGeneration marker at
+ * every call site: a value set on window cannot survive a real document
+ * reload, so nothing here is taken on trust.
+ */
+async function takeTheUpdate(page: Page): Promise<void> {
+  await page.locator(UPDATE_BAR).getByRole('button', { name: 'Restart now' }).click({ timeout: 60_000 })
+}
+
+/**
  * Wait until a worker is ACTIVE -- the incumbent the next install compares
  * against (service-worker.ts only announces an update when one exists).
  *
@@ -220,7 +236,7 @@ test.describe('pwa update bar', () => {
     // answered by the browser rather than by a timeout.
     await page.evaluate(() => { (window as unknown as { __e2eGeneration?: number }).__e2eGeneration = 1 })
 
-    await page.locator(UPDATE_BAR).getByRole('button', { name: 'Restart now' }).click()
+    await takeTheUpdate(page)
 
     await page.waitForFunction(
       () => (window as unknown as { __e2eGeneration?: number }).__e2eGeneration === undefined,
@@ -278,7 +294,7 @@ test.describe('pwa update bar', () => {
     await letTheAppPoll(page)
     await expect(page.locator(UPDATE_BAR)).toBeVisible({ timeout: 30_000 })
     await page.evaluate(() => { (window as unknown as { __e2eGeneration?: number }).__e2eGeneration = 1 })
-    await page.locator(UPDATE_BAR).getByRole('button', { name: 'Restart now' }).click()
+    await takeTheUpdate(page)
     await page.waitForFunction(
       () => (window as unknown as { __e2eGeneration?: number }).__e2eGeneration === undefined,
       undefined,
@@ -402,7 +418,7 @@ test.describe('pwa update bar', () => {
     await letTheAppPoll(page)
     await expect(page.locator(UPDATE_BAR)).toBeVisible({ timeout: 30_000 })
     await page.evaluate(() => { (window as unknown as { __e2eGeneration?: number }).__e2eGeneration = 1 })
-    await page.locator(UPDATE_BAR).getByRole('button', { name: 'Restart now' }).click()
+    await takeTheUpdate(page)
     await page.waitForFunction(
       () => (window as unknown as { __e2eGeneration?: number }).__e2eGeneration === undefined,
       undefined,

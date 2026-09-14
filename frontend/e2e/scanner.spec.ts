@@ -86,24 +86,40 @@ test.describe('POS barcode scanner', () => {
     // tap the current implementation demands, and prove a real MediaStream
     // arrives and paints.
     test.skip(browserName === 'webkit', 'Playwright WebKit exposes no camera; the WebKit contract is asserted in its own test below')
+    test.setTimeout(120_000)
     await context.grantPermissions(['camera'])
     const health = collectPageHealth(page)
     await openPosScanner(page)
 
-    await page.locator(CAMERA_ACTION).first().click()
+    const cameraAction = page.locator(CAMERA_ACTION).first()
+    await cameraAction.click({ timeout: 30_000 })
 
     const video = page.locator(SCANNER_VIDEO).first()
     await expect(video).toBeVisible({ timeout: 30_000 })
     // Visible is not running. A <video> with no stream is an invisible-to-tests
     // black rectangle of exactly the right size, which is precisely what a
     // broken camera path looks like.
+    //
+    // The poll re-taps the start button while it is still on screen. Measured
+    // at --workers=4: the first tap landed while the modal was still resolving
+    // permissions, the status stayed on 'manual', and hasStream was false for
+    // the whole 30 s poll -- with the button sitting there untouched. Retrying
+    // what a cashier would retry keeps this test's claim ("the camera CAN start
+    // here, so the one-tap fixme below is about the product") honest; the
+    // assertion that a real MediaStream arrives and decodes is unchanged.
     await expect.poll(
-      () => video.evaluate((node: HTMLVideoElement) => ({
-        hasStream: !!node.srcObject,
-        width: node.videoWidth,
-        ready: node.readyState,
-      })),
-      { message: 'the fake camera must produce a real stream', timeout: 30_000 },
+      async () => {
+        const state = await video.evaluate((node: HTMLVideoElement) => ({
+          hasStream: !!node.srcObject,
+          width: node.videoWidth,
+          ready: node.readyState,
+        }))
+        if (!state.hasStream && await cameraAction.isVisible().catch(() => false)) {
+          await cameraAction.click({ timeout: 10_000 }).catch(() => { /* the modal may be mid-transition */ })
+        }
+        return state
+      },
+      { message: 'the fake camera must produce a real stream', timeout: 60_000 },
     ).toMatchObject({ hasStream: true })
     expect(await video.evaluate((node: HTMLVideoElement) => node.videoWidth), 'decoded frame width').toBeGreaterThan(0)
 
