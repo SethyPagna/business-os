@@ -1210,10 +1210,24 @@ export default function Dashboard() {
   // profit by the server kernel. Showing it here must never add or subtract
   // it from either headline.
   const aCredit = analytics?.totals?.pending_revenue_usd || 0
+  // Stock removed entirely, priced at cost (owner, Sep 14 2026: "i want in
+  // stat a break down of revenue/profit excluding the losses caused by this.
+  // and including caused by this"). PRESENCE-signalled, never defaulted to 0:
+  // the server omits the block for a non-admin caller and for a window it
+  // cannot match to stock movements, and a 0 there would read as "nothing was
+  // removed". The headline revenue and profit above stay the canonical
+  // figures -- this is reported beside them, never subtracted from them.
+  const aHasLosses = typeof analytics?.totals?.removal_loss_usd === 'number'
+  const aRemovalLoss = analytics?.totals?.removal_loss_usd || 0
+  const aRevenueInclLosses = analytics?.totals?.revenue_after_losses_usd ?? (aRevenue - aRemovalLoss)
   const aPrevRevenue = analytics?.prevTotals?.revenue_usd || 0
   const aTxCount  = analytics?.totals?.tx_count || 0
   const aPrevTxCount = analytics?.prevTotals?.tx_count || 0
   const aProfit   = analytics?.totals?.profit_usd || 0
+  // Unclamped: a period that destroyed more stock than it earned really is
+  // negative here, and hiding that is the one thing this view exists to stop.
+  // The no-negative rule governs the canonical aProfit above, not this.
+  const aProfitInclLosses = analytics?.totals?.profit_after_losses_usd ?? (aProfit - aRemovalLoss)
   const aCost     = analytics?.totals?.cost_usd   || 0
   const aAvgOrder = analytics?.totals?.avg_order_usd || 0
   // "What actually changed hands" = net revenue + tax + customer-paid
@@ -1427,6 +1441,13 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
         ...(aGrossSales !== aRevenue ? [{ label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) }] : []),
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
+        // The owner's excluding/including pair, inside this card rather than as
+        // a new one. The headline above IS the excluding figure, so only the
+        // loss and the including figure need naming.
+        ...(aHasLosses ? [
+          { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: fmtUSD(aRemovalLoss) },
+          { label: translateOr('rpt_revenue_after_losses', 'Revenue incl. losses'), value: fmtUSD(aRevenueInclLosses) },
+        ] : []),
       ],
     },
     {
@@ -1472,6 +1493,10 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
         { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_usd) || 0) },
         { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_cost_usd) || 0) },
         { label: translateOr('profit_margin', 'Profit margin'), value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
+        ...(aHasLosses ? [
+          { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: fmtUSD(aRemovalLoss) },
+          { label: translateOr('rpt_profit_after_losses', 'Profit incl. losses'), value: fmtUSD(aProfitInclLosses) },
+        ] : []),
       ],
     },
     {
