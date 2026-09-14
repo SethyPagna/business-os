@@ -55,7 +55,8 @@ function loadReal(relPath, requireOverrides = {}) {
 const sqlBinding = loadReal('lib/sqlBinding.ts', { './db': {} })
 const batchCode = loadReal('lib/batchCode.ts', { './db': {} })
 const productBatches = loadReal('lib/productBatches.ts', { './db': {}, './batchCode': batchCode, './sqlBinding': sqlBinding })
-const kernel = loadReal('lib/returnsStock.ts', { './db': {}, './productBatches': productBatches, './sqlBinding': sqlBinding })
+const stockCondition = loadReal('lib/stockCondition.ts')
+const kernel = loadReal('lib/returnsStock.ts', { './db': {}, './productBatches': productBatches, './sqlBinding': sqlBinding, './stockCondition': stockCondition })
 
 let passed = 0
 async function check(name, fn) {

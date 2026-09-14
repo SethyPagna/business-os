@@ -65,8 +65,8 @@ runTest('every queued line freezes its reason and every adjust write sends it', 
   assert.match(modal, /interface ReceivedLine \{[^]*?\n  reason: string\n[^]*?\n\}/)
   assert.match(modal, /const next: ReceivedLine = \{[^]*?\n\s+reason: reason\.trim\(\),\n[^]*?\}/)
   assert.match(modal, /function editLine\(line: ReceivedLine\) \{[^]*?setReason\(line\.reason\)/, 'reopening a queued line restores its reason')
-  // remove, set and the unlocked-pricing add all resolve through the one helper
-  assert.equal((modal.match(/reason: stockLineReason\(line, tr\), branchId: Number\(branchId\),/g) || []).length, 3)
+  // remove, set, the unlocked-pricing add and the tagged restock (P3-L6) all resolve through the one helper
+  assert.equal((modal.match(/reason: stockLineReason\(line, tr\), branchId: Number\(branchId\),/g) || []).length, 4)
   assert.doesNotMatch(modal, /reason: tr\('stock_change_session_reason'/, 'no hardcoded reason is left on a write')
   assert.doesNotMatch(modal, /reason: tr\('stock_in_session_reason'/, 'no hardcoded reason is left on a write')
   // the plain add sends the text or null so the Worker keeps its lot label

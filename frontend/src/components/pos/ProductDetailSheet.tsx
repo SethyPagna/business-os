@@ -10,6 +10,7 @@ import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { getProductBatches } from '../../api/batchesTransport.ts'
 import { readFreshPickerLots, startPickerLotRead } from '../../utils/pickerLotFreshness.ts'
 import { getDamagedLots, type DamagedLot } from '../../api/damagedLotsTransport.ts'
+import { stockConditionLabel } from '../../utils/stockCondition.ts'
 import type { BatchSelection, ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { useApp, useLowStockConfig } from '../../AppContext'
@@ -618,8 +619,13 @@ export default function ProductDetailSheet({
   const displayedStock = sheetState.displayedStock
 
 
+  // P3-L6: a held lot names the condition it actually carries. Calling an
+  // 'expired' or 'opened' lot "Damage" told the cashier the wrong thing about
+  // what they are about to sell. The tag is the raw English constant in every
+  // language (owner: "the tag remains english even in khmer"); a lot with no
+  // tag -- only rows written before 0162 -- keeps the translated generic word.
   const damagedLotLabel = (lot: DamagedLot): string =>
-    `${posCopy('Damage', 'ខូចខាត')} · ${lot.return_id ? `${posCopy('return', 'ប្រគល់វិញ')} #${lot.return_id}` : `#${lot.id}`}`
+    `${lot.condition_tag ? stockConditionLabel(lot.condition_tag) : posCopy('Damage', 'ខូចខាត')} · ${lot.return_id ? `${posCopy('return', 'ប្រគល់វិញ')} #${lot.return_id}` : `#${lot.id}`}`
 
   const buildDamagedSelection = () => selectedDamagedLot
     ? { damagedLotId: selectedDamagedLot.id, quantity: Number(selectedDamagedLot.quantity_remaining || 0), label: damagedLotLabel(selectedDamagedLot) }

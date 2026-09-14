@@ -20,7 +20,16 @@ export function isStockReceiptMovement(value: unknown): boolean {
   return receiptTypes.has(normalizedMovementType(value))
 }
 
-export function isRevertibleStockMovement(value: unknown): boolean {
+// P3-L6: the Worker refuses to revert a movement whose reference_id carries
+// the damaged-lot marker, because such a movement moved BOTH sellable stock
+// and a tagged row's held quantity, and the ledger revert only knows how to
+// move one of them (lib/stockRevert.ts). Mirrored here so the Revert control
+// is not offered for a refusal the operator would only discover by pressing
+// it -- the same reason the type allowlist above is mirrored at all.
+export const DAMAGED_LOT_REFERENCE_PREFIX = 'damaged_lot:'
+
+export function isRevertibleStockMovement(value: unknown, referenceId?: unknown): boolean {
+  if (String(referenceId ?? '').startsWith(DAMAGED_LOT_REFERENCE_PREFIX)) return false
   return revertibleTypes.has(normalizedMovementType(value))
 }
 

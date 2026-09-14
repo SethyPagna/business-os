@@ -157,7 +157,23 @@ const movementSearchKernel = loadReal('lib/movementSearch.ts', {
   './movementActorName': movementActorNameKernel,
   './movementBranchName': movementBranchNameKernel,
 })
+// P3-L6: routes/inventory.ts imports the tagged-stock kernel, so this
+// loader has to resolve it too (the paths under test never tag anything;
+// they just have to import).
+const stockCondition = loadReal('lib/stockCondition.ts')
+const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
+  './productBatches': productBatches,
+  './stockCondition': stockCondition,
+  './movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision }),
+  './returnsStock': loadReal('lib/returnsStock.ts', { './productBatches': productBatches, './stockCondition': stockCondition }),
+  // readTaggedLotGroups now chunks its IN(...) list through this helper
+  // (D1's 100-bound-parameter fix); without the override the transpiled
+  // require resolves against scripts/ and the whole loader dies.
+  './sqlBinding': sqlBinding,
+})
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/stockCondition': stockCondition,
+  '../lib/damagedLotActions': damagedLotActions,
   // inventory.ts imports this TypeScript-only helper; load it through the
   // harness rather than asking Node to resolve a non-existent .js sibling.
   '../lib/transferOperationReceipt': loadReal('lib/transferOperationReceipt.ts'),

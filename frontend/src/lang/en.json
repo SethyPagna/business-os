@@ -6580,5 +6580,18 @@
   "plan_tier_free": "Free",
   "plan_tier_paid": "Paid",
   "plan_tier_hint_free": "Running on the Cloudflare free plan: smaller import batches and no automatic backups.",
-  "plan_tier_hint_paid": "Running on the Cloudflare paid plan: full import batches and automatic backups."
+  "plan_tier_hint_paid": "Running on the Cloudflare paid plan: full import batches and automatic backups.",
+  "stock_remove_entirely": "Remove entirely",
+  "stock_restock_sellable": "Restock as sellable",
+  "stock_keep_in_group_as": "Keep in group as",
+  "stock_restock_with_tag": "Restock with",
+  "stock_tagged_undo_hint": "Saved. Use the tagged row on the product to restore or remove these units.",
+  "stock_tagged_not_sellable": "Not sellable",
+  "stock_tagged_restore": "Restore to sellable",
+  "stock_tagged_excluded_hint": "Held stock: counted here but never in the group stock total, and never offered to a sale.",
+  "stock_tagged_action_title": "Tagged stock",
+  "stock_tagged_load_failed": "Failed to load tagged stock",
+  "stock_tagged_quantity_over": "More than the held quantity",
+  "stock_tagged_dispose_done": "Removed from tagged stock",
+  "stock_tagged_restore_done": "Restored to sellable stock"
 }

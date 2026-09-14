@@ -20,6 +20,9 @@ export type ProductRemovePlan = {
   branch_batch_stock: Array<Record<string, unknown>>
   product_images: Array<Record<string, unknown>>
   child_links: Array<Record<string, unknown>>
+  /** P3-L6 held (tagged) lots. Optional: absent in a plan written before
+    * the tagged-stock kernel existed -- see legacyPlanDamagedLots(). */
+  damaged_lots?: Array<Record<string, unknown>>
   source_bytes: number
   state_digest: string
 }
@@ -105,8 +108,15 @@ export async function prepareProductRemovePlan(
     FROM product_images WHERE product_id=@product ORDER BY id`).all<Record<string, unknown>>({ product: productId }))
   const childLinks = rows(await db.prepare(`SELECT id,parent_id FROM products WHERE parent_id=@product ORDER BY id`)
     .all<Record<string, unknown>>({ product: productId }))
+  // P3-L6: held (tagged) units are stock too -- they left branch_stock when
+  // they were tagged and live on here. ALL rows are snapshotted, drained ones
+  // included, because the graph guards assert an exact row set for this
+  // product and a filtered snapshot could never match it after the delete.
+  const damagedLots = rows(await db.prepare(`SELECT id,product_id,product_name,branch_id,batch_id,return_id,quantity,
+      quantity_remaining,reason,condition_tag,source,unit_cost_usd,created_by_user_id,created_by_user_name,created_at,updated_at
+    FROM damaged_stock_lots WHERE product_id=@product ORDER BY id`).all<Record<string, unknown>>({ product: productId }))
   const source = { product: { ...product }, branch_stock: branchStock, batches, branch_batch_stock: branchBatchStock,
-    product_images: productImages, child_links: childLinks }
+    product_images: productImages, child_links: childLinks, damaged_lots: damagedLots }
   const sourceBytes = byteLength(source)
   if (sourceBytes > PRODUCT_REMOVE_MAX_SOURCE_BYTES) {
     throw new ProductRemoveError('remove_graph_too_large', 'This product graph is too large for one reversible removal.', 413)
@@ -166,6 +176,9 @@ export async function prepareProductRemoveReviewPlans(
   const childLinks = rows(await db.prepare(`SELECT child.id,child.parent_id FROM products child
     JOIN json_each(@ids) selected ON CAST(selected.value AS INTEGER)=child.parent_id ORDER BY child.parent_id,child.id`)
     .all<Record<string, unknown>>({ ids: allowedJson }))
+  const damagedLots = rows(await db.prepare(`SELECT dsl.* FROM damaged_stock_lots dsl
+    JOIN json_each(@ids) selected ON CAST(selected.value AS INTEGER)=dsl.product_id ORDER BY dsl.product_id,dsl.id`)
+    .all<Record<string, unknown>>({ ids: allowedJson }))
   let retainedBytes = 0
   const results: ProductRemoveReviewPlan[] = []
   for (const removal of removals) {
@@ -181,6 +194,7 @@ export async function prepareProductRemoveReviewPlans(
           .map(({ product_id: _productId, ...row }) => row),
         product_images: productImages.filter((row) => Number(row.product_id) === removal.product_id),
         child_links: childLinks.filter((row) => Number(row.parent_id) === removal.product_id),
+        damaged_lots: damagedLots.filter((row) => Number(row.product_id) === removal.product_id),
       }
       const sourceBytes = byteLength(source)
       if (sourceBytes > PRODUCT_REMOVE_MAX_SOURCE_BYTES || retainedBytes + sourceBytes > PRODUCT_REMOVE_MAX_REVIEW_SOURCE_BYTES) {
@@ -197,10 +211,11 @@ export async function prepareProductRemoveReviewPlans(
     const detail = plan
       ? { product_id: removal.product_id, reason: removal.reason, product: plan.product, branch_stock: plan.branch_stock,
           batches: plan.batches, branch_batch_stock: plan.branch_batch_stock, product_images: plan.product_images,
-          child_links: plan.child_links, source_bytes: plan.source_bytes, blocked: null }
+          child_links: plan.child_links, damaged_lots: plan.damaged_lots, source_bytes: plan.source_bytes, blocked: null }
       : { product_id: removal.product_id, reason: removal.reason,
           product: product ? { id: product.id, name: product.name, barcode: product.barcode, is_active: product.is_active, is_group: product.is_group } : null,
-          branch_stock: [], batches: [], branch_batch_stock: [], product_images: [], child_links: [], source_bytes: 0, blocked: blocker }
+          branch_stock: [], batches: [], branch_batch_stock: [], product_images: [], child_links: [], damaged_lots: [],
+          source_bytes: 0, blocked: blocker }
     const stateDigest = plan?.state_digest || await sha256({ version: 1, removal, blocker, product: detail.product })
     const planDigest = await sha256(plan || detail)
     results.push({ product_id: removal.product_id, reason: removal.reason, plan, state_digest: stateDigest,
@@ -236,13 +251,28 @@ function exactRowsSql(args: {
       ))`
 }
 
+/** The held lots a plan governs, or null when the plan predates P3-L6.
+  *
+  * null is NOT the same as []. A legacy plan never snapshotted these rows, so
+  * it must not guard them (a product with return-sourced lots would fail an
+  * exact-set guard expecting none), must not zero them on apply (nothing
+  * could restore them), and must not touch them on undo. It keeps exactly
+  * the behaviour it had when it was written. */
+function legacyPlanDamagedLots(plan: ProductRemovePlan): Array<Record<string, unknown>> | null {
+  return Array.isArray(plan.damaged_lots) ? plan.damaged_lots : null
+}
+
 function expectedDeletedPlan(plan: ProductRemovePlan, transitionStamp: string): ProductRemovePlan {
+  const damagedLots = legacyPlanDamagedLots(plan)
   return {
     ...plan,
     product: { ...plan.product, is_active: 0, stock_quantity: 0, rfid_confirmed_qty: 0, updated_at: transitionStamp },
     branch_stock: plan.branch_stock.map((row) => ({ ...row, quantity: 0, rfid_confirmed_qty: 0 })),
     batches: plan.batches.map((row) => ({ ...row, is_active: 0, updated_at: transitionStamp })),
     branch_batch_stock: plan.branch_batch_stock.map((row) => ({ ...row, quantity: 0, updated_at: transitionStamp })),
+    ...(damagedLots
+      ? { damaged_lots: damagedLots.map((row) => ({ ...row, quantity_remaining: 0, updated_at: transitionStamp })) }
+      : {}),
   }
 }
 
@@ -252,6 +282,7 @@ export function productRemoveGraphGuards(
   transitionStamp?: string,
 ): ProductRemoveStatement[] {
   const snapshot = expected === 'source' ? plan : expectedDeletedPlan(plan, String(transitionStamp || ''))
+  const damagedLots = legacyPlanDamagedLots(snapshot)
   const productColumns = Object.keys(snapshot.product)
   if (!productColumns.length) throw new Error('Product removal snapshot is missing the product row.')
   const productGuards: ProductRemoveStatement[] = []
@@ -275,6 +306,10 @@ export function productRemoveGraphGuards(
       parameter: 'rowsJson', identity: ['id'] },
     { table: 'products', alias: 'child', scope: 'child.parent_id=@product', rows: snapshot.child_links,
       parameter: 'rowsJson', identity: ['id', 'parent_id'] },
+    ...(damagedLots
+      ? [{ table: 'damaged_stock_lots', alias: 'dsl', scope: 'dsl.product_id=@product', rows: damagedLots,
+          parameter: 'rowsJson', identity: ['id'] }]
+      : []),
   ]
   return [...productGuards, ...rowGuards.map((guard) => ({
     sql: `SELECT CASE WHEN ${exactRowsSql(guard)}
@@ -295,6 +330,7 @@ export function parseProductRemovePlan(value: unknown): ProductRemovePlan {
     || !plan.product || typeof plan.product !== 'object' || Array.isArray(plan.product)
     || !Array.isArray(plan.branch_stock) || !Array.isArray(plan.batches) || !Array.isArray(plan.branch_batch_stock)
     || !Array.isArray(plan.product_images) || !Array.isArray(plan.child_links)
+    || (plan.damaged_lots !== undefined && !Array.isArray(plan.damaged_lots))
     || !Number.isSafeInteger(Number(plan.source_bytes)) || Number(plan.source_bytes) < 0
     || typeof plan.state_digest !== 'string' || !plan.state_digest) {
     throw new ProductRemoveError('invalid_remove_plan', 'Invalid saved product removal plan.')
@@ -448,7 +484,13 @@ export function productRemoveApplyStatements(args: {
   }, {
     sql: `UPDATE product_batches SET is_active=0,updated_at=@stamp WHERE variant_product_id=@product`,
     params: { stamp: args.transitionStamp, product: plan.product_id },
-  }, {
+  }, ...(legacyPlanDamagedLots(plan) ? [{
+    // P3-L6: the held units go with the product. No write_off is booked --
+    // they already left sellable stock as damage_out when they were tagged,
+    // and a delete is a data removal, not a disposal.
+    sql: `UPDATE damaged_stock_lots SET quantity_remaining=0,updated_at=@stamp WHERE product_id=@product`,
+    params: { stamp: args.transitionStamp, product: plan.product_id },
+  }] : []), {
     sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
       VALUES(@actor,@actorName,'delete','product',@product,@details,'products',@product,@details)`,
     params: { actor: args.user.id, actorName: userName, product: String(plan.product_id), details },
@@ -586,7 +628,13 @@ export function productRemoveReplayStatements(args: {
       updated_at=(SELECT json_extract(value,'$.updated_at') FROM json_each(@rows) WHERE json_extract(value,'$.id')=branch_batch_stock.id)
       WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=@product)`,
     params: { rows: JSON.stringify(plan.branch_batch_stock), product: plan.product_id },
-  }] : [{
+  }, ...(legacyPlanDamagedLots(plan) ? [{
+    sql: `UPDATE damaged_stock_lots SET
+      quantity_remaining=(SELECT json_extract(value,'$.quantity_remaining') FROM json_each(@rows) WHERE json_extract(value,'$.id')=damaged_stock_lots.id),
+      updated_at=(SELECT json_extract(value,'$.updated_at') FROM json_each(@rows) WHERE json_extract(value,'$.id')=damaged_stock_lots.id)
+      WHERE product_id=@product`,
+    params: { rows: JSON.stringify(plan.damaged_lots), product: plan.product_id },
+  }] : [])] : [{
     sql: `UPDATE products SET is_active=0,stock_quantity=0,rfid_confirmed_qty=0,updated_at=@stamp WHERE id=@product`,
     params: { stamp: args.transitionStamp, product: plan.product_id },
   }, {
@@ -599,7 +647,10 @@ export function productRemoveReplayStatements(args: {
   }, {
     sql: 'UPDATE product_batches SET is_active=0,updated_at=@stamp WHERE variant_product_id=@product',
     params: { stamp: args.transitionStamp, product: plan.product_id },
-  }]
+  }, ...(legacyPlanDamagedLots(plan) ? [{
+    sql: 'UPDATE damaged_stock_lots SET quantity_remaining=0,updated_at=@stamp WHERE product_id=@product',
+    params: { stamp: args.transitionStamp, product: plan.product_id },
+  }] : [])]
   return [{
     sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_remove_operations
       WHERE operation_id=@operation AND product_id=@product AND status=@status AND generation=@generation

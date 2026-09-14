@@ -80,6 +80,10 @@ type AdjustForm = {
   free_goods: boolean
   payment_status: string
   credit_due_date: string
+  // P3-L6: mirrors InventoryStockModals.tsx's field of the same name --
+  // '' = untagged, otherwise the English condition constant the units are
+  // kept (or received) under. See frontend/src/utils/stockCondition.ts.
+  condition_tag: string
 }
 
 // 4-union reason type -- matches InventoryReasonManagerModal.tsx (which
@@ -347,6 +351,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     free_goods: false,
     payment_status: 'paid',
     credit_due_date: '',
+    condition_tag: '',
   }))
   // S4-15: one id for everything typed in this modal opening, so several
   // lines land in the Sessions list as ONE receipt rather than one row per
@@ -421,6 +426,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       free_goods: false,
       payment_status: 'paid',
       credit_due_date: '',
+      condition_tag: '',
     })
     // Resuming an unsaved failed attempt: put back exactly what the operator
     // had typed (type, quantity, reason, branch, lot, date) on top of the
@@ -559,6 +565,12 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         : undefined,
       supplierId: isStockIn && adjustForm.supplier_id !== '' ? Number(adjustForm.supplier_id) : undefined,
       supplierName: isStockIn && String(adjustForm.supplier_name || '').trim() !== '' ? String(adjustForm.supplier_name).trim() : undefined,
+      // P3-L6: the condition tag, sent only when the control offered it
+      // (add/remove; a 'set' has no quantity of its own to tag and the route
+      // refuses one). Absent means the ordinary untagged behaviour.
+      conditionTag: (adjustForm.type === 'add' || adjustForm.type === 'remove') && adjustForm.condition_tag
+        ? String(adjustForm.condition_tag)
+        : undefined,
       ...stockReceiptWire(adjustForm, receiptSessionIdRef.current, isStockIn),
       pricing: unlockPricing ? {
         selling_price_usd: parseFloat(String(adjustForm.selling_price_usd)) || 0,

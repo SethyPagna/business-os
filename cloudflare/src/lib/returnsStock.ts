@@ -27,6 +27,7 @@
 // real logic against a real sqlite database.
 import type { D1Compat } from './db'
 import { InsufficientBatchStockError, planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
+import { DEFAULT_STOCK_CONDITION_TAG, type StockConditionSource, type StockConditionTag } from './stockCondition'
 
 export type ReturnStockAction = 'none' | 'restock' | 'damaged'
 
@@ -131,16 +132,26 @@ export function createDamagedLotStatement(input: {
   reason: string | null
   userId: number | string | null
   userName: string | null
+  // P3-L6 (migration 0162). ONE insert shape for every writer of this table.
+  // The returns callers below omit all three and keep the identity their rows
+  // always had implicitly -- the same values 0162 backfilled history with --
+  // so nothing about the returns flow changes. The stock-side writers
+  // (lib/damagedLotActions.ts) always pass them explicitly.
+  conditionTag?: StockConditionTag | null
+  source?: StockConditionSource | null
+  unitCostUsd?: number | null
 }): StockWriteStatement {
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Damaged quantity must be positive')
   return {
     sql: `INSERT INTO damaged_stock_lots (
       product_id, product_name, branch_id, batch_id, return_id, quantity,
-      quantity_remaining, reason, created_by_user_id, created_by_user_name
+      quantity_remaining, reason, created_by_user_id, created_by_user_name,
+      condition_tag, source, unit_cost_usd
     ) VALUES (
       @product_id,@product_name,@branch_id,@batch_id,${input.returnIdSql},@quantity,
-      @quantity,@reason,@user_id,@user_name
+      @quantity,@reason,@user_id,@user_name,
+      @condition_tag,@source,@unit_cost_usd
     )`,
     params: {
       product_id: input.productId,
@@ -151,6 +162,9 @@ export function createDamagedLotStatement(input: {
       reason: input.reason,
       user_id: input.userId,
       user_name: input.userName,
+      condition_tag: input.conditionTag ?? DEFAULT_STOCK_CONDITION_TAG,
+      source: input.source ?? 'return',
+      unit_cost_usd: input.unitCostUsd ?? null,
     },
   }
 }
@@ -379,10 +393,15 @@ export async function restoreDamagedLot(db: D1Compat, input: {
 export async function listOpenDamagedLots(db: D1Compat, input: {
   productId: number
   branchId?: number | null
-}): Promise<Array<{ id: number; branch_id: number | null; batch_id: number | null; return_id: number | null; quantity_remaining: number; reason: string | null; created_at: string | null }>> {
+}): Promise<Array<{ id: number; branch_id: number | null; batch_id: number | null; return_id: number | null; quantity_remaining: number; reason: string | null; created_at: string | null; condition_tag: string | null }>> {
   const branchClause = input.branchId != null ? 'AND branch_id = @branch_id' : ''
+  // P3-L6: condition_tag rides along so the POS damage picker can name the
+  // condition it is offering ("expired", "opened") instead of calling every
+  // held lot "damaged". unit_cost_usd (0162) deliberately does NOT: this
+  // reader is behind the POS-readable gate, which must not hand a cashier
+  // cost figures -- see routes/batches.ts GET /damaged-lots.
   return await db.prepare(`
-    SELECT id, branch_id, batch_id, return_id, quantity_remaining, reason, created_at
+    SELECT id, branch_id, batch_id, return_id, quantity_remaining, reason, created_at, condition_tag
     FROM damaged_stock_lots
     WHERE product_id = @product_id AND quantity_remaining > 0 ${branchClause}
     ORDER BY created_at ASC, id ASC

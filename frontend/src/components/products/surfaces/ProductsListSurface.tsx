@@ -118,6 +118,15 @@ type ProductsListSurfaceProps = {
   // is the affordance).
   bindGroupHold?: (group: ProductGroup) => Record<string, unknown>
   renderGroupActions?: (group: ProductGroup) => ReactNode
+  // P3-L6: the group's TAGGED child rows (broken/damaged/expired units kept
+  // inside the group but not sellable), rendered right after its product
+  // rows. A slot rather than data on ProductGroup on purpose: these units
+  // live in damaged_stock_lots, not in the product records this surface is
+  // built from, so they cannot leak into group counts, summary chips or any
+  // selection scope -- the exclusion is structural. Desktop returns <tr>s
+  // (same columns as a product row), mobile returns cards.
+  renderGroupTaggedRows?: (group: ProductGroup) => ReactNode
+  renderGroupTaggedCards?: (group: ProductGroup) => ReactNode
   renderGroupThumbnail?: (group: ProductGroup) => ReactNode
   renderMobileProductCard: (product: ProductLike, options: ProductRowRenderOptions) => ReactNode
   // True once anything is selected -- see Products.tsx's selectionModeActive
@@ -150,6 +159,8 @@ export default function ProductsListSurface({
   renderDesktopProductRow,
   bindGroupHold,
   renderGroupActions,
+  renderGroupTaggedRows,
+  renderGroupTaggedCards,
   renderGroupThumbnail,
   renderMobileProductCard,
   selectionModeActive,
@@ -448,6 +459,9 @@ export default function ProductsListSurface({
                               </tr>
                             ) : null}
                             {!groupCollapsed || !showGroupRow ? group.rows.map((product) => renderDesktopProductRow(product, { indented: showGroupRow })) : null}
+                            {/* P3-L6: held/tagged units, below the sellable rows
+                                of the same group and never part of their totals. */}
+                            {(!groupCollapsed || !showGroupRow) && renderGroupTaggedRows ? renderGroupTaggedRows(group) : null}
                           </Fragment>
                         )
                       }) : null}
@@ -538,6 +552,7 @@ export default function ProductsListSurface({
                   return (
                     <div key={group.key} data-product-jump-id={group.anchorId}>
                       {group.rows.map((product) => renderMobileProductCard(product, { indented: false }))}
+                      {renderGroupTaggedCards ? renderGroupTaggedCards(group) : null}
                     </div>
                   )
                 }
@@ -600,6 +615,7 @@ export default function ProductsListSurface({
                     {!groupCollapsed ? (
                       <div className="bg-white dark:bg-slate-900/70">
                         {group.rows.map((product) => renderMobileProductCard(product, { indented: true }))}
+                        {renderGroupTaggedCards ? renderGroupTaggedCards(group) : null}
                       </div>
                     ) : null}
                   </div>

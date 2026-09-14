@@ -186,6 +186,8 @@ type AdjustForm = {
   free_goods: boolean
   payment_status: string
   credit_due_date: string
+  // P3-L6: mirrors InventoryStockModals.tsx's field of the same name.
+  condition_tag: string
 }
 
 type TransferForm = {
@@ -478,6 +480,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '', received_date: todayIsoDate(),
     supplier_id: '', supplier_name: '',
     unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',
+    condition_tag: '',
   })
   const [transferModal, setTransferModal] = useState<InventoryProduct | null>(null)
   const [transferForm,  setTransferForm]  = useState<TransferForm>({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
@@ -1354,6 +1357,12 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       // (first attribution sticks), so what's here is what was on screen.
       supplierId: isStockIn && adjustForm.supplier_id !== '' ? Number(adjustForm.supplier_id) : undefined,
       supplierName: isStockIn && String(adjustForm.supplier_name || '').trim() !== '' ? String(adjustForm.supplier_name).trim() : undefined,
+      // P3-L6: the condition tag, sent only when the control offered it
+      // (add/remove; a 'set' has no quantity of its own to tag and the route
+      // refuses one). Absent means the ordinary untagged behaviour.
+      conditionTag: (adjustForm.type === 'add' || adjustForm.type === 'remove') && adjustForm.condition_tag
+        ? String(adjustForm.condition_tag)
+        : undefined,
       ...stockReceiptWire(adjustForm, receiptSessionIdRef.current, isStockIn),
       pricing: unlockPricing ? {
         selling_price_usd: parseFloat(String(adjustForm.selling_price_usd)) || 0,
@@ -1418,7 +1427,19 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         // (possibly 'new') batchId.
         const resolvedBatchId = (res as { batchId?: number | null } | null)?.batchId ?? null
         const inverseBatchId = resolvedBatchId != null ? resolvedBatchId : adjustmentRequest.batchId
-        actionHistory.pushAction({
+        // P3-L6. A tagged adjustment is NOT reversible by an inverse
+        // /adjust call, so no undo entry is pushed for one -- an undo that
+        // reports success while doing the wrong thing is worse than no undo.
+        //   * a tagged REMOVE moved units out of sellable stock AND created
+        //     a held row; the inverse "add" would receive brand-new stock
+        //     and leave the held row standing, so the units would exist
+        //     twice. Its real reversal is the tagged row's own "Restore to
+        //     sellable" on the Products page, which moves both ledgers.
+        //   * a tagged RESTOCK additionally recorded a supplier purchase;
+        //     un-buying it is the Stock Change ledger's revert, not this.
+        if (adjustmentRequest.conditionTag) {
+          notify(tr('stock_tagged_undo_hint', 'Saved. Use the tagged row on the product to restore or remove these units.'), 'info')
+        } else actionHistory.pushAction({
           label: `Adjust stock for ${previousSnapshot?.name || adjustModal?.name || 'product'}`,
           undo: async () => {
             // N14-D: an undo puts the branch back to the figure it held before.
@@ -1539,6 +1560,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       // receipt must never ride along into this one.
       supplier_id: '', supplier_name: '',
       unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',
+      // P3-L6: the condition tag resets with every other stale receipt
+      // field -- the last removal's "broken" must never silently tag the
+      // next one.
+      condition_tag: '',
     })
   }
 

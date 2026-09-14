@@ -6580,5 +6580,18 @@
   "plan_tier_free": "ឥតគិតថ្លៃ",
   "plan_tier_paid": "បង់ប្រាក់",
   "plan_tier_hint_free": "ដំណើរការលើផែនការ Cloudflare ឥតគិតថ្លៃ៖ នាំចូលបានតិចជួរក្នុងម្តង និងគ្មានការបម្រុងទុកស្វ័យប្រវត្តិ។",
-  "plan_tier_hint_paid": "ដំណើរការលើផែនការ Cloudflare បង់ប្រាក់៖ នាំចូលបានច្រើនជួរក្នុងម្តង និងមានការបម្រុងទុកស្វ័យប្រវត្តិ។"
+  "plan_tier_hint_paid": "ដំណើរការលើផែនការ Cloudflare បង់ប្រាក់៖ នាំចូលបានច្រើនជួរក្នុងម្តង និងមានការបម្រុងទុកស្វ័យប្រវត្តិ។",
+  "stock_remove_entirely": "ដកចេញទាំងស្រុង",
+  "stock_restock_sellable": "បញ្ចូលជាទំនិញលក់បាន",
+  "stock_keep_in_group_as": "រក្សាក្នុងក្រុមជា",
+  "stock_restock_with_tag": "បញ្ចូលជាមួយស្លាក",
+  "stock_tagged_undo_hint": "បានរក្សាទុក។ ប្រើជួរស្លាកនៅលើផលិតផល ដើម្បីស្តារ ឬដកទំនិញទាំងនេះចេញ។",
+  "stock_tagged_not_sellable": "លក់មិនបាន",
+  "stock_tagged_restore": "ស្តារទៅជាទំនិញលក់បាន",
+  "stock_tagged_excluded_hint": "ស្តុករក្សាទុក៖ រាប់នៅទីនេះ ប៉ុន្តែមិនរាប់ក្នុងស្តុកសរុបរបស់ក្រុម និងមិនអាចលក់បានទេ។",
+  "stock_tagged_action_title": "ស្តុកមានស្លាក",
+  "stock_tagged_load_failed": "មិនអាចផ្ទុកស្តុកមានស្លាកបានទេ",
+  "stock_tagged_quantity_over": "លើសពីបរិមាណដែលរក្សាទុក",
+  "stock_tagged_dispose_done": "បានដកចេញពីស្តុកមានស្លាក",
+  "stock_tagged_restore_done": "បានស្តារទៅស្តុកលក់បាន"
 }

@@ -18,6 +18,7 @@ import DateEntryInput from '../shared/DateEntryInput.tsx'
 import Modal from '../shared/Modal.tsx'
 import { receiveBatchStock, getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
+import StockConditionTagRow from './StockConditionTagRow'
 import { searchProducts } from '../../api/methods.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -100,6 +101,11 @@ interface ReceivedLine {
   // movement exactly as typed. Blank -> stockLineReason() supplies the
   // session label the write path carried before (N27 hardcoded it).
   reason: string
+  // P3-L6: frozen with the line for the same reason. '' is the untagged
+  // default; a tag makes a remove KEEP the units in the product group as a
+  // non-sellable tagged row, and makes an add receive straight into that row
+  // ("Restock with tag") while still recording the supplier purchase.
+  conditionTag: string
   // True when THIS session created the product (scan -> create), so the queue
   // can tag New / Existing the way the session receipt does.
   createdProduct: boolean
@@ -131,6 +137,7 @@ interface FastStockInModalProps {
 type FastStockInDraft = {
   sessionId?: number
   mode?: StockMode
+  conditionTag?: string
   createdProductIds?: string[]
   branchId: string
   receivedDate: string
@@ -153,7 +160,7 @@ type FastStockInDraft = {
 }
 
 type FastStockInCloseState = Pick<FastStockInDraft,
-  'mode' | 'createdProductIds' | 'branchId' | 'receivedDate' | 'supplier' |
+  'mode' | 'conditionTag' | 'createdProductIds' | 'branchId' | 'receivedDate' | 'supplier' |
   'paymentStatus' | 'creditDueDate' | 'query' | 'picked' | 'quantity' |
   'unitCost' | 'freeGoods' | 'createPriceVariant' | 'expiryDate' | 'reason' | 'batchChoice' |
   'lines' | 'scannedBarcode'>
@@ -191,6 +198,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const draft = draftRef.current
   const pristineCloseStateRef = useRef<FastStockInCloseState>({
     mode: initialMode || 'add',
+    conditionTag: '',
     createdProductIds: [],
     branchId: String(initialHeader?.branchId || (defaultBranchId != null ? defaultBranchId : (branchOptions[0]?.value || ''))),
     receivedDate: initialHeader?.receivedDate || todayStr(),
@@ -221,6 +229,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   // N27: add / remove / set. Per line once queued; this is the switch for the
   // NEXT line.
   const [mode, setMode] = useState<StockMode>(draft?.mode || initialMode || 'add')
+  const [conditionTag, setConditionTag] = useState<string>(draft?.conditionTag || '')
   // Products this session created (scan -> Create product), so the queue can
   // say New / Existing with certainty rather than guessing.
   const [createdProductIds, setCreatedProductIds] = useState<string[]>(draft?.createdProductIds || [])
@@ -256,7 +265,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const [saving, setSaving] = useState(false)
   // A draft saved before the mode switch existed holds add lines that never
   // recorded a mode; they stay adds rather than reading as 'changes'.
-  const [received, setReceived] = useState<ReceivedLine[]>(() => (draft?.lines || []).map((line) => ({ ...line, mode: line.mode || 'add', reason: line.reason || '', createdProduct: Boolean(line.createdProduct) })))
+  const [received, setReceived] = useState<ReceivedLine[]>(() => (draft?.lines || []).map((line) => ({ ...line, mode: line.mode || 'add', reason: line.reason || '', conditionTag: line.conditionTag || '', createdProduct: Boolean(line.createdProduct) })))
   const [editingKey, setEditingKey] = useState('')
   const duplicateRows = useMemo(() => received.map((line) => ({
     ...line,
@@ -304,11 +313,11 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   // be lost.
   useEffect(() => {
     return scheduleWorkDraftWrite<FastStockInDraft>(fastStockInDraftKey, {
-      sessionId: sessionIdRef.current, mode, createdProductIds,
+      sessionId: sessionIdRef.current, mode, conditionTag, createdProductIds,
       branchId, receivedDate, supplier, paymentStatus, creditDueDate,
       query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received, scannedBarcode,
     })
-  }, [branchId, receivedDate, supplier, paymentStatus, creditDueDate, query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice, received, scannedBarcode, mode, createdProductIds])
+  }, [branchId, receivedDate, supplier, paymentStatus, creditDueDate, query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice, received, scannedBarcode, mode, conditionTag, createdProductIds])
 
   useEffect(() => {
     const text = query.trim()
@@ -466,7 +475,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const persistDraftBeforeProductCreate = () => {
     writeWorkDraft<FastStockInDraft>(fastStockInDraftKey, {
       sessionId: sessionIdRef.current,
-      mode, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
+      mode, conditionTag, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
       query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received, scannedBarcode,
     })
   }
@@ -575,6 +584,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               : tr('new_batch', '+ New received date'),
         mode,
         reason: reason.trim(),
+        conditionTag: mode === 'set' ? '' : conditionTag,
         createdProduct: createdProductIds.includes(String(picked.id)),
         status: 'queued',
         detail: tr('ready_to_receive', 'Ready'),
@@ -590,6 +600,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     if (saving || line.status === 'saved') return
     setEditingKey(line.key)
     setMode(line.mode)
+    setConditionTag(line.conditionTag || '')
     setPicked(line.product)
     setQuery(line.productName)
     setQuantity(String(line.quantity))
@@ -641,6 +652,8 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         const result = line.mode === 'remove'
           ? await adjustStock({
               productId: Number(line.product.id), type: 'remove', quantity: line.quantity,
+              // P3-L6: a tagged removal keeps the units in the group.
+              conditionTag: line.conditionTag || undefined,
               reason: stockLineReason(line, tr), branchId: Number(branchId),
               // A chosen lot is drained by id; otherwise the oldest lots first.
               batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
@@ -653,6 +666,26 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               // Receipt fields ride along: a set that RAISES stock is an add
               // server-side and is gated like one; a set that lowers it
               // ignores them.
+              receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
+              supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
+              unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
+              freeGoods: line.freeGoods, paymentStatus,
+              creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
+              sessionId: sessionIdRef.current,
+            }) as { batchNumber?: number | null; lotCode?: string | null; createdSibling?: boolean }
+          // P3-L6 "Restock with tag". The ordinary add wire here is POST
+          // /api/batches (receiveBatchStock); the tagged one is POST
+          // /api/inventory/adjust, because that is the single writer that
+          // receives the purchase AND holds the units as a tagged row in one
+          // request. Every receipt fact still rides along, so the supplier
+          // ledger, the invoice and the credit balance are identical to an
+          // untagged receipt of the same goods.
+          : line.mode === 'add' && line.conditionTag
+          ? await adjustStock({
+              productId: Number(line.product.id), type: 'add', quantity: line.quantity,
+              reason: stockLineReason(line, tr), branchId: Number(branchId),
+              conditionTag: line.conditionTag,
+              batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
               receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
               supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
               unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
@@ -758,7 +791,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     total + (line.mode === 'remove' ? 0 : Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitCost) || 0))
   ), 0)
   const closeState: FastStockInCloseState = {
-    mode, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
+    mode, conditionTag, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
     query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice,
     lines: received, scannedBarcode,
   }
@@ -923,6 +956,21 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                   </span> : null}
                 </div>
               )}
+              {/* P3-L6: keep-or-destroy (remove) and sellable-or-tagged
+                  (add) as ONE compact row on every screen size. Not offered
+                  for 'set' -- see StockConditionTagRow and the route's own
+                  refusal. */}
+              {mode !== 'set' ? (
+                <div className="mt-2">
+                  <StockConditionTagRow
+                    mode={mode === 'remove' ? 'remove' : 'add'}
+                    value={conditionTag}
+                    onChange={setConditionTag}
+                    tr={tr}
+                    id="fast-stockin-condition-tag"
+                  />
+                </div>
+              ) : null}
               <div className={`mt-2 grid grid-cols-2 gap-2 sm:items-end ${mode === 'remove' ? 'sm:grid-cols-[5rem_1fr]' : 'sm:grid-cols-[5rem_6rem_8rem_1fr]'}`}>
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{mode === 'set' ? tr('set_to', 'Set to') : tr('quantity', 'Qty')}</span><input type="number" min={mode === 'set' ? 0 : 1} step="1" className="input text-center text-sm" value={quantity} onChange={(event) => setQuantity(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addLine() }} /></label>
                 {mode !== 'remove' ? <>

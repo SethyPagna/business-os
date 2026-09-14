@@ -27,6 +27,9 @@ import ScanSearchButton from '../shared/ScanSearchButton'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import ProductsListSurface, { ROW_TEXT_GUTTER } from './surfaces/ProductsListSurface'
+import { TaggedStockActionModal, TaggedStockDesktopRow, TaggedStockMobileCard } from './TaggedStockRows.tsx'
+import type { TaggedStockAction, TaggedStockRow } from './TaggedStockRows.tsx'
+import { getTaggedLots } from '../../api/damagedLotsTransport.ts'
 import StockInSessionsSection from './StockInSessionsSection.tsx'
 import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
 import type { MergeDuplicatesRecoveryNotice } from './MergeDuplicatesReviewModal'
@@ -2753,6 +2756,42 @@ function ProductsFullEditor() {
   const visibleIds = useMemo(() => buildVisibleProductIds(visibleProducts), [visibleProducts])
   const visibleIdsSignature = useMemo(() => visibleIds.join(','), [visibleIds])
   const visibleIdSet = useMemo(() => new Set(visibleIds), [visibleIdsSignature])
+  // ---------------------------------------------------------------- P3-L6
+  // TAGGED stock: units the operator chose to KEEP inside a product group
+  // under an English condition tag (broken/damaged/expired/opened/other)
+  // instead of destroying them. They live in damaged_stock_lots, never in
+  // branch_stock or products.stock_quantity, so they are absent from the
+  // product records this page is built from -- and therefore from every
+  // group total, summary chip, selection scope, export column and product
+  // picker, including POS. That exclusion is structural, not a filter, and
+  // this separate read is the ONLY thing on the page that can see them.
+  const [taggedLots, setTaggedLots] = useState<TaggedStockRow[]>([])
+  const [taggedAction, setTaggedAction] = useState<TaggedStockAction | null>(null)
+  const [taggedReloadToken, setTaggedReloadToken] = useState(0)
+  useEffect(() => {
+    const ids = visibleIdsSignature ? visibleIdsSignature.split(',').filter(Boolean) : []
+    if (!ids.length) { setTaggedLots([]); return }
+    let cancelled = false
+    getTaggedLots(ids)
+      .then((response) => { if (!cancelled) setTaggedLots(Array.isArray(response?.items) ? response.items : []) })
+      .catch(() => {
+        // A failed read must never render as "no held stock" -- that reads
+        // as units that were quietly written off. Keep the last known rows
+        // and say the read failed.
+        if (!cancelled) notify(tr('stock_tagged_load_failed', 'Failed to load tagged stock'), 'error')
+      })
+    return () => { cancelled = true }
+  }, [notify, taggedReloadToken, tr, visibleIdsSignature])
+  const taggedLotsByProduct = useMemo(() => {
+    const map = new Map<string, TaggedStockRow[]>()
+    for (const row of taggedLots) {
+      const key = String(row.product_id)
+      const list = map.get(key)
+      if (list) list.push(row)
+      else map.set(key, [row])
+    }
+    return map
+  }, [taggedLots])
   const selectedVisibleIds = useMemo(
     () => buildSelectedVisibleIds(selectedIds, visibleIds).map((id) => Number(id)).filter((id) => Number.isFinite(id)),
     [selectedIds, visibleIds],
@@ -4263,6 +4302,54 @@ function ProductsFullEditor() {
     )
   }, [openProductFormTab, tr])
 
+  // P3-L6. Held rows are keyed off the group's FULL id list, not its display
+  // rows: mergeSameDetailRows collapses branch-only duplicates into one
+  // visible row, and the merged-away product may be the one carrying the
+  // held units. Keying off the display rows would hide them.
+  const groupTaggedRows = useCallback((group: { ids?: Array<string | number> }): TaggedStockRow[] => {
+    if (!taggedLotsByProduct.size) return []
+    const seen = new Set<string>()
+    const rows: TaggedStockRow[] = []
+    for (const id of group.ids || []) {
+      const key = String(id)
+      if (seen.has(key)) continue
+      seen.add(key)
+      for (const row of taggedLotsByProduct.get(key) || []) rows.push(row)
+    }
+    return rows
+  }, [taggedLotsByProduct])
+
+  const taggedRowKey = (row: TaggedStockRow) => `tagged-${row.product_id}-${row.branch_id ?? 'none'}-${row.condition_tag}`
+
+  const renderGroupTaggedRows = useCallback((group: { ids?: Array<string | number> }) => {
+    const rows = groupTaggedRows(group)
+    if (!rows.length) return null
+    return rows.map((row) => (
+      <TaggedStockDesktopRow
+        key={taggedRowKey(row)}
+        row={row}
+        tr={tr}
+        canWrite={canAdjustInventoryStock}
+        onAction={setTaggedAction}
+        selectionModeActive={selectionModeActive}
+      />
+    ))
+  }, [canAdjustInventoryStock, groupTaggedRows, selectionModeActive, tr])
+
+  const renderGroupTaggedCards = useCallback((group: { ids?: Array<string | number> }) => {
+    const rows = groupTaggedRows(group)
+    if (!rows.length) return null
+    return rows.map((row) => (
+      <TaggedStockMobileCard
+        key={taggedRowKey(row)}
+        row={row}
+        tr={tr}
+        canWrite={canAdjustInventoryStock}
+        onAction={setTaggedAction}
+      />
+    ))
+  }, [canAdjustInventoryStock, groupTaggedRows, tr])
+
   if (loadError && !loading && !products.length && !categories.length && !units.length && !branches.length) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
       <div className="text-4xl">!</div>
@@ -4877,6 +4964,8 @@ function ProductsFullEditor() {
           renderDesktopProductRow={renderDesktopProductRow}
           bindGroupHold={bindGroupHold}
           renderGroupActions={renderGroupActions}
+          renderGroupTaggedRows={renderGroupTaggedRows}
+          renderGroupTaggedCards={renderGroupTaggedCards}
           renderGroupThumbnail={renderGroupThumbnail}
           renderMobileProductCard={renderMobileProductCard}
           selectionModeActive={selectionModeActive}
@@ -4888,6 +4977,20 @@ function ProductsFullEditor() {
           visibleProducts={visibleProducts}
         />
       </div>
+
+      {/* P3-L6: "Remove entirely" / "Restore to sellable" for a held row.
+          Both reload the held rows AND the products themselves -- a restore
+          moves units back into branch stock, so the sellable numbers on this
+          page are stale until the products are re-read. */}
+      {taggedAction ? (
+        <TaggedStockActionModal
+          action={taggedAction}
+          tr={tr}
+          notify={notify}
+          onClose={() => setTaggedAction(null)}
+          onDone={() => { setTaggedReloadToken((token) => token + 1); void load(true) }}
+        />
+      ) : null}
 
       <AlphaIndexRail letters={visibleLetters} onJump={jumpToLetter} label={t('jump_to_letter') || 'Jump to letter'} />
 

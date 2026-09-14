@@ -74,7 +74,27 @@ const asyncNoop = async () => null
 // The one shared reason-length cap. REAL, not a stub: the point of the
 // module is that every reason wire measures the same way.
 const stockReason = loadModule('lib/stockReason.ts', require)
+// P3-L6: the tagged-stock kernel that routes/inventory.ts now imports.
+const taggedStockCondition = loadModule('lib/stockCondition.ts', require)
+const taggedReturnsStock = loadModule('lib/returnsStock.ts', (id) => {
+  if (id === './stockCondition') return taggedStockCondition
+  if (id === './productBatches') return productBatches
+  return require(id)
+})
+const taggedLotActions = loadModule('lib/damagedLotActions.ts', (id) => {
+  if (id === './stockCondition') return taggedStockCondition
+  if (id === './productBatches') return productBatches
+  if (id === './movementCostSnapshot') return movementCostSnapshot
+  if (id === './returnsStock') return taggedReturnsStock
+  // readTaggedLotGroups now chunks its IN(...) list through this helper
+  // (D1's 100-bound-parameter fix); without the override the transpiled
+  // require resolves against scripts/ and the whole loader dies.
+  if (id === './sqlBinding') return sqlBinding
+  return require(id)
+})
 const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
+  if (id === '../lib/stockCondition') return taggedStockCondition
+  if (id === '../lib/damagedLotActions') return taggedLotActions
   if (id === '../lib/moneyPrecision') return moneyPrecision
   if (id === 'hono') return require('hono')
   if (id === '../lib/db') return { getDb: () => wrapDb(routeDb) }

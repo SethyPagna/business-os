@@ -72,7 +72,7 @@ test('a stock-in session undo/redo counter-movement is not offered for revert', 
   const sessionSource = readFileSync(new URL('../../cloudflare/src/lib/stockSession.ts', import.meta.url), 'utf8')
   assert.ok(sessionSource.includes('`Stock session ${op.id} ${direction} generation ${generation + 1}`'), 'Worker undo/redo reason template located')
   const section = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
-  assert.match(section, /isRevertibleStockMovement\(detail\.movement_type\) && !isStockSessionGenerationMovement\(detail\)/)
+  assert.match(section, /isRevertibleStockMovement\(detail\.movement_type, detail\.reference_id\) && !isStockSessionGenerationMovement\(detail\)/)
 })
 
 test('frontend movement allowlists stay in source parity with the Worker', () => {

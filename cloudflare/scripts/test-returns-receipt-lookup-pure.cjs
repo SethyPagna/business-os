@@ -143,7 +143,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/saleMoneyPrecision': saleMoneyPrecision,
   '../lib/customerReturnEntitlement': customerReturnEntitlement,
   '../lib/productMergeLineage': productMergeLineage,
-  '../lib/returnsStock': loadReal('lib/returnsStock.ts', { './db': { getDb: () => db }, './productBatches': productBatches, './sqlBinding': sqlBinding }),
+  '../lib/returnsStock': loadReal('lib/returnsStock.ts', { './db': { getDb: () => db }, './productBatches': productBatches, './sqlBinding': sqlBinding, './stockCondition': loadReal('lib/stockCondition.ts') }),
   '../lib/receiptNumber': { uniqueBusinessDateTimeNumber: async (prefix) => `${prefix ? `${prefix}-` : ''}20260830-120000` },
   // Real money kernel -- the replacement sale derives its totals through the
   // same function routes/sales.ts uses, so it must be the real one here too.
