@@ -1051,6 +1051,28 @@ export async function maybeRunScheduledBackup(env: Env) {
     console.error('[backup] retention pass failed', error)
   }
 
+  // A full backup walks every backup table and lists the whole R2 bucket.
+  // It is the single heaviest thing this cron does, and a cron trigger gets
+  // the SAME 10 ms CPU budget as a request on the free plan -- it does not
+  // run slowly there, it is killed partway through, and a backup killed
+  // mid-write is worse than one that never started (the lifecycle sidecar is
+  // left claiming a copy is in progress, which then blocks the next run
+  // until STALE_BACKUP_MS elapses). Refuse explicitly instead.
+  //
+  // Deliberately placed AFTER the retention pass above: pruning old backups
+  // is cheap, and it is what keeps R2 under the free tier's storage ceiling,
+  // so it must keep running on both plans. Manual backups from the Backup
+  // screen are also unaffected -- a person can watch one and retry it; an
+  // unattended cron cannot.
+  if (!getPlanLimits(env).scheduledBackupEnabled) {
+    return {
+      skipped: true,
+      reason: 'scheduled-backup-unavailable-free',
+      code: 'scheduled_backup_unavailable_free',
+      latest: newestFinalized ?? null,
+      retention,
+    }
+  }
   if (activeCopyMs && Date.now() - activeCopyMs < STALE_BACKUP_MS) {
     return { skipped: true, reason: 'backup-in-progress', latest: activeCopy, retention }
   }

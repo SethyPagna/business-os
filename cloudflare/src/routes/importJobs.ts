@@ -746,6 +746,10 @@ app.post('/:id/preflight', async (c) => {
       // queued analyze phase after POST /:id/start). Under the cap =>
       // this preflight covered the entire file.
       partial: loaded.results.length >= preflightMaxRows,
+      // Named so the UI can say "only the first 125 rows were checked"
+      // rather than leaving `partial` as a bare flag. Null when the whole
+      // file fit, so the presence of a code IS the condition.
+      partialCode: loaded.results.length >= preflightMaxRows ? 'import_preflight_partial' : null,
       // The cap that actually applied, so "partial" is never a bare flag the
       // UI has to explain with a hard-coded number that may not be this
       // deployment's. On Free this is 125, not 500.

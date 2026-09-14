@@ -56,7 +56,7 @@ import { planReconcileBranchSnapshot } from './productBatches'
 
 import type { Env } from '../index'
 import { getDb, type D1Compat } from './db'
-import { getPlanLimits } from './planTier'
+import { freePlanRefusalSuffix, getPlanLimits } from './planTier'
 import { chunkRowsForAttempt, dispatchImportWork } from './queueDispatch'
 import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
 import {
@@ -5004,7 +5004,15 @@ export async function applyStockActionsJob(
   const limits = getPlanLimits(env)
   if (getUnifiedStockMode(policyJson) === 'reconcile') {
     if (totalRows > limits.stockActionMaxRows) {
-      throw new Error(`This stock import has ${totalRows} rows; reconcile mode checks every row against one live-stock snapshot, so split it into files of at most ${limits.stockActionMaxRows} rows before importing.`)
+      // Refuse, never truncate. Reconcile's deltas are computed against ONE
+      // live-stock snapshot, so applying the first N rows of an oversized
+      // sheet is not a partial import, it is a wrong one. The code is what
+      // the UI translates (lang/*.json has a key of the same name); the
+      // message stays English because a queue invocation has no locale.
+      throw Object.assign(
+        new Error(`This stock import has ${totalRows} rows; reconcile mode checks every row against one live-stock snapshot, so split it into files of at most ${limits.stockActionMaxRows} rows before importing.${freePlanRefusalSuffix(env)}`),
+        { code: 'stock_import_over_tier_cap' },
+      )
     }
     return await applyStockActionsSinglePass(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, actor)
   }
@@ -5069,7 +5077,13 @@ async function applyStockActionsSinglePass(
   const unitCount = saleGroups.size + singles.length
   const singlePassMaxUnits = getPlanLimits(env).stockActionMaxUnits
   if (unitCount > singlePassMaxUnits) {
-    throw new Error(`This stock import resolves to ${unitCount} actions; split it into files of at most ${singlePassMaxUnits} actions before importing.`)
+    // Same refusal, one level down: rows became actions (a receipt is one
+    // action however many lines it has), so a sheet inside the row cap can
+    // still be outside the action cap.
+    throw Object.assign(
+      new Error(`This stock import resolves to ${unitCount} actions; split it into files of at most ${singlePassMaxUnits} actions before importing.${freePlanRefusalSuffix(env)}`),
+      { code: 'stock_import_over_tier_cap' },
+    )
   }
 
   const fail = (r: StockActionImportResult, message: string) => { r.action = 'error'; r.message = message }

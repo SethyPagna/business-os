@@ -8,6 +8,7 @@ import { audit } from '../lib/audit'
 import { encryptSecret, decryptSecret } from '../lib/secretCrypto'
 import { generateTotpSecret, verifyTotp } from '../lib/totp'
 import { isAdminControlUser } from '../lib/permissions'
+import { resolvePlanTier } from '../lib/planTier'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
@@ -377,6 +378,10 @@ app.get('/bootstrap', async (c) => {
         database: 'd1',
         objectStorage: 'r2',
         cache: 'kv',
+        // 'free' | 'paid'. The bootstrap is the one payload every client
+        // already reads on login, so the app knows which ceilings apply
+        // without a second round trip. See lib/planTier.ts.
+        plan: resolvePlanTier(c.env),
       },
     },
   })

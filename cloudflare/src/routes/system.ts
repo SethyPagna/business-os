@@ -15,7 +15,7 @@ import { bumpVersion } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { getPlanLimits } from '../lib/planTier'
+import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
 
 // Each R2 delete is its own subrequest, and a Worker invocation has a
 // hard ceiling on how many it may make. A catalog of ~6,700 products with
@@ -243,6 +243,19 @@ app.post('/reset-data', async (c) => {
   const includeMovements = mode === 'products' && body.includeMovements === true
   const includeSales = mode === 'products' && body.includeSales === true
   const includeImages = mode === 'products' && body.includeImages === true
+  // Refuse rather than half-delete. Each image delete is one external
+  // subrequest and Free allows 50 per invocation, so a reset asking to
+  // delete more than maxImageDeletesPerReset files would leave the rest
+  // orphaned in R2 with no second pass to collect them -- the request that
+  // knows about them is the one that just ended. Paid keeps the existing
+  // "deleted N, left M" behaviour because 500 fits its budget.
+  if (includeImages && resolvePlanTier(c.env) === 'free') {
+    return c.json({
+      success: false,
+      error: 'Deleting the image files as part of a products reset is not available on the Cloudflare free plan: one request cannot delete enough of them to finish the job, and a partial delete would leave orphaned files behind. Reset without the image option, then remove the files from the Library.',
+      code: 'reset_images_unavailable_free',
+    }, 400)
+  }
   const db = getDb(c.env)
   const user = c.get('user')
 

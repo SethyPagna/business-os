@@ -35,6 +35,7 @@
 import type { Env } from '../index'
 import { getDb } from './db'
 import { recordAnalytics } from './analytics'
+import { resolvePlanTier, type PlanTier } from './planTier'
 
 export type QuotaResource = 'kv_write' | 'r2_class_a' | 'cf_images_transform' | 'cloudinary_transform'
 
@@ -56,8 +57,17 @@ type QuotaLimit = {
   window: 'day' | 'month'
 }
 
-const LIMITS: Record<QuotaResource, QuotaLimit> = {
-  kv_write: { limit: 1000, window: 'day' },
+// Only KV writes are scoped to the WORKERS plan. The image/CDN ceilings
+// below belong to their own products' plans (Cloudflare Images, Cloudinary)
+// and do not move when the Worker is deployed from wrangler.free.toml, so
+// they are shared verbatim between the two tables rather than duplicated
+// with different numbers.
+//
+// This whole table used to be the FREE column, unconditionally -- on the
+// paid account that has been live, bumpVersion started degrading at 700
+// writes/day against a ceiling that plan does not have. That is the bug this
+// split fixes; it is not only a free-plan feature.
+const PLAN_INDEPENDENT_LIMITS = {
   r2_class_a: { limit: 1_000_000, window: 'month' },
   // Cloudflare Images free plan: 5,000 UNIQUE transformations/month, counted
   // per source+parameters. Exceeding it returns error 9422 and is never
@@ -68,6 +78,32 @@ const LIMITS: Record<QuotaResource, QuotaLimit> = {
   // credit. Tracked as transformations so the two providers are directly
   // comparable in the same units.
   cloudinary_transform: { limit: 25_000, window: 'month' },
+} as const satisfies Record<Exclude<QuotaResource, 'kv_write'>, QuotaLimit>
+
+const FREE_QUOTA_LIMITS: Record<QuotaResource, QuotaLimit> = {
+  // Workers Free: 1,000 KV writes/day, account-wide.
+  kv_write: { limit: 1000, window: 'day' },
+  ...PLAN_INDEPENDENT_LIMITS,
+}
+
+const PAID_QUOTA_LIMITS: Record<QuotaResource, QuotaLimit> = {
+  // Workers Paid: KV writes are billed per operation rather than capped at
+  // a daily ceiling. A number is still carried (rather than Infinity) so
+  // the zone maths, the stored counter and the admin readout all keep
+  // working unchanged, and so runaway write amplification is still visible
+  // in the doctor before it becomes an invoice. 1,000,000/day is three
+  // orders of magnitude above this shop's observed volume.
+  kv_write: { limit: 1_000_000, window: 'day' },
+  ...PLAN_INDEPENDENT_LIMITS,
+}
+
+export const QUOTA_LIMITS_BY_TIER: Record<PlanTier, Record<QuotaResource, QuotaLimit>> = {
+  free: FREE_QUOTA_LIMITS,
+  paid: PAID_QUOTA_LIMITS,
+}
+
+function limitsFor(env: Env): Record<QuotaResource, QuotaLimit> {
+  return QUOTA_LIMITS_BY_TIER[resolvePlanTier(env)]
 }
 
 // Deliberately conservative. The point of a safe zone is to change behaviour
@@ -110,8 +146,8 @@ const VIDEO_RESERVE: Partial<Record<QuotaResource, number>> = {
  * backs off while the real quota still has room, and a video request later
  * that day still finds budget.
  */
-export function reservedZoneFor(resource: QuotaResource, used: number): QuotaZone {
-  const { limit } = LIMITS[resource]
+export function reservedZoneFor(env: Env, resource: QuotaResource, used: number): QuotaZone {
+  const { limit } = limitsFor(env)[resource]
   const reserve = VIDEO_RESERVE[resource] || 0
   return zoneFor(used, Math.max(1, limit - reserve))
 }
@@ -137,8 +173,8 @@ export type QuotaStatus = {
   allowed: boolean
 }
 
-function buildStatus(resource: QuotaResource, used: number): QuotaStatus {
-  const { limit } = LIMITS[resource]
+function buildStatus(env: Env, resource: QuotaResource, used: number): QuotaStatus {
+  const { limit } = limitsFor(env)[resource]
   const zone = zoneFor(used, limit)
   return {
     resource,
@@ -149,7 +185,7 @@ function buildStatus(resource: QuotaResource, used: number): QuotaStatus {
     // What an image caller should read: the same thresholds against a
     // ceiling reduced by the video reserve, so image work stops early and
     // leaves the remainder for video.
-    reservedZone: reservedZoneFor(resource, used),
+    reservedZone: reservedZoneFor(env, resource, used),
     allowed: zone !== 'exhausted',
   }
 }
@@ -164,7 +200,7 @@ function buildStatus(resource: QuotaResource, used: number): QuotaStatus {
  * a COUNT query failed is the opposite of that.
  */
 export async function consumeQuota(env: Env, resource: QuotaResource, amount = 1): Promise<QuotaStatus> {
-  const { window } = LIMITS[resource]
+  const { window } = limitsFor(env)[resource]
   const windowKey = windowKeyFor(window)
   try {
     const db = getDb(env)
@@ -177,7 +213,7 @@ export async function consumeQuota(env: Env, resource: QuotaResource, amount = 1
     const row = await db
       .prepare(`SELECT used FROM quota_usage WHERE resource = @resource AND window_key = @windowKey`)
       .get<{ used: number }>({ resource, windowKey })
-    const status = buildStatus(resource, Number(row?.used || 0))
+    const status = buildStatus(env, resource, Number(row?.used || 0))
     // Only the moment a zone CHANGES, not every consumption. The point is to
     // be able to answer "when did we start running out" without writing a
     // data point on every mutation -- and Analytics Engine is the only store
@@ -192,25 +228,25 @@ export async function consumeQuota(env: Env, resource: QuotaResource, amount = 1
     }
     return status
   } catch {
-    return { ...buildStatus(resource, 0), zone: 'ok', allowed: true }
+    return { ...buildStatus(env, resource, 0), zone: 'ok', allowed: true }
   }
 }
 
 /** Reads current usage without recording any. */
 export async function readQuota(env: Env, resource: QuotaResource): Promise<QuotaStatus> {
-  const { window } = LIMITS[resource]
+  const { window } = limitsFor(env)[resource]
   try {
     const db = getDb(env)
     const row = await db
       .prepare(`SELECT used FROM quota_usage WHERE resource = @resource AND window_key = @windowKey`)
       .get<{ used: number }>({ resource, windowKey: windowKeyFor(window) })
-    return buildStatus(resource, Number(row?.used || 0))
+    return buildStatus(env, resource, Number(row?.used || 0))
   } catch {
-    return buildStatus(resource, 0)
+    return buildStatus(env, resource, 0)
   }
 }
 
 /** Every tracked resource at once, for the admin health readout. */
 export async function readAllQuotas(env: Env): Promise<QuotaStatus[]> {
-  return Promise.all((Object.keys(LIMITS) as QuotaResource[]).map((resource) => readQuota(env, resource)))
+  return Promise.all((Object.keys(limitsFor(env)) as QuotaResource[]).map((resource) => readQuota(env, resource)))
 }

@@ -308,6 +308,23 @@ export function getPlanLimits(env: Env): PlanLimits {
 }
 
 /**
+ * The sentence appended to a refusal that only exists because this
+ * deployment is on the free plan. Empty on paid, so a paid deployment's
+ * messages are byte-identical to what they were before the tier split.
+ *
+ * The Worker has no translation layer (there is no request locale on a queue
+ * invocation at all), so every refusal built with this stays English on the
+ * wire and carries a stable `code` beside it. The frontend resolves that code
+ * against lang/en.json + lang/km.json -- the keys are named exactly after the
+ * codes, so `t(code, englishFallback)` needs no mapping table.
+ */
+export function freePlanRefusalSuffix(env: Env): string {
+  return resolvePlanTier(env) === 'free'
+    ? ' This deployment runs on the Cloudflare free plan, where that ceiling is lower than on the paid plan.'
+    : ''
+}
+
+/**
  * Test-only escape hatch.
  *
  * The cache above is deliberately a bare module-level variable (not an
