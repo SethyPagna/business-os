@@ -6286,6 +6286,7 @@
   "fee_sale_search_placeholder": "Search receipt, customer, phone, product, SKU or barcode",
   "portalPublicationReadinessWarning": "Publication is paused until the registered name, registration number, address, phone, and email are all verified and completed.",
   "portalPublicationMissingFields": "Missing: {fields}",
+  "productDefaultsUseSuggested": "Use suggested text",
   "externalTranslationDisclosure": "Choosing one sends the text on this page to Google Translate and may set Google cookies.",
   "shareProofTitle": "Send share proof",
   "shareProofInstructions": "Upload screenshots for staff review. A submission does not guarantee points or approval.",

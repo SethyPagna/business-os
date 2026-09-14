@@ -24,6 +24,7 @@ import ButtonGuidePopover from '../shared/ButtonGuidePopover'
 import { CatalogPageProvider, useCatalogPageContext } from './CatalogPageContext'
 import ImageField from './CatalogImageField'
 import { SectionShell } from './catalogUi'
+import { PRODUCT_CAUTION_SUGGESTED_TEXT, PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT } from './productDetailDefaultsText.ts'
 import type { createInitialUploadState } from '../../utils/mediaUpload.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 
@@ -242,6 +243,48 @@ function HintLabel({ title, hint, className = 'text-sm font-medium text-slate-70
     <div className="flex items-center gap-1.5">
       <span className={className}>{title}</span>
       <InfoHint label={title} text={hint} />
+    </div>
+  )
+}
+
+// A textarea whose premade wording (productDetailDefaultsText.ts) is offered
+// as the placeholder AND as a one-tap "Use suggested text" that writes it
+// into the draft. The button shows only while the field is empty: once the
+// owner has typed (or accepted) something, a tap must not overwrite it. The
+// value still reaches settings through the normal Save path only.
+function SuggestedTextField({ id, settingKey, label, suggestedText, applyLabel, value, setDraft }: {
+  id: string
+  settingKey: string
+  label: string
+  suggestedText: string
+  applyLabel: string
+  value: string
+  setDraft: (key: string, value: DraftUpdateValue) => void
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <label htmlFor={id} className="block text-sm font-medium text-slate-700">{label}</label>
+        {value.trim() ? null : (
+          <button
+            type="button"
+            className="btn-secondary inline-flex items-center gap-1 px-2 py-1 text-xs"
+            onClick={() => setDraft(settingKey, suggestedText)}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {applyLabel}
+          </button>
+        )}
+      </div>
+      <textarea
+        id={id}
+        name={settingKey}
+        className="input resize-none"
+        rows={4}
+        placeholder={suggestedText}
+        value={value}
+        onChange={(event) => setDraft(settingKey, event.target.value)}
+      />
     </div>
   )
 }
@@ -862,30 +905,24 @@ function CatalogEditorSurfaceContent() {
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
               <HintLabel className="text-sm font-semibold text-slate-900" title={copy('productDefaultsTitle', 'Product detail defaults')} hint={copy('productDefaultsHint', 'Shown on every product\'s detail view. A product\'s own Caution text (typed into its description) takes priority over this default; Need More Details always shows when set here.')} />
               <div className="mt-3 grid min-w-0 gap-3 lg:grid-cols-2">
-                <div>
-                <label htmlFor="portal-product-caution-default" className="block text-sm font-medium text-slate-700">{copy('productCaution', 'Caution')}</label>
-                <textarea
+                <SuggestedTextField
                   id="portal-product-caution-default"
-                  name="customer_portal_product_caution_default"
-                  className="input resize-none"
-                  rows={4}
-                  placeholder="Follow the instructions on the product packaging and use the product only as directed. Stop use if unexpected irritation, discomfort, or another adverse reaction occurs. Contact us if you need help confirming the exact variant or usage details before purchase. For external use only. Avoid contact with eyes."
+                  settingKey="customer_portal_product_caution_default"
+                  label={copy('productCaution', 'Caution')}
+                  suggestedText={PRODUCT_CAUTION_SUGGESTED_TEXT}
+                  applyLabel={copy('productDefaultsUseSuggested', 'Use suggested text')}
                   value={editorDraft.customer_portal_product_caution_default || ''}
-                  onChange={(event) => setDraft('customer_portal_product_caution_default', event.target.value)}
+                  setDraft={setDraft}
                 />
-                </div>
-                <div>
-                <label htmlFor="portal-product-need-more-details-default" className="block text-sm font-medium text-slate-700">{copy('productNeedMoreDetails', 'Need More Details')}</label>
-                <textarea
+                <SuggestedTextField
                   id="portal-product-need-more-details-default"
-                  name="customer_portal_product_need_more_details_default"
-                  className="input resize-none"
-                  rows={4}
-                  placeholder="Contact us if you need additional product details, variant confirmation, usage guidance, or help comparing suitable options. Consider how the product fits into your existing routine and what finish, function, or application style you want. For products where ingredients, shade compatibility, or personal suitability matter, check the exact packaging details before use."
+                  settingKey="customer_portal_product_need_more_details_default"
+                  label={copy('productNeedMoreDetails', 'Need More Details')}
+                  suggestedText={PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT}
+                  applyLabel={copy('productDefaultsUseSuggested', 'Use suggested text')}
                   value={editorDraft.customer_portal_product_need_more_details_default || ''}
-                  onChange={(event) => setDraft('customer_portal_product_need_more_details_default', event.target.value)}
+                  setDraft={setDraft}
                 />
-                </div>
               </div>
             </div>
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
