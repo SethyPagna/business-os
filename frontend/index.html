@@ -16,6 +16,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#1e3a8a" />
     <meta name="description" content="Leang Beauty — product catalog, prices and store contact" />
+    <!-- Link previews (Open Graph / Twitter card) for the storefront. The
+         image is absolute because preview crawlers do not resolve relative
+         URLs. On admin hosts the Worker rewrites these along with the title
+         and icons (cloudflare/src/lib/adminDocumentIdentity.ts), so the
+         inline bootstrap below leaves them alone. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Leang Beauty" />
+    <meta property="og:title" content="Leang Beauty" />
+    <meta property="og:description" content="Leang Beauty — product catalog, prices and store contact" />
+    <meta property="og:image" content="https://leangbeauty.com/leang-cosmetics-icon-512.png" />
+    <meta name="twitter:card" content="summary" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <!-- `default`, not `black-translucent`. black-translucent paints the iOS

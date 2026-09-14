@@ -90,7 +90,7 @@ binding = "STATIC_ASSETS"
 # .cjs fails if they drift, because a path listed here without a handler there
 # 404s a whole page, and a handler there without a path here never runs.
 run_worker_first = [
-  "/api/*", "/uploads/*", "/health", "/ws",
+  "/api/*", "/uploads/*", "/health", "/ws", "/robots.txt", "/sitemap.xml",
   "/", "/index.html", "/admin", "/admin/*",
   "/app", "/app/*", "/login", "/login/*",
   "/audit", "/audit/*", "/audit-log", "/audit-log/*",

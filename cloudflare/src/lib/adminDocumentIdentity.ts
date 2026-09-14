@@ -99,7 +99,15 @@ export type DocumentElementRewrite = {
   element(element: RewritableElement): void
 }
 
-/** The six tags iOS reads when it installs a home-screen app. */
+// Open Graph on the admin host: index.html's og:* tags name the storefront
+// (a link to the shop pasted into a chat should preview as the shop), and a
+// crawler or chat app reading the ADMIN host's raw HTML must not get that
+// preview either. Relative is enough here -- nothing should ever be
+// previewing the admin app; the point is that it is not Leang Beauty.
+const ADMIN_DOCUMENT_OG_IMAGE = '/icon-512.png'
+
+/** The six tags iOS reads when it installs a home-screen app, plus the
+ * Open Graph tags a link preview reads. */
 export const ADMIN_DOCUMENT_REWRITES: readonly DocumentElementRewrite[] = [
   {
     selector: 'title',
@@ -128,6 +136,22 @@ export const ADMIN_DOCUMENT_REWRITES: readonly DocumentElementRewrite[] = [
       element.setAttribute('href', icon.href)
       element.setAttribute('type', icon.type)
     },
+  },
+  {
+    selector: 'meta[property="og:site_name"]',
+    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_TITLE) },
+  },
+  {
+    selector: 'meta[property="og:title"]',
+    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_TITLE) },
+  },
+  {
+    selector: 'meta[property="og:description"]',
+    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_DESCRIPTION) },
+  },
+  {
+    selector: 'meta[property="og:image"]',
+    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_OG_IMAGE) },
   },
 ]
 

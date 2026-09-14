@@ -234,7 +234,9 @@ check('every document route the Worker handles is routed to the Worker', () => {
 })
 
 check('no route is sent to the Worker without a handler', () => {
-  const handled = new Set([...identity.APP_DOCUMENT_ROUTES, '/api/*', '/uploads/*', '/health', '/ws'])
+  // /robots.txt and /sitemap.xml: src/index.ts's public SEO handlers
+  // (test-public-seo-pure.cjs).
+  const handled = new Set([...identity.APP_DOCUMENT_ROUTES, '/api/*', '/uploads/*', '/health', '/ws', '/robots.txt', '/sitemap.xml'])
   for (const route of wranglerRunWorkerFirst()) {
     assert.ok(handled.has(route), route + ' reaches the Worker but nothing handles it; that 404s a whole page')
   }
