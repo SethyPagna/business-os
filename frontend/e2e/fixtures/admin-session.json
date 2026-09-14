@@ -1,0 +1,32 @@
+{
+  "_provenance": "user: cloudflare/src/routes/auth.ts GET /bootstrap + POST /login (id, username, name, organizationId, roleId, permissions, role_code, role_permissions). organization/defaultGroup: cloudflare/src/routes/organizations.ts GET /bootstrap (ORG_COLUMNS = id, name, slug, public_id, is_active, setup_enabled, created_at). Permissions mirror the built-in admin: {} on the user row, {\"all\": true} on the role -- the exact split AppContext.getMergedPermissionsRaw has to merge.",
+  "user": {
+    "id": 1,
+    "username": "e2e_admin",
+    "name": "E2E Admin",
+    "email": null,
+    "organizationId": 1,
+    "organization_public_id": "e2e-org",
+    "roleId": 1,
+    "role_code": "admin",
+    "permissions": {},
+    "role_permissions": { "all": true },
+    "is_active": 1
+  },
+  "organization": {
+    "id": 1,
+    "name": "Leang Beauty",
+    "slug": "leang-beauty",
+    "public_id": "e2e-org",
+    "is_active": 1,
+    "setup_enabled": 0,
+    "created_at": "2026-01-01T00:00:00.000Z"
+  },
+  "defaultGroup": {
+    "id": 1,
+    "organization_id": 1,
+    "name": "Default",
+    "slug": "default",
+    "is_default": 1
+  }
+}

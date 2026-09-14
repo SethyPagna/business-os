@@ -1,0 +1,58 @@
+{
+  "categories": [
+    {
+      "name": "Body care"
+    },
+    {
+      "name": "Fragrance"
+    },
+    {
+      "name": "Haircare"
+    },
+    {
+      "name": "Makeup"
+    },
+    {
+      "name": "Skincare"
+    }
+  ],
+  "brands": [
+    {
+      "name": "Aurelia"
+    },
+    {
+      "name": "Belle Roux"
+    },
+    {
+      "name": "Céleste"
+    },
+    {
+      "name": "Dermalux"
+    },
+    {
+      "name": "Eunoia"
+    },
+    {
+      "name": "Fleurine"
+    },
+    {
+      "name": "Glowary"
+    },
+    {
+      "name": "Havenlys"
+    },
+    {
+      "name": "Iridine"
+    }
+  ],
+  "branches": [
+    {
+      "id": 1,
+      "name": "Shop"
+    },
+    {
+      "id": 2,
+      "name": "Warehouse"
+    }
+  ]
+}
