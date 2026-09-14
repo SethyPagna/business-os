@@ -15,11 +15,13 @@ import { getScrollTarget, getScrollToPosition } from './components/shared/global
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
 import { ensureTextAffordances } from './components/shared/textAffordances.ts'
 import InfoHint from './components/shared/InfoHint.tsx'
+import IosInstallHint from './components/shared/IosInstallHint.tsx'
 import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { restartIntoLatestApp } from './utils/appUpdate.ts'
+import { installBeforeInstallPromptCapture } from './utils/standaloneNavigation.ts'
 import { persistentNoticeFingerprint, shouldRenderPersistentNotice } from './utils/persistentNoticeDismissal.ts'
 import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGuard.ts'
 import { hasDirtyWork } from './utils/dirtyWork.ts'
@@ -1945,6 +1947,13 @@ export default function App() {
   // Mount once at the shell so truncated cells work on every route.
   useEffect(() => { ensureTextAffordances({ copy: t('copy'), copied: t('copied') }) }, [t])
 
+  // G5: arm the native install-prompt capture at boot, before IosInstallHint
+  // mounts. Chromium chooses when to fire beforeinstallprompt and the event
+  // is lost if nothing calls preventDefault() on it; capturing here (and not
+  // in the component) means an event that fires during sign-in is still
+  // replayable afterwards. Idempotent, so the effect re-running is harmless.
+  useEffect(() => { installBeforeInstallPromptCapture() }, [])
+
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
     const url = new URL(window.location.href)
@@ -2222,6 +2231,7 @@ export default function App() {
         className={`pointer-events-none fixed inset-x-2 z-[1200] flex flex-col gap-2 ${inlineMobileNavigation ? BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS : BOTTOM_STACK_CLEARS_NAV_CLASS} md:inset-x-auto md:bottom-4 md:right-4 md:w-[24rem]`}
       >
         <StorageEvictionBand pendingSync={pendingSync} storagePersisted={storagePersisted} />
+        <IosInstallHint />
       </div>
       <GlobalScrollControls mobileBottomNavVisible={!inlineMobileNavigation} />
       {writeConflict ? (

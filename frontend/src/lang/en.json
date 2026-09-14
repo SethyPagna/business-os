@@ -6565,5 +6565,8 @@
   "money_rounding_down": "Rounding down",
   "money_rounding_up": "Rounding up",
   "storage_eviction_title": "Offline data may be cleared",
-  "storage_eviction_detail": "Add to Home Screen keeps sales safe: offline sales waiting to sync, and the saved app pages, can be deleted by the browser when the device runs low on space. Browsers keep data for apps opened from the Home Screen."
+  "storage_eviction_detail": "Add to Home Screen keeps sales safe: offline sales waiting to sync, and the saved app pages, can be deleted by the browser when the device runs low on space. Browsers keep data for apps opened from the Home Screen.",
+  "install_app": "Install app",
+  "ios_install_hint": "Install this app: tap Share, then \"Add to Home Screen\".",
+  "ios_install_hint_detail": "Installed, the app gets its own icon, keeps working offline, and the browser keeps its saved data instead of clearing it."
 }
