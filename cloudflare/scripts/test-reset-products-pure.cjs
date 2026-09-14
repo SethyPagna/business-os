@@ -82,7 +82,13 @@ const media = loadReal('lib/media.ts')
 
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+const planTier = loadReal('lib/planTier.ts')
+
 const systemRoute = loadReal('routes/system.ts', {
+  // planTier.ts is pure (only `import type`) and holds the free-vs-paid
+  // image-delete cap the reset path now reads -- real, not an inert stub,
+  // which would make that cap undefined and slice(0, undefined) empty.
+  '../lib/planTier': planTier,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
@@ -396,6 +402,32 @@ async function main() {
     assert.ok(deletedObjectKeys.includes('uploads/product-1-main.jpg'), JSON.stringify(deletedObjectKeys))
     assert.ok(deletedObjectKeys.includes('uploads/product-1-gallery-a.jpg'), JSON.stringify(deletedObjectKeys))
     assert.ok(deletedObjectKeys.includes('uploads/product-1-gallery-b.jpg'), JSON.stringify(deletedObjectKeys))
+  })
+
+  await check('mode=products with includeImages=true is REFUSED on the free plan instead of deleting part of the files', async () => {
+    // Each image delete is one external subrequest and Free allows 50 per
+    // invocation. Deleting the first 40 of 900 and returning 200 would tell
+    // the person the job was done while leaving the rest orphaned in R2 with
+    // no second pass coming -- the request that knew about them just ended.
+    seed()
+    planTier.__resetPlanTierCacheForTests()
+    const res = await app.request('/reset-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'products', includeImages: true }),
+    }, { ...fakeEnv, PLAN_TIER: 'free' }, fakeExecutionCtx)
+    const json = await res.json().catch(() => null)
+    planTier.__resetPlanTierCacheForTests()
+
+    assert.strictEqual(res.status, 400, JSON.stringify(json))
+    assert.strictEqual(json.code, 'reset_images_unavailable_free')
+    assert.strictEqual(deletedObjectKeys.length, 0, 'the refusal must land before anything is deleted')
+    // ...and nothing else was reset either: a gate that still wipes the
+    // products and only refuses the images would be worse than no gate.
+    assert.ok(count('products') > 0, 'the whole reset must be refused, not just its image half')
+    // POSITIVE CONTROL: the identical request on paid still deletes the 3
+    // seeded keys (the check directly above), so this is a tier gate, not a
+    // permanently-closed door.
   })
 
   await check('mode=products, includeMovements=true also deletes movement/audit tables but keeps sales/returns/contacts', async () => {

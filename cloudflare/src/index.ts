@@ -88,8 +88,13 @@ export type Env = {
   // and nothing publicly writable is created on the Cloudinary side.
   CLOUDINARY_API_KEY?: string
   CLOUDINARY_API_SECRET?: string
-  IMPORT_QUEUE: Queue
-  MEDIA_QUEUE: Queue
+  // Optional so the type tells the truth: a deployment whose config lost its
+  // [[queues.producers]] block still runs, it just has no binding here. The
+  // producers no longer touch these directly -- import work goes through
+  // lib/queueDispatch.ts (queued when bound, inline when not) and image
+  // normalization through lib/imageAudit.ts, which already checked.
+  IMPORT_QUEUE?: Queue
+  MEDIA_QUEUE?: Queue
   // Optional (wrangler.toml [[queues.producers]] binding) -- see
   // lib/backup.ts's createCloudflareBackup/continueCloudflareBackupAssetCopy
   // for the queue-driven full-asset-coverage backup path (Part 122).
@@ -104,6 +109,13 @@ export type Env = {
   BROADCAST_HUB: DurableObjectNamespace
   BUSINESS_OS_PUBLIC_URL: string
   BUSINESS_OS_ADMIN_URL: string
+  // Which Workers plan this deployment runs on: 'paid' (wrangler.toml) or
+  // 'free' (wrangler.free.toml). Read ONLY by lib/planTier.ts, which turns
+  // it into the limit table every plan-sensitive call site reads. Optional
+  // and defaulting to 'paid' on purpose -- see that module's header for why
+  // an unset value must never be treated as 'free', and why the tier is
+  // never inferred from which bindings happen to be present.
+  PLAN_TIER?: 'free' | 'paid'
   // Slug (or public_id) of the one organization this deployment serves --
   // see routes/organizations.ts's getDefaultOrganization for why this is a
   // preference with a fallback rather than a hard requirement. Optional:

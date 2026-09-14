@@ -104,6 +104,10 @@ const runtimeOverrides = {
 }
 
 const systemRoute = loadReal('routes/system.ts', {
+  // planTier.ts is pure (only `import type`) and holds the free-vs-paid
+  // image-delete cap the reset path now reads -- real, not an inert stub,
+  // which would make that cap undefined and slice(0, undefined) empty.
+  '../lib/planTier': loadReal('lib/planTier.ts'),
   '../lib/auth': auth,
   '../lib/permissions': permissions,
   '../lib/db': dbKernel,

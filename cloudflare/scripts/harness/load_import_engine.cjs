@@ -74,6 +74,16 @@ const PURE_LIB_SPECIFIERS = [
   './salesStatus', './productBatches', './batchCode', './searchMatch',
   './productDetailRule', './productDescriptionSections', './sqlBinding',
   './membershipNumber', './permissions', './media', './productImagePermission',
+  // planTier.ts is the free-vs-paid limit table. It must be loaded REAL, not
+  // stubbed: importEngine's chunk/unit ceilings read getPlanLimits(env), and a
+  // {} stub would make them read undefined and silently classify zero rows.
+  // It is the purest module in lib/ (its only import is `import type`), so it
+  // costs this loader nothing.
+  './planTier',
+  // queueDispatch.ts is the producer side of every import continuation now
+  // (it replaced nine bare env.IMPORT_QUEUE.send calls). Also pure -- only an
+  // `import type` -- and a {} stub turns every chunk tail into a TypeError.
+  './queueDispatch',
 ]
 const pureLibCache = new Map()
 function getPureLib(specifier) {

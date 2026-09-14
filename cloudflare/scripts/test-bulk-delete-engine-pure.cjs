@@ -53,6 +53,10 @@ function loadRealLib(relName) {
 // output (Env/D1Compat/BroadcastChannel are type-only imports, elided by
 // the transpiler) -- anything else falls through to the real require.
 function stubRequire(id) {
+  // queueDispatch is pure and is what runBulkDeleteJob's self-continuation
+  // enqueues through now; a {} stub makes dispatchImportWork undefined.
+  if (id === './queueDispatch') return loadRealLib('queueDispatch')
+  if (id === './planTier') return loadRealLib('planTier')
   if (id === './sqlBinding') return loadRealLib('sqlBinding')
   // N13: the actor snapshot kernel. Pure, no imports of its own, so it loads
   if (id === './actorSnapshot') return loadRealLib('actorSnapshot')

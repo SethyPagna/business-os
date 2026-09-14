@@ -12,6 +12,10 @@ function loadRealLib(relName) {
   })
   const mod = { exports: {} }
   new Function('exports','require','module', outputText)(mod.exports, (id) => {
+    // queueDispatch is pure and is what runBulkDeleteJob's self-continuation
+    // enqueues through now; a {} stub makes dispatchImportWork undefined.
+    if (id === './queueDispatch') return loadRealLib('queueDispatch')
+    if (id === './planTier') return loadRealLib('planTier')
     if (id === './sqlBinding') return loadRealLib('sqlBinding')
     if (id === './anonymousCustomer') return loadRealLib('anonymousCustomer')
     if (id === './actorSnapshot') return loadRealLib('actorSnapshot')

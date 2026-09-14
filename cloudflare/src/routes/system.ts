@@ -15,6 +15,7 @@ import { bumpVersion } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
 
 // Each R2 delete is its own subrequest, and a Worker invocation has a
 // hard ceiling on how many it may make. A catalog of ~6,700 products with
@@ -36,7 +37,12 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 // catalog": a 20k-object sweep belongs to a continuation design, not one
 // interactive request, and the leftover-reporting path already handles
 // the remainder honestly.
-const MAX_IMAGE_DELETES_PER_RESET = 500
+//
+// The number itself now lives in lib/planTier.ts (maxImageDeletesPerReset)
+// because it is plan-sensitive: Free allows 50 external subrequests per
+// invocation, so 500 is not a cap there, it is a guaranteed mid-loop
+// failure. It is read per request at the call site below rather than kept
+// as a second copy here that could drift from the table.
 
 const SALE_RECORD_RESET_GUARD_KEY = 'sale_record_events_reset_guard'
 const SALE_INCIDENT_RECOVERY_RESET_GUARD_KEY = 'sale_incident_recovery_reset_guard'
@@ -237,6 +243,19 @@ app.post('/reset-data', async (c) => {
   const includeMovements = mode === 'products' && body.includeMovements === true
   const includeSales = mode === 'products' && body.includeSales === true
   const includeImages = mode === 'products' && body.includeImages === true
+  // Refuse rather than half-delete. Each image delete is one external
+  // subrequest and Free allows 50 per invocation, so a reset asking to
+  // delete more than maxImageDeletesPerReset files would leave the rest
+  // orphaned in R2 with no second pass to collect them -- the request that
+  // knows about them is the one that just ended. Paid keeps the existing
+  // "deleted N, left M" behaviour because 500 fits its budget.
+  if (includeImages && resolvePlanTier(c.env) === 'free') {
+    return c.json({
+      success: false,
+      error: 'Deleting the image files as part of a products reset is not available on the Cloudflare free plan: one request cannot delete enough of them to finish the job, and a partial delete would leave orphaned files behind. Reset without the image option, then remove the files from the Library.',
+      code: 'reset_images_unavailable_free',
+    }, 400)
+  }
   const db = getDb(c.env)
   const user = c.get('user')
 
@@ -350,9 +369,14 @@ app.post('/reset-data', async (c) => {
       // that already succeeded, it's just reported back to the caller.
       const imageDeleteErrors: string[] = []
       let imagesDeleted = 0
-      const imagesOverCap = Math.max(0, imageKeysToDelete.length - MAX_IMAGE_DELETES_PER_RESET)
+      // Tier-aware shadow: the module-level constant keeps its Paid 500,
+      // while a Free deployment gets the number that actually fits Free's
+      // 50-external-subrequest ceiling (each delete is one subrequest).
+      // See lib/planTier.ts's maxImageDeletesPerReset.
+      const imageDeleteCap = getPlanLimits(c.env).maxImageDeletesPerReset
+      const imagesOverCap = Math.max(0, imageKeysToDelete.length - imageDeleteCap)
       if (includeImages && imageKeysToDelete.length) {
-        for (const key of imageKeysToDelete.slice(0, MAX_IMAGE_DELETES_PER_RESET)) {
+        for (const key of imageKeysToDelete.slice(0, imageDeleteCap)) {
           try {
             await deleteObject(c.env.ASSETS, key)
             imagesDeleted += 1
@@ -395,7 +419,7 @@ app.post('/reset-data', async (c) => {
 
       return c.json({
         success: true,
-        message: `Products reset complete - products, their received dates, and their branch stock deleted${includeMovements ? ', movement/audit history deleted' : ''}${includeSales ? ', sales and returns deleted' : ''}${includeImages ? `, ${imagesDeleted} image file(s) deleted` : ''}. ${keptSuffix} A fresh backup was taken first.${imagesOverCap ? ` Note: ${imagesOverCap} more image file(s) were left in storage -- a single request cannot delete more than ${MAX_IMAGE_DELETES_PER_RESET}. They are no longer referenced by any product and can be removed from the Library.` : ''}${imageDeleteErrors.length ? ` Note: ${imageDeleteErrors.length} image file(s) failed to delete from storage (the database was still updated correctly).` : ''}`,
+        message: `Products reset complete - products, their received dates, and their branch stock deleted${includeMovements ? ', movement/audit history deleted' : ''}${includeSales ? ', sales and returns deleted' : ''}${includeImages ? `, ${imagesDeleted} image file(s) deleted` : ''}. ${keptSuffix} A fresh backup was taken first.${imagesOverCap ? ` Note: ${imagesOverCap} more image file(s) were left in storage -- a single request cannot delete more than ${imageDeleteCap}. They are no longer referenced by any product and can be removed from the Library.` : ''}${imageDeleteErrors.length ? ` Note: ${imageDeleteErrors.length} image file(s) failed to delete from storage (the database was still updated correctly).` : ''}`,
       })
     } catch (error) {
       return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)

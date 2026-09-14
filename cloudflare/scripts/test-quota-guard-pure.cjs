@@ -36,6 +36,12 @@ function freshEnv() {
   return {
     env: {
       DB: db,
+      // This whole file asserts the FREE ceilings (1,000 KV writes/day is the
+      // Workers Free number). Until the tier split those numbers were applied
+      // unconditionally, including on the paid account that has been live --
+      // see the tier check at the bottom of this file, which is what stops
+      // that regression coming back by way of a 'harmless' default.
+      PLAN_TIER: 'free',
       CACHE: {
         get: async (key) => (kv.has(key) ? kv.get(key) : null),
         put: async (key, value) => { kvWrites += 1; kv.set(key, value) },
@@ -241,6 +247,9 @@ function loadModule(name) {
     // test env has -- stubbed so this never depends on the real dataset.
     if (request === './analytics') return { recordAnalytics: () => {} }
     if (request === './quotaGuard') return loadModule('quotaGuard.ts')
+    // Real: quotaGuard's ceilings are per-plan now, and this file's numbers
+    // ARE the free column -- a stub would make limitsFor() read undefined.
+    if (request === './planTier') return loadModule('planTier.ts')
     if (request === '../index') return {}
     return require(request)
   }
@@ -251,9 +260,36 @@ function loadModule(name) {
   return moduleObj.exports
 }
 
+check('the ceilings are per plan, and an unset PLAN_TIER means paid', async () => {
+  const { QUOTA_LIMITS_BY_TIER, consumeQuota } = await loadQuotaGuard()
+  const { __resetPlanTierCacheForTests } = loadModule('planTier.ts')
+  // The bug this split fixes: the table above used to be the FREE column
+  // unconditionally, so a paid deployment started degrading bumpVersion at
+  // 700 KV writes/day against a ceiling it does not have.
+  assert.equal(QUOTA_LIMITS_BY_TIER.free.kv_write.limit, 1000)
+  assert.ok(QUOTA_LIMITS_BY_TIER.paid.kv_write.limit > QUOTA_LIMITS_BY_TIER.free.kv_write.limit * 100,
+    'paid KV writes are billed per operation, not capped at the free daily ceiling')
+  // The image/CDN budgets belong to their own products' plans and must NOT
+  // move with the Workers plan -- a positive control in the other direction.
+  for (const resource of ['r2_class_a', 'cf_images_transform', 'cloudinary_transform']) {
+    assert.deepEqual(QUOTA_LIMITS_BY_TIER.free[resource], QUOTA_LIMITS_BY_TIER.paid[resource], resource + ' is not scoped to the Workers plan')
+  }
+  // And the default: an env with no PLAN_TIER is paid, so a config that
+  // forgets the var cannot silently shrink production's ceilings.
+  const { env } = freshEnv()
+  delete env.PLAN_TIER
+  __resetPlanTierCacheForTests()
+  const status = await consumeQuota(env, 'kv_write', 1)
+  assert.equal(status.limit, QUOTA_LIMITS_BY_TIER.paid.kv_write.limit)
+})
+
 async function main() {
+  const { __resetPlanTierCacheForTests } = loadModule('planTier.ts')
   for (const { name, fn } of tests) {
     try {
+      // resolvePlanTier caches per isolate; this process exercises both
+      // tiers, so the cache is cleared between cases.
+      __resetPlanTierCacheForTests()
       await fn()
       console.log('PASS', name)
       passed++

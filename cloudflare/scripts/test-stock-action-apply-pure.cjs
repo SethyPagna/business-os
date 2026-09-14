@@ -49,6 +49,15 @@ const REAL = new Set([
   'branchRoles', 'branchRoleGuards',
   'actorSnapshot', 'saleCreationSnapshot',
   'moneyPrecision', 'saleMoneyPrecision',
+  // planTier carries the per-tier unit/row/concurrency ceilings the apply
+  // dispatch loop bounds itself with. Left to the inert `{}` stub every one
+  // of them reads undefined and getPlanLimits is not a function at all.
+  'planTier',
+  // queueDispatch replaced the bare env.IMPORT_QUEUE.send in the dispatch
+  // window's tail. This harness's env DOES bind IMPORT_QUEUE, so the real
+  // module keeps it on the queued path and the pumped continuation still
+  // sees the same messages it always did.
+  'queueDispatch',
 ])
 
 // Functional stubs for the D1/Env/queue/cache/broadcast modules that can't

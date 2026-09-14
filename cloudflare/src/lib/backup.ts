@@ -1,4 +1,5 @@
 import type { Env } from '../index'
+import { getPlanLimits } from './planTier'
 import { copyObject, listObjects } from './r2'
 import { streamBackupEvents } from './backupRestoreStream'
 
@@ -631,7 +632,12 @@ async function writeBackupDocument(
     // picks up right where this run left off, and so on until the whole
     // snapshot is covered -- no repeated manual "Backup now" clicks
     // needed to reach full asset coverage.
-    const firstSlice = assets.slice(0, MAX_ASSET_BYTES_PER_BACKUP)
+    // Tier-aware cap. Each asset here is an R2 get() + put() = 2 subrequests,
+    // and Free allows 50 external subrequests per invocation -- so the Paid
+    // 100 (~200 subrequests) has to fall back to 20 (~40) on Free or the
+    // continuation dies mid-slice. The module-level export keeps its Paid
+    // value; see lib/planTier.ts's maxAssetsPerBackup.
+    const firstSlice = assets.slice(0, getPlanLimits(env).maxAssetsPerBackup)
     for (const asset of firstSlice) {
       attempts[asset.key] = 1
       try {
@@ -654,7 +660,7 @@ async function writeBackupDocument(
     // still make real progress across the whole catalog instead of
     // repeatedly copying the same first 40.
     const priorCursor = await getAssetCopyCursor(env)
-    const toCopy = selectAssetsToCopy(assets, priorCursor)
+    const toCopy = selectAssetsToCopy(assets, priorCursor, getPlanLimits(env).maxAssetsPerBackup)
     for (const asset of toCopy) {
       try {
         const destKey = `${assetsPrefix}${asset.key.replace(/^uploads\//, '')}`
@@ -834,7 +840,7 @@ export async function continueCloudflareBackupAssetCopy(env: Env, backupName: st
     return { key, skipped: true, reason: 'not-resumable' as const, status: state.status }
   }
 
-  const slice = state.pendingKeys.slice(0, MAX_ASSET_BYTES_PER_BACKUP)
+  const slice = state.pendingKeys.slice(0, getPlanLimits(env).maxAssetsPerBackup)
   if (!slice.length) {
     state.status = state.failedKeys.length ? 'failed' : 'finalized'
     if (state.status === 'finalized') state.finalizedAt = new Date().toISOString()
@@ -1045,6 +1051,28 @@ export async function maybeRunScheduledBackup(env: Env) {
     console.error('[backup] retention pass failed', error)
   }
 
+  // A full backup walks every backup table and lists the whole R2 bucket.
+  // It is the single heaviest thing this cron does, and a cron trigger gets
+  // the SAME 10 ms CPU budget as a request on the free plan -- it does not
+  // run slowly there, it is killed partway through, and a backup killed
+  // mid-write is worse than one that never started (the lifecycle sidecar is
+  // left claiming a copy is in progress, which then blocks the next run
+  // until STALE_BACKUP_MS elapses). Refuse explicitly instead.
+  //
+  // Deliberately placed AFTER the retention pass above: pruning old backups
+  // is cheap, and it is what keeps R2 under the free tier's storage ceiling,
+  // so it must keep running on both plans. Manual backups from the Backup
+  // screen are also unaffected -- a person can watch one and retry it; an
+  // unattended cron cannot.
+  if (!getPlanLimits(env).scheduledBackupEnabled) {
+    return {
+      skipped: true,
+      reason: 'scheduled-backup-unavailable-free',
+      code: 'scheduled_backup_unavailable_free',
+      latest: newestFinalized ?? null,
+      retention,
+    }
+  }
   if (activeCopyMs && Date.now() - activeCopyMs < STALE_BACKUP_MS) {
     return { skipped: true, reason: 'backup-in-progress', latest: activeCopy, retention }
   }

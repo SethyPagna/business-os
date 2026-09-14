@@ -6,6 +6,8 @@ import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } f
 import { buildDriveOauthStartUrl, completeDriveOauth, consumeDriveOauthState, disconnectDrive, driveSyncStatus, updateDrivePreferences } from '../lib/googleDrive'
 import { enqueueDriveRestoreStageJob, enqueueDriveSyncJob } from '../lib/driveSyncQueue'
 import { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier } from '../lib/permissions'
+import { resolvePlanTier } from '../lib/planTier'
+import { readAllQuotas } from '../lib/quotaGuard'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { buildAuditLogFilters } from '../lib/auditLogQuery'
 import { putObject, getObject, deleteObject } from '../lib/r2'
@@ -840,7 +842,29 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
     backupCheck = { ok: false, status: 'needs_attention', message: error instanceof Error ? error.message : 'R2 backup listing failed' }
   }
 
-  const queue = { ok: true, status: 'configured', message: 'Cloudflare Queues configured.', queues: ['business-os-import', 'business-os-media'] }
+  // This was hard-coded `ok: true, 'configured'` -- it reported a healthy
+  // queue on a deployment with no queue binding at all, which is exactly the
+  // configuration the doctor exists to catch. Read the binding.
+  const importQueueBound = !!c.env.IMPORT_QUEUE
+  const mediaQueueBound = !!c.env.MEDIA_QUEUE
+  const queue = importQueueBound
+    ? {
+        ok: true,
+        status: 'configured',
+        message: mediaQueueBound
+          ? 'Cloudflare Queues configured.'
+          : 'Import queue configured; the media queue binding is missing, so uploaded images are normalized by the 6-hourly sweep instead of on upload.',
+        queues: mediaQueueBound ? ['business-os-import', 'business-os-media'] : ['business-os-import'],
+      }
+    : {
+        ok: false,
+        status: 'needs_attention',
+        message: 'No IMPORT_QUEUE binding on this deployment. Imports and bulk deletes still run, but inline inside the request that starts them (see lib/queueDispatch.ts), so a large one will be cut short by the CPU limit. Check [[queues.producers]] in the config this Worker was deployed from.',
+        queues: mediaQueueBound ? ['business-os-media'] : [],
+      }
+  // ...and it counts towards the overall verdict. It never did before,
+  // because it was a literal true.
+  if (!queue.ok) ok = false
 
   // DuckDB/Parquet has no equivalent in a Workers isolate (no native modules,
   // no filesystem) -- this deployment never uses it, so report that plainly
@@ -871,7 +895,11 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
   }
 
   const checks = { database, objectStorage, queue, analytics, googleDrive, googleLogin, backup: backupCheck }
-  return c.json({ item: { checks, runtime: { objectStorageDriver: 'r2' } }, checks, ok })
+  // tier rides in `runtime` beside objectStorageDriver: the doctor is where
+  // someone looks when production behaves like a smaller machine than they
+  // expect, and "which plan is this deployment on" is the first question.
+  const runtime = { objectStorageDriver: 'r2', tier: resolvePlanTier(c.env), quotas: await readAllQuotas(c.env) }
+  return c.json({ item: { checks, runtime }, checks, ok })
 })
 
 // Ported from backend's testObjectStore(): write, read-back, delete a probe

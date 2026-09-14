@@ -64,6 +64,8 @@ function load(relPath, stubs = {}) {
 const { R2StreamWriter, R2_PART_BYTES } = load('lib/backup.ts', {
   './r2': {},
   './backupRestoreStream': {},
+  // Real: planTier.ts is pure and is what backup.ts's asset cap now reads.
+  './planTier': load('lib/planTier.ts'),
 })
 
 assert.strictEqual(typeof R2StreamWriter, 'function', 'R2StreamWriter must be exported')

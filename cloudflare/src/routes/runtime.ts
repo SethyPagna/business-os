@@ -4,6 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getBuildStamp } from '../lib/buildStamp'
+import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
 import type { Env } from '../index'
 
 // Ported from backend/src/routes/runtime.ts. Three endpoints the Settings
@@ -55,6 +56,11 @@ function getRuntimeVersion(env: Env) {
     sourceHash: stamp.sourceHash,
     builtAt: stamp.builtAt,
     bootedAt: workerBootedAt,
+    // Which plan this deployment was built for -- the ONE readout every
+    // other surface reuses (GET /runtime/version, the auth bootstrap, the
+    // integration doctor). Read from the deploy-time PLAN_TIER var, never
+    // inferred from which bindings happen to be present.
+    tier: resolvePlanTier(env),
   }
 }
 
@@ -172,11 +178,23 @@ app.get('/catalog-integrity', async (c) => {
   }
   try {
     const db = getDb(c.env)
-    const productRows = await db.prepare(`
+    // Bounded, and honest about it. This used to select every active
+    // product with no LIMIT at all; on the free plan that is both a 10 ms
+    // CPU budget and a 5,000,000-rows-read-per-day D1 ceiling being spent by
+    // a diagnostic screen. Reading cap + 1 rows is what lets the response
+    // distinguish "the whole catalog was checked" from "there is more",
+    // rather than silently truncating and reporting a clean bill of health
+    // for a catalog it never looked at.
+    const catalogIntegrityMaxProducts = getPlanLimits(c.env).catalogIntegrityMaxProducts
+    const scanned = await db.prepare(`
       SELECT id, name, brand, category, unit, description, supplier
       FROM products
       WHERE is_active = 1
+      ORDER BY id
+      LIMIT ${catalogIntegrityMaxProducts + 1}
     `).all<Record<string, unknown>>()
+    const catalogPartial = scanned.length > catalogIntegrityMaxProducts
+    const productRows = catalogPartial ? scanned.slice(0, catalogIntegrityMaxProducts) : scanned
     const { productFieldCounts, suspiciousProducts, suspiciousProductCount } = summarizeSuspiciousProducts(productRows)
 
     const brandOptionsRow = await db.prepare("SELECT value FROM settings WHERE key = 'product_brand_options'").get<{ value: string }>()
@@ -195,6 +213,13 @@ app.get('/catalog-integrity', async (c) => {
       },
       suspiciousProducts,
       suspiciousBrandOptions: suspiciousBrandOptions.sample,
+      // Null when the whole catalog was covered, so the presence of a code
+      // IS the condition the UI keys off (same shape as the import
+      // preflight's partialCode).
+      partial: catalogPartial,
+      checkedProducts: productRows.length,
+      maxCheckedProducts: catalogIntegrityMaxProducts,
+      partialCode: catalogPartial ? 'catalog_integrity_partial' : null,
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error)?.message || 'Failed to inspect catalog integrity' }, 500)

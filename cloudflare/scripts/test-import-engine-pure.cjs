@@ -248,6 +248,14 @@ function loadPureSibling(name, requireShim = require) {
   )
   return siblingModule.exports
 }
+// planTier holds the free-vs-paid chunk/row ceilings importEngine reads per
+// request. A `{}` stub makes every ceiling undefined, so loops that compare
+// against them would never bound -- real module, like permissions/media.
+const planTierModule = loadPureSibling('planTier')
+// queueDispatch is pure too, and is now what every import producer calls
+// instead of env.IMPORT_QUEUE.send. Stubbed to {}, dispatchImportWork would
+// be undefined and every chunk tail would throw a TypeError.
+const queueDispatchModule = loadPureSibling('queueDispatch')
 const permissionsModule = loadPureSibling('permissions')
 const mediaModule = loadPureSibling('media')
 const productImagePermissionModule = loadPureSibling('productImagePermission', (request) => {
@@ -363,6 +371,8 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './sqlBinding') {
     return sqlBindingModuleObj.exports // real module -- keeps IN(...) lookups inside D1's bound-parameter limit
   }
+  if (request === './planTier') return planTierModule
+  if (request === './queueDispatch') return queueDispatchModule
   if (request === './permissions') return permissionsModule
   if (request === './media') return mediaModule
   if (request === './productImagePermission') return productImagePermissionModule

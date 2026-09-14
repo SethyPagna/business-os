@@ -6568,5 +6568,15 @@
   "storage_eviction_detail": "Add to Home Screen keeps sales safe: offline sales waiting to sync, and the saved app pages, can be deleted by the browser when the device runs low on space. Browsers keep data for apps opened from the Home Screen.",
   "install_app": "Install app",
   "ios_install_hint": "Install this app: tap Share, then \"Add to Home Screen\".",
-  "ios_install_hint_detail": "Installed, the app gets its own icon, keeps working offline, and the browser keeps its saved data instead of clearing it."
+  "ios_install_hint_detail": "Installed, the app gets its own icon, keeps working offline, and the browser keeps its saved data instead of clearing it.",
+  "stock_import_over_tier_cap": "This stock file has more rows than one import can check against a single live-stock snapshot. Split it into smaller files and import them one after another.",
+  "import_preflight_partial": "Only the first rows of this file were checked here. The whole file is still checked when the import itself runs.",
+  "catalog_integrity_partial": "Only part of the catalogue was scanned. Products past the limit were not checked, so this result is not a clean bill of health for the whole catalogue.",
+  "scheduled_backup_unavailable_free": "Automatic backups are off on the free plan. Create a backup from this screen when you need one.",
+  "reset_images_unavailable_free": "Deleting the image files as part of a reset is not available on the free plan. Reset without that option, then remove the files from the Library.",
+  "plan_tier_label": "Plan",
+  "plan_tier_free": "Free",
+  "plan_tier_paid": "Paid",
+  "plan_tier_hint_free": "Running on the Cloudflare free plan: smaller import batches and no automatic backups.",
+  "plan_tier_hint_paid": "Running on the Cloudflare paid plan: full import batches and automatic backups."
 }
