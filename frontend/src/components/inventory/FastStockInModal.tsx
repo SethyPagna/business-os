@@ -18,7 +18,7 @@ import DateEntryInput from '../shared/DateEntryInput.tsx'
 import Modal from '../shared/Modal.tsx'
 import { receiveBatchStock, getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
-import { getInventoryReasons, searchProducts } from '../../api/methods.ts'
+import { searchProducts } from '../../api/methods.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
@@ -29,7 +29,8 @@ import { buildProductGroups, type ProductGroup, type ProductRecord } from '../..
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import InfoHint from '../shared/InfoHint.tsx'
-import StockReasonField, { type SavedStockReason } from '../shared/StockReasonField.tsx'
+import StockReasonField from '../shared/StockReasonField.tsx'
+import { useSavedStockReasons } from '../../utils/useSavedStockReasons.ts'
 import { stockLineReason } from '../../utils/stockLineReason.ts'
 import { findSessionProductDuplicate } from '../../utils/createProductsSession.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
@@ -237,7 +238,9 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   // P3-L2: sticky across lines like the mode switch -- a damaged-goods removal
   // of five products is typed once. Frozen onto each line as it queues.
   const [reason, setReason] = useState(draft?.reason || '')
-  const [savedReasons, setSavedReasons] = useState<SavedStockReason[]>([])
+  // The same saved-reason catalog the adjust form offers (type 'adjust'); a
+  // failed read leaves the free-text box, never blocks a line.
+  const savedReasons = useSavedStockReasons()
   const [scannedBarcode, setScannedBarcode] = useState(draft?.scannedBarcode || '')
   // Deliberately NOT persisted in the draft, same reasoning as
   // ReceiveBatchModal: a lot id can go stale between sessions (merged,
@@ -375,20 +378,6 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       .finally(() => { if (!cancelled) setBatchLoading(false) })
     return () => { cancelled = true }
   }, [picked?.id, branchId])
-
-  // P3-L2: the same saved-reason catalog the adjust form offers (type
-  // 'adjust'); a failed read leaves the free-text box, never blocks a line.
-  useEffect(() => {
-    let cancelled = false
-    getInventoryReasons()
-      .then((result) => {
-        if (cancelled) return
-        const items = Array.isArray((result as { items?: unknown })?.items) ? (result as { items: Array<{ id?: unknown; type?: unknown; label?: unknown }> }).items : []
-        setSavedReasons(items.flatMap((item) => item?.type === 'adjust' && typeof item.label === 'string' && item.label.trim() ? [{ id: String(item.id ?? item.label), label: item.label }] : []))
-      })
-      .catch(() => { if (!cancelled) setSavedReasons([]) })
-    return () => { cancelled = true }
-  }, [])
 
   // ProductForm needs the same lookup data as the normal catalog-create
   // surface. Fetch it only when a real unmatched scan asks to create; empty

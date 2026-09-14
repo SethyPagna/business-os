@@ -25,6 +25,7 @@ const inventoryRoute = read('../../cloudflare/src/routes/inventory.ts')
 const sessionsSection = read('../src/components/products/StockInSessionsSection.tsx')
 const productsSession = read('../src/components/products/CreateProductsSessionModal.tsx')
 const receiveModal = read('../src/components/inventory/ReceiveBatchModal.tsx')
+const loader = read('../src/utils/useSavedStockReasons.ts')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
 
@@ -77,9 +78,16 @@ runTest('every queued line freezes its reason and every adjust write sends it', 
 })
 
 runTest('the fast flow and the adjust form share ONE reason control, fed by the saved-reason catalog', () => {
-  assert.match(modal, /import StockReasonField, \{ type SavedStockReason \} from '\.\.\/shared\/StockReasonField\.tsx'/)
-  assert.match(modal, /import \{ getInventoryReasons, searchProducts \} from '\.\.\/\.\.\/api\/methods\.ts'/)
-  assert.match(modal, /item\?\.type === 'adjust'/, 'the fast flow offers the adjust-type saved reasons, same as the adjust form')
+  assert.match(modal, /import StockReasonField from '\.\.\/shared\/StockReasonField\.tsx'/)
+  assert.match(modal, /import \{ useSavedStockReasons \} from '\.\.\/\.\.\/utils\/useSavedStockReasons\.ts'/)
+  assert.match(modal, /const savedReasons = useSavedStockReasons\(\)/)
+  // The catalog fetch + type filter + { id, label } mapping lives in ONE
+  // place; no surface keeps its own copy of it.
+  assert.equal((loader.match(/item\?\.type === type/g) || []).length, 1, 'the adjust-type filter is written once')
+  assert.match(loader, /export function useSavedStockReasons\(type = 'adjust'\)/, 'adjust is the default catalog, same as the adjust form')
+  for (const surface of [modal, productsSession, receiveModal]) {
+    assert.doesNotMatch(surface, /getInventoryReasons\(\)/, 'no surface re-implements the catalog read')
+  }
   assert.match(modal, /<StockReasonField\n\s+id="fast-stockin-reason"[^]*?onEnter=\{addLine\}[^]*?savedReasons=\{savedReasons\}/, 'Enter in the reason box queues the line')
   assert.match(adjustForm, /<StockReasonField\n\s+id="inventory-adjust-reason"[^]*?savedReasons=\{reasonsByType\.adjust\}/)
   // no second copy of the chip markup survives in either surface
