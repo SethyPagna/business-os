@@ -411,10 +411,10 @@ async function intervalError(db: D1Compat, shift: ShiftRow, openedAt: string, cl
     readAdjacentShift(db, shift, openedAt, 'previous'),
     readAdjacentShift(db, shift, openedAt, 'next'),
   ])
-  if (previous && (!previous.closed_at || new Date(previous.closed_at).getTime() > new Date(openedAt).getTime())) {
+  if (previous && (!previous.closed_at || utcMs(previous.closed_at) > utcMs(openedAt))) {
     return 'Opening time overlaps the previous shift segment.'
   }
-  if (next && (!closedAt || new Date(closedAt).getTime() > new Date(next.opened_at).getTime())) {
+  if (next && (!closedAt || utcMs(closedAt) > utcMs(next.opened_at))) {
     return 'Closing time overlaps the next shift segment.'
   }
   return null
@@ -770,7 +770,7 @@ app.post('/:id/close', async (c) => {
   if (shift.cancelled_at) return c.json({ error: 'A cancelled shift cannot be closed.' }, 409)
   if (shift.closed_at) return c.json({ error: 'Shift is already closed.' }, 409)
   if (expectedRevision !== shift.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  if (parsedClosedAt.getTime() < new Date(shift.opened_at).getTime()) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
+  if (parsedClosedAt.getTime() < utcMs(shift.opened_at)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
   const result = await writeClose(db, user, shift, { closedAt, recordedAt: new Date().toISOString(),
@@ -877,11 +877,11 @@ app.patch('/:id', async (c) => {
   const openedAt = iso('opened_at', before.opened_at); const closedAt = iso('closed_at', before.closed_at)
   if (!openedAt || closedAt === undefined) return c.json({ error: 'Invalid shift timestamp.' }, 400)
   const now = Date.now()
-  if (new Date(openedAt).getTime() > now || (closedAt && new Date(closedAt).getTime() > now)) return c.json({ error: 'Shift time cannot be in the future.' }, 400)
+  if (utcMs(openedAt) > now || (closedAt && utcMs(closedAt) > now)) return c.json({ error: 'Shift time cannot be in the future.' }, 400)
   if (businessDateFor(openedAt) !== before.business_date) return c.json({ error: 'Opening time must remain within the shift business date.' }, 400)
   if (before.closed_at && !closedAt) return c.json({ error: 'Closed shifts cannot be reopened.' }, 400)
   if (!before.closed_at && closedAt) return c.json({ error: 'Open shifts must be closed through the close action.' }, 400)
-  if (closedAt && new Date(closedAt).getTime() < new Date(openedAt).getTime()) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
+  if (closedAt && utcMs(closedAt) < utcMs(openedAt)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
   const openingUsdParsed = 'opening_float_usd' in body
     ? countedMoney(body.opening_float_usd) : { ok: true as const, value: before.opening_float_usd }
   const openingKhrParsed = 'opening_float_khr' in body
@@ -917,13 +917,13 @@ app.patch('/:id', async (c) => {
   if (before.parent_shift_id != null) {
     const parent = await readShiftById(db, before.parent_shift_id)
     const parentTerminatedAt = parent?.cancelled_at ?? parent?.closed_at
-    if (!parentTerminatedAt || new Date(openedAt).getTime() < new Date(parentTerminatedAt).getTime()) {
+    if (!parentTerminatedAt || utcMs(openedAt) < utcMs(parentTerminatedAt)) {
       return c.json({ error: 'Opening time cannot be before the parent shift ended.' }, 400)
     }
   }
   if (before.has_reopened_child) {
     const child = await readChild(db, before.id)
-    if (!closedAt || (child && new Date(closedAt).getTime() > new Date(child.opened_at).getTime())) {
+    if (!closedAt || (child && utcMs(closedAt) > utcMs(child.opened_at))) {
       return c.json({ error: 'Closing time cannot be after the reopened segment began.' }, 400)
     }
   }

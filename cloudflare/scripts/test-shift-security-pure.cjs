@@ -1,3 +1,9 @@
+// Forced non-UTC before any Date is constructed anywhere in this process:
+// workerd always runs UTC, so the deployed route never surfaces a
+// bare-D1-timestamp-vs-normalized-Z-timestamp mismatch, but this pure harness
+// must, so the fix in routes/shifts.ts (utcMs on every raw D1 comparison
+// operand) has something to prove itself against.
+process.env.TZ = 'Asia/Phnom_Penh'
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -247,6 +253,33 @@ async function main() {
   assert.throws(() => sqlite.prepare('DELETE FROM shift_session_amendments').run(), /immutable/, 'ordinary code cannot delete amendment history')
   sqlite.prepare("INSERT INTO system_flags(key,value) VALUES ('maintenance', ?)").run(JSON.stringify({ mode: 'restore', token: 'test' }))
   assert.doesNotThrow(() => sqlite.prepare('DELETE FROM shift_session_amendments').run(), 'authorized restore maintenance can replace amendment history')
+
+  // ---- Non-UTC host regression (verifier repro, Sep 15 2026) ---------------
+  //
+  // intervalError() compares a caller-normalized (Z-suffixed) timestamp
+  // against an adjacent shift's RAW D1 opened_at ("YYYY-MM-DD HH:MM:SS", no
+  // zone -- exactly what SQLite/D1 write). Both name true UTC instants five
+  // hours apart with no overlap, but `new Date()` on a bare string parses it
+  // as ambient-LOCAL time, not UTC: on this UTC+7 host (TZ forced above) that
+  // reads the "next" shift's 21:00 opened_at as 14:00 UTC, which the amended
+  // 16:00 UTC close then appears to run past. This is a POSITIVE CONTROL --
+  // reverting intervalError's utcMs() calls back to bare `new Date()` makes
+  // this print 400, not 200; keep it that way if this ever needs re-checking.
+  user = { id: 60, name: 'TZ owner', username: 'tzowner', permissions: JSON.stringify({ pos: true }) }
+  sqlite.prepare(`INSERT INTO shift_sessions
+    (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,closed_at)
+    VALUES ('TZ-CURRENT','per_account',60,'TZ owner',1,'Canonical Shop','2026-09-14','2026-09-14 08:00:00','2026-09-14T10:00:00.000Z')`).run()
+  const tzCurrent = sqlite.prepare("SELECT id,revision FROM shift_sessions WHERE shift_code='TZ-CURRENT'").get()
+  sqlite.prepare(`INSERT INTO shift_sessions
+    (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at)
+    VALUES ('TZ-NEXT','per_account',60,'TZ owner',1,'Canonical Shop','2026-09-15','2026-09-14 21:00:00')`).run()
+  const tzOverlap = await call('PATCH', `/${tzCurrent.id}`, {
+    expected_revision: tzCurrent.revision, reason: 'Recorded closing time', closed_at: '2026-09-14T16:00:00.000Z',
+  })
+  assert.equal(tzOverlap.status, 200,
+    'closed_at five hours before the next bare-opened_at shift does not overlap, even parsed on a UTC+7 host')
+  console.log('PASS non-UTC host: amending closed_at against a bare-D1 next-shift opened_at resolves by true UTC instant, not ambient TZ')
+
   console.log('OK shift security/integrity: permissions, canonical branch, lifecycle, concurrent amendment')
 }
 main().catch((error) => { console.error(error); process.exit(1) })
