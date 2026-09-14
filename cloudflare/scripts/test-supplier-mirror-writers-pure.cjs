@@ -216,6 +216,65 @@ function readers(sql) {
   assert.deepEqual(read.totals(), { batches: 0, units: 0, cost: 0, creditOpen: 0, creditBatches: 0 }, 'Acme is not charged for Other Trading\'s receipt')
   ok(true, 'a later same-day receipt on the emptied lot is attributed to ITS supplier, never the reverted one')
 
+  // W4-null: a lot zeroed with an OLD supplier, then a NEW receipt that
+  // carries NO supplier at all, must NOT inherit the old one -- the zeroed
+  // lot's attribution is not "sticky" once fully reverted (received_quantity
+  // 0 AND is_active 0); only a still-live lot keeps first-attribution-sticks
+  // (control block right after this one).
+  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (506, 'Toner Refill', 'T-2', 'pcs', 0, 1)`).run({})
+  const w4n = await productBatches.receiveBatchStock(db, {
+    productId: 506, branchId: 1, quantity: 5, receivedDate: '2026-09-01', supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 3,
+  })
+  const w4nMovement = recordReceiptMovement(506, w4n.batchId, 5, 3)
+  const r4n = await stockRevert.applyMovementRevert(db, movementById(w4nMovement), actor)
+  assert.equal(r4n.ok, true, r4n.error)
+  assert.deepEqual(
+    { supplier_id: lotOf(w4n.batchId).supplier_id, received_quantity: lotOf(w4n.batchId).received_quantity, is_active: lotOf(w4n.batchId).is_active },
+    { supplier_id: SUPPLIER.id, received_quantity: 0, is_active: 0 },
+    'precondition: lot zeroed, still carrying OldSup\'s attribution',
+  )
+  const w4nNext = await productBatches.receiveBatchStock(db, {
+    productId: 506, branchId: 1, quantity: 4, receivedDate: '2026-09-01', unitCostUsd: 7,
+  })
+  const w4nNextMovement = recordReceiptMovement(506, w4nNext.batchId, 4, 7)
+  assert.equal(w4nNext.batchId, w4n.batchId, 'same date, same lot row')
+  const lot4n = lotOf(w4n.batchId)
+  assert.deepEqual(
+    { supplier_id: lot4n.supplier_id, supplier_name: lot4n.supplier_name, received_quantity: lot4n.received_quantity, unit_cost_usd: lot4n.unit_cost_usd },
+    { supplier_id: null, supplier_name: null, received_quantity: 4, unit_cost_usd: 7 },
+    'a NO-SUPPLIER receipt on a zeroed lot clears the old supplier entirely -- it does not inherit OldSup',
+  )
+  assert.deepEqual(read.totals(), { batches: 0, units: 0, cost: 0, creditOpen: 0, creditBatches: 0 }, 'OldSup is not charged for the unattributed receipt')
+  ok(true, 'a no-supplier receipt landing on a zeroed lot clears the old supplier instead of inheriting it')
+  // Clean up: revert this unattributed receipt too so it does not linger in
+  // the shared "no supplier" invoice bucket the assertions below re-check.
+  assert.equal((await stockRevert.applyMovementRevert(db, movementById(w4nNextMovement), actor)).ok, true)
+
+  // Control: the SAME no-supplier top-up shape, but on a LIVE lot (never
+  // zeroed) -- first attribution must still stick, proving the zeroed-only
+  // carve-out above does not leak into ordinary top-ups.
+  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (507, 'Toner Spare', 'T-3', 'pcs', 0, 1)`).run({})
+  const w4c1 = await productBatches.receiveBatchStock(db, {
+    productId: 507, branchId: 1, quantity: 5, receivedDate: '2026-09-01', supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 3,
+  })
+  const w4c1Movement = recordReceiptMovement(507, w4c1.batchId, 5, 3)
+  const w4c2 = await productBatches.receiveBatchStock(db, {
+    productId: 507, branchId: 1, quantity: 2, receivedDate: '2026-09-01', unitCostUsd: 9,
+  })
+  const w4c2Movement = recordReceiptMovement(507, w4c2.batchId, 2, 9)
+  assert.equal(w4c2.batchId, w4c1.batchId, 'same date, same lot row')
+  const lot4c = lotOf(w4c1.batchId)
+  assert.deepEqual(
+    { supplier_id: lot4c.supplier_id, supplier_name: lot4c.supplier_name, received_quantity: lot4c.received_quantity, unit_cost_usd: lot4c.unit_cost_usd },
+    { supplier_id: SUPPLIER.id, supplier_name: SUPPLIER.name, received_quantity: 7, unit_cost_usd: 3 },
+    'control: a top-up on a LIVE lot keeps first attribution (supplier AND unit_cost_usd untouched by the no-supplier top-up)',
+  )
+  ok(true, 'control: a live (never-zeroed) lot keeps first-attribution-sticks for a later no-supplier top-up')
+  // Clean up: revert both of this control's receipts so the supplier's
+  // running totals go back to baseline for the assertions below.
+  assert.equal((await stockRevert.applyMovementRevert(db, movementById(w4c2Movement), actor)).ok, true)
+  assert.equal((await stockRevert.applyMovementRevert(db, movementById(w4c1Movement), actor)).ok, true)
+
   // W5: two same-day receipts share one lot; reverting one leaves the other.
   db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (502, 'Mask', 'M-1', 'pcs', 0, 1)`).run({})
   const a = await productBatches.receiveBatchStock(db, { productId: 502, branchId: 1, quantity: 10, receivedDate: '2026-09-03', supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 4, paymentStatus: 'credit', creditDueDate: '2026-10-03' })

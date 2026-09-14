@@ -173,14 +173,17 @@ export type ReceiveBatchStatementPlan = {
 }
 
 // First attribution sticks on a top-up: a lot's recorded supplier / cost /
-// payment is only filled where still NULL. The one exception is a lot whose
-// tracked receipts are all gone (received_quantity = 0: every receipt on it
-// was reverted or undone, see planUnreceiveBatchStock). Such a lot keeps its
-// old attribution so that reverting the revert can put the purchase back --
-// but a NEW receipt landing on it (same product, same date code) is a
-// different purchase and supplies whatever it carries; first-attribution-
-// sticks would charge B's receipt to A. A receipt that carries no supplier
-// leaves the old one in place.
+// payment is only filled where still NULL. The one exception is a lot that
+// is fully reverted (received_quantity = 0 AND is_active = 0: every receipt
+// on it was reverted or undone AND nothing of it remains in any branch's
+// stock, see planUnreceiveBatchStock). A NEW receipt landing on such a lot
+// (same product, same date code) is a different purchase, so it takes the
+// row over completely -- supplier, cost and payment state all come from the
+// new receipt, including a supplier-less receipt clearing the old supplier
+// to NULL, so the old supplier's purchases list never keeps units it never
+// sold. A lot that is merely zeroed but still "live" (is_active = 1,
+// because stock of it still sits somewhere) is NOT this case and keeps
+// first-attribution-sticks like any other lot.
 // Known limit, not changed here: two same-day receipts from DIFFERENT
 // suppliers share one lot (batch_key is the date code), and the first
 // attribution outlives the receipt it belonged to once a second receipt
@@ -188,12 +191,12 @@ export type ReceiveBatchStatementPlan = {
 // Unqualified names are the stored row both in an UPDATE and in an upsert's
 // DO UPDATE SET, so one fragment serves both receipt shapes below.
 const LOT_ATTRIBUTION_SET_SQL = `
-          supplier_name = CASE WHEN received_quantity = 0 AND (@supplierId IS NOT NULL OR @supplierName IS NOT NULL) THEN @supplierName ELSE COALESCE(supplier_name, @supplierName) END,
-          supplier_id = CASE WHEN received_quantity = 0 AND (@supplierId IS NOT NULL OR @supplierName IS NOT NULL) THEN @supplierId ELSE COALESCE(supplier_id, @supplierId) END,
-          unit_cost_usd = CASE WHEN received_quantity = 0 AND @unitCostUsd IS NOT NULL THEN @unitCostUsd ELSE COALESCE(unit_cost_usd, @unitCostUsd) END,
-          credit_due_date = CASE WHEN payment_status IS NULL OR (received_quantity = 0 AND @paymentStatus IS NOT NULL) THEN @creditDueDate ELSE credit_due_date END,
-          payment_status = CASE WHEN received_quantity = 0 AND @paymentStatus IS NOT NULL THEN @paymentStatus ELSE COALESCE(payment_status, @paymentStatus) END,
-          received_branch_id = CASE WHEN received_quantity = 0 THEN @receivedBranchId ELSE COALESCE(received_branch_id, @receivedBranchId) END`
+          supplier_name = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @supplierName ELSE COALESCE(supplier_name, @supplierName) END,
+          supplier_id = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @supplierId ELSE COALESCE(supplier_id, @supplierId) END,
+          unit_cost_usd = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @unitCostUsd ELSE COALESCE(unit_cost_usd, @unitCostUsd) END,
+          credit_due_date = CASE WHEN payment_status IS NULL OR (received_quantity = 0 AND is_active = 0) THEN @creditDueDate ELSE credit_due_date END,
+          payment_status = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @paymentStatus ELSE COALESCE(payment_status, @paymentStatus) END,
+          received_branch_id = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @receivedBranchId ELSE COALESCE(received_branch_id, @receivedBranchId) END`
 
 // Side-effect-free receipt planner. Stock-session commands use this inside
 // their one operation batch; the legacy helper below uses the same plan so

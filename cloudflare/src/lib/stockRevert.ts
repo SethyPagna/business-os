@@ -244,8 +244,22 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     // Reverting the revert of a receipt puts the purchase back on the same
     // lot: units and money are received again under the supplier and payment
     // state the row kept through the revert (they are not on the movement).
+    // Since productBatches.ts now makes a ZEROED lot take whatever attribution
+    // this receipt carries -- including clearing it to NULL when none is
+    // given, so an unrelated later receipt never inherits a stale supplier --
+    // this call must explicitly re-supply the row's own attribution rather
+    // than rely on an implicit "no info means leave it alone".
+    const priorAttribution = await db.prepare(
+      'SELECT supplier_id, supplier_name, payment_status, credit_due_date FROM product_batches WHERE id = @batchId',
+    ).get<{ supplier_id: number | null; supplier_name: string | null; payment_status: string | null; credit_due_date: string | null }>({ batchId })
     try {
-      const received = await receiveBatchStock(db, { productId, branchId, quantity: magnitude, batchId, unitCostUsd: m.unit_cost_usd ?? null })
+      const received = await receiveBatchStock(db, {
+        productId, branchId, quantity: magnitude, batchId, unitCostUsd: m.unit_cost_usd ?? null,
+        supplierId: priorAttribution?.supplier_id ?? null,
+        supplierName: priorAttribution?.supplier_name ?? null,
+        paymentStatus: priorAttribution?.payment_status === 'paid' || priorAttribution?.payment_status === 'credit' ? priorAttribution.payment_status : null,
+        creditDueDate: priorAttribution?.credit_due_date ?? null,
+      })
       usedBatchId = received.batchId
     } catch (err) {
       return { ok: false, status: 400, error: err instanceof Error ? err.message : 'Failed to revert stock' }
