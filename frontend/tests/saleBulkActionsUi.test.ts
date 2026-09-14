@@ -35,7 +35,7 @@ assert.match(sales, /getDeliveryContacts\(\{ search: query, page: 1, pageSize: S
 assert.match(sales, /SALES_BULK_LINKED_SEARCH_DEBOUNCE_MS/, 'linked-target search is debounced rather than issuing one request per keystroke')
 assert.match(sales, /searchVersion !== bulkTargetSearchVersionRef\.current/, 'a slower superseded contact search cannot replace newer target choices')
 assert.match(cancel, /drafts\.map/, 'bulk cancellation renders a review entry per sale')
-assert.match(cancel, /max-h-\[65vh\].*overflow-y-auto/, 'bulk cancellation review stays scrollable')
+assert.match(cancel, /max-h-\[calc\(65\*var\(--app-vh\)\)\].*overflow-y-auto/, 'bulk cancellation review stays scrollable, bounded through the shared --app-vh helper so the cap is the viewport iOS really shows')
 assert.match(cancel, /aria-expanded=\{open\}/, 'each sale review is independently collapsible')
 assert.match(cancel, /cancel_fee_usd/, 'each sale includes the single-sale USD lost-fee ask')
 assert.match(cancel, /cancel_fee_khr/, 'each sale includes the single-sale KHR lost-fee ask')

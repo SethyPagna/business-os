@@ -2480,7 +2480,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
               <SectionExportAction>
                 <LazyPortalMenu
                   align="auto"
-                  menuClassName="max-h-[70vh] overflow-auto"
+                  menuClassName="max-h-[calc(70*var(--app-vh))] overflow-auto"
                   trigger={<button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800" aria-label={translateOr('export', 'Export')} title={translateOr('export', 'Export')}><Download className="h-5 w-5 shrink-0" /></button>}
                   items={(salesExportItems || []).filter((item): item is PortalMenuItem => Boolean(item)).map((item) => item === 'divider' ? item : ({ ...item, icon: item.icon ?? <Download className="h-4 w-4 shrink-0" /> }))}
                 />
@@ -2488,7 +2488,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             ) : null}
             {canImportSales ? <LazyPortalMenu
               align="auto"
-              menuClassName="max-h-[70vh] overflow-auto"
+              menuClassName="max-h-[calc(70*var(--app-vh))] overflow-auto"
               trigger={(
                 <button
                   type="button"

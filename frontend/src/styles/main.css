@@ -31,6 +31,13 @@
     max-width: 100%;
     overflow-x: hidden;
     touch-action: pan-x pan-y;
+    /* iOS/Android WebKit flash a translucent grey box over any tapped element
+       with a click handler, including whole table rows and cards. The app
+       already gives every tappable surface its own `active:` state, so the
+       default highlight only ever arrives as a second, differently-shaped and
+       differently-timed flash on top of it. Inherited, so one declaration on
+       <html> covers the whole app and both portals. */
+    -webkit-tap-highlight-color: transparent;
   }
   body {
     margin: 0;
@@ -717,16 +724,28 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 
   /* Portalled dialogs must fit the actually visible iOS viewport and stay
      clear of notches/home indicators. This also keeps footer buttons from
-     sitting underneath the app's fixed bottom navigation. */
+     sitting underneath the app's fixed bottom navigation.
+
+     --kb-inset is the on-screen keyboard's height, published by
+     utils/useVisualViewportInset.ts (installed once from shared/Modal.tsx).
+     It is 0px -- and the property is not even set -- whenever no keyboard is
+     up, so everything below is byte-identical to the old rules on desktop.
+     It has to be subtracted SEPARATELY from dvh: iOS never shrinks the layout
+     viewport for the keyboard, so 100dvh on an iPhone still spans the area
+     the keyboard is painted over and a dialog's sticky Save/Cancel footer
+     ends up underneath it the moment a field is focused.
+     The padding-bottom below moves the centring box up by the same amount, so
+     a panel that still fits is re-centred in the visible strip instead of
+     being centred in the full viewport with its lower half covered. */
   .modal-viewport-safe {
     padding-top: calc(.75rem + env(safe-area-inset-top, 0px));
     padding-right: calc(.75rem + env(safe-area-inset-right, 0px));
-    padding-bottom: calc(.75rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(.75rem + env(safe-area-inset-bottom, 0px) + var(--kb-inset, 0px));
     padding-left: calc(.75rem + env(safe-area-inset-left, 0px));
   }
   .modal-panel-safe {
-    max-height: calc(100vh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-    max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100vh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px));
+    max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px));
     max-width: calc(100vw - 1.5rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   }
   .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -804,6 +823,26 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .h-screen { height: 100vh; height: 100dvh; }
 .min-h-screen { min-height: 100vh; min-height: 100dvh; }
 
+/* ONE definition of "1% of the viewport height a phone can actually show",
+   for the ~30 places that cannot use the two overrides above because they are
+   arbitrary Tailwind values (`max-h-[70vh]`), compound (`min(28rem,70vh)`) or
+   inline styles. Every one of them measured against plain `vh`, i.e. against
+   the LARGER "as if the browser chrome were hidden" viewport, so a dropdown
+   or sheet capped at 70vh rendered taller than the visible area on iOS and
+   its last rows sat under Safari's toolbar or the app's bottom nav.
+
+   This deliberately does NOT use the `a: 100vh; a: 100dvh` double-declaration
+   pattern the rules above use, and it cannot: custom property values are
+   stored as unparsed token streams, so an engine with no `dvh` support would
+   still ACCEPT `--app-vh: 1dvh` and keep it, and every consumer would then
+   compute to nothing. @supports is the only guard that actually tests the
+   unit. iOS Safari has had dvh since 15.4; the 1vh value is the fallback for
+   anything older. */
+:root { --app-vh: 1vh; }
+@supports (height: 1dvh) {
+  :root { --app-vh: 1dvh; }
+}
+
 /* iOS standalone mode can change the visual viewport when browser chrome or
    the keyboard moves. Keep the app shell pinned to that visible viewport and
    prevent flex descendants from manufacturing a wider page. */
@@ -832,12 +871,17 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
    visible fold, in the same area the fixed bottom nav bar occupies, which
    is what read as "the nav bar shows through the modal". Same 92vh-then-
    92dvh fallback pattern as `.h-screen` above, just as reusable classes
-   since an arbitrary-value utility can't carry two declarations itself. */
-.max-h-modal-90 { max-height: 90vh; max-height: 90dvh; }
-.max-h-modal-92 { max-height: 92vh; max-height: 92dvh; }
-.max-h-modal-80 { max-height: 80vh; max-height: 80dvh; }
-.max-h-modal-85 { max-height: 85vh; max-height: 85dvh; }
-.max-h-modal-88 { max-height: 88vh; max-height: 88dvh; }
+   since an arbitrary-value utility can't carry two declarations itself.
+
+   Every one of these also subtracts --kb-inset (see .modal-panel-safe above):
+   a phone dialog capped at 88% of the viewport is still 88% of an area the
+   iOS keyboard covers the bottom third of. The property is unset whenever no
+   keyboard is open, so `var(--kb-inset, 0px)` is 0 and desktop is unchanged. */
+.max-h-modal-90 { max-height: 90vh; max-height: calc(90dvh - var(--kb-inset, 0px)); }
+.max-h-modal-92 { max-height: 92vh; max-height: calc(92dvh - var(--kb-inset, 0px)); }
+.max-h-modal-80 { max-height: 80vh; max-height: calc(80dvh - var(--kb-inset, 0px)); }
+.max-h-modal-85 { max-height: 85vh; max-height: calc(85dvh - var(--kb-inset, 0px)); }
+.max-h-modal-88 { max-height: 88vh; max-height: calc(88dvh - var(--kb-inset, 0px)); }
 
 /* POS product grid. Denser on phones (user, Aug 31: "pos products section is
    showing one whole product display for small screens ... should be minimized
@@ -1338,4 +1382,42 @@ body[data-density='spacious'] th, body[data-density='spacious'] td { padding-top
   width: 100%;
   min-width: 0;
   max-width: 100%;
+}
+
+/* ---------------------------------------------------------------------------
+   iOS focus-zoom floor. Must stay at the END of this file -- see the
+   specificity note below.
+
+   iOS Safari zooms the whole page in when a focused text field's COMPUTED
+   font-size is under 16px, and it never zooms back out: the layout is left
+   scaled up with the action row pushed outside the viewport, which is the
+   "everything jumps when I tap a field and I can't reach the buttons" report.
+
+   This rule is the PRIMARY mechanism. `maximum-scale=1, user-scalable=no` on
+   index.html's viewport meta is belt and braces only: Safari has ignored
+   user-scalable on the open web since iOS 10 (an accessibility decision) and
+   honours it only in an installed home-screen PWA, so a build that relies on
+   the meta tag alone still zooms for anyone using the site in a browser tab.
+
+   `.input` already carried `font-size: max(16px, ...)` (see the .input rule
+   far above) but WITHOUT !important, while `.text-xs`/`.text-sm` in this file
+   ARE !important -- so `<input className="input text-sm">`, of which there
+   were 74 single-line occurrences, resolved to 14px and zoomed. That is the
+   same trap `input.date-entry-input` documents: a class rule (0-1-0) beats a
+   bare type rule (0-0-1) when both are !important, so the selectors here are
+   deliberately element-plus-pseudo-class (0-1-1 and up) AND placed last.
+
+   Scoped to the types that actually raise a keyboard. Checkbox/radio/range/
+   color/file are excluded because their intrinsic box can be font-size
+   derived, and resizing them would change layout for no iOS benefit.
+   `.date-entry-input` is excluded by name so the dedicated rule above (which
+   guarantees the same 16px floor on phones and additionally pins 13px from
+   768px up) keeps winning instead of tying with this one on source order. */
+@media (max-width: 767px) {
+  input:is([type='text'], [type='search'], [type='email'], [type='url'], [type='tel'], [type='number'], [type='password'], :not([type])):not(.date-entry-input),
+  select:not([multiple]),
+  textarea:not([hidden]),
+  [contenteditable='true']:not([hidden]) {
+    font-size: max(16px, 1em) !important;
+  }
 }

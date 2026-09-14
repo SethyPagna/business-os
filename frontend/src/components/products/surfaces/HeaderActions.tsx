@@ -222,7 +222,7 @@ export default function ProductsHeaderActions({
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName={buttonSizing}
-          menuClassName="max-h-[70vh] overflow-auto"
+          menuClassName="max-h-[calc(70*var(--app-vh))] overflow-auto"
           trigger={(
             <button
               type="button"

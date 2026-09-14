@@ -227,7 +227,7 @@ export default function GroupedReport(p: ReportViewProps) {
             const k = String(row.product_id ?? row.product_name)
             setOpenKey((cur) => (cur === k ? null : k))
           }}
-          maxHeight="70vh"
+          maxHeight="calc(70 * var(--app-vh))"
         />
         <Fold className="reports-fold-panel" open={!!open} onClose={() => setOpenKey(null)} anchorRef={anchorRef} title={open?.product_name || ''}>
           <div className="p-2">
@@ -292,7 +292,7 @@ export default function GroupedReport(p: ReportViewProps) {
           totalsRow={courierRows.length > 1 ? { delivery_contact_id: null, delivery_contact_name: labels.total, deliveries: sum('deliveries'), charged_fee_usd: sum('charged_fee_usd'), absorbed_fee_usd: sum('absorbed_fee_usd'), actual_cost_usd: sum('actual_cost_usd'), actual_cost_count: sum('actual_cost_count'), margin_usd: sum('margin_usd'), last_delivery_at: null } : null}
           sort={sort}
           onSortChange={setSort}
-          maxHeight="70vh"
+          maxHeight="calc(70 * var(--app-vh))"
         />
       </ReportFrame>
     )
@@ -354,7 +354,7 @@ export default function GroupedReport(p: ReportViewProps) {
           anchorRef.current = el
           setOpenKey((cur) => (cur === row.key ? null : row.key))
         }}
-        maxHeight="70vh"
+        maxHeight="calc(70 * var(--app-vh))"
       />
       <Fold
         className="reports-fold-panel"

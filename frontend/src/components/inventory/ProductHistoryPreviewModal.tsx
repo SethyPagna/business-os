@@ -83,7 +83,7 @@ export default function ProductHistoryPreviewModal({ state, onClose, onRetry, on
           {T('no_stock_history', 'No stock movements recorded for this product yet.')}
         </div>
       ) : (
-        <div className="max-h-[50vh] space-y-1.5 overflow-y-auto pr-1">
+        <div className="max-h-[calc(50*var(--app-vh))] space-y-1.5 overflow-y-auto pr-1">
           {movements.map((movement, index) => {
             const qty = Number(movement.quantity || 0)
             const signed = qty > 0 ? `+${qty}` : String(qty)

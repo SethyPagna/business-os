@@ -126,6 +126,10 @@ new Function('require', 'module', 'exports', compiled)((name: string) => {
   if (name.includes('lucide-react')) return { default: () => null }
   if (name.includes('AppContextCore')) return { useApp: () => ({ t: (key: string) => key }) }
   if (name.includes('useCloseGuard')) return { useCloseGuard: () => ({ requestClose }) }
+  // Modal installs the shared --kb-inset publisher (utils/useVisualViewportInset.ts).
+  // This harness has no useEffect and no CSSOM, so it is stubbed like every
+  // other Modal dependency above; the hook has its own coverage.
+  if (name.includes('useVisualViewportInset')) return { useVisualViewportInset: () => {} }
   if (name.includes('modalCloseContext')) return { ModalCloseContext: { Provider: 'close-context-provider' } }
   if (name.includes('UnsavedChangesPrompt')) return { default: () => null }
   return {}

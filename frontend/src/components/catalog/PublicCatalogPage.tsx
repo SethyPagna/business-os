@@ -1609,7 +1609,7 @@ export default function PublicCatalogPage() {
           <PortalNoPaymentNotice copy={copy} />
         </div>
 
-        <div className="max-h-[50vh] overflow-y-auto px-5 py-3">
+        <div className="max-h-[calc(50*var(--app-vh))] overflow-y-auto px-5 py-3">
           {bucket.items.length === 0 ? (
             <div className="py-10 text-center text-sm text-slate-500 dark:text-neutral-400">
               {copy('bucketEmpty', 'Your list is empty. Tap "Add" on products you like.')}
@@ -1718,7 +1718,7 @@ export default function PublicCatalogPage() {
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto overscroll-contain px-5 py-4">
+        <div className="max-h-[calc(70*var(--app-vh))] overflow-y-auto overscroll-contain px-5 py-4">
           <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">{copy('loadingPortal', 'Loading customer portal...')}</div>}>
             <CatalogAccountSection
               copy={copy}
@@ -1766,7 +1766,7 @@ export default function PublicCatalogPage() {
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="max-h-[60vh] overflow-y-auto px-5 py-3">
+        <div className="max-h-[calc(60*var(--app-vh))] overflow-y-auto px-5 py-3">
           {wishlist.items.length === 0 ? (
             <div className="py-10 text-center text-sm text-slate-500 dark:text-neutral-400">
               {copy('wishlistEmpty', 'Your wishlist is empty. Tap the heart on products you love.', 'បញ្ជីចង់បានរបស់អ្នកនៅទទេ។ ចុចរូបបេះដូងលើផលិតផលដែលអ្នកចូលចិត្ត។')}

@@ -692,7 +692,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             id="mobile-nav-layer"
             data-bos-nav-layer={inline ? 'pages' : 'sheet'}
             style={inline ? { top: navLayerTop } : undefined}
-            className={`fixed left-0 right-0 z-40 overflow-y-auto md:hidden ${inline ? 'bos-nav-chrome bos-nav-layer' : 'max-h-[70vh] rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900'} ${inline ? 'bottom-0 pb-[env(safe-area-inset-bottom)]' : 'bottom-[calc(3.55rem+env(safe-area-inset-bottom))]'}`}
+            className={`fixed left-0 right-0 z-40 overflow-y-auto md:hidden ${inline ? 'bos-nav-chrome bos-nav-layer' : 'max-h-[calc(70*var(--app-vh))] rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900'} ${inline ? 'bottom-0 pb-[env(safe-area-inset-bottom)]' : 'bottom-[calc(3.55rem+env(safe-area-inset-bottom))]'}`}
           >
             {inline ? null : (
             <div className="sticky top-0 bg-white px-3 pb-1 pt-3 dark:bg-gray-900">

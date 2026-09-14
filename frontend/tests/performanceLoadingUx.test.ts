@@ -615,7 +615,7 @@ assert.doesNotMatch(filterMenu, /ActiveFilterChips/, 'FilterMenu must not surfac
 assert.match(filterMenu, /if \(label\.toLowerCase\(\) === 'back'\) return fallback/, 'FilterMenu should replace accidental Back labels with section-specific labels')
 assert.match(appSelect, /data-app-select-button="true"/, 'AppSelect should expose a stable rounded trigger hook for live visual checks')
 assert.match(appSelect, /data-app-select-selected="true"/, 'AppSelect should expose the selected value for live visual checks')
-assert.match(appSelect, /max-h-\[min\(18rem,calc\(100vh-1rem\)\)\]/, 'AppSelect menus should be viewport-bounded instead of tall square native popups')
+assert.match(appSelect, /max-h-\[min\(18rem,calc\(100\*var\(--app-vh\)_-_1rem\)\)\]/, 'AppSelect menus should be viewport-bounded through the shared --app-vh helper (raw 100vh measures the larger "chrome hidden" viewport on iOS) instead of tall square native popups')
 assert.doesNotMatch(productsHeaderActions, /import PortalMenu from '\.\.\/\.\.\/shared\/PortalMenu'/, 'Products header actions should not load PortalMenu before a manage/export click')
 assert.match(productsHeaderActions, /import LazyPortalMenu from '\.\.\/\.\.\/shared\/LazyPortalMenu'/, 'Products header actions should load PortalMenu through LazyPortalMenu')
 assert.doesNotMatch(productRowParts, /import \{ ThreeDotPortal \} from '\.\.\/\.\.\/shared\/PortalMenu'/, 'Product row actions should not statically load PortalMenu for every first route paint')

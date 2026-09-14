@@ -239,7 +239,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
         ref={dialogRef}
         tabIndex={-1}
         onKeyDown={handleDialogKeyDown}
-        className="relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[88vh] sm:max-w-3xl sm:rounded-2xl sm:pb-0 dark:bg-neutral-900"
+        className="relative flex max-h-[calc(92*var(--app-vh))] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[calc(88*var(--app-vh))] sm:max-w-3xl sm:rounded-2xl sm:pb-0 dark:bg-neutral-900"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

@@ -160,7 +160,7 @@ export default function ExpensesReport(p: ReportViewProps) {
   const loading = mode === 'each' ? paged.loading : state.loading
   const error = mode === 'each' ? paged.error : state.error
   const reload = mode === 'each' ? paged.reload : state.reload
-  const common = { style, fmtMoney, labels, loading, sort, onSortChange: setSort, maxHeight: '70vh' as const }
+  const common = { style, fmtMoney, labels, loading, sort, onSortChange: setSort, maxHeight: 'calc(70 * var(--app-vh))' as const }
 
   return (
     <ReportFrame

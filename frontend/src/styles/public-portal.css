@@ -383,3 +383,17 @@ body[data-public-portal='true'] :focus-visible,
     transform: none !important;
   }
 }
+
+/* The one storefront field styles/main.css's iOS focus-zoom floor cannot
+   reach. That floor uses element-plus-pseudo-class selectors (0-1-1) so it
+   beats the !important text-size utility classes; the Google Translate combo
+   above is pinned at 0.875rem through an ID selector (1-2-1), which outranks
+   it. The widget is a real <select> in the storefront header, so on a phone
+   tapping it zoomed the catalog in and left it there. Phones only -- desktop
+   keeps the compact 14px the header was designed around. */
+@media (max-width: 767px) {
+  body[data-public-portal='true'] #business-os-portal-translate-widget .goog-te-combo,
+  body[data-public-portal='true'] .portal-tools-bar #business-os-portal-translate-widget .goog-te-combo {
+    font-size: 16px !important;
+  }
+}

@@ -231,7 +231,7 @@ export default function SalesListReport(p: ReportViewProps) {
           anchorRef.current = el
           setOpenRow((cur) => (cur?.id === row.id ? null : row))
         }}
-        maxHeight="70vh"
+        maxHeight="calc(70 * var(--app-vh))"
         footer={
           paged.hasMore ? (
             <div className="flex items-center gap-2 text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">
