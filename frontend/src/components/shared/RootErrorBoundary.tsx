@@ -22,6 +22,18 @@ import { reportClientCrash } from '../../utils/clientCrashReport.ts'
 // 3. Never silent. The error is logged to the console AND posted to the
 //    Worker through the same /api/system/client-error path PageErrorBoundary
 //    uses (App.tsx:1072-1093), so a blank-page report is never invisible.
+// 4. Reload is the ONLY recovery here, and only the person can trigger it.
+//    The button calls location.reload() and nothing else: it never clears
+//    storage and never unregisters the service worker, so a queued offline
+//    sale and any cart/form draft survive pressing it. It also never reloads
+//    by itself, which is what keeps it out of the way of the chunk-load
+//    recovery in App.tsx:445-478 (triggerChunkRecoveryReload). A stale-deploy
+//    chunk failure is caught BELOW this boundary, by PageErrorBoundary and
+//    lazyImport, which own the offline check, the hasDirtyWork() check and
+//    the one-reload-per-build guard in utils/chunkReloadGuard.ts. Anything
+//    that reaches THIS boundary has already been declined or missed by that
+//    path, so an automatic reload here would only double-handle it and risk
+//    the reload loop that guard exists to prevent.
 
 interface RootErrorBoundaryProps {
   /** Identifies the failing root in the crash report: 'admin-root' | 'public-catalog-root'. */
