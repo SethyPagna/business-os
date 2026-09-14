@@ -41,6 +41,15 @@ function peekDashboardFocusSection(): DashboardFocusSection {
   }
 }
 
+function clearDashboardInventoryFocus(): void {
+  try {
+    window.sessionStorage.removeItem(DASHBOARD_INVENTORY_FOCUS_KEY)
+  } catch {
+    // Nothing to clear where site data is blocked (iOS "Block All Cookies");
+    // the guarded read above already degraded to "no queued focus".
+  }
+}
+
 function initialSection(canBranchList: boolean, canInventory: boolean): BranchesHubSection {
   if (typeof window !== 'undefined') {
     const focus = peekDashboardFocusSection()
@@ -78,10 +87,10 @@ export default function BranchesHubPage() {
     try {
       payload = JSON.parse(raw) as { section?: unknown; stockFilter?: unknown }
     } catch {
-      window.sessionStorage.removeItem(DASHBOARD_INVENTORY_FOCUS_KEY)
+      clearDashboardInventoryFocus()
       return
     }
-    window.sessionStorage.removeItem(DASHBOARD_INVENTORY_FOCUS_KEY)
+    clearDashboardInventoryFocus()
     const focus = String(payload?.section || '')
     if (focus === 'products') {
       try {

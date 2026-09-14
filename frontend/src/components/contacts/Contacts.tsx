@@ -165,7 +165,12 @@ export default function Contacts() {
   useEffect(() => {
     if (!isActive || typeof window === 'undefined') return
     const consumeFocus = () => {
-      const raw = window.sessionStorage.getItem('bos:contacts:focus')
+      // Touching window.sessionStorage throws where site data is blocked
+      // (iOS Safari "Block All Cookies"), and this runs on every activation
+      // of the hub. Guarded the same way BranchesHubPage.tsx guards the twin
+      // inventory-focus handoff: no queued focus just opens the default tab.
+      let raw: string | null = null
+      try { raw = window.sessionStorage.getItem('bos:contacts:focus') } catch { return }
       if (!raw) return
       try {
         const payload = JSON.parse(raw) as { tab?: unknown; search?: unknown }
@@ -178,7 +183,7 @@ export default function Contacts() {
       } catch {
         // A malformed handoff must not block the Contacts page.
       } finally {
-        window.sessionStorage.removeItem('bos:contacts:focus')
+        try { window.sessionStorage.removeItem('bos:contacts:focus') } catch { /* nothing to clear if the store is unusable */ }
       }
     }
     consumeFocus()
