@@ -15,6 +15,7 @@ import { bumpVersion } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { getPlanLimits } from '../lib/planTier'
 
 // Each R2 delete is its own subrequest, and a Worker invocation has a
 // hard ceiling on how many it may make. A catalog of ~6,700 products with
@@ -36,7 +37,12 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 // catalog": a 20k-object sweep belongs to a continuation design, not one
 // interactive request, and the leftover-reporting path already handles
 // the remainder honestly.
-const MAX_IMAGE_DELETES_PER_RESET = 500
+//
+// The number itself now lives in lib/planTier.ts (maxImageDeletesPerReset)
+// because it is plan-sensitive: Free allows 50 external subrequests per
+// invocation, so 500 is not a cap there, it is a guaranteed mid-loop
+// failure. It is read per request at the call site below rather than kept
+// as a second copy here that could drift from the table.
 
 const SALE_RECORD_RESET_GUARD_KEY = 'sale_record_events_reset_guard'
 const SALE_INCIDENT_RECOVERY_RESET_GUARD_KEY = 'sale_incident_recovery_reset_guard'
@@ -350,9 +356,14 @@ app.post('/reset-data', async (c) => {
       // that already succeeded, it's just reported back to the caller.
       const imageDeleteErrors: string[] = []
       let imagesDeleted = 0
-      const imagesOverCap = Math.max(0, imageKeysToDelete.length - MAX_IMAGE_DELETES_PER_RESET)
+      // Tier-aware shadow: the module-level constant keeps its Paid 500,
+      // while a Free deployment gets the number that actually fits Free's
+      // 50-external-subrequest ceiling (each delete is one subrequest).
+      // See lib/planTier.ts's maxImageDeletesPerReset.
+      const imageDeleteCap = getPlanLimits(c.env).maxImageDeletesPerReset
+      const imagesOverCap = Math.max(0, imageKeysToDelete.length - imageDeleteCap)
       if (includeImages && imageKeysToDelete.length) {
-        for (const key of imageKeysToDelete.slice(0, MAX_IMAGE_DELETES_PER_RESET)) {
+        for (const key of imageKeysToDelete.slice(0, imageDeleteCap)) {
           try {
             await deleteObject(c.env.ASSETS, key)
             imagesDeleted += 1
@@ -395,7 +406,7 @@ app.post('/reset-data', async (c) => {
 
       return c.json({
         success: true,
-        message: `Products reset complete - products, their received dates, and their branch stock deleted${includeMovements ? ', movement/audit history deleted' : ''}${includeSales ? ', sales and returns deleted' : ''}${includeImages ? `, ${imagesDeleted} image file(s) deleted` : ''}. ${keptSuffix} A fresh backup was taken first.${imagesOverCap ? ` Note: ${imagesOverCap} more image file(s) were left in storage -- a single request cannot delete more than ${MAX_IMAGE_DELETES_PER_RESET}. They are no longer referenced by any product and can be removed from the Library.` : ''}${imageDeleteErrors.length ? ` Note: ${imageDeleteErrors.length} image file(s) failed to delete from storage (the database was still updated correctly).` : ''}`,
+        message: `Products reset complete - products, their received dates, and their branch stock deleted${includeMovements ? ', movement/audit history deleted' : ''}${includeSales ? ', sales and returns deleted' : ''}${includeImages ? `, ${imagesDeleted} image file(s) deleted` : ''}. ${keptSuffix} A fresh backup was taken first.${imagesOverCap ? ` Note: ${imagesOverCap} more image file(s) were left in storage -- a single request cannot delete more than ${imageDeleteCap}. They are no longer referenced by any product and can be removed from the Library.` : ''}${imageDeleteErrors.length ? ` Note: ${imageDeleteErrors.length} image file(s) failed to delete from storage (the database was still updated correctly).` : ''}`,
       })
     } catch (error) {
       return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)

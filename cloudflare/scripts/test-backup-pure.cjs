@@ -46,10 +46,19 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', restoreS
   restoreStreamModuleObj.exports, require, restoreStreamModuleObj, restoreStream.sourcePath, path.dirname(restoreStream.sourcePath),
 )
 
+// planTier.ts is pure and carries the tier-aware maxAssetsPerBackup this
+// test's fixtures are sized against -- real, not stubbed.
+const planTier = transpile('lib/planTier.ts')
+const planTierModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', planTier.outputText)(
+  planTierModuleObj.exports, require, planTierModuleObj, planTier.sourcePath, path.dirname(planTier.sourcePath),
+)
+
 const backup = transpile('lib/backup.ts')
 const Module = require('module')
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === './planTier') return planTierModuleObj.exports // real limit tables
   if (request === './r2') return r2ModuleObj.exports // real module, actually exercised
   if (request === './backupRestoreStream') return restoreStreamModuleObj.exports // real scanner
   return originalLoad.call(this, request, parent, isMain)

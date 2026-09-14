@@ -1,4 +1,5 @@
 import type { Env } from '../index'
+import { getPlanLimits } from './planTier'
 import { copyObject, listObjects } from './r2'
 import { streamBackupEvents } from './backupRestoreStream'
 
@@ -631,7 +632,12 @@ async function writeBackupDocument(
     // picks up right where this run left off, and so on until the whole
     // snapshot is covered -- no repeated manual "Backup now" clicks
     // needed to reach full asset coverage.
-    const firstSlice = assets.slice(0, MAX_ASSET_BYTES_PER_BACKUP)
+    // Tier-aware cap. Each asset here is an R2 get() + put() = 2 subrequests,
+    // and Free allows 50 external subrequests per invocation -- so the Paid
+    // 100 (~200 subrequests) has to fall back to 20 (~40) on Free or the
+    // continuation dies mid-slice. The module-level export keeps its Paid
+    // value; see lib/planTier.ts's maxAssetsPerBackup.
+    const firstSlice = assets.slice(0, getPlanLimits(env).maxAssetsPerBackup)
     for (const asset of firstSlice) {
       attempts[asset.key] = 1
       try {
@@ -654,7 +660,7 @@ async function writeBackupDocument(
     // still make real progress across the whole catalog instead of
     // repeatedly copying the same first 40.
     const priorCursor = await getAssetCopyCursor(env)
-    const toCopy = selectAssetsToCopy(assets, priorCursor)
+    const toCopy = selectAssetsToCopy(assets, priorCursor, getPlanLimits(env).maxAssetsPerBackup)
     for (const asset of toCopy) {
       try {
         const destKey = `${assetsPrefix}${asset.key.replace(/^uploads\//, '')}`
@@ -834,7 +840,7 @@ export async function continueCloudflareBackupAssetCopy(env: Env, backupName: st
     return { key, skipped: true, reason: 'not-resumable' as const, status: state.status }
   }
 
-  const slice = state.pendingKeys.slice(0, MAX_ASSET_BYTES_PER_BACKUP)
+  const slice = state.pendingKeys.slice(0, getPlanLimits(env).maxAssetsPerBackup)
   if (!slice.length) {
     state.status = state.failedKeys.length ? 'failed' : 'finalized'
     if (state.status === 'finalized') state.finalizedAt = new Date().toISOString()

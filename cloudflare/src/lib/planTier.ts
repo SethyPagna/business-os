@@ -72,10 +72,11 @@ export type PlanLimits = {
   // measured against, per the constant's own comment.
   rowsPerImportChunk: number
 
-  // importEngine.ts PREFLIGHT_MAX_ROWS. POST /import-jobs/:id/preflight
-  // classifies a bounded sample SYNCHRONOUSLY inside one HTTP request --
-  // there is no queue continuation available, a browser is waiting. Paid
-  // 500 is the current exported constant. Free 125 is a CONSERVATIVE
+  // routes/importJobs.ts POST /import-jobs/:id/preflight classifies a
+  // bounded sample SYNCHRONOUSLY inside one HTTP request -- there is no
+  // queue continuation available, a browser is waiting. Paid 500 is the
+  // value importEngine.ts's PREFLIGHT_MAX_ROWS held (that export had this
+  // route as its only reader and moved here). Free 125 is a CONSERVATIVE
   // ESTIMATE, not a historical figure (this constant's comment never
   // records a Free-era value): scaled by the same 150/600 = 0.25 ratio the
   // chunk size was, since preflight does the same per-row classify work as

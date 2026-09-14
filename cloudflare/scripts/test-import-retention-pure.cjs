@@ -44,12 +44,19 @@ const r2 = loadModule('lib/r2.ts', (id) => {
   throw new Error(`unexpected import in r2.ts: ${id}`)
 })
 
+// lib/planTier.ts has no runtime imports either -- loaded for REAL so the
+// per-tier LIMIT this retention sweep applies is the shipped number.
+const planTier = loadModule('lib/planTier.ts', (id) => {
+  throw new Error(`unexpected import in planTier.ts: ${id}`)
+})
+
 const auditEvents = []
 let currentDb = null
 const retention = loadModule('lib/importRetention.ts', (id) => {
   if (id === './db') return { getDb: () => currentDb }
   if (id === './audit') return { audit: async (_env, _uid, _uname, action, _entity, _entityId, details) => { auditEvents.push({ action, details }) } }
   if (id === './r2') return r2
+  if (id === './planTier') return planTier
   return require(id)
 })
 

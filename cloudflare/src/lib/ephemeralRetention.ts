@@ -24,6 +24,7 @@
 // here too so one missing/locked table cannot stop the rest).
 
 import { getDb } from './db'
+import { getPlanLimits } from './planTier'
 import { sqliteUtcTimestamp } from './rateLimit'
 import { deleteObjectsBulk } from './r2'
 import type { Env } from '../index'
@@ -71,7 +72,9 @@ const SUBMISSION_ROW_BATCH = 200
 // Per-statement row cap so one sweep never builds an unbounded D1 transaction
 // (D1 has its own per-statement CPU/row budget). D1 does not support
 // `DELETE ... LIMIT`, so we delete by a bounded sub-select of ids and loop.
-const DELETE_BATCH = 5000
+// The number is plan-sensitive and therefore lives in lib/planTier.ts
+// (ephemeralDeleteBatch: paid 5000, free 1000), read per run in
+// batchDeleteById below rather than kept as a second copy here.
 
 // SQLite CURRENT_TIMESTAMP renders 'YYYY-MM-DD HH:MM:SS' (UTC); age cutoffs
 // must be formatted the SAME way to compare correctly.
@@ -94,15 +97,20 @@ type Db = ReturnType<typeof getDb>
 
 // Bounded delete for tables that have an integer `id` PK: repeatedly delete a
 // capped slice matching `where` until fewer than a full batch remain.
-async function batchDeleteById(db: Db, table: string, where: string, params: Record<string, unknown>): Promise<number> {
+async function batchDeleteById(env: Env, db: Db, table: string, where: string, params: Record<string, unknown>): Promise<number> {
+  // Rows per bounded DELETE, tier-aware -- see lib/planTier.ts. Free gets
+  // 1000 instead of 5000: it keeps one statement inside the 10 ms cron
+  // budget, and stops a log sweep spending a noticeable slice of the
+  // 100,000-rows-written-per-day D1 ceiling on pruning alone.
+  const deleteBatch = getPlanLimits(env).ephemeralDeleteBatch
   let total = 0
   for (;;) {
     const result = await db
-      .prepare(`DELETE FROM ${table} WHERE id IN (SELECT id FROM ${table} WHERE ${where} LIMIT ${DELETE_BATCH})`)
+      .prepare(`DELETE FROM ${table} WHERE id IN (SELECT id FROM ${table} WHERE ${where} LIMIT ${deleteBatch})`)
       .run(params)
     const n = result.changes || 0
     total += n
-    if (n < DELETE_BATCH) break
+    if (n < deleteBatch) break
   }
   return total
 }
@@ -209,20 +217,20 @@ export async function maybeRunScheduledEphemeralRetention(env: Env): Promise<Eph
     try { deleted[label] = await fn() } catch (error) { console.error(`[ephemeral-retention] ${label} failed`, (error as Error)?.message || error) }
   }
 
-  await step('rate_limit_events', () => batchDeleteById(db, 'rate_limit_events', 'created_at < @cutoff', { cutoff: daysAgo(RATE_LIMIT_TTL_DAYS) }))
-  await step('user_sessions', () => batchDeleteById(db, 'user_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}))
-  await step('portal_sessions', () => batchDeleteById(db, 'portal_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}))
+  await step('rate_limit_events', () => batchDeleteById(env, db, 'rate_limit_events', 'created_at < @cutoff', { cutoff: daysAgo(RATE_LIMIT_TTL_DAYS) }))
+  await step('user_sessions', () => batchDeleteById(env, db, 'user_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}))
+  await step('portal_sessions', () => batchDeleteById(env, db, 'portal_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}))
   const verificationNow = Date.now()
-  await step('verification_codes', () => batchDeleteById(db, 'verification_codes', `
+  await step('verification_codes', () => batchDeleteById(env, db, 'verification_codes', `
     created_at <= @historyCutoff
     AND (consumed_at IS NOT NULL OR julianday(expires_at) <= julianday(@now))
   `, {
     historyCutoff: sqliteUtcTimestamp(verificationNow - VERIFICATION_HISTORY_MS),
     now: sqliteUtcTimestamp(verificationNow),
   }))
-  await step('trusted_devices', () => batchDeleteById(db, 'trusted_devices', 'revoked_at IS NOT NULL AND revoked_at < @cutoff', { cutoff: daysAgo(TRUSTED_DEVICE_TTL_DAYS) }))
-  await step('ai_response_logs', () => batchDeleteById(db, 'ai_response_logs', 'created_at < @cutoff', { cutoff: daysAgo(AI_LOG_TTL_DAYS) }))
-  await step('action_history', () => batchDeleteById(db, 'action_history', 'created_at < @cutoff', { cutoff: daysAgo(ACTION_HISTORY_TTL_DAYS) }))
+  await step('trusted_devices', () => batchDeleteById(env, db, 'trusted_devices', 'revoked_at IS NOT NULL AND revoked_at < @cutoff', { cutoff: daysAgo(TRUSTED_DEVICE_TTL_DAYS) }))
+  await step('ai_response_logs', () => batchDeleteById(env, db, 'ai_response_logs', 'created_at < @cutoff', { cutoff: daysAgo(AI_LOG_TTL_DAYS) }))
+  await step('action_history', () => batchDeleteById(env, db, 'action_history', 'created_at < @cutoff', { cutoff: daysAgo(ACTION_HISTORY_TTL_DAYS) }))
   await step('share_submission_images', () => pruneSubmissionImages(env, db))
   await step('share_submissions_unreviewed', () => pruneUnreviewedSubmissions(env, db))
   await step('login_lockouts', () => directDelete(db, 'login_lockouts', '(locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP) AND updated_at < @cutoff', { cutoff: daysAgo(LOCKOUT_TTL_DAYS) }))

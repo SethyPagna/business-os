@@ -37,6 +37,7 @@ function loadModule(relPath, requireShim) {
 // backup.ts pulls in the R2 stream writer and restore stream; only the
 // exported constants/helpers are exercised here, so stub the heavy imports.
 const backup = loadModule('lib/backup.ts', (id) => {
+  if (id === './planTier') return loadModule('lib/planTier.ts', require)
   if (id === './backupRestoreStream') return { streamBackupEvents: async function* () {} }
   if (id === './r2') return {}
   if (id === './db') return {}
