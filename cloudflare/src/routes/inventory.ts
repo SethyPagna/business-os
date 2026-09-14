@@ -2395,7 +2395,7 @@ app.post('/movements/:id/revert', async (c) => {
   const db = getDb(c.env)
   const mv = await db.prepare(`
     SELECT id, product_id, product_name, branch_id, branch_name, movement_type, quantity,
-      unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, batch_id
+      unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, batch_id
     FROM inventory_movements WHERE id = @id
   `).get<RevertMovementRow>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found' }, 404)

@@ -585,6 +585,65 @@ export function planRemoveStockFromBatch(input: RemoveBatchStockPlanInput): { st
   ] }
 }
 
+// The compensating side of a receipt, for the writers that reverse one
+// (lib/stockRevert.ts today; anything that un-receives a lot-stamped inflow
+// tomorrow). A lot's supplier-facing columns -- received_quantity (0067),
+// received_cost_usd (0080), payment_status/credit_due_date (0065) and the
+// first-attribution supplier/cost (0062/0065) -- are what Contacts derives
+// purchases, stock-in invoices, "not paid" balances and credit reminders
+// from, so a reverted receipt that leaves them untouched keeps showing as a
+// purchase. Rules, matching the stock-session undo's own lot target in
+// lib/stockSession.ts:
+//   - subtract THIS receipt's own units and money, never zero the row: two
+//     same-day receipts share one lot (batch_key is the date code), and the
+//     other receipt's purchase must survive.
+//   - a lot that never tracked receipts (NULL received_quantity, pre-0067)
+//     stays NULL rather than being guessed to 0; its payment state is left
+//     alone because nothing says this was its only receipt.
+//   - once the lot's tracked receipts are fully reverted (received_quantity
+//     reaches 0) nothing is owed on it: payment_status/credit_due_date clear
+//     and the money resets, so the credit reminder and the open balance go.
+//   - once it is ALSO empty everywhere, the attribution belonging solely to
+//     the reverted receipt is cleared and the lot is deactivated -- a later
+//     same-day receipt from another supplier reuses the row and must fill
+//     its own supplier/cost (first-attribution-sticks would otherwise charge
+//     B's receipt to A), and an empty, receipt-less lot has no business in
+//     the pickers. A lot still holding untracked units keeps its supplier.
+// Run inside the caller's atomic db.batch AFTER the stock decrement so the
+// emptiness test sees the post-revert quantities.
+export function planUnreceiveBatchStock(input: { batchId: number; quantity: number; totalCostUsd: number | null }): StockWriteStatement[] {
+  const batchId = Number(input.batchId)
+  const quantity = Number(input.quantity)
+  if (!Number.isSafeInteger(batchId) || batchId <= 0) throw new Error('A valid received date is required')
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be a positive number')
+  const totalCostUsd = input.totalCostUsd == null ? null : roundMoney4(Number(input.totalCostUsd))
+  const params = { batchId, quantity, totalCostUsd }
+  return [
+    {
+      sql: `UPDATE product_batches SET
+              received_quantity = CASE WHEN received_quantity IS NULL THEN NULL ELSE MAX(0, received_quantity - @quantity) END,
+              received_cost_usd = CASE WHEN received_cost_usd IS NULL THEN NULL ELSE MAX(0, ROUND(received_cost_usd - COALESCE(@totalCostUsd, 0), 4)) END,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = @batchId`,
+      params,
+    },
+    {
+      sql: `UPDATE product_batches SET
+              payment_status = NULL, credit_due_date = NULL,
+              received_cost_usd = CASE WHEN received_cost_usd IS NULL THEN NULL ELSE 0 END
+            WHERE id = @batchId AND received_quantity = 0`,
+      params,
+    },
+    {
+      sql: `UPDATE product_batches SET
+              is_active = 0, supplier_id = NULL, supplier_name = NULL, unit_cost_usd = NULL, received_branch_id = NULL
+            WHERE id = @batchId AND received_quantity = 0
+              AND NOT EXISTS (SELECT 1 FROM branch_batch_stock WHERE batch_id = @batchId AND quantity > 0)`,
+      params,
+    },
+  ]
+}
+
 // Mirror of receiveBatchStock for the remove side of mandatory batch
 // selection (Inventory's "Adjust stock" > Remove, see routes/inventory.ts's
 // /adjust). Validates against the BATCH's own quantity at this branch, not
