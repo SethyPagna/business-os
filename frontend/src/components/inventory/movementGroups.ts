@@ -357,7 +357,11 @@ export function buildMovementGroups(movements: unknown[] = []): MovementGroup[] 
         productSummary: uniqueProducts.length <= 2 ? uniqueProducts.join(', ') : `${uniqueProducts.slice(0, 2).join(', ')} +${uniqueProducts.length - 2}`,
         branchSummary: uniqueBranches.length <= 1 ? (uniqueBranches[0] || '') : `${uniqueBranches[0]} +${uniqueBranches.length - 1}`,
         userSummary: uniqueUsers.length <= 1 ? (uniqueUsers[0] || '') : `${uniqueUsers[0]} +${uniqueUsers.length - 1}`,
-        reasonSummary: allReasons[0] || '',
+        // Same +N convention as the branch and user summaries above. Printing
+        // only the first reason hid every other one in the group, which is
+        // exactly the case per-line reasons create: one stock-in session can
+        // now carry a different reason on every line.
+        reasonSummary: allReasons.length <= 1 ? (allReasons[0] || '') : `${allReasons[0]} +${allReasons.length - 1}`,
       }
     })
     .sort((a, b) => {

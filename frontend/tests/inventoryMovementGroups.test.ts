@@ -64,6 +64,31 @@ await runTest('transfer in and out rows with same reference become one net-zero 
   assert.equal(groups[0]?.branchSummary, 'A +1')
 })
 
+await runTest('a group whose lines carry different reasons says so, like the branch and user summaries', () => {
+  // P3-L2: a stock-in session can now carry a different reason on every
+  // line, so printing allReasons[0] alone silently hid the rest -- the row
+  // claimed the whole group was "Damaged in transit".
+  const groups = buildMovementGroups([
+    { id: 1, product_id: 1, product_name: 'A', movement_type: 'add', quantity: 1, reason: 'Damaged in transit', branch_name: 'Shop', user_name: 'aza', reference_id: 'session_9', created_at: '2026-09-14 10:00:00' },
+    { id: 2, product_id: 2, product_name: 'B', movement_type: 'add', quantity: 2, reason: 'Recount after audit', branch_name: 'Shop', user_name: 'aza', reference_id: 'session_9', created_at: '2026-09-14 10:00:01' },
+    { id: 3, product_id: 3, product_name: 'C', movement_type: 'add', quantity: 3, reason: 'Sample from rep', branch_name: 'Shop', user_name: 'aza', reference_id: 'session_9', created_at: '2026-09-14 10:00:02' },
+  ])
+
+  assert.equal(groups.length, 1)
+  assert.equal(groups[0]?.reasonSummary, 'Damaged in transit +2')
+  // One reason (or a repeated one) still reads as itself, with no +0.
+  const single = buildMovementGroups([
+    { id: 4, product_id: 1, product_name: 'A', movement_type: 'add', quantity: 1, reason: 'Opening stock', reference_id: 'session_10', created_at: '2026-09-14 11:00:00' },
+    { id: 5, product_id: 2, product_name: 'B', movement_type: 'add', quantity: 1, reason: 'Opening stock', reference_id: 'session_10', created_at: '2026-09-14 11:00:01' },
+  ])
+  assert.equal(single[0]?.reasonSummary, 'Opening stock')
+  // A group with no reason at all stays blank, so the row renders nothing.
+  const none = buildMovementGroups([
+    { id: 6, product_id: 1, product_name: 'A', movement_type: 'add', quantity: 1, reference_id: 'session_11', created_at: '2026-09-14 12:00:00' },
+  ])
+  assert.equal(none[0]?.reasonSummary, '')
+})
+
 await runTest('movement timestamp falls back to server created_at when imported date is invalid', () => {
   assert.equal(
     normalizeMovementTimestamp({ movement_date: 'Invalid Date', created_at: '2026-05-05 12:34:56' }),
