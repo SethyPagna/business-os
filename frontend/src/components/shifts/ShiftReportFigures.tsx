@@ -69,7 +69,7 @@ export default function ShiftReportFigures({ shift, className = '' }: Props) {
           </div>
           {(additional?.usd || additional?.khr) ? (
             <div className="flex min-w-0 items-baseline justify-between gap-3 border-t border-black/5 pt-1 dark:border-white/10">
-              <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400">{tr('shift_recon_additional_cash', 'Additional cash')}</span>
+              <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400">{tr('shift_recon_additional_cash', 'Additional change used')}</span>
               <span className="min-w-0 break-words text-right font-medium text-gray-800 dark:text-gray-100">+ {shiftCountedPairText(additional.usd, additional.khr, fmtUSD, fmtKHR)}</span>
             </div>
           ) : null}

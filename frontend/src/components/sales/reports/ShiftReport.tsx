@@ -27,7 +27,7 @@ export default function ShiftReport(p: ReportViewProps) {
       { Section: tr('shift_registered_cash', 'Registered cash'), Line: tr('shift_registered_open', 'OPEN'), USD: registered.open.usd ?? '', KHR: registered.open.khr ?? '' },
       { Section: tr('shift_registered_cash', 'Registered cash'), Line: tr('shift_registered_end', 'END'), USD: registered.end.usd ?? '', KHR: registered.end.khr ?? '' },
       ...(shift.figures?.additional_cash && (shift.figures.additional_cash.usd || shift.figures.additional_cash.khr)
-        ? [{ Section: tr('shift_registered_cash', 'Registered cash'), Line: tr('shift_recon_additional_cash', 'Additional cash'), USD: shift.figures.additional_cash.usd, KHR: shift.figures.additional_cash.khr }]
+        ? [{ Section: tr('shift_registered_cash', 'Registered cash'), Line: tr('shift_recon_additional_cash', 'Additional change used'), USD: shift.figures.additional_cash.usd, KHR: shift.figures.additional_cash.khr }]
         : []),
       ...shiftFigureRows(shiftFiguresOf(shift)).map((row) => ({
         Section: tr('shift_report_figures', 'Business results'),
