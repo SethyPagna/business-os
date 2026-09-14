@@ -32,7 +32,7 @@ import { saleLineEditPreview, saleRemovalSubtotal } from '../../utils/saleLineEd
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, type SaleMutationHeaderQuote } from '../../utils/saleMutationHeaderQuote.ts'
 import { useSaleMoneyCapability } from './useSaleMoneyCapability.ts'
 import { multiplyMoney4, roundMoney4, sellingPriceCeilCent, settlementRounding4, subtractMoney4, sumMoney4 } from '../../utils/moneyPrecision.ts'
-import { saleEditorInputWidth } from '../../utils/saleItemNameLayout.ts'
+import { promotionLabelText, saleEditorInputWidth } from '../../utils/saleItemNameLayout.ts'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
 import { SaleCopyValue as EntityLink } from './SalesListSurface.tsx'
@@ -1995,6 +1995,11 @@ export default function SaleDetailModal({
                     const displayPrice = preview?.sellingPriceUsd ?? lineFigures.sellingUnitUsd
                     const displayDiscount = preview?.totalDiscountUsd ?? lineFigures.unitSavingsUsd
                     const displayTotal = preview?.lineTotalUsd ?? lineUsd
+                    // The promotion named inside the cut's parentheses, capped
+                    // to the shared 40 characters (promotionLabelText): this
+                    // cell is whitespace-nowrap, so an uncapped rule title
+                    // pushed the total column off the screen.
+                    const promotionLabel = promotionLabelText(item.product_discount_label)
                     const editingLine = canAmendThisSale && amendLineId === lineId && lineId > 0
                     const productName = String(item.product_name || item.name || '')
                     return (
@@ -2038,7 +2043,7 @@ export default function SaleDetailModal({
                               <input id={`amend-discount-${lineId}`} aria-label={t('discount') || 'Discount'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendDiscountText} onChange={(event) => { if (!amendDiscountType) setAmendDiscountType('fixed'); setAmendDiscountText(event.target.value) }} style={{ width: saleEditorInputWidth(amendDiscountText) }} className="h-7 min-w-10 rounded border border-amber-300 bg-white px-1 py-0.5 text-right text-[11px] dark:border-amber-700 dark:bg-gray-800" />
                               <button type="button" disabled={amendSaving} aria-label={translateOr('clear_discount', 'Clear discount', 'លុបការបញ្ចុះតម្លៃ')} onClick={() => { setAmendDiscountType(null); setAmendDiscountText('0') }} className="rounded px-1 py-0.5">×</button>
                             </div>
-                          </div> : <span className="inline-flex items-baseline gap-1">{unknownRecordedUnit ? '—' : fmtUSD(displayPrice)}{!unknownRecordedUnit && !unknownRecordedTotal && displayDiscount > 0 ? <span className="text-[10px] text-amber-700 dark:text-amber-400">(-{fmtUSD(displayDiscount)}{item.product_discount_label ? ` ${item.product_discount_label}` : ''})</span> : null}</span>}
+                          </div> : <span className="inline-flex items-baseline gap-1">{unknownRecordedUnit ? '—' : fmtUSD(displayPrice)}{!unknownRecordedUnit && !unknownRecordedTotal && displayDiscount > 0 ? <span className="text-[10px] text-amber-700 dark:text-amber-400" title={String(item.product_discount_label || '')}>(-{fmtUSD(displayDiscount)}{promotionLabel ? ` ${promotionLabel}` : ''})</span> : null}</span>}
                         </td>
                         <td data-sale-line-total="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top text-[11px] font-semibold tabular-nums sm:px-2">{unknownRecordedTotal && !preview ? '—' : fmtUSD(displayTotal)}</td>
                         <td data-sale-line-edit="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2">

@@ -23,6 +23,7 @@ import {
   RECEIPT_ROW_GRID_TEMPLATE,
   receiptItemGridTemplate,
 } from '../../utils/receiptItemColumns.ts'
+import { promotionLabelText } from '../../utils/saleItemNameLayout.ts'
 import { customerDisplayName as displayCustomerName, isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
 import { openPrintPreviewWindow } from '../../utils/printSurface.ts'
 
@@ -649,6 +650,9 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
           // utils/receiptLineMath for the derivation and its fallbacks.
           const hasItemDiscount = !unknownRecordedUnit && !unknownRecordedTotal && figures.hasDiscount
           const unitSavingsUsd = figures.unitSavingsUsd
+          // The promotion's own title, capped to the shared 40 characters (see
+          // promotionLabelText) so a long rule title cannot widen the line.
+          const promotionLabel = hasItemDiscount ? promotionLabelText(item.product_discount_label) : ''
           // Price-tier tag printed beside the item name (user). Derived from
           // the persisted price_mode, so a wholesale line the cashier left
           // marked prints the tag and one they deselected (recorded as
@@ -684,7 +688,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
                         customer can read WHICH offer the "(-$x)" below is;
                         beside the name and not in the Price cell, because that
                         cell's width is pinned to one figure (N33 above). */}
-                    {hasItemDiscount && item.product_discount_label ? <span className="ml-1 text-[10px] font-semibold text-red-600">{item.product_discount_label}</span> : null}
+                    {promotionLabel ? <span className="ml-1 text-[10px] font-semibold text-red-600" title={String(item.product_discount_label || '')}>{promotionLabel}</span> : null}
                     {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
                   </div>
                 </div>
