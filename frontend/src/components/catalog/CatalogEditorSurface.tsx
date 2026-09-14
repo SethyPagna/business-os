@@ -1314,13 +1314,16 @@ function CatalogEditorSurfaceContent() {
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="flex items-center gap-1.5">
                 <div className="text-sm font-semibold text-slate-800">{copy('portal_legal_editor_block', 'Legal & business details')}</div>
-                <InfoHint label={copy('portal_legal_editor_block', 'Legal & business details')} text={copy('portal_legal_editor_hint', 'These verified details appear in the storefront policies. Publication stays paused while a required field is blank.')} />
+                <InfoHint label={copy('portal_legal_editor_block', 'Legal & business details')} text={copy('portal_legal_editor_hint', 'Shown in the storefront footer and filled into the privacy, terms and cookie pages. Leave a field blank to hide that line.')} />
               </div>
               {missingSellerFieldLabels.length ? (
                 <p role="status" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                  {/* A hint, never a gate: nothing about the storefront is
+                      paused or switched off while these are blank (owner,
+                      2026-09-14). The copy says exactly that much. */}
                   {copy(
                     'portalPublicationReadinessWarning',
-                    'Publication is paused until the registered name, registration number, address, phone, and email are all verified and completed.',
+                    "These seller details are shown on the storefront's legal and contact pages, so complete them when you can.",
                   )}
                   {' '}
                   <span className="font-semibold">

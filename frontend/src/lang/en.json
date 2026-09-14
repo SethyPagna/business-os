@@ -6284,7 +6284,7 @@
   "image_upload_missing_path": "Image upload completed without a stored file path.",
   "sale_payment_correction_hint": "Correct the recorded tender method or amount. This creates an audited correction receipt.",
   "fee_sale_search_placeholder": "Search receipt, customer, phone, product, SKU or barcode",
-  "portalPublicationReadinessWarning": "Publication is paused until the registered name, registration number, address, phone, and email are all verified and completed.",
+  "portalPublicationReadinessWarning": "These seller details are shown on the storefront's legal and contact pages, so complete them when you can.",
   "portalPublicationMissingFields": "Missing: {fields}",
   "productDefaultsUseSuggested": "Use suggested text",
   "externalTranslationDisclosure": "Choosing one sends the text on this page to Google Translate and may set Google cookies.",

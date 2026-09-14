@@ -6284,7 +6284,7 @@
   "image_upload_missing_path": "ការបង្ហោះរូបភាពបានបញ្ចប់ ប៉ុន្តែមិនមានទីតាំងឯកសារដែលបានរក្សាទុកទេ។",
   "sale_payment_correction_hint": "កែវិធី ឬចំនួនទឹកប្រាក់ដែលបានកត់ត្រា។ វានឹងបង្កើតបង្កាន់ដៃកែតម្រូវដែលមានកំណត់ត្រា។",
   "fee_sale_search_placeholder": "ស្វែងរកតាមបង្កាន់ដៃ អតិថិជន ទូរសព្ទ ផលិតផល SKU ឬបាកូដ",
-  "portalPublicationReadinessWarning": "ការផ្សព្វផ្សាយត្រូវបានផ្អាក រហូតដល់ឈ្មោះចុះបញ្ជី លេខចុះបញ្ជី អាសយដ្ឋាន លេខទូរស័ព្ទ និងអ៊ីមែល ត្រូវបានផ្ទៀងផ្ទាត់ និងបំពេញរួច។",
+  "portalPublicationReadinessWarning": "ព័ត៌មានអ្នកលក់ទាំងនេះបង្ហាញនៅលើទំព័រច្បាប់ និងទំនាក់ទំនងរបស់ហាង សូមបំពេញពេលអ្នកអាចធ្វើបាន។",
   "portalPublicationMissingFields": "ខ្វះ៖ {fields}",
   "productDefaultsUseSuggested": "ប្រើអត្ថបទណែនាំ",
   "externalTranslationDisclosure": "ការជ្រើសរើសភាសាមួយនឹងផ្ញើអត្ថបទលើទំព័រនេះទៅ Google Translate ហើយអាចកំណត់ខូឃី Google។",
