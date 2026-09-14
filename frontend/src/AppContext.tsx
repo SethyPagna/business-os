@@ -13,6 +13,7 @@ import {
   shouldResetForRuntimeChange,
   writeStoredRuntimeDescriptor,
 } from './platform/runtime/clientRuntime.ts'
+import { requestPersistentAppStorage } from './api/syncRuntime.ts'
 import { disconnectWS, isWSConnected, resumeWS } from './api/websocket.ts'
 import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
@@ -214,6 +215,9 @@ type AppContextValue = {
   saveSettings: (newSettings: AppSettings, options?: SettingsWriteOptions) => Promise<WriteConflictDetail | { success: boolean; error?: unknown }>
   setPage: (page: string) => void
   settings: AppSettings
+  /** C5: navigator.storage.persist()'s answer for this device, null until asked.
+   *  false means the browser may evict IndexedDB -- including unsynced sales. */
+  storagePersisted: boolean | null
   syncChannel: SyncChannelUpdate | null
   syncConnected: boolean
   syncServerUnreachable: boolean
@@ -647,6 +651,13 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const [notification,        setNotification]        = useState<AppNotification | null>(null)
   const [writeConflict,       setWriteConflict]       = useState<WriteConflictDetail | null>(null)
   const [langRevision,        setLangRevision]        = useState(0)
+  // C5: navigator.storage.persist()'s answer for THIS device. `null` means
+  // nobody has asked yet (no signed-in user, or the request is still in
+  // flight) and must never be read as "granted". A browser with no Storage
+  // Manager at all resolves false here on purpose: it cannot promise
+  // persistence either, so the same warning applies to it.
+  const [storagePersisted,    setStoragePersisted]    = useState<boolean | null>(null)
+  const persistentStorageAskedForRef = useRef<number | null>(null)
   const settingsRef = useRef<AppSettings>({})
   const authRecoveryRef = useRef(false)
   const authEstablishedAtRef = useRef(0)
@@ -1850,6 +1861,47 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     setNotification(null)
   }, [])
 
+  // C5: ask the browser to make this origin's storage persistent, once per
+  // authenticated session, from the BOOT path.
+  //
+  // Before this, requestPersistentAppStorage() had exactly one caller --
+  // api/saleWriteTransport.ts, at the moment a sale was already being queued
+  // offline. That is far too late on the device this matters on: a
+  // non-installed iOS Safari origin is subject to ITP's 7-day cap, so the
+  // whole IndexedDB store (including sales queued but never synced) can be
+  // evicted before the first offline sale is ever written. Asking at boot
+  // gives the browser its chance to grant persistence while there is still
+  // nothing to lose.
+  //
+  // Keyed on the signed-in actor, never on mount: `persist()` is a
+  // permission-shaped prompt on some browsers and must not be triggered on
+  // the login screen or the public storefront (neither has an offline vault
+  // to protect). The ref makes it once per session, and syncRuntime.ts
+  // memoises the promise besides, so the sale path's later call is the same
+  // single real request rather than a second one.
+  //
+  // Shop devices are shared by several staff accounts, so the answer is
+  // recomputed per authenticated session and CLEARED on sign-out: a stale
+  // `false` left behind by the previous cashier would otherwise put a
+  // warning in front of the next one before their own session was measured.
+  useEffect(() => {
+    const actorId = user?.id == null ? null : Number(user.id)
+    if (actorId == null || !Number.isFinite(actorId)) {
+      persistentStorageAskedForRef.current = null
+      setStoragePersisted(null)
+      return undefined
+    }
+    if (persistentStorageAskedForRef.current === actorId) return undefined
+    setStoragePersisted(null)
+    persistentStorageAskedForRef.current = actorId
+    let cancelled = false
+    void requestPersistentAppStorage().then((persisted) => {
+      if (cancelled) return
+      setStoragePersisted(persisted)
+    })
+    return () => { cancelled = true }
+  }, [user?.id])
+
   const dismissWriteConflict = useCallback(() => {
     setWriteConflict(null)
     setNotification(null)
@@ -2471,6 +2523,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     syncChannel,
     syncServerUnreachable,
     canWriteToServer,
+    storagePersisted,
     AccessDenied: () => <AccessDenied t={t} />,
   }
 
