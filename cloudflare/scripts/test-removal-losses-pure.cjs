@@ -75,9 +75,13 @@ CREATE TABLE inventory_movements (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP, batch_id INTEGER
 );
 CREATE TABLE product_batches (id INTEGER PRIMARY KEY, variant_product_id INTEGER, unit_cost_usd REAL, is_active INTEGER DEFAULT 1);
-CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, cost_price_usd REAL);
+CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, cost_price_usd REAL DEFAULT 0);
 
 INSERT INTO products(id,name,cost_price_usd) VALUES (1,'Priced product',2.50),(2,'Lot-priced product',NULL),(3,'Costless product',NULL);
+-- #14 below: products.cost_price_usd is REAL DEFAULT 0 (migration 0001), so an
+-- uncosted product in production carries a literal 0, not NULL -- distinct
+-- from product 3's NULL above. Both must be treated as "no cost recorded".
+INSERT INTO products(id,name,cost_price_usd) VALUES (4,'Zero-cost-price product',0);
 INSERT INTO product_batches(id,variant_product_id,unit_cost_usd) VALUES (77,2,4.00);
 
 -- Local UTC+7 day 2026-09-10 runs 2026-09-09 17:00Z .. 2026-09-10 16:59Z.
@@ -97,7 +101,11 @@ INSERT INTO inventory_movements
   -- Writers the condition-tag lane named (p3/tag, Sep 14 2026). Both are
   -- removals in the ledger and NEITHER is a loss here:
   (12,1,2,'write_off',     8, 0.00,  0.00,'Removed product Widget',   NULL,9,'2026-09-10 09:00:00',NULL),
-  (13,1,2,'adjustment',   -4, 0.00,  0.00,'Merged duplicate into #1', NULL,9,'2026-09-10 09:30:00',NULL);
+  (13,1,2,'adjustment',   -4, 0.00,  0.00,'Merged duplicate into #1', NULL,9,'2026-09-10 09:30:00',NULL),
+  -- #14: no movement cost snapshot, no batch, and the product's OWN cost_price_usd
+  -- sits at the column's real production DEFAULT 0 -- not a genuinely free item,
+  -- an uncosted one. Must be unvalued, exactly like #10, never priced at $0.00.
+  (14,4,2,'remove',        3, 0.00,  0.00,'No cost anywhere, zero-cost product', NULL,9,'2026-09-10 09:45:00',NULL);
 `)
 
 // The business-day clause, byte-copied from lib/businessDateWindow.ts's
@@ -121,7 +129,7 @@ function readRows(params = { startDate: '2026-09-10', endDate: '2026-09-10', bra
 {
   const rows = readRows()
   const ids = rows.map((r) => Number(r.id)).sort((a, b) => a - b)
-  assert.deepEqual(ids, [1, 9, 10], `only the real removals are selected, got ${JSON.stringify(ids)}`)
+  assert.deepEqual(ids, [1, 9, 10, 14], `only the real removals are selected, got ${JSON.stringify(ids)}`)
   ok('SQL: sale, transfer_out and damage_out are not losses')
   ok('SQL: a reverted removal (#5) and the revert row itself (#6) are both excluded')
   ok('SQL: a negative-quantity stock-session undo (#7) is excluded')
@@ -155,6 +163,25 @@ function readRows(params = { startDate: '2026-09-10', endDate: '2026-09-10', bra
 }
 
 // ---------------------------------------------------------------------------
+// 1c. A fallback of exactly 0 -- products.cost_price_usd's REAL production
+//     DEFAULT (migration 0001), not a null-shaped absence -- must ALSO be
+//     read as "no cost recorded", never as "this item is free". #14 has no
+//     batch (so COALESCE falls all the way to products.cost_price_usd) and
+//     that column is a literal 0, not NULL.
+// ---------------------------------------------------------------------------
+{
+  const row = readRows().find((r) => Number(r.id) === 14)
+  assert.ok(row, '#14 is selected')
+  assert.equal(Number(row.unit_cost_usd), 0)
+  assert.equal(Number(row.total_cost_usd), 0)
+  assert.equal(Number(row.fallback_unit_cost_usd), 0, 'products.cost_price_usd DEFAULT is a literal 0, not NULL')
+  assert.equal(lib.removalRowLossUsd(row), null, 'a $0 fallback is absence, not a free item -- must be unvalued, never $0.00')
+  assert.equal(lib.removalRowLossUsd({ quantity: 2, total_cost_usd: 0, unit_cost_usd: 0, fallback_unit_cost_usd: 0 }), null,
+    'the same guard on a plain object, independent of the SQL round trip')
+  ok('a fallback of exactly 0 (the real products.cost_price_usd default) is absence, counted as unvalued -- not priced at $0.00')
+}
+
+// ---------------------------------------------------------------------------
 // 2. The revert guard is real, not incidental: delete the revert row and #5
 //    comes back as a $25 loss. Without this the first case could pass under an
 //    implementation that never looked at reverts at all.
@@ -162,7 +189,7 @@ function readRows(params = { startDate: '2026-09-10', endDate: '2026-09-10', bra
 {
   sql.exec('UPDATE inventory_movements SET reference_id = NULL WHERE id = 6')
   const ids = readRows().map((r) => Number(r.id)).sort((a, b) => a - b)
-  assert.deepEqual(ids, [1, 5, 9, 10], 'with the revert unlinked, #5 is a loss again')
+  assert.deepEqual(ids, [1, 5, 9, 10, 14], 'with the revert unlinked, #5 is a loss again')
   const withRevertGone = lib.summarizeRemovalLosses(readRows())
   assert.equal(withRevertGone.removal_loss_usd, 40.5, '7.50 + 25.00 + 8.00')
   sql.exec(`UPDATE inventory_movements SET reference_id = 'revert:5' WHERE id = 6`)
@@ -176,10 +203,11 @@ function readRows(params = { startDate: '2026-09-10', endDate: '2026-09-10', bra
   const summary = lib.summarizeRemovalLosses(readRows())
   //  #1 = 3 x 2.50 from its own snapshot ($7.50)
   //  #9 = 2 x 4.00 from the LOT, because its own columns sit at the DEFAULT 0
-  // #10 = 6 units that nothing can price
-  assert.equal(summary.removal_loss_usd, 15.5, '7.50 + 8.00, and #10 adds nothing it cannot prove')
-  assert.equal(summary.removal_loss_qty, 11, '3 + 2 + 6 units left the shelf')
-  assert.equal(summary.removal_loss_unvalued_rows, 1, 'the uncostable row is REPORTED, not dropped silently')
+  // #10 = 6 units that nothing can price (product cost_price_usd is NULL)
+  // #14 = 3 units that nothing can price (product cost_price_usd is a literal 0)
+  assert.equal(summary.removal_loss_usd, 15.5, '7.50 + 8.00, and #10/#14 add nothing they cannot prove')
+  assert.equal(summary.removal_loss_qty, 14, '3 + 2 + 6 + 3 units left the shelf')
+  assert.equal(summary.removal_loss_unvalued_rows, 2, 'both uncostable rows are REPORTED, not dropped silently')
   ok('cost comes from the movement snapshot, then the lot, then is declared unknown')
 }
 
