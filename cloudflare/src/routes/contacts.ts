@@ -1862,6 +1862,10 @@ app.get('/suppliers/:id/purchases', async (c) => {
 // must not become a giant "No supplier recorded" invoice merely because
 // the catalog was imported that day. Keep genuine no-supplier receipts;
 // exclude only the unmistakable all-null catalog placeholder shape.
+// Likewise a lot whose every receipt was reverted or undone (lib/stockRevert.ts
+// planUnreceiveBatchStock, lib/stockSession.ts's undo target): nothing
+// received, no attribution left, deactivated -- there is no invoice to show.
+// The reverts themselves stay visible in the stock ledger.
 const STOCK_IN_REPORT_SOURCE = `
   SELECT pb.id, pb.variant_product_id, pb.batch_number, pb.lot_code, pb.received_at,
          pb.received_quantity, pb.unit_cost_usd, pb.received_cost_usd, pb.payment_status, pb.credit_due_date,
@@ -1884,6 +1888,12 @@ const STOCK_IN_REPORT_SOURCE = `
     AND trim(COALESCE(pb.supplier_name, '')) = ''
     AND pb.unit_cost_usd IS NULL
     AND pb.received_branch_id IS NULL
+  )
+  AND NOT (
+    pb.is_active = 0
+    AND pb.received_quantity = 0
+    AND pb.supplier_id IS NULL
+    AND trim(COALESCE(pb.supplier_name, '')) = ''
   )
 `
 
