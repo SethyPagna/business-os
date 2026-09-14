@@ -170,7 +170,7 @@ const LABELS = {
   cancelled: { en: 'Cancelled', km: 'បានបោះបង់' },
   // Sales with at least one `sale_amendments` row (migration 0115) written
   // inside the window -- the append-only ledger IS the definition of edited.
-  edited: { en: 'Edited', km: 'បានកែ' },
+  edited: { en: 'Edited', km: 'បានកែប្រែ' },
   // `sales` is reused from the reports section above -- the shift header's
   // "Sales" line is the same word and the same figure shape as /report's.
   profit: { en: 'Profit', km: 'ចំណេញ' },
