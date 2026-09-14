@@ -20,7 +20,7 @@ import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.t
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
-import { restartIntoLatestApp } from './utils/appUpdate.ts'
+import { restartIntoLatestApp, setAppUpdateUnsavedWorkNotice } from './utils/appUpdate.ts'
 import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from './utils/standaloneNavigation.ts'
 import { persistentNoticeFingerprint, shouldRenderPersistentNotice } from './utils/persistentNoticeDismissal.ts'
 import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGuard.ts'
@@ -1963,6 +1963,17 @@ export default function App() {
     installBeforeInstallPromptCapture()
     installStandaloneExternalLinkGuard()
   }, [])
+
+  // G10: hand appUpdate.ts the shell's own non-blocking notice, so the
+  // unsaved-work refusal stops being a window.alert() that freezes the tab
+  // (and, on an installed iOS PWA, puts a system sheet over a chromeless
+  // window). Registered here rather than at each call site so the sidebar's
+  // manual update action gets the same treatment as the update bar without
+  // being touched. Long duration: this one is a refusal, not a receipt.
+  useEffect(() => {
+    setAppUpdateUnsavedWorkNotice((message) => notify(message, 'warning', 6000))
+    return () => setAppUpdateUnsavedWorkNotice(null)
+  }, [notify])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
