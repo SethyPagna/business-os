@@ -15,6 +15,11 @@ export type DamagedLot = {
   quantity_remaining: number
   reason: string | null
   created_at: string | null
+  /** P3-L6: which condition the held units carry ('broken', 'expired', ...).
+    * Null only for a row written before the tag existed. The wire value is
+    * the English constant in every language. unit_cost_usd is deliberately
+    * NOT on this reader -- see lib/returnsStock.ts listOpenDamagedLots. */
+  condition_tag?: string | null
 }
 
 export function getDamagedLots(productId: number | string, branchId?: number | string | null): Promise<{ lots: DamagedLot[] }> {

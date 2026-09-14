@@ -183,6 +183,21 @@ runTest('a tagged movement is not offered a ledger revert', () => {
   assert.match(readSource('cloudflare/src/lib/stockRevert.ts'), /isDamagedLotReference\(m\.reference_id\)/)
 })
 
+runTest('the POS damage picker names the condition it is offering', () => {
+  // A lot tagged 'expired' or 'opened' used to be offered to the cashier as
+  // "Damage", which is the wrong thing to tell someone about to sell it. The
+  // tag is shown through the same helper the product page uses, so it is the
+  // raw English constant here too -- never tr(), in any language.
+  const sheet = readSource('frontend/src/components/pos/ProductDetailSheet.tsx')
+  assert.match(sheet, /import \{ stockConditionLabel \} from '\.\.\/\.\.\/utils\/stockCondition\.ts'/)
+  assert.match(sheet, /lot\.condition_tag \? stockConditionLabel\(lot\.condition_tag\)/)
+  assert.doesNotMatch(stripComments(sheet), /tr\([^)]*stockConditionLabel/)
+  // The tag has to actually reach the client for the label to mean anything:
+  // the wire type carries it, and the Worker's reader selects it.
+  assert.match(readSource('frontend/src/api/damagedLotsTransport.ts'), /condition_tag\?: string \| null/)
+  assert.match(readSource('cloudflare/src/lib/returnsStock.ts'), /quantity_remaining, reason, created_at, condition_tag/)
+})
+
 runTest('holding and disposing are different movement types', () => {
   // The double-count guard: keeping units as tagged is NOT a loss, disposing
   // of them is, and a keep-then-dispose of the same unit must be charged once.
