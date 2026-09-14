@@ -74,6 +74,17 @@ function actorStorageUnavailableError(): Error {
   })
 }
 
+/** The OAuth owner marker exists only for the duration of one redirect.
+ *  Shop phones are shared by several staff accounts, so a copy left behind by
+ *  an abandoned attempt must never be able to finish somebody else's sign-in:
+ *  it is deleted when a new cookie phase starts, when any cookie phase settles
+ *  (which includes every logout, since logout is itself a cookie mutation),
+ *  and the moment it is found to be stale on return. */
+function clearActorOauthCookieOwner(): void {
+  removeScopeStorage('session', OAUTH_COOKIE_OWNER)
+  removeScopeStorage('local', OAUTH_COOKIE_OWNER)
+}
+
 export function isActorCookieMutationPending(): boolean {
   return !!pendingCookieOwner()
 }
@@ -113,6 +124,10 @@ export async function beginActorCookieMutation(): Promise<string> {
       if (pendingWritten) removeScopeStorage('local', AUTH_PENDING_OWNER)
       throw actorStorageUnavailableError()
     }
+    // A new cookie phase begins: whatever redirect marker an earlier attempt
+    // left behind can never complete now, so it does not get to outlive this
+    // moment. prepareActorOauthCookieRedirect() writes the new one after this.
+    clearActorOauthCookieOwner()
     expectedPending = marker
     expectedMarker = marker
     localSession++
@@ -133,6 +148,10 @@ export function finishActorCookieMutation(marker: string, ownerReconciliation = 
   expectedMarker = settled
   expectedPending = null
   removeScopeStorage('local', AUTH_PENDING_OWNER)
+  // The redirect marker belonged to the phase that just settled -- login,
+  // logout, OTP or session-duration -- so it is spent in every one of those
+  // paths, not only in the OAuth one below.
+  clearActorOauthCookieOwner()
   localSession++
   if (ownerReconciliation) {
     if (user) cookieUsers.set(user, settled)
@@ -191,9 +210,25 @@ export function prepareActorOauthCookieRedirect(marker: string, redirectTo: stri
 
 export function finishActorOauthCookieRedirect(returnedMarker: string | null): boolean {
   const owned = readScopeStorage('session', OAUTH_COOKIE_OWNER) || readScopeStorage('local', OAUTH_COOKIE_OWNER)
-  if (!owned || owned !== returnedMarker || !finishActorCookieMutation(owned)) return false
-  removeScopeStorage('session', OAUTH_COOKIE_OWNER)
-  removeScopeStorage('local', OAUTH_COOKIE_OWNER)
+  if (!owned) return false
+  // Two independent conditions, both of which predate the localStorage mirror:
+  // the stored marker must EQUAL the server-signed value returned in
+  // auth_session_intent, and it must still be THE pending cookie owner
+  // (enforced inside finishActorCookieMutation). A marker that is no longer
+  // the pending owner is spent or belongs to another account's abandoned
+  // attempt on this shared device -- it is deleted here rather than left in
+  // localStorage for a later redirect to meet.
+  //
+  // A merely MISMATCHED value while this device's own phase is still pending
+  // is rejected but NOT deleted: deleting then would let any stray callback
+  // erase the live owner and lock the person out of finishing their own
+  // sign-in. Staleness, not disagreement, is what makes a marker unsafe.
+  if (pendingCookieOwner() !== owned) {
+    clearActorOauthCookieOwner()
+    return false
+  }
+  if (owned !== returnedMarker || !finishActorCookieMutation(owned)) return false
+  // finishActorCookieMutation already consumed both copies; nothing to clear.
   quarantined = false
   quarantineStatus = 'ready'
   quarantineListeners.forEach((listener) => listener())
@@ -201,7 +236,7 @@ export function finishActorOauthCookieRedirect(returnedMarker: string | null): b
 }
 
 function sessionMarker(): string | null {
-  try { return window.localStorage.getItem(SESSION_MARKER) } catch { return null }
+  return readScopeStorage('local', SESSION_MARKER)
 }
 
 function observeSessionMarker(): void {
