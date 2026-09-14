@@ -56,13 +56,29 @@ const suggestionInput = read('components/shared/SuggestionTextInput.tsx')
 assert.match(picker, /import SuggestionTextInput/, 'the picker wraps the shared control instead of copying it')
 assert.match(
   picker,
-  /if \(option\) onChange\(\{ supplierId: Number\(option\.payload\), supplierName: option\.value \}\)/,
-  'an id may only ever come from an explicit pick',
+  /if \(option\) \{[\s\S]{0,80}?onChange\(\{ supplierId: Number\(option\.payload\), supplierName: option\.value \}\)/,
+  'a pick carries the contact id outright',
+)
+// P3-9: typing no longer always drops the id. It is RE-RESOLVED from the
+// typed text on every keystroke against the loaded name list, so an edited
+// name still cannot ride on the previous pick's id, while typing an existing
+// supplier's name exactly now attributes the lot to that contact instead of
+// minting a second name-only attribution for a supplier that already exists.
+// An unmatched OR ambiguous name still resolves to null (name-only).
+assert.match(
+  picker,
+  /const resolved = resolveSupplierByExactName\(resolvable, next\)/,
+  'the typed name goes through the exact-name resolver',
 )
 assert.match(
   picker,
+  /onChange\(\{ supplierId: resolved \? resolved\.id : null, supplierName: next \}\)/,
+  'an unresolved name is still recorded by name only',
+)
+assert.doesNotMatch(
+  picker,
   /else onChange\(\{ supplierId: null, supplierName: next \}\)/,
-  'typing clears supplierId -- an edited name can never ride on a stale id',
+  'the unconditional drop is gone',
 )
 assert.match(suggestionInput, /onMouseDown=\{\(event\) => \{ event\.preventDefault\(\); pick\(option\) \}\}/, 'suggestion picks beat blur via mousedown')
 assert.doesNotMatch(suggestionInput, /onTouchStart=\{[^}]*pick\(/, 'a tap already reaches the mousedown path; a touchstart pick would fire mid-scroll')

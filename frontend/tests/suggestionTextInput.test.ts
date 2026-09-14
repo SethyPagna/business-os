@@ -154,13 +154,24 @@ check('the shared supplier picker delegates to the same control (one implementat
   assert.match(supplierPicker, /<SuggestionTextInput/)
   assert.match(
     supplierPicker,
-    /if \(option\) onChange\(\{ supplierId: Number\(option\.payload\), supplierName: option\.value \}\)/,
+    /if \(option\) \{[\s\S]{0,80}?onChange\(\{ supplierId: Number\(option\.payload\), supplierName: option\.value \}\)/,
     'a PICK still carries the contact id',
   )
+  // P3-9 changed what TYPING means, on purpose: an exactly typed existing
+  // name now resolves to that contact instead of always dropping the id, so
+  // the same supplier stops being recorded two ways depending on whether the
+  // suggestion was clicked. The id is still never invented -- it can only be
+  // one already in the loaded list, and an unmatched or ambiguous name stays
+  // name-only (supplierDuplicateCollapse.test.ts owns the resolver itself).
   assert.match(
     supplierPicker,
+    /onChange\(\{ supplierId: resolved \? resolved\.id : null, supplierName: next \}\)/,
+    'typing re-resolves the id from the typed text, never carries a stale one',
+  )
+  assert.doesNotMatch(
+    supplierPicker,
     /else onChange\(\{ supplierId: null, supplierName: next \}\)/,
-    'typing still breaks the contact link -- an id may only come from an explicit pick',
+    'the unconditional drop is gone',
   )
 })
 
