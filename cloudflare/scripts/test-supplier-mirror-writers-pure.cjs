@@ -91,7 +91,11 @@ const supplierWhereMatch = contactsSource.match(/const supplierWhere = `(\([\s\S
 const totalsMatch = contactsSource.match(/const totalsRow = await db\.prepare\(`([\s\S]*?)`\)\.get</)
 const reportSourceMatch = contactsSource.match(/const STOCK_IN_REPORT_SOURCE = `\n([\s\S]*?)`/)
 assert.ok(supplierWhereMatch && totalsMatch && reportSourceMatch, 'contacts.ts still defines supplierWhere, the purchase totals query and STOCK_IN_REPORT_SOURCE')
-const PURCHASE_TOTALS_SQL = totalsMatch[1].replace('${supplierWhere}', supplierWhereMatch[1])
+const PURCHASE_TOTALS_SQL = totalsMatch[1]
+  // P3-10 (contacts lane) filters the totals by the Start->End range; with no
+  // range set purchasesWhere IS supplierWhere, so both spellings resolve to it.
+  .replace('${purchasesWhere}', supplierWhereMatch[1]).replace('${supplierWhere}', supplierWhereMatch[1])
+assert.ok(!PURCHASE_TOTALS_SQL.includes('${'), 'the purchase totals query was extracted whole -- no template placeholder survived')
 const REPORT_SOURCE = reportSourceMatch[1]
 const notificationsSource = readSource('routes/notifications.ts')
 const creditSection = notificationsSource.slice(notificationsSource.indexOf('async function buildSupplierCreditSection'))

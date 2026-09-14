@@ -314,7 +314,11 @@ const contactsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes
 const supplierWhereMatch = contactsSource.match(/const supplierWhere = `(\([\s\S]*?\))`/)
 const totalsMatch = contactsSource.match(/const totalsRow = await db\.prepare\(`([\s\S]*?)`\)\.get/)
 assert.ok(supplierWhereMatch && totalsMatch, 'contacts.ts still defines supplierWhere and the purchase totals query')
-const PURCHASE_TOTALS_SQL = totalsMatch[1].replace('${supplierWhere}', supplierWhereMatch[1])
+const PURCHASE_TOTALS_SQL = totalsMatch[1]
+  // P3-10 (contacts lane) filters the totals by the Start->End range; with no
+  // range set purchasesWhere IS supplierWhere, so both spellings resolve to it.
+  .replace('${purchasesWhere}', supplierWhereMatch[1]).replace('${supplierWhere}', supplierWhereMatch[1])
+assert.ok(!PURCHASE_TOTALS_SQL.includes('${'), 'the purchase totals query was extracted whole -- no template placeholder survived')
 const SUPPLIER = { id: 41, name: 'Acme Supply' }
 
 let passed = 0
