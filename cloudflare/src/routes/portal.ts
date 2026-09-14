@@ -74,9 +74,18 @@ function normalizePortalFaqItems(value: unknown): Array<{ id: string; question: 
 // serialised by frontend portalEditorUtils.ts's serializePromoItems). Same
 // field set the storefront's CatalogProductsSection reads; a card links to
 // a product (linkProductId, opened in the product detail flyout) OR to a
-// URL, and the URL is sanitised ONCE here with the same allowlist the
+// URL, and BOTH of the card's URLs -- the link it navigates to and the image
+// it renders -- are sanitised ONCE here with the same allowlist the
 // announcement strip's link_url goes through (lib/safeLinkUrl.ts), so an
 // unsafe value stored before that guard existed can never reach a visitor.
+//
+// mediaUrl goes through the same allowlist as linkUrl rather than a looser
+// image-only rule: a real card image is either an uploaded /uploads/... path
+// or an https:// URL, which is exactly what the allowlist admits, and an
+// <img src> is not a harmless place for javascript:/data:/protocol-relative
+// values either (a data: document behind an onerror, a //evil.example beacon
+// that leaks every visitor's IP and referrer to a third party).
+//
 // Malformed JSON fails closed to no cards, like the FAQ above.
 export function normalizePortalPromoItems(value: unknown) {
   let parsed: unknown = value
@@ -101,7 +110,7 @@ export function normalizePortalPromoItems(value: unknown) {
         title: text('title'),
         subtitle: text('subtitle'),
         body: text('body'),
-        mediaUrl: text('mediaUrl'),
+        mediaUrl: normalizeSafeLinkUrl(row.mediaUrl) || '',
         ctaLabel: text('ctaLabel'),
         linkUrl: normalizeSafeLinkUrl(row.linkUrl) || '',
         linkProductId: Number.isFinite(linkProductId) && linkProductId > 0 ? linkProductId : null,

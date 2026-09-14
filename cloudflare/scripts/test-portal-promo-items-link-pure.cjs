@@ -63,6 +63,30 @@ check('javascript: and data: links are stripped, the card itself stays', () => {
   }
 })
 
+check('a card image goes through the SAME allowlist as its link', () => {
+  // An <img src> is not a harmless place for a staff-typed URL either: a
+  // protocol-relative //evil.example leaks every visitor's IP and referrer to
+  // a third party, and data:/javascript: have no business being a shop photo.
+  const media = normalizePortalPromoItems([
+    { id: 'm-uploaded', title: 'Uploaded', mediaUrl: '/uploads/serum.jpg' },
+    { id: 'm-absolute', title: 'Absolute', mediaUrl: 'https://cdn.example.com/serum.jpg' },
+    { id: 'm-script', title: 'Script', mediaUrl: 'javascript:alert(1)' },
+    { id: 'm-data', title: 'Data', mediaUrl: 'data:text/html,<script>alert(1)</script>' },
+    { id: 'm-protocol-relative', title: 'Beacon', mediaUrl: '//evil.example/pixel.gif' },
+    { id: 'm-control-char', title: 'Tabbed', mediaUrl: 'java\tscript:alert(1)' },
+  ])
+  const byId = Object.fromEntries(media.map((item) => [item.id, item.mediaUrl]))
+  assert.strictEqual(byId['m-uploaded'], '/uploads/serum.jpg', 'an uploaded image path is what a real card carries')
+  assert.strictEqual(byId['m-absolute'], 'https://cdn.example.com/serum.jpg')
+  for (const id of ['m-script', 'm-data', 'm-protocol-relative', 'm-control-char']) {
+    assert.strictEqual(byId[id], '', `${id} must not reach a visitor's <img src>`)
+  }
+  // The card itself survives, exactly as it does when its linkUrl is stripped.
+  assert.strictEqual(media.length, 6)
+  // ...unless the unsafe image was the only thing on it.
+  assert.deepStrictEqual(normalizePortalPromoItems([{ id: 'm-only', mediaUrl: 'javascript:alert(1)' }]), [])
+})
+
 check('a card with nothing to show is dropped, a non-object entry is ignored', () => {
   const items = normalizePortalPromoItems(cards)
   assert.ok(!items.some((item) => item.id === 'promo-f'), 'a link with no visible card is not a card')
