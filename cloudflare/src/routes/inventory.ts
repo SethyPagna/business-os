@@ -1480,6 +1480,11 @@ app.post('/adjust', async (c) => {
   // existing caller -- it only closes the gap where a hand-typed request
   // omitted `reason` entirely.
   if (!reason) return c.json({ error: 'A reason is required for stock adjustments' }, 400)
+  // ... and no longer than the 500 characters PATCH /movements/:id/reason
+  // and the session parser both cap at. Two of the three writers accepted an
+  // unbounded string, so a reason could be written that the editor could then
+  // never save back.
+  if (reason && reason.length > 500) return c.json({ error: 'Reason is too long (max 500 characters)', code: 'reason_too_long' }, 400)
 
   const db = getDb(c.env)
   const product = unlockPricing

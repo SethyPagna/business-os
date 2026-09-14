@@ -62,6 +62,11 @@ export default function StockReasonField({
       <input
         id={id}
         name={name}
+        // What every reason writer accepts (POST /api/inventory/adjust, POST
+        // /api/batches, the session parser, PATCH /movements/:id/reason): the
+        // box stops at the limit instead of letting a long paste be refused
+        // after the operator has finished the rest of the line.
+        maxLength={500}
         className={`input w-full ${inputClassName}`}
         placeholder={placeholder}
         value={value}
