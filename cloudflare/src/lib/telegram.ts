@@ -194,6 +194,15 @@ type SalesBucket = {
   // header and the shift header print the same word "Expenses", so they have
   // to add up the same two things. See expenseBlock() below.
   deliveryCostUsd: number; deliveryCostRecorded: number
+  /**
+   * Stock removed entirely over the window, priced at cost -- the owner's
+   * "if remove directly it also counts toward losses. as cost price no
+   * selling price means loss" (Sep 14 2026). OPTIONAL on purpose: the kernel
+   * omits the key when it could not scope the window to stock movements, and
+   * a missing figure must not print as "Loss $0.00", which would assert that
+   * nothing was destroyed.
+   */
+  removalLossUsd?: number
 }
 type DayStats = { date: string; sales: SalesBucket; fees: MoneyBucket; stockIn: UnitBucket; stockOut: UnitBucket }
 type CashierRow = { cashier: string; count: number; usd: number }
@@ -243,6 +252,11 @@ async function dayStats(env: Env, date: string): Promise<DayStats> {
       // reports' "Expenses" is one sum with one source, not a lookalike.
       deliveryCostUsd: totals.delivery_actual_cost_usd,
       deliveryCostRecorded: totals.delivery_actual_cost_count,
+      // Stock destroyed outright, at cost. Same kernel field the Reports hub
+      // and the Dashboard read, so the three surfaces cannot disagree. Note
+      // the `stockOut` line below is NOT this figure: it counts quantity over
+      // remove + transfer_out + move_out, and a transfer is not a loss.
+      removalLossUsd: totals.removal_loss_usd,
     },
     fees,
     stockIn,
@@ -359,6 +373,11 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   if (expenses.header) header.push(expenses.header)
   if (showSales && stats.sales?.deliveryFeeUsd) header.push(labeled('deliveryFee', usd(stats.sales.deliveryFeeUsd)))
   if (showSales && stats.sales?.creditUsd) header.push(labeled('credit', usd(stats.sales.creditUsd)))
+  // Directly below Not Paid, the owner's "also add one row below unpaid in
+  // reports as well". One number, no sentence. Like Credit it is a POSITIVE
+  // memo and is never subtracted from the Sales/Profit lines above -- those
+  // stay the canonical figures the app's own stats show.
+  if (showSales && stats.sales?.removalLossUsd) header.push(labeled('loss', usd(stats.sales.removalLossUsd)))
   if (header.length) lines.push(RULE, ...header)
 
   if (showSales) {
@@ -574,6 +593,12 @@ export type ShiftReportFigures = {
   // no per-return breakdown.
   refundUsd: number
   creditUsd: number
+  /**
+   * Stock removed entirely during the shift, at cost. Optional: absent means
+   * the kernel could not scope the window to stock movements, not that
+   * nothing was destroyed, so the row is omitted rather than printed as $0.00.
+   */
+  removalLossUsd?: number
   otherExpenseUsd: number
   otherExpenseKhr: number
   // Native tender currencies, never USD-equivalent sales totals. Null/absent
@@ -638,6 +663,11 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // Always positive, always labelled "Not Paid" -- never "$-n", never
   // subtracted from anything above it (see the owner's separate ruling).
   if (figures.creditUsd) lines.push(labeled('credit', usd(figures.creditUsd)))
+  // Directly below Not Paid (owner, Sep 14 2026: "also add one row below
+  // unpaid in reports as well"). A POSITIVE memo, one number and no sentence:
+  // Sales and Profit above stay the canonical figures and are never reduced
+  // by it, exactly as Credit behaves.
+  if (figures.removalLossUsd) lines.push(labeled('loss', usd(figures.removalLossUsd)))
 
   lines.push(RULE, labeled('invoices', figures.invoices))
 
@@ -775,6 +805,9 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number):
     // but never in collected cash. Always printed as a positive "Credit"
     // figure -- see the owner's ruling in the header comment.
     creditUsd: totals.pending_revenue_usd,
+    // Stock destroyed during the shift, at cost -- the same kernel field the
+    // day summary and the Reports hub read, so the surfaces cannot disagree.
+    removalLossUsd: totals.removal_loss_usd,
     otherExpenseUsd: expenses.usd,
     otherExpenseKhr: expenses.khr,
     // Refunds and courier payouts no longer suppress the estimate: they are
