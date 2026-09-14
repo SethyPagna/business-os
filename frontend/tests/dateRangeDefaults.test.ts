@@ -209,19 +209,58 @@ assert.ok(!('batchDateFrom' in productRequest), 'Products catalog request is all
 assert.ok(!('batchDateTo' in productRequest), 'Products catalog request carries no received-date upper bound')
 assert.doesNotMatch(products, /createdDateFrom|createdDateTo|CreatedDateFilter/, 'Products owns no received-date filter state or UI')
 
-const invoiceSurfaces = [
-  { file: 'contacts/ArInvoicesSection.tsx', endpoint: 'getCustomerReceivables', context: { customer: 'all', status: 'all' } },
-  { file: 'contacts/ApInvoicesSection.tsx', endpoint: 'getSupplierApInvoices', context: { branch: 'all', supplier: 'all', status: 'all' } },
+// Operational ledgers keep the Today default: they are fed by live receipts,
+// so the current business day is the useful first screen.
+const todayInvoiceSurfaces = [
   { file: 'contacts/StockInInvoicesSection.tsx', endpoint: 'getStockInInvoiceReport', context: { branchId: 'all', supplierKey: 'all' } },
   { file: 'review/LegacyDeletedSalesSection.tsx', endpoint: 'getLegacyDeletedSales', context: { search: '', cashier: 'all' } },
 ] as const
-for (const surface of invoiceSurfaces) {
+for (const surface of todayInvoiceSurfaces) {
   const dates = todayPair(surface.file, '[fromDate, setFromDate]', '[toDate, setToDate]')
   const request = evaluate(requestArgs(dates.source, surface.endpoint)[0], {
     ...surface.context, fromDate: dates.from, toDate: dates.to, page: 1, pageSize: 20,
   })
   assert.deepEqual([request.from, request.to], [day1, day1], `${surface.endpoint} first request is Today`)
 }
+
+// P3-10. The AP and AR ledgers are the opposite case and must NOT open on
+// Today. Both tables hold imported legacy finance documents only -- nothing in
+// the running app ever writes a row dated today -- so the Today default made
+// them open empty on every visit, which is what the owner reported as "for
+// invoice, i see only one or none for both suppliers and customer ... it seems
+// to only show today". They default to ALL TIME: both bounds empty, which
+// contactReadTransport's buildQueryString drops from the URL, so the Worker's
+// invoice_date conditions never get added and the whole ledger comes back.
+const allTimeInvoiceSurfaces = [
+  { file: 'contacts/ArInvoicesSection.tsx', endpoint: 'getCustomerReceivables', context: { customer: 'all', status: 'all' } },
+  { file: 'contacts/ApInvoicesSection.tsx', endpoint: 'getSupplierApInvoices', context: { branch: 'all', supplier: 'all', status: 'all' } },
+] as const
+for (const surface of allTimeInvoiceSurfaces) {
+  const source = read(surface.file)
+  assert.doesNotMatch(source, /todayStr/, `${surface.file} must not reach for the business-day helper at all`)
+  const from = stateCell(source, '[fromDate, setFromDate]')
+  const to = stateCell(source, '[toDate, setToDate]')
+  assert.equal(from.initial, '', `${surface.file} start initializer is All time`)
+  assert.equal(to.initial, '', `${surface.file} end initializer is All time`)
+  const request = evaluate(requestArgs(source, surface.endpoint)[0], {
+    ...surface.context, fromDate: from.initial, toDate: to.initial, page: 1, pageSize: 20,
+  })
+  assert.deepEqual([request.from, request.to], ['', ''], `${surface.endpoint} first request carries no date bounds`)
+  // Choosing Today from the preset chips must still bound the request, so the
+  // all-time default is a default and not a dropped filter.
+  const today = preset('today')
+  const bounded = evaluate(requestArgs(source, surface.endpoint)[0], {
+    ...surface.context, fromDate: today.startDate, toDate: today.endDate, page: 1, pageSize: 20,
+  })
+  assert.deepEqual([bounded.from, bounded.to], [day1, day1], `${surface.endpoint} still honours a chosen range`)
+}
+// The mechanism the all-time default depends on: empty values never reach the
+// query string, so "no bound" really means "no bound" at the Worker.
+assert.match(
+  readFileSync(new URL('../src/api/contactReadTransport.ts', import.meta.url), 'utf8'),
+  /if \(value == null \|\| value === ''\) continue/,
+  'contactReadTransport must drop empty query values, or an all-time default would send from=&to=',
+)
 
 const audit = todayPair('utils-settings/AuditLog.tsx', '[rangeStart, setRangeStart]', '[rangeEnd, setRangeEnd]')
 const effectiveDateRange = evaluate(variable(audit.source, 'effectiveDateRange'), {
@@ -286,18 +325,21 @@ const lineRequest = evaluate(requestArgs(stockInSource, 'getStockInInvoiceLines'
 })
 assert.deepEqual([lineRequest.day, lineRequest.page], ['2026-08-31', 3], 'expanded invoice cursor/date stays group-owned')
 
-for (const [file, fromSetter, toSetter] of [
-  ['products/StockChangeSection.tsx', 'setStartDate', 'setEndDate'],
-  ['contacts/ArInvoicesSection.tsx', 'setFromDate', 'setToDate'],
-  ['contacts/ApInvoicesSection.tsx', 'setFromDate', 'setToDate'],
-  ['contacts/StockInInvoicesSection.tsx', 'setFromDate', 'setToDate'],
-  ['utils-settings/AuditLog.tsx', 'setRangeStart', 'setRangeEnd'],
-  ['review/LegacyDeletedSalesSection.tsx', 'setFromDate', 'setToDate'],
+// P3-10 moved the three contacts ledgers onto the shared StatsRangeRow, whose
+// change attribute is `onRangeChange`; the rest still pass `onChange` straight
+// to DateTimeRangePicker. Either way the handler must clear to All time.
+for (const [file, fromSetter, toSetter, attribute] of [
+  ['products/StockChangeSection.tsx', 'setStartDate', 'setEndDate', 'onChange'],
+  ['contacts/ArInvoicesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
+  ['contacts/ApInvoicesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
+  ['contacts/StockInInvoicesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
+  ['utils-settings/AuditLog.tsx', 'setRangeStart', 'setRangeEnd', 'onChange'],
+  ['review/LegacyDeletedSalesSection.tsx', 'setFromDate', 'setToDate', 'onChange'],
 ] as const) {
   const source = read(file)
   let from = day1
   let to = day1
-  const handler = evaluate(jsxHandler(source, 'onChange', fromSetter), {
+  const handler = evaluate(jsxHandler(source, attribute, fromSetter), {
     changeFilter: (apply: () => void) => apply(),
     [fromSetter]: (value: string) => { from = value },
     [toSetter]: (value: string) => { to = value },

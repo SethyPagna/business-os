@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import AppSelect from '../shared/AppSelect.tsx'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 // fmtDate, not fmtDateOnly: these are full UTC instants converted from the
 // old system's Bangkok wall clock, so the calendar day must be read in the
 // business timezone (an fmtDateOnly UTC slice would show the previous day
 // for anything before 07:00 Bangkok).
 import { fmtDate } from '../../utils/formatters'
-import { todayStr } from '../../utils/dateHelpers.ts'
 import { getSupplierApInvoices } from '../../api/contactReadTransport.ts'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
@@ -63,9 +62,16 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
   const [branch, setBranch] = useState('all')
   const [supplier, setSupplier] = useState('all')
   const [status, setStatus] = useState('all')
-  const initialToday = todayStr()
-  const [fromDate, setFromDate] = useState(initialToday)
-  const [toDate, setToDate] = useState(initialToday)
+  // P3-10: ALL TIME on first open, not Today. `supplier_invoices` holds only
+  // the legacy account-payable documents imported on Aug 30 -- nothing writes
+  // a row with today's date, so a Today default made the ledger open empty
+  // every single time ("for invoice, i see only one or none ... it seems to
+  // only show today"). Empty bounds are dropped by buildQueryString and the
+  // Worker only adds its invoice_date conditions when from/to arrive
+  // (cloudflare/src/routes/contacts.ts, the ap-invoices where-builder), so
+  // this asks for the whole ledger rather than an unbounded-looking today.
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)
@@ -152,7 +158,19 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
           that scrolls horizontally cannot itself be the sticky element. The
           negative margins let the blurred background span the section's own
           p-3 padding instead of leaving a bright gutter beside it. */}
-      <div className="sticky top-2 z-30 -mx-3 -mt-3 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
+      <div className="sticky top-2 z-30 -mx-3 -mt-3 space-y-1.5 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
+      {/* P3-10: the Start→End range leads the pinned block on its own
+          full-width row (same shape as Sales), instead of being the fourth
+          control inside the horizontally scrolling filter line below where a
+          phone never reached it. Presets come with StatsRangeRow. */}
+      <StatsRangeRow
+        range={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
+        onRangeChange={(range) => changeFilter(() => {
+          setFromDate(range.startDate || '')
+          setToDate(range.endDate || '')
+        })}
+        t={t}
+      />
       {/* Part 567: filters kept to a single scrollable line (user: "the
           filters options one row") rather than wrapping. */}
       <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
@@ -187,16 +205,6 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
             { value: 'outstanding', label: tr('ap_outstanding', 'Outstanding') },
             { value: 'paid', label: tr('paid', 'Paid') },
           ]}
-        />
-        <DateTimeRangePicker
-          value={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
-          onChange={(range) => changeFilter(() => {
-            setFromDate(range.startDate || '')
-            setToDate(range.endDate || '')
-          })}
-          t={t}
-          showTime={false}
-          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
         />
         {anyFilter ? (
           <button

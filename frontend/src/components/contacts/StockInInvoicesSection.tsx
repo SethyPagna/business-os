@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import AppSelect from '../shared/AppSelect.tsx'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { fmtDateOnly } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers.ts'
@@ -268,8 +268,24 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           `sticky top-2` offset the Customers/Suppliers/Delivery search rows
           use one level up. Outside the overflow-x-auto row on purpose: a
           horizontally scrolling box cannot itself be the sticky element. */}
-      <div className="sticky top-2 z-30 -mx-3 -mt-3 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
-      {/* The report's standard filter row: branch · supplier · date range.
+      <div className="sticky top-2 z-30 -mx-3 -mt-3 space-y-1.5 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
+      {/* P3-10. The Start→End range leads the pinned block on its OWN
+          full-width row, exactly as Sales/Inventory/Branches do, because it
+          used to be the THIRD control inside the `overflow-x-auto` filter
+          line below -- on a phone that pushed it past the right edge, so the
+          owner reported "invoice doesn't have start and end date ... i don't
+          see it in small screens". StatsRangeRow also brings the preset chips
+          (All time / Today / Yesterday / 7d / 30d / week / month / year), so
+          widening a ledger no longer means opening the picker. */}
+      <StatsRangeRow
+        range={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
+        onRangeChange={(range) => changeFilter(() => {
+          setFromDate(range.startDate || '')
+          setToDate(range.endDate || '')
+        })}
+        t={t}
+      />
+      {/* The report's standard filter row: branch · supplier.
           Part 567: kept to a single scrollable line (user: "the filters
           options one row") rather than wrapping to two. */}
       <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
@@ -293,18 +309,6 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
             { value: 'none', label: tr('no_supplier_recorded', 'No supplier recorded') },
             ...supplierOptions.map((option) => ({ value: option.key, label: String(option.name || option.key) })),
           ]}
-        />
-        {/* Unified Start → End pill (same control the Dashboard, reports,
-            Fees and Inventory movements use) instead of two loose inputs. */}
-        <DateTimeRangePicker
-          value={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
-          onChange={(range) => changeFilter(() => {
-            setFromDate(range.startDate || '')
-            setToDate(range.endDate || '')
-          })}
-          t={t}
-          showTime={false}
-          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
         />
         {anyFilter ? (
           <button

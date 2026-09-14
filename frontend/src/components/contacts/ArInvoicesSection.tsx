@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import AppSelect from '../shared/AppSelect.tsx'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import type { TableColumnDef } from '../shared/columnPreferences.ts'
@@ -8,7 +8,6 @@ import type { TableColumnDef } from '../shared/columnPreferences.ts'
 // the old system's Bangkok wall clock (same as the AP ledger), so the calendar
 // day must be read in the business timezone.
 import { fmtDate } from '../../utils/formatters'
-import { todayStr } from '../../utils/dateHelpers.ts'
 import { getCustomerReceivables } from '../../api/contactReadTransport.ts'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
@@ -70,9 +69,13 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [customer, setCustomer] = useState('all')
   const [status, setStatus] = useState('all')
-  const initialToday = todayStr()
-  const [fromDate, setFromDate] = useState(initialToday)
-  const [toDate, setToDate] = useState(initialToday)
+  // P3-10: ALL TIME on first open, not Today -- same reason as the AP ledger
+  // it mirrors. `customer_receivables` is the legacy AR import (migration
+  // 0094) and nothing writes a row dated today, so Today opened the section
+  // empty every time. Empty bounds are dropped by buildQueryString and the
+  // Worker adds its invoice_date conditions only when from/to arrive.
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)
@@ -151,7 +154,16 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
           offset the Customers/Suppliers/Delivery search rows use one level
           up. The sticky wrapper is outside the overflow-x-auto row because a
           horizontally scrolling box cannot itself be the sticky element. */}
-      <div className="sticky top-2 z-30 -mx-3 -mt-3 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
+      <div className="sticky top-2 z-30 -mx-3 -mt-3 space-y-1.5 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
+      {/* P3-10: the Start→End range leads the pinned block on its own
+          full-width row with its preset chips, instead of being the third
+          control inside the horizontally scrolling filter line below -- the
+          position a phone never scrolled to. */}
+      <StatsRangeRow
+        range={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
+        onRangeChange={(range) => changeFilter(() => { setFromDate(range.startDate || ''); setToDate(range.endDate || '') })}
+        t={t}
+      />
       <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
         <AppSelect
           ariaLabel={tr('customer', 'Customer')}
@@ -174,13 +186,6 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
             { value: 'overpaid', label: tr('ar_overpaid', 'Customer balance') },
             { value: 'settled', label: tr('paid', 'Paid') },
           ]}
-        />
-        <DateTimeRangePicker
-          value={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
-          onChange={(range) => changeFilter(() => { setFromDate(range.startDate || ''); setToDate(range.endDate || '') })}
-          t={t}
-          showTime={false}
-          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
         />
         {anyFilter ? (
           <button type="button" className="btn-secondary py-1 text-xs" onClick={() => changeFilter(() => { setCustomer('all'); setStatus('all'); setFromDate(''); setToDate('') })}>

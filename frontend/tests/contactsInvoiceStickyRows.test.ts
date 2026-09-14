@@ -54,18 +54,32 @@ function divSpan(source: string, predicate: (classes: string) => boolean): { sta
   return null
 }
 
+/**
+ * Where this file draws its Start→End control. `StatsRangeRow` is the shared
+ * wrapper (picker + preset chips) the ledgers switched to in P3-10; a surface
+ * that still draws the bare `DateTimeRangePicker` is held to the same rule.
+ */
+function rangeControlIndex(source: string): number {
+  const stats = source.indexOf('<StatsRangeRow')
+  return stats >= 0 ? stats : source.indexOf('<DateTimeRangePicker')
+}
+
+function hasRangeControl(source: string): boolean {
+  return rangeControlIndex(source) >= 0
+}
+
 /** Does this file pin its date row inside a sticky wrapper that contains it? */
 function pinsItsDateRow(source: string): boolean {
   const span = divSpan(source, (classes) => /\bsticky\b/.test(classes) && /\btop-\d/.test(classes))
   if (!span) return false
-  const picker = source.indexOf('<DateTimeRangePicker')
+  const picker = rangeControlIndex(source)
   return picker > span.start && picker < span.end
 }
 
 const sections = fs
   .readdirSync(contactsDir)
   .filter((file) => file.endsWith('Section.tsx'))
-  .filter((file) => read(file).includes('<DateTimeRangePicker'))
+  .filter((file) => hasRangeControl(read(file)))
   .sort()
 
 assert.deepEqual(
@@ -80,13 +94,40 @@ for (const file of sections) {
     pinsItsDateRow(source),
     `${file}: the filter + date row must sit inside a sticky top-N wrapper, so it pins while the ledger scrolls`,
   )
+
+  // P3-10. Pinned is not the same as visible. The range control used to be the
+  // third or fourth item INSIDE the `flex flex-nowrap ... overflow-x-auto`
+  // select row, which on a phone put it past the right edge of a row nobody
+  // scrolls -- the owner's "invoice doesn't have start and end date ... i
+  // don't see it in small screens". It now leads the sticky block on its own
+  // full-width line, with the selects row underneath, exactly like Sales.
+  const sticky = divSpan(source, (classes) => /\bsticky\b/.test(classes) && /\btop-\d/.test(classes))!
+  const range = rangeControlIndex(source)
+  const scrollingRow = divSpan(source, (classes) => /\bflex-nowrap\b/.test(classes) && /\boverflow-x-auto\b/.test(classes))
+  assert.ok(scrollingRow, `${file}: the branch/supplier/status selects still live in one scrollable row`)
+  assert.ok(
+    range < scrollingRow!.start,
+    `${file}: the Start→End range must come BEFORE the horizontally scrolling selects row, not inside it`,
+  )
+  // "First child" is proven by what sits between the sticky wrapper's opening
+  // tag and the range control: JSX comments and whitespace only, never another
+  // element. Grepping for order alone would pass a layout that quietly grew a
+  // row above the range.
+  assert.equal(
+    source.slice(sticky.start, range).replace(/\{\/\*[\s\S]*?\*\/\}/g, '').trim(),
+    '',
+    `${file}: the Start→End range must be the FIRST child of the sticky wrapper -- only comments may precede it`,
+  )
+  assert.ok(
+    source.includes('<StatsRangeRow'),
+    `${file}: use the shared StatsRangeRow so the preset chips (All time / Today / ...) come with the range`,
+  )
   for (const open of source.matchAll(/<div className="([^"]*)"/g)) {
     assert.ok(
       !(/\bsticky\b/.test(open[1]) && /\boverflow-x-auto\b/.test(open[1])),
       `${file}: "${open[1]}" makes the horizontally scrolling row itself sticky, which never pins -- wrap it instead`,
     )
   }
-  const sticky = divSpan(source, (classes) => /\bsticky\b/.test(classes))!
   const stickyClasses = /<div className="([^"]*sticky[^"]*)"/.exec(source)![1]
   assert.match(stickyClasses, /\bz-\d/, `${file}: the pinned row needs a stacking context above the rows it covers`)
   assert.match(

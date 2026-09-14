@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
+import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { fmtDateOnly } from '../../utils/formatters'
 import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
@@ -40,7 +41,7 @@ type PurchasesPayload = {
 type SupplierPurchasesModalProps = {
   supplierId: number | string
   supplierName: string
-  fetchPurchases: (id: number | string, params?: { page?: number; page_size?: number }) => Promise<unknown>
+  fetchPurchases: (id: number | string, params?: { page?: number; page_size?: number; from?: string; to?: string }) => Promise<unknown>
   onClose: () => void
   t: TranslateFn
 }
@@ -57,6 +58,12 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  // P3-10: this report had NO date range at all, so a supplier with years of
+  // receipts could only be read page by page. It opens on ALL TIME (empty
+  // bounds) so the existing, complete view is what loads first; the bounds are
+  // only sent once a range is chosen, and buildQueryString drops empty values.
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const aliveRef = useRef(true)
 
   const tr = (key: string, fallback: string): string => t(key) || fallback
@@ -69,7 +76,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
     aliveRef.current = true
     setLoading(true)
     setError('')
-    fetchPurchases(supplierId, { page, page_size: pageSize })
+    fetchPurchases(supplierId, { page, page_size: pageSize, from: fromDate, to: toDate })
       .then((result) => {
         if (!aliveRef.current) return
         setData((result || {}) as PurchasesPayload)
@@ -85,7 +92,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
       aliveRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supplierId, page, pageSize])
+  }, [supplierId, page, pageSize, fromDate, toDate])
 
   const totals = data?.totals || {}
   const batches = Array.isArray(data?.batches) ? data!.batches! : []
@@ -95,6 +102,19 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
   return (
     <Modal title={`${tr('supplier_purchases', 'Purchases')} -- ${supplierName}`} onClose={onClose} wide unsavedChanges="read-only">
       <div className="space-y-3">
+        {/* Start → End on its own full-width row above the report, the same
+            control and preset chips the three invoice ledgers now lead with.
+            Outside the loading branch on purpose: re-ranging must stay
+            reachable while the next page is in flight. */}
+        <StatsRangeRow
+          range={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
+          onRangeChange={(range) => {
+            setFromDate(range.startDate || '')
+            setToDate(range.endDate || '')
+            setPage(1)
+          }}
+          t={t}
+        />
         {loading ? (
           <div className="py-8 text-center text-sm text-gray-400">{tr('loading', 'Loading...')}</div>
         ) : error ? (
