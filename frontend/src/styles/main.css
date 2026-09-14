@@ -717,16 +717,28 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 
   /* Portalled dialogs must fit the actually visible iOS viewport and stay
      clear of notches/home indicators. This also keeps footer buttons from
-     sitting underneath the app's fixed bottom navigation. */
+     sitting underneath the app's fixed bottom navigation.
+
+     --kb-inset is the on-screen keyboard's height, published by
+     utils/useVisualViewportInset.ts (installed once from shared/Modal.tsx).
+     It is 0px -- and the property is not even set -- whenever no keyboard is
+     up, so everything below is byte-identical to the old rules on desktop.
+     It has to be subtracted SEPARATELY from dvh: iOS never shrinks the layout
+     viewport for the keyboard, so 100dvh on an iPhone still spans the area
+     the keyboard is painted over and a dialog's sticky Save/Cancel footer
+     ends up underneath it the moment a field is focused.
+     The padding-bottom below moves the centring box up by the same amount, so
+     a panel that still fits is re-centred in the visible strip instead of
+     being centred in the full viewport with its lower half covered. */
   .modal-viewport-safe {
     padding-top: calc(.75rem + env(safe-area-inset-top, 0px));
     padding-right: calc(.75rem + env(safe-area-inset-right, 0px));
-    padding-bottom: calc(.75rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(.75rem + env(safe-area-inset-bottom, 0px) + var(--kb-inset, 0px));
     padding-left: calc(.75rem + env(safe-area-inset-left, 0px));
   }
   .modal-panel-safe {
-    max-height: calc(100vh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-    max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100vh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px));
+    max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px));
     max-width: calc(100vw - 1.5rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   }
   .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -832,12 +844,17 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
    visible fold, in the same area the fixed bottom nav bar occupies, which
    is what read as "the nav bar shows through the modal". Same 92vh-then-
    92dvh fallback pattern as `.h-screen` above, just as reusable classes
-   since an arbitrary-value utility can't carry two declarations itself. */
-.max-h-modal-90 { max-height: 90vh; max-height: 90dvh; }
-.max-h-modal-92 { max-height: 92vh; max-height: 92dvh; }
-.max-h-modal-80 { max-height: 80vh; max-height: 80dvh; }
-.max-h-modal-85 { max-height: 85vh; max-height: 85dvh; }
-.max-h-modal-88 { max-height: 88vh; max-height: 88dvh; }
+   since an arbitrary-value utility can't carry two declarations itself.
+
+   Every one of these also subtracts --kb-inset (see .modal-panel-safe above):
+   a phone dialog capped at 88% of the viewport is still 88% of an area the
+   iOS keyboard covers the bottom third of. The property is unset whenever no
+   keyboard is open, so `var(--kb-inset, 0px)` is 0 and desktop is unchanged. */
+.max-h-modal-90 { max-height: 90vh; max-height: calc(90dvh - var(--kb-inset, 0px)); }
+.max-h-modal-92 { max-height: 92vh; max-height: calc(92dvh - var(--kb-inset, 0px)); }
+.max-h-modal-80 { max-height: 80vh; max-height: calc(80dvh - var(--kb-inset, 0px)); }
+.max-h-modal-85 { max-height: 85vh; max-height: calc(85dvh - var(--kb-inset, 0px)); }
+.max-h-modal-88 { max-height: 88vh; max-height: calc(88dvh - var(--kb-inset, 0px)); }
 
 /* POS product grid. Denser on phones (user, Aug 31: "pos products section is
    showing one whole product display for small screens ... should be minimized

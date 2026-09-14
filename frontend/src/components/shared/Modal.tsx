@@ -3,6 +3,7 @@ import { useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import { useVisualViewportInset } from '../../utils/useVisualViewportInset.ts'
 import type { DraftPreservingMinimize, UnsavedChangesDeclaration } from '../../utils/closeGuard.ts'
 import { ModalCloseContext } from './modalCloseContext.ts'
 import UnsavedChangesPrompt from './UnsavedChangesPrompt.tsx'
@@ -69,6 +70,12 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
     const value = t(key)
     return value && value !== key ? value : fallback
   }
+  // Every admin dialog in the app renders through this component, so this is
+  // the one place that has to keep `--kb-inset` current: .modal-viewport-safe
+  // and .modal-panel-safe (styles/main.css) subtract it so a sticky Save/
+  // Cancel footer stays above the iOS on-screen keyboard, which does not
+  // shrink the layout viewport and therefore is invisible to `dvh`.
+  useVisualViewportInset()
   const closeGuard = useCloseGuard(unsavedChanges, onClose, onMinimize)
   const requestClose = closeDisabled ? () => {} : closeGuard.requestClose
   const widthClass =
