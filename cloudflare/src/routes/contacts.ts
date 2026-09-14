@@ -1766,11 +1766,29 @@ app.get('/suppliers/:id/purchases', async (c) => {
   const page = clampInt(query.page, 1, 1, 100000)
   const pageSize = clampInt(query.page_size ?? query.pageSize, 50, 1, 200)
   const offset = (page - 1) * pageSize
-  const params = { id, name: String(supplier.name || '').trim().toLowerCase() }
+  const params: Record<string, unknown> = { id, name: String(supplier.name || '').trim().toLowerCase() }
   const supplierWhere = `(
     pb.supplier_id = @id
     OR (pb.supplier_id IS NULL AND pb.supplier_name IS NOT NULL AND lower(trim(pb.supplier_name)) = @name)
   )`
+
+  // P3-10: the Start->End range the purchases float sends. `received_at` holds
+  // the operator's recorded receive DATE, not a UTC timestamp, so it is bounded
+  // by plain day-string comparison exactly the way the stock-in invoice report
+  // does it (stockInReportFilters below) -- localDateAtOrAfter() would shift a
+  // bare date by the business timezone and drop the edge day. A bound also
+  // requires a recorded date, so a filtered window never silently counts lots
+  // that have no receive date at all; with no range set the endpoint still
+  // reports the supplier's complete history, exactly as before.
+  const from = String(query.from || '').slice(0, 10)
+  const to = String(query.to || '').slice(0, 10)
+  const receivedDay = "substr(COALESCE(pb.received_at, ''), 1, 10)"
+  const rangeConditions: string[] = []
+  if (from) { rangeConditions.push(`${receivedDay} <> '' AND ${receivedDay} >= @from`); params.from = from }
+  if (to) { rangeConditions.push(`${receivedDay} <> '' AND ${receivedDay} <= @to`); params.to = to }
+  // The totals below stay independent of the visible PAGE, but they do honour
+  // this range, so the headline numbers always describe the filtered rows.
+  const purchasesWhere = [supplierWhere, ...rangeConditions].join(' AND ')
 
   // Totals are calculated across the COMPLETE supplier history, independently
   // of the visible page. The old endpoint capped the row array at 1,000 and
@@ -1785,7 +1803,7 @@ app.get('/suppliers/:id/purchases', async (c) => {
            SUM(CASE WHEN pb.payment_status = 'credit' THEN 1 ELSE 0 END) AS credit_batches,
            SUM(CASE WHEN pb.received_cost_usd IS NULL THEN 1 ELSE 0 END) AS batches_without_cost
     FROM product_batches pb
-    WHERE ${supplierWhere}
+    WHERE ${purchasesWhere}
   `).get<{
     batches: number; products: number; units_received: number; cost_usd: number
     credit_open_usd: number; credit_batches: number; batches_without_cost: number
@@ -1803,7 +1821,7 @@ app.get('/suppliers/:id/purchases', async (c) => {
       FROM branch_batch_stock
       GROUP BY batch_id
     ) bbs ON bbs.batch_id = pb.id
-    WHERE ${supplierWhere}
+    WHERE ${purchasesWhere}
     ORDER BY pb.received_at DESC, pb.id DESC
     LIMIT @limit OFFSET @offset
   `).all<{
