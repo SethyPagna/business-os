@@ -483,6 +483,22 @@ function syncOutboxOnce() {
   return syncOutboxPromise
 }
 
+// DEPLOY-TIME CONFLICT, spelled out because the three handlers below all
+// touch it: the moment a deploy lands, a phone still running the OLD build
+// meets the NEW Worker and the NEW sw.js at once.
+//  - Navigations. The old worker keeps serving, and its appShellFallback is
+//    network-first; the document still carries the must-revalidate headers
+//    frontend/public/_headers declares (the Worker re-sets the same value on
+//    the admin-host rewrite), so the old client fetches the current
+//    index.html instead of replaying a cached one and never pins itself to a
+//    stale shell.
+//  - Caches. The new worker precaches under its OWN build hash, so the old
+//    page keeps serving from the generation it installed with. A FAILED new
+//    install therefore deletes only the caches that did not exist before it
+//    started -- never the running generation the old page is still reading.
+//  - Update prompt. A parked worker never takes the session; the page offers
+//    an update only when the waiting build hash actually differs from the one
+//    it is running (index.tsx asks this worker for its version below).
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     // Which of this generation's caches already existed. precacheAppShell
@@ -547,6 +563,14 @@ self.addEventListener('message', (event) => {
   }
   if (event?.data?.type === 'BUSINESS_OS_SKIP_WAITING') {
     event.waitUntil?.(self.skipWaiting())
+  }
+  // Which build is this worker? A worker parked in 'waiting' since an
+  // earlier session never re-broadcasts BUSINESS_OS_APP_UPDATE_AVAILABLE, so
+  // index.tsx asks it directly and compares hashes before offering an update
+  // -- without this reply it cannot tell a genuinely newer shell from the
+  // build the page is already running, and would prompt for both.
+  if (event?.data?.type === 'BUSINESS_OS_APP_VERSION_REQUEST') {
+    event.ports?.[0]?.postMessage({ type: 'BUSINESS_OS_APP_VERSION', version: APP_SHELL_VERSION })
   }
 })
 
