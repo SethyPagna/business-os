@@ -189,8 +189,8 @@ const ORDER = [
   // of them and is a positive figure, never a deduction.
   'Sales', 'Profit', 'Expenses', 'Delivery fee', 'Not Paid',
   'Invoices',
-  'Opening cash', 'Closing cash',
-  'Additional cash', 'Actual delivery cost', 'Other expenses', 'Expected cash', 'Difference',
+  'Opening cash', 'Additional change used', 'Closing cash',
+  'Actual delivery cost', 'Other expenses', 'Expected cash', 'Difference',
 ]
 let cursor = -1
 for (const english of ORDER) {
@@ -289,7 +289,7 @@ console.log('PASS honesty: an unrecorded courier cost prints no line and enters 
 assert.equal(lines.filter((line) => line.startsWith(`Difference${SEP}`)).length, 1)
 // opening 50 + cash 210 - refunds 12 - expenses 4 - courier 3.50 = 240.50,
 // counted 256 -> +15.50. Riel: 100,000 in, 100,000 counted -> 0.
-assert.equal(valueOf('Additional cash'), '$10.00 · 5,000៛')
+assert.equal(valueOf('Additional change used'), '$10.00 · 5,000៛')
 assert.equal(valueOf('Expected cash'), '$250.50 · 105,000៛')
 assert.equal(valueOf('Difference'), '+$5.50 · −5,000៛')
 assert.equal(50 + 210 - 12 - 4 - 3.5, 240.5)

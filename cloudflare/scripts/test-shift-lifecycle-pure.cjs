@@ -244,10 +244,17 @@ async function main() {
   })
   assert.equal(firstAmendResponse.status, 200)
   const amendedChild = (await firstAmendResponse.json()).shift
+  // The dependents read the AMENDED row, not a cached one: the Telegram shift
+  // report is re-sent for this shift after the commit, and it re-reads the row
+  // (lib/telegram.ts sendTelegramShiftReport), as do the reconciliation and
+  // the figures the report block and the Reports export render.
+  assert.equal(sent.at(-1), child.id, 'an accepted amendment re-sends the shift report')
+  const sentAfterAmend = sent.length
   const staleAmendResponse = await call('PATCH', `/${child.id}`, {
     expected_revision: child.revision, reason: 'Stale overwrite', opening_note: 'Stale second value',
   })
   assert.equal(staleAmendResponse.status, 409, 'sequential stale amendment is rejected')
+  assert.equal(sent.length, sentAfterAmend, 'and a rejected one reports nothing')
   assert.equal(sqlite.prepare('SELECT opening_note FROM shift_sessions WHERE id=?').get(child.id).opening_note, 'First accepted value',
     'stale amendment cannot overwrite the accepted value')
 
@@ -281,6 +288,38 @@ async function main() {
   const grandchildShift = (await grandchildRead.json()).shift
   assert.equal(grandchildShift.opening_float_usd, null)
   assert.equal(grandchildShift.opening_float_khr, 5000)
+
+  // ---- ONE ROW PER SHIFT RECORD (owner ruling, Sep 14 2026) --------------
+  //
+  // "each shift have record shown one row last row of each record". Three
+  // rows exist in D1 for this ONE working shift -- opened, reopened, reopened
+  // again -- and the list used to print all three, the older two carrying
+  // superseded figures. Now the continued segments are not listed and the one
+  // row that is carries the latest values.
+  //
+  // Its amendment_count is the whole record's, not the segment's: the only
+  // real EDIT here was made on the MIDDLE segment ("Verified opening note"),
+  // and it must still light the badge on the row the owner can see. The close
+  // and the two reopens each wrote an amendment row too and none of them is an
+  // edit, so a plain COUNT(*) would have said 5.
+  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM shift_sessions').get().n, 3, 'all three segments are still stored')
+  const lineageRows = (await (await call('GET', '/?branch_id=1')).json()).shifts
+  assert.equal(lineageRows.length, 1, 'a reopened shift lists as ONE row, not one row per segment')
+  assert.equal(lineageRows[0].id, grandchild.id, 'and that row is the latest segment')
+  assert.equal(lineageRows[0].opening_float_khr, 5000, 'carrying the latest values')
+  assert.equal(lineageRows[0].parent_shift_id, child.id, 'with the rest of the chain reachable from it')
+  assert.equal(lineageRows[0].amendment_count, 1, 'and an edit made on an earlier segment still counts on the row that is shown')
+  const lineageDetail = await (await call('GET', `/${grandchild.id}/history`)).json()
+  assert.deepEqual(lineageDetail.segments.map((segment) => segment.id), [rootShift.id, child.id, grandchild.id],
+    'the detail read returns every segment of the record, oldest first')
+  assert.equal(lineageDetail.amendments.length, 5, 'with every segment record on one timeline')
+  assert.deepEqual([...new Set(lineageDetail.amendments.map((row) => row.shift_session_id))].sort((left, right) => left - right),
+    [rootShift.id, child.id, grandchild.id], 'each record naming the segment it belongs to')
+  // Asking for the MIDDLE segment returns the same record, so an old link or a
+  // stale tab cannot land on a half view.
+  const fromMiddle = await (await call('GET', `/${child.id}/history`)).json()
+  assert.deepEqual(fromMiddle.segments.map((segment) => segment.id), [rootShift.id, child.id, grandchild.id],
+    'the lineage is the same read from any segment')
   const notificationsBeforeRejectedCancels = sent.length
   const waitsBeforeRejectedCancels = waited.length
   user = { id: 7, name: 'Owner', username: 'owner', permissions: JSON.stringify({ pos: true }) }

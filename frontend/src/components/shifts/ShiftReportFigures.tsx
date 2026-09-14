@@ -1,6 +1,6 @@
 import { useApp } from '../../AppContext.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { shiftCountedPairText, shiftFigureRows, shiftFiguresOf, shiftRegisteredCash } from './shiftReportModel.ts'
+import { shiftCountedPairText, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows } from './shiftReportModel.ts'
 import type { Shift } from '../../api/shiftTransport.ts'
 
 /**
@@ -44,8 +44,7 @@ export default function ShiftReportFigures({ shift, className = '' }: Props) {
     const value = t(key)
     return value && value !== key ? value : fallback
   }
-  const registered = shiftRegisteredCash(shift)
-  const additional = shift.figures?.additional_cash
+  const registered = shiftRegisteredRows(shift)
   const rows = shiftFigureRows(shiftFiguresOf(shift))
 
   return (
@@ -56,23 +55,15 @@ export default function ShiftReportFigures({ shift, className = '' }: Props) {
           <InfoHint text={tr('shift_registered_cash_hint', 'Drawer registration for reference only; it never changes sales, profit, or whether a shift can close.')} label={tr('shift_registered_cash', 'Registered cash')} />
         </div>
         {/* One compact row per drawer state keeps USD and KHR together on
-            narrow PWA screens. The separator makes the two native piles clear
-            without forcing a second horizontal scroll. */}
+            narrow PWA screens. Open, the extra change used, then end -- the
+            shared order from shiftRegisteredRows(). */}
         <div className="mt-2 space-y-1 text-xs">
-          <div className="flex min-w-0 items-baseline justify-between gap-3">
-            <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400">{tr('shift_registered_open', 'OPEN')}</span>
-            <span className="min-w-0 break-words text-right font-medium text-gray-800 dark:text-gray-100">{shiftCountedPairText(registered.open.usd, registered.open.khr, fmtUSD, fmtKHR)}</span>
-          </div>
-          <div className="flex min-w-0 items-baseline justify-between gap-3">
-            <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400">{tr('shift_registered_end', 'END')}</span>
-            <span className="min-w-0 break-words text-right font-medium text-gray-800 dark:text-gray-100">{shiftCountedPairText(registered.end.usd, registered.end.khr, fmtUSD, fmtKHR)}</span>
-          </div>
-          {(additional?.usd || additional?.khr) ? (
-            <div className="flex min-w-0 items-baseline justify-between gap-3 border-t border-black/5 pt-1 dark:border-white/10">
-              <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400">{tr('shift_recon_additional_cash', 'Additional cash')}</span>
-              <span className="min-w-0 break-words text-right font-medium text-gray-800 dark:text-gray-100">+ {shiftCountedPairText(additional.usd, additional.khr, fmtUSD, fmtKHR)}</span>
+          {registered.map((row) => (
+            <div key={row.key} className="flex min-w-0 items-baseline justify-between gap-3">
+              <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400">{tr(row.key, row.fallback)}</span>
+              <span className="min-w-0 break-words text-right font-medium text-gray-800 dark:text-gray-100">{row.added ? '+ ' : ''}{shiftCountedPairText(row.usd, row.khr, fmtUSD, fmtKHR)}</span>
             </div>
-          ) : null}
+          ))}
         </div>
       </div>
 

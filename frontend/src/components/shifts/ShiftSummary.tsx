@@ -52,7 +52,23 @@ export default function ShiftSummary({ shift, detail = false, className = '' }: 
           </div>
           <div className="mt-0.5 break-words text-xs leading-relaxed text-gray-500 dark:text-gray-400">{cashier} · {branch}</div>
         </div>
-        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${shift.cancelled_at ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300' : shift.closed_at ? 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'}`}>{status}</span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* EDITED, the same fact a sale row carries: this record was
+              corrected after it was written, and the corrections (who, when,
+              before -> after) are in the records list inside this shift's
+              float -- which is what the row opens. Counted by the server
+              across the whole lineage and excluding the close/cancel/reopen
+              transitions, so it never brands an ordinary closed shift. */}
+          {(shift.amendment_count ?? 0) > 0 ? (
+            <span
+              className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+              title={tr('shift_amendments', 'Records')}
+            >
+              {tr('shift_edited', 'Edited')}{(shift.amendment_count ?? 0) > 1 ? ` · ${shift.amendment_count}` : ''}
+            </span>
+          ) : null}
+          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${shift.cancelled_at ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300' : shift.closed_at ? 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'}`}>{status}</span>
+        </div>
       </div>
 
       <dl className="mt-2 grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 text-xs sm:grid-cols-4">

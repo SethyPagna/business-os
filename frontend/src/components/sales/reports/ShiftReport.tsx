@@ -7,7 +7,7 @@ import { downloadCSV } from '../../../utils/csv.ts'
 import { openPrintExport } from '../../../utils/exportOptions.ts'
 import ShiftHistoryPanel from '../../shifts/ShiftHistoryPanel.tsx'
 import ShiftSummary from '../../shifts/ShiftSummary.tsx'
-import { shiftFigureRows, shiftFiguresOf, shiftRegisteredCash } from '../../shifts/shiftReportModel.ts'
+import { shiftFigureRows, shiftFiguresOf, shiftRegisteredRows } from '../../shifts/shiftReportModel.ts'
 import { EmptyState, OverflowMenu, Skeleton } from '../../shared/kit'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import { reportFileName } from './reportModel.ts'
@@ -22,13 +22,15 @@ export default function ShiftReport(p: ReportViewProps) {
 
   const rows = useMemo(() => {
     if (!shift) return []
-    const registered = shiftRegisteredCash(shift)
     return [
-      { Section: tr('shift_registered_cash', 'Registered cash'), Line: tr('shift_registered_open', 'OPEN'), USD: registered.open.usd ?? '', KHR: registered.open.khr ?? '' },
-      { Section: tr('shift_registered_cash', 'Registered cash'), Line: tr('shift_registered_end', 'END'), USD: registered.end.usd ?? '', KHR: registered.end.khr ?? '' },
-      ...(shift.figures?.additional_cash && (shift.figures.additional_cash.usd || shift.figures.additional_cash.khr)
-        ? [{ Section: tr('shift_registered_cash', 'Registered cash'), Line: tr('shift_recon_additional_cash', 'Additional cash'), USD: shift.figures.additional_cash.usd, KHR: shift.figures.additional_cash.khr }]
-        : []),
+      // Open, additional change used, end -- the same shared order the shift
+      // screen prints, so an exported row never contradicts the app.
+      ...shiftRegisteredRows(shift).map((row) => ({
+        Section: tr('shift_registered_cash', 'Registered cash'),
+        Line: tr(row.key, row.fallback),
+        USD: row.usd ?? '',
+        KHR: row.khr ?? '',
+      })),
       ...shiftFigureRows(shiftFiguresOf(shift)).map((row) => ({
         Section: tr('shift_report_figures', 'Business results'),
         Line: tr(row.key, row.key === 'credit_awaiting_payment' ? 'Not Paid' : row.key),

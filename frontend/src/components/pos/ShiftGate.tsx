@@ -6,7 +6,7 @@ import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts
 import { closeShift, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftCountPairBlocker, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
-import { shiftCountedPairText } from '../shifts/shiftReportModel.ts'
+import { shiftAdditionalCash, shiftCountedPairText, shiftExpectedWithTypedAdditional } from '../shifts/shiftReportModel.ts'
 
 function closingCountInvalid(value: string): boolean {
   return value.trim() !== '' && shiftClosingCounts(value, null).usd == null
@@ -490,6 +490,33 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   const typedDrawer = endBlocker === 'invalid'
     ? '—'
     : shiftCountedPairText(typedCounts.usd, typedCounts.khr, fmtUSD, fmtKHR)
+  const closedAdditional = closed ? shiftAdditionalCash(closed) : null
+
+  // ---- EXPECTED, before the close is written -----------------------------
+  //
+  // The server's reconciliation is computed from the additional change
+  // RECORDED on the shift, which on an open shift is not the amount the
+  // cashier is typing into this form: they would put another 20,000 riel of
+  // change into the drawer, type it here, and watch Expected stay where it
+  // was -- then be told the till is 20,000 over.
+  //
+  // The formula is NOT reproduced here. It lives once, on the server
+  // (cloudflare/src/lib/shiftReconciliation.ts: opening + additional + cash
+  // sales - refunds - expenses - courier), and only the ONE term that changed
+  // is adjusted: expected - recorded additional + typed additional. An
+  // uncounted currency (null opening -> null expected) stays unknown rather
+  // than turning into a number, and a blank field is 0 added, not a guess.
+  const typedAdditional = shiftClosingCounts(additionalUsd, additionalKhr)
+  const expectedNow = shiftExpectedWithTypedAdditional(shift?.reconciliation, typedAdditional)
+  // The drawer breakdown printed above the form carries the same Expected
+  // row, so it takes the same adjustment: one screen must never show two
+  // different expected drawers. After the close the server's own figures are
+  // final and are shown exactly as they came.
+  const drawerBreakdown = !shift?.reconciliation ? null
+    : closed ? shift.reconciliation
+      : { ...shift.reconciliation,
+        additional_cash: { usd: typedAdditional.usd ?? 0, khr: typedAdditional.khr ?? 0 },
+        expected: expectedNow }
 
   // No open shift AND no summary to show: this control has nothing to do.
   if (!canCloseCurrent && !closed && !open) return null
@@ -534,11 +561,16 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 { label: closed ? t('shift_closed_at') : t('shift_ends_at'), value: fmtDateTime24(closed?.closed_at || now) },
                 { label: closed ? t('shift_duration') : t('shift_open_for'), value: formatShiftDuration(shift.opened_at, parseServerTimestampMs(closed?.closed_at) || now, t) },
                 { label: t('shift_opened_with'), value: shiftCountedPairText(shift.opening_float_usd, shift.opening_float_khr, fmtUSD, fmtKHR) },
-                // The after half of the before/after: what was counted into
-                // the drawer against what it opened with, on the same cell
-                // shape so the two are read as one comparison.
+                // The rest of the chain, in the order the drawer moved: the
+                // extra change put in when the float ran out, then what was
+                // counted out of it at the close -- on the same cell shape as
+                // "Opened with" so the three are read as one comparison.
+                // Only when some was actually put in -- the SAME rule the
+                // report rows and the Reports export use (shiftAdditionalCash),
+                // so a shift that never needed more change does not print
+                // "+ $0.00 · 0៛" here and nothing there.
+                !!closedAdditional && { label: t('shift_recon_additional_cash'), value: `+ ${shiftCountedPairText(closedAdditional.usd, closedAdditional.khr, fmtUSD, fmtKHR)}` },
                 !!closed && { label: t('shift_counted_close'), value: shiftCountedPairText(closed.closing_counted_usd, closed.closing_counted_khr, fmtUSD, fmtKHR) },
-                !!closed && { label: t('shift_recon_additional_cash'), value: `+ ${shiftCountedPairText(closed.additional_cash_usd ?? 0, closed.additional_cash_khr ?? 0, fmtUSD, fmtKHR)}` },
                 !!closed?.closing_note && { label: t('note'), value: closed.closing_note },
               ]}
               />
@@ -548,30 +580,36 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 reconciliation -- before the close so the cashier counts
                 against a number instead of guessing, and after it so the
                 difference is stated rather than left to be worked out. */}
-            {shift?.reconciliation && (
+            {drawerBreakdown && (
               <div className="rounded-lg border border-black/10 px-3 py-2 dark:border-white/10">
-                <ShiftCashBreakdown reconciliation={shift.reconciliation} />
+                <ShiftCashBreakdown reconciliation={drawerBreakdown} />
               </div>
             )}
 
             {!closed && (
               <>
+                {/* Opening float -> additional change used -> closing count,
+                    the order the drawer actually moves in and the order the
+                    cashier knows the figures: the extra change was put in and
+                    spent before the final count is taken, so it is asked for
+                    first and carries the focus. Neither figure changes the
+                    other -- the server's one reconciliation reads both. */}
                 <ShiftCountPair
                   dense autoFocus disabled={busy || pending}
+                  label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')}
+                  hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')}
+                  usd={additionalUsd} khr={additionalKhr} onUsd={setAdditionalUsd} onKhr={setAdditionalKhr}
+                />
+                <ShiftCountPair
+                  dense disabled={busy || pending}
                   label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')}
                   hint={t('shift_registered_cash_hint')}
                   usd={countedUsd} khr={countedKhr} onUsd={setCountedUsd} onKhr={setCountedKhr}
                 />
-                <ShiftCountPair
-                  dense disabled={busy || pending}
-                  label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')}
-                  hint={t('shift_additional_cash_hint')}
-                  usd={additionalUsd} khr={additionalKhr} onUsd={setAdditionalUsd} onKhr={setAdditionalKhr}
-                />
                 {shift?.reconciliation && (
                   <ShiftFactStrip accent facts={[
                     { label: t('shift_drawer_total_typed'), value: typedDrawer },
-                    { label: t('shift_recon_expected'), value: shiftCountedPairText(shift.reconciliation.expected.usd, shift.reconciliation.expected.khr, fmtUSD, fmtKHR) },
+                    { label: t('shift_recon_expected'), value: shiftCountedPairText(expectedNow.usd, expectedNow.khr, fmtUSD, fmtKHR) },
                   ]}
                   />
                 )}

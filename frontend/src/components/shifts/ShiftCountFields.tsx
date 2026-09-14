@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { useApp } from '../../AppContext.tsx'
+import InfoHint from '../shared/InfoHint.tsx'
 import type { ShiftCountBlocker } from '../../api/shiftTransport.ts'
 
 /**
@@ -38,19 +39,30 @@ type PairProps = {
   autoFocus?: boolean
   dense?: boolean
   hint?: string
+  /**
+   * The long half of the explanation -- the worked example, the report-only
+   * rule -- behind the InfoHint beside the label, never inline. The standing
+   * density rule: a till screen is 375px wide and three lines of prose under
+   * one field pushes the button the cashier needs off it. `hint` stays one
+   * short line; this is what they get when they ask.
+   */
+  hintDetail?: string
   className?: string
 }
 
 const DENSE_INPUT = 'h-10 text-base sm:h-8 sm:text-[13px] w-full rounded-lg border border-gray-300 bg-white pl-2.5 pr-12 text-zinc-900 tabular-nums placeholder:text-gray-400 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100'
 const FORM_INPUT = 'input pr-12 tabular-nums'
 
-export default function ShiftCountPair({ label, usd, khr, onUsd, onKhr, usdLabel, khrLabel, disabled = false, autoFocus = false, dense = false, hint, className = '' }: PairProps) {
+export default function ShiftCountPair({ label, usd, khr, onUsd, onKhr, usdLabel, khrLabel, disabled = false, autoFocus = false, dense = false, hint, hintDetail, className = '' }: PairProps) {
   const { t } = useApp() as ShiftGateContext
   const inputClass = dense ? DENSE_INPUT : FORM_INPUT
   const suffixClass = 'pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-[11px] font-semibold tracking-wide text-[color:var(--ui-accent,#9c7a3c)]'
   return (
     <div className={`min-w-0 ${className}`}>
-      <span className="block text-xs font-medium leading-relaxed text-zinc-700 dark:text-zinc-200">{label}</span>
+      <span className="flex items-center gap-1 text-xs font-medium leading-relaxed text-zinc-700 dark:text-zinc-200">
+        {label}
+        {hintDetail ? <InfoHint text={hintDetail} label={label} /> : null}
+      </span>
       <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <span className="relative block min-w-0">
           <input

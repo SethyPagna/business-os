@@ -217,7 +217,11 @@ new Function('require', 'module', 'exports', compiled)((name: string) => {
     shiftClosingCounts: (usd: string, khr: string) => ({ usd: usd === '' ? null : Number(usd), khr: khr === '' ? null : Number(khr) }),
     closeShift: (input: any) => { submitted = input; return new Promise((resolve) => { resolveClose = resolve }) } }
   if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker }
-  if (name.includes('shiftReportModel')) return { shiftCountedPairText: () => '—' }
+  if (name.includes('shiftReportModel')) return {
+    shiftCountedPairText: () => '—',
+    shiftAdditionalCash: () => null,
+    shiftExpectedWithTypedAdditional: () => ({ usd: null, khr: null }),
+  }
   return { default: () => null }
 }, gateModule, gateModule.exports)
 const render = () => {

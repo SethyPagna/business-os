@@ -147,7 +147,7 @@ export function shiftTimestampIsFuture(value: string, now = Date.now()): boolean
  * (cloudflare/src/lib/shiftReconciliation.ts) and returns with the close and
  * with the shift reads. Per currency, never cross-converted:
  *
- *   expected   = opening + additional cash + cash sales - refunds - expenses - courier
+ *   expected   = opening + additional change used + cash sales - refunds - expenses - courier
  *   difference = counted - expected
  *
  * The client renders these numbers and NEVER recomputes them. A second
@@ -206,6 +206,16 @@ export type Shift = {
   reopen_reason: string | null
   reopened_by_user_id: number | null
   reopened_by_user_name: string | null
+  /**
+   * How many CORRECTIONS this shift record carries -- the Edited badge on the
+   * row. Counted by the server over the whole lineage and excluding the close,
+   * cancel and reopen transitions (routes/shifts.ts, AMENDMENT_COUNT_SQL), so
+   * a closed shift that was never corrected reads 0.
+   *
+   * Optional: a response cached by an older build does not carry it, and an
+   * absent value must read as "the server did not say", never as "edited".
+   */
+  amendment_count?: number
   // Present on the close response and on the shift reads. Absent on rows that
   // come back from a list (the server does not price a whole page of shifts).
   reconciliation?: ShiftReconciliation | null
@@ -289,7 +299,14 @@ export type ShiftAmendment = {
 }
 
 export type ShiftListResult = { shifts: Shift[]; scope: 'all' | 'own' }
-export type ShiftHistoryResult = { shift: Shift; amendments: ShiftAmendment[] }
+/**
+ * One shift RECORD: the segment that was asked for, every segment of its
+ * lineage oldest first (a reopen continues a shift into a new row), and the
+ * before/after records of all of them on one timeline -- each naming its own
+ * `shift_session_id`. `segments` is optional so a response from an older
+ * Worker still renders as the single segment it describes.
+ */
+export type ShiftHistoryResult = { shift: Shift; segments?: Shift[]; amendments: ShiftAmendment[] }
 
 export function orderShiftRows(rows: Shift[]): Shift[] {
   return [...rows].sort((left, right) => {
@@ -460,8 +477,8 @@ export async function closeShift(input: CloseShiftInput): Promise<ShiftState> {
       closed_at: input.closedAt || new Date().toISOString(),
       closing_counted_usd: closingCountedUsd,
       closing_counted_khr: closingCountedKhr,
-      ...(input.additionalCashUsd !== undefined ? { additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional USD cash') } : {}),
-      ...(input.additionalCashKhr !== undefined ? { additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional KHR cash') } : {}),
+      ...(input.additionalCashUsd !== undefined ? { additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional change used (USD)') } : {}),
+      ...(input.additionalCashKhr !== undefined ? { additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional change used (KHR)') } : {}),
       closing_note: input.closingNote ?? null,
     }, input.actorId),
     null,
@@ -541,8 +558,8 @@ export async function amendShift(id: number, input: AmendShiftInput): Promise<{ 
       opened_at: input.openedAt,
       opening_float_usd: openingFloatUsd,
       opening_float_khr: openingFloatKhr,
-      ...(input.additionalCashUsd !== undefined ? { additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional USD cash') } : {}),
-      ...(input.additionalCashKhr !== undefined ? { additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional KHR cash') } : {}),
+      ...(input.additionalCashUsd !== undefined ? { additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional change used (USD)') } : {}),
+      ...(input.additionalCashKhr !== undefined ? { additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional change used (KHR)') } : {}),
       opening_note: input.openingNote ?? null,
       closed_at: input.closedAt ?? null,
       closing_counted_usd: closingCountedUsd,
@@ -587,8 +604,8 @@ export async function closeShiftById(id: number, input: CloseShiftByIdInput): Pr
       closed_at: input.closedAt,
       closing_counted_usd: closingCountedUsd,
       closing_counted_khr: closingCountedKhr,
-      additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional USD cash'),
-      additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional KHR cash'),
+      additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional change used (USD)'),
+      additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional change used (KHR)'),
       closing_note: input.closingNote ?? null,
     }, input.actorId),
     null,
