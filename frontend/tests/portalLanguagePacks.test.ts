@@ -46,4 +46,35 @@ assert.equal(getPortalLanguageText('zh-CN', 'businessName'), '')
 assert.equal(getPortalLanguageText('fr', 'portalIntro'), '')
 assert.equal(getPortalLanguageText('es', 'businessTagline'), '')
 
+
+// P3-L3 item D: the product detail flyout's labels. None of its copy() keys
+// exists in either lang pack, so for a Khmer visitor every one of them fell
+// through to the English fallback (the "Caution" / "Need More Details"
+// headings on a Khmer storefront). The key list is read from the flyout
+// source so a label added later without Khmer fails here, not on screen.
+{
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const flyout = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'components', 'catalog', 'ProductDetailFlyout.tsx'), 'utf8')
+  const keys = new Set<string>()
+  for (const match of flyout.matchAll(/copy\('([A-Za-z]+)'/g)) keys.add(match[1])
+  for (const match of flyout.matchAll(/labelKey: '([A-Za-z]+)'/g)) keys.add(match[1])
+  assert.ok(keys.size >= 24, `expected the flyout's copy keys, found ${keys.size}`)
+  // imageCount is "{current}/{total}" in every language: digits and a slash.
+  keys.delete('imageCount')
+  const khmer = /[\u1780-\u17ff]/
+  for (const key of keys) {
+    const text = getPortalLanguageText('km', key)
+    assert.ok(text, `km pack has no value for flyout key ${key}`)
+    assert.match(text, khmer, `km.${key} is not Khmer: ${text}`)
+    assert.doesNotMatch(text, mojibakePattern, `km.${key} is mojibake`)
+  }
+  // Same word for the same concept as the rest of the storefront.
+  assert.equal(getPortalLanguageText('km', 'productCategory'), getPortalLanguageText('km', 'category'))
+  assert.equal(getPortalLanguageText('km', 'productBrand'), getPortalLanguageText('km', 'brand'))
+  assert.equal(getPortalLanguageText('km', 'productCaution'), 'ការប្រុងប្រយ័ត្ន')
+  assert.equal(getPortalLanguageText('km', 'productNeedMoreDetails'), 'ត្រូវការព័ត៌មានបន្ថែម')
+}
+
 console.log('portalLanguagePacks tests passed')
