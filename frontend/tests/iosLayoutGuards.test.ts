@@ -421,7 +421,7 @@ runTest('D4 -- the surfaces this lane converted route through the helper', () =>
   assert.match(read('src/components/shared/AppSelect.tsx'), /max-h-\[min\(18rem,calc\(100\*var\(--app-vh\)_-_1rem\)\)\]/)
   assert.match(read('src/components/shared/ActionHistoryBar.tsx'), /max-h-\[min\(28rem,calc\(70\*var\(--app-vh\)\)\)\]/)
   assert.match(read('src/components/sales/reports/PeriodReport.tsx'), /maxHeight="calc\(70 \* var\(--app-vh\)\)"/)
-  assert.match(read('src/AppContext.tsx'), /minHeight:'calc\(100 \* var\(--app-vh\)\)'/)
+  assert.match(read('src/AppContext.tsx'), /minHeight:'calc\(100 \* var\(--app-vh, 1vh\)\)'/, 'the bootstrap LoadingScreen renders before main.css can be trusted, so it carries the 1vh fallback')
 })
 
 // ---------------------------------------------------------------------------
