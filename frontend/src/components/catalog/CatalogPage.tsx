@@ -3205,14 +3205,38 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices })
   }
   const closeProductDetailView = () => setProductDetailView((prev) => ({ ...prev, open: false }))
-  // Preview twin of PublicCatalogPage.tsx's openProductById, minus the
-  // by-id search: the editor holds the full product list already. A
-  // function declaration because the promotions banner above renders
-  // before this point in the component body.
+  // Preview twin of PublicCatalogPage.tsx's openProductById, and the SAME
+  // three steps: the loaded page, then the by-id search, then a name search.
+  // `products` is one server page (the search effect above replaces it on
+  // every page/filter change), not the whole catalog -- so a promo card
+  // pointing at a product on any other page used to fall straight through to
+  // a name search while a visitor got the flyout. What the owner sees while
+  // editing has to be what a visitor gets.
+  //
+  // A function declaration because the promotions banner above renders before
+  // this point in the component body.
   function openProductById(productId: number, productName: string) {
     const loaded = products.find((product) => Number(product.id) === productId)
-    if (loaded) openProductDetail(loaded)
-    else setSearch(productName)
+    if (loaded) {
+      openProductDetail(loaded)
+      return
+    }
+    withLoaderTimeout(
+      () => getCatalogApi().searchPortalCatalogProducts({ productId, pageSize: 1 }),
+      'Portal product lookup',
+      CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS,
+    )
+      .then((result) => {
+        if (!aliveRef.current) return
+        // Same shaping as this preview's own product search above: the items
+        // array as the endpoint returned it, no second grouping pass.
+        const [product] = Array.isArray(result?.items) ? result.items as CatalogProduct[] : []
+        if (product) openProductDetail(product)
+        else setSearch(productName)
+      })
+      .catch(() => {
+        if (aliveRef.current) setSearch(productName)
+      })
   }
 
   const catalogTabProps = {

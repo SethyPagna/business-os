@@ -67,12 +67,27 @@ assert.match(shop, /setPromoFacet\(''\)/, 'clearing filters clears the facet')
 assert.match(shop, /\(promoFacet \? 1 : 0\)/, 'the facet counts as an active filter')
 assert.doesNotMatch(shop + section + strip, /promoOnly|setPromoOnly/, 'the boolean facet is gone everywhere')
 
-// 5. Editor preview parity.
+// 5. Editor preview parity: the SAME three steps as the storefront -- the
+// loaded page, then the by-id search, then a name search. The preview's
+// `products` is one server page, not the whole catalog (the search effect
+// replaces it on every page/filter change), so a promo card pointing at a
+// product on another page must not fall through to a name search while a
+// visitor gets the flyout.
 const editor = catalog('CatalogPage.tsx')
 assert.match(editor, /promo: promoFacet,/, 'the preview search sends the facet')
 assert.match(editor, /onOpenProduct=\{openProductById\}/, 'the preview banner opens products')
 assert.match(editor, /^\s+openProductById,$/m, 'the preview cards open products')
 assert.match(editor, /^\s+promoFacet,\s+setPromoFacet,$/m, 'the preview section gets the facet')
+const previewOpener = editor.slice(editor.indexOf('function openProductById('), editor.indexOf('const catalogTabProps'))
+assert.ok(previewOpener, 'the preview opener still exists')
+assert.match(previewOpener, /const loaded = products\.find\(\(product\) => Number\(product\.id\) === productId\)/, 'step 1: the loaded page')
+assert.match(previewOpener, /searchPortalCatalogProducts\(\{ productId, pageSize: 1 \}\)/, 'step 2: the by-id lookup through the SAME search endpoint')
+assert.match(previewOpener, /if \(product\) openProductDetail\(product\)\s+else setSearch\(productName\)/, 'step 3: only a product that no longer answers falls back to a name search')
+assert.ok(
+  previewOpener.indexOf('openProductDetail(loaded)') < previewOpener.indexOf('searchPortalCatalogProducts'),
+  'a product already on the page opens without a request',
+)
+assert.doesNotMatch(editor, /minus the\s+\/\/ by-id search|the editor holds the full product list/, 'the retired "full product list" claim must not come back')
 
 // The Worker side of the same contract.
 const worker = read('../cloudflare/src/routes/portal.ts')
