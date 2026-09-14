@@ -209,7 +209,7 @@ app.post('/', async (c) => {
   const paymentStatus = body.payment_status === 'paid' || body.payment_status === 'credit' ? body.payment_status : null
   const creditDueDate = String(body.credit_due_date || '').slice(0, 10) || null
   if (paymentStatus === 'credit' && !creditDueDate) {
-    return c.json({ error: 'A credit purchase needs its due date — that is what the admin reminder is built on.' }, 400)
+    return c.json({ error: 'A Not Yet Paid purchase needs its due date — that is what the admin reminder is built on.' }, 400)
   }
   // N14-D: this is the THIRD receipt wire (FastStockInModal's ordinary lines
   // and ReceiveBatchModal both land here, not on /api/inventory/adjust), so it
@@ -376,7 +376,7 @@ app.patch('/:id', async (c) => {
   if (bodyExtra.payment_status !== undefined) {
     const nextStatus = bodyExtra.payment_status === 'paid' || bodyExtra.payment_status === 'credit' ? bodyExtra.payment_status : null
     const nextDue = String(bodyExtra.credit_due_date || '').slice(0, 10) || null
-    if (nextStatus === 'credit' && !nextDue) return c.json({ error: 'A credit purchase needs its due date.' }, 400)
+    if (nextStatus === 'credit' && !nextDue) return c.json({ error: 'A Not Yet Paid purchase needs its due date.' }, 400)
     updates.push('payment_status = @payment_status', 'credit_due_date = @credit_due_date')
     params.payment_status = nextStatus
     params.credit_due_date = nextStatus === 'credit' ? nextDue : null

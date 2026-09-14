@@ -1452,7 +1452,7 @@ app.post('/adjust', async (c) => {
   // luck -- is a receipt and is gated.
   const freeGoods = body.freeGoods === true
   const attribution = body.attribution === 'correction' ? 'correction' : 'receipt'
-  if (paymentStatus === 'credit' && !creditDueDate) return c.json({ error: 'A credit purchase needs its due date' }, 400)
+  if (paymentStatus === 'credit' && !creditDueDate) return c.json({ error: 'A Not Yet Paid purchase needs its due date' }, 400)
   // `unlockPricing` is an explicit flag from the frontend, not inferred by
   // diffing -- see InventoryStockModals.tsx's "Lock current pricing"
   // toggle. Locked (the default) skips the identity lookup below entirely
