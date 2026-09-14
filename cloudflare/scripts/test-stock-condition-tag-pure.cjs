@@ -337,6 +337,14 @@ const heldLots = (tag) => rawDb.prepare(
 const movements = (type) => rawDb.prepare(
   `SELECT * FROM inventory_movements WHERE product_id = 1 ${type ? 'AND movement_type = @type' : ''} ORDER BY id`,
 ).all(type ? { type } : {})
+// Stock lives in TWO ledgers here: the aggregate (branch_stock +
+// products.stock_quantity) and the lot ledger (branch_batch_stock). A
+// transition that moves one and not the other shows up later as "7 here, 0
+// there", so the reversal is checked against both.
+const lotLedger = () => Number(rawDb.prepare(
+  'SELECT COALESCE(SUM(bbs.quantity), 0) AS q FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id = bbs.batch_id WHERE pb.variant_product_id = 1',
+).get({}).q)
+
 const purchaseTotals = () => {
   const row = rawDb.prepare(PURCHASE_TOTALS_SQL).get({ id: SUPPLIER.id, name: SUPPLIER.name.toLowerCase() })
   return {
@@ -545,6 +553,7 @@ const ADD = (extra) => ({
     seed()
     assert.equal((await req('POST', '/adjust', ADD())).status, 200)
     const baseline = sellable()
+    const baselineLots = lotLedger()
 
     assert.equal((await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 4, reason: 'shelf damage', branchId: 1, conditionTag: 'opened' })).status, 200)
     assert.deepEqual(sellable(), { product: baseline.product - 4, branch: baseline.branch - 4 })
@@ -553,8 +562,10 @@ const ADD = (extra) => ({
     const res = await req('POST', '/tagged-lots/restore', { productId: 1, branchId: 1, conditionTag: 'opened', quantity: 4, reason: 'cleaned up, fine to sell' })
     assert.equal(res.status, 200)
 
-    // Both ledgers back exactly where they started.
+    // Both ledgers back exactly where they started -- the aggregate AND the
+    // lot ledger, so the two cannot silently fork.
     assert.deepEqual(sellable(), baseline)
+    assert.equal(lotLedger(), baselineLots)
     assert.equal(Number(heldLots('opened')[0].quantity_remaining), 0)
 
     const restores = movements('in')
