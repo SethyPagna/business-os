@@ -22,6 +22,50 @@ async function shiftWrite<T>(channel: string, send: () => Promise<T>, local: nul
 }
 
 type ShiftMutationBody = Record<string, unknown>
+
+// The pending-request store. Site data can be blocked outright (iOS Safari's
+// "Block All Cookies"), where even TOUCHING window.sessionStorage throws
+// SecurityError -- so a shift edit on such a device died with an opaque
+// browser error before it ever reached the network. Reads degrade to "no
+// pending request"; the write REPORTS whether the value read back, because
+// shiftMutationFetch below refuses to dispatch a shift mutation it could not
+// make recoverable.
+function shiftRequestStore(): Storage | null {
+  try {
+    return window.sessionStorage || null
+  } catch {
+    return null
+  }
+}
+
+function readShiftRequest(key: string): string | null {
+  try {
+    return shiftRequestStore()?.getItem(key) ?? null
+  } catch {
+    return null
+  }
+}
+
+function writeShiftRequest(key: string, value: string): boolean {
+  try {
+    const store = shiftRequestStore()
+    if (!store) return false
+    store.setItem(key, value)
+    return store.getItem(key) === value
+  } catch {
+    return false
+  }
+}
+
+function clearShiftRequest(key: string, expected: string): void {
+  try {
+    const store = shiftRequestStore()
+    if (store && store.getItem(key) === expected) store.removeItem(key)
+  } catch {
+    // Nothing to clear if the store was never usable.
+  }
+}
+
 export function freezeShiftMutation(body: ShiftMutationBody): ShiftMutationBody {
   return JSON.parse(JSON.stringify({ ...body, client_request_id: body.client_request_id || crypto.randomUUID() }))
 }
@@ -31,7 +75,7 @@ export function pendingShiftMutation(actorId: number | string | undefined, id: n
   for (const action of ['edit', 'close', 'reopen', 'cancel'] as const) {
     const method = action === 'edit' ? 'PATCH' : 'POST'
     const path = `/api/shifts/${id}${action === 'edit' ? '' : `/${action}`}`
-    const raw = window.sessionStorage.getItem(`businessos_shift_request_v1:${actorId}:${method}:${path}`)
+    const raw = readShiftRequest(`businessos_shift_request_v1:${actorId}:${method}:${path}`)
     if (raw) return { action, body: JSON.parse(raw) as ShiftMutationBody }
   }
   return null
@@ -42,15 +86,15 @@ export function pendingShiftMutation(actorId: number | string | undefined, id: n
 async function shiftMutationFetch(method: string, path: string, body: ShiftMutationBody, actorId?: number | string) {
   if (!actorId) throw new Error('The signed-in shift operator is required')
   const key = `businessos_shift_request_v1:${actorId}:${method}:${path}`
-  const storage = window.sessionStorage
-  const prior = storage.getItem(key)
+  const prior = readShiftRequest(key)
   const frozen = prior ? JSON.parse(prior) as ShiftMutationBody : freezeShiftMutation(body)
   const serialized = JSON.stringify(frozen)
-  storage.setItem(key, serialized)
-  if (storage.getItem(key) !== serialized) throw new Error('Could not save the shift retry request')
-  const clearExactPending = () => {
-    if (storage.getItem(key) === serialized) storage.removeItem(key)
-  }
+  // Unchanged fail-closed contract: no dispatch unless the exact request is
+  // provably recoverable. writeShiftRequest performs the same read-back check
+  // that used to live on the next line, so blocked storage now raises this
+  // readable error instead of a raw SecurityError from the property access.
+  if (!writeShiftRequest(key, serialized)) throw new Error('Could not save the shift retry request')
+  const clearExactPending = () => clearShiftRequest(key, serialized)
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const result = await apiFetch(method, path, frozen, 45_000, { skipWriteDedupe: true })

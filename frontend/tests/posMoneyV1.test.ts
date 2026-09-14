@@ -346,7 +346,10 @@ async function reviewProbe(options: { proof?: unknown; marker?: boolean; denied?
     loadProductTransport: async () => ({ getProductsByIds: async () => { calls.push('products'); if (options.denied) throw new Error('403'); if (options.stale) generation++; return { items: [{ id: 7, selling_price_usd: 12 }], promotion_rules: capturedPool.rules } } }),
     quoteSaleCartLines, exchangeRate: 4000, checkoutRequestIdsRef: { current: new Map([['order1', 'request-1']]) },
     posOrdersStorageKey: 'actor-scoped-draft', writePosDraft: (key: string, value: string) => { calls.push('persist'); stored.set(key, value) },
-    localStorage: { getItem: (key: string) => stored.get(key) }, sessionStorage: { getItem: (key: string) => stored.get(key) },
+    // The draft read-back goes through POS.tsx's guarded readPosStorage now:
+    // touching window.localStorage throws outright on an iOS device with site
+    // data blocked, so the raw stores are no longer referenced by the slice.
+    readPosStorage: (_kind: string, key: string) => stored.get(key) ?? null,
     setOrders: (value: unknown) => { calls.push('orders') }, setPromotionRules: () => {}, setPromotionReadVersion: () => {},
     setReceiptQueue: () => calls.push('print'), closeOrder: () => calls.push('close'),
     notify: (message: string) => notices.push(message), getErrorMessage: (error: Error) => error.message, t: (key: string) => key,

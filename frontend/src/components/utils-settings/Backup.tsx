@@ -18,6 +18,7 @@ import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
 import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import { useActionHistory } from '../../utils/actionHistory.ts'
+import { isStandaloneDisplayMode } from '../../utils/standaloneDisplay.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -1034,6 +1035,28 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     return () => window.removeEventListener('message', handler)
   }, [active, copy, load, notify])
 
+  // The SAME-TAB return leg. When the consent page has no opener (an
+  // installed PWA, or any browser that blocked the popup) the Worker's
+  // callback cannot postMessage, so it redirects back here with
+  // ?drive_sync=connected|error (cloudflare/src/routes/compat.ts:989-1000).
+  // Nothing in the frontend read that parameter: the connection really was
+  // stored server-side, but the screen said nothing at all and the stale
+  // parameter stayed in the URL. Consume it once, strip it, and report.
+  useEffect(() => {
+    if (!active || typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    const outcome = String(url.searchParams.get('drive_sync') || '').trim().toLowerCase()
+    if (outcome !== 'connected' && outcome !== 'error') return
+    url.searchParams.delete('drive_sync')
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`)
+    if (outcome === 'connected') {
+      notify(copy('drive_sync_connected', 'Google Drive connected'), 'success')
+      loadRef.current?.({ force: true })
+      return
+    }
+    notify(copy('drive_sync_connect_failed', 'Google Drive connection failed'), 'error')
+  }, [active, copy, notify])
+
   const trackQueuedJob = useCallback((queued: QueuedJobResponse | undefined, reason: string, handlers: JobWatcherHandlers = {}) => {
     const jobId = queued?.job_id || queued?.item?.id
     if (!jobId) return queued
@@ -1185,6 +1208,18 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
 
   const openGoogleDriveSetup = (): void => {
     if (!pendingAuthUrl) return
+    // An installed iOS PWA has no real popup: window.open() returns a truthy
+    // proxy while Safari opens the consent page as a separate app, so the
+    // `if (popup)` branch below looked like success, the same-tab fallback
+    // never ran, and the postMessage handshake could never arrive from
+    // another app -- Drive setup sat on "setup ready" forever. Go straight to
+    // the same-tab redirect there; the Worker's callback already handles an
+    // openerless flow by redirecting back to this page with
+    // ?drive_sync=connected|error, which the effect above consumes.
+    if (isStandaloneDisplayMode()) {
+      window.location.assign(pendingAuthUrl)
+      return
+    }
     // This explicit popup keeps an opener for the completion handshake. If a
     // browser blocks it, use the same-tab path instead; the Worker then uses
     // its safe redirect fallback and no postMessage is trusted by this tab.

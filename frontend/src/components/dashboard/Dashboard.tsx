@@ -786,11 +786,17 @@ export default function Dashboard() {
 
   const openInventoryOverview = useCallback((stockState: InventoryStockFocus = 'all') => {
     if (typeof window !== 'undefined') {
-      window.sessionStorage.setItem(DASHBOARD_INVENTORY_FOCUS_KEY, JSON.stringify({
-        section: 'products',
-        tab: 'products',
-        stockFilter: stockState,
-      }))
+      try {
+        window.sessionStorage.setItem(DASHBOARD_INVENTORY_FOCUS_KEY, JSON.stringify({
+          section: 'products',
+          tab: 'products',
+          stockFilter: stockState,
+        }))
+      } catch {
+        // Storage blocked (iOS "Block All Cookies"): navigate without the
+        // optional focus payload rather than let a card tap throw. Same
+        // stance as the filter-prefs writer further down this file.
+      }
     }
     setProductDetail(null)
     // E1: the inventory page id retired into the Branches hub -- the focus

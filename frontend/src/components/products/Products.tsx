@@ -786,7 +786,12 @@ function ProductsFullEditor() {
   useEffect(() => {
     if (!isActive || typeof window === 'undefined') return
     const consumeFocus = () => {
-      const raw = window.sessionStorage.getItem('bos:dashboard:products-focus')
+      // Touching window.sessionStorage throws where site data is blocked
+      // (iOS Safari "Block All Cookies"), and this runs on every activation
+      // of the page. Guarded like the twin handoff in BranchesHubPage.tsx:
+      // no queued focus just leaves the current view state alone.
+      let raw: string | null = null
+      try { raw = window.sessionStorage.getItem('bos:dashboard:products-focus') } catch { return }
       if (!raw) return
       try {
         const payload = JSON.parse(raw) as { stockFilter?: unknown; search?: unknown; unit?: unknown; brand?: unknown; category?: unknown }
@@ -810,7 +815,7 @@ function ProductsFullEditor() {
       } catch {
         // Malformed handoff -- keep the current view state.
       } finally {
-        window.sessionStorage.removeItem('bos:dashboard:products-focus')
+        try { window.sessionStorage.removeItem('bos:dashboard:products-focus') } catch { /* nothing to clear if the store is unusable */ }
       }
     }
     consumeFocus()
