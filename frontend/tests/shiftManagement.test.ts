@@ -223,7 +223,8 @@ ok(/onClick=\{\(\) => void submitClose\(\)\}/.test(gate) && /await closeShift\(\
 ok(transport.includes('`/api/shifts/${input.shiftId}/close`'), 'the close transport pins the exact shift route')
 ok(/publish\(next\)/.test(gate) && /if \(next\.shift\) setClosed\(next\.shift\)/.test(gate),
   'the closed row the server returned is what the summary renders')
-ok(/<ShiftCashBreakdown reconciliation=\{shift\.reconciliation\}/.test(gate),
+ok(/<ShiftCashBreakdown reconciliation=\{drawerBreakdown\}/.test(gate)
+  && /drawerBreakdown = !shift\?\.reconciliation \? null\s*\n\s*: closed \? shift\.reconciliation/.test(gate),
   'the close dialog shows the server drawer breakdown before and after the close')
 // One close affordance: the Modal header X. "Back" and "Done" were a second
 // and a third control doing exactly what it already does.
