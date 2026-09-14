@@ -22,6 +22,7 @@
     "test:e2e": "playwright test",
     "test:e2e:fresh": "npm run build && playwright test",
     "test:e2e:ios": "playwright test --project=ios-webkit",
+    "test:e2e:system": "node e2e/system/run.mjs",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report e2e-report",
     "verify:i18n": "node ../ops/scripts/frontend/verify-i18n.ts",

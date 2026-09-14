@@ -6,6 +6,10 @@ this project has actually shipped before — blank page, runtime error, glitch,
 slowness, another cashier's data on my screen — at the only layer where those
 classes are observable at all.
 
+A tenth spec, `e2e/system/pos-sale.spec.ts`, is opt-in and answers the one
+question the other nine structurally cannot: does a sale rung on the till
+actually survive the round trip through the real Worker and the real database.
+
 Nothing here can reach production. Every URL is loopback.
 
 ---
@@ -23,6 +27,7 @@ npm run test:e2e       # all three projects
 | `npm run test:e2e` | the whole Tier "app" suite, all three projects |
 | `npm run test:e2e:fresh` | `npm run build` first, then the suite |
 | `npm run test:e2e:ios` | the iPhone 13 WebKit project only |
+| `npm run test:e2e:system` | Tier "system" — needs a local Worker, see below |
 | `npm run test:e2e:ui` | Playwright's watch/inspect UI |
 | `npm run test:e2e:report` | open the HTML report from the last run |
 
@@ -92,42 +97,75 @@ Sign-in goes through the real login form and the real `POST /api/auth/login`,
 and the fixture server sets the real session cookie (`bos_session`). Accounts:
 `admin`, `cashier_a`, `cashier_b` (any non-empty password).
 
-### Tier "system" — opt-in, real Worker, real D1 — **NOT SHIPPED YET**
+### Tier "system" — opt-in, real Worker, real D1
 
-The runner already has the hook: `playwright.config.ts` collects
-`e2e/system/**` only when `E2E_SYSTEM=1`, and suppresses the fixture
-`webServer` in that mode so it cannot shadow a real Worker. **There are no
-system specs and no seed script in this branch yet** — `E2E_SYSTEM=1` today
-runs zero tests, by design, rather than failing for a missing Worker.
+`e2e/system/*.spec.ts`, collected only with `E2E_SYSTEM=1`; in that mode the
+fixture `webServer` is suppressed so it cannot shadow the real one. Nothing is
+stubbed: the real bcrypt check, the real `POST /api/sales`, the real D1.
 
-What it is meant to be, and what it still needs, is in the lane report. The
-shape it must take:
+One-time, then once per machine reboot:
 
 ```bash
 cd cloudflare
-npm run migrate:local                     # 156 migrations into a LOCAL D1
-npx wrangler dev --local --port 4319      # NOT 8787: that port is the shared
-                                          # worker-dev server other sessions own
-node scripts/seed-e2e-local.cjs           # one org, one branch, a few products,
-                                          # one administrator-role cashier
+
+# 1. Schema. NOT `npm run migrate:local` -- see the note below.
+node scripts/apply-local-migrations.cjs --persist-to "$LOCAL_D1"
+
+# 2. The Worker. NOT port 8787: that is the shared worker-dev server other
+#    sessions own. It also provisions the pinned organization on first boot,
+#    which is why it starts BEFORE the seed.
+npx wrangler dev --local --port 4319 --ip 127.0.0.1 --persist-to "$LOCAL_D1"
+
+# 3. Data: one administrator cashier, two canonical branches, three priced
+#    products with shop stock, and a reset of the login limiter's counters.
+node scripts/seed-e2e-local.cjs --persist-to "$LOCAL_D1"
+
 cd ../frontend
-E2E_SYSTEM=1 npx playwright test --project=desktop-chromium
+npm run test:e2e:system
 ```
 
-One origin is enough: `wrangler.toml` serves `../frontend/dist` as
-`[assets]` with `run_worker_first = ["/api/*", ...]`, and
-`src/app/pathRouting.ts:106` treats `127.0.0.1` as the admin host.
+`$LOCAL_D1` must be a SHORT path — `C:\Users\<you>\AppData\Local\Temp\bos-e2e-d1`
+is what this was measured with. The default `cloudflare/.wrangler/state` inside
+a deep worktree exceeds the Windows path limit and miniflare fails with
+`SQLITE_CANTOPEN` before the first statement runs.
 
-Two constraints found while scoping it, both load-bearing for whoever
-finishes it:
+One origin is enough: `wrangler.toml` serves `../frontend/dist` as `[assets]`
+with `run_worker_first = ["/api/*", …]`, and `src/app/pathRouting.ts:106`
+treats `127.0.0.1` as the admin host.
 
-- `cloudflare/src/routes/auth.ts` gates every **non-administrator** role
-  behind `requiresDeviceApproval`, so the seeded account must either hold an
-  administrator role or have a pre-approved device row — otherwise a correct
-  password returns `deviceApprovalRequired` and the spec never signs in.
-- `routes/organizations.ts getDefaultOrganization` prefers
-  `BUSINESS_OS_ORGANIZATION_SLUG` and falls back to first-by-id, so the seed
-  may name the organization freely.
+**Why `npm run migrate:local` is not used.** On wrangler 4.116.0 it cannot
+apply this project's migration set at all: it concatenates every pending file
+into one local query and dies in its own result aggregation with
+`too many terms in compound SELECT: SQLITE_ERROR`. Measured — the first run
+applied the schema through 0097 and recorded 97 rows, and re-running with 64
+files still pending failed identically and applied nothing, so it does not
+converge by repetition. `scripts/apply-local-migrations.cjs` applies the same
+files, in the same order, one transaction each, into the same `d1_migrations`
+table. It is local-only by construction: no network code, no `--remote`, no
+credential.
+
+**Why one browser.** Running the system spec on all three projects at once
+fails the second and third with the server's own words, "Too many login
+attempts for this account." That is the real limiter working as designed
+(`routes/auth.ts:56`, 8 per account per 15 minutes; `:54`, 20 per IP), and the
+answer is not to raise it for tests. This tier asks "does the whole stack
+work", which is a per-stack question; the per-engine questions live in tier
+"app", which needs no login at all. Override with `E2E_SYSTEM_PROJECT`.
+
+**Why the seeded cashier is an administrator.** `lib/deviceTrust.ts:31`
+`requiresDeviceApproval()` gates every non-administrator account behind a
+per-device approval, so a cashier-role seed answers a correct password with
+`deviceApprovalRequired`. The device gate is a real behaviour that deserves
+its own spec; it is not this one.
+
+What the one system spec proves, in one flow: a real sign-in reaches the
+shell → the seeded product reaches the till from D1 → one tap puts it in the
+cart (positive control: the cart must stop reading "Cart is empty") → "Exact
+$" then "Complete Sale" → `POST /api/sales` creates **exactly one** sale →
+that sale carries the right total, status, item, quantity, cashier and branch
+→ shop stock drops by exactly one → and the receipt number is visible on the
+Sales page. If the till refuses instead of selling, the refusal toast is read
+back into the failure message rather than left to expire.
 
 ---
 
@@ -144,6 +182,7 @@ finishes it:
 | `storage-isolation.spec.ts` | cashier A signs out, cashier B signs in on the same device, and none of A's state is still on the screen. |
 | `perf-budget.spec.ts` | the storefront and the till reach first useful paint within a measured budget, and the request count on the boot path does not grow. |
 | `console-hygiene.spec.ts` | every public surface and every signed-out admin route boots with no uncaught error, no `console.error`, no failed resource and no unmocked API call. |
+| `system/pos-sale.spec.ts` | **opt-in.** A real cashier signs in against real bcrypt, rings a real sale through `POST /api/sales`, and the sale, its money, its item, its cashier, its branch, the shop's stock and the receipt on the Sales page all agree afterwards. |
 
 Every spec file opens with a header naming what it proves, the incident class it
 guards, and the command that runs just that file. Every assertion carries a
