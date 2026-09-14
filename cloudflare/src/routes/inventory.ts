@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { getDb, type D1Compat } from '../lib/db'
 
 /** Fail closed until the complete additive release schema is available. */
@@ -56,6 +56,11 @@ import { movementReferenceSelectSql } from '../lib/movementReference'
 import { movementSearchHaystackSql } from '../lib/movementSearch'
 import { findTransferReceipt, normalizeTransferRequestId, transferReceiptResponse, transferRequestDigest } from '../lib/transferOperationReceipt'
 import { resolveMovementCostSnapshot, type MovementCostComponent } from '../lib/movementCostSnapshot'
+import { parseStockConditionTag, type StockConditionTag } from '../lib/stockCondition'
+import {
+  allocateTaggedLots, planDisposeTagged, planHoldAsTagged, planRestoreTagged,
+  readOpenTaggedLots, readTaggedLotGroups,
+} from '../lib/damagedLotActions'
 import { addMoney4, roundMoney4 } from '../lib/moneyPrecision'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
@@ -1452,6 +1457,14 @@ app.post('/adjust', async (c) => {
   // luck -- is a receipt and is gated.
   const freeGoods = body.freeGoods === true
   const attribution = body.attribution === 'correction' ? 'correction' : 'receipt'
+  // P3-L6: the condition tag chosen on the remove control ("Keep in group
+  // as broken/damaged/...") or on a tagged restock. Absent means the
+  // ordinary removal/receipt this route has always done. Both spellings are
+  // accepted because this route's body is camelCase while the column and
+  // every other surface that names the field spell it snake_case.
+  const conditionTagResult = parseStockConditionTag(body.conditionTag ?? body.condition_tag)
+  if (!conditionTagResult.ok) return c.json({ error: conditionTagResult.error }, 400)
+  const conditionTag: StockConditionTag | null = conditionTagResult.tag
   if (paymentStatus === 'credit' && !creditDueDate) return c.json({ error: 'A credit purchase needs its due date' }, 400)
   // `unlockPricing` is an explicit flag from the frontend, not inferred by
   // diffing -- see InventoryStockModals.tsx's "Lock current pricing"
@@ -1461,6 +1474,13 @@ app.post('/adjust', async (c) => {
 
   if (!productId || !Number.isFinite(quantity)) return c.json({ error: 'Missing required fields' }, 400)
   if (!['add', 'remove', 'set'].includes(type)) return c.json({ error: 'Invalid stock action' }, 400)
+  // A tag names where UNITS went (held as broken/expired/...) or what was
+  // received. A 'set' is a target figure whose direction is only decided
+  // below, against live stock -- "set to 12, keep as damaged" does not say
+  // how many units are damaged. Refused outright rather than guessed.
+  if (conditionTag && type === 'set') {
+    return c.json({ error: 'Choose Add or Remove to record a condition tag -- a Set has no quantity of its own to tag.' }, 400)
+  }
   // N27: an add or a remove is a MOVEMENT, so zero is meaningless and refused.
   // A set is a TARGET -- "this branch now holds exactly N" -- and zero is a
   // number an operator counts: the last one sold, a branch being emptied, a
@@ -1891,6 +1911,41 @@ app.post('/adjust', async (c) => {
     await applyStockDelta(c.env, targetProductId, branchId, delta)
   }
 
+  // P3-L6 HOLD (remove): the units have just left sellable stock above. A
+  // tagged removal records them as still-owned held stock instead of a
+  // destruction: one db.batch writes the damage_out movement AND the
+  // damaged_stock_lots row, so there is no state where stock left sellable
+  // with no held row to restore it from. The movement carries the same cost
+  // snapshot the plain removal would have carried, so the units are valued
+  // at what they cost -- but as damage_out, which a loss report must not
+  // count; the loss is booked once, when the held row is disposed of.
+  if (conditionTag && type === 'remove' && delta !== 0 && !movementWrittenAtomically) {
+    const holdCost = removeMovementCost || resolveMovementCostSnapshot({
+      quantity: Math.abs(delta),
+      components: removedBatchQuantities.map((entry) => ({
+        quantity: entry.quantity,
+        unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null,
+      })),
+      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+    })
+    await db.batch(planHoldAsTagged({
+      productId: targetProductId,
+      productName: targetProductName,
+      branchId,
+      branchName: branch?.name || null,
+      batchId: useBatchLedger ? resolvedBatchId : null,
+      quantity: Math.abs(delta),
+      tag: conditionTag,
+      source: 'remove',
+      reason,
+      cost: holdCost,
+      referenceId: sessionId,
+      actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
+    }))
+    movementWrittenAtomically = true
+  }
+
   if (delta !== 0 && !movementWrittenAtomically) {
     let costComponents: MovementCostComponent[] = []
     if (type === 'add') {
@@ -1940,6 +1995,58 @@ app.post('/adjust', async (c) => {
       // on remove; NULL when no single lot owns the whole movement.
       batchId: useBatchLedger ? resolvedBatchId : null,
     })
+  }
+
+  // P3-L6 HOLD (restock with a tag). The receipt above ran UNCHANGED: a real
+  // product_batches lot carrying supplier_id/supplier_name, received
+  // quantity/cost and payment state, plus its own 'add' movement. That is
+  // deliberate and is the least-bloat choice of the two on the table:
+  //
+  //   (a) a "non-sellable lot" flag on product_batches -- a new column, a new
+  //       state every lot reader (POS FIFO, pickers, transfers, merges, the
+  //       0154/0155 activation invariants) would have to learn, and a second
+  //       meaning for is_active;
+  //   (b) receive, then immediately hold -- zero new concepts, and every
+  //       supplier-facing column is written by receiveBatchStock, the SAME
+  //       writer the supplier mirror pins as W3
+  //       (scripts/test-supplier-mirror-writers-pure.cjs). Contacts sees the
+  //       purchase, the invoice, the cost and the "not paid" balance exactly
+  //       as it does for any other stock-in.
+  //
+  // (b) is what runs here. The ledger tells the honest story too -- goods
+  // arrived and were immediately found broken -- rather than a receipt that
+  // silently never became sellable.
+  if (conditionTag && type === 'add' && delta !== 0) {
+    const heldBatchId = useBatchLedger ? resolvedBatchId : null
+    try {
+      if (heldBatchId != null) {
+        await removeStockFromBatch(db, { batchId: heldBatchId, productId: targetProductId, branchId, quantity: Math.abs(delta) })
+      } else {
+        await applyStockDelta(c.env, targetProductId, branchId, -Math.abs(delta))
+      }
+    } catch (err) {
+      if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
+      return c.json({ error: err instanceof Error ? err.message : 'Failed to hold received stock as tagged' }, 400)
+    }
+    await db.batch(planHoldAsTagged({
+      productId: targetProductId,
+      productName: targetProductName,
+      branchId,
+      branchName: branch?.name || null,
+      batchId: heldBatchId,
+      quantity: Math.abs(delta),
+      tag: conditionTag,
+      source: 'restock',
+      reason,
+      cost: addMovementCost || resolveMovementCostSnapshot({
+        quantity: Math.abs(delta),
+        components: [{ quantity: Math.abs(delta), unitCostUsd: receiptUnitCostUsd }],
+        fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+        fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+      }),
+      referenceId: sessionId,
+      actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
+    }))
   }
 
   // `type` is always 'add'/'remove' here (a 'set' request was converted
@@ -2435,6 +2542,97 @@ app.patch('/movements/:id/reason', async (c) => {
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: productId }))
   return c.json({ success: true, id, reason })
 })
+
+// ---- P3-L6: tagged (held, non-sellable) stock rows --------------------
+//
+// The Products page shows held units as their own child row inside the
+// product group -- one row per (product, tag, branch), qty =
+// SUM(quantity_remaining). The row is DELIBERATELY not part of the group's
+// sellable rows: it is never in branch_stock, never in the POS/product
+// pickers, and never inside the group's stock total. Reading it through its
+// own endpoint (rather than folding it into the products list) is what makes
+// that exclusion structural instead of a filter somebody can forget.
+app.get('/tagged-lots', async (c) => {
+  const ids = String(c.req.query('productIds') || c.req.query('productId') || '')
+    .split(',')
+    .map((part) => Number.parseInt(part.trim(), 10))
+    .filter((id) => Number.isSafeInteger(id) && id > 0)
+  if (!ids.length) return c.json({ items: [] })
+  // Bounded like every other id-list read here; the Products page asks for
+  // the ids it is currently rendering, never the whole catalog.
+  const items = await readTaggedLotGroups(getDb(c.env), ids.slice(0, 500))
+  return c.json({ items })
+})
+
+// The two row actions. Both take the SAME (product, branch, tag, quantity)
+// shape, both allocate oldest-held-first across that tag's open lots, and
+// both refuse outright when the held quantity no longer covers the request
+// -- a stale page must not partially apply. Gated exactly like /adjust: this
+// is a stock write.
+type InventoryContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
+async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'restore') {
+  const user = c.get('user')
+  if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
+    return c.json({ error: 'Changing tagged stock requires Full Access to Inventory.' }, 403)
+  }
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const productId = Number.parseInt(String(body.productId ?? ''), 10)
+  const branchId = Number.parseInt(String(body.branchId ?? ''), 10)
+  const quantity = Number(body.quantity)
+  const reason = body.reason != null ? String(body.reason).trim() || null : null
+  const tagResult = parseStockConditionTag(body.conditionTag ?? body.condition_tag)
+  if (!tagResult.ok) return c.json({ error: tagResult.error }, 400)
+  if (!tagResult.tag) return c.json({ error: 'A condition tag is required' }, 400)
+  if (!Number.isSafeInteger(productId) || productId <= 0) return c.json({ error: 'Missing required fields' }, 400)
+  if (!Number.isSafeInteger(branchId) || branchId <= 0) return c.json({ error: 'A branch is required' }, 400)
+  if (!Number.isFinite(quantity) || quantity <= 0) return c.json({ error: 'Quantity must be a positive number' }, 400)
+  // Same mandatory-cause rule POST /adjust enforces -- a tagged disposal is a
+  // loss and a restore puts sellable stock back; neither goes undocumented.
+  if (!reason) return c.json({ error: 'A reason is required for stock adjustments' }, 400)
+
+  const db = getDb(c.env)
+  const product = await db.prepare('SELECT id, name, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
+    .get<{ id: number; name: string; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
+  if (!product) return c.json({ error: 'Product not found' }, 404)
+  const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
+
+  const lots = await readOpenTaggedLots(db, { productId, branchId, tag: tagResult.tag })
+  const { takes, uncovered } = allocateTaggedLots(lots, quantity)
+  if (uncovered > 0) {
+    const held = lots.reduce((sum, lot) => sum + (Number(lot.quantity_remaining) || 0), 0)
+    return c.json({ error: `Only ${held} ${tagResult.tag} unit(s) are held at ${branch?.name || 'this branch'}, ${quantity} requested.` }, 400)
+  }
+
+  const change = {
+    productId,
+    productName: product.name,
+    branchId,
+    branchName: branch?.name || null,
+    tag: tagResult.tag,
+    takes,
+    reason,
+    fallbackUnitCostUsd: product.cost_price_usd ?? null,
+    fallbackUnitCostKhr: product.cost_price_khr ?? null,
+    actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
+  }
+  try {
+    await db.batch(action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change))
+  } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
+    return c.json({ error: error instanceof Error ? error.message : 'Failed to change tagged stock' }, 400)
+  }
+
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), action === 'dispose' ? 'stock_tagged_dispose' : 'stock_tagged_restore', 'product', productId, {
+    branchId, conditionTag: tagResult.tag, quantity, reason, lotIds: takes.map((take) => take.lotId),
+  })
+  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: productId }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  return c.json({ success: true, productId, branchId, conditionTag: tagResult.tag, quantity })
+}
+
+app.post('/tagged-lots/dispose', (c) => runTaggedLotAction(c, 'dispose'))
+app.post('/tagged-lots/restore', (c) => runTaggedLotAction(c, 'restore'))
 
 app.get('/rfid/status', (c) => c.json({ connected: false, status: 'unconfigured', readers: [] }))
 app.get('/rfid/tags/search', (c) => c.json({ items: [], total: 0, page: 1, pageSize: 20 }))

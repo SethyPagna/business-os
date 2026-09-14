@@ -221,7 +221,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   // K2 (Part 410): real, pure -- the three-way stock_action + Replace
   // kernel the route now imports (test-returns-replace-damaged-pure.cjs
   // covers it in isolation; here it runs under the real route).
-  '../lib/returnsStock': loadReal('lib/returnsStock.ts', { './db': { getDb: () => db }, './productBatches': productBatches, './sqlBinding': loadReal('lib/sqlBinding.ts') }),
+  '../lib/returnsStock': loadReal('lib/returnsStock.ts', { './db': { getDb: () => db }, './productBatches': productBatches, './sqlBinding': loadReal('lib/sqlBinding.ts'), './stockCondition': loadReal('lib/stockCondition.ts') }),
   // Part 519 (session 0b) gave the route a datetime return-number generator;
   // the real one reads the DB for same-second collisions -- a deterministic
   // stub keeps this suite's return numbers stable.

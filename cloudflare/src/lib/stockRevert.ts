@@ -18,6 +18,7 @@ import {
   planUnreceiveBatchStock, restoreBatchStockStatements, type StockWriteStatement,
 } from './productBatches'
 import { multiplyMoney4 } from './moneyPrecision'
+import { isDamagedLotReference } from './stockCondition'
 
 const OUT_TYPES = new Set<string>(LEDGER_OUT_TYPES)
 
@@ -129,6 +130,22 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   const branchId = Number(m.branch_id) || 0
   if (!productId || !branchId) {
     return { ok: false, status: 400, error: 'This movement is not tied to a product and branch, so it cannot be reverted here.' }
+  }
+  // P3-L6. A movement that moved units into or out of a TAGGED held row is
+  // half of a two-ledger transition (sellable stock AND
+  // damaged_stock_lots.quantity_remaining). The allowlist above is keyed on
+  // movement_type alone, and 'in' -- the type a restore-to-sellable writes --
+  // is on it, so without this guard the ledger would happily "revert" a
+  // restore: the units would come back OUT of sellable stock while the held
+  // row stayed at the figure the restore left it, and they would exist in
+  // neither place. The real reversal for these transitions is the tagged
+  // row's own Restore / Remove entirely actions, which move both ledgers.
+  if (isDamagedLotReference(m.reference_id)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'This movement belongs to a tagged (damaged, broken, expired ...) stock row. Reverse it from that row on the product instead, so the tagged quantity moves with the stock.',
+    }
   }
   const plan = planMovementRevert(m)
   if (!plan.revertible) {
