@@ -30,6 +30,8 @@
 
 import type { Env } from '../index'
 import { getDb, type D1Compat } from './db'
+import { getPlanLimits } from './planTier'
+import { dispatchImportWork } from './queueDispatch'
 import { chunkForBinding, selectInChunks } from './sqlBinding'
 import { runD1BatchInChunks } from './importEngine'
 import { bumpVersion } from './cache'
@@ -68,7 +70,8 @@ interface EntityConfig {
 // test-bulk-delete-engine-pure.cjs can exercise the real logic without a
 // live D1 -- both are pure/data, no Env or D1Compat needed to call them.
 // Returns one statement per D1-sized slice of `chunk`, not one statement
-// for the whole chunk: BULK_DELETE_CHUNK_SIZE is a CPU-budget number (500),
+// for the whole chunk: the bulk-delete chunk size is a CPU-budget number
+// (paid 500, free 125 -- lib/planTier.ts's bulkDeleteChunkSize),
 // while D1 refuses any single statement carrying more than 100 bound
 // parameters, so a 500-id `IN (...)` threw `too many SQL variables` and
 // runBulkDeleteJob's catch recorded all 500 ids as *failed deletes* --
@@ -201,7 +204,8 @@ export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
 // for most products), so this errs a little larger than import's; the
 // adaptive halve-and-retry inside runD1BatchInChunks covers it either way
 // if a particular chunk (e.g. unusually stock-heavy) blows the budget.
-const BULK_DELETE_CHUNK_SIZE = 500
+// The number itself is plan-sensitive and lives in lib/planTier.ts
+// (bulkDeleteChunkSize: paid 500, free 125), read per job below.
 
 interface JobRow {
   id: string
@@ -237,7 +241,7 @@ export async function createBulkDeleteJob(
     id: jobId, entityType, reason, idsJson: JSON.stringify(uniqueIds), totalCount: uniqueIds.length,
     userId: user.id, userName: actorSnapshot(user),
   })
-  await env.IMPORT_QUEUE.send({ jobId, kind: 'bulk-delete' })
+  await dispatchImportWork(env, { jobId, kind: 'bulk-delete' })
   return { jobId, totalCount: uniqueIds.length }
 }
 
@@ -258,6 +262,11 @@ async function markFailed(db: D1Compat, jobId: string, message: string): Promise
 
 export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
   const db = getDb(env)
+  // Ids per chunk, tier-aware -- see lib/planTier.ts. Free gets 125 instead
+  // of 500 for the same reason the import chunk shrinks: one chunk has to
+  // fit one invocation's CPU budget. runD1BatchInChunks' adaptive
+  // halve-and-retry still covers a chunk that overshoots on either plan.
+  const bulkDeleteChunkSize = getPlanLimits(env).bulkDeleteChunkSize
   const job = await getBulkDeleteJob(env, jobId)
   if (!job) return // job row vanished (shouldn't happen outside manual DB edits) -- nothing to do
   if (job.status === 'completed' || job.status === 'cancelled' || job.status === 'failed') return // already terminal, e.g. a redelivered queue message
@@ -290,7 +299,7 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
       return
     }
 
-    const chunk = allIds.slice(cursor, cursor + BULK_DELETE_CHUNK_SIZE)
+    const chunk = allIds.slice(cursor, cursor + bulkDeleteChunkSize)
     let deleteChunk = chunk
     if (job.entity_type === 'customers') {
       const protectedIds = await loadAnonymousCustomerIds(db, chunk)

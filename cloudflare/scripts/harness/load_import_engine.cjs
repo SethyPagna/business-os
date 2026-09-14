@@ -80,6 +80,10 @@ const PURE_LIB_SPECIFIERS = [
   // It is the purest module in lib/ (its only import is `import type`), so it
   // costs this loader nothing.
   './planTier',
+  // queueDispatch.ts is the producer side of every import continuation now
+  // (it replaced nine bare env.IMPORT_QUEUE.send calls). Also pure -- only an
+  // `import type` -- and a {} stub turns every chunk tail into a TypeError.
+  './queueDispatch',
 ]
 const pureLibCache = new Map()
 function getPureLib(specifier) {

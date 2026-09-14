@@ -48,6 +48,12 @@ const fallback = new Proxy({}, {
 const permissions = load('lib/permissions.ts')
 const media = load('lib/media.ts')
 const sqlBinding = load('lib/sqlBinding.ts')
+// planTier.ts is pure and supplies the per-tier ceilings runImportApply now
+// reads. It must NOT fall through to `fallback` below: that Proxy hands back
+// () => undefined, so getPlanLimits(env) would return undefined and the very
+// first limits lookup would throw a TypeError -- masking the authority error
+// this file asserts on.
+const planTier = load('lib/planTier.ts')
 const productImagePermission = load('lib/productImagePermission.ts', {
   './media': media,
   './sqlBinding': sqlBinding,
@@ -121,6 +127,11 @@ const exactStubs = {
   './media': media,
   './productImagePermission': productImagePermission,
   './sqlBinding': sqlBinding,
+  './planTier': planTier,
+  // Real: the envs here are bare `{}`, so any code path that unexpectedly
+  // reached a dispatch must fail loudly instead of being absorbed by the
+  // permissive `fallback` proxy below.
+  './queueDispatch': load('lib/queueDispatch.ts'),
 }
 const enginePath = path.join(srcRoot, 'lib', 'importEngine.ts')
 const originalLoad = Module._load
@@ -224,6 +235,9 @@ async function main() {
   const permanent = Object.assign(new Error('revoked'), { code: 'import_apply_permission_revoked' })
   const queue = load('queue.ts', {
     './index': {},
+    // queue.ts registers the inline fallback runner at module load; this
+    // test drives the CONSUMER, so the registration just has to not throw.
+    './lib/queueDispatch': { registerInlineImportRunner: () => {} },
     './lib/db': { getDb: () => activeState.db },
     './lib/importEngine': {
       runImportAnalyze: async () => {},
@@ -250,6 +264,8 @@ async function main() {
   retried = 0
   const transientQueue = load('queue.ts', {
     './index': {},
+    // Same registration-only stub as the permanent-failure queue above.
+    './lib/queueDispatch': { registerInlineImportRunner: () => {} },
     './lib/db': { getDb: () => activeState.db },
     './lib/importEngine': {
       runImportAnalyze: async () => {},

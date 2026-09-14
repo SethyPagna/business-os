@@ -198,6 +198,10 @@ function loadImportRoute(state) {
     '../lib/cache': { bumpVersion: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     '../lib/importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3, buildImageDisplayName: () => 'image.png' },
+    // Real: the approve/apply routes enqueue through dispatchImportWork now,
+    // and the permissive `fallback` below would swallow the send -- making
+    // state.queue stay empty and the "did it enqueue" assertions meaningless.
+    '../lib/queueDispatch': loadTs('lib/queueDispatch.ts'),
     '../index': {},
   }
   const fallback = permissiveModule()

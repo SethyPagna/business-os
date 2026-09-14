@@ -6,7 +6,7 @@ import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from 
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, PREFLIGHT_MAX_ROWS, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { readCentralDirectory, extractZipEntry, isRealFileEntry, ZipFormatError } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
 import { bumpVersion } from '../lib/cache'
@@ -16,6 +16,8 @@ import { importJobFullDeleteStatements, importJobStagingDeleteStatements } from 
 import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere, buildUnresolvedProductReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
+import { dispatchImportWork } from '../lib/queueDispatch'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -658,7 +660,13 @@ app.post('/:id/preflight', async (c) => {
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
   try {
-    const loaded = await loadAndClassify(c.env, id, PREFLIGHT_MAX_ROWS)
+    // Tier-aware sample size. This classify pass runs SYNCHRONOUSLY inside
+    // one HTTP request with a browser waiting, so it is the one import step
+    // with no queue continuation to fall back on -- on Free it has to fit a
+    // 10 ms invocation. The module-level PREFLIGHT_MAX_ROWS export keeps its
+    // Paid value; see lib/planTier.ts's preflightMaxRows.
+    const preflightMaxRows = getPlanLimits(c.env).preflightMaxRows
+    const loaded = await loadAndClassify(c.env, id, preflightMaxRows)
     if (!loaded) return c.json({ success: false, error: 'Upload a CSV before previewing this import' }, 400)
     const counts = { create: 0, update: 0, skip: 0, error: 0 }
     for (const r of loaded.results) counts[r.action] += 1
@@ -676,8 +684,8 @@ app.post('/:id/preflight', async (c) => {
     // and `total` are left in the response too (harmless extra fields) in
     // case any other caller still reads them.
     //
-    // This only ever checks the first PREFLIGHT_MAX_ROWS rows (see that
-    // constant's comment in importEngine.ts) -- a synchronous HTTP request
+    // This only ever checks the first preflightMaxRows rows (see that
+    // limit's comment in lib/planTier.ts) -- a synchronous HTTP request
     // can't chunk itself across a person's browser the way the queued
     // analyze/apply phases now do. `partial`/`totalRowsInFile` let the
     // frontend say so rather than silently implying every row was checked.
@@ -737,7 +745,12 @@ app.post('/:id/preflight', async (c) => {
       // quick check never looked at (the real, complete check is the
       // queued analyze phase after POST /:id/start). Under the cap =>
       // this preflight covered the entire file.
-      partial: loaded.results.length >= PREFLIGHT_MAX_ROWS,
+      partial: loaded.results.length >= preflightMaxRows,
+      // The cap that actually applied, so "partial" is never a bare flag the
+      // UI has to explain with a hard-coded number that may not be this
+      // deployment's. On Free this is 125, not 500.
+      maxCheckedRows: preflightMaxRows,
+      planTier: resolvePlanTier(c.env),
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Failed to preflight import job' }, 400)
@@ -1144,7 +1157,7 @@ app.post('/:id/start', async (c) => {
   if (!csvCount?.n) return c.json({ success: false, error: 'Upload a CSV before starting the import' }, 400)
 
   await db.prepare(`UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id })
-  await c.env.IMPORT_QUEUE.send({ jobId: id, kind: 'analyze' })
+  await dispatchImportWork(c.env, { jobId: id, kind: 'analyze' })
   const queued = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_start', id, job, queued || null, { source: 'api', mode: 'analyze' })
   return c.json({ success: true, job: serializeJob(queued || job) })
@@ -1235,7 +1248,7 @@ app.post('/:id/approve', async (c) => {
   if (approval.changes !== 1) {
     return c.json({ success: false, error: 'Import status changed before approval. Refresh and review it again.' }, 409)
   }
-  await c.env.IMPORT_QUEUE.send({ jobId: id, kind: 'apply' })
+  await dispatchImportWork(c.env, { jobId: id, kind: 'apply' })
   const queued = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_approve', id, job, queued || null, { source: 'api', mode: 'apply' })
   return c.json({ success: true, job: serializeJob(queued || job) })
@@ -1368,7 +1381,7 @@ app.post('/:id/retry', async (c) => {
       policy_json = COALESCE(@policy, policy_json), updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
   `).run({ id, policy: mode === 'apply' ? JSON.stringify(policy) : null })
-  await c.env.IMPORT_QUEUE.send({ jobId: id, kind: mode })
+  await dispatchImportWork(c.env, { jobId: id, kind: mode })
   const queued = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_retry', id, job, queued || null, { source: 'api', mode })
   return c.json({ success: true, job: serializeJob(queued || job) })

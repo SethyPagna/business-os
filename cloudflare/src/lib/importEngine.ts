@@ -56,6 +56,8 @@ import { planReconcileBranchSnapshot } from './productBatches'
 
 import type { Env } from '../index'
 import { getDb, type D1Compat } from './db'
+import { getPlanLimits } from './planTier'
+import { chunkRowsForAttempt, dispatchImportWork } from './queueDispatch'
 import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
 import {
   parseCsvRows,
@@ -499,7 +501,11 @@ export const ROWS_PER_IMPORT_CHUNK = 600
 // response), so it only ever classifies a bounded sample for a quick
 // sanity check. The real, authoritative, complete pass is the (chunked)
 // analyze phase that runs after POST /:id/start.
-export const PREFLIGHT_MAX_ROWS = 500
+//
+// The sample size itself moved to lib/planTier.ts (preflightMaxRows: paid
+// 500, free 125) and is read per request at that route. It is NOT kept as a
+// second exported copy here: this route was its only reader, and an export
+// nobody reads is a number that drifts from the one in force.
 
 // Phase timing, stored on the job row (summary_json.timings) so a slow
 // import can actually be diagnosed after the fact -- which pipeline phase
@@ -1231,7 +1237,7 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
   const isDone = window.done || cappedEarly
 
   await saveMaterializeState(db, jobId, state, isDone)
-  await env.IMPORT_QUEUE.send({ jobId, kind })
+  await dispatchImportWork(env, { jobId, kind })
   return true
 }
 
@@ -4117,7 +4123,8 @@ async function readSalesGroupWindow(
   `).all<{ group_key: string; first_seq: number }>({ id: jobId, limit, cursor })
   if (!keyRows.length) return []
 
-  // `limit` is ROWS_PER_IMPORT_CHUNK (150), so this list is always over
+  // `limit` is the caller's per-tier rowsPerImportChunk (600 paid / 150
+  // free -- see lib/planTier.ts), so this list is always over
   // D1's 100-parameter ceiling on its own -- chunked, with @id reserved.
   const dataRows: Array<{ group_key: string; data_json: string }> = []
   for (const slice of chunkForBinding(keyRows.map((row) => row.group_key), 1)) {
@@ -4214,8 +4221,16 @@ async function persistChunkResults(db: D1Compat, jobId: string, phase: 'analyze'
 // awaiting_review. queue.ts acks the CURRENT message after this returns
 // either way -- the continuation is a separate, fresh message, not a retry
 // of this one.
-export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?: number): Promise<void> {
+export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?: number, attempt?: number): Promise<void> {
   const db = getDb(env)
+  // Per-request shadow of the module-level ceilings. The exported constants
+  // keep their Paid values, so every existing reader and test is unaffected;
+  // THIS is what the running code uses, so a Free deployment actually gets
+  // the Free-sized numbers instead of throwing partway through a chunk.
+  // See lib/planTier.ts.
+  const limits = getPlanLimits(env)
+  // ...narrowed further on a redelivery: see chunkRowsForAttempt.
+  const chunkRows = chunkRowsForAttempt(limits.rowsPerImportChunk, attempt)
   const sw = makeStopwatch()
   const jobRow = await db.prepare(`SELECT status, cancel_requested FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number }>({ id: jobId })
   if (!jobRow) throw new Error('Import job not found')
@@ -4274,7 +4289,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     // a chance. RECONCILE keeps the strict cap (its delta math needs one
     // live-stock snapshot -- see applyStockActionsJob's own guard).
     const stockActionRowCap = meta.type === 'stock_actions'
-      ? (getUnifiedStockMode(meta.policyJson) === 'direct' ? STOCK_ACTION_DIRECT_MAX_ROWS : STOCK_ACTION_MAX_ROWS)
+      ? (getUnifiedStockMode(meta.policyJson) === 'direct' ? STOCK_ACTION_DIRECT_MAX_ROWS : limits.stockActionMaxRows)
       : Infinity
     if (meta.type === 'stock_actions' && meta.totalRows > stockActionRowCap) {
       throw new Error(`This stock import has ${meta.totalRows} rows; split it into files of at most ${stockActionRowCap} rows before importing.`)
@@ -4289,7 +4304,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     // shape on the import path.
     const totalUnits = isSales ? await countSalesGroups(db, jobId) : meta.totalRows
     const windowEntries = isSales
-      ? await readSalesGroupWindow(db, jobId, decisions, cursor, ROWS_PER_IMPORT_CHUNK)
+      ? await readSalesGroupWindow(db, jobId, decisions, cursor, chunkRows)
       : null
 
     let imageMatchCache = state.imageMatch
@@ -4300,7 +4315,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
 
     const windowRows = windowEntries
       ? windowEntries.flatMap(([, rows]) => rows)
-      : await readMaterializedWindow(db, jobId, cursor, ROWS_PER_IMPORT_CHUNK, decisions)
+      : await readMaterializedWindow(db, jobId, cursor, chunkRows, decisions)
     const groupIndexByRowNumber = windowEntries
       ? new Map(windowEntries.flatMap(([, rows], i) => rows.map((r) => [r._rowNumber, cursor + i] as const)))
       : undefined
@@ -4348,7 +4363,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
       await db.prepare(`UPDATE import_jobs SET total_rows = @total, processed_rows = @processed, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
         .run({ id: jobId, total: totalUnits, processed: nextCursor })
       console.log('[import-timing] analyze chunk', jobId, { cursor, nextCursor, totalUnits, ...sw.marks })
-      await env.IMPORT_QUEUE.send({ jobId, kind: 'analyze' })
+      await dispatchImportWork(env, { jobId, kind: 'analyze' })
       return
     }
 
@@ -4986,9 +5001,10 @@ export async function applyStockActionsJob(
   // across self-enqueued continuation invocations — no total-unit ceiling,
   // only per-invocation budgets, with the writers' idempotency seals making
   // crash/redelivery resume exact.
+  const limits = getPlanLimits(env)
   if (getUnifiedStockMode(policyJson) === 'reconcile') {
-    if (totalRows > STOCK_ACTION_MAX_ROWS) {
-      throw new Error(`This stock import has ${totalRows} rows; reconcile mode checks every row against one live-stock snapshot, so split it into files of at most ${STOCK_ACTION_MAX_ROWS} rows before importing.`)
+    if (totalRows > limits.stockActionMaxRows) {
+      throw new Error(`This stock import has ${totalRows} rows; reconcile mode checks every row against one live-stock snapshot, so split it into files of at most ${limits.stockActionMaxRows} rows before importing.`)
     }
     return await applyStockActionsSinglePass(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, actor)
   }
@@ -5051,8 +5067,9 @@ async function applyStockActionsSinglePass(
   }
 
   const unitCount = saleGroups.size + singles.length
-  if (unitCount > STOCK_ACTION_MAX_UNITS) {
-    throw new Error(`This stock import resolves to ${unitCount} actions; split it into files of at most ${STOCK_ACTION_MAX_UNITS} actions before importing.`)
+  const singlePassMaxUnits = getPlanLimits(env).stockActionMaxUnits
+  if (unitCount > singlePassMaxUnits) {
+    throw new Error(`This stock import resolves to ${unitCount} actions; split it into files of at most ${singlePassMaxUnits} actions before importing.`)
   }
 
   const fail = (r: StockActionImportResult, message: string) => { r.action = 'error'; r.message = message }
@@ -5136,6 +5153,9 @@ async function applyStockActionsContinuation(
   totalRows: number,
   actor: SessionUser,
 ): Promise<{ applied: number; failed: number }> {
+  // Per-invocation dispatch budget, tier-aware -- see lib/planTier.ts. The
+  // module-level STOCK_ACTION_* exports keep their Paid values.
+  const limits = getPlanLimits(env)
   const decisions = getDecisionMap(policyJson)
   const { cursor, state } = await getChunkState(db, jobId)
   if (!state.startedAtMs) state.startedAtMs = startedAtMs
@@ -5226,7 +5246,7 @@ async function applyStockActionsContinuation(
     await db.prepare(`UPDATE import_jobs SET processed_rows = @n, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
       .run({ id: jobId, n: Math.min(nextCursor, totalRows) })
     console.log('[import-timing] stock-action classify window', jobId, { cursor, nextCursor, totalRows, classifyDone, ...sw.marks })
-    await env.IMPORT_QUEUE.send({ jobId, kind: 'apply' })
+    await dispatchImportWork(env, { jobId, kind: 'apply' })
     return { applied: 0, failed: 0 }
   }
 
@@ -5282,7 +5302,7 @@ async function applyStockActionsContinuation(
     pendingLotKeys.clear()
   }
 
-  outer: while (unitsDispatched < STOCK_ACTION_MAX_UNITS) {
+  outer: while (unitsDispatched < limits.stockActionMaxUnits) {
     const batch = await db.staging.prepare(`
       SELECT row_number, group_index, result_json FROM import_job_rows
       WHERE job_id = @id AND phase = 'apply' AND row_number > @after
@@ -5291,7 +5311,7 @@ async function applyStockActionsContinuation(
     if (!batch.length) { moreRows = false; break }
 
     for (const record of batch) {
-      if (unitsDispatched >= STOCK_ACTION_MAX_UNITS) break outer
+      if (unitsDispatched >= limits.stockActionMaxUnits) break outer
       after = record.row_number
       const r = parseRow(record.result_json)
       if (!r) continue
@@ -5345,7 +5365,7 @@ async function applyStockActionsContinuation(
         if (pendingLotKeys.has(lotKey)) await flushAdds()
         pendingLotKeys.add(lotKey)
         pendingAdds.push(runSingle(r))
-        if (pendingAdds.length >= STOCK_ACTION_ADD_CONCURRENCY) await flushAdds()
+        if (pendingAdds.length >= limits.stockActionAddConcurrency) await flushAdds()
       } else {
         // Create/noop paths remain ordered. A create can establish identity
         // used by a later row, while a noop has no I/O to parallelize.
@@ -5363,7 +5383,7 @@ async function applyStockActionsContinuation(
   if (moreRows) {
     await saveChunkState(db, jobId, cursor, state)
     console.log('[import-timing] stock-action dispatch window', jobId, { after, unitsDispatched, ...sw.marks })
-    await env.IMPORT_QUEUE.send({ jobId, kind: 'apply' })
+    await dispatchImportWork(env, { jobId, kind: 'apply' })
     return { applied: 0, failed: 0 }
   }
 
@@ -5506,8 +5526,12 @@ export async function runD1BatchGroupsInChunks(
 // needed beyond the existing in-window same-batch dedup below (which only
 // has to cover duplicates within one ~150-row window, same as it always
 // covered duplicates within one batch).
-export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: number): Promise<{ applied: number; failed: number }> {
+export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: number, attempt?: number): Promise<{ applied: number; failed: number }> {
   const db = getDb(env)
+  // Same per-request shadow as runImportAnalyze -- see its comment -- and
+  // the same redelivery back-off.
+  const limits = getPlanLimits(env)
+  const chunkRows = chunkRowsForAttempt(limits.rowsPerImportChunk, attempt)
   const sw = makeStopwatch()
   const jobRow = await db.prepare(`SELECT status, cancel_requested, started_at FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number; started_at: string | null }>({ id: jobId })
   if (!jobRow) throw new Error('Import job not found')
@@ -5585,7 +5609,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const isSalesJob = job.type === 'sales'
     const totalUnits = isSalesJob ? await countSalesGroups(db, jobId) : totalRows.n
     const groupEntries = isSalesJob
-      ? await readSalesGroupWindow(db, jobId, decisions, cursor, ROWS_PER_IMPORT_CHUNK)
+      ? await readSalesGroupWindow(db, jobId, decisions, cursor, chunkRows)
       : null
 
     let imageMatchCache = state.imageMatch
@@ -5634,7 +5658,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // Already windowed by readSalesGroupWindow's LIMIT/OFFSET -- slicing by
     // `cursor` again here would window it twice and skip whole receipts.
     const windowEntries = groupEntries
-    const windowRows = windowEntries ? windowEntries.flatMap(([, rows]) => rows) : await readMaterializedWindow(db, jobId, cursor, ROWS_PER_IMPORT_CHUNK, decisions)
+    const windowRows = windowEntries ? windowEntries.flatMap(([, rows]) => rows) : await readMaterializedWindow(db, jobId, cursor, chunkRows, decisions)
     const windowUnitCount = windowEntries ? windowEntries.length : windowRows.length
     const groupIndexByRowNumber = windowEntries
       ? new Map(windowEntries.flatMap(([, rows], i) => rows.map((r) => [r._rowNumber, cursor + i] as const)))
@@ -6430,8 +6454,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // Loyalty accrual is the operator's import-time choice (default OFF for
       // historical data). Read it once per chunk from the reviewed policy.
       const accrueLoyalty = getSalesImportAccrueLoyalty(job.policy_json)
-      for (let offset = 0; offset < actionable.length; offset += HISTORICAL_SALES_IMPORT_CONCURRENCY) {
-        const receiptWindow = actionable.slice(offset, offset + HISTORICAL_SALES_IMPORT_CONCURRENCY)
+      // Tier-aware: paid 12, free 6 -- see lib/planTier.ts. The module-level
+      // export keeps its Paid value for existing readers.
+      const historicalSalesConcurrency = limits.historicalSalesImportConcurrency
+      for (let offset = 0; offset < actionable.length; offset += historicalSalesConcurrency) {
+        const receiptWindow = actionable.slice(offset, offset + historicalSalesConcurrency)
         const settled = await Promise.allSettled(receiptWindow.map(async (r) => {
           await applyHistoricalSaleImport(db, {
             jobId,
@@ -6463,7 +6490,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       await db.prepare(`UPDATE import_jobs SET processed_rows = processed_rows + @applied, failed_rows = failed_rows + @failed, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
         .run({ id: jobId, applied: actionable.length, failed: chunkFailed })
       console.log('[import-timing] apply chunk', jobId, { cursor, nextCursor, totalUnits, ...sw.marks })
-      await env.IMPORT_QUEUE.send({ jobId, kind: 'apply' })
+      await dispatchImportWork(env, { jobId, kind: 'apply' })
       return { applied: actionable.length, failed: chunkFailed }
     }
 

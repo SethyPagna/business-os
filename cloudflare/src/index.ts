@@ -81,8 +81,13 @@ export type Env = {
   // and nothing publicly writable is created on the Cloudinary side.
   CLOUDINARY_API_KEY?: string
   CLOUDINARY_API_SECRET?: string
-  IMPORT_QUEUE: Queue
-  MEDIA_QUEUE: Queue
+  // Optional so the type tells the truth: a deployment whose config lost its
+  // [[queues.producers]] block still runs, it just has no binding here. The
+  // producers no longer touch these directly -- import work goes through
+  // lib/queueDispatch.ts (queued when bound, inline when not) and image
+  // normalization through lib/imageAudit.ts, which already checked.
+  IMPORT_QUEUE?: Queue
+  MEDIA_QUEUE?: Queue
   // Optional (wrangler.toml [[queues.producers]] binding) -- see
   // lib/backup.ts's createCloudflareBackup/continueCloudflareBackupAssetCopy
   // for the queue-driven full-asset-coverage backup path (Part 122).
