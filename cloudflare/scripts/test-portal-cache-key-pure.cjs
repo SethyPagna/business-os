@@ -45,6 +45,7 @@ async function main() {
   const params = {
     page: '2', pageSize: '100', query: 'cream', q: 'lotion', brand: 'Brand A',
     category: 'Skin', branchId: '1,1', branch_id: '2', stockState: 'out', initial: 'C', promo: 'promoted',
+    productId: '7',
   }
   for (const [key, value] of Object.entries(params)) {
     const changed = await get(search + '?' + new URLSearchParams({ [key]: value }))
