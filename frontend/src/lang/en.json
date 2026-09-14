@@ -5508,6 +5508,7 @@
   "complete_stock_session_changes": "Post stock changes",
   "confirm_complete_stock_session_mixed": "Post {lines} stock line(s) — {adds} add · {removes} remove · {sets} set — for {branch}?",
   "fast_stock_reason_hint": "Written on each line's stock movement exactly as typed. Leave blank to use the session label.",
+  "receive_batch_reason_hint": "Written on this receipt's stock movement exactly as typed. Leave blank to use the received-date label.",
   "fast_stock_mode_hint": "Add receives stock into a received date. Remove takes stock out — pick the received date, or the oldest received dates drain first. Set makes the branch total exactly this quantity; the difference posts as an add (supplier and cost required) or a remove.",
   "fast_stock_auto_lot": "Oldest received dates first",
   "fast_stock_set_hint": "Set makes the branch total exactly this quantity. The difference posts as an add (supplier and cost required) or a remove.",

@@ -14,6 +14,8 @@ import { getProductBatches, receiveBatchStock, type ProductBatch } from '../../a
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
+import StockReasonField from '../shared/StockReasonField.tsx'
+import { useSavedStockReasons } from '../../utils/useSavedStockReasons.ts'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 
 function todayIsoDate(): string {
@@ -70,6 +72,9 @@ export default function ReceiveBatchModal({
   const [receivedDate, setReceivedDate] = useState(todayIsoDate())
   const [expiryDate, setExpiryDate] = useState('')
   const [notes, setNotes] = useState('')
+  // P3-L2: why this stock came in, written on the receipt's own movement as
+  // typed. Blank keeps the Worker's 'Stock received (<lot>)' label.
+  const [reason, setReason] = useState('')
   // Supplier + cost + paid/on-credit (migrations 0062/0065): who this lot
   // came from, what one unit cost, and — when on credit — the due date the
   // admin reminder is built on. D5a: the supplier is a real picker now --
@@ -93,6 +98,7 @@ export default function ReceiveBatchModal({
   const [batchChoice, setBatchChoice] = useState<'new' | number>('new')
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
   const [batchLoading, setBatchLoading] = useState(false)
+  const savedReasons = useSavedStockReasons()
 
   useEffect(() => {
     const productId = Number(product?.id)
@@ -124,6 +130,7 @@ export default function ReceiveBatchModal({
     setReceivedDate(todayIsoDate())
     setExpiryDate('')
     setNotes('')
+    setReason('')
     setSupplierName('')
     setSupplierId(null)
     setUnitCost('')
@@ -135,7 +142,7 @@ export default function ReceiveBatchModal({
   // in-progress stock work -- page navigation must ask, not strand it.
   const dirtyStateRef = useRef(false)
   dirtyStateRef.current = Boolean(product) && (
-    quantity !== '1' || expiryDate !== '' || notes !== '' ||
+    quantity !== '1' || expiryDate !== '' || notes !== '' || reason !== '' ||
     supplierName !== '' || unitCost !== '' || paymentStatus !== '' || creditDueDate !== ''
   )
   // Part 388 "Canva-level" persistence: typed values survive a crash,
@@ -155,6 +162,7 @@ export default function ReceiveBatchModal({
         if (draft.receivedDate) setReceivedDate(draft.receivedDate)
         if (draft.expiryDate !== undefined) setExpiryDate(draft.expiryDate)
         if (draft.notes !== undefined) setNotes(draft.notes)
+        if (draft.reason !== undefined) setReason(draft.reason)
         if (draft.supplierName !== undefined) setSupplierName(draft.supplierName)
         // D5a: the contact link rides with the drafted name. Only restored
         // when a name is drafted too -- an id with no name would be
@@ -180,9 +188,9 @@ export default function ReceiveBatchModal({
 
   useEffect(() => {
     if (!product || !dirtyStateRef.current) return
-    return scheduleWorkDraftWrite(draftKey, { quantity, receivedDate, expiryDate, notes, supplierName, supplierId, unitCost, paymentStatus, creditDueDate }, 600)
+    return scheduleWorkDraftWrite(draftKey, { quantity, receivedDate, expiryDate, notes, reason, supplierName, supplierId, unitCost, paymentStatus, creditDueDate }, 600)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quantity, receivedDate, expiryDate, notes, supplierName, supplierId, unitCost, paymentStatus, creditDueDate])
+  }, [quantity, receivedDate, expiryDate, notes, reason, supplierName, supplierId, unitCost, paymentStatus, creditDueDate])
 
   // S4-21: this modal already declares its own in-progress state to the
   // nav guard above (`receive-batch-<id>`), so the dismissal guard asks the
@@ -191,7 +199,7 @@ export default function ReceiveBatchModal({
   // "Discard & Leave" runs. A null product yields an unregistered key,
   // which the guard treats as clean (fails open, never blocks a close).
   const currentDraft = () => ({
-    quantity, receivedDate, expiryDate, notes, supplierName, supplierId,
+    quantity, receivedDate, expiryDate, notes, reason, supplierName, supplierId,
     unitCost, paymentStatus, creditDueDate,
   })
   const preserveAndMinimize = product && onMinimize ? () => {
@@ -281,6 +289,8 @@ export default function ReceiveBatchModal({
         receivedDate: batchChoice === 'new' ? (receivedDate || null) : null,
         batchId: typeof batchChoice === 'number' ? batchChoice : null,
         notes: notes.trim() || null,
+        // As typed; blank sends null so the Worker keeps its own lot label.
+        reason: reason.trim() || null,
         // Mirrors the picker's visibility: locked (lot already attributed)
         // sends nothing, so the wire never carries a choice the UI
         // couldn't offer.
@@ -489,6 +499,18 @@ export default function ReceiveBatchModal({
               ) : null}
             </div>
           </div>
+          {/* P3-L2: the same reason control every other stock write renders.
+              Above Notes because it is what the ledger shows; Notes stays the
+              free-form receipt detail. */}
+          <StockReasonField
+            id="receive-batch-reason"
+            labelClassName="text-[11px] font-medium text-gray-600 dark:text-gray-400"
+            label={<span className="inline-flex items-center gap-1">{tr('reason', 'Reason')}<InfoHint label={tr('reason', 'Reason')} text={tr('receive_batch_reason_hint', "Written on this receipt's stock movement exactly as typed. Leave blank to use the received-date label.")} /></span>}
+            value={reason}
+            onChange={setReason}
+            savedReasons={savedReasons}
+            placeholder={tr('reason_placeholder', 'e.g. Physical count, Damaged goods…')}
+          />
           <label className="block">
             <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('notes') || 'Notes'}</span>
             <textarea

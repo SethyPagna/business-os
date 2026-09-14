@@ -24,6 +24,7 @@ const batchesRoute = read('../../cloudflare/src/routes/batches.ts')
 const inventoryRoute = read('../../cloudflare/src/routes/inventory.ts')
 const sessionsSection = read('../src/components/products/StockInSessionsSection.tsx')
 const productsSession = read('../src/components/products/CreateProductsSessionModal.tsx')
+const receiveModal = read('../src/components/inventory/ReceiveBatchModal.tsx')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
 
@@ -125,6 +126,29 @@ runTest("the Add/Create Products session asks for a reason and its payload build
   assert.match(productsSession, /const \[reason, setReason\] = useState\(draft\?\.reason \|\| ''\)/)
   // Visible where the line is, same as the fast flow's queue.
   assert.match(productsSession, /\{row\.reason \? <span className="block break-words text-\[10px\] text-gray-500 dark:text-gray-400">\{row\.reason\}<\/span> : null\}/)
+})
+
+runTest("the branch Receive stock modal asks for a reason and sends it", () => {
+  // The third receipt surface (Branches hub -> Receive stock). POST /api/batches
+  // has taken an optional reason since the fast-flow commit; this modal is the
+  // other caller of that wire and had no way to give one.
+  assert.match(receiveModal, /import StockReasonField from '\.\.\/shared\/StockReasonField\.tsx'/)
+  assert.match(receiveModal, /import \{ useSavedStockReasons \} from '\.\.\/\.\.\/utils\/useSavedStockReasons\.ts'/)
+  assert.match(receiveModal, /<StockReasonField\n\s+id="receive-batch-reason"[^]*?savedReasons=\{savedReasons\}/)
+  assert.doesNotMatch(receiveModal, /savedReasons\.map/, 'no second copy of the chip markup')
+  // Blank sends null so the Worker keeps its own "Stock received (<lot>)" label.
+  assert.match(receiveModal, /await receiveBatchStock\(\{[^]*?reason: reason\.trim\(\) \|\| null,[^]*?\}\)/)
+  // In-progress work: dirty guard, draft write, draft restore, and the reset
+  // that runs when another product is opened -- same as every other field.
+  assert.match(receiveModal, /notes !== '' \|\| reason !== ''/)
+  assert.match(receiveModal, /scheduleWorkDraftWrite\(draftKey, \{ quantity, receivedDate, expiryDate, notes, reason,/)
+  assert.match(receiveModal, /if \(draft\.reason !== undefined\) setReason\(draft\.reason\)/)
+  assert.match(receiveModal, /setNotes\(''\)\r?\n\s+setReason\(''\)/)
+  for (const key of ['receive_batch_reason_hint']) {
+    assert.equal(typeof en[key], 'string', `en.${key}`)
+    assert.equal(typeof km[key], 'string', `km.${key}`)
+    assert.match(km[key], /[ក-៿]/, `km.${key} is Khmer`)
+  }
 })
 
 runTest('Worker parity: /inventory/adjust still refuses a missing reason; /batches takes an optional one', () => {
