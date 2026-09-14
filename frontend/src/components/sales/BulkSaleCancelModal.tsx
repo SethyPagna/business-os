@@ -64,7 +64,7 @@ export default function BulkSaleCancelModal({ sales, saving = false, translate, 
           <div><h2 id={titleId} className="font-bold">{translate('cancel_sale_title', 'Cancel sales', 'បោះបង់ការលក់')}</h2><p className="text-xs text-gray-400">{translate('bulk_cancel_review_hint', 'Review every sale before cancelling.', 'ពិនិត្យការលក់នីមួយៗមុនពេលបោះបង់។')}</p></div>
           <button ref={closeButtonRef} type="button" className="flex h-11 w-11 items-center justify-center rounded-lg" onClick={requestClose} disabled={saving} aria-label={translate('close', 'Close', 'បិទ')}><X className="h-4 w-4" /></button>
         </div>
-        <div className="modal-scroll max-h-[65vh] space-y-2 overflow-y-auto p-4">
+        <div className="modal-scroll max-h-[calc(65*var(--app-vh))] space-y-2 overflow-y-auto p-4">
           {drafts.map((draft, index) => {
             const open = openId === draft.id
             const complete = !!draft.cancel_reason && (draft.cancel_reason !== 'other' || !!draft.cancel_note.trim())

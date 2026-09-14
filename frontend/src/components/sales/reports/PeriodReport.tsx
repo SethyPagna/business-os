@@ -159,7 +159,7 @@ export default function PeriodReport(p: ReportViewProps) {
           anchorRef.current = el
           setOpenRow((cur) => (cur?.period === row.period ? null : row))
         }}
-        maxHeight="70vh"
+        maxHeight="calc(70 * var(--app-vh))"
       />
       <Fold
         className="reports-fold-panel"

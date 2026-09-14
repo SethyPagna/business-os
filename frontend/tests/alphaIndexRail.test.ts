@@ -480,7 +480,10 @@ runTest('the admin portal EDITOR PREVIEW gets a brand index too, not a carve-out
   )
   // The preview variant must not be viewport-fixed and must not portal out of
   // the panel -- either one puts it over the admin's own chrome.
-  assert.match(rail, /edge === 'inline'\s*\?\s*'relative max-h-\[60vh\]'/, "the inline variant must not be `fixed`")
+  // The cap's UNIT is not this assertion's subject -- it moved to the shared
+  // --app-vh helper (styles/main.css) so it tracks the viewport iOS really
+  // shows. `relative` rather than `fixed`, plus the presence of a cap, is.
+  assert.match(rail, /edge === 'inline'\s*\?\s*'relative max-h-\[[^']+\]'/, "the inline variant must not be `fixed`")
   const inlineBranch = /if \(edge === 'inline'\) \{[\s\S]*?\n  \}/.exec(rail)
   assert.ok(inlineBranch, 'the inline variant needs its own render branch')
   assert.doesNotMatch(inlineBranch![0], /createPortal/, 'the preview rail must stay inside the preview panel')

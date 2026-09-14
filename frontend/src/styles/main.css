@@ -816,6 +816,26 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .h-screen { height: 100vh; height: 100dvh; }
 .min-h-screen { min-height: 100vh; min-height: 100dvh; }
 
+/* ONE definition of "1% of the viewport height a phone can actually show",
+   for the ~30 places that cannot use the two overrides above because they are
+   arbitrary Tailwind values (`max-h-[70vh]`), compound (`min(28rem,70vh)`) or
+   inline styles. Every one of them measured against plain `vh`, i.e. against
+   the LARGER "as if the browser chrome were hidden" viewport, so a dropdown
+   or sheet capped at 70vh rendered taller than the visible area on iOS and
+   its last rows sat under Safari's toolbar or the app's bottom nav.
+
+   This deliberately does NOT use the `a: 100vh; a: 100dvh` double-declaration
+   pattern the rules above use, and it cannot: custom property values are
+   stored as unparsed token streams, so an engine with no `dvh` support would
+   still ACCEPT `--app-vh: 1dvh` and keep it, and every consumer would then
+   compute to nothing. @supports is the only guard that actually tests the
+   unit. iOS Safari has had dvh since 15.4; the 1vh value is the fallback for
+   anything older. */
+:root { --app-vh: 1vh; }
+@supports (height: 1dvh) {
+  :root { --app-vh: 1dvh; }
+}
+
 /* iOS standalone mode can change the visual viewport when browser chrome or
    the keyboard moves. Keep the app shell pinned to that visible viewport and
    prevent flex descendants from manufacturing a wider page. */

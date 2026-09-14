@@ -65,7 +65,7 @@ export default function ProductDescriptionDetailModal({
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[85vh] sm:max-w-2xl sm:rounded-2xl sm:pb-0 dark:bg-gray-800"
+        className="flex max-h-[calc(88*var(--app-vh))] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[calc(85*var(--app-vh))] sm:max-w-2xl sm:rounded-2xl sm:pb-0 dark:bg-gray-800"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">

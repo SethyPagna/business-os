@@ -303,10 +303,10 @@ export default function AlphaIndexRail({
   // list FAB (z-50); 'sidebar' keeps the admin's 220px offset on md+;
   // 'inline' owns no position of its own -- the sticky track below places it.
   const edgeClass = edge === 'inline'
-    ? 'relative max-h-[60vh]'
+    ? 'relative max-h-[calc(60*var(--app-vh))]'
     : edge === 'screen'
-      ? 'fixed top-1/2 z-30 -translate-y-1/2 right-[calc(0.5rem+env(safe-area-inset-right))] max-h-[60vh]'
-      : 'fixed top-1/2 z-30 -translate-y-1/2 right-2 max-h-[70vh] md:left-[228px] md:right-auto'
+      ? 'fixed top-1/2 z-30 -translate-y-1/2 right-[calc(0.5rem+env(safe-area-inset-right))] max-h-[calc(60*var(--app-vh))]'
+      : 'fixed top-1/2 z-30 -translate-y-1/2 right-2 max-h-[calc(70*var(--app-vh))] md:left-[228px] md:right-auto'
 
   // The STOREFRONT rail is rendered through a portal, like every other float
   // in the app: it is viewport-`fixed` inside a shell that carries

@@ -118,9 +118,12 @@ runTest('the pages layer is anchored to the chrome, not to the bottom of the vie
   // The pre-fix shape, kept as a negative control: a bottom-anchored sheet
   // capped at 70vh cannot be flush with a top-anchored bar, and the band it
   // leaves is where the page you backed out of showed through.
-  assert.doesNotMatch(layer, /inline \? '[^']*max-h-\[70vh\]/, 'pages mode must not cap the layer at 70vh')
-  assert.match(layer, /\$\{inline \? 'bos-nav-chrome bos-nav-layer' : 'max-h-\[70vh\][^']*'\}/,
-    'only the legacy sections-mode sheet keeps the 70vh cap')
+  // Unit-agnostic on purpose: the cap moved to the shared --app-vh helper in
+  // styles/main.css so it measures the viewport iOS actually shows. What these
+  // two pin is WHICH mode carries a viewport cap, never its spelling.
+  assert.doesNotMatch(layer, /inline \? '[^']*max-h-\[/, 'pages mode must not cap the layer against the viewport at all')
+  assert.match(layer, /\$\{inline \? 'bos-nav-chrome bos-nav-layer' : 'max-h-\[[^\]]+\][^']*'\}/,
+    'only the legacy sections-mode sheet keeps the viewport cap')
   assert.match(layer, /\{inline \? null : <div className="fixed inset-0 z-30 bg-black\/40 md:hidden"/,
     'an opaque full-height layer needs no scrim; the legacy sheet still gets one')
   assert.match(css, /\.bos-nav-layer \{[^}]*background-color: var\(--nav-ground\)/,
