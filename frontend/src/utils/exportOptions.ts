@@ -9,6 +9,8 @@
 // ships. "Excel" uses the existing xlsxExport bridge; CSV the existing
 // csv utils.
 
+import { openPrintPreviewWindow, printHtmlInHiddenFrame } from './printSurface.ts'
+
 export interface ExportColumn {
   key: string
   label: string
@@ -83,11 +85,16 @@ function escapeHtml(value: unknown): string {
 
 // The printable document. Kept as a pure string builder so the test can
 // assert structure + escaping without a window.
-export function buildPrintDocument({ title, subtitle, headers, rows }: {
+export function buildPrintDocument({ title, subtitle, headers, rows, autoPrint = true }: {
   title: string
   subtitle?: string
   headers: string[]
   rows: Array<Record<string, unknown>>
+  // The window path relies on the document printing itself once it has
+  // loaded. The hidden-frame path must NOT: printHtmlInHiddenFrame waits for
+  // fonts and images and then prints the frame itself, and two print() calls
+  // on one document mean two print sheets on iOS.
+  autoPrint?: boolean
 }): string {
   const headCells = headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')
   const bodyRows = rows.map((row) => `<tr>${headers.map((header) => `<td>${escapeHtml(row[header])}</td>`).join('')}</tr>`).join('\n')
@@ -107,18 +114,35 @@ export function buildPrintDocument({ title, subtitle, headers, rows }: {
 <table><thead><tr>${headCells}</tr></thead><tbody>
 ${bodyRows}
 </tbody></table>
-<script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 150); });</script>
+${autoPrint ? "<script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 150); });</script>" : ''}
 </body></html>`
 }
 
 // Opens the printable document; the platform print dialog's "Save as PDF"
-// is the PDF path. Returns false when the popup was blocked so the dialog
-// can tell the person instead of failing silently.
+// is the PDF path.
+//
+// Two delivery surfaces, exactly as printReceipt.ts uses: a second window
+// where the browser has one, and a hidden same-document iframe where it does
+// not. An installed iOS PWA has no address bar, no popup setting and hands
+// any window.open document to Safari outside the app, so the window path
+// alone meant "Print" did nothing at all on an iPhone or iPad. Returns false
+// only when neither surface exists, so the dialog can still tell the person
+// instead of failing silently.
 export function openPrintExport(input: { title: string; subtitle?: string; headers: string[]; rows: Array<Record<string, unknown>> }): boolean {
-  const printWindow = window.open('', '_blank')
-  if (!printWindow) return false
-  printWindow.document.open()
-  printWindow.document.write(buildPrintDocument(input))
-  printWindow.document.close()
+  const printWindow = openPrintPreviewWindow()
+  if (printWindow) {
+    printWindow.document.open()
+    printWindow.document.write(buildPrintDocument(input))
+    printWindow.document.close()
+    return true
+  }
+  if (typeof document === 'undefined' || !document.body) return false
+  // The same document, printed from this page. Not awaited: the caller is a
+  // synchronous menu action, and the frame prints (and cleans itself up) on
+  // its own; a failure there is reported to the console rather than as a
+  // false "blocked popup" message the person cannot act on.
+  void printHtmlInHiddenFrame(buildPrintDocument({ ...input, autoPrint: false })).catch((error) => {
+    console.error('[exportOptions] print frame failed', error)
+  })
   return true
 }
