@@ -6,9 +6,10 @@
 //      planUnreceiveBatchStock run on an identically seeded twin (same
 //      arithmetic, derived from the helper rather than hard-coded);
 //   2. the coordinator's literal expectations for the four pinned lots;
-//   3. attribution is cleared and the lot deactivated ONLY when the lot holds
-//      no positive branch_batch_stock (positive control: a whole-lot revert
-//      whose lot still holds units keeps supplier + stays active);
+//   3. the supplier and payment state stay on every lot; a whole-lot revert
+//      zeroes the figures and deactivates the lot ONLY when it holds no
+//      positive branch_batch_stock (positive control: a lot that still holds
+//      units stays active);
 //   4. a same-shaped lot that is not one of the pinned ids is untouched;
 //   5. a drifted pre-state (received_quantity moved) makes that pair a no-op;
 //   6. re-running the file changes nothing (idempotent), and the full chain
@@ -142,18 +143,13 @@ function scenario(name, lotStock) {
   assert.deepStrictEqual(
     [l56.received_quantity, l56.received_cost_usd, l56.supplier_name, l56.payment_status, l56.is_active],
     [1, 37.5, 'Lang', 'paid', 1], `${name}: 61156 -> 1 / 37.5, supplier + paid kept`)
-  for (const id of [61187, 61155]) {
+  for (const [id, supplier] of [[61187, 'srey now'], [61155, 'Lang']]) {
     const l = lot(a, id)
-    assert.deepStrictEqual([l.received_quantity, l.received_cost_usd, l.payment_status, l.credit_due_date], [0, 0, null, null],
-      `${name}: ${id} -> 0 / 0, payment cleared`)
-    if ((lotStock[id] ?? 0) > 0) {
-      assert.strictEqual(l.is_active, 1, `${name}: ${id} still holds stock -> stays active`)
-      assert.ok(l.supplier_id != null && l.supplier_name != null && l.unit_cost_usd != null && l.received_branch_id != null,
-        `${name}: ${id} still holds stock -> attribution kept`)
-    } else {
-      assert.deepStrictEqual([l.is_active, l.supplier_id, l.supplier_name, l.unit_cost_usd, l.received_branch_id], [0, null, null, null, null],
-        `${name}: ${id} empty everywhere -> attribution cleared, inactive`)
-    }
+    assert.deepStrictEqual(
+      [l.received_quantity, l.received_cost_usd, l.supplier_name, l.payment_status, l.unit_cost_usd != null, l.received_branch_id],
+      [0, 0, supplier, 'paid', true, 1], `${name}: ${id} -> 0 / 0, supplier and payment state kept`)
+    assert.strictEqual(l.is_active, (lotStock[id] ?? 0) > 0 ? 1 : 0,
+      `${name}: ${id} ${(lotStock[id] ?? 0) > 0 ? 'still holds stock -> stays active' : 'empty everywhere -> inactive'}`)
   }
   // The audit row carries the live pre-image (recovery source), not the header literals.
   const audit = a.prepare(`SELECT old_value, details FROM audit_logs WHERE user_name = @u AND record_id = '61035'`).get({ u: AUDIT_USER })
