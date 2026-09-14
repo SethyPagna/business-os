@@ -25,6 +25,7 @@ const inventoryRoute = read('../../cloudflare/src/routes/inventory.ts')
 const sessionsSection = read('../src/components/products/StockInSessionsSection.tsx')
 const productsSession = read('../src/components/products/CreateProductsSessionModal.tsx')
 const receiveModal = read('../src/components/inventory/ReceiveBatchModal.tsx')
+const bulkAdd = read('../src/components/products/forms/BulkAddStockModal.tsx')
 const loader = read('../src/utils/useSavedStockReasons.ts')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
@@ -92,6 +93,13 @@ runTest('the fast flow and the adjust form share ONE reason control, fed by the 
   assert.match(adjustForm, /<StockReasonField\n\s+id="inventory-adjust-reason"[^]*?savedReasons=\{reasonsByType\.adjust\}/)
   // no second copy of the chip markup survives in either surface
   assert.doesNotMatch(adjustForm, /reasonsByType\.adjust\.map/)
+  // Bulk add stock is the fourth writer of an adjust reason. It hand-rolled
+  // its own chips and its own <input> with no maxLength and a placeholder
+  // that disagreed with the pack's -- the exact drift this control exists to
+  // stop. It renders the shared one now, same as the other three.
+  assert.match(bulkAdd, /<StockReasonField\n\s+id="bulk-add-stock-reason"[^]*?savedReasons=\{reasonsByType\.adjust\}/)
+  assert.doesNotMatch(bulkAdd, /reasonsByType\.adjust\.map/)
+  assert.doesNotMatch(bulkAdd, /<input[^>]*id="bulk-add-stock-reason"/, 'no second copy of the reason input survives')
   assert.doesNotMatch(modal, /savedReasons\.map/)
   assert.equal((field.match(/savedReasons\.map/g) || []).length, 1)
   assert.match(field, /aria-pressed=\{value === entry\.label\}/)
