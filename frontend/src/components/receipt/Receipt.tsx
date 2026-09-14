@@ -907,12 +907,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const defaultVariant: ReceiptVariant = 'full'
   const variantTitle = (variant: ReceiptVariant) => `${receiptTitle} - ${variant === 'compact' ? '80x50mm' : `${fullReceiptWidthMm}mm`}`
 
-  const exportReceiptVariant = async (
-    printTools: ReceiptPrintModule,
-    mode: ReceiptExportMode,
-    variant: ReceiptVariant,
-    previewWindow?: Window | null,
-  ) => {
+  const exportReceiptVariant = async (printTools: ReceiptPrintModule, mode: ReceiptExportMode, variant: ReceiptVariant, previewWindow?: Window | null) => {
     const target = variant === 'compact' ? compactPrintRef.current : printRef.current
     const variantSettings = variant === 'compact' ? compactPrintSettings : fullPrintSettings
     if (!target) return
