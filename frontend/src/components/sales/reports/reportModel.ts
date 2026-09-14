@@ -934,9 +934,15 @@ function pendingLines(t: ReportTotals, line: LineFactory): StatementLine[] {
  */
 function removalLossLines(t: ReportTotals, line: LineFactory): StatementLine[] {
   if (!hasRemovalLosses(t)) return []
+  const revenue = line('revenue_after_losses', 'rpt_revenue_after_losses', 'Revenue incl. losses', 'memo', 'losses')
   const lines = [
     line('removal_loss', 'rpt_removal_loss', 'Losses (stock removed)', 'memo', 'losses', ['rpt_hint_removal_loss', 'Stock removed entirely from inventory, valued at its cost price. It is not a sale, so it never reduced the revenue and profit above; the two lines below show the same period with it taken off.'], removalLossNote(t)),
-    line('revenue_after_losses', 'rpt_revenue_after_losses', 'Revenue incl. losses', 'memo', 'losses'),
+    // Same tone rule as profit_after_losses just below: a period that lost
+    // more stock than it made revenue prints negative here (unclamped, by
+    // design), and it must never print unstyled (F4, Sep 15 2026 -- this
+    // used to tone profit_after_losses only and leave revenue_after_losses
+    // in plain text at the same negative value).
+    { ...revenue, tone: revenue.usd > 0 ? 'positive' as const : revenue.usd < 0 ? 'negative' as const : undefined },
   ]
   if (typeof t.profit_after_losses_usd === 'number') {
     const profit = line('profit_after_losses', 'rpt_profit_after_losses', 'Profit incl. losses', 'memo', 'losses')

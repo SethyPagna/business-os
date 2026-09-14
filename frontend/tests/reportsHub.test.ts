@@ -503,6 +503,23 @@ test('removal losses render as their own memo block below unpaid, and only when 
   for (const key of ['removal_loss', 'revenue_after_losses', 'profit_after_losses']) {
     assert.equal(m[key].kind, 'memo', `${key} is a memo, never a realised total`)
   }
+  // F4 (Sep 15 2026): profit_after_losses has always toned red/green here;
+  // revenue_after_losses used to print plain even at the same negative sign.
+  assert.equal(m.revenue_after_losses.tone, 'positive', 'a positive revenue-incl.-losses figure is toned, same as profit_after_losses')
+  assert.equal(m.profit_after_losses.tone, 'negative')
+
+  // Unclamped AND toned: a window that destroyed more than it earned prints a
+  // real negative revenue-incl.-losses figure, styled red like profit's own
+  // negative case -- never left unstyled at the same sign.
+  const deepLoss = buildIncomeStatement({
+    sales: normalizeTotals({ ...adminTotals, removal_loss_usd: 300, removal_loss_qty: 40, removal_loss_unvalued_rows: 0, revenue_after_losses_usd: -45, profit_after_losses_usd: -270 }),
+    profitMode: 'gross',
+    khrToUsd,
+  })
+  const md = lineMap(deepLoss)
+  assert.equal(md.revenue_after_losses.usd, -45)
+  assert.equal(md.revenue_after_losses.tone, 'negative', 'a negative revenue-incl.-losses figure must be toned, never printed unstyled')
+  assert.equal(md.profit_after_losses.tone, 'negative')
 
   // Absence is the contract: an older Worker, or a non-admin reply, sends no
   // loss keys and the rows are omitted rather than printed as $0.00.
