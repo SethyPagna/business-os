@@ -12,6 +12,19 @@ import { isStandaloneDisplayMode } from './standaloneDisplay.ts'
 // So there are exactly two delivery surfaces, and every print path in the app
 // picks between them here instead of inventing its own fallback.
 
+// MEMORY: exactly one print frame can exist at a time. A second Print tap
+// while the first sheet is still open replaces that frame instead of stacking
+// another document, and every exit path below -- afterprint, the timeout, and
+// a thrown error -- removes it. Nothing here creates an object URL (the
+// document is written straight into the frame), so there is none to revoke.
+let activePrintFrame: HTMLIFrameElement | null = null
+
+function discardActivePrintFrame(): void {
+  if (!activePrintFrame) return
+  activePrintFrame.remove()
+  activePrintFrame = null
+}
+
 // A slow webfont must never be the reason a receipt does not print: after this
 // the frame is printed with whatever has loaded.
 const PRINT_FRAME_ASSET_TIMEOUT_MS = 4000
@@ -77,6 +90,7 @@ function removeFrameAfterPrinting(frame: HTMLIFrameElement, frameWindow: Window)
     removed = true
     clearTimeout(timer)
     frame.remove()
+    if (activePrintFrame === frame) activePrintFrame = null
   }
   timer = setTimeout(remove, PRINT_FRAME_CLEANUP_MS) as unknown as number
   frameWindow.addEventListener?.('afterprint', remove, { once: true })
@@ -91,6 +105,10 @@ function removeFrameAfterPrinting(frame: HTMLIFrameElement, frameWindow: Window)
  */
 export async function printHtmlInHiddenFrame(html: string): Promise<boolean> {
   if (typeof document === 'undefined' || !document.body) return false
+  // Never two at once: the previous document is dropped before this one is
+  // written, so repeated taps cannot leave frames (and their decoded fonts
+  // and images) alive in memory behind the print sheet.
+  discardActivePrintFrame()
   const frame = document.createElement('iframe')
   frame.setAttribute('aria-hidden', 'true')
   frame.setAttribute('tabindex', '-1')
@@ -101,10 +119,11 @@ export async function printHtmlInHiddenFrame(html: string): Promise<boolean> {
   frame.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;border:0;pointer-events:none;z-index:-1;'
   document.body.appendChild(frame)
 
+  activePrintFrame = frame
   const frameWindow = frame.contentWindow
   const frameDocument = frame.contentDocument || frameWindow?.document || null
   if (!frameWindow || !frameDocument) {
-    frame.remove()
+    discardActivePrintFrame()
     return false
   }
 
@@ -128,7 +147,7 @@ export async function printHtmlInHiddenFrame(html: string): Promise<boolean> {
     if (!printed) frameWindow.print()
     return true
   } catch (error) {
-    frame.remove()
+    discardActivePrintFrame()
     throw error
   }
 }
