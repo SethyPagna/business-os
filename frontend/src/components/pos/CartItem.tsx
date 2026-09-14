@@ -5,6 +5,7 @@ import { computeCartLineSavings } from './posCore.ts'
 import AppSelect from '../shared/AppSelect'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import { branchCanSell } from '../../utils/branchRoles.ts'
+import { promotionLabelText } from '../../utils/saleItemNameLayout.ts'
 
 type Translate = (key: string) => string | undefined
 type CurrencyFormatter = (value: number) => string
@@ -138,7 +139,15 @@ export default function CartItem({
   // wholesale_price key so it matches the POS grid/detail sheet.
   const hasWholesalePrice = Number(item.wholesale_price_usd || 0) > 0 || Number(item.wholesale_price_khr || 0) > 0
   const wholesaleTagActive = (item.display_price_mode ?? item.price_mode) === 'wholesale'
-  const promotionPriceLabel = item.product_discount_label || translate(t, 'promotion_price', 'Discount price')
+  // Capped to the SAME 40 characters as the receipt and sale detail (see
+  // promotionLabelText in utils/saleItemNameLayout) -- a merchant's own
+  // promotion rule title has no length limit of its own, and this label sits
+  // on one line beside the product name in the cart just like it does on the
+  // printed receipt. The untruncated title stays reachable on the div's
+  // title= below, so a long rule name is never a dead end.
+  const promotionPriceLabel = item.product_discount_label
+    ? promotionLabelText(item.product_discount_label)
+    : translate(t, 'promotion_price', 'Discount price')
   const savings = showItemDiscount ? computeCartLineSavings(item) : null
 
   return (
@@ -189,7 +198,12 @@ export default function CartItem({
             </div>
           ) : null}
           {item.price_mode === 'promotion' ? (
-            <div {...getKhmerTextProps(promotionPriceLabel, 'mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300')}>{promotionPriceLabel}</div>
+            <div
+              {...getKhmerTextProps(promotionPriceLabel, 'mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300')}
+              title={item.product_discount_label ? String(item.product_discount_label) : undefined}
+            >
+              {promotionPriceLabel}
+            </div>
           ) : null}
           {savings?.active ? (
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5">

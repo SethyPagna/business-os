@@ -163,6 +163,91 @@ await runTest('the sale detail price cell prints the capped value, never the raw
   assert.match(priceCell, /title=\{String\(item\.product_discount_label \|\| ''\)\}/)
 })
 
+// --- the live POS cart line, rendered for real ------------------------------
+//
+// P3/public followup: the cap landed on the receipt and the sale detail in
+// 072fb70c but the live cart (components/pos/CartItem.tsx) still printed the
+// raw, uncapped product_discount_label -- the same merchant-typed rule title
+// that pushed the receipt's paper and the sale detail's price column would
+// have pushed the cart line just as wide, before a sale is even rung up.
+
+function loadCartItemComponent(): unknown {
+  const source = fs.readFileSync(new URL('../src/components/pos/CartItem.tsx', import.meta.url), 'utf8')
+  const mod = { exports: {} as Record<string, unknown> }
+  const compiled = transformSync(source, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
+  new Function('require', 'module', 'exports', compiled)((id: string) => {
+    if (id === 'react' || id === 'react/jsx-runtime') return require(id)
+    // Pure utilities and posCore are real code (no JSX), loaded exactly as
+    // CartItem imports them -- so the SAME cap function under test runs, not
+    // a stand-in for it.
+    if (id.includes('utils/pricing')) return require('../src/utils/pricing.ts')
+    if (id.includes('utils/scriptTypography')) return require('../src/utils/scriptTypography.ts')
+    if (id.includes('utils/branchRoles')) return require('../src/utils/branchRoles.ts')
+    if (id.includes('utils/saleItemNameLayout')) return require('../src/utils/saleItemNameLayout.ts')
+    if (id.includes('posCore')) return require('../src/components/pos/posCore.ts')
+    // AppSelect/ProductNameRail are JSX components unrelated to the
+    // promotion label -- stubbed the same way Receipt's loader stubs
+    // ReceiptQrCodes, so the harness stays smaller than the feature. Only one
+    // branch is passed to every render below, so AppSelect is never invoked.
+    if (id.includes('shared/AppSelect')) return { __esModule: true, default: () => null }
+    if (id.includes('shared/ProductNameRail')) {
+      return { __esModule: true, default: (props: { name: string }) => React.createElement('span', null, props.name) }
+    }
+    return { __esModule: true, default: () => null }
+  }, mod, mod.exports)
+  return mod.exports.default
+}
+
+const CartItem = loadCartItemComponent()
+
+function renderCartItemWithLabel(label: unknown, priceMode: string = 'promotion'): string {
+  return renderToStaticMarkup(React.createElement(CartItem, {
+    item: {
+      id: 1,
+      name: 'Lip Balm',
+      quantity: 1,
+      price_mode: priceMode,
+      product_discount_label: label,
+      applied_price_usd: 18,
+      applied_price_khr: 0,
+    },
+    branches: [{ id: 1, name: 'Shop', is_default: true }],
+    t: (key: string) => key,
+    onQtyChange: () => {},
+    onPriceChange: () => {},
+    onDiscountChange: () => {},
+    onBranchChange: () => {},
+    onToggleTierTag: () => {},
+    onRemove: () => {},
+    onShowDetails: () => {},
+    fmtUSD: (value: number) => `$${Number(value).toFixed(2)}`,
+    fmtKHR: (value: number) => `${Math.round(Number(value)).toLocaleString()}៛`,
+    usdSymbol: '$',
+    khrSymbol: '៛',
+  }))
+}
+
+// The promotion label line under the product name, as it really renders: its
+// visible text and the full title parked on it.
+const CART_PROMOTION_LABEL = /class="mt-0\.5 text-\[10px\] font-semibold text-rose-600 dark:text-rose-300"(?: title="([^"]*)")?>([^<]*)</
+function cartPromotionLabel(html: string): { title: string; text: string } | null {
+  const match = html.match(CART_PROMOTION_LABEL)
+  return match ? { title: match[1] ?? '', text: match[2] } : null
+}
+
+await runTest('the cart line caps the promotion label like the receipt, and parks the full title on hover', () => {
+  const label = cartPromotionLabel(renderCartItemWithLabel(LONG_LABEL))
+  assert.ok(label, 'the promotion label prints on a promotion-priced line')
+  assert.equal(label.text, CAPPED, 'exactly the first 40 characters reach the cart line')
+  assert.equal(Array.from(label.text).length, 40)
+  assert.equal(label.title, LONG_LABEL, 'the untruncated title is still available on hover')
+})
+
+await runTest('a short cart promotion is unchanged, and a non-promotion line names none', () => {
+  assert.equal(cartPromotionLabel(renderCartItemWithLabel('Summer sale'))?.text, 'Summer sale', 'a normal title prints in full')
+  assert.equal(cartPromotionLabel(renderCartItemWithLabel(LONG_LABEL, 'selling')), null, 'a plain-priced line names no promotion')
+})
+
 if (failed) {
   console.error(`\n${failed} promotion label cap test(s) failed`)
   process.exit(1)
