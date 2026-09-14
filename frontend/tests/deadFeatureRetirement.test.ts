@@ -112,6 +112,13 @@ console.log(`PASS all ${exportedNames.length} inventoryExport export(s) have a c
 // contradicted the list beneath it for every shop that changed the number.
 // Its two siblings, stock_desc_in and stock_desc_out, hardcode the same 10.
 //
+// camera_permission_ready ("Camera permission is saved. Start the camera only
+// when you are ready to scan.") lost its feature on 2026-09-14: the owner asked
+// for the scanner button to open the camera in ONE tap, so the modal starts
+// getUserMedia from the tap that mounted it and nothing ever renders a
+// "start it when you are ready" instruction. A union merge that re-adds the key
+// would put the retired two-step wording back in front of users, hence the lock.
+//
 // The other three lost their feature: all_custom_tables and add_table belonged
 // to the deleted custom-tables component, and perm_section_users labelled a
 // permission section removed when the `users` grant was found to be backend-dead
@@ -132,6 +139,7 @@ assert.ok(en.stock_filter_low_stock && km.stock_filter_low_stock, 'positive cont
 const retiredKeys = [
   'add_table',
   'all_custom_tables',
+  'camera_permission_ready',
   'perm_section_users',
   'stock_desc_in',
   'stock_desc_low',

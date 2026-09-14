@@ -67,6 +67,29 @@ async function importWithTimeout<T>(importer: LazyImporter<T>, key: string): Pro
 }
 
 /**
+ * Warm a lazyRetry chunk BEFORE the click that needs it.
+ *
+ * The barcode scanner opens its camera on the tap that opened the modal (one
+ * tap, no second "Start camera" button), and that same tap is the user
+ * gesture the browser attaches to getUserMedia. Fetching the modal's chunk
+ * after the click spends the gesture's transient-activation window on a
+ * network round trip. pointerdown/touchstart/mouseenter/focus all fire before
+ * click, so calling this from those handlers leaves the module already in the
+ * cache when React mounts the modal.
+ *
+ * Idempotent: the first call owns the import, every later call is a no-op.
+ * Failures are swallowed on purpose -- this is a speculative warm-up, and the
+ * real render still goes through lazyRetry, which retries and recovers.
+ */
+export function preloadLazy<T>(importer: LazyImporter<T>): () => void {
+  let started: Promise<unknown> | null = null
+  return () => {
+    if (started) return
+    started = importer().catch(() => {})
+  }
+}
+
+/**
  * Drop-in replacement for React.lazy(importer) that silently retries a
  * failed/slow chunk fetch a couple of times before giving up. Use this for
  * any lazily-loaded modal, sheet, or sub-component nested inside a page.

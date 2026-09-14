@@ -5603,7 +5603,7 @@
   "unlabeled": "Unlabeled",
   "barcode_not_recorded": "Barcode not recorded",
   "batch_quantity_change_note": "Quantity will change from {from} to {to} at this branch.",
-  "camera_permission_ready": "Camera permission is saved. Start the camera only when you are ready to scan.",
+  "camera_paused_resume": "Camera paused. Tap Start camera to resume scanning.",
   "confirm_complete_stock_session": "Receive {lines} product line(s), {units} total unit(s), into {branch}? This posts stock movements and creates or updates the related received dates.",
   "confirm_deactivate_batch_details": "Deactivate received date {batch} for {product}? It will no longer be available for new stock operations.",
   "confirm_receive_batch_details": "Receive {quantity} {unit} of {product} into {branch}, using received date {lot}? This posts stock movement(s).",

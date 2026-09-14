@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, Dispatch, DragEvent, SetStateAction } from 'react'
-import { lazyRetry } from '../../../utils/lazyImport.ts'
+import { lazyRetry, preloadLazy } from '../../../utils/lazyImport.ts'
 import { registerDirtyWork } from '../../../utils/dirtyWork.ts'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
@@ -53,7 +53,13 @@ function duplicateCollisionFrom(error: unknown): { id: number; name: string | nu
   return { id, name: err?.duplicate?.name == null ? null : String(err.duplicate.name) }
 }
 
-const BarcodeScannerModal = lazyRetry(() => import('../scanning/BarcodeScannerModal'), 'product-form-barcode-scanner-modal')
+const importBarcodeScannerModal = () => import('../scanning/BarcodeScannerModal')
+const BarcodeScannerModal = lazyRetry(importBarcodeScannerModal, 'product-form-barcode-scanner-modal')
+// The scanner opens its camera as soon as it mounts (one tap, no Start
+// button), so this chunk is warmed from the pointer/hover/focus that precedes
+// the click rather than fetched inside the click's gesture window. Same module
+// as ScanSearchButton's scanner, so either entry point warms both.
+const preloadBarcodeScannerModal = preloadLazy(importBarcodeScannerModal)
 const PRODUCT_SUPPLIERS_TIMEOUT_MS = 8000
 const PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 
@@ -1674,6 +1680,10 @@ export default function ProductForm({
                   type="button"
                   className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
                   onClick={() => openScanner('barcode')}
+                  onPointerDown={preloadBarcodeScannerModal}
+                  onTouchStart={preloadBarcodeScannerModal}
+                  onMouseEnter={preloadBarcodeScannerModal}
+                  onFocus={preloadBarcodeScannerModal}
                   title={scannerLaunchingField === 'barcode' ? scanningLabel : scanBarcodeLabel}
                   aria-label={scanBarcodeLabel}
                   disabled={saving || !!scannerLaunchingField}

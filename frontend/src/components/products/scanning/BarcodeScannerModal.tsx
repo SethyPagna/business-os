@@ -81,7 +81,7 @@ interface ScannerLabels {
   scanUnsupported: string
   scanPermissionDenied: string
   cameraPermissionNeeded: string
-  cameraPermissionReady: string
+  cameraPaused: string
   cameraPermissionBlocked: string
   cameraPermissionResetHint: string
   requestCameraAccess: string
@@ -145,7 +145,12 @@ export default function BarcodeScannerModal({
   const detectionHandledRef = useRef(false)
   const lastScanAtRef = useRef(0)
   const [manualValue, setManualValue] = useState('')
-  const [status, setStatus] = useState<ScannerStatus>('idle')
+  // Seeded from `open` rather than 'idle': the modal is only ever mounted by
+  // the tap on a scanner button, and that tap already starts the camera (see
+  // the open effect). An 'idle' first frame would flash the "Request camera
+  // access" empty state for one paint before the effect flips it to
+  // 'starting' -- exactly the two-step screen the owner asked to remove.
+  const [status, setStatus] = useState<ScannerStatus>(open ? 'starting' : 'idle')
   const statusRef = useRef<ScannerStatus>('idle')
   const [error, setError] = useState('')
   const [permissionState, setPermissionState] = useState<ScannerPermissionState>('unknown')
@@ -162,7 +167,11 @@ export default function BarcodeScannerModal({
     scanUnsupported: tr('scan_unsupported', 'Camera scanning is not supported in this browser. You can still paste or type the value below.', 'ការស្កេនកាមេរ៉ាមិនត្រូវបានគាំទ្រដោយកម្មវិធីរុករកនេះទេ។ អ្នកនៅតែអាចបិទភ្ជាប់ ឬវាយតម្លៃខាងក្រោមបាន។'),
     scanPermissionDenied: tr('scan_permission_denied', 'Camera access was denied. Allow it or enter the code manually.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបដិសេធ។ សូមអនុញ្ញាតវា ឬបញ្ចូលកូដដោយដៃ។'),
     cameraPermissionNeeded: tr('camera_permission_needed', 'Camera access is needed to scan barcodes.', 'ត្រូវការការអនុញ្ញាតកាមេរ៉ាដើម្បីស្កេនបាកូដ។'),
-    cameraPermissionReady: tr('camera_permission_ready', 'Camera permission is saved. Start the camera only when you are ready to scan.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានរក្សាទុក។ ចាប់ផ្តើមកាមេរ៉ាតែនៅពេលអ្នកត្រៀមស្កេន។'),
+    // Shown only after a start already happened and the stream was released
+    // (page backgrounded, or the photo picker took over). Opening the modal
+    // never lands here, so this copy no longer tells anyone to "start the
+    // camera when you are ready" -- it explains a camera that was paused.
+    cameraPaused: tr('camera_paused_resume', 'Camera paused. Tap Start camera to resume scanning.', 'កាមេរ៉ាត្រូវបានផ្អាក។ ចុច «ចាប់ផ្តើមកាមេរ៉ា» ដើម្បីបន្តស្កេន។'),
     cameraPermissionBlocked: hideManualEntry
       ? tr('camera_permission_blocked_no_manual', 'Camera access is blocked. Allow it in your browser settings, then try again.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក រួចសាកម្តងទៀត។')
       : tr('camera_permission_blocked', 'Camera access is blocked. Allow it in browser settings, or use manual entry below.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក ឬប្រើការបញ្ចូលដោយដៃខាងក្រោម។'),
@@ -423,9 +432,11 @@ export default function BarcodeScannerModal({
 
     const nextPermissionState = await readCameraPermissionState()
     setPermissionState(nextPermissionState)
-    // Permission is durable browser state; a MediaStream is not. Never start
-    // the camera just because permission is already granted. getUserMedia is
-    // reached only from the visible Start/Request camera button below.
+    // Permission is durable browser state; a MediaStream is not. This is the
+    // RESUME path only (the page came back to the foreground), which is not a
+    // user gesture -- so it re-reads permission and parks on the Start camera
+    // button instead of calling getUserMedia. Opening the modal is a gesture
+    // and goes straight to startCamera; see the open effect below.
     setStatus('manual')
   }, [cleanup, labels.cameraDocumentBlocked, labels.scanUnsupported])
 
@@ -461,10 +472,23 @@ export default function BarcodeScannerModal({
     }
   }, [completeDetection, labels.scanPhotoFailed])
 
+  // `startCamera` takes a new identity whenever the parent re-renders, because
+  // its labels close over the caller's `t`. Read it through a ref so `open` is
+  // the ONLY thing that can trigger a start: a parent re-render must never
+  // restart a live stream mid-scan, which with a one-tap start would read as a
+  // camera that keeps re-prompting.
+  const startCameraRef = useRef(startCamera)
+  useEffect(() => { startCameraRef.current = startCamera }, [startCamera])
+
   useEffect(() => {
     if (!open) return undefined
     detectionHandledRef.current = false
-    prepareScanner()
+    // Owner rule (2026-09-14): pressing the scanner button opens the camera
+    // directly. The click that mounted this modal IS the user gesture, so the
+    // request happens here instead of behind a second "Start camera" tap; the
+    // guards inside startCamera (unsupported, document policy, saved denial)
+    // still decide whether getUserMedia is reached at all.
+    void startCameraRef.current()
     return () => {
       detectionHandledRef.current = true
       cleanup()
@@ -472,11 +496,11 @@ export default function BarcodeScannerModal({
       setError('')
       setPermissionState('unknown')
     }
-  }, [cleanup, open, prepareScanner])
+  }, [cleanup, open])
 
   // iOS can keep a PWA page mounted while it is backgrounded. Stop every
-  // camera track immediately, but never auto-resume it on foreground: the
-  // user must tap Start camera again.
+  // camera track immediately, but never auto-resume it on foreground: coming
+  // back to the page is not a user gesture, so the user taps Start camera.
   useEffect(() => {
     if (!open || typeof document === 'undefined') return undefined
     const handleVisibility = () => {

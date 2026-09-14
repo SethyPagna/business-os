@@ -5599,7 +5599,7 @@
   "unlabeled": "គ្មានស្លាក",
   "barcode_not_recorded": "គ្មានបាកូដកត់ត្រា",
   "batch_quantity_change_note": "បរិមាណនឹងផ្លាស់ប្តូរពី {from} ទៅ {to} នៅសាខានេះ។",
-  "camera_permission_ready": "ការអនុញ្ញាតកាមេរ៉ាត្រូវបានរក្សាទុក។ ចាប់ផ្តើមកាមេរ៉ាតែនៅពេលអ្នកត្រៀមស្កេន។",
+  "camera_paused_resume": "កាមេរ៉ាត្រូវបានផ្អាក។ ចុច «ចាប់ផ្តើមកាមេរ៉ា» ដើម្បីបន្តស្កេន។",
   "confirm_complete_stock_session": "ទទួលផលិតផល {lines} ជួរ សរុប {units} ឯកតា ចូល {branch} មែនទេ? វានឹងកត់ត្រាចលនាស្តុក និងបង្កើត ឬធ្វើបច្ចុប្បន្នភាពថ្ងៃចូលដែលពាក់ព័ន្ធ។",
   "confirm_deactivate_batch_details": "បិទដំណើរការថ្ងៃចូល {batch} សម្រាប់ {product} មែនទេ? វានឹងលែងអាចប្រើសម្រាប់ប្រតិបត្តិការស្តុកថ្មីទៀតហើយ។",
   "confirm_receive_batch_details": "ទទួល {quantity} {unit} នៃ {product} ចូល {branch} ដោយប្រើថ្ងៃចូល {lot} មែនទេ? វានឹងកត់ត្រាចលនាស្តុក។",

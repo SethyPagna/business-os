@@ -1,11 +1,17 @@
 import { Suspense, useCallback, useState } from 'react'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
-import { lazyRetry } from '../../utils/lazyImport.ts'
+import { lazyRetry, preloadLazy } from '../../utils/lazyImport.ts'
 
 // Lazy-loaded so the camera/zxing scanning code (already used by the
 // product-form barcode scanner) isn't pulled into the initial bundle for
 // pages that never open it -- same pattern as ProductForm.tsx.
-const BarcodeScannerModal = lazyRetry(() => import('../products/scanning/BarcodeScannerModal'), 'search-barcode-scanner-modal')
+const importBarcodeScannerModal = () => import('../products/scanning/BarcodeScannerModal')
+const BarcodeScannerModal = lazyRetry(importBarcodeScannerModal, 'search-barcode-scanner-modal')
+// The modal starts the camera the moment it mounts (one tap, no Start
+// button), so the chunk must not still be downloading when the click lands.
+// Warmed from the pointer/hover/focus that precedes the click; ProductForm's
+// barcode trigger warms the same module.
+const preloadBarcodeScannerModal = preloadLazy(importBarcodeScannerModal)
 
 interface ScanSearchButtonProps {
   /** Called with the scanned barcode/SKU value -- typically wired to setSearch(value). */
@@ -52,6 +58,10 @@ export default function ScanSearchButton({ onDetected, t, title, className = '',
       <button
         type="button"
         onClick={() => setOpen(true)}
+        onPointerDown={preloadBarcodeScannerModal}
+        onTouchStart={preloadBarcodeScannerModal}
+        onMouseEnter={preloadBarcodeScannerModal}
+        onFocus={preloadBarcodeScannerModal}
         title={label}
         aria-label={label}
         className={`inline-flex h-10 flex-shrink-0 items-center justify-center gap-1.5 rounded-lg border font-medium transition-colors ${
