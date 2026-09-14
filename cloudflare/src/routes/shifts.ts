@@ -139,7 +139,7 @@ function countedMoney(value: unknown): { ok: true; value: number | null } | { ok
   const n = Number(typeof value === 'string' ? value.trim() : value)
   return Number.isFinite(n) && n >= 0 ? { ok: true, value: Math.round(n * 100) / 100 } : { ok: false }
 }
-/** Additional cash is an optional non-negative inflow. Blank means no cash
+/** Additional change used is an optional non-negative inflow. Blank means no cash
  * was added, so it is stored as numeric zero and never changes the opening or
  * closing registration. */
 function additionalMoney(value: unknown): { ok: true; value: number } | { ok: false } {
@@ -585,7 +585,7 @@ app.post('/close', async (c) => {
   const countedUsd = countedMoney(body.closing_counted_usd); const countedKhr = countedMoney(body.closing_counted_khr)
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
   const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
-  if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional cash must be 0 or more, or left blank.' }, 400)
+  if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
   const closedAt = new Date().toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
@@ -614,7 +614,7 @@ app.post('/:id/close', async (c) => {
   const countedUsd = countedMoney(body.closing_counted_usd); const countedKhr = countedMoney(body.closing_counted_khr)
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
   const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
-  if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional cash must be 0 or more, or left blank.' }, 400)
+  if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
   const db = getDb(c.env); const shift = await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
   if (shift.branch_id != null && !(await resolveBranch(db, shift.branch_id))) return c.json({ error: 'Shift not found.' }, 404)

@@ -644,12 +644,17 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // The owner's specific gap: registered opening and closing cash, both currencies,
   // as one small block. A factual readout -- it is not compared to anything
   // here, and an open shift (no count taken yet) shows only the open half.
+  // Opening -> additional change used -> closing, the order the drawer
+  // actually moves in and the order every shift surface in the app reads
+  // (ShiftGate, the report figures, the amend form): the extra change went in
+  // and was spent BEFORE the final count was taken. Printing it after the
+  // closing cash made the phone message tell a different story from the app.
   lines.push(RULE, labeled('cashOpen', registeredMoney(shift.opening_float_usd, shift.opening_float_khr)))
-  if (shift.closed_at) lines.push(labeled('cashEnd', registeredMoney(shift.closing_counted_usd, shift.closing_counted_khr)))
   const additionalCash = shift.additional_cash_usd || shift.additional_cash_khr
     ? registeredMoney(shift.additional_cash_usd ?? 0, shift.additional_cash_khr ?? 0)
     : ''
   if (additionalCash) lines.push(labeled('additionalCash', additionalCash))
+  if (shift.closed_at) lines.push(labeled('cashEnd', registeredMoney(shift.closing_counted_usd, shift.closing_counted_khr)))
 
   // Expenses split into exactly two plain lines and one informational
   // difference line -- none of it an

@@ -186,7 +186,10 @@ const LABELS = {
   // reading the phone message and the shift screen sees the same terms.
   cashOpen: { en: 'Opening cash', km: 'សាច់ប្រាក់ដើមវេន' },
   cashEnd: { en: 'Closing cash', km: 'សាច់ប្រាក់បិទវេន' },
-  additionalCash: { en: 'Additional cash', km: 'សាច់ប្រាក់បន្ថែម' },
+  // The app's own term for this figure (shift_additional_cash in both packs):
+  // the extra CHANGE money put into the drawer mid-shift and used up as
+  // change. 'Additional cash' read as a second pile of takings.
+  additionalCash: { en: 'Additional change used', km: 'ប្រាក់អាប់បន្ថែមដែលបានប្រើ' },
   expectedCash: { en: 'Expected cash', km: 'សាច់ប្រាក់ត្រូវមាន' },
   // ONE refunds line (no per-return breakdown) and ONE informational
   // difference line -- never "shortage", never a must-match claim. Computed
