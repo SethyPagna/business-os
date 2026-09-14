@@ -225,7 +225,6 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     : 'usd'
   const pointsPerUsd = toNumber(settings.customer_portal_points_per_usd, 1)
   const derivedPointsPerKhr = pointsPerUsd > 0 && exchangeRate > 0 ? pointsPerUsd / exchangeRate : 0
-  const publicationMissing = getPortalPublicationMissingFields(settings)
 
   return {
     businessName: settings.business_name || 'Business OS',
@@ -234,18 +233,13 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     businessAddress: settings.business_address || '',
     // N45: the registered identity an online seller has to display (Cambodia's
     // 2019 e-commerce law) and that the privacy/terms/cookie templates fill in.
-    // Separate from businessName, which is the display/brand name.
+    // Separate from businessName, which is the display/brand name. WHICH of
+    // them are still blank stays an editor-side hint computed from the draft
+    // (CatalogEditorSurface.tsx) and is deliberately NOT published here: no
+    // visitor feature depends on it, and internal readiness has no business
+    // on an anonymous response (owner, 2026-09-14).
     businessLegalName: settings.business_legal_name || '',
     businessRegistrationNumber: settings.business_registration_number || '',
-    // An ADMIN-EDITOR hint only: which of the five seller-identity fields
-    // are still empty. Nothing on the public storefront reads these any
-    // more and no visitor feature is switched off by them -- the owner ruled
-    // (2026-09-14) that the storefront never renders a system-generated
-    // notice and that AI chat / share submissions follow their own settings
-    // (aiEnabled, submissionEnabled). The display name is deliberately not
-    // accepted as a registered identity.
-    publicationReady: publicationMissing.length === 0,
-    publicationMissing,
     businessTagline: settings.customer_portal_business_tagline || '',
     businessLogo: settings.customer_portal_logo_image || '',
     businessFavicon: settings.customer_portal_favicon_image || '',
@@ -433,19 +427,6 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     productCautionDefault: settings.customer_portal_product_caution_default || '',
     productNeedMoreDetailsDefault: settings.customer_portal_product_need_more_details_default || '',
   }
-}
-
-export type PortalPublicationField = 'business_legal_name' | 'business_registration_number' | 'business_address' | 'business_phone' | 'business_email'
-
-export function getPortalPublicationMissingFields(settings: SettingsMap): PortalPublicationField[] {
-  const required: PortalPublicationField[] = [
-    'business_legal_name',
-    'business_registration_number',
-    'business_address',
-    'business_phone',
-    'business_email',
-  ]
-  return required.filter((key) => !String(settings[key] || '').trim())
 }
 
 // Root cause of "brand/category filter showing irrelevant/empty options":

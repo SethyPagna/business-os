@@ -214,8 +214,11 @@ async function run() {
     const portalRoute = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'portal.ts'), 'utf8')
     assert.match(portalRoute, /businessLegalName: settings\.business_legal_name/)
     assert.match(portalRoute, /businessRegistrationNumber: settings\.business_registration_number/)
-    assert.match(portalRoute, /publicationReady: publicationMissing\.length === 0/)
     assert.doesNotMatch(portalRoute, /businessLegalName:\s*settings\.business_legal_name\s*\|\|\s*settings\.business_name/)
+    // Internal readiness never rides on the anonymous wire: nothing reads it
+    // (the editor recomputes the gap from its own draft) and a visitor has no
+    // business learning which back-office fields are still blank.
+    assert.doesNotMatch(portalRoute, /publicationReady|publicationMissing/, 'GET /portal/config still publishes internal readiness')
   })
 
   await check('empty seller details are an editor hint only: no storefront notice, no feature switched off', () => {
@@ -225,7 +228,6 @@ async function run() {
     // never renders a system-generated notice, and AI chat / share
     // submissions follow their own settings instead of failing closed on it.
     const portalRoute = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'portal.ts'), 'utf8')
-    assert.doesNotMatch(portalRoute, /if \(!config\.publicationReady\)/, 'a visitor route still fails closed on publicationReady')
     assert.doesNotMatch(portalRoute, /portal_publication_not_ready/, 'the 503 code must be gone with the gate')
     assert.match(portalRoute, /enabled: !!config\.aiEnabled && !!provider,/, '/ai/status follows aiEnabled and the provider only')
     const catalogDir = path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'catalog')
