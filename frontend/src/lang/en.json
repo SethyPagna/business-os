@@ -6161,7 +6161,7 @@
   "delivery_amount_unchanged": "That is already the amount on this sale.",
   "shift_difference_informational": "For the record only. Nothing has to match: sales, cost and profit are calculated without the drawer count.",
   "shift_registered_cash": "Registered cash",
-  "shift_registered_cash_hint": "Cash counted into the drawer at open and out of it at end. A shift record only — no sales, cost or profit figure uses it.",
+  "shift_registered_cash_hint": "Cash counted into the drawer at open, the additional change used during the shift, and what is counted out of it at end. A shift record only — no sales, cost or profit figure uses it.",
   "shift_registered_open": "OPEN",
   "shift_registered_end": "END",
   "shift_report_figures": "Shift figures",
