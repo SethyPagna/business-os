@@ -188,6 +188,10 @@ async function main() {
     './routes/auth': { __esModule: true, default: authRoutes },
     './routes/system': { __esModule: true, default: system },
     './routes/sync': { createSyncRoute: () => new Hono() },
+    // Real module, not a stub: index.ts iterates APP_DOCUMENT_ROUTES at module
+    // scope to register the admin-host document handler, and the poisoned proxy
+    // is not iterable.
+    './lib/adminDocumentIdentity': load('lib/adminDocumentIdentity.ts'),
     './lib/requestBodyGuard': guard, './lib/auth': auth, './lib/permissions': permissions,
     './lib/coreDataInvariants': { ensureCoreDataInvariantsOnce: async () => { calls.bootstrap++ } },
     './lib/maintenance': { isMaintenanceGatedRequest: () => true, getMaintenance: async () => { calls.maintenance++; return null } },

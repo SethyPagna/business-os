@@ -62,6 +62,10 @@ Module._load = function(request, parent, isMain) {
   if (request === '../lib/reportMoneyPrecision') {
     return originalLoad.call(this, path.join(root, 'src', 'lib', 'reportMoneyPrecision.ts'), parent, isMain)
   }
+  // index.ts iterates APP_DOCUMENT_ROUTES at module scope to register the
+  // admin-host document handler, so this one lib must be the real module: a
+  // harmless proxy is not iterable and the Worker never finishes loading.
+  if (request === './lib/adminDocumentIdentity') return originalLoad.call(this, path.join(root, 'src', 'lib', 'adminDocumentIdentity.ts'), parent, isMain)
   if (request === './lib/coreDataInvariants') return { ensureCoreDataInvariantsOnce: async () => {} }
   if (request === './lib/maintenance') return { getMaintenance: async () => null, isMaintenanceGatedRequest: () => false }
   if (request === './lib/errorReporting') return { reportError: async () => {} }
