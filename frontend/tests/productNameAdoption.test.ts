@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { build } from 'esbuild'
 import { createRequire } from 'node:module'
+import { finishBrowserTest, removeBrowserProfile } from './browserProfileTeardown.ts'
 
 const root = path.resolve(import.meta.dirname, '..')
 const require = createRequire(import.meta.url)
@@ -217,5 +218,6 @@ try {
   socket?.close()
   await new Promise<void>((resolve) => server.close(() => resolve()))
   await new Promise((resolve) => setTimeout(resolve, 100))
-  fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  removeBrowserProfile(profile)
 }
+finishBrowserTest()

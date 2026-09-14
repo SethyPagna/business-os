@@ -6,6 +6,7 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { build, type Plugin } from 'esbuild'
+import { finishBrowserTest, removeBrowserProfile } from './browserProfileTeardown.ts'
 
 // Native-browser coverage for the composed StockChangeSection. This renders
 // the real section, ProductNameRail, history model, batch-label formatter and
@@ -405,5 +406,6 @@ try {
   socket?.close()
   await new Promise<void>((resolve) => server.close(() => resolve()))
   await new Promise((resolve) => setTimeout(resolve, 100))
-  fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  removeBrowserProfile(profile)
 }
+finishBrowserTest()

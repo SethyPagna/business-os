@@ -6,6 +6,7 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { build } from 'esbuild'
+import { finishBrowserTest, removeBrowserProfile } from './browserProfileTeardown.ts'
 
 const root = path.resolve(import.meta.dirname, '..')
 const browserCandidates = process.platform === 'win32'
@@ -200,5 +201,6 @@ try {
   socket?.close()
   await new Promise<void>((resolve) => server.close(() => resolve()))
   await new Promise((resolve) => setTimeout(resolve, 100))
-  fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  removeBrowserProfile(profile)
 }
+finishBrowserTest()
