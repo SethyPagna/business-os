@@ -111,8 +111,37 @@ async function main() {
   const spoofed = await call('GET', '/?branch_id=1&user_id=8')
   assert.equal(spoofed.status, 200, 'a caller-supplied user_id is a filter, never an authorization')
   assert.equal((await spoofed.json()).shifts.length, 0, 'naming another cashier in user_id cannot widen the scope')
-  assert.equal((await call('PATCH', `/${foreignId}`, { expected_revision: 0, reason: 'not mine', opening_float_usd: 6 })).status, 403,
-    'POS user cannot amend another cashier shift')
+  // ---- amending is not an ownership privilege (owner ruling, Sep 14 2026) --
+  //
+  // "shift should be aditable for employees ... like sales record for any
+  // change, before and after." A cashier holding the plain POS permission may
+  // CORRECT any shift record, including one another cashier opened, exactly as
+  // they may edit a sale they did not ring up. What makes that safe is the
+  // record it leaves, so this asserts the record too: a before/after row whose
+  // actor is the caller, not the shift's owner, and an audit line to match.
+  const foreignAmend = await call('PATCH', `/${foreignId}`, { expected_revision: 0, reason: 'Counted the float again', opening_float_usd: 6 })
+  assert.equal(foreignAmend.status, 200, 'a POS user can amend another cashier shift')
+  const foreignAmendBody = await foreignAmend.json()
+  assert.equal(foreignAmendBody.shift.opening_float_usd, 6, 'the amendment is applied')
+  assert.equal(foreignAmendBody.shift.amendment_count, 1, 'and the row reports itself as edited')
+  const foreignRecord = sqlite.prepare('SELECT actor_user_id, reason, before_json, after_json FROM shift_session_amendments WHERE shift_session_id=?').get(foreignId)
+  assert.equal(foreignRecord.actor_user_id, 7, 'the before/after record names the ACTOR, not the shift owner')
+  // Null, not 5: this fixture row was inserted without the registration
+  // flags (migration 0132), so the float had never been REGISTERED -- and the
+  // before half records exactly that rather than inventing the stored number.
+  assert.equal(JSON.parse(foreignRecord.before_json).opening_float_usd, null, 'the before half is the value that was there')
+  assert.equal(JSON.parse(foreignRecord.after_json).opening_float_usd, 6, 'the after half is the value that replaced it')
+  assert.equal(JSON.parse(foreignRecord.before_json).amendment_count, undefined, 'a derived count is never written into a snapshot')
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='shift.amend' AND user_id=7 AND entity_id=CAST(? AS TEXT)").get(foreignId).n, 1,
+    'and the amendment is audited under the acting account')
+  // The branch scope is still a wall: a shift filed under a branch that is not
+  // active is not reachable at all, and says "not found" rather than naming it.
+  sqlite.prepare(`INSERT INTO shift_sessions
+    (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr)
+    VALUES ('S-OFFBRANCH','per_account',7,'Cashier',2,'Inactive',date('now','+7 hours'),datetime('now','-1 hour'),5,1000)`).run()
+  const offBranchId = sqlite.prepare("SELECT id FROM shift_sessions WHERE shift_code='S-OFFBRANCH'").get().id
+  assert.equal((await call('PATCH', `/${offBranchId}`, { expected_revision: 0, reason: 'out of scope', opening_float_usd: 6 })).status, 404,
+    'a shift outside the caller branch scope cannot be amended')
 
   // The shift-review capability (admin control user) is the exception the
   // owner asked for, and it is the SAME capability that already gates cancel.
@@ -144,8 +173,11 @@ async function main() {
     call('PATCH', `/${id}`, { expected_revision: openedBody.shift.revision, reason: 'race B', opening_float_usd: 12 }),
   ])
   assert.deepEqual([a.status, b.status].sort(), [200, 409], 'only one concurrent amendment reports success')
-  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM shift_session_amendments').get().n, 1, 'loser writes no false amendment')
-  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='shift.amend'").get().n, 1,
+  // Both counts are scoped to the raced shift: the foreign-amendment case
+  // above legitimately wrote one record and one audit line of its own, and a
+  // bare table count would mistake those for the loser's.
+  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM shift_session_amendments WHERE shift_session_id=?').get(id).n, 1, 'loser writes no false amendment')
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='shift.amend' AND entity_id=CAST(? AS TEXT)").get(id).n, 1,
     'only the winning amendment is audited')
 
   user = { id: 7, name: 'Cashier', permissions: JSON.stringify({ pos: true }) }

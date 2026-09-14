@@ -37,7 +37,14 @@ app.use('*', async (c, next) => {
   }
   const db = getDb(c.env); const target = await readShiftById(db, legacyClose ? Number(body.shift_id) : Number(match?.[1]))
   if (!target) return c.json({ error: 'Shift not found.' }, 404)
-  if (!canMutateShift(user, target) || (action === 'cancel' && !canManageShifts(user))) return c.json({ error: 'Shift permission is required.' }, 403)
+  // The same split the handlers enforce, applied before the replay lookup so
+  // a caller who may not act cannot probe a receipt: amend follows
+  // canAmendShift (any shifts user), cancel is administrator-only, and the
+  // close/reopen transitions stay with the owner or an administrator.
+  const permitted = action === 'amend' ? canAmendShift(user, target)
+    : action === 'cancel' ? canManageShifts(user) && canMutateShift(user, target)
+      : canMutateShift(user, target)
+  if (!permitted) return c.json({ error: 'Shift permission is required.' }, 403)
   if (target.branch_id != null && !(await resolveBranch(db, target.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
   const replay = async () => {
     const receipt = await db.prepare(`SELECT entity_id, details FROM audit_logs
@@ -88,9 +95,46 @@ export type ShiftRow = {
   cancelled_at: string | null; cancelled_by_user_id: number | null
   cancelled_by_user_name: string | null; cancel_reason: string | null
 }
-type ShiftDbRow = ShiftRow & { has_reopened_child: number }
+type ShiftDbRow = ShiftRow & { has_reopened_child: number; amendment_count: number }
 export type ShiftCapabilities = { can_edit: boolean; can_close: boolean; can_reopen: boolean; can_cancel: boolean }
-export type ShiftResponseRow = ShiftRow & { capabilities: ShiftCapabilities }
+export type ShiftResponseRow = ShiftRow & { capabilities: ShiftCapabilities; amendment_count: number }
+
+/**
+ * ---- The EDITED badge: how many CORRECTIONS this shift record carries ----
+ *
+ * `shift_session_amendments` is the before/after journal for everything that
+ * ever moved a shift row, so a plain COUNT(*) would badge every closed shift
+ * as edited -- the close writes a row there, and so do the cancel and the
+ * reopen. An edit is a CORRECTION of a recorded fact, so the three lifecycle
+ * transitions are excluded by what their own snapshots say:
+ *
+ *   * a reopen (and the replacement opened after a cancellation) is the only
+ *     kind whose before/after describe two DIFFERENT rows, so the shift_code
+ *     differs;
+ *   * a cancellation is the only kind whose after-snapshot is cancelled;
+ *   * a close is the only kind that turns a null closed_at into a real one.
+ *
+ * Counted across the whole LINEAGE, not the one row: a reopened shift is one
+ * record to the owner (one list row -- see the list read), and an edit made on
+ * an earlier segment must still light the badge on it. The chain is walked
+ * upwards through parent_shift_id, which is at most a handful of rows.
+ *
+ * Mirrors the sale rows' Edited badge (lib/saleRecords.ts), which counts
+ * `sale_amendments` the same way and for the same reason.
+ */
+const AMENDMENT_COUNT_SQL = `(SELECT COUNT(*) FROM shift_session_amendments amend
+    WHERE amend.shift_session_id IN (
+      WITH RECURSIVE lineage(segment_id) AS (
+        SELECT shift_sessions.id
+        UNION ALL
+        SELECT older.parent_shift_id FROM shift_sessions older
+          JOIN lineage ON older.id = lineage.segment_id WHERE older.parent_shift_id IS NOT NULL)
+      SELECT segment_id FROM lineage)
+      AND json_valid(amend.before_json) AND json_valid(amend.after_json)
+      AND json_extract(amend.before_json, '$.shift_code') = json_extract(amend.after_json, '$.shift_code')
+      AND json_extract(amend.after_json, '$.cancelled_at') IS NULL
+      AND NOT (json_extract(amend.before_json, '$.closed_at') IS NULL
+        AND json_extract(amend.after_json, '$.closed_at') IS NOT NULL))`
 
 const SHIFT_COLUMNS = `id, shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date,
   opened_at,
@@ -101,7 +145,8 @@ const SHIFT_COLUMNS = `id, shift_code, scope_mode, user_id, user_name, branch_id
   closed_by_user_id, closed_by_user_name, revision,
   parent_shift_id, reopen_reason, reopened_by_user_id, reopened_by_user_name,
   cancelled_at, cancelled_by_user_id, cancelled_by_user_name, cancel_reason,
-  EXISTS (SELECT 1 FROM shift_sessions child WHERE child.parent_shift_id=shift_sessions.id) AS has_reopened_child`
+  EXISTS (SELECT 1 FROM shift_sessions child WHERE child.parent_shift_id=shift_sessions.id) AS has_reopened_child,
+  ${AMENDMENT_COUNT_SQL} AS amendment_count`
 
 function parseBranchId(value: unknown): number | null {
   if (value == null || String(value).trim() === '') return null
@@ -218,18 +263,45 @@ function canSeeShift(user: SessionUser, policy: ShiftPolicy, shift: ShiftRow): b
   return canManageShifts(user) || shift.user_id === user.id
     || (policy.scope_mode === 'shop_wide' && shift.scope_mode === 'shop_wide')
 }
+/** The row as it is STORED, which is what a before/after snapshot must hold:
+ * the two derived columns above are answers about the row, not fields of it,
+ * and writing them into before_json/after_json would make every amendment
+ * diff carry a count of itself. */
 function storedShift(shift: ShiftDbRow): ShiftRow {
-  const { has_reopened_child: _hasReopenedChild, ...stored } = shift
+  const { has_reopened_child: _hasReopenedChild, amendment_count: _amendmentCount, ...stored } = shift
   return stored
 }
 function canMutateShift(user: SessionUser, shift: ShiftRow): boolean {
   return canManageShifts(user) || shift.user_id === user.id
 }
+/**
+ * ---- Who may AMEND a shift record (owner ruling, Sep 14 2026) ------------
+ *
+ * "shift should be aditable for employees. it just leaves record basially
+ * each shift have record shown one row last row of each record. like sales
+ * record for any change, before and after."
+ *
+ * Amending is therefore NOT an ownership privilege. Any account that may use
+ * shifts at all -- the same pos/sales tier that opens and closes one in POS,
+ * already required by `shiftPermissionError` on every route here -- may
+ * correct any shift record it can reach, exactly as a cashier may edit a sale
+ * they did not ring up. The correction is not silent: it writes a before/after
+ * row in `shift_session_amendments` and an audit line naming the actor.
+ *
+ * What did NOT widen: CANCEL stays administrator-only (canManageShifts), and
+ * the CLOSE and REOPEN lifecycle transitions stay with the shift owner or an
+ * administrator (canMutateShift) -- they end and restart a working shift
+ * rather than correct a record of one. A cancelled row is not amendable at
+ * all; its amendment would have nothing left to correct.
+ */
+function canAmendShift(user: SessionUser, shift: ShiftRow): boolean {
+  return canUseShifts(user) && !shift.cancelled_at
+}
 function responseShift(user: SessionUser, row: ShiftDbRow): ShiftResponseRow {
   const shift = storedShift(row)
   const cancelled = !!shift.cancelled_at; const canMutate = canMutateShift(user, shift) && !cancelled
-  return { ...shift, capabilities: {
-    can_edit: canMutate,
+  return { ...shift, amendment_count: Number(row.amendment_count) || 0, capabilities: {
+    can_edit: canAmendShift(user, shift),
     can_close: canMutate && !shift.closed_at,
     can_reopen: canMutate && !!shift.closed_at && !row.has_reopened_child
       && shift.business_date === businessDateFor(new Date().toISOString()),
@@ -275,6 +347,32 @@ async function readShiftById(db: D1Compat, id: number) {
 }
 async function readChild(db: D1Compat, id: number) {
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE parent_shift_id = @id LIMIT 1`).get<ShiftDbRow>({ id })
+}
+/**
+ * Every segment of ONE shift record, oldest first. A reopen -- and the
+ * replacement opened after a cancellation -- writes a new row that points at
+ * the segment it continues (`parent_shift_id`, migration 0123), and the owner
+ * reads the whole chain as one shift. One child per parent is an invariant of
+ * the continuation insert (its NOT EXISTS guard), so this is a list, not a
+ * tree; the step cap and the seen check only keep a corrupted chain from
+ * looping forever.
+ */
+const MAX_SHIFT_SEGMENTS = 20
+async function readLineage(db: D1Compat, shift: ShiftDbRow): Promise<ShiftDbRow[]> {
+  const chain = [shift]
+  while (chain.length < MAX_SHIFT_SEGMENTS) {
+    const parentId = chain[0].parent_shift_id
+    if (parentId == null) break
+    const parent = await readShiftById(db, parentId)
+    if (!parent || chain.some((segment) => segment.id === parent.id)) break
+    chain.unshift(parent)
+  }
+  while (chain.length < MAX_SHIFT_SEGMENTS) {
+    const child = await readChild(db, chain[chain.length - 1].id)
+    if (!child || chain.some((segment) => segment.id === child.id)) break
+    chain.push(child)
+  }
+  return chain
 }
 async function readShiftByCode(db: D1Compat, shiftCodeValue: string) {
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE shift_code = @shiftCode LIMIT 1`).get<ShiftDbRow>({ shiftCode: shiftCodeValue })
@@ -441,7 +539,25 @@ app.get('/', async (c) => {
   const requestedUserId = parsedUserId
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit')) || 50))
   const visibility = shiftVisibility(user, await readShiftPolicy(db))
+  // ---- ONE ROW PER SHIFT RECORD (owner ruling, Sep 14 2026) --------------
+  //
+  // "each shift have record shown one row last row of each record". Reopening
+  // a shift, and replacing a cancelled one, writes a CONTINUATION row
+  // (migration 0123) rather than mutating the segment it continues, so the
+  // same working shift used to list two, three or four times -- once per
+  // segment -- with the older rows carrying superseded figures.
+  //
+  // A segment that has been continued is therefore not listed: the row that
+  // remains is the LAST one of the lineage, which carries the current values,
+  // and `parent_shift_id` on it leads to the rest of the chain (the detail
+  // read returns every segment, and the float prints them in order).
+  //
+  // Filtered in SQL rather than after the read so `LIMIT` still counts rows
+  // the caller will actually see; an open shift can never have a continuation
+  // (only a closed or cancelled one can be continued), so the same clause is
+  // safe on both halves.
   const filters = `${visibility.clause}
+      AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
       AND (@requestedUserId IS NULL OR user_id = @requestedUserId)
       AND (@branchId IS NULL OR branch_id = @branchId)
       AND (branch_id IS NULL OR EXISTS (SELECT 1 FROM branches b WHERE b.id=shift_sessions.branch_id AND b.is_active=1))
@@ -466,10 +582,26 @@ app.get('/:id/history', async (c) => {
   // 404, not 403: a caller who may not see this shift must not learn that it
   // exists, which id probing would otherwise reveal one status code at a time.
   if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
+  // The whole RECORD, not the one segment. The list shows a reopened shift as
+  // a single row, so its detail has to carry what that row stands for: every
+  // segment oldest first, and every amendment of every segment on one
+  // timeline. Each amendment names its own `shift_session_id`, so the float
+  // can print them against the segment they corrected.
+  const segments = await readLineage(db, shift)
+  const ids = segments.map((segment) => segment.id)
+  // sql-bound-params: bounded by construction -- readLineage returns at most
+  // MAX_SHIFT_SEGMENTS (20) rows, so this placeholder list can never approach
+  // D1's 100-parameter limit and needs no chunking.
+  const idParams = Object.fromEntries(ids.map((value, index) => [`id${index}`, value]))
   const amendments = await db.prepare(`SELECT id, shift_session_id, actor_user_id, actor_name, reason,
     before_json, after_json, created_at FROM shift_session_amendments
-    WHERE shift_session_id = @id ORDER BY created_at ASC, id ASC`).all({ id })
-  return c.json({ shift: await reconciledShift(c.env, user, shift), amendments })
+    WHERE shift_session_id IN (${ids.map((_value, index) => `@id${index}`).join(',')})
+    ORDER BY created_at ASC, id ASC`).all(idParams)
+  return c.json({
+    shift: await reconciledShift(c.env, user, shift),
+    segments: segments.map((segment) => responseShift(user, segment)),
+    amendments,
+  })
 })
 
 app.post('/open', async (c) => {
@@ -719,7 +851,7 @@ app.patch('/:id', async (c) => {
   if (!before) return c.json({ error: 'Shift not found.' }, 404)
   if (before.branch_id != null && !(await resolveBranch(db, before.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
   if (before.cancelled_at) return c.json({ error: 'A cancelled shift cannot be amended.' }, 409)
-  if (!canMutateShift(user, before)) return c.json({ error: 'Only the shift owner or an administrator can amend this shift.' }, 403)
+  if (!canAmendShift(user, before)) return c.json({ error: 'Shift permission is required to amend this shift.' }, 403)
   if (before.revision !== expectedRevision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const iso = (key: string, fallback: string | null) => {
     if (!(key in body)) return fallback
