@@ -259,8 +259,15 @@ queue = "business-os-import"
 # to 5 on Paid.
 max_batch_size = 1
 max_batch_timeout = 5
-# Once a message has thrown on every one of Cloudflare's default max_retries
-# attempts, it's moved here instead of silently dropped -- queue.ts's
+# Six deliveries (1 + max_retries) is what lib/queueDispatch.ts
+# chunkRowsForAttempt needs to walk 600 -> 300 -> 150 -> 75 -> 37 -> 25 rows
+# before a message is given up on; Cloudflare's default of 3 retries stopped
+# at 75, and the operator's Retry then started over at 600. Same value in
+# wrangler.toml and wrangler.free.toml on purpose (the drift test pins the
+# two files to four differences).
+max_retries = 5
+# Once a message has thrown on every one of its max_retries attempts, it's
+# moved here instead of silently dropped -- queue.ts's
 # handleImportDeadLetterQueue picks it up and marks the job definitively
 # failed with an actionable last_error (see that function's own comment for
 # the full "why", including what used to happen without this: the job could
