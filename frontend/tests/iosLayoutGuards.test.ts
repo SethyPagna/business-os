@@ -136,7 +136,7 @@ runTest('D5 -- the modal height/padding rules consume var(--kb-inset)', () => {
   // max-height alone shrinks a centred panel without moving it up.
   assert.match(
     mainCss,
-    /\.modal-panel-safe \{[\s\S]*?max-height: calc\(100dvh[^;]*- var\(--kb-inset, 0px\)\);/,
+    /\.modal-panel-safe \{[\s\S]*?max-height: calc\(100 \* var\(--app-vh\)[^;]*- var\(--kb-inset, 0px\)\);/,
   )
   assert.match(
     mainCss,
@@ -147,6 +147,12 @@ runTest('D5 -- the modal height/padding rules consume var(--kb-inset)', () => {
   assert.ok(caps.length >= 5, `expected the .max-h-modal-* family, found ${caps.length}`)
   for (const cap of caps) {
     assert.match(cap, /var\(--kb-inset, 0px\)/, `${cap} must subtract the keyboard inset`)
+    // Catches: the `Nvh; calc(Ndvh - var(..))` pair. A var() inside the dvh
+    // declaration is validated at computed-value time, so an engine without
+    // dvh drops it THERE and never falls back to the vh line -- max-height
+    // becomes none. One declaration through --app-vh is the only safe shape.
+    assert.match(cap, /max-height: calc\(\d+ \* var\(--app-vh\) - var\(--kb-inset, 0px\)\);/, `${cap} must measure through --app-vh in one declaration`)
+    assert.doesNotMatch(cap, /\d+d?vh/, `${cap} must not carry a bare vh/dvh declaration`)
     // The 0px fallback is what makes every one of these a no-op on desktop.
     assert.match(cap, /var\(--kb-inset, 0px\)/)
   }
@@ -328,9 +334,14 @@ function codeOnly(source: string): string {
     .join('\n')
 }
 
-/** Raw `NNvh` values -- the ones dvh/svh/lvh and --app-vh replaced. */
+/** Raw `NNvh` values -- the ones dvh/svh/lvh and --app-vh replaced.
+ *  `var(--app-vh, 1vh)` is the ONE permitted spelling of a raw vh: the
+ *  fallback for surfaces that must render when the CSS bundle itself failed
+ *  (RootErrorBoundary, the bootstrap LoadingScreen), where --app-vh does not
+ *  exist. Everywhere else the bare `var(--app-vh)` form is required. */
+const APP_VH_WITH_FALLBACK = /var\(--app-vh, 1vh\)/g
 function rawViewportHeights(source: string): string[] {
-  return (codeOnly(source).match(/(?<![a-z-])\d+(?:\.\d+)?vh\b/g) || [])
+  return (codeOnly(source).replace(APP_VH_WITH_FALLBACK, 'var(--app-vh)').match(/(?<![a-z-])\d+(?:\.\d+)?vh\b/g) || [])
 }
 
 function everyTsxFile(): string[] {
@@ -389,6 +400,8 @@ runTest('D4 -- the allowlist names real remaining work, and the detector really 
   )
   // Negative controls: the fixed spelling, the sibling units, and a comment.
   assert.deepEqual(rawViewportHeights(`max-h-[calc(70*var(--app-vh))]`), [])
+  assert.deepEqual(rawViewportHeights(`style={{ minHeight: 'calc(100 * var(--app-vh, 1vh))' }}`), [], 'the pre-CSS fallback spelling is allowed')
+  assert.deepEqual(rawViewportHeights(`style={{ minHeight: 'calc(100 * var(--app-vh, 100vh))' }}`), ['100vh'], 'only the 1vh fallback is allowed')
   assert.deepEqual(rawViewportHeights(`h-[100dvh] w-[50svh] max-h-[80lvh]`), [])
   assert.deepEqual(rawViewportHeights(`{/* it used to be max-h-[70vh] */}`), [])
   // ...and every allowlisted file must still actually contain one, so a file

@@ -744,8 +744,12 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
     padding-left: calc(.75rem + env(safe-area-inset-left, 0px));
   }
   .modal-panel-safe {
-    max-height: calc(100vh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px));
-    max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px));
+    /* One declaration through --app-vh (defined below with an @supports
+       guard), not the vh-then-dvh pair: a declaration that contains env() or
+       var() is only checked at computed-value time, so on an engine without
+       dvh it becomes invalid THERE and max-height falls to none -- the earlier
+       vh line is not resurrected. The helper carries the fallback instead. */
+    max-height: calc(100 * var(--app-vh) - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px));
     max-width: calc(100vw - 1.5rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   }
   .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -876,12 +880,17 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
    Every one of these also subtracts --kb-inset (see .modal-panel-safe above):
    a phone dialog capped at 88% of the viewport is still 88% of an area the
    iOS keyboard covers the bottom third of. The property is unset whenever no
-   keyboard is open, so `var(--kb-inset, 0px)` is 0 and desktop is unchanged. */
-.max-h-modal-90 { max-height: 90vh; max-height: calc(90dvh - var(--kb-inset, 0px)); }
-.max-h-modal-92 { max-height: 92vh; max-height: calc(92dvh - var(--kb-inset, 0px)); }
-.max-h-modal-80 { max-height: 80vh; max-height: calc(80dvh - var(--kb-inset, 0px)); }
-.max-h-modal-85 { max-height: 85vh; max-height: calc(85dvh - var(--kb-inset, 0px)); }
-.max-h-modal-88 { max-height: 88vh; max-height: calc(88dvh - var(--kb-inset, 0px)); }
+   keyboard is open, so `var(--kb-inset, 0px)` is 0 and desktop is unchanged.
+
+   Measured through --app-vh, one declaration each, for the reason given at
+   .modal-panel-safe: a `90vh; calc(90dvh - var(..))` pair loses BOTH values
+   on an engine without dvh, because the var() makes the second declaration
+   invalid at computed-value time instead of at parse time. */
+.max-h-modal-90 { max-height: calc(90 * var(--app-vh) - var(--kb-inset, 0px)); }
+.max-h-modal-92 { max-height: calc(92 * var(--app-vh) - var(--kb-inset, 0px)); }
+.max-h-modal-80 { max-height: calc(80 * var(--app-vh) - var(--kb-inset, 0px)); }
+.max-h-modal-85 { max-height: calc(85 * var(--app-vh) - var(--kb-inset, 0px)); }
+.max-h-modal-88 { max-height: calc(88 * var(--app-vh) - var(--kb-inset, 0px)); }
 
 /* POS product grid. Denser on phones (user, Aug 31: "pos products section is
    showing one whole product display for small screens ... should be minimized
