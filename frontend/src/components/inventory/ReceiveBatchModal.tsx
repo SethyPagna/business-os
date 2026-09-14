@@ -236,7 +236,7 @@ export default function ReceiveBatchModal({
     if (!parsedBranchId) { notify(tr('choose_branch', 'Choose a branch'), 'error'); return }
     if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) { notify(tr('quantity_must_be_positive', 'Quantity must be a positive number'), 'error'); return }
     if (paymentStatus === 'credit' && !creditDueDate) {
-      notify(tr('credit_needs_due_date', 'A credit purchase needs its due date — the admin reminder is built on it.'), 'error')
+      notify(tr('credit_needs_due_date', 'A supplier purchase marked Not Yet Paid needs a due date — reminders use it.'), 'error')
       return
     }
     const branchName = branchSelectOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'selected branch')
@@ -464,7 +464,7 @@ export default function ReceiveBatchModal({
             <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('payment_to_supplier', 'Payment to supplier')}</span>
             <div className="flex items-center gap-2">
               <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-xs font-medium dark:border-gray-600">
-                {([['', tr('payment_unset', '—')], ['paid', tr('paid', 'Paid')], ['credit', tr('on_credit', 'Not Paid to supplier')]] as const).map(([value, label], index) => (
+                {([['', tr('payment_unset', '—')], ['paid', tr('paid', 'Paid')], ['credit', tr('on_credit', 'Not Yet Paid')]] as const).map(([value, label], index) => (
                   <button
                     key={value || 'unset'}
                     type="button"

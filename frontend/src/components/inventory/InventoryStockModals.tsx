@@ -696,7 +696,7 @@ export default function InventoryStockModals({
                               ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                               : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                           >
-                            {mode === 'credit' ? tr('on_credit', 'Not Paid to supplier') : tr('paid', 'Paid')}
+                            {mode === 'credit' ? tr('on_credit', 'Not Yet Paid') : tr('paid', 'Paid')}
                           </button>
                         ))}
                       </div>
@@ -715,7 +715,7 @@ export default function InventoryStockModals({
                         onChange={iso => setAdjustForm(f => ({ ...f, credit_due_date: iso }))}
                       />
                       {creditDueMissing ? (
-                        <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{tr('fast_stockin_credit_due', 'Not Paid supplier stock needs a due date')}</div>
+                        <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date')}</div>
                       ) : null}
                     </div>
                   ) : null}
