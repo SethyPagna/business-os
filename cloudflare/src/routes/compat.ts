@@ -357,7 +357,28 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
   }
 }
 
-async function dashboardAnalytics(env: Env, query: Record<string, string>) {
+/**
+ * The removal-loss block is COST money (stock priced at what it cost), so it
+ * follows the same admin-only rule reports.ts's gateTotals applies -- and it
+ * is STRIPPED, not zeroed, so a non-admin client cannot tell "hidden" from
+ * "no losses". revenue_after_losses_usd goes with it: leaving it beside the
+ * canonical revenue would hand back the loss by subtraction.
+ *
+ * Scoped to the five new keys on purpose. cost_usd / profit_usd have shipped
+ * on this endpoint ungated since before this lane and narrowing them here
+ * would silently change the Dashboard for non-admin roles; that exposure is
+ * reported separately rather than widened or quietly fixed here.
+ */
+function gateRemovalLosses(totals: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
+  if (isAdmin) return totals
+  const {
+    removal_loss_usd, removal_loss_qty, removal_loss_unvalued_rows,
+    revenue_after_losses_usd, profit_after_losses_usd, ...rest
+  } = totals
+  return rest
+}
+
+async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdmin: boolean) {
   const db = getDb(env)
   const range = dateRange(query)
   const { startDate, endDate, granularity } = range
@@ -487,8 +508,8 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
     `).all(analyticsParams),
   ])
   return {
-    totals: totals || {},
-    prevTotals: prevTotals || {},
+    totals: gateRemovalLosses((totals || {}) as unknown as Record<string, unknown>, isAdmin),
+    prevTotals: gateRemovalLosses((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin),
     periodReturns: periodReturns || {},
     periodSupplierReturns: periodSupplierReturns || {},
     periodData: periodData || [],
@@ -535,14 +556,14 @@ app.get('/dashboard/stock-alerts', async (c) => {
 app.get('/analytics', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
-  return c.json(await dashboardAnalytics(c.env, c.req.query()))
+  return c.json(await dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user'))))
 })
 app.get('/dashboard/startup', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
   const [summary, analytics] = await Promise.all([
     dashboardSummary(c.env, c.req.query()),
-    dashboardAnalytics(c.env, c.req.query()),
+    dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user'))),
   ])
   return c.json({ summary, analytics })
 })

@@ -42,7 +42,7 @@ const localDateAtOrBefore = (column) => `date(${column}, '+7 hours') <= @endDate
 // the shipped SQL rather than a transcription of it.
 const productSalesLedger = loadTs('lib/productSalesLedger.ts', {
   './salesAnalytics': loadTs('lib/salesAnalytics.ts', {
-    './businessDateWindow': { localDateAtOrAfter, localDateAtOrBefore },
+    './removalLosses': loadTs('lib/removalLosses.ts'), './businessDateWindow': { localDateAtOrAfter, localDateAtOrBefore },
   }),
 })
 const inventory = loadTs('routes/inventory.ts', {

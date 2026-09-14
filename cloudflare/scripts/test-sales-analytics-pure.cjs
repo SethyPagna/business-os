@@ -33,6 +33,9 @@ fs.writeFileSync(tsPath, stripped)
 // pure dependency in so the isolated compile resolves and emits it.
 const winPath = path.join(tmpDir, 'businessDateWindow.ts')
 fs.writeFileSync(winPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+// P3-L5: salesAnalytics.ts now imports ./removalLosses (stock removed entirely,
+// priced at cost). It is dependency-free, so copying the real file in is enough.
+fs.writeFileSync(path.join(tmpDir, 'removalLosses.ts'), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'removalLosses.ts'), 'utf8'))
 const moneyPath = path.join(tmpDir, 'moneyPrecision.ts')
 const reportMoneyPath = path.join(tmpDir, 'reportMoneyPrecision.ts')
 const customerReturnPath = path.join(tmpDir, 'customerReturnEntitlement.ts')

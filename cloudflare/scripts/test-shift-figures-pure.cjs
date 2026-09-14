@@ -133,7 +133,7 @@ const analyticsPrecision = { './saleMoneyPrecision': saleMoneyPrecision, './repo
 const saleTotals = load('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = load('lib/financialPrecision.ts')
 const nativeSaleChange = load('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
-const realAnalytics = load('lib/salesAnalytics.ts', { './db': { getDb: () => db }, './businessDateWindow': businessDateWindow, ...analyticsPrecision })
+const realAnalytics = load('lib/salesAnalytics.ts', { './db': { getDb: () => db }, './removalLosses': load('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 const analytics = {
   ...realAnalytics,
   getSalesTotals: async (_env, filters) => { seen.push(filters); return { ...KERNEL } },

@@ -64,6 +64,8 @@ const analytics = compile('salesAnalytics.ts', {
   './db': {},
   '../index': {},
   './businessDateWindow': businessDateWindow,
+  // P3-L5: stock removed entirely, priced at cost. Dependency-free module.
+  './removalLosses': compile('removalLosses.ts'),
   './reportMoneyPrecision': reportMoneyPrecision,
   './customerReturnEntitlement': customerReturnEntitlement,
   './refundMoneyPrecision': refundMoneyPrecision,

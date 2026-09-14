@@ -126,7 +126,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
 })
 const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => db },
-  './businessDateWindow': businessDateWindow,
+  './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
   './reportMoneyPrecision': reportMoneyPrecision,
   './customerReturnEntitlement': customerReturnEntitlement,
   './refundMoneyPrecision': refundMoneyPrecision, './saleMoneyPrecision': saleMoneyPrecision,

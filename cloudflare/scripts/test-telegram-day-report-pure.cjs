@@ -123,7 +123,7 @@ const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrec
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
-const analytics = loadReal('lib/salesAnalytics.ts', { './db': dbShim, './businessDateWindow': businessDateWindow, ...analyticsPrecision })
+const analytics = loadReal('lib/salesAnalytics.ts', { './db': dbShim, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 // Merged Sep 6 2026: telegram.ts now reads the owner's low-stock setting
 // through lib/lowStockSettings.ts and shares the drawer arithmetic through
 // lib/shiftReconciliation.ts (lowstock and shifts lanes). Both are the REAL

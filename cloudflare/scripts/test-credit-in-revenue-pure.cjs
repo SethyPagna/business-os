@@ -58,6 +58,9 @@ const kernelStripped = ('// @ts-nocheck\n' + kernelSrc)
 fs.writeFileSync(path.join(tmpDir, 'salesAnalytics.ts'), kernelStripped)
 fs.writeFileSync(path.join(tmpDir, 'businessDateWindow.ts'),
   fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+// P3-L5: salesAnalytics.ts now imports ./removalLosses (stock removed entirely,
+// priced at cost). It is dependency-free, so copying the real file in is enough.
+fs.writeFileSync(path.join(tmpDir, 'removalLosses.ts'), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'removalLosses.ts'), 'utf8'))
 const kernelDependencies = [
   'moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts',
   'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts',

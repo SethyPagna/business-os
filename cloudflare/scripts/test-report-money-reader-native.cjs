@@ -47,7 +47,7 @@ function kernel(sql, hook) {
   const dates = load('src/lib/businessDateWindow.ts')
   const money = load('src/lib/moneyPrecision.ts')
   const reportMoney = load('src/lib/reportMoneyPrecision.ts', { './moneyPrecision': money })
-  return load('src/lib/salesAnalytics.ts', { './db': { getDb: () => db }, './businessDateWindow': dates, './reportMoneyPrecision': reportMoney })
+  return load('src/lib/salesAnalytics.ts', { './db': { getDb: () => db }, './removalLosses': load('src/lib/removalLosses.ts'), './businessDateWindow': dates, './reportMoneyPrecision': reportMoney })
 }
 const filters = { startDate: '2026-09-01', endDate: '2026-09-30', branchId: 2 }
 

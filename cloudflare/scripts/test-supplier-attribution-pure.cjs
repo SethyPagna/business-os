@@ -100,7 +100,7 @@ const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => db },
-  './businessDateWindow': businessDateWindow,
+  './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
   ...analyticsPrecision,
 })
 // routes/inventory.ts's per-product revenue/COGS SQL moved into this shared

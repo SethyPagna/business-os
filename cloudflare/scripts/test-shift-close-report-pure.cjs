@@ -339,7 +339,7 @@ async function main() {
   const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 
   const closeAnalytics = loadReal('lib/salesAnalytics.ts', {
-    './db': { getDb: () => settingsOnly }, './businessDateWindow': businessDateWindow, ...analyticsPrecision,
+    './db': { getDb: () => settingsOnly }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision,
   })
   const telegram = loadReal('lib/telegram.ts', {
     './lowStockSettings': lowStockStub,

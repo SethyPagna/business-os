@@ -470,6 +470,19 @@ export type ShiftFigures = {
   /** One refunds total. The report shows no per-return breakdown. */
   refunds_usd: number
   /**
+   * Stock removed entirely during the shift, priced at cost (owner, Sep 14
+   * 2026: "also add one row below unpaid in reports as well"). A POSITIVE
+   * amount lost, printed below the unpaid row exactly like credit_usd, and --
+   * like it -- never subtracted from sales/profit above: the pair of figures
+   * is the point. OPTIONAL: absent when the kernel could not scope the
+   * movement window, so the row is omitted rather than printed as $0.00.
+   */
+  removal_loss_usd?: number
+  /** Revenue and profit WITH the removal losses taken off. Absent together
+   *  with removal_loss_usd. profit may be negative -- that is the loss view. */
+  revenue_after_losses_usd?: number
+  profit_after_losses_usd?: number
+  /**
    * The two halves of the window's expenses, per currency:
    * delivery_cost = courier payouts + fees typed 'delivery';
    * other_expenses = every remaining fee.
@@ -487,6 +500,8 @@ export type ShiftFiguresInput = {
   totals: {
     revenue_usd?: unknown; cost_usd?: unknown; profit_usd?: unknown
     delivery_usd?: unknown; pending_revenue_usd?: unknown; refund_usd?: unknown
+    removal_loss_usd?: unknown
+    revenue_after_losses_usd?: unknown; profit_after_losses_usd?: unknown
   } | null | undefined
   /** Every fee in the window. */
   expenses: Partial<ShiftMoney> | null | undefined
@@ -514,6 +529,13 @@ export function composeShiftFigures(input: ShiftFiguresInput): ShiftFigures {
     // negative here would be a data defect printed as a business fact.
     credit_usd: Math.max(0, round2(finite(totals.pending_revenue_usd))),
     refunds_usd: round2(finite(totals.refund_usd)),
+    // Present only when the kernel sent the block. Never floored at 0 on the
+    // profit side: "including the losses" is allowed to be negative.
+    ...(totals.removal_loss_usd === undefined ? {} : {
+      removal_loss_usd: Math.max(0, round2(finite(totals.removal_loss_usd))),
+      revenue_after_losses_usd: round2(finite(totals.revenue_after_losses_usd)),
+      profit_after_losses_usd: round2(finite(totals.profit_after_losses_usd)),
+    }),
     delivery_cost: {
       usd: round2(deliveryFees.usd + courier.usd),
       khr: roundKhr(deliveryFees.khr + courier.khr),
