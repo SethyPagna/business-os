@@ -478,7 +478,24 @@ function syncOutboxOnce() {
 }
 self.addEventListener('install', (event) => {
     event.waitUntil((async () => {
-        await precacheAppShell();
+        // Which of this generation's caches already existed. precacheAppShell
+        // writes into BOTH caches before it can throw (a missing entry asset, a
+        // killed iOS install), and nothing deleted the half-filled pair until some
+        // later worker activated successfully -- so a phone that fails an install
+        // twice carries two dead generations of storage into the next attempt,
+        // which on iOS is exactly how the next install gets evicted. Delete only
+        // what THIS attempt created; a same-hash reinstall must never take the
+        // running worker's caches with it.
+        const cacheNamesBeforeInstall = new Set(await caches.keys());
+        try {
+            await precacheAppShell();
+        }
+        catch (error) {
+            await Promise.all([APP_SHELL_CACHE, STATIC_CACHE]
+                .filter((name) => !cacheNamesBeforeInstall.has(name))
+                .map((name) => caches.delete(name).catch(() => { })));
+            throw error;
+        }
         // Do not take over a live checkout or editor mid-session. Updated workers
         // wait until the user closes the old client or explicitly chooses Update;
         // the first install still activates normally because there is no incumbent.
@@ -561,7 +578,6 @@ async function appShellFallback(request) {
     const cache = await caches.open(APP_SHELL_CACHE);
     try {
         const response = await fetch(request, { cache: 'no-store' });
-        const cached = await cache.match('/index.html') || await cache.match('/');
         if (response && response.ok && response.type === 'basic' && !response.redirected) {
             await cache.put('/index.html', response.clone()).catch(() => { });
             return response;

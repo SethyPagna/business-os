@@ -88,6 +88,23 @@ function watchForNewAppShell(registration: ServiceWorkerRegistration) {
   window.addEventListener('online', () => { check(SERVICE_WORKER_UPDATE_MIN_GAP_MS) })
 }
 
+// A worker that installed during an EARLIER session and is still parked in
+// 'waiting' never announces itself again: BUSINESS_OS_APP_UPDATE_AVAILABLE is
+// broadcast from 'install' and 'activate' only. Reopening an installed iOS app
+// is exactly that case -- the new shell is already waiting, the page boots the
+// old bundle from cache, and nothing ever offers the user the update. Re-raise
+// the same event the page listens for, once, at registration time.
+//
+// No version is attached on purpose: a waiting worker's build hash is not
+// readable from here, and inventing one would let App.tsx's "same build"
+// check silently drop a real update.
+function announceWaitingAppShell(registration: ServiceWorkerRegistration) {
+  if (typeof window === 'undefined' || !registration.waiting) return
+  window.dispatchEvent(new CustomEvent('sync:app-update-available', {
+    detail: { reason: 'waiting_worker', message: 'New version ready', ts: Date.now() },
+  }))
+}
+
 function registerOfflineAppShell() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
@@ -95,6 +112,7 @@ function registerOfflineAppShell() {
     try {
       const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
       registration.update?.().catch(() => {})
+      announceWaitingAppShell(registration)
       watchForNewAppShell(registration)
     } catch (_) {}
   }
