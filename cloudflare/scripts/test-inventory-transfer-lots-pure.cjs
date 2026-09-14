@@ -71,7 +71,23 @@ let routeAudits = []
 let routeWaits = []
 const noop = () => null
 const asyncNoop = async () => null
+// P3-L6: the tagged-stock kernel that routes/inventory.ts now imports.
+const taggedStockCondition = loadModule('lib/stockCondition.ts', require)
+const taggedReturnsStock = loadModule('lib/returnsStock.ts', (id) => {
+  if (id === './stockCondition') return taggedStockCondition
+  if (id === './productBatches') return productBatches
+  return require(id)
+})
+const taggedLotActions = loadModule('lib/damagedLotActions.ts', (id) => {
+  if (id === './stockCondition') return taggedStockCondition
+  if (id === './productBatches') return productBatches
+  if (id === './movementCostSnapshot') return movementCostSnapshot
+  if (id === './returnsStock') return taggedReturnsStock
+  return require(id)
+})
 const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
+  if (id === '../lib/stockCondition') return taggedStockCondition
+  if (id === '../lib/damagedLotActions') return taggedLotActions
   if (id === '../lib/moneyPrecision') return moneyPrecision
   if (id === 'hono') return require('hono')
   if (id === '../lib/db') return { getDb: () => wrapDb(routeDb) }

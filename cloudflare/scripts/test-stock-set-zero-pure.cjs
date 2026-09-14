@@ -122,7 +122,19 @@ const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnaly
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
 
+// P3-L6: routes/inventory.ts imports the tagged-stock kernel, so this
+// loader has to resolve it too (the paths under test never tag anything;
+// they just have to import).
+const stockCondition = loadReal('lib/stockCondition.ts')
+const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
+  './productBatches': productBatches,
+  './stockCondition': stockCondition,
+  './movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision }),
+  './returnsStock': loadReal('lib/returnsStock.ts', { './productBatches': productBatches, './stockCondition': stockCondition }),
+})
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/stockCondition': stockCondition,
+  '../lib/damagedLotActions': damagedLotActions,
   '../lib/moneyPrecision': moneyPrecision,
   '../lib/movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision }),
   // inventory.ts imports this TypeScript-only helper; load it through the
