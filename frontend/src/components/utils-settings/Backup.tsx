@@ -640,6 +640,18 @@ function IntegrationDoctorCard({ copy, notify, active }: IntegrationDoctorCardPr
         <DoctorStatusPill label="Cloudflare D1" check={checks.database} />
         <DoctorStatusPill label={`${String(runtime.objectStorageDriver || 'R2').toUpperCase()} storage`} check={storage} />
         <DoctorStatusPill label="Cloudflare Queues" check={checks.queue} />
+        {/* Which plan this deployment was built for (lib/planTier.ts): the
+            doctor is where someone looks when production behaves like a
+            smaller machine than expected. Env-only; never inferred here. */}
+        <DoctorStatusPill
+          label={copy('plan_tier_label', 'Plan')}
+          check={{
+            ok: true,
+            message: runtime.tier === 'free'
+              ? `${copy('plan_tier_free', 'Free')} -- ${copy('plan_tier_hint_free', 'Running on the Cloudflare free plan: smaller import batches and no automatic backups.')}`
+              : `${copy('plan_tier_paid', 'Paid')} -- ${copy('plan_tier_hint_paid', 'Running on the Cloudflare paid plan: full import batches and automatic backups.')}`,
+          }}
+        />
         <DoctorStatusPill label="Analytics" check={checks.analytics} />
         <DoctorStatusPill label="Google Drive" check={drive} />
         <DoctorStatusPill label="Google login" check={google_login} />
