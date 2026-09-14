@@ -97,6 +97,13 @@ export type Env = {
   BROADCAST_HUB: DurableObjectNamespace
   BUSINESS_OS_PUBLIC_URL: string
   BUSINESS_OS_ADMIN_URL: string
+  // Which Workers plan this deployment runs on: 'paid' (wrangler.toml) or
+  // 'free' (wrangler.free.toml). Read ONLY by lib/planTier.ts, which turns
+  // it into the limit table every plan-sensitive call site reads. Optional
+  // and defaulting to 'paid' on purpose -- see that module's header for why
+  // an unset value must never be treated as 'free', and why the tier is
+  // never inferred from which bindings happen to be present.
+  PLAN_TIER?: 'free' | 'paid'
   // Slug (or public_id) of the one organization this deployment serves --
   // see routes/organizations.ts's getDefaultOrganization for why this is a
   // preference with a fallback rather than a hard requirement. Optional:
