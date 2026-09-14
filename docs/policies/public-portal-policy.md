@@ -6,7 +6,7 @@ This implementation provides bilingual English and Khmer privacy, terms, cookie,
 
 The read-only production settings check on 7 September 2026 confirmed the trade name **Leang Cosmetics**, address **136 St 215, Phnom Penh**, and phone **017 611 168**. The business email is blank. No verified registered legal name or registration number was found in the queried settings. The trade name is not substituted for a registered identity.
 
-Catalogue browsing remains available while those details are incomplete and shows a visible readiness warning. AI requests and customer screenshot submissions fail closed while publication readiness is incomplete. Before public release, the operator must verify and enter the registered name, registration number, address, phone, and email, confirm the target markets, and obtain qualified legal review appropriate to those markets.
+Catalogue browsing remains available while those details are incomplete. Since 14 September 2026 the storefront shows no automatic readiness notice to visitors; the missing seller details are listed only inside the admin portal editor, and any visitor-facing notice is text the operator writes there. AI requests and customer screenshot submissions are not gated on publication readiness. Before public release, the operator must verify and enter the registered name, registration number, address, phone, and email, confirm the target markets, and obtain qualified legal review appropriate to those markets.
 
 ## Data and consent behavior
 
