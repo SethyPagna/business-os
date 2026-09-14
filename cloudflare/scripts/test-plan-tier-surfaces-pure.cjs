@@ -94,9 +94,15 @@ check('the free-plan reason is appended only on free', async () => {
 check('the stock-import refusals carry a stable code and the tier reason', async () => {
   const engine = readSource('lib/importEngine.ts')
   const coded = engine.match(/code: 'stock_import_over_tier_cap'/g) || []
-  assert.equal(coded.length, 2, 'both the reconcile row cap and the single-pass action cap must be coded')
+  assert.equal(coded.length, 3, 'the analyze-phase row cap, the apply-phase reconcile row cap and the single-pass action cap must all be coded')
   const suffixed = engine.match(/\$\{freePlanRefusalSuffix\(env\)\}/g) || []
-  assert.equal(suffixed.length, 2, 'each refusal must say why the ceiling is what it is')
+  assert.equal(suffixed.length, 2, 'each apply-side refusal must say why the ceiling is what it is')
+  // The analyze gate (runImportAnalyze) also serves the direct-mode cap,
+  // which is data-bound rather than a tier limit, so its code and suffix are
+  // conditional on the cap having come from the tier table.
+  assert.match(engine, /const tierCap = stockActionRowCap === limits\.stockActionMaxRows/)
+  assert.match(engine, /\$\{tierCap \? freePlanRefusalSuffix\(env\) : ''\}/)
+  assert.match(engine, /tierCap \? \{ code: 'stock_import_over_tier_cap' \} : \{\}/)
   // The refusal must be a throw, not a slice: a reconcile import applies
   // deltas against ONE live-stock snapshot, so the first N rows of an
   // oversized sheet are not a partial import, they are a wrong one.
@@ -263,6 +269,18 @@ check('the products reset refuses the image option on free instead of half-delet
   const idx = source.indexOf("code: 'reset_images_unavailable_free'")
   const dbIdx = source.indexOf('const db = getDb(c.env)')
   assert.ok(idx > -1 && dbIdx > idx, 'the gate must precede the reset path it guards')
+  // ...and the screen shows the pack string for that code, not the raw
+  // English body: api/http.ts copies `code` onto the thrown error, and
+  // ResetData resolves it through t() before falling back to the message.
+  const http = fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'api', 'http.ts'), 'utf8')
+  assert.match(http, /error\.code = parsed\?\.code \|\| null/)
+  const resetData = fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'components', 'utils-settings', 'ResetData.tsx'), 'utf8')
+  assert.match(resetData, /function describeError\(error: unknown, T: \(key: string, fallback: string\) => string\): string/)
+  assert.match(resetData, /const localized = T\(code, message\)\s*\n\s*return localized === code \? message : localized/)
+  const shown = resetData.match(/describeError\(error, T\)/g) || []
+  assert.ok(shown.length >= 3, `every reset catch shows the translated refusal (saw ${shown.length})`)
+  assert.doesNotMatch(resetData, /: \$\{getErrorMessage\(error\)\}/,
+    'no reset catch may bypass the code translation')
 })
 
 check('every refusal code has a lang pack key of the same name', async () => {

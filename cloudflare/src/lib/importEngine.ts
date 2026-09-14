@@ -4292,7 +4292,14 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
       ? (getUnifiedStockMode(meta.policyJson) === 'direct' ? STOCK_ACTION_DIRECT_MAX_ROWS : limits.stockActionMaxRows)
       : Infinity
     if (meta.type === 'stock_actions' && meta.totalRows > stockActionRowCap) {
-      throw new Error(`This stock import has ${meta.totalRows} rows; split it into files of at most ${stockActionRowCap} rows before importing.`)
+      // Same code + suffix as the apply-side refusals (applyStockActionsJob),
+      // so the UI translates it. The direct-mode cap is data-bound, not a
+      // tier limit, and keeps a plain message.
+      const tierCap = stockActionRowCap === limits.stockActionMaxRows
+      throw Object.assign(
+        new Error(`This stock import has ${meta.totalRows} rows; split it into files of at most ${stockActionRowCap} rows before importing.${tierCap ? freePlanRefusalSuffix(env) : ''}`),
+        tierCap ? { code: 'stock_import_over_tier_cap' } : {},
+      )
     }
     const { cursor, state } = await getChunkState(db, jobId)
     const decisions = getDecisionMap(meta.policyJson)
