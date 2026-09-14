@@ -1,0 +1,20 @@
+{
+  "//": "The e2e suite's OWN typecheck. Kept out of tsconfig.json on purpose: the app typecheck must not depend on @playwright/test being installed, and the specs need DOM lib plus Playwright's globals that the app never sees. Run: npx tsc --noEmit -p tsconfig.e2e.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": [
+    "playwright.config.ts",
+    "e2e/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
+}

@@ -19,6 +19,11 @@
     "preview": "vite preview",
     "smoke:local": "vite --host 127.0.0.1 --port 4173",
     "test:utils": "node tests/runTestChain.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:fresh": "npm run build && playwright test",
+    "test:e2e:ios": "playwright test --project=ios-webkit",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report e2e-report",
     "verify:i18n": "node ../ops/scripts/frontend/verify-i18n.ts",
     "verify:public-runtime": "node ../ops/scripts/frontend/build-public-runtime-scripts.ts --check"
   },
@@ -41,6 +46,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/node": "^24.12.4",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.2.15",

@@ -41,6 +41,10 @@
     "tests/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "e2e",
+    "e2e-report",
+    "test-results",
+    "playwright.config.ts"
   ]
 }
