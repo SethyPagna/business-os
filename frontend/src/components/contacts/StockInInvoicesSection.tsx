@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
@@ -7,6 +7,8 @@ import { fmtDateOnly } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { getStockInInvoiceLines, getStockInInvoiceReport } from '../../api/contactReadTransport.ts'
 import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
+import InvoiceDetailFloat from './InvoiceDetailFloat.tsx'
+import CopyableId from '../shared/CopyableId.tsx'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 
 type TranslateFn = (key: string) => string | undefined
@@ -109,6 +111,11 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState<Record<string, LinesState>>({})
+  // P3-2: the invoice group whose detail float is open (user: "i meant float
+  // when clicked on the invoice rows click to view details and sections").
+  // Its product lines still live in `expanded`, keyed by group -- the float
+  // renders that slot, so the loader/pager below is unchanged.
+  const [detailGroup, setDetailGroup] = useState<InvoiceGroup | null>(null)
   const aliveRef = useRef(true)
   const requestRef = useRef(0)
 
@@ -138,9 +145,11 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           return
         }
         setData(nextData)
-        // A filter change makes the open groups' line sets stale (the
-        // branch filter also scopes lines), so they collapse.
+        // A filter change makes the open group's line set stale (the branch
+        // filter also scopes lines), so the cache is dropped and the float
+        // closes with it rather than showing lines from the old filter.
         setExpanded({})
+        setDetailGroup(null)
       })
       .catch((err: unknown) => {
         if (!aliveRef.current || requestRef.current !== requestId) return
@@ -207,17 +216,12 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId])
 
-  const toggleGroup = (group: InvoiceGroup) => {
-    const key = groupKeyOf(group)
-    if (expanded[key]) {
-      setExpanded((current) => {
-        const next = { ...current }
-        delete next[key]
-        return next
-      })
-      return
-    }
-    loadLines(group, 1)
+  // Clicking an invoice row opens its float. The lines are fetched on open
+  // unless this group's page is already cached, so re-opening the same invoice
+  // shows its rows immediately instead of flashing a loader.
+  const openGroup = (group: InvoiceGroup) => {
+    setDetailGroup(group)
+    if (!expanded[groupKeyOf(group)]) loadLines(group, 1)
   }
 
   const totals = data?.totals || {}
@@ -361,18 +365,19 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
             <div className="space-y-2">
               {invoices.map((group) => {
                 const key = groupKeyOf(group)
-                const linesState = expanded[key]
                 const branchNames = groupBranchNames(group)
-                const linePages = linesState ? Math.max(1, Math.ceil(linesState.total / linesState.pageSize)) : 1
                 return (
                   <div key={key} className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+                    {/* P3-2: the row opens the invoice's float instead of
+                        pushing an inline table into the list. One compact line
+                        on a wide screen, wrapping on a phone. */}
                     <button
                       type="button"
                       className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700/40"
-                      onClick={() => toggleGroup(group)}
-                      aria-expanded={Boolean(linesState)}
+                      onClick={() => openGroup(group)}
+                      aria-haspopup="dialog"
                     >
-                      <ChevronDown className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${linesState ? '' : '-rotate-90'}`} />
+                      <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-400" />
                       <span className="whitespace-nowrap text-sm font-semibold tabular-nums text-gray-900 dark:text-white">
                         {group.received_day ? <time dateTime={group.received_day}>{fmtDateOnly(group.received_day)}</time> : tr('no_date_recorded', 'No date recorded')}
                       </span>
@@ -385,57 +390,6 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                       <span className="text-xs text-gray-500">{qty(group.units_received)} {tr('units', 'Units').toLowerCase()}</span>
                       <span className="text-xs font-semibold text-gray-800 dark:text-gray-100">{money(group.cost_usd)}</span>
                     </button>
-                    {linesState ? (
-                      <div className="border-t border-gray-100 dark:border-gray-800">
-                        {linesState.error ? (
-                          <div className="px-3 py-2 text-sm text-amber-800 dark:text-amber-200">{linesState.error}</div>
-                        ) : linesState.loading && linesState.lines.length === 0 ? (
-                          <div className="px-3 py-3 text-center text-sm text-gray-400">{tr('loading', 'Loading...')}</div>
-                        ) : (
-                          <>
-                            <div data-invoice-ledger-scroll className="max-w-full overflow-x-auto overscroll-x-contain">
-                              <table className="w-full min-w-[860px] text-left text-xs tabular-nums">
-                                <thead className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                                  <tr>
-                                    <th className="px-3 py-2">{tr('product', 'Product')}</th>
-                                    <th className="px-3 py-2">{tr('barcode', 'Barcode')}</th>
-                                    <th className="px-3 py-2">{tr('batch', 'Received date')}</th>
-                                    <th className="px-3 py-2 text-right">{tr('quantity_received', 'Qty received')}</th>
-                                    <th className="px-3 py-2">{tr('unit', 'Unit')}</th>
-                                    <th className="px-3 py-2 text-right">{tr('unit_cost_usd', 'Unit cost (USD)')}</th>
-                                    <th className="px-3 py-2 text-right">{tr('total', 'Total')}</th>
-                                    <th className="px-3 py-2">{tr('payment_to_supplier', 'Payment')}</th>
-                                    <th className="px-3 py-2">{tr('received_branch', 'Received into')}</th>
-                                    <th className="px-3 py-2 text-right">{tr('remaining', 'Remaining')}</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {linesState.lines.map((line) => (
-                                    <tr key={line.id} className="border-t border-gray-100 dark:border-gray-800">
-                                      <td className="px-3 py-2 text-gray-800 dark:text-gray-100">{line.product_name || '--'}</td>
-                                      <td className="px-3 py-2 text-gray-500">{line.barcode || '--'}</td>
-                                      <td className="px-3 py-2 text-gray-500">{batchDisplayLabel({ id: line.id, lot_code: line.lot_code, received_at: line.received_at, batch_number: line.batch_number }, tr('batch', 'Received date'))}</td>
-                                      <td className="px-3 py-2 text-right text-gray-800 dark:text-gray-100">{qty(line.received_quantity)}</td>
-                                      <td className="px-3 py-2 text-gray-500">{line.unit || '--'}</td>
-                                      <td className="px-3 py-2 text-right text-gray-800 dark:text-gray-100">{line.unit_cost_usd == null ? '--' : money(line.unit_cost_usd)}</td>
-                                      <td className="px-3 py-2 text-right font-medium text-gray-800 dark:text-gray-100">{line.line_total_usd == null ? '--' : money(line.line_total_usd)}</td>
-                                      <td className="px-3 py-2">{paymentChip(line)}</td>
-                                      <td className="px-3 py-2 text-gray-500">{line.received_branch_name || tr('not_recorded', 'Not recorded')}</td>
-                                      <td className="px-3 py-2 text-right text-gray-500">{qty(line.remaining_quantity)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                            {linePages > 1 ? (
-                              <div className="flex justify-center border-t border-gray-100 px-3 py-2 dark:border-gray-800">
-                                <PaginationControls compact rangeAsPageSize page={linesState.page} pageSize={linesState.pageSize} pageSizeOptions={[LINE_PAGE_SIZE]} editablePageSizeInput={false} totalItems={linesState.total} label={tr('invoice_lines', 'Lines').toLowerCase()} t={t} onPageChange={(nextPage) => loadLines(group, nextPage)} />
-                              </div>
-                            ) : null}
-                          </>
-                        )}
-                      </div>
-                    ) : null}
                   </div>
                 )
               })}
@@ -447,6 +401,98 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           </div>
         </>
       )}
+
+      {detailGroup ? (() => {
+        const linesState = expanded[groupKeyOf(detailGroup)]
+        const linePages = linesState ? Math.max(1, Math.ceil(linesState.total / linesState.pageSize)) : 1
+        return (
+          <InvoiceDetailFloat
+            t={t}
+            wide
+            onClose={() => setDetailGroup(null)}
+            title={`${tr('invoice_details', 'Invoice details')} -- ${supplierLabel(detailGroup)}`}
+            idLabel={tr('received_date', 'Received date')}
+            idValue={detailGroup.received_day ? fmtDateOnly(detailGroup.received_day) : tr('no_date_recorded', 'No date recorded')}
+            badge={detailGroup.credit_lines > 0 ? (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium leading-5 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                {tr('on_credit', 'Not Yet Paid')}: {detailGroup.credit_lines}
+              </span>
+            ) : null}
+            sections={[
+              {
+                key: 'invoice',
+                title: tr('details', 'Details'),
+                facts: [
+                  { key: 'supplier', label: tr('supplier', 'Supplier'), value: supplierLabel(detailGroup) },
+                  { key: 'received_day', label: tr('received_date', 'Received date'), value: detailGroup.received_day ? <time dateTime={detailGroup.received_day}>{fmtDateOnly(detailGroup.received_day)}</time> : tr('no_date_recorded', 'No date recorded') },
+                  { key: 'branches', label: tr('received_branch', 'Received into'), value: groupBranchNames(detailGroup) || tr('not_recorded', 'Not recorded') },
+                  { key: 'lines', label: tr('invoice_lines', 'Lines'), value: String(detailGroup.line_count) },
+                  { key: 'units', label: tr('units_received', 'Units received'), value: qty(detailGroup.units_received) },
+                  { key: 'cost', label: tr('purchase_cost', 'Purchase cost'), value: money(detailGroup.cost_usd) },
+                ],
+              },
+              {
+                key: 'lines',
+                title: tr('invoice_lines', 'Lines'),
+                // Same table the ledger used to push inline. It lives here now
+                // (user: the row click opens a float), still paging through the
+                // existing per-invoice loader.
+                content: linesState?.error ? (
+                  <div className="px-3 py-2 text-sm leading-6 text-amber-800 dark:text-amber-200">{linesState.error}</div>
+                ) : !linesState || (linesState.loading && linesState.lines.length === 0) ? (
+                  <div className="px-3 py-3 text-center text-sm leading-6 text-gray-400">{tr('loading', 'Loading...')}</div>
+                ) : (
+                  <>
+                    <div data-invoice-ledger-scroll className="max-w-full overflow-x-auto overscroll-x-contain">
+                      <table className="w-full min-w-[860px] text-left text-xs tabular-nums">
+                        <thead className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                          <tr>
+                            <th className="px-3 py-2">{tr('product', 'Product')}</th>
+                            <th className="px-3 py-2">{tr('barcode', 'Barcode')}</th>
+                            <th className="px-3 py-2">{tr('batch', 'Received date')}</th>
+                            <th className="px-3 py-2 text-right">{tr('quantity_received', 'Qty received')}</th>
+                            <th className="px-3 py-2">{tr('unit', 'Unit')}</th>
+                            <th className="px-3 py-2 text-right">{tr('unit_cost_usd', 'Unit cost (USD)')}</th>
+                            <th className="px-3 py-2 text-right">{tr('total', 'Total')}</th>
+                            <th className="px-3 py-2">{tr('payment_to_supplier', 'Payment')}</th>
+                            <th className="px-3 py-2">{tr('received_branch', 'Received into')}</th>
+                            <th className="px-3 py-2 text-right">{tr('remaining', 'Remaining')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {linesState.lines.map((line) => (
+                            <tr key={line.id} className="border-t border-gray-100 dark:border-gray-800">
+                              <td className="px-3 py-2 leading-6 text-gray-800 dark:text-gray-100">{line.product_name || '--'}</td>
+                              <td className="px-3 py-2 leading-6 text-gray-500">
+                                {line.barcode ? (
+                                  <CopyableId value={line.barcode} copyLabel={tr('copy', 'Copy')} copiedLabel={tr('copied', 'Copied')} valueClassName="text-xs leading-5 text-gray-500" />
+                                ) : '--'}
+                              </td>
+                              <td className="px-3 py-2 leading-6 text-gray-500">{batchDisplayLabel({ id: line.id, lot_code: line.lot_code, received_at: line.received_at, batch_number: line.batch_number }, tr('batch', 'Received date'))}</td>
+                              <td className="px-3 py-2 text-right leading-6 text-gray-800 dark:text-gray-100">{qty(line.received_quantity)}</td>
+                              <td className="px-3 py-2 leading-6 text-gray-500">{line.unit || '--'}</td>
+                              <td className="px-3 py-2 text-right leading-6 text-gray-800 dark:text-gray-100">{line.unit_cost_usd == null ? '--' : money(line.unit_cost_usd)}</td>
+                              <td className="px-3 py-2 text-right font-medium leading-6 text-gray-800 dark:text-gray-100">{line.line_total_usd == null ? '--' : money(line.line_total_usd)}</td>
+                              <td className="px-3 py-2">{paymentChip(line)}</td>
+                              <td className="px-3 py-2 leading-6 text-gray-500">{line.received_branch_name || tr('not_recorded', 'Not recorded')}</td>
+                              <td className="px-3 py-2 text-right leading-6 text-gray-500">{qty(line.remaining_quantity)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {linePages > 1 ? (
+                      <div className="flex justify-center border-t border-gray-100 px-3 py-2 dark:border-gray-800">
+                        <PaginationControls compact rangeAsPageSize page={linesState.page} pageSize={linesState.pageSize} pageSizeOptions={[LINE_PAGE_SIZE]} editablePageSizeInput={false} totalItems={linesState.total} label={tr('invoice_lines', 'Lines').toLowerCase()} t={t} onPageChange={(nextPage) => loadLines(detailGroup, nextPage)} />
+                      </div>
+                    ) : null}
+                  </>
+                ),
+              },
+            ]}
+          />
+        )
+      })() : null}
     </div>
   )
 }
