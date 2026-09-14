@@ -28,6 +28,18 @@ const KNOWN_FORMATS = [
   'upc_e',
 ]
 
+// One constraints object for both decoders. The native BarcodeDetector loop and
+// the ZXing fallback open the SAME camera from the SAME single getUserMedia
+// call, so hoisting this keeps that one acquisition obvious at a glance.
+const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
+  audio: false,
+  video: {
+    facingMode: { ideal: 'environment' },
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+  },
+}
+
 type ScannerStatus = 'idle' | 'starting' | 'scanning' | 'blocked' | 'dismissed' | 'manual'
 type ScannerPermissionState = CameraPermissionState
 
@@ -65,8 +77,11 @@ interface ZxingControls {
 
 interface ZxingReader {
   reset?: () => void
-  decodeFromConstraints: (
-    constraints: MediaStreamConstraints,
+  /** Decode from a stream this component already owns. `decodeFromConstraints`
+   * is deliberately NOT used: it calls getUserMedia itself, which would put the
+   * permission prompt behind the decoder's own chunk download. */
+  decodeFromStream: (
+    stream: MediaStream,
     element: HTMLVideoElement,
     callback: (result: { getText?: () => unknown } | null) => void,
   ) => Promise<ZxingControls>
@@ -120,7 +135,13 @@ function getScanErrorText(error: unknown): string {
 
 function stopStream(stream: MediaStream | null | undefined): void {
   try {
-    stream?.getTracks?.().forEach((track) => track.stop())
+    // Skip tracks that already ended. ZXing's controls.stop() disposes the
+    // stream it was handed (BrowserCodeReader's finalize callback calls
+    // disposeMediaStream), so cleanup() can reach the same tracks twice.
+    // track.stop() on an ended track is a no-op per spec, but skipping makes
+    // "each track is stopped exactly once" a property a test can assert
+    // instead of a hope.
+    stream?.getTracks?.().forEach((track) => { if (track.readyState !== 'ended') track.stop() })
   } catch (_) {}
 }
 
@@ -316,6 +337,28 @@ export default function BarcodeScannerModal({
       if (!video || startTokenRef.current !== startToken) return
       video.setAttribute('playsinline', 'true')
 
+      // The camera is acquired FIRST, before either decoder is chosen. WebKit
+      // ships no BarcodeDetector, so on iOS this used to fall through to
+      // decodeFromConstraints, which reaches getUserMedia only AFTER awaiting
+      // the 446 KB ZXing chunk -- the prompt arrived a download later than the
+      // tap that asked for it. One acquisition, immediately after the tap, on
+      // every browser.
+      const stream = await navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS)
+      if (startTokenRef.current !== startToken) {
+        stopStream(stream)
+        return
+      }
+      // Owned from here on: every later bail-out is a token change, and a token
+      // only changes through cleanup() (or a newer startCamera, which calls
+      // cleanup() first), which stops this stream. A throw lands in the catch
+      // below, whose first statement is cleanup() -- so a decoder that fails to
+      // load can never leave the camera light on.
+      streamRef.current = stream
+      setPermissionState('granted')
+      video.srcObject = stream
+      await video.play()
+      if (startTokenRef.current !== startToken) return
+
       const NativeBarcodeDetector = getNativeBarcodeDetector()
       if (NativeBarcodeDetector) {
         const supported = typeof NativeBarcodeDetector.getSupportedFormats === 'function'
@@ -326,41 +369,22 @@ export default function BarcodeScannerModal({
           .map((item) => String(item || ''))
           .filter((item) => KNOWN_FORMATS.includes(item))
         detectorRef.current = new NativeBarcodeDetector({ formats: formats.length ? formats : KNOWN_FORMATS })
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        })
-        if (startTokenRef.current !== startToken) {
-          stopStream(stream)
-          return
-        }
-        streamRef.current = stream
-        setPermissionState('granted')
-        video.srcObject = stream
-        await video.play()
         setStatus('scanning')
         frameRef.current = requestAnimationFrame(scanFrame)
         return
       }
 
+      // No native detector: load the compatibility decoder now that the camera
+      // is already live, and hand it the stream instead of letting it open its
+      // own. decodeFromStream is exactly what decodeFromConstraints calls once
+      // it has a stream, so this is the same supported path minus its
+      // getUserMedia.
       const { BrowserMultiFormatReader } = await import('@zxing/browser') as unknown as ZxingModule
       if (startTokenRef.current !== startToken) return
       const reader = new BrowserMultiFormatReader()
       zxingReaderRef.current = reader
-      const controls = await reader.decodeFromConstraints(
-        {
-          audio: false,
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        },
+      const controls = await reader.decodeFromStream(
+        stream,
         video,
         (result) => {
           const raw = String(result?.getText?.() || '').trim()
@@ -373,7 +397,8 @@ export default function BarcodeScannerModal({
         return
       }
       zxingControlsRef.current = controls
-      setPermissionState('granted')
+      // permissionState was already set to 'granted' by the single acquisition
+      // above -- both decoders share it now, so it is not repeated per branch.
       setStatus('scanning')
       setError(labels.scanFallbackActive)
     } catch (scanError) {

@@ -103,7 +103,23 @@ await runTest('opening the scanner starts the camera itself, and the button surv
   const modalSource = fs.readFileSync(new URL('../src/components/shared/Modal.tsx', import.meta.url), 'utf8')
   const searchButtonSource = fs.readFileSync(new URL('../src/components/shared/ScanSearchButton.tsx', import.meta.url), 'utf8')
   assert.match(source, /const video = await waitForVideoElement\(startToken\)/, 'camera startup must wait for React to commit the video element')
-  assert.match(source, /decodeFromConstraints\([\s\S]*?video,[\s\S]*?\(result\)/, 'the iOS compatibility decoder must receive the mounted video element')
+  assert.match(source, /decodeFromStream\(\s*stream,\s*video,[\s\S]*?\(result\)/, 'the iOS compatibility decoder must receive the stream we already hold and the mounted video element')
+
+  // WebKit has no BarcodeDetector, so iOS always takes the ZXing branch. If the
+  // camera were acquired inside that branch's decodeFromConstraints, the prompt
+  // would sit behind a 446 KB chunk download -- after the tap's activation
+  // window. One acquisition, ahead of the decoder choice, for both paths.
+  const startBlock = source.slice(source.indexOf('const startCamera'), source.indexOf('const prepareScanner'))
+  const acquisitions = startBlock.match(/navigator\.mediaDevices\.getUserMedia\(/g) || []
+  assert.equal(acquisitions.length, 1, 'both decoders must share ONE getUserMedia call')
+  const acquireAt = startBlock.indexOf('navigator.mediaDevices.getUserMedia(')
+  const chooseDecoderAt = startBlock.indexOf('const NativeBarcodeDetector = getNativeBarcodeDetector()')
+  const zxingImportAt = startBlock.indexOf("import('@zxing/browser')")
+  assert.ok(acquireAt > 0 && chooseDecoderAt > acquireAt, 'the camera must be acquired BEFORE the native/fallback decision, not inside one branch')
+  assert.ok(zxingImportAt > acquireAt, 'the fallback decoder chunk must load after the camera is already open')
+  assert.doesNotMatch(source, /decodeFromConstraints\(/, 'decodeFromConstraints hides getUserMedia behind the decoder import; it must not be called again')
+  assert.match(source, /const CAMERA_CONSTRAINTS: MediaStreamConstraints/, 'the shared constraints belong in one hoisted object')
+  assert.match(source, /if \(track\.readyState !== 'ended'\) track\.stop\(\)/, 'ZXing stop() disposes the stream it was handed, so cleanup must not stop an ended track again')
 
   const openEffect = source.slice(source.indexOf('const startCameraRef'), source.indexOf('// iOS can keep a PWA page mounted'))
   const prepareBlock = source.slice(source.indexOf('const prepareScanner'), source.indexOf('const closeScanner'))
@@ -270,7 +286,9 @@ class FakeBarcodeDetector {
   async detect(): Promise<Array<{ rawValue?: unknown }>> { return [] }
 }
 
-const memoryWindow = {
+// Typed loosely so BarcodeDetector can be removed again: WebKit has none, and
+// that absence is what sends iOS down the ZXing path this file also covers.
+const memoryWindow: Record<string, unknown> = {
   document: memoryDocument,
   HTMLElement: MemoryNode,
   HTMLIFrameElement: class {},
@@ -282,6 +300,12 @@ const memoryWindow = {
   clearTimeout: globalThis.clearTimeout.bind(globalThis),
 }
 memoryDocument.defaultView = memoryWindow
+
+// Ordered log shared with the stubbed @zxing/browser module, so the test can
+// see whether the camera was requested before or after the decoder chunk was
+// evaluated -- the whole point of the iOS fix.
+const scannerEvents: string[] = []
+Object.defineProperty(globalThis, '__scannerEvents', { configurable: true, value: scannerEvents })
 
 // The scan loop reschedules itself forever; give it a budget so an assertion
 // failure cannot turn into a hung test file.
@@ -311,12 +335,25 @@ Object.defineProperty(globalThis, 'cancelAnimationFrame', {
   },
 })
 
-interface CameraProbe {
-  getUserMediaCalls: number
+interface FakeTrack {
+  readyState: string
+  stopCount: number
+  stop: () => void
 }
 
-function installCamera(permissionState: 'granted' | 'prompt' | 'denied'): CameraProbe {
-  const probe: CameraProbe = { getUserMediaCalls: 0 }
+interface CameraProbe {
+  getUserMediaCalls: number
+  tracks: FakeTrack[]
+}
+
+function installCamera(
+  permissionState: 'granted' | 'prompt' | 'denied',
+  { native = true }: { native?: boolean } = {},
+): CameraProbe {
+  const probe: CameraProbe = { getUserMediaCalls: 0, tracks: [] }
+  scannerEvents.length = 0
+  if (native) memoryWindow.BarcodeDetector = FakeBarcodeDetector
+  else delete memoryWindow.BarcodeDetector
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     value: {
@@ -326,7 +363,14 @@ function installCamera(permissionState: 'granted' | 'prompt' | 'denied'): Camera
       mediaDevices: {
         getUserMedia: async () => {
           probe.getUserMediaCalls += 1
-          return { getTracks: () => [{ stop() {} }] }
+          scannerEvents.push('getUserMedia')
+          const track: FakeTrack = {
+            readyState: 'live',
+            stopCount: 0,
+            stop() { this.stopCount += 1; this.readyState = 'ended' },
+          }
+          probe.tracks.push(track)
+          return { getTracks: () => [track], getVideoTracks: () => [track] }
         },
       },
     },
@@ -345,6 +389,10 @@ const vite = await createServer({
   configFile: false,
   appType: 'custom',
   server: { middlewareMode: true },
+  // Without this the decoder is externalised to Node's own resolver and the
+  // stub below is never consulted -- the import would load (and fail on) the
+  // real browser package instead of recording its evaluation order.
+  ssr: { noExternal: ['@zxing/browser'] },
   plugins: [
     {
       name: 'barcode-scanner-mocks',
@@ -352,6 +400,7 @@ const vite = await createServer({
       resolveId(id) {
         if (id.includes('lucide-react')) return '\0scanner-icon'
         if (/shared\/Modal$/.test(id)) return '\0scanner-modal'
+        if (id === '@zxing/browser') return '\0scanner-zxing'
         return null
       },
       load(id) {
@@ -360,6 +409,26 @@ const vite = await createServer({
           return `import React from 'react'
             export default function Modal({ children }) { return React.createElement('div', { role: 'dialog' }, children) }`
         }
+        // Records the moment the decoder module is EVALUATED, which is what the
+        // real 446 KB chunk costs on iOS. controls.stop() disposes the stream it
+        // was handed, mirroring BrowserCodeReader's finalize callback -- that is
+        // the second stop cleanup() has to avoid duplicating.
+        if (id === '\0scanner-zxing') {
+          return `globalThis.__scannerEvents.push('zxing-module-evaluated')
+            export class BrowserMultiFormatReader {
+              async decodeFromStream(stream, video, callback) {
+                globalThis.__scannerEvents.push('decodeFromStream')
+                if (!stream || typeof stream.getVideoTracks !== 'function') throw new Error('decodeFromStream needs the caller stream')
+                return {
+                  stop() {
+                    globalThis.__scannerEvents.push('zxing-controls-stop')
+                    stream.getVideoTracks().forEach((track) => track.stop())
+                  },
+                }
+              }
+              reset() {}
+            }`
+        }
         return null
       },
     },
@@ -367,8 +436,11 @@ const vite = await createServer({
   ],
 })
 
-async function mountScanner(probePermission: 'granted' | 'prompt' | 'denied'): Promise<{ probe: CameraProbe; text: string; unmount: () => Promise<void> }> {
-  const probe = installCamera(probePermission)
+async function mountScanner(
+  probePermission: 'granted' | 'prompt' | 'denied',
+  options: { native?: boolean } = {},
+): Promise<{ probe: CameraProbe; text: string; events: string[]; unmount: () => Promise<void> }> {
+  const probe = installCamera(probePermission, options)
   const module = await vite.ssrLoadModule(modulePath) as { default: React.ComponentType<Record<string, unknown>> }
   const container = memoryDocument.createElement('div')
   memoryDocument.body.appendChild(container)
@@ -387,10 +459,14 @@ async function mountScanner(probePermission: 'granted' | 'prompt' | 'denied'): P
   // happens anywhere in here -- that is the whole point of the test.
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)) })
   const text = container.textContent
+  let unmounted = false
   return {
     probe,
     text,
+    events: scannerEvents,
     unmount: async () => {
+      if (unmounted) return
+      unmounted = true
       await act(async () => root.unmount())
       memoryDocument.body.removeChild(container)
     },
@@ -413,6 +489,33 @@ try {
     const mounted = await mountScanner('prompt')
     try {
       assert.equal(mounted.probe.getUserMediaCalls, 1, 'an unanswered permission must be asked from the tap that opened the scanner')
+    } finally {
+      await mounted.unmount()
+    }
+  })
+
+  // The iOS path: no BarcodeDetector, so the ZXing chunk is unavoidable. What
+  // must NOT happen is the camera request waiting behind it.
+  await runTest('without a native detector the camera is open before the fallback decoder is even evaluated', async () => {
+    const mounted = await mountScanner('granted', { native: false })
+    try {
+      assert.equal(mounted.probe.getUserMediaCalls, 1, 'the fallback path must open the camera itself, exactly once')
+      const trace = mounted.events.join(' -> ')
+      const acquiredAt = mounted.events.indexOf('getUserMedia')
+      const decoderAt = mounted.events.indexOf('zxing-module-evaluated')
+      assert.ok(acquiredAt >= 0, `the camera must be requested on the fallback path, got: ${trace}`)
+      assert.ok(decoderAt > acquiredAt, `the decoder chunk must be evaluated only after the camera is open, got: ${trace}`)
+      assert.ok(mounted.events.includes('decodeFromStream'), `the decoder must be handed the stream we already own, got: ${trace}`)
+
+      await mounted.unmount()
+      // ZXing's controls.stop() disposes the stream, then cleanup() calls
+      // stopStream on the same one: the track must still end up stopped once.
+      assert.ok(mounted.events.includes('zxing-controls-stop'), `closing must stop the decoder, got: ${mounted.events.join(' -> ')}`)
+      assert.deepEqual(
+        mounted.probe.tracks.map((track) => track.stopCount),
+        [1],
+        `each camera track must be stopped exactly once, got ${JSON.stringify(mounted.probe.tracks.map((track) => track.stopCount))}`,
+      )
     } finally {
       await mounted.unmount()
     }
