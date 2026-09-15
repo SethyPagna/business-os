@@ -439,8 +439,12 @@ app.patch('/:id', async (c) => {
   if (deactivating && update.changes === 0) {
     return c.json({ error: activeBatchStockError(await positiveBatchStock(db, id)) }, 400)
   }
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_update', 'product_batch', id, body)
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }))
+  // Perf-2: `{ success: true }` reads nothing audit() writes -- defer it
+  // into the same waitUntil the broadcast already used.
+  c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_update', 'product_batch', id, body),
+    broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }),
+  ]))
   return c.json({ success: true })
 })
 
@@ -533,8 +537,10 @@ app.patch('/:id/branches/:branchId', async (c) => {
     })
   }
 
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_quantity_correction', 'product_batch', batchId, { branch_id: branchId, quantity, previous_quantity: previousQuantity })
+  // Perf-2: `{ success: true }` reads nothing audit() writes -- defer it
+  // into the same waitUntil the bumpVersion/broadcast calls already used.
   c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_quantity_correction', 'product_batch', batchId, { branch_id: branchId, quantity, previous_quantity: previousQuantity }),
     bumpVersion(c.env, 'products'),
     broadcast(c.env, 'inventory', { type: 'batch_updated', batchId }),
     broadcast(c.env, 'products', { action: 'update', id: batch.productId }),
@@ -578,8 +584,12 @@ app.delete('/:id', async (c) => {
   if (deactivated.changes === 0) {
     return c.json({ error: activeBatchStockError(await positiveBatchStock(db, id)) }, 400)
   }
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_deactivate', 'product_batch', id, null)
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }))
+  // Perf-2: `{ success: true }` reads nothing audit() writes -- defer it
+  // into the same waitUntil the broadcast already used.
+  c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_deactivate', 'product_batch', id, null),
+    broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }),
+  ]))
   return c.json({ success: true })
 })
 
