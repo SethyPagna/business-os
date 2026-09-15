@@ -30,6 +30,8 @@ const paginationControls = read('src/components/shared/PaginationControls.tsx')
 const catalogPagination = read('src/components/catalog/catalogPagination.tsx')
 const installPromptBand = read('src/components/shared/InstallPromptBand.tsx')
 const iosInstallHint = read('src/components/shared/IosInstallHint.tsx')
+const alphaIndexRail = read('src/components/shared/AlphaIndexRail.tsx')
+const publicPortalCss = read('src/styles/public-portal.css')
 const en = readJson('src/lang/en.json') as Record<string, unknown>
 const km = readJson('src/lang/km.json') as Record<string, unknown>
 
@@ -67,6 +69,71 @@ check('1 the public product grid reserves a gutter for the screen-edge rail', ()
     catalogProductsSection,
     /className=\{`min-w-0 \$\{railGutterClass\}`\}/,
     'the gutter class must actually apply to the content column, not just be declared',
+  )
+})
+
+// --- 1b. The rail's (and header icons') own tap-target floor must not -------
+//         repaint them oversized --------------------------------------------
+
+// Isolates the `@media (pointer: coarse) { ... }` block by brace-counting
+// from its opening `{`, rather than guessing an end offset from a nearby
+// string -- CSS has no comment-stripping concern here (public-portal.css's
+// comments are /* */ only, and none of them contain a bare `{` or `}`).
+function extractMediaBlock(css: string, atRule: string): string {
+  const start = css.indexOf(atRule)
+  assert.ok(start > -1, `${atRule} must exist in public-portal.css`)
+  const braceStart = css.indexOf('{', start)
+  let depth = 0
+  for (let i = braceStart; i < css.length; i++) {
+    if (css[i] === '{') depth++
+    else if (css[i] === '}') {
+      depth--
+      if (depth === 0) return css.slice(start, i + 1)
+    }
+  }
+  throw new Error(`${atRule} block never closes`)
+}
+
+const coarsePointerBlock = extractMediaBlock(publicPortalCss, '@media (pointer: coarse)')
+
+check('1b the alpha rail is exempt from the coarse-pointer 44px aria-label floor', () => {
+  // CATCHES: public-portal.css's `@media (pointer: coarse)` block forces
+  // min-width/min-height:44px on every `button[aria-label]` on the real
+  // storefront root -- and every rail entry carries an aria-label (its
+  // accessible name), so the collapsed `h-0.5 w-2.5` dashes and expanded
+  // `h-5 w-6` letters were silently repainted as a column of blank 44x44
+  // grey circles that blocked the page underneath (owner, 2026-09-15,
+  // image 3). The gutter fix (check 1) reserves layout space for the rail;
+  // it does nothing about the rail's own entries being oversized.
+  assert.match(
+    alphaIndexRail,
+    /data-alpha-rail=""/,
+    'the rail container must carry a stable attribute the CSS exemption can key off',
+  )
+  assert.match(coarsePointerBlock, /\[data-alpha-rail\] button/, 'the rail exemption must live inside the SAME pointer:coarse block as the 44px floor it overrides')
+  assert.match(
+    coarsePointerBlock,
+    /body\[data-public-portal='true'\] \[data-alpha-rail\] button,[\s\S]{0,120}\[data-public-media-protection='true'\] \[data-alpha-rail\] button \{[\s\S]{0,80}min-width: 0;[\s\S]{0,40}min-height: 0;/,
+    'the exemption must cover BOTH storefront roots (admin body[data-public-portal] preview and the real PublicCatalogPage.tsx marker) and revert min-width/min-height to 0 so entries keep their own intrinsic sizes',
+  )
+})
+
+check('1c the header social/account icon rows are exempt from the same floor', () => {
+  // CATCHES: the header's social-links and wishlist/account/language/theme
+  // rows intentionally shrink to h-8/h-9 (32/36px) below `sm` so they fit on
+  // one row (check 2) -- every icon in them carries an aria-label too, so
+  // without this exemption the 44px floor silently re-widens them past that
+  // width and reopens the same overflow the nowrap fix closed.
+  assert.equal(
+    (catalogPreviewSurface.match(/data-portal-header-icons=""/g) || []).length,
+    2,
+    'BOTH icon rows (social links and wishlist/account/language/theme) must carry the exemption hook',
+  )
+  assert.match(coarsePointerBlock, /\[data-portal-header-icons\] a\[aria-label\]/, 'the header-icon exemption must live inside the SAME pointer:coarse block as the 44px floor')
+  assert.match(
+    coarsePointerBlock,
+    /\[data-portal-header-icons\] a\[aria-label\],[\s\S]{0,400}\[data-portal-header-icons\] button\[aria-label\][\s\S]{0,200}min-width: 0;[\s\S]{0,40}min-height: 0;/,
+    'the exemption must cover both <a> and <button> icons (social links are anchors, account/wishlist/theme are buttons) and revert to 0',
   )
 })
 
