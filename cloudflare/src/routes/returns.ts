@@ -13,9 +13,9 @@ import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } f
 import { planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
   normalizeStockAction, resolveRefundUnitPrice, planReturnLot, ReturnLotRequiredError,
-  createDamagedLotStatement, reverseDamagedLots, planReplacementStock, listOpenDamagedLots,
+  reverseDamagedLots, planReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
-  REPLACEMENT_OUT_MOVEMENT,
+  REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine,
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
@@ -45,6 +45,7 @@ import {
 } from '../lib/customerReturnEntitlement'
 import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
+import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -404,6 +405,10 @@ function canonicalReturnEditIntent(returnId: number, expectedUpdatedAt: string, 
     'sale_item_id', 'product_id', 'product_name', 'quantity',
     'applied_price_usd', 'applied_price_khr', 'cost_price_usd', 'cost_price_khr',
     'unit_cost_usd', 'unit_cost_khr', 'return_to_stock', 'stock_action', 'branch_id', 'batch_id',
+    // P4-3: a resubmit with the same client_request_id but a genuinely
+    // different tag/disposition choice must NOT replay the earlier cached
+    // response -- see resolveDamagedReturnChoice.
+    'condition_tag', 'damaged_disposition',
   ] as const
   const itemsPresent = Object.prototype.hasOwnProperty.call(body, 'items')
   const rawItems = body.items
@@ -503,6 +508,11 @@ type ReturnItemInput = {
   // 11.13: 'none' | 'restock' | 'damaged'; absent falls back to the
   // return_to_stock boolean's historical meaning (see normalizeStockAction).
   stock_action?: string
+  // P4-3: only meaningful when stock_action is 'damaged'. Both absent means
+  // the untouched legacy behavior (tag 'damaged', kept as a held row) --
+  // see resolveDamagedReturnChoice.
+  condition_tag?: string
+  damaged_disposition?: string
   branch_id?: number
   // The lot the operator picked for this line's restock. Only sent when the
   // original sale line cannot say which lot the units came from (see
@@ -1426,6 +1436,14 @@ app.post('/', async (c) => {
       }
     }
   }
+  // P4-3: validate every 'damaged' line's tag/disposition BEFORE any write
+  // statement is built -- nothing below this point has executed yet, so a
+  // 400 here leaves no partial state.
+  for (const item of returnItems) {
+    if (normalizeStockAction(item) !== 'damaged') continue
+    const choice = resolveDamagedReturnChoice(item)
+    if (!choice.ok) return c.json({ error: choice.error }, 400)
+  }
   let projectedStatus: string | null = null
   if (saleMeta) {
     if (isMoneyV1) {
@@ -1882,23 +1900,22 @@ app.post('/', async (c) => {
     }
     const originalBatchId = item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id))?.batch_id ?? null : null
     if (stockAction === 'damaged' && productId && itemBranchId) {
-      const damaged = createDamagedLotStatement({
-        productId, productName, branchId: itemBranchId, batchId: originalBatchId,
-        returnIdSql: returnIdExpression, quantity, reason, userId: authenticatedActorId, userName: actorSnapshot(user),
-      })
-      statements.push({ sql: damaged.sql, params: { ...(damaged.params as Record<string, unknown>), returnClientRequestId: clientRequestId } })
-      statements.push({
-        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-              VALUES(@product_id,@product_name,@branch_id,'${DAMAGE_IN_MOVEMENT}',@quantity,@unit_cost_usd,@unit_cost_khr,@reason,${returnIdExpression},@user_id,@user_name,@batch_id)`,
-        params: {
-          product_id: productId, product_name: productName, branch_id: itemBranchId, quantity,
-          unit_cost_usd: unitCostUsd,
-          unit_cost_khr: unitCostKhr,
-          reason: `Return (damaged): ${reason}`, user_id: authenticatedActorId, user_name: actorSnapshot(user),
-          batch_id: originalBatchId, returnClientRequestId: clientRequestId,
-        },
-      })
-      movementCount += 1
+      // Already 400'd above (resolveDamagedReturnChoice) if this were invalid.
+      const choice = resolveDamagedReturnChoice(item)
+      if (choice.ok) {
+        const damagedStatements = planDamagedReturnLine({
+          productId, productName, branchId: itemBranchId, batchId: originalBatchId,
+          returnIdSql: returnIdExpression, quantity, reason,
+          userId: authenticatedActorId, userName: actorSnapshot(user),
+          tag: choice.tag, disposition: choice.disposition,
+          unitCostUsd, unitCostKhr,
+        })
+        statements.push(...damagedStatements.map((statement) => ({
+          sql: statement.sql,
+          params: { ...(statement.params as Record<string, unknown>), returnClientRequestId: clientRequestId },
+        })))
+        movementCount += choice.disposition === 'remove' ? 2 : 1
+      }
     }
     const splits = plan.splits
     const recordedBatchId = splits.length === 1 && splits[0].quantity === quantity ? splits[0].batchId : null
@@ -2087,7 +2104,7 @@ app.post('/', async (c) => {
     AND (SELECT COUNT(*) FROM sale_item_batch_allocations WHERE sale_item_id IN(
       SELECT id FROM sale_items WHERE sale_id=${replacementLines.length ? replacementSaleExpression : 'NULL'}))=json_extract(@expectedJson,'$.sale_allocations')
     AND (SELECT COUNT(*) FROM inventory_movements WHERE reference_id=${returnIdExpression}
-      AND movement_type IN ('return','${DAMAGE_IN_MOVEMENT}','${REPLACEMENT_OUT_MOVEMENT}'))=json_extract(@expectedJson,'$.movements')
+      AND movement_type IN ('return','${DAMAGE_IN_MOVEMENT}','${REPLACEMENT_OUT_MOVEMENT}','${TAGGED_DISPOSAL_MOVEMENT_TYPE}'))=json_extract(@expectedJson,'$.movements')
     AND (SELECT COUNT(*) FROM sale_record_events WHERE source_kind='return_create' AND source_id=@receiptId
       AND generation=0)=json_extract(@expectedJson,'$.event')
     AND EXISTS(SELECT 1 FROM audit_logs WHERE entity='return_create' AND entity_id=@receiptId)
@@ -2574,6 +2591,13 @@ app.patch('/:id', async (c) => {
   if (existingItems.length > 50 || newItems.length > 50) {
     return c.json({ error: 'Edit at most 50 return items at a time.', code: 'return_edit_too_large' }, 400)
   }
+  // P4-3: same fail-fast validation the create path runs, before anything
+  // below reverses the return's existing stock effect.
+  for (const item of newItems) {
+    if (normalizeStockAction(item) !== 'damaged') continue
+    const choice = resolveDamagedReturnChoice(item)
+    if (!choice.ok) return c.json({ error: choice.error }, 400)
+  }
 
   try {
     assertUpdatedAtMatch('return', existing, expectedUpdatedAt)
@@ -2852,35 +2876,21 @@ app.patch('/:id', async (c) => {
 
     if (stockAction === 'damaged' && item.product_id && itemBranchId) {
       const originalBatchId = item.sale_item_id ? (saleItemBatchInfoForEdit.get(item.sale_item_id)?.batch_id ?? null) : null
-      statements.push({
-        sql: `INSERT INTO damaged_stock_lots(
-          product_id,product_name,branch_id,batch_id,return_id,quantity,quantity_remaining,reason,created_by_user_id,created_by_user_name
-        ) VALUES(@productId,@productName,@branchId,@batchId,@returnId,@quantity,@quantity,@reason,@userId,@userName)`,
-        params: {
-          productId: item.product_id, productName: item.product_name || null,
-          branchId: itemBranchId, batchId: originalBatchId, returnId: id, quantity,
-          reason: String(body.reason || existing.reason || '') || null,
-          userId: user?.id ?? null, userName: actorSnapshot(user),
-        },
+      const choice = resolveDamagedReturnChoice(item)
+      if (!choice.ok) return c.json({ error: choice.error }, 400)
+      const damagedStatements = planDamagedReturnLine({
+        productId: item.product_id, productName: item.product_name || null,
+        branchId: itemBranchId, batchId: originalBatchId,
+        returnIdSql: '@return_id', quantity,
+        reason: String(body.reason || existing.reason || '') || null,
+        userId: user?.id ?? null, userName: actorSnapshot(user),
+        tag: choice.tag, disposition: choice.disposition,
+        unitCostUsd: item.cost_price_usd ?? null, unitCostKhr: item.cost_price_khr ?? null,
       })
-      statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_IN_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
-        params: {
-          product_id: item.product_id,
-          product_name: item.product_name || null,
-          branch_id: itemBranchId,
-          quantity,
-          unit_cost_usd: item.cost_price_usd || 0,
-          unit_cost_khr: item.cost_price_khr || 0,
-          reason: `Return #${existing.return_number} updated (damaged): ${body.reason || existing.reason}`,
-          reference_id: id,
-          user_id: user?.id ?? null,
-          user_name: actorSnapshot(user),
-          // 0084: the original sale lot, same as the create path.
-          batch_id: originalBatchId,
-        },
-      })
+      statements.push(...damagedStatements.map((statement) => ({
+        sql: statement.sql,
+        params: { ...(statement.params as Record<string, unknown>), return_id: id },
+      })))
     }
 
     statements.push({
