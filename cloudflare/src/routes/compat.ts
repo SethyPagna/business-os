@@ -268,14 +268,14 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
   // -- previously a flat COUNT(*)/SUM() here counted every variant row (and
   // group-header placeholder rows) individually, overcounting vs. those
   // listing pages whenever grouped products existed.
-  const [todaySales, allSales, todayReturns, inventory, lowStockPage, outOfStockPage, expiring, expiringCount, recentSales] = await Promise.all([
+  // today_* and all_* below both read the same window-scoped `sales` rows
+  // (same WHERE clause, same params) -- historical naming from when they
+  // scoped two different windows, kept for API back-compat. Previously two
+  // separate queries recomputed the identical SUM twice; one query with a
+  // COUNT now backs both.
+  const [salesTotals, todayReturns, inventory, lowStockPage, outOfStockPage, expiring, expiringCount, recentSales] = await Promise.all([
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
-      FROM sales
-      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'${saleBranchClause('sales')}
-    `).get(params),
-    db.prepare(`
-      SELECT COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
       FROM sales
       WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'${saleBranchClause('sales')}
     `).get(params),
@@ -330,13 +330,13 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
 
   return {
     ...emptySummary(),
-    today_count: num((todaySales as Record<string, unknown>)?.count),
-    today_total: num((todaySales as Record<string, unknown>)?.total_usd),
-    today_total_khr: num((todaySales as Record<string, unknown>)?.total_khr),
+    today_count: num((salesTotals as Record<string, unknown>)?.count),
+    today_total: num((salesTotals as Record<string, unknown>)?.total_usd),
+    today_total_khr: num((salesTotals as Record<string, unknown>)?.total_khr),
     today_return_count: num((todayReturns as Record<string, unknown>)?.count),
     today_return_usd: num((todayReturns as Record<string, unknown>)?.total_usd),
-    all_total: num((allSales as Record<string, unknown>)?.total_usd),
-    all_total_khr: num((allSales as Record<string, unknown>)?.total_khr),
+    all_total: num((salesTotals as Record<string, unknown>)?.total_usd),
+    all_total_khr: num((salesTotals as Record<string, unknown>)?.total_khr),
     product_count: inventory.total_products,
     in_stock_count: inventory.in_stock,
     low_stock_count: inventory.low_stock,
@@ -445,25 +445,38 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
       GROUP BY s.branch_id, COALESCE(s.branch_name, 'Unassigned')
       ORDER BY revenue_usd DESC
     `).all(analyticsParams),
+    // Grouped by product_id (COALESCE(si.product_id, 0), falling back to a
+    // normalized name key only for the NULL-id/no-link legacy rows) -- NOT
+    // by (product_id, product_name). A product merge (migration 0165+) keeps
+    // one keeper id but leaves old sale_items rows carrying the pre-merge
+    // product_name snapshot, so grouping by the pair split one merged
+    // product's history back into N rows here, one per historical name. The
+    // display name is read live from `products` (COALESCE(MAX(p.name),
+    // MAX(si.product_name))) so a renamed/merged product shows its current
+    // name; the snapshot is only a fallback for a deleted product_id.
+    // Same id-only grouping shape as lib/salesAnalytics.ts's top-products
+    // kernel (line ~3049), just this endpoint's own revenue-attribution math.
     db.prepare(`
-      SELECT si.product_id, si.product_name, SUM(si.quantity) AS qty_sold,
+      SELECT si.product_id, COALESCE(MAX(p.name), MAX(si.product_name)) AS product_name, SUM(si.quantity) AS qty_sold,
              COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
+      LEFT JOIN products p ON p.id = si.product_id
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
-      GROUP BY si.product_id, si.product_name
+      GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
       ORDER BY revenue_usd DESC
       LIMIT 20
     `).all(analyticsParams),
     db.prepare(`
-      SELECT si.product_id, si.product_name, SUM(si.quantity) AS qty_sold,
+      SELECT si.product_id, COALESCE(MAX(p.name), MAX(si.product_name)) AS product_name, SUM(si.quantity) AS qty_sold,
              COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
+      LEFT JOIN products p ON p.id = si.product_id
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
-      GROUP BY si.product_id, si.product_name
+      GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
       ORDER BY qty_sold DESC
       LIMIT 20
     `).all(analyticsParams),

@@ -6066,8 +6066,21 @@ app.get('/export', async (c) => {
       SELECT sale_id, COALESCE(SUM(line_value_usd), 0) AS line_value_usd
       FROM sale_product_lines
       GROUP BY sale_id
+    -- Grouped by product_id (COALESCE(pl.product_id, 0), falling back to a
+    -- normalized name key only for NULL-id/no-link legacy lines) -- NOT by
+    -- (product_id, product_name). sale_product_lines groups within one sale,
+    -- where a product's name snapshot is stable, but a product merge
+    -- (migration 0165+) keeps one keeper id while different sales still
+    -- carry different pre-merge product_name snapshots; grouping across
+    -- sales by the pair split one merged product's export row back into N.
+    -- The display name is read live from products (COALESCE(MAX(p.name),
+    -- MAX(pl.product_name))) so a renamed/merged product exports its
+    -- current name; the snapshot is only a fallback for a deleted
+    -- product_id. Same id-only grouping shape as this file's dashboard
+    -- sibling (routes/compat.ts's topProducts/topProductsQty) and
+    -- lib/salesAnalytics.ts's top-products kernel.
     ), product_totals AS (
-      SELECT pl.product_id, pl.product_name,
+      SELECT pl.product_id, COALESCE(MAX(p.name), MAX(pl.product_name)) AS product_name,
            COALESCE(SUM(pl.qty_sold), 0) AS qty_sold,
            COALESCE(SUM(
              CASE WHEN lt.line_value_usd <> 0
@@ -6079,10 +6092,11 @@ app.get('/export', async (c) => {
       FROM sales s
       JOIN sale_product_lines pl ON pl.sale_id = s.id
       JOIN sale_line_totals lt ON lt.sale_id = s.id
+      LEFT JOIN products p ON p.id = pl.product_id
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${snapshotWhere.join(' AND ')}
         AND ${recognizedExpr('s.')}
-      GROUP BY pl.product_id, pl.product_name
+      GROUP BY COALESCE(pl.product_id, 0), CASE WHEN pl.product_id IS NULL THEN lower(trim(COALESCE(pl.product_name, ''))) ELSE '' END
     ), unallocated_sales AS (
     -- A recognized legacy receipt can have no usable line-value denominator.
     -- Its header revenue remains real and visible in the canonical summary,

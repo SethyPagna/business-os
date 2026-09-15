@@ -228,8 +228,15 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
     !/date\(s?\.?created_at\) (BETWEEN|= date\(@today\))/.test(src) && !/created_at >= date\(@(startDate|today)\)/.test(src))
   check('compat.ts buckets the range breakdowns via the local-day helper',
     /localDateRangeClause\(`\$\{alias\}\.created_at`\)/.test(src) && /localDateRangeClause\('r\.created_at'\)/.test(src))
+  // p6/efficiency-3: today_total/today_count and all_total/all_total_khr
+  // used to be built from two separately-awaited queries that carried the
+  // IDENTICAL WHERE clause (same window, same params) -- one wasteful round
+  // trip recomputing the same SUM. They now share one query, so this locator
+  // dropped from 4 to 3; the remaining 3 (sales totals, returns, recent
+  // sales) still cover every surface this checked, just without the
+  // duplicate.
   check('compat.ts scopes dashboard summary sales and returns through the selected local-date range',
-    (src.match(/localDateRangeClause\('created_at'\)/g) || []).length >= 4)
+    (src.match(/localDateRangeClause\('created_at'\)/g) || []).length >= 3)
   check('compat.ts buckets hour-of-day in local time', /localHourExpr\('s\.created_at'\)/.test(src))
   // Alert scope lock -- see the "Alert scope" block above for the behavior.
   check('compat.ts no longer scopes any dashboard card to products sold in the range',
