@@ -74,7 +74,19 @@ type PrintableReceiptLayout = {
   /** One physical card/label: the whole receipt has to land on this one page. */
   singleSheet: boolean
   previewSettings?: ReceiptPreviewSettings
+  // The owner's chosen fallback strategy for continuous-roll paper (see
+  // ReceiptPrintSettings.pageSizeMode). Defaults to 'measured' so a caller
+  // that builds a layout without this field (existing tests, a genuinely
+  // fixed sheet) keeps today's behaviour exactly.
+  pageSizeMode?: ReceiptPrintSettings['pageSizeMode']
 }
+
+// One explicit page as long as the longest continuous roll a thermal driver
+// commonly exposes. Chosen as a fallback for drivers that ignore a measured
+// `@page` height outright but still honour an explicit one: an owner who
+// still sees a blank band or a second strip after 'measured' and 'fixed'
+// have both been tried can select this as the last resort before 'driver'.
+const RECEIPT_AUTO_LONGEST_PAGE_MM = 3276
 
 function parsePrintNumber(value: unknown, fallback: number): number {
   const parsed = Number.parseFloat(String(value ?? ''))
@@ -1091,6 +1103,64 @@ async function withReceiptElement<T>(
   }
 }
 
+export type ReceiptPageGeometry = {
+  pageHeightMm: number
+  continuousRoll: boolean
+  pageSizeMode: ReceiptPrintSettings['pageSizeMode']
+}
+
+/**
+ * The one place that decides a receipt's printable page length and whether
+ * it is a continuous, in-document-remeasured roll -- pulled out of
+ * createPrintableReceiptMarkup as a pure function so it is directly testable
+ * without a DOM (that function also clones/measures the live host, which
+ * needs `document`). `fixedHeightMm` is getPaperHeightMm(printSettings): a
+ * genuine fixed sheet (80x50mm/A4/Letter/custom with a height) always keeps
+ * its own explicit height and 'measured' bookkeeping, regardless of what
+ * pageSizeMode happens to be saved as -- pageSizeMode only ever governs
+ * CONTINUOUS ROLL paper (58/72/80mm, fixedHeightMm null).
+ */
+export function resolveReceiptPageGeometry({
+  fixedHeightMm,
+  measuredHeightMm,
+  savedPageSizeMode,
+  fixedPageLengthMm,
+}: {
+  fixedHeightMm: number | null
+  measuredHeightMm: number
+  savedPageSizeMode?: string
+  fixedPageLengthMm?: unknown
+}): ReceiptPageGeometry {
+  const pageSizeMode: ReceiptPrintSettings['pageSizeMode'] = fixedHeightMm == null
+    ? ((savedPageSizeMode as ReceiptPrintSettings['pageSizeMode']) || 'measured')
+    : 'measured'
+  if (fixedHeightMm != null) {
+    return { pageHeightMm: fixedHeightMm, continuousRoll: false, pageSizeMode }
+  }
+  if (pageSizeMode === 'fixed') {
+    // A document page of the owner's chosen length; a long receipt flows
+    // onto further pages of that same length instead of clipping or scaling
+    // (isSingleSheetPaperSize stays false here, same as A4/Letter).
+    return { pageHeightMm: Math.max(10, parsePrintNumber(fixedPageLengthMm, 100)), continuousRoll: false, pageSizeMode }
+  }
+  if (pageSizeMode === 'auto-longest') {
+    return { pageHeightMm: RECEIPT_AUTO_LONGEST_PAGE_MM, continuousRoll: false, pageSizeMode }
+  }
+  if (pageSizeMode === 'driver') {
+    // No `@page size` will be emitted at all (see buildPrintablePreviewDocument),
+    // so this number is never printed as a page length. Keep the measured
+    // estimate anyway so a caller inspecting the layout still gets a
+    // sensible content height (e.g. for the PDF export path, which stays on
+    // 'measured' geometry independent of this HTML/@page setting).
+    return { pageHeightMm: Math.max(1, measuredHeightMm + 1), continuousRoll: false, pageSizeMode }
+  }
+  // 'measured' (default): current behaviour. A continuous roll is
+  // width-only media: its one logical page grows with the complete receipt.
+  // Keep this measured height for both HTML Print and PDF/Image so item
+  // count can never trigger pagination or fit-to-page shrinking.
+  return { pageHeightMm: Math.max(1, measuredHeightMm + 1), continuousRoll: true, pageSizeMode: 'measured' }
+}
+
 async function createPrintableReceiptMarkup(content: ReceiptContent, options: ReceiptPrintOptions = {}): Promise<PrintableReceiptLayout> {
   const printSettings = options.printSettings || getPrintSettings()
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
@@ -1106,12 +1176,12 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
     const renderedHeightPx = Math.max(1, host.scrollHeight || hostRect.height || host.offsetHeight)
     const measuredHeightMm = renderedHeightPx * (widthMm / renderedWidthPx)
     const fixedHeightMm = getPaperHeightMm(printSettings)
-    const continuousRoll = fixedHeightMm == null
-    // A continuous roll is width-only media: its one logical page grows with
-    // the complete receipt. Keep this measured height for both HTML Print and
-    // PDF/Image so item count can never trigger pagination or fit-to-page
-    // shrinking inside the app.
-    const pageHeightMm = fixedHeightMm ?? Math.max(1, measuredHeightMm + 1)
+    const { pageHeightMm, continuousRoll, pageSizeMode } = resolveReceiptPageGeometry({
+      fixedHeightMm,
+      measuredHeightMm,
+      savedPageSizeMode: printSettings.pageSizeMode,
+      fixedPageLengthMm: printSettings.fixedPageLengthMm,
+    })
 
     const clone = normalizePrintableRoot(cloneElementWithInlineStyles(host), widthMm)
     if (!clone) throw new Error('Receipt preview element is unavailable')
@@ -1126,12 +1196,24 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
     clone.querySelectorAll('canvas, video').forEach((node) => node.remove())
     await inlineImageNodeSources(clone)
     await inlineStyleAssetUrls(clone)
-    return { markup: clone.outerHTML, widthMm, pageHeightMm, continuousRoll, singleSheet: isSingleSheetPaperSize(printSettings.paperSize), previewSettings: receiptPreviewSettings(printSettings) }
+    return {
+      markup: clone.outerHTML,
+      widthMm,
+      pageHeightMm,
+      continuousRoll,
+      singleSheet: isSingleSheetPaperSize(printSettings.paperSize),
+      previewSettings: receiptPreviewSettings(printSettings),
+      pageSizeMode,
+    }
   }, printSettings)
 }
 
 export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: ReceiptPrintOptions = {}): string {
-  const { markup, widthMm, pageHeightMm, continuousRoll, singleSheet } = layout
+  const { markup, widthMm, pageHeightMm, continuousRoll, singleSheet, pageSizeMode = 'measured' } = layout
+  // 'driver' is the owner's explicit "let the printer's own registered form
+  // decide" fallback -- no `@page size` reaches the document at all (margin
+  // stays 0). Every other mode keeps an explicit, valid width x height.
+  const omitPageSize = pageSizeMode === 'driver'
   // Three page semantics, not two. A continuous roll is one variable-height
   // logical page whose length is the measured receipt content.
   // A DOCUMENT page (A4, Letter, custom) is a stack of pages, so a long receipt
@@ -1162,6 +1244,17 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
   // overwrites it, in the actual print document, right before print() is
   // called in both delivery paths.
   const pageSizeCss = `${widthMm}mm ${pageHeightMm.toFixed(2)}mm`
+  // 'auto-longest' is one explicit page as long as the printer's longest
+  // supported roll (RECEIPT_AUTO_LONGEST_PAGE_MM); a receipt must never
+  // legitimately fill it, so nothing should ever try to break after it --
+  // this only guards against a driver that pages anyway.
+  const autoLongestCss = pageSizeMode === 'auto-longest'
+    ? `
+        .receipt-frame, .receipt-frame > * {
+          page-break-after: avoid;
+          break-after: avoid-page;
+        }`
+    : ''
   const documentHeightCss = clipToOnePage
     ? `height: ${pageHeightMm.toFixed(2)}mm !important;
           min-height: ${pageHeightMm.toFixed(2)}mm !important;`
@@ -1330,7 +1423,7 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
         word-break: break-word;
       }
       @page {
-        size: ${pageSizeCss};
+        ${omitPageSize ? '' : `size: ${pageSizeCss};`}
         margin: 0;
       }
       @media print {
@@ -1376,7 +1469,7 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
         }
         .receipt-frame > * {
           margin: 0 !important;
-        }${pageBreakAvoidanceCss}
+        }${pageBreakAvoidanceCss}${autoLongestCss}
       }
     </style>
     <!-- Empty until remeasureContinuousRollBeforePrint (below) fills it in,

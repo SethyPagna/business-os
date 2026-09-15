@@ -82,6 +82,19 @@ export interface ReceiptPrintSettings {
   scale: string
   customWidth: string
   customHeight: string
+  // How the printable page length is decided for CONTINUOUS ROLL paper
+  // (58/72/80mm) only -- a fixed physical sheet (80x50mm/A4/Letter/custom
+  // with a height) already has an explicit height and ignores this field.
+  // 'measured' (default): current behaviour, in-document remeasure right
+  // before print(). 'fixed': a document-page length the owner chooses,
+  // long receipts flow onto further pages of that length. 'driver': no
+  // `@page size` at all, so the printer driver's own registered form/paper
+  // applies. 'auto-longest': one explicit page as long as the printer's
+  // longest supported roll, for drivers that ignore a measured height.
+  pageSizeMode: 'measured' | 'fixed' | 'driver' | 'auto-longest'
+  // The chosen page length in mm for pageSizeMode 'fixed' (a preset such as
+  // 100/150/200/297, or a custom value). Ignored by every other mode.
+  fixedPageLengthMm: string
 }
 
 export interface AppliedReceiptConfig {

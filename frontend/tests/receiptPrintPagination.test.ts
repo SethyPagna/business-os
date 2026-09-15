@@ -5,9 +5,11 @@ import {
   buildSingleImagePdf,
   measureContinuousRollPageHeightMm,
   remeasureContinuousRollBeforePrint,
+  resolveReceiptPageGeometry,
   writeContinuousRollPageSize,
 } from '../src/utils/printReceipt.ts'
-import { computeImagePageSegments } from '../src/utils/receiptPdfLayout.ts'
+import { computeImagePageSegments, isSingleSheetPaperSize } from '../src/utils/receiptPdfLayout.ts'
+import { DEFAULT_RECEIPT_PRINT_SETTINGS, normalizeReceiptPrintSettings } from '../src/utils/receiptAppliedConfig.ts'
 
 let failed = 0
 
@@ -297,6 +299,132 @@ await runTest('both print delivery paths re-measure inside the actual print docu
   assert.match(surfaceSource, /await waitForFrameAssets\(frameWindow, frameDocument\)[\s\S]{0,200}if \(options\.beforePrint\)/,
     'printHtmlInHiddenFrame invokes beforePrint AFTER assets settle and BEFORE print()')
   assert.match(surfaceSource, /if \(!printed\) frameWindow\.print\(\)/)
+})
+
+// --- P7-receipt-page-modes: pageSizeMode fallbacks -------------------------
+
+await runTest('resolveReceiptPageGeometry: measured mode (default) keeps the in-document remeasured roll behaviour unchanged', () => {
+  const geometry = resolveReceiptPageGeometry({ fixedHeightMm: null, measuredHeightMm: 300, savedPageSizeMode: 'measured', fixedPageLengthMm: '100' })
+  assert.equal(geometry.pageHeightMm, 301)
+  assert.equal(geometry.continuousRoll, true)
+  assert.equal(geometry.pageSizeMode, 'measured')
+
+  const html = buildPrintablePreviewDocument({
+    markup: '<section>ITEM-1</section>',
+    widthMm: 80,
+    pageHeightMm: geometry.pageHeightMm,
+    continuousRoll: geometry.continuousRoll,
+    singleSheet: false,
+    pageSizeMode: geometry.pageSizeMode,
+  })
+  assert.match(html, /size: 80mm 301\.00mm/, 'measured mode keeps an explicit measured @page size')
+  assert.match(html, /data-receipt-length-line="true"/, 'measured mode still shows the pre-print length diagnostic')
+})
+
+await runTest('resolveReceiptPageGeometry: a missing/undefined saved pageSizeMode (pre-feature settings) defaults to measured', () => {
+  const geometry = resolveReceiptPageGeometry({ fixedHeightMm: null, measuredHeightMm: 200, savedPageSizeMode: undefined, fixedPageLengthMm: undefined })
+  assert.equal(geometry.pageSizeMode, 'measured')
+  assert.equal(geometry.continuousRoll, true)
+})
+
+await runTest('resolveReceiptPageGeometry: fixed mode with a 25-item receipt uses the explicit 80x100mm page and paginates instead of clipping', () => {
+  const geometry = resolveReceiptPageGeometry({ fixedHeightMm: null, measuredHeightMm: 455.03, savedPageSizeMode: 'fixed', fixedPageLengthMm: '100' })
+  assert.equal(geometry.pageHeightMm, 100)
+  assert.equal(geometry.continuousRoll, false)
+  assert.equal(geometry.pageSizeMode, 'fixed')
+
+  const itemIds = Array.from({ length: 25 }, (_, index) => `ITEM-${index + 1}`)
+  const html = buildPrintablePreviewDocument({
+    markup: `<section>${itemIds.join('|')}</section>`,
+    widthMm: 80,
+    pageHeightMm: geometry.pageHeightMm,
+    continuousRoll: geometry.continuousRoll,
+    singleSheet: false,
+    pageSizeMode: geometry.pageSizeMode,
+  })
+  assert.match(html, /size: 80mm 100\.00mm/, 'fixed mode emits an explicit 80x100mm page')
+  assert.doesNotMatch(html, /overflow: hidden !important/, 'a fixed-length document page never clips a long receipt')
+  assert.match(html, /overflow: visible !important/, 'content keeps flowing onto further 100mm pages instead of being cut')
+  for (const id of itemIds) assert.ok(html.includes(id), `${id} is retained, none of the 25 items are dropped`)
+  assert.match(html, /break-inside: avoid-page/, 'fixed-length pagination still keeps an item/row from being sliced across two pages')
+  assert.doesNotMatch(html, /data-receipt-length-line="true">Receipt length/, 'fixed mode has a chosen page length, not a measured roll length to report')
+})
+
+await runTest('resolveReceiptPageGeometry: driver mode emits NO @page size token at all, only margin: 0, and is not remeasured', () => {
+  const geometry = resolveReceiptPageGeometry({ fixedHeightMm: null, measuredHeightMm: 248.65, savedPageSizeMode: 'driver', fixedPageLengthMm: '100' })
+  assert.equal(geometry.continuousRoll, false, 'driver mode must never be re-measured in-document')
+  assert.equal(geometry.pageSizeMode, 'driver')
+
+  const html = buildPrintablePreviewDocument({
+    markup: '<section>ITEM-1|ITEM-2</section>',
+    widthMm: 80,
+    pageHeightMm: geometry.pageHeightMm,
+    continuousRoll: geometry.continuousRoll,
+    singleSheet: false,
+    pageSizeMode: geometry.pageSizeMode,
+  })
+  const pageRuleMatch = html.match(/@page\s*\{([^}]*)\}/)
+  assert.ok(pageRuleMatch, 'the document still has an @page rule')
+  assert.doesNotMatch(pageRuleMatch![1], /size:/, 'driver mode leaves the printer driver\'s own registered page/form in charge')
+  assert.match(pageRuleMatch![1], /margin:\s*0;/, 'margins stay zero even with no explicit size')
+
+  // remeasureContinuousRollBeforePrint is gated on layout.continuousRoll,
+  // which driver mode sets to false -- the in-document remeasure that
+  // rewrites #receipt-page-size must be skipped for this mode.
+  let rewritten = false
+  const fakeStyleEl = { set textContent(_value: string) { rewritten = true } } as unknown as HTMLElement
+  const fakeDoc = { getElementById: (id: string) => (id === 'receipt-page-size' ? fakeStyleEl : null), querySelector: () => null } as unknown as Document
+  remeasureContinuousRollBeforePrint(fakeDoc, { markup: '', widthMm: 80, pageHeightMm: geometry.pageHeightMm, continuousRoll: geometry.continuousRoll, singleSheet: false, pageSizeMode: geometry.pageSizeMode })
+  assert.equal(rewritten, false, 'driver mode never overwrites #receipt-page-size in-document')
+})
+
+await runTest('resolveReceiptPageGeometry: auto-longest emits one explicit longest-roll @page size with page-break-after avoid', () => {
+  const geometry = resolveReceiptPageGeometry({ fixedHeightMm: null, measuredHeightMm: 455.03, savedPageSizeMode: 'auto-longest', fixedPageLengthMm: '100' })
+  assert.equal(geometry.pageHeightMm, 3276)
+  assert.equal(geometry.continuousRoll, false)
+  assert.equal(geometry.pageSizeMode, 'auto-longest')
+
+  const html = buildPrintablePreviewDocument({
+    markup: '<section>ITEM-1</section>',
+    widthMm: 80,
+    pageHeightMm: geometry.pageHeightMm,
+    continuousRoll: geometry.continuousRoll,
+    singleSheet: false,
+    pageSizeMode: geometry.pageSizeMode,
+  })
+  assert.match(html, /size: 80mm 3276\.00mm/, 'auto-longest emits one explicit page as long as the printer\'s longest supported roll')
+  assert.match(html, /page-break-after:\s*avoid/, 'auto-longest guards against a driver paginating anyway')
+})
+
+await runTest('resolveReceiptPageGeometry: a genuine fixed sheet (80x50mm/A4/Letter/custom height) always resolves to measured bookkeeping regardless of the saved pageSizeMode', () => {
+  for (const savedPageSizeMode of ['measured', 'fixed', 'driver', 'auto-longest', undefined]) {
+    const geometry = resolveReceiptPageGeometry({ fixedHeightMm: 50, measuredHeightMm: 999, savedPageSizeMode, fixedPageLengthMm: '150' })
+    assert.equal(geometry.pageHeightMm, 50, `paperSize's own explicit height wins regardless of pageSizeMode=${savedPageSizeMode}`)
+    assert.equal(geometry.continuousRoll, false)
+    assert.equal(geometry.pageSizeMode, 'measured')
+  }
+  assert.equal(isSingleSheetPaperSize('80x50mm'), true, '80x50mm keeps its existing fit-to-one-card identity untouched by this feature')
+})
+
+await runTest('normalizeReceiptPrintSettings: pageSizeMode/fixedPageLengthMm default and migrate existing saved settings', () => {
+  assert.equal(DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode, 'measured')
+  assert.equal(DEFAULT_RECEIPT_PRINT_SETTINGS.fixedPageLengthMm, '100')
+
+  // A settings blob saved before this feature existed (no pageSizeMode key at
+  // all) must migrate to 'measured' -- today's own behaviour -- not throw and
+  // not silently pick a different mode.
+  const migrated = normalizeReceiptPrintSettings({ paperSize: '80mm', scale: '100' })
+  assert.equal(migrated.pageSizeMode, 'measured')
+  assert.equal(migrated.fixedPageLengthMm, '100')
+
+  const savedFixed = normalizeReceiptPrintSettings({ paperSize: '80mm', pageSizeMode: 'fixed', fixedPageLengthMm: '150' })
+  assert.equal(savedFixed.pageSizeMode, 'fixed')
+  assert.equal(savedFixed.fixedPageLengthMm, '150')
+
+  // A corrupted/foreign value must never resolve to anything but 'measured'.
+  const bogus = normalizeReceiptPrintSettings({ pageSizeMode: 'nonsense-mode', fixedPageLengthMm: '-40' })
+  assert.equal(bogus.pageSizeMode, 'measured')
+  assert.equal(bogus.fixedPageLengthMm, '100')
 })
 
 if (failed > 0) process.exitCode = 1
