@@ -21,6 +21,9 @@ import { searchProducts } from '../../api/methods.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { PAYMENT_METHODS } from '../../constants.ts'
 import { STOCK_ACTION_OPTIONS, returnLineNeedsLotPick, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
+import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
+import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
+import type { DamagedDisposition } from './helpers/returnOptions.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
@@ -84,6 +87,12 @@ interface SaleReturnItem extends SaleItemRow {
   // 11.13: the ONE per-item chooser -- what happens to this item's stock.
   // return_to_stock stays derived from it (restock <=> true) for the wire.
   stock_action: ReturnStockAction
+  // P4-3: only meaningful when stock_action is 'damaged'. Defaulted the
+  // moment the item becomes 'damaged' (see updateItemAction) to the SAME
+  // values an old client's absence of these fields resolves to server-side,
+  // so the wire payload is always explicit but never changes behavior.
+  condition_tag: string
+  damaged_disposition: DamagedDisposition
   // Only used when the sale cannot say which lot: the lots this product has
   // at the branch, and the one the operator named. Every unit goes back into
   // a named lot -- unspecified stock is not a destination.
@@ -182,6 +191,9 @@ interface ReturnCreatePayload extends Record<string, unknown> {
     cost_price_khr: number
     return_to_stock: boolean
     stock_action: ReturnStockAction
+    // P4-3: only sent when stock_action is 'damaged'.
+    condition_tag?: string
+    damaged_disposition?: DamagedDisposition
     branch_id: number | string | null
     batch_id?: number | null
   }>
@@ -590,6 +602,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             included: remaining > 0,
             return_to_stock: true,
             stock_action: 'restock' as ReturnStockAction,
+            condition_tag: DEFAULT_STOCK_CONDITION_TAG,
+            damaged_disposition: 'keep' as DamagedDisposition,
             lotOptions: [],
             pickedBatchId: null,
           }
@@ -720,7 +734,25 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   }
 
   const updateItemAction = (idx: number, action: ReturnStockAction) => {
-    setSelectedItems((prev) => prev.map((it, i) => i === idx ? { ...it, stock_action: action, return_to_stock: action === 'restock' } : it))
+    setSelectedItems((prev) => prev.map((it, i) => i === idx ? {
+      ...it, stock_action: action, return_to_stock: action === 'restock',
+      // Landing on 'damaged' always starts on the SAME default the server
+      // resolves an old client's absent fields to -- kept, tagged 'damaged'.
+      ...(action === 'damaged' && it.stock_action !== 'damaged'
+        ? { condition_tag: DEFAULT_STOCK_CONDITION_TAG, damaged_disposition: 'keep' as DamagedDisposition }
+        : {}),
+    } : it))
+  }
+
+  // The StockConditionTagRow's own value model: '' = "Remove entirely" (no
+  // tag, destroyed immediately, a booked loss), a tag = "Keep in group as
+  // <tag>" (held). See planDamagedReturnLine's transition table.
+  const updateItemDamagedChoice = (idx: number, value: string) => {
+    setSelectedItems((prev) => prev.map((it, i) => i === idx ? {
+      ...it,
+      damaged_disposition: (value ? 'keep' : 'remove') as DamagedDisposition,
+      condition_tag: value || it.condition_tag || DEFAULT_STOCK_CONDITION_TAG,
+    } : it))
   }
 
   const updateItemLot = (idx: number, batchId: number | null) => {
@@ -798,6 +830,14 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             cost_price_khr:    toNumber(it.cost_price_khr || it.purchase_price_khr),
             return_to_stock:   it.return_to_stock !== false,
             stock_action:      it.stock_action,
+            // The tag always rides along, even under "Remove entirely" --
+            // it still stamps the held-then-disposed row and its write_off's
+            // reason (see planDamagedReturnLine); only disposition decides
+            // whether the row stays open.
+            ...(it.stock_action === 'damaged' ? {
+              condition_tag: it.condition_tag || DEFAULT_STOCK_CONDITION_TAG,
+              damaged_disposition: it.damaged_disposition,
+            } : {}),
             branch_id:         it.branch_id || foundSale?.branch_id || null,
             // Sent ONLY for a line the sale itself cannot place. When the
             // sale knows the lot(s), the server restocks exactly those --
@@ -921,6 +961,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
           branch_id: foundSale?.branch_id || null,
           items: activeItems.map(it => ({ sale_item_id: Number(it.id), product_id: it.product_id, quantity: it.returnQty,
             stock_action: it.stock_action, return_to_stock: it.stock_action === 'restock', branch_id: it.branch_id || foundSale?.branch_id || null,
+            ...(it.stock_action === 'damaged' ? {
+              condition_tag: it.condition_tag || DEFAULT_STOCK_CONDITION_TAG,
+              damaged_disposition: it.damaged_disposition,
+            } : {}),
             ...(it.pickedBatchId != null ? { batch_id: it.pickedBatchId } : {}) })),
         }, quote)
         if (!current()) return
@@ -1230,8 +1274,23 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                 </span>
                               </div>
                               {item.stock_action === 'damaged' && (
-                                <div className="text-[10px] text-orange-500 dark:text-orange-400">
-                                  {T('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
+                                <div className="space-y-1">
+                                  {/* P4-3: the SAME remove-stock chooser
+                                      (StockConditionTagRow, mode='remove') --
+                                      keep as a tagged, held row (default) or
+                                      destroy immediately as a booked loss. */}
+                                  <StockConditionTagRow
+                                    mode="remove"
+                                    value={item.damaged_disposition === 'remove' ? '' : (item.condition_tag || DEFAULT_STOCK_CONDITION_TAG)}
+                                    onChange={(next) => updateItemDamagedChoice(idx, next)}
+                                    tr={(key, fallback) => T(key, fallback ?? key)}
+                                    id={`return-damaged-tag-${idx}`}
+                                  />
+                                  <div className="text-[10px] text-orange-500 dark:text-orange-400">
+                                    {item.damaged_disposition === 'remove'
+                                      ? T('stock_action_damaged_remove_hint', 'Destroyed immediately -- booked as a loss at cost.')
+                                      : T('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
+                                  </div>
                                 </div>
                               )}
                               {/* WHICH lot these units go back into. When the
@@ -1495,8 +1554,11 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   {activeItems.filter(it => it.stock_action === 'none').length > 0 && (
                     <div>🚫 {activeItems.filter(it => it.stock_action === 'none').length} {T('written_off','will NOT restock')}</div>
                   )}
-                  {activeItems.filter(it => it.stock_action === 'damaged').length > 0 && (
-                    <div>🟠 {activeItems.filter(it => it.stock_action === 'damaged').length} {T('tracked_as_damaged','tracked as damaged stock')}</div>
+                  {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition !== 'remove').length > 0 && (
+                    <div>🟠 {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition !== 'remove').length} {T('tracked_as_damaged','tracked as damaged stock')}</div>
+                  )}
+                  {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length > 0 && (
+                    <div>🗑️ {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length} {T('stock_action_damaged_remove_hint_short','destroyed immediately (booked loss)')}</div>
                   )}
                   {replacements.length > 0 && (
                     <div>🔁 {replacements.length} {T('replacement_sale_items_short','item(s) on the replacement sale receipt')} — {fmtUSD(replacementTotalUsd)} · {replacementPaymentMethod}</div>
