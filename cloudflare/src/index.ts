@@ -437,7 +437,7 @@ app.get('/ws', async (c) => {
 // (files.ts requires auth), not at read time.
 app.get('/uploads/*', async (c) => {
   const key = `uploads/${c.req.path.replace(/^\/uploads\//, '')}`
-  return serveObject(c.env.ASSETS, key, c.req.raw)
+  return serveObject(c.env.ASSETS, key, c.req.raw, c.executionCtx)
 })
 
 app.route('/api/settings', settingsRoute)
