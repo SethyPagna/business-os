@@ -538,13 +538,20 @@ export default function SalesListSurface({
                               {driverLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('delivery') || 'Delivery'}: ${driverLabel}`}><EntityLink page="contacts" anchor="hub:contacts:delivery" search={driverLabel} navigate={navigateTo}>{driverLabel}</EntityLink></span></> : null}
                             </div>
                             {/* Third row on small screens: branch, status,
-                                payment and item count get their own line. The
-                                payment badge truncates with "…" instead of
-                                ever touching the KHR figure at the right. */}
+                                payment and item count get their own line.
+                                Every child is shrink-0/whitespace-nowrap (no
+                                truncate/max-w) so the row itself overflows
+                                and scrolls horizontally instead of any one
+                                child shrinking and clipping to "…" -- same
+                                contract as the two meta rows above it
+                                (owner: still saw the payment badge get cut
+                                off on a phone even after this row gained
+                                overflow-x-auto, because the badge could
+                                still shrink inside the flex-nowrap row). */}
                             <div data-sales-card-status-meta="" className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                               {branchLabel ? <span className="shrink-0" aria-label={`${t('branch') || 'Branch'}: ${branchLabel}`}><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink></span> : null}
-                              <StatusBadge status={status} t={t} />
-                              {sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} className="min-w-0 max-w-[9rem] truncate"><span className="badge-blue min-w-0 max-w-[9rem] truncate text-xs">{sale.payment_method}</span></EntityLink> : <span className="badge-blue min-w-0 max-w-[9rem] truncate text-xs">N/A</span>}
+                              <span className="shrink-0"><StatusBadge status={status} t={t} /></span>
+                              {sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} className="shrink-0 whitespace-nowrap"><span className="badge-blue shrink-0 whitespace-nowrap text-xs">{sale.payment_method}</span></EntityLink> : <span className="badge-blue shrink-0 whitespace-nowrap text-xs">N/A</span>}
                               <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{items.length} {t('items')}</span>
                             </div>
                           </div>

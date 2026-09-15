@@ -74,4 +74,21 @@ assert.match(
   'the last mobile sale card row (Shop/status/payment/item count) uses the identical scroll utility classes as the sibling meta rows',
 )
 
+// P6-8 follow-up: the row scrolling is necessary but not sufficient -- a
+// child that can still shrink and truncate (the payment badge previously
+// had min-w-0/max-w-[9rem]/truncate) clips to "..." instead of ever letting
+// the row overflow. Every child of the status-meta row must be shrink-0 and
+// none may carry truncate/max-w-, so the row -- not any one child -- is what
+// scrolls.
+const statusMetaRowMatch = salesListSurface.match(
+  /<div data-sales-card-status-meta="" className="[^"]*">([\s\S]*?)<span className="shrink-0 rounded bg-slate-100[^<]*<\/span>\s*<\/div>/,
+)
+assert.ok(statusMetaRowMatch, 'the status-meta row body is present and closes before the card wrapper div')
+const statusMetaRowBody = statusMetaRowMatch![0]
+assert.doesNotMatch(statusMetaRowBody, /\btruncate\b/, 'no child of the status-meta row truncates its text')
+assert.doesNotMatch(statusMetaRowBody, /max-w-\[/, 'no child of the status-meta row caps its width and shrinks')
+assert.match(statusMetaRowBody, /EntityLink[^>]*className="shrink-0 whitespace-nowrap"/, 'the payment-method link is shrink-0 and does not wrap')
+assert.match(statusMetaRowBody, /badge-blue shrink-0 whitespace-nowrap text-xs/, 'the payment-method badge (and its N\\/A fallback) is shrink-0 and does not wrap')
+assert.match(statusMetaRowBody, /<span className="shrink-0"><StatusBadge/, 'StatusBadge is wrapped in a shrink-0 span since the component itself has no className passthrough')
+
 console.log('PASS dashboard card row alignment, view-more floats, and sales last-row scroll (P6-7/P6-8)')
