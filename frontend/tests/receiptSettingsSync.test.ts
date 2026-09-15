@@ -60,17 +60,25 @@ assert.match(printUtilSource, /RECEIPT_PRINT_SETTINGS_STORAGE_KEY/)
 assert.match(printUtilSource, /normalizeReceiptPrintSettings/)
 assert.match(printUtilSource, /applyHighContrastBold\(host, printSettings\)/)
 assert.match(printUtilSource, /sourceSettings && typeof sourceSettings === 'object' && sourceSettings\.receipt_print_settings/)
-// 2026-09-15 (owner, real 80mm print photos): a continuous roll now hands
-// its LENGTH to the printer (`auto`) instead of a JS-measured mm figure --
-// that measured number is what disagreed with real thermal drivers and
-// produced a blank lead-in band plus a forced second page for the QR
-// footer. The WIDTH still stays the exact configured paper width; only a
-// bare, width-less `size: auto` (which would let the printer substitute
-// its own default document size, e.g. Letter/A4) remains forbidden.
-assert.match(printUtilSource, /const pageSizeCss = continuousRoll \? `\$\{widthMm\}mm auto` : `\$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm`/,
-  'a continuous roll uses an explicit width with an auto (printer-driven) length; a fixed sheet keeps its explicit measured-height CSS page')
+// 2026-09-15 (owner, real 80mm print photos): CSS Paged Media's `size`
+// property never accepts a length combined with `auto` -- that declaration
+// is a parse error, the whole rule is dropped, and the browser falls back
+// to the printer driver's own default document size, which is exactly the
+// blank lead-in band plus forced second page the owner photographed (and
+// what a4d99ac0/943e9884 already learned the hard way with bare `auto`).
+// `pageSizeCss` therefore stays an explicit, VALID `<width>mm <height>mm`
+// for every case, continuous roll included; the roll's height is no longer
+// trusted from the app's off-screen measurement but re-measured inside the
+// actual print document immediately before print() (see
+// remeasureContinuousRollBeforePrint / writeContinuousRollPageSize below).
+assert.match(printUtilSource, /const pageSizeCss = `\$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm`/,
+  'the @page size is always an explicit, valid width-by-height pair -- never `auto` combined with a length')
 assert.doesNotMatch(printUtilSource, /size:\s*auto\s*[,;)]/,
   'the page size must never fall back to the printer default document size (width-less auto)')
+assert.doesNotMatch(printUtilSource, /\$\{widthMm\}mm auto/,
+  'a length combined with `auto` is invalid CSS Paged Media and must never reappear')
+assert.match(printUtilSource, /remeasureContinuousRollBeforePrint/,
+  'the continuous roll height is re-measured inside the actual print document right before print()')
 
 assert.match(receiptConfigSource, /export const DEFAULT_RECEIPT_TEMPLATE/)
 assert.match(receiptConfigSource, /export const DEFAULT_RECEIPT_PRINT_SETTINGS/)

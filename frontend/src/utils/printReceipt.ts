@@ -6,8 +6,8 @@ import {
 import type { ReceiptPrintSettings } from '../types/receiptContracts'
 import { computeFixedSheetFit, computeImagePageSegments, computeImagePdfLayout, isSingleSheetPaperSize } from './receiptPdfLayout.ts'
 import { RECEIPT_ITEM_COLUMN_GAP_EM, RECEIPT_ROW_GRID_TEMPLATE, receiptItemGridTemplate } from './receiptItemColumns.ts'
-import { receiptPreviewDiagnosticLines, receiptPreviewSettings, type ReceiptPreviewSettings, type ReceiptPreviewTranslate } from './receiptPreviewDiagnostics.ts'
-import { openPrintPreviewWindow, printHtmlInHiddenFrame } from './printSurface.ts'
+import { receiptLengthDiagnosticLine, receiptPreviewDiagnosticLines, receiptPreviewSettings, type ReceiptPreviewSettings, type ReceiptPreviewTranslate } from './receiptPreviewDiagnostics.ts'
+import { openPrintPreviewWindow, printHtmlInHiddenFrame, waitForFrameAssets } from './printSurface.ts'
 
 export const PRINT_DEFAULTS = { ...DEFAULT_RECEIPT_PRINT_SETTINGS }
 const RECEIPT_ASSET_INLINE_CONCURRENCY = 3
@@ -1140,20 +1140,28 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
   // clipping here prevents rounding from spilling a second card.
   const clipToOnePage = singleSheet && !continuousRoll
   const pageOverflow = clipToOnePage ? 'hidden' : 'visible'
-  // 2026-09-15 (owner, two photos of a real 80mm print): an explicit
-  // width x measured-height @page looked correct in every browser preview,
-  // but real thermal drivers do not treat it as "this exact length" -- they
-  // reconciled it against their own registered continuous-roll form, which
-  // showed up as a blank band inserted before the first line AND the
-  // JS-measured height coming up short against the driver's own font/layout
-  // pass, which pushed the trailing QR block (kept atomic by the avoid-page
-  // rules below) onto a second physical strip. `size: <width>mm auto` hands
-  // the roll's length to the printer/driver entirely -- there is no
-  // JS-measured number for it to disagree with, so there is nothing left to
-  // reconcile a gap or a break out of. Only a REAL fixed sheet (the 80x50
-  // card, or an A4/Letter/custom document height) still needs an explicit
-  // page length; those media genuinely end at that length.
-  const pageSizeCss = continuousRoll ? `${widthMm}mm auto` : `${widthMm}mm ${pageHeightMm.toFixed(2)}mm`
+  // 2026-09-15 (owner, two photos of a real 80mm print) + coordinator review:
+  // `size: <width>mm auto` is NOT a valid @page value -- CSS Paged Media only
+  // accepts `auto` alone, one/two lengths, or a page-size keyword, never a
+  // length combined with `auto`. That declaration silently parses to nothing,
+  // the printer falls back to its OWN default document size, and that is
+  // exactly the "auto inserts page breaks / shrinks to a fixed sheet" failure
+  // a4d99ac0 hit on Sep 12 (bare `auto`, same root cause) and 943e9884
+  // reverted the same day. `size` must stay a VALID explicit width x height.
+  //
+  // What actually caused the blank band and the forced second page: the
+  // height was measured in the APP's off-screen clone, not in the document
+  // that is about to print. A different document (its own font-fallback
+  // timing, its own sub-pixel rounding) lays the same markup out a hair
+  // taller or shorter, and a real thermal driver, handed a page shorter than
+  // what it is physically printing, still has to put that overflow
+  // somewhere -- a gap reconciled against its own registered form, then a
+  // forced page for whatever no longer fit. The value below is only the
+  // FALLBACK for a print with no JS (or one that reaches print() before the
+  // re-measure resolves); `remeasureContinuousRollBeforePrint` below
+  // overwrites it, in the actual print document, right before print() is
+  // called in both delivery paths.
+  const pageSizeCss = `${widthMm}mm ${pageHeightMm.toFixed(2)}mm`
   const documentHeightCss = clipToOnePage
     ? `height: ${pageHeightMm.toFixed(2)}mm !important;
           min-height: ${pageHeightMm.toFixed(2)}mm !important;`
@@ -1194,6 +1202,12 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
   const diagnostics = receiptPreviewDiagnosticLines(layout,
     layout.previewSettings || receiptPreviewSettings(options.printSettings || getPrintSettings()), options.previewTranslate)
     .map((line) => `<p>${escapeHtml(line)}</p>`).join('')
+  // The exact measured length, as its OWN line with a stable selector so
+  // remeasureContinuousRollBeforePrint can replace it once it has a number
+  // measured in this document instead of the app's off-screen estimate.
+  const lengthLine = continuousRoll
+    ? `<p data-receipt-length-line="true">${escapeHtml(receiptLengthDiagnosticLine(pageHeightMm, options.previewTranslate))}</p>`
+    : ''
 
   return `<!doctype html>
 <html lang="en">
@@ -1365,6 +1379,12 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
         }${pageBreakAvoidanceCss}
       }
     </style>
+    <!-- Empty until remeasureContinuousRollBeforePrint (below) fills it in,
+         right before print(), with an @page rule measured in THIS document.
+         Placed after the main stylesheet so it wins the cascade once it has
+         content; a fixed sheet or a print with no JS never touches it and
+         keeps the fallback @page above. -->
+    <style id="receipt-page-size"></style>
   </head>
   <body>
     <div class="receipt-shell">
@@ -1377,7 +1397,7 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
           <button type="button" data-receipt-action="print">Print</button>
           <button type="button" data-receipt-action="close">Close</button>
         </div>
-        <div class="receipt-print-diagnostics" data-receipt-print-diagnostics="true">${diagnostics}</div>
+        <div class="receipt-print-diagnostics" data-receipt-print-diagnostics="true">${diagnostics}${lengthLine}</div>
       </div>
       ${note}
       <div class="receipt-stage">
@@ -1390,16 +1410,95 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
 </html>`
 }
 
-function attachPrintablePreviewActions(previewWindow: Window | null, { autoPrint = false }: { autoPrint?: boolean } = {}): void {
+// Safety margin added on top of the in-document measurement below. The app's
+// off-screen estimate already adds 1mm (createPrintableReceiptMarkup); this
+// is a second, independent buffer for the number measured in the ACTUAL
+// print document, where sub-pixel rounding differs again.
+const RECEIPT_PAGE_MEASURE_BUFFER_MM = 3
+
+/**
+ * Reads `.receipt-frame`'s own rendered size INSIDE `doc` -- the document
+ * that is actually about to print, fonts and images already settled -- and
+ * converts it to a page height in mm using that same document's px/mm ratio.
+ * Returns null when the frame cannot be measured (no `.receipt-frame`, or a
+ * zero width); the caller keeps the app-measured fallback @page rule in that
+ * case instead of writing a bogus one.
+ */
+export function measureContinuousRollPageHeightMm(doc: Document, widthMm: number): number | null {
+  const frame = doc.querySelector('.receipt-frame')
+  if (!frame) return null
+  const rect = frame.getBoundingClientRect?.() as { width?: number; height?: number } | undefined
+  const renderedWidthPx = rect?.width || (frame as HTMLElement).offsetWidth || 0
+  if (!(renderedWidthPx > 0)) return null
+  const renderedHeightPx = (frame as HTMLElement).scrollHeight || rect?.height || (frame as HTMLElement).offsetHeight || 0
+  if (!(renderedHeightPx > 0)) return null
+  const heightMm = renderedHeightPx * (widthMm / renderedWidthPx)
+  return Math.max(1, heightMm + RECEIPT_PAGE_MEASURE_BUFFER_MM)
+}
+
+/**
+ * Overwrites the dedicated `#receipt-page-size` stylesheet with a fresh,
+ * VALID `@page { size: <width>mm <height>mm; margin: 0; }` rule -- never
+ * `auto` combined with a length, which CSS Paged Media rejects outright and
+ * which is what handed pagination to the printer's own default document
+ * size in the first place. No-ops if the document has no such element (a
+ * fixed sheet's document never needs one).
+ */
+export function writeContinuousRollPageSize(doc: Document, widthMm: number, heightMm: number): void {
+  const styleEl = doc.getElementById('receipt-page-size')
+  if (!styleEl) return
+  styleEl.textContent = `@page { size: ${widthMm}mm ${heightMm.toFixed(2)}mm; margin: 0; }`
+}
+
+/**
+ * The one place both print delivery paths (the preview window and the
+ * hidden same-document iframe) re-measure a continuous roll's page height
+ * INSIDE the document that is about to print, and show that exact number to
+ * the operator, right before print() is called. A fixed sheet (already
+ * fitted to its explicit height) and any measurement failure are silent
+ * no-ops -- this must never throw and block a print; the fallback @page rule
+ * already baked into the document by buildPrintablePreviewDocument still
+ * works on its own.
+ */
+export function remeasureContinuousRollBeforePrint(
+  doc: Document,
+  layout: PrintableReceiptLayout,
+  translate?: ReceiptPreviewTranslate,
+): void {
+  if (!layout.continuousRoll) return
+  try {
+    const heightMm = measureContinuousRollPageHeightMm(doc, layout.widthMm)
+    if (heightMm == null) return
+    writeContinuousRollPageSize(doc, layout.widthMm, heightMm)
+    const lengthLineEl = doc.querySelector('[data-receipt-length-line]')
+    if (lengthLineEl) lengthLineEl.textContent = receiptLengthDiagnosticLine(heightMm, translate)
+  } catch {
+    // The fallback @page rule from the initial markup still prints correctly.
+  }
+}
+
+function attachPrintablePreviewActions(
+  previewWindow: Window | null,
+  layout: PrintableReceiptLayout,
+  options: ReceiptPrintOptions,
+  { autoPrint = false }: { autoPrint?: boolean } = {},
+): void {
   if (!previewWindow?.document) return
   const doc = previewWindow.document
   const printButton = doc.querySelector('[data-receipt-action="print"]')
   const closeButton = doc.querySelector('[data-receipt-action="close"]')
-  printButton?.addEventListener('click', () => previewWindow.print?.())
+  const printNow = async () => {
+    // Re-measure in THIS document, fonts/images settled, right before print()
+    // -- the one moment left to correct the app's off-screen estimate.
+    await waitForFrameAssets(previewWindow, doc)
+    remeasureContinuousRollBeforePrint(doc, layout, options.previewTranslate)
+    previewWindow.print?.()
+  }
+  printButton?.addEventListener('click', () => { void printNow() })
   closeButton?.addEventListener('click', () => previewWindow.close?.())
 
   if (!autoPrint) return
-  const schedulePrint = () => previewWindow.setTimeout?.(() => previewWindow.print?.(), 240)
+  const schedulePrint = () => previewWindow.setTimeout?.(() => { void printNow() }, 240)
   if (doc.readyState === 'complete') schedulePrint()
   else previewWindow.addEventListener?.('load', schedulePrint, { once: true })
 }
@@ -1422,14 +1521,19 @@ export async function openPrintableReceiptPreview(content: ReceiptContent, optio
       // preview (and its Save to Files is the PDF), so this path prints even
       // when the caller only asked to preview: there is nowhere else to show
       // it, and silently doing nothing is what people reported as broken.
-      const printed = await printHtmlInHiddenFrame(html)
+      const printed = await printHtmlInHiddenFrame(html, {
+        // printHtmlInHiddenFrame has already awaited fonts/images by the time
+        // this runs -- re-measuring here needs no second wait, just the read
+        // + rewrite, right before it calls print().
+        beforePrint: (_win, frameDoc) => { remeasureContinuousRollBeforePrint(frameDoc, layout, options.previewTranslate) },
+      })
       if (!printed) throw new Error('This browser could not open the receipt for printing.')
       return { opened: true, mode: 'frame-print' }
     }
     previewWindow.document.open()
     previewWindow.document.write(html)
     previewWindow.document.close()
-    attachPrintablePreviewActions(previewWindow, { autoPrint: !!options.autoPrint })
+    attachPrintablePreviewActions(previewWindow, layout, options, { autoPrint: !!options.autoPrint })
     previewWindow.focus?.()
     return { opened: true, mode: 'preview' }
   } catch (error) {

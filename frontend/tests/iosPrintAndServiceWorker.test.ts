@@ -137,7 +137,9 @@ check('standalone mode never asks for a window', () => {
 
 check('a missing window selects the iframe print path', () => {
   const body = functionBody(printReceipt, 'export async function openPrintableReceiptPreview', '\nfunction downloadBlob')
-  assert.match(body, /if \(!previewWindow\) \{[\s\S]*?printHtmlInHiddenFrame\(html\)/, 'no window means print in this document')
+  assert.match(body, /if \(!previewWindow\) \{[\s\S]*?printHtmlInHiddenFrame\(html, \{/, 'no window means print in this document')
+  assert.match(body, /beforePrint: \(_win, frameDoc\) => \{ remeasureContinuousRollBeforePrint\(frameDoc, layout, options\.previewTranslate\) \}/,
+    'the iframe path re-measures the roll length inside the actual print document, right before print()')
   assert.match(body, /buildPrintablePreviewDocument\(layout, options\)/, 'the iframe gets the SAME document, stylesheet included')
   const exportBody = functionBody(exportOptions, 'export function openPrintExport', '\n}')
   assert.match(exportBody, /printHtmlInHiddenFrame\(buildPrintDocument\(\{ \.\.\.input, autoPrint: false \}\)\)/,
