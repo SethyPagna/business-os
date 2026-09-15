@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import Modal from '../shared/Modal'
 import { stockConditionLabel } from '../../utils/stockCondition.ts'
 import { disposeTaggedLot, restoreTaggedLot, type TaggedLotGroup } from '../../api/damagedLotsTransport.ts'
@@ -75,7 +75,7 @@ function TagPill({ row }: { row: TaggedStockRow }) {
  *  columns line up with the sellable rows above it. Only the name rail, the
  *  branch and the quantity carry content -- a held row has no price, no margin
  *  and no catalog identity of its own. */
-export function TaggedStockDesktopRow({ row, tr, canWrite, onAction, selectionModeActive }: {
+function TaggedStockDesktopRowComponent({ row, tr, canWrite, onAction, selectionModeActive }: {
   row: TaggedStockRow
   tr: Translate
   canWrite: boolean
@@ -108,8 +108,13 @@ export function TaggedStockDesktopRow({ row, tr, canWrite, onAction, selectionMo
   )
 }
 
+/** Memoized: this row's own re-render is gated on its own props, not on
+ *  every unrelated Products.tsx state change re-invoking the .map() that
+ *  builds it (see hotRowMemoBoundaries.test.ts's ProductCard precedent). */
+export const TaggedStockDesktopRow = memo(TaggedStockDesktopRowComponent)
+
 /** Small screens: the same row as a card inside the group card. */
-export function TaggedStockMobileCard({ row, tr, canWrite, onAction }: {
+function TaggedStockMobileCardComponent({ row, tr, canWrite, onAction }: {
   row: TaggedStockRow
   tr: Translate
   canWrite: boolean
@@ -129,6 +134,8 @@ export function TaggedStockMobileCard({ row, tr, canWrite, onAction }: {
     </div>
   )
 }
+
+export const TaggedStockMobileCard = memo(TaggedStockMobileCardComponent)
 
 /**
  * The one dialog both actions share. Quantity defaults to the whole held row

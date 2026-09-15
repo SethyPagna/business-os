@@ -2,7 +2,7 @@ import ProductNameRail from '../shared/ProductNameRail'
 // Products
 // Main Products page; all sub-modals are imported from sibling files.
 
-import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Suspense, memo, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
@@ -148,6 +148,7 @@ import { readStockAdjustDraft, STOCK_ADJUST_RESTORE_HOST } from '../../utils/sto
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
+import type { LowStockConfig } from '../../utils/lowStockSettings.ts'
 import type { BulkDeleteJobStatus } from '../../api/productWriteTransport.ts'
 import { getPossiblySameProducts, dismissProductDuplicateCluster } from '../../api/productWriteTransport.ts'
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
@@ -682,6 +683,649 @@ export default function Products() {
   }
   return can('products', 'view') ? <ProductsFullEditor /> : null
 }
+
+// ---------------------------------------------------------------------------
+// Product row / child row memo boundary (P4-4b item 3)
+// ---------------------------------------------------------------------------
+// renderDesktopProductRow/renderMobileProductCard below used to be plain
+// closures invoked directly inside ProductsListSurface's .map() for every
+// visible row, on every render of this ~5500-line component -- a totally
+// unrelated state change (a filter chip, a different section's toggle, an
+// in-flight duplicate merge elsewhere) still rebuilt every row's JSX from
+// scratch, because there was no component boundary for React to bail out
+// at. Two extracted, memoized components below give React exactly that
+// boundary (same fix POS.tsx's ProductCard got in
+// hotRowMemoBoundaries.test.ts): a row only re-renders when its own
+// `product`/`indented` or the shared `ctx` object actually changes.
+//
+// `ctx` bundles every value the row bodies read from Products.tsx's own
+// scope (previously plain closures over them) and is rebuilt via useMemo
+// with the same dependency list renderDesktopProductRow/
+// renderMobileProductCard already declared (see productRowCtx below) --
+// it only changes identity when one of those dependencies actually
+// changes. The row bodies themselves are unchanged from before: each
+// component destructures `ctx` back into the same local names the body
+// already used, so no line inside either JSX tree had to change.
+type ProductRowCtx = {
+  branchFilter: string
+  branchNameById: Map<string, unknown>
+  catMap: Record<string, LookupRecord>
+  copy: ReturnType<typeof useCopyFloat>
+  exchangeRate: number
+  fmtKHR: (value: unknown) => string
+  fmtUSD: (value: unknown) => string
+  getBranchQty: (product: Record<string, unknown>, branchId: unknown) => unknown
+  getBranchSummaryLabel: (product: Record<string, unknown>) => string
+  getBrandColor: (brandName: unknown) => string
+  getLongPressState: (rowId: number) => LongPressState
+  isSelectionScopeFullySelected: (ids: EntityId[]) => boolean
+  isSelectionScopePartiallySelected: (ids: EntityId[]) => boolean
+  openLightbox: (gallery: unknown, startIndex?: number, title?: string) => void
+  promotionRules: PromotionRule[]
+  lowStockConfig: LowStockConfig
+  renderMetaPill: (item: { className?: string; color?: string; key: string; label?: unknown } | null) => ReactNode
+  renderUnitChip: (unitName: string | undefined) => ReactNode
+  selectionModeActive: boolean
+  t: (key: string) => string
+  toggleSelectionScope: (ids: EntityId[], checked: boolean) => void
+  tr: (key: string, fallbackEn?: string, fallbackKm?: string) => string
+  exactDuplicateIndex: Map<number, ExactDuplicateInfo>
+  dupResolverBusyKey: string | null
+  canMergeDuplicates: boolean
+  handleDuplicateKeepThis: (keepId: number, info: ExactDuplicateInfo) => Promise<void>
+  handleDuplicateKeepBoth: (info: ExactDuplicateInfo) => Promise<void>
+  navigateTo: (page: string, anchor?: string) => void
+  setDetailProduct: (product: ProductRecord | null) => void
+}
+
+function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { product: ProductRecord; indented?: boolean; ctx: ProductRowCtx }) {
+  const {
+    branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD,
+    getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState,
+    isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox,
+    promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive,
+    t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
+    canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
+    setDetailProduct,
+  } = ctx
+    const productId = p.id ?? 0
+    const productName = String(p.name || '')
+    const sellingUsd = Number(p.selling_price_usd || 0)
+    const sellingKhr = Number(p.selling_price_khr || 0)
+    // Was specialUsd/specialKhr off special_price_*, rendered as "VIP". The
+    // 2026-09-04 ruling deleted that tier: it was the wholesale price all
+    // along, and migration 0111 moved the very same numbers into
+    // wholesale_price_*, so this row keeps showing the same figures under the
+    // name they should always have had.
+    const wholesaleUsd = Number(p.wholesale_price_usd || 0)
+    const wholesaleKhr = Number(p.wholesale_price_khr || 0)
+    const {
+      branchSummaryLabel,
+      compactMeta,
+      marginPct,
+      marginUsd,
+      promotion,
+      costKhr,
+      costUsd,
+      qty,
+      selectedBranchName,
+      stockStatusTextClass,
+    } = buildProductRowDisplayState(p, {
+      branchFilter,
+      branchNameById,
+      catMap,
+      exchangeRate,
+      getBranchQty,
+      getBranchSummaryLabel,
+      getBrandColor,
+      t,
+      promotionRules,
+      lowStock: lowStockConfig,
+    })
+    const thumbnailState = buildProductThumbnailState(p)
+    // A merged row (see mergeSameDetailRows) represents multiple real
+    // product ids -- selecting/checking it needs to act on all of them
+    // together, not just the lead id, or a bulk delete would silently
+    // leave the other branch-duplicate rows behind. Falls back to the
+    // single id for ordinary, unmerged rows.
+    const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
+    const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
+    // Exact duplicate (same real barcode + same name, per the server sweep)?
+    // If so, the row's normal click-to-detail "Manage/Product" flow is
+    // suppressed (user spec item #3) -- the inline resolver below is the only
+    // action until it's kept-one/kept-both.
+    const dupInfo = findRowDuplicateInfo(exactDuplicateIndex, productId, rowScopeIds)
+    // Long-press/click-hold enters select mode by selecting this row;
+    // once select mode is active (selectionModeActive, derived from
+    // selectedIds.size), the row's own onClick below toggles selection
+    // directly and these handlers are skipped entirely (disabled), so a
+    // plain click never has to wait out the hold once selecting is live.
+    // Not a hook -- see utils/longPress.ts -- this row's persistent
+    // timer slot comes from the shared Map keyed by product id.
+    const rowLongPressState = getLongPressState(Number(productId))
+    const longPress = createLongPressHandlers(rowLongPressState, {
+      disabled: selectionModeActive,
+      onLongPress: () => toggleSelectionScope(rowScopeIds, true),
+      onClick: (target) => {
+        if (dupInfo) return
+        const copyTarget = (target as Element | null)?.closest?.(COPY_SELECTOR)
+        if (copyTarget) {
+          deferCopySurfaceAction(copyTarget, () => setDetailProduct(p))
+          return
+        }
+        setDetailProduct(p)
+      },
+    })
+    // The native `click` that follows this same press-release still
+    // fires once selectionModeActive flips true and swaps this element's
+    // onClick out from under it -- consumeLongPressClick() eats exactly
+    // that one ghost click instead of letting it immediately toggle the
+    // row back off. See utils/longPress.ts's own comment on
+    // consumeLongPressClick for the full mechanism.
+    const handleRowClick = (event: ReactMouseEvent) => {
+      if (consumeLongPressClick(rowLongPressState)) return
+      const copyTarget = (event.target as Element | null)?.closest?.(COPY_SELECTOR)
+      if (copyTarget) {
+        deferCopySurfaceAction(copyTarget, () => toggleSelectionScope(rowScopeIds, !rowSelected))
+        return
+      }
+      toggleSelectionScope(rowScopeIds, !rowSelected)
+    }
+    return (
+      <tr
+        key={productId}
+        data-product-jump-id={productId}
+        // The row's own click IS the surface here: it opens the product, or
+        // toggles selection once select mode is live. `data-clickable` is how
+        // this app already declares that (the dense tables in Stock Changes,
+        // Stock-in Sessions, Returns and Fees all carry it), and the shared
+        // text-affordance controller reads it to decide whether a copyable
+        // value inside the row may take that click. It may not. Declaration
+        // only: the CSS keyed on this attribute is scoped to
+        // `.dense-data-table`, which this table is not.
+        data-clickable="true"
+        className={`table-row cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}
+        onClick={selectionModeActive ? handleRowClick : undefined}
+        {...(selectionModeActive ? {} : longPress)}
+      >
+        <td className={`${selectionModeActive ? 'px-2' : 'px-0'} py-2`} onClick={(e) => { e.stopPropagation(); if (selectionModeActive) toggleSelectionScope(rowScopeIds, !rowSelected) }}>
+          {selectionModeActive ? (
+            <input
+              type="checkbox"
+              className="rounded"
+              checked={rowSelected}
+              ref={(node) => {
+                if (node) node.indeterminate = !rowSelected && isSelectionScopePartiallySelected(rowScopeIds)
+              }}
+              onChange={(event) => toggleSelectionScope(rowScopeIds, event.target.checked)}
+            />
+          ) : null}
+        </td>
+        {/* A grouped CHILD row shows no image.
+            A name group is ONE product and carries ONE set of photos, drawn
+            once on the group header by renderGroupThumbnail -- repeating it
+            per child implies each row has its own, which is exactly the
+            model the group replaced.
+            renderMobileProductCard already did this; the desktop TABLE row
+            did not, which is why the duplicate thumbnails and the resulting
+            ragged left edge only appeared on large screens.
+            The cell itself still renders (a <td> has to exist for the column
+            to line up) -- it is the image inside that is dropped, so every
+            child row's name starts at exactly the same x as the group
+            title's. */}
+        <td className="px-2 py-2">
+          {indented ? null : (
+            <button
+                type="button"
+                className={`block rounded-lg ${thumbnailState.hasImage ? 'cursor-zoom-in' : 'cursor-default'}`}
+                aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
+                aria-disabled={!thumbnailState.hasImage}
+                onMouseDown={(event) => event.stopPropagation()}
+                onMouseUp={(event) => event.stopPropagation()}
+                onTouchStart={(event) => event.stopPropagation()}
+                onTouchEnd={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  if (thumbnailState.hasImage) openLightbox(thumbnailState.gallery, 0, productName)
+                }}
+              >
+                {thumbnailState.hasImage
+                  ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-12 w-12 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" />
+                  : <ProductImagePlaceholder className="h-12 w-12 rounded-lg" compact />}
+              </button>
+          )}
+        </td>
+        {/* Name rail (col 3): child rows align EXACTLY with the group
+            title -- no text indent. A child row leaves its image cell empty
+            (see the image <td> above), and that empty image column is what
+            visually sets the group title's thumbnail apart from its
+            children, so an extra text indent on top would double the
+            offset. The category band sits one column LEFT of this, on the
+            image rail (see ProductsListSurface's geometry note). */}
+        <td className={`${ROW_TEXT_GUTTER} py-2`}>
+          {/* Name cell previously forced align-top on the <td> itself, so
+              a row with no meta pills (the common case) sat pinned to the
+              top of the row instead of vertically centered like every
+              other cell (image, cost, selling, margin, stock all default-
+              center) -- reported as the name reading "much higher" than
+              the thumbnail next to it. Centering now happens on the whole
+              block (pills + name together, via this wrapping flex column)
+              instead of on the <td>, so a row WITH pills still stacks them
+              above the name correctly, it just centers as one unit
+              vertically within the row rather than pinning to the top. */}
+          <div className="flex min-h-10 flex-col justify-center">
+            {compactMeta.length ? (
+              <div className="mb-1 flex max-w-[18rem] flex-wrap gap-1 lg:max-w-none lg:flex-nowrap lg:overflow-hidden">
+                {compactMeta.map((item) => {
+                  const pill = renderMetaPill(item ? {
+                    key: String(item.key),
+                    label: String(item.label || ''),
+                    color: typeof item.color === 'string' ? item.color : undefined,
+                    className: typeof item.className === 'string' ? item.className : undefined,
+                  } : null)
+                  // Barcode and brand are two of the four copyable product
+                  // fields. renderMetaPill stringifies its label, so the
+                  // affordance cannot go inside the pill -- this is the same
+                  // wrapper ProductRowParts uses for the supplier pill: an
+                  // inline-flex span with no box of its own, so the meta line
+                  // lays out exactly as it did.
+                  const metaKey = String(item?.key || '')
+                  if (!pill || (metaKey !== 'barcode' && metaKey !== 'brand' && metaKey !== 'category')) return pill
+                  const focus = metaKey === 'brand'
+                    ? { brand: String(item?.label || '') }
+                    : metaKey === 'category'
+                      ? { category: String(item?.label || '') }
+                      : undefined
+                  return (
+                    <span key={`${metaKey}-copy`} className={`inline-flex min-w-0 ${metaKey === 'barcode' ? 'shrink-0' : 'max-w-full'}`} {...copy(item?.label)}>
+                      <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={metaKey === 'barcode' ? String(item?.label || '') : undefined} focus={focus} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+                        {pill}
+                      </EntityLink>
+                    </span>
+                  )
+                })}
+              </div>
+            ) : null}
+            <div className="flex min-w-0 items-center gap-1.5">
+              {/* Standalone rows (indented === false, i.e. not a child under
+                  an expanded group) now match the group header's own title
+                  weight (font-semibold) instead of font-medium, so a
+                  standalone product reads as the same visual tier as a group
+                  row rather than one step below it -- per the Aug 19 2026
+                  ask. Child rows under a group keep font-medium, same as
+                  before. */}
+              {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+              <div {...getKhmerTextProps(productName, `min-w-0 text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)} {...copy(productName)}>
+                <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+                  <ProductNameRail name={productName} />
+                </EntityLink>
+              </div>
+            </div>
+            {dupInfo ? (
+              <DuplicateResolverControl
+                tr={tr}
+                memberCount={dupInfo.members.length}
+                busy={dupResolverBusyKey === dupInfo.key}
+                disabled={!canMergeDuplicates}
+                onKeepThis={() => void handleDuplicateKeepThis(Number(productId), dupInfo)}
+                onKeepBoth={() => void handleDuplicateKeepBoth(dupInfo)}
+              />
+            ) : null}
+          </div>
+        </td>
+        {/* border-l here (freed-up space between the Name and Details
+            columns) instead of a whole new column -- per the Aug 19 2026
+            ask for a divider before the details column. */}
+        <td className="border-l border-gray-100 px-3 py-2 align-top dark:border-gray-700">
+          <ProductDetailsCell
+            product={p}
+            promotion={promotion}
+            branchLabel={String(branchSummaryLabel || '')}
+            selectedBranchName={selectedBranchName ? String(selectedBranchName) : ''}
+            selectedBranchId={branchFilter}
+            renderMetaPill={renderMetaPill}
+            tr={tr}
+            fmtUSD={fmtUSD}
+            navigateTo={navigateTo}
+          />
+        </td>
+        <td className="px-3 py-2 text-right col-highlight-red">
+          <div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</div>
+          {costKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(costKhr)}</div>}
+        </td>
+        <td className="px-3 py-2 text-right col-highlight-green">
+          <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>
+          {sellingKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(sellingKhr)}</div>}
+          {wholesaleUsd > 0 || wholesaleKhr > 0 ? (
+            <div className="mt-0.5 text-[10px] text-primary-600 dark:text-primary-400">
+              {fmtUSD(wholesaleUsd || sellingUsd)}
+              {wholesaleKhr > 0 ? ` / ${fmtKHR(wholesaleKhr)}` : ''}
+            </div>
+          ) : null}
+          {promotion.active ? (
+            <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
+              {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
+            </div>
+          ) : null}
+        </td>
+        <td className="px-3 py-2 text-right">
+          {costUsd > 0 && sellingUsd > 0
+            ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-blue-500/80 dark:text-blue-400/80">{marginPct.toFixed(1)}%</div></div>
+            : <span className="text-gray-300">N/A</span>}
+        </td>
+        <td className="px-3 py-2 text-right">
+          {/* Stock status convention (this session): the qty+unit value
+              itself is colored (red/yellow/green) instead of showing a
+              separate "In"/"Low"/"Out" badge underneath -- the badge is
+              still shown in the click-to-view-details panel (its own
+              "Status" row, see ProductDetailModal.tsx), just not
+              repeated here in the table. */}
+          {/* Was a plain inline-flex div -- the unit chip (whitespace-nowrap,
+              shrink-0) had nowhere to go but past the cell's right edge
+              once the qty number plus a longer/Khmer unit name didn't both
+              fit on one line ("stock qty overflowing its container" from
+              the Aug 19 2026 ask). flex-wrap lets the chip drop to its own
+              line inside the same right-aligned cell instead of spilling
+              out of it. */}
+          <div className={`flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 font-bold ${stockStatusTextClass}`}>
+            <span>{String(qty || 0)}</span>
+            {renderUnitChip(typeof p.unit === 'string' ? p.unit : undefined)}
+          </div>
+        </td>
+      </tr>
+    )
+}
+
+/** Memoized: see the file-level comment above ProductRowCtx. */
+const ProductDesktopRow = memo(ProductDesktopRowComponent)
+
+function ProductMobileCardComponent({ product: p, indented = false, ctx }: { product: ProductRecord; indented?: boolean; ctx: ProductRowCtx }) {
+  const {
+    branchFilter, catMap, copy, exchangeRate, fmtUSD,
+    getBranchQty, getBrandColor, getLongPressState,
+    isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox,
+    promotionRules, lowStockConfig, renderUnitChip, selectionModeActive,
+    t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
+    canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
+    setDetailProduct,
+  } = ctx
+    const productId = p.id ?? 0
+    const productName = String(p.name || '')
+    const brandName = String(p.brand || '')
+    const barcode = String(p.barcode || '')
+    const sellingUsd = Number(p.selling_price_usd || 0)
+    // Same re-point as the desktop row: the "VIP" tier is deleted (2026-09-04
+    // ruling) and wholesale_price_usd now carries the number it used to.
+    const wholesaleUsd = Number(p.wholesale_price_usd || 0)
+    const unitName = typeof p.unit === 'string' ? p.unit : undefined
+    const {
+      promotion,
+      costUsd,
+      qty,
+      stockStatusTextClass,
+    } = buildProductRowDisplayState(p, {
+      branchFilter,
+      exchangeRate,
+      getBranchQty,
+      t,
+      promotionRules,
+      lowStock: lowStockConfig,
+    })
+    const thumbnailState = buildProductThumbnailState(p)
+    const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
+    const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
+    // Exact duplicate? -> suppress click-to-detail, show the inline resolver
+    // (same rule as renderDesktopProductRow; user spec item #3).
+    const dupInfo = findRowDuplicateInfo(exactDuplicateIndex, productId, rowScopeIds)
+
+    // Grouped child rows (indented) share the group's single merged card
+    // (wrapper rendered by ProductsListSurface) instead of each getting its
+    // own boxed "card" -- a thin top divider separates rows within the
+    // group instead, matching Inventory's mobile grouped-row treatment
+    // (InventoryProductsSurface.tsx) for parity between the two pages.
+    // Ungrouped single products are untouched, still their own card.
+    const rowClassName = indented
+      ? `min-w-0 max-w-full cursor-pointer select-none border-t border-gray-100 px-3 py-2.5 dark:border-gray-800 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
+      : `card min-w-0 max-w-full cursor-pointer select-none px-3 py-2.5 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
+
+    // Same long-press/select-mode rules as renderDesktopProductRow -- see
+    // its comment for the full reasoning. Not a hook; shares the same
+    // per-row-id timer-slot Map (a row's product id is the same whether
+    // it's rendered on the desktop table or here).
+    const rowLongPressState = getLongPressState(Number(productId))
+    const longPress = createLongPressHandlers(rowLongPressState, {
+      disabled: selectionModeActive,
+      onLongPress: () => toggleSelectionScope(rowScopeIds, true),
+      onClick: (target) => {
+        if (dupInfo) return
+        const copyTarget = (target as Element | null)?.closest?.(COPY_SELECTOR)
+        if (copyTarget) {
+          deferCopySurfaceAction(copyTarget, () => setDetailProduct(p))
+          return
+        }
+        setDetailProduct(p)
+      },
+    })
+    // Same ghost-click guard as renderDesktopProductRow -- see its
+    // comment and utils/longPress.ts's consumeLongPressClick for why
+    // this is needed, not just belt-and-suspenders.
+    const handleRowClick = (event: ReactMouseEvent) => {
+      if (consumeLongPressClick(rowLongPressState)) return
+      const copyTarget = (event.target as Element | null)?.closest?.(COPY_SELECTOR)
+      if (copyTarget) {
+        deferCopySurfaceAction(copyTarget, () => toggleSelectionScope(rowScopeIds, !rowSelected))
+        return
+      }
+      toggleSelectionScope(rowScopeIds, !rowSelected)
+    }
+
+    return (
+      <div
+        key={productId}
+        data-product-jump-id={productId}
+        // Same declaration as renderDesktopProductRow -- see its comment.
+        data-clickable="true"
+        className={rowClassName}
+        onClick={selectionModeActive ? handleRowClick : undefined}
+        {...(selectionModeActive ? {} : longPress)}
+      >
+        {/* No indent wrapper here anymore -- grouped (indented) rows already
+            read as "part of the group" from the shared card/divider treatment
+            above (see rowClassName just above: a plain top border between
+            rows sharing one card, vs. a standalone product's own separate
+            `card`). An extra left-padding indent on top of that was
+            redundant, and it also meant a child row's text started to the
+            right of the group title above it instead of lining up with it. */}
+        <div className="flex min-w-0 items-start gap-3">
+          {selectionModeActive ? (
+            <input
+              type="checkbox"
+              className="rounded mt-1 flex-shrink-0 cursor-pointer"
+              checked={rowSelected}
+              ref={(node) => {
+                if (node) node.indeterminate = !rowSelected && isSelectionScopePartiallySelected(rowScopeIds)
+              }}
+              onChange={(e) => { e.stopPropagation(); toggleSelectionScope(rowScopeIds, e.target.checked) }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : null}
+          {/* Child rows under a group lose the image slot entirely now --
+              not just a shrunk spacer -- per explicit follow-up direction
+              on the Aug 19 2026 "Image 1" note (Part 208 had only shrunk
+              this to a slim w-3 spacer; that still reserved dead space for
+              an image that will never show here, since the group header's
+              renderGroupThumbnail already shows one unified image for the
+              whole name-group). Skipping the wrapper `<div>` outright
+              (rather than rendering it empty) lets the parent's gap-3
+              close the space up instead of leaving a gap-sized empty box. */}
+          {indented ? null : (
+            // A compact fixed square keeps every card's image footprint equal.
+            // The former self-stretch/min-h-[5rem] slot let image content set
+            // the card height, producing visibly uneven rows.
+            <button
+              type="button"
+              className="relative flex-shrink-0 self-stretch rounded-xl text-left"
+              aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
+              aria-disabled={!thumbnailState.hasImage}
+              onMouseDown={(event) => event.stopPropagation()}
+              onMouseUp={(event) => event.stopPropagation()}
+              onTouchStart={(event) => event.stopPropagation()}
+              onTouchEnd={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
+                if (thumbnailState.hasImage) openLightbox(thumbnailState.gallery, 0, productName)
+              }}
+            >
+              {thumbnailState.hasImage
+                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-12 w-12 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" />
+                : <ProductImagePlaceholder className="h-12 w-12 rounded-xl" />}
+              <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
+            </button>
+          )}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+                <div {...getKhmerTextProps(productName, 'min-w-0 text-sm font-semibold text-gray-900 dark:text-white')} {...copy(productName)}>
+                  <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+                    <ProductNameRail name={productName} />
+                  </EntityLink>
+                </div>
+              </div>
+              {/* Batch count rides the name row as a small YELLOW badge
+                  (user, Aug 30: "add number of batches yellow next to the
+                  standalone product rows and child rows"); the truncating
+                  name above can never touch it. */}
+              {Number((p as { batch_count?: number }).batch_count || 0) > 0 ? (
+                <span
+                  className="mt-0.5 inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                  title={`${Number((p as { batch_count?: number }).batch_count || 0)} ${t('batches') || 'received dates'}`}
+                >
+                  {Number((p as { batch_count?: number }).batch_count || 0)}
+                </span>
+              ) : null}
+            </div>
+            {/* min-h matches one chip's height (text-[10px] line ~15px +
+                py-0.5 = 19px) so a product with NO barcode/brand keeps the
+                price/qty line at the same vertical spot as its neighbours
+                instead of the row sliding up into the gap (user, Aug 30:
+                "instead of moving the price and quantity row just keep it
+                constant there"). */}
+            <div className="mt-0.5 flex min-h-[1.1875rem] flex-wrap gap-1">
+              {/* Small-screen default card shows the BARCODE here in place of
+                  the category (user, Aug 29: "hide the category inside the
+                  details ... replace the outside with barcode"). Category is
+                  one tap away in the detail view; a scannable code is more
+                  useful on the card face. Brand stays. */}
+              {barcode ? (
+                <span
+                  className="inline-flex shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-1 py-0.5 font-mono text-[10px] tracking-tight text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  {...copy(barcode)}
+                  title={barcode}
+                >
+                    <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={barcode} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{barcode}</EntityLink>
+                </span>
+              ) : null}
+              {brandName ? (
+                <span
+                  className={`inline-block max-w-[4.5rem] truncate rounded-full px-1 py-0.5 text-[10px] font-medium sm:max-w-[6rem] ${getBrandColor(brandName) ? '' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
+                  style={getBrandColor(brandName) ? {
+                    background: getBrandColor(brandName),
+                    color: getContrastingTextColor(getBrandColor(brandName)),
+                  } : undefined}
+                  {...copy(brandName)}
+                  title={brandName}
+                >
+                  <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={brandName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{brandName}</EntityLink>
+                </span>
+              ) : null}
+            </div>
+            {/* Price/stock lines moved in here, inside the same flex-1 column
+                as the name/category/brand above it, instead of living as a
+                sibling block with its own hand-tuned `pl-[5.35rem]` meant to
+                eyeball-match the image width + gap. That fixed value didn't
+                actually match the flex layout's real offset, so this line
+                sat further right than the category/brand row above it. Being
+                a normal child of the same column means it now lines up
+                exactly, with no hardcoded offset to keep in sync by hand.
+
+                ONE row, only one row (user, Aug 28 2026, with a screenshot
+                of the two-row card): every price AND the stock qty share a
+                single line. This SUPERSEDES the earlier "selling price
+                should get its own row" split from the Aug-25 backlog --
+                the user saw the split live and rejected it, so don't
+                re-split without a fresh ask. Selling (green) leads and
+                keeps its bigger weight so it still reads first; special/
+                discount figures ride beside it; then cost (red) and the
+                status-colored qty+unit, "|"-separated like before.
+
+                N36 (owner, Sep 6 2026): "the qty unit is being pushed to next
+                row if selling price, wholesale price, cost price is fully
+                there. 2 digits, if 3 even worse ... keep it visible compact
+                one line." flex-wrap WAS the overflow protection, and at 375px
+                with three full prices it is what fires -- see the width
+                arithmetic on `.price-strip` in styles/main.css. The row is
+                now nowrap and pays for it in divider blanks and one step of
+                digit size (tabular-nums, tighter tracking) rather than in a
+                second line; no value is dropped or hidden. */}
+            <div className="price-strip mt-1">
+              <span className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
+              {wholesaleUsd > 0 ? (
+                // The wholesale price (wholesale_price_usd). This used to read
+                // special_price_usd and be labelled "VIP"; the 2026-09-04
+                // ruling established that tier was never a VIP price and
+                // deleted it, so the card shows the same figure -- migration
+                // 0111 moved the values across -- as wholesale. On the
+                // small-screen default
+                // card it shows as JUST the number, colour-coded (primary/blue)
+                // with no text label -- the colour distinguishes it from selling
+                // (green) and cost (red) on this compact one-line price row
+                // (user, Aug 29 2026). A "|" separates it from the selling price
+                // beside it, matching the cost/qty dividers on this same row
+                // (user, Aug 31). The desktop table row keeps its own labelling.
+                <>
+                  <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
+                  <span className="font-medium text-primary-700 dark:text-primary-400">
+                    {fmtUSD(wholesaleUsd)}
+                  </span>
+                </>
+              ) : null}
+              {promotion.active ? (
+                <span className="font-medium text-rose-600 dark:text-rose-300">
+                  {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
+                </span>
+              ) : null}
+              <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
+              <span className="text-red-600">{fmtUSD(costUsd)}</span>
+              <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
+              {/* Colored by stock status (red/yellow/green) instead of the
+                  separate "In"/"Low"/"Out" badge this row used to show up
+                  in its header line -- see stockStatusTextClass above. */}
+              <span className={withKhmerTextClass(unitName, `price-strip-qty inline-flex items-center font-medium ${stockStatusTextClass}`)}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
+            </div>
+            <ProductBatchPreview product={p} branchId={branchFilter} tr={tr} compact />
+            {/* Description is intentionally NOT shown on the small-screen list
+                card (user, Sep 1 2026: "only hide in the default view, keep it
+                in click-to-view details") -- it stays available in the product
+                detail modal opened on tap (ProductDetailModal). */}
+            {dupInfo ? (
+              <DuplicateResolverControl
+                tr={tr}
+                memberCount={dupInfo.members.length}
+                busy={dupResolverBusyKey === dupInfo.key}
+                disabled={!canMergeDuplicates}
+                onKeepThis={() => void handleDuplicateKeepThis(Number(productId), dupInfo)}
+                onKeepBoth={() => void handleDuplicateKeepBoth(dupInfo)}
+              />
+            ) : null}
+          </div>
+        </div>
+      </div>
+    )
+}
+
+/** Memoized: see the file-level comment above ProductRowCtx. */
+const ProductMobileCard = memo(ProductMobileCardComponent)
 
 function ProductsFullEditor() {
   const { can, t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate, getPermissionTier, hasPermission, navigateTo } = useProductsApp()
@@ -2671,7 +3315,15 @@ function ProductsFullEditor() {
       </span>
     )
   }, [])
-  const renderUnitChip = (unitName: string | undefined) => {
+  // Both of these used to be plain functions redeclared on every render of
+  // this whole (5000+ line) component -- and both were already listed in
+  // renderDesktopProductRow/renderMobileProductCard's own useCallback deps
+  // below, so a fresh renderUnitChip/openLightbox identity forced BOTH row
+  // renderers to rebuild every render regardless of anything else, silently
+  // defeating any row-level memoization. useCallback with real deps is what
+  // makes the ProductDesktopRow/ProductMobileCard memo boundaries below
+  // actually hold.
+  const renderUnitChip = useCallback((unitName: string | undefined) => {
     if (!unitName) return null
     const color = unitMap[unitName]?.color
     if (!color) return <EntityLink page="products" anchor="hub:products:products" focus={{ unit: unitName }} navigate={navigateTo} title={tr('open_unit_products', 'Open products using this unit', 'បើកផលិតផលដែលប្រើឯកតានេះ')} className="ml-1 text-inherit no-underline hover:text-inherit"><span {...getKhmerTextProps(unitName, 'shrink-0 whitespace-nowrap text-xs font-normal text-gray-400')}>{unitName}</span></EntityLink>
@@ -2680,12 +3332,12 @@ function ProductsFullEditor() {
         <span {...getKhmerTextProps(unitName, 'inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold')} style={{ background: color, color: getContrastingTextColor(color) }}>{unitName}</span>
       </EntityLink>
     )
-  }
+  }, [navigateTo, tr, unitMap])
 
-  const openLightbox = (gallery: unknown, startIndex = 0, title = '') => {
+  const openLightbox = useCallback((gallery: unknown, startIndex = 0, title = '') => {
     const nextLightbox = buildProductLightboxState(gallery, startIndex, title)
     if (nextLightbox) setLightbox(nextLightbox)
-  }
+  }, [])
 
   const getBranchQty = useCallback((product: Record<string, unknown>, branchId: unknown) => getProductBranchQuantity(product, branchId), [])
   const parentProductIds = useMemo(() => buildParentProductIdSet(products), [products])
@@ -3683,570 +4335,29 @@ function ProductsFullEditor() {
     t,
   }), [branches, brandFilter, branchFilter, brandOptions, catFilter, categoryFilterOptions, groupFilter, hideZeroStockRows, hierarchicalCategoryOptions, isProductFilterMenuOpen, issueFilter, mergedFilter, productSortDirection, promoFilter, searchMode, setSearchMode, stockFilter, supplierFilter, suppliers, t])
 
-  const renderDesktopProductRow = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
-    const productId = p.id ?? 0
-    const productName = String(p.name || '')
-    const sellingUsd = Number(p.selling_price_usd || 0)
-    const sellingKhr = Number(p.selling_price_khr || 0)
-    // Was specialUsd/specialKhr off special_price_*, rendered as "VIP". The
-    // 2026-09-04 ruling deleted that tier: it was the wholesale price all
-    // along, and migration 0111 moved the very same numbers into
-    // wholesale_price_*, so this row keeps showing the same figures under the
-    // name they should always have had.
-    const wholesaleUsd = Number(p.wholesale_price_usd || 0)
-    const wholesaleKhr = Number(p.wholesale_price_khr || 0)
-    const {
-      branchSummaryLabel,
-      compactMeta,
-      marginPct,
-      marginUsd,
-      promotion,
-      costKhr,
-      costUsd,
-      qty,
-      selectedBranchName,
-      stockStatusTextClass,
-    } = buildProductRowDisplayState(p, {
-      branchFilter,
-      branchNameById,
-      catMap,
-      exchangeRate,
-      getBranchQty,
-      getBranchSummaryLabel,
-      getBrandColor,
-      t,
-      promotionRules,
-      lowStock: lowStockConfig,
-    })
-    const thumbnailState = buildProductThumbnailState(p)
-    // A merged row (see mergeSameDetailRows) represents multiple real
-    // product ids -- selecting/checking it needs to act on all of them
-    // together, not just the lead id, or a bulk delete would silently
-    // leave the other branch-duplicate rows behind. Falls back to the
-    // single id for ordinary, unmerged rows.
-    const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
-    const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
-    // Exact duplicate (same real barcode + same name, per the server sweep)?
-    // If so, the row's normal click-to-detail "Manage/Product" flow is
-    // suppressed (user spec item #3) -- the inline resolver below is the only
-    // action until it's kept-one/kept-both.
-    const dupInfo = findRowDuplicateInfo(exactDuplicateIndex, productId, rowScopeIds)
-    // Long-press/click-hold enters select mode by selecting this row;
-    // once select mode is active (selectionModeActive, derived from
-    // selectedIds.size), the row's own onClick below toggles selection
-    // directly and these handlers are skipped entirely (disabled), so a
-    // plain click never has to wait out the hold once selecting is live.
-    // Not a hook -- see utils/longPress.ts -- this row's persistent
-    // timer slot comes from the shared Map keyed by product id.
-    const rowLongPressState = getLongPressState(Number(productId))
-    const longPress = createLongPressHandlers(rowLongPressState, {
-      disabled: selectionModeActive,
-      onLongPress: () => toggleSelectionScope(rowScopeIds, true),
-      onClick: (target) => {
-        if (dupInfo) return
-        const copyTarget = (target as Element | null)?.closest?.(COPY_SELECTOR)
-        if (copyTarget) {
-          deferCopySurfaceAction(copyTarget, () => setDetailProduct(p))
-          return
-        }
-        setDetailProduct(p)
-      },
-    })
-    // The native `click` that follows this same press-release still
-    // fires once selectionModeActive flips true and swaps this element's
-    // onClick out from under it -- consumeLongPressClick() eats exactly
-    // that one ghost click instead of letting it immediately toggle the
-    // row back off. See utils/longPress.ts's own comment on
-    // consumeLongPressClick for the full mechanism.
-    const handleRowClick = (event: ReactMouseEvent) => {
-      if (consumeLongPressClick(rowLongPressState)) return
-      const copyTarget = (event.target as Element | null)?.closest?.(COPY_SELECTOR)
-      if (copyTarget) {
-        deferCopySurfaceAction(copyTarget, () => toggleSelectionScope(rowScopeIds, !rowSelected))
-        return
-      }
-      toggleSelectionScope(rowScopeIds, !rowSelected)
-    }
-    return (
-      <tr
-        key={productId}
-        data-product-jump-id={productId}
-        // The row's own click IS the surface here: it opens the product, or
-        // toggles selection once select mode is live. `data-clickable` is how
-        // this app already declares that (the dense tables in Stock Changes,
-        // Stock-in Sessions, Returns and Fees all carry it), and the shared
-        // text-affordance controller reads it to decide whether a copyable
-        // value inside the row may take that click. It may not. Declaration
-        // only: the CSS keyed on this attribute is scoped to
-        // `.dense-data-table`, which this table is not.
-        data-clickable="true"
-        className={`table-row cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}
-        onClick={selectionModeActive ? handleRowClick : undefined}
-        {...(selectionModeActive ? {} : longPress)}
-      >
-        <td className={`${selectionModeActive ? 'px-2' : 'px-0'} py-2`} onClick={(e) => { e.stopPropagation(); if (selectionModeActive) toggleSelectionScope(rowScopeIds, !rowSelected) }}>
-          {selectionModeActive ? (
-            <input
-              type="checkbox"
-              className="rounded"
-              checked={rowSelected}
-              ref={(node) => {
-                if (node) node.indeterminate = !rowSelected && isSelectionScopePartiallySelected(rowScopeIds)
-              }}
-              onChange={(event) => toggleSelectionScope(rowScopeIds, event.target.checked)}
-            />
-          ) : null}
-        </td>
-        {/* A grouped CHILD row shows no image.
-            A name group is ONE product and carries ONE set of photos, drawn
-            once on the group header by renderGroupThumbnail -- repeating it
-            per child implies each row has its own, which is exactly the
-            model the group replaced.
-            renderMobileProductCard already did this; the desktop TABLE row
-            did not, which is why the duplicate thumbnails and the resulting
-            ragged left edge only appeared on large screens.
-            The cell itself still renders (a <td> has to exist for the column
-            to line up) -- it is the image inside that is dropped, so every
-            child row's name starts at exactly the same x as the group
-            title's. */}
-        <td className="px-2 py-2">
-          {indented ? null : (
-            <button
-                type="button"
-                className={`block rounded-lg ${thumbnailState.hasImage ? 'cursor-zoom-in' : 'cursor-default'}`}
-                aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
-                aria-disabled={!thumbnailState.hasImage}
-                onMouseDown={(event) => event.stopPropagation()}
-                onMouseUp={(event) => event.stopPropagation()}
-                onTouchStart={(event) => event.stopPropagation()}
-                onTouchEnd={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  if (thumbnailState.hasImage) openLightbox(thumbnailState.gallery, 0, productName)
-                }}
-              >
-                {thumbnailState.hasImage
-                  ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-12 w-12 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" />
-                  : <ProductImagePlaceholder className="h-12 w-12 rounded-lg" compact />}
-              </button>
-          )}
-        </td>
-        {/* Name rail (col 3): child rows align EXACTLY with the group
-            title -- no text indent. A child row leaves its image cell empty
-            (see the image <td> above), and that empty image column is what
-            visually sets the group title's thumbnail apart from its
-            children, so an extra text indent on top would double the
-            offset. The category band sits one column LEFT of this, on the
-            image rail (see ProductsListSurface's geometry note). */}
-        <td className={`${ROW_TEXT_GUTTER} py-2`}>
-          {/* Name cell previously forced align-top on the <td> itself, so
-              a row with no meta pills (the common case) sat pinned to the
-              top of the row instead of vertically centered like every
-              other cell (image, cost, selling, margin, stock all default-
-              center) -- reported as the name reading "much higher" than
-              the thumbnail next to it. Centering now happens on the whole
-              block (pills + name together, via this wrapping flex column)
-              instead of on the <td>, so a row WITH pills still stacks them
-              above the name correctly, it just centers as one unit
-              vertically within the row rather than pinning to the top. */}
-          <div className="flex min-h-10 flex-col justify-center">
-            {compactMeta.length ? (
-              <div className="mb-1 flex max-w-[18rem] flex-wrap gap-1 lg:max-w-none lg:flex-nowrap lg:overflow-hidden">
-                {compactMeta.map((item) => {
-                  const pill = renderMetaPill(item ? {
-                    key: String(item.key),
-                    label: String(item.label || ''),
-                    color: typeof item.color === 'string' ? item.color : undefined,
-                    className: typeof item.className === 'string' ? item.className : undefined,
-                  } : null)
-                  // Barcode and brand are two of the four copyable product
-                  // fields. renderMetaPill stringifies its label, so the
-                  // affordance cannot go inside the pill -- this is the same
-                  // wrapper ProductRowParts uses for the supplier pill: an
-                  // inline-flex span with no box of its own, so the meta line
-                  // lays out exactly as it did.
-                  const metaKey = String(item?.key || '')
-                  if (!pill || (metaKey !== 'barcode' && metaKey !== 'brand' && metaKey !== 'category')) return pill
-                  const focus = metaKey === 'brand'
-                    ? { brand: String(item?.label || '') }
-                    : metaKey === 'category'
-                      ? { category: String(item?.label || '') }
-                      : undefined
-                  return (
-                    <span key={`${metaKey}-copy`} className={`inline-flex min-w-0 ${metaKey === 'barcode' ? 'shrink-0' : 'max-w-full'}`} {...copy(item?.label)}>
-                      <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={metaKey === 'barcode' ? String(item?.label || '') : undefined} focus={focus} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
-                        {pill}
-                      </EntityLink>
-                    </span>
-                  )
-                })}
-              </div>
-            ) : null}
-            <div className="flex min-w-0 items-center gap-1.5">
-              {/* Standalone rows (indented === false, i.e. not a child under
-                  an expanded group) now match the group header's own title
-                  weight (font-semibold) instead of font-medium, so a
-                  standalone product reads as the same visual tier as a group
-                  row rather than one step below it -- per the Aug 19 2026
-                  ask. Child rows under a group keep font-medium, same as
-                  before. */}
-              {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
-              <div {...getKhmerTextProps(productName, `min-w-0 text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)} {...copy(productName)}>
-                <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
-                  <ProductNameRail name={productName} />
-                </EntityLink>
-              </div>
-            </div>
-            {dupInfo ? (
-              <DuplicateResolverControl
-                tr={tr}
-                memberCount={dupInfo.members.length}
-                busy={dupResolverBusyKey === dupInfo.key}
-                disabled={!canMergeDuplicates}
-                onKeepThis={() => void handleDuplicateKeepThis(Number(productId), dupInfo)}
-                onKeepBoth={() => void handleDuplicateKeepBoth(dupInfo)}
-              />
-            ) : null}
-          </div>
-        </td>
-        {/* border-l here (freed-up space between the Name and Details
-            columns) instead of a whole new column -- per the Aug 19 2026
-            ask for a divider before the details column. */}
-        <td className="border-l border-gray-100 px-3 py-2 align-top dark:border-gray-700">
-          <ProductDetailsCell
-            product={p}
-            promotion={promotion}
-            branchLabel={String(branchSummaryLabel || '')}
-            selectedBranchName={selectedBranchName ? String(selectedBranchName) : ''}
-            selectedBranchId={branchFilter}
-            renderMetaPill={renderMetaPill}
-            tr={tr}
-            fmtUSD={fmtUSD}
-            navigateTo={navigateTo}
-          />
-        </td>
-        <td className="px-3 py-2 text-right col-highlight-red">
-          <div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</div>
-          {costKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(costKhr)}</div>}
-        </td>
-        <td className="px-3 py-2 text-right col-highlight-green">
-          <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>
-          {sellingKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(sellingKhr)}</div>}
-          {wholesaleUsd > 0 || wholesaleKhr > 0 ? (
-            <div className="mt-0.5 text-[10px] text-primary-600 dark:text-primary-400">
-              {fmtUSD(wholesaleUsd || sellingUsd)}
-              {wholesaleKhr > 0 ? ` / ${fmtKHR(wholesaleKhr)}` : ''}
-            </div>
-          ) : null}
-          {promotion.active ? (
-            <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
-              {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
-            </div>
-          ) : null}
-        </td>
-        <td className="px-3 py-2 text-right">
-          {costUsd > 0 && sellingUsd > 0
-            ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-blue-500/80 dark:text-blue-400/80">{marginPct.toFixed(1)}%</div></div>
-            : <span className="text-gray-300">N/A</span>}
-        </td>
-        <td className="px-3 py-2 text-right">
-          {/* Stock status convention (this session): the qty+unit value
-              itself is colored (red/yellow/green) instead of showing a
-              separate "In"/"Low"/"Out" badge underneath -- the badge is
-              still shown in the click-to-view-details panel (its own
-              "Status" row, see ProductDetailModal.tsx), just not
-              repeated here in the table. */}
-          {/* Was a plain inline-flex div -- the unit chip (whitespace-nowrap,
-              shrink-0) had nowhere to go but past the cell's right edge
-              once the qty number plus a longer/Khmer unit name didn't both
-              fit on one line ("stock qty overflowing its container" from
-              the Aug 19 2026 ask). flex-wrap lets the chip drop to its own
-              line inside the same right-aligned cell instead of spilling
-              out of it. */}
-          <div className={`flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 font-bold ${stockStatusTextClass}`}>
-            <span>{String(qty || 0)}</span>
-            {renderUnitChip(typeof p.unit === 'string' ? p.unit : undefined)}
-          </div>
-        </td>
-      </tr>
-    )
-  }, [branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
+  // Single shared ctx for both row shapes -- union of the two original
+  // useCallback dependency lists (desktop's + mobile's), so it only
+  // recomputes when a dependency either row actually used changes. Fixed
+  // above to include lowStockConfig (previously closed over without being
+  // declared as a dependency of either useCallback -- a latent staleness
+  // risk now that the row body only sees it through this memo).
+  const productRowCtx = useMemo<ProductRowCtx>(() => ({
+    branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD,
+    getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState,
+    isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox,
+    promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive,
+    t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
+    canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
+    setDetailProduct,
+  }), [branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo, setDetailProduct])
 
-  const renderMobileProductCard = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
-    const productId = p.id ?? 0
-    const productName = String(p.name || '')
-    const brandName = String(p.brand || '')
-    const barcode = String(p.barcode || '')
-    const sellingUsd = Number(p.selling_price_usd || 0)
-    // Same re-point as the desktop row: the "VIP" tier is deleted (2026-09-04
-    // ruling) and wholesale_price_usd now carries the number it used to.
-    const wholesaleUsd = Number(p.wholesale_price_usd || 0)
-    const unitName = typeof p.unit === 'string' ? p.unit : undefined
-    const {
-      promotion,
-      costUsd,
-      qty,
-      stockStatusTextClass,
-    } = buildProductRowDisplayState(p, {
-      branchFilter,
-      exchangeRate,
-      getBranchQty,
-      t,
-      promotionRules,
-      lowStock: lowStockConfig,
-    })
-    const thumbnailState = buildProductThumbnailState(p)
-    const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
-    const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
-    // Exact duplicate? -> suppress click-to-detail, show the inline resolver
-    // (same rule as renderDesktopProductRow; user spec item #3).
-    const dupInfo = findRowDuplicateInfo(exactDuplicateIndex, productId, rowScopeIds)
+  const renderDesktopProductRow = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => (
+    <ProductDesktopRow key={p.id} product={p} indented={indented} ctx={productRowCtx} />
+  ), [productRowCtx])
 
-    // Grouped child rows (indented) share the group's single merged card
-    // (wrapper rendered by ProductsListSurface) instead of each getting its
-    // own boxed "card" -- a thin top divider separates rows within the
-    // group instead, matching Inventory's mobile grouped-row treatment
-    // (InventoryProductsSurface.tsx) for parity between the two pages.
-    // Ungrouped single products are untouched, still their own card.
-    const rowClassName = indented
-      ? `min-w-0 max-w-full cursor-pointer select-none border-t border-gray-100 px-3 py-2.5 dark:border-gray-800 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
-      : `card min-w-0 max-w-full cursor-pointer select-none px-3 py-2.5 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
-
-    // Same long-press/select-mode rules as renderDesktopProductRow -- see
-    // its comment for the full reasoning. Not a hook; shares the same
-    // per-row-id timer-slot Map (a row's product id is the same whether
-    // it's rendered on the desktop table or here).
-    const rowLongPressState = getLongPressState(Number(productId))
-    const longPress = createLongPressHandlers(rowLongPressState, {
-      disabled: selectionModeActive,
-      onLongPress: () => toggleSelectionScope(rowScopeIds, true),
-      onClick: (target) => {
-        if (dupInfo) return
-        const copyTarget = (target as Element | null)?.closest?.(COPY_SELECTOR)
-        if (copyTarget) {
-          deferCopySurfaceAction(copyTarget, () => setDetailProduct(p))
-          return
-        }
-        setDetailProduct(p)
-      },
-    })
-    // Same ghost-click guard as renderDesktopProductRow -- see its
-    // comment and utils/longPress.ts's consumeLongPressClick for why
-    // this is needed, not just belt-and-suspenders.
-    const handleRowClick = (event: ReactMouseEvent) => {
-      if (consumeLongPressClick(rowLongPressState)) return
-      const copyTarget = (event.target as Element | null)?.closest?.(COPY_SELECTOR)
-      if (copyTarget) {
-        deferCopySurfaceAction(copyTarget, () => toggleSelectionScope(rowScopeIds, !rowSelected))
-        return
-      }
-      toggleSelectionScope(rowScopeIds, !rowSelected)
-    }
-
-    return (
-      <div
-        key={productId}
-        data-product-jump-id={productId}
-        // Same declaration as renderDesktopProductRow -- see its comment.
-        data-clickable="true"
-        className={rowClassName}
-        onClick={selectionModeActive ? handleRowClick : undefined}
-        {...(selectionModeActive ? {} : longPress)}
-      >
-        {/* No indent wrapper here anymore -- grouped (indented) rows already
-            read as "part of the group" from the shared card/divider treatment
-            above (see rowClassName just above: a plain top border between
-            rows sharing one card, vs. a standalone product's own separate
-            `card`). An extra left-padding indent on top of that was
-            redundant, and it also meant a child row's text started to the
-            right of the group title above it instead of lining up with it. */}
-        <div className="flex min-w-0 items-start gap-3">
-          {selectionModeActive ? (
-            <input
-              type="checkbox"
-              className="rounded mt-1 flex-shrink-0 cursor-pointer"
-              checked={rowSelected}
-              ref={(node) => {
-                if (node) node.indeterminate = !rowSelected && isSelectionScopePartiallySelected(rowScopeIds)
-              }}
-              onChange={(e) => { e.stopPropagation(); toggleSelectionScope(rowScopeIds, e.target.checked) }}
-              onClick={(e) => e.stopPropagation()}
-            />
-          ) : null}
-          {/* Child rows under a group lose the image slot entirely now --
-              not just a shrunk spacer -- per explicit follow-up direction
-              on the Aug 19 2026 "Image 1" note (Part 208 had only shrunk
-              this to a slim w-3 spacer; that still reserved dead space for
-              an image that will never show here, since the group header's
-              renderGroupThumbnail already shows one unified image for the
-              whole name-group). Skipping the wrapper `<div>` outright
-              (rather than rendering it empty) lets the parent's gap-3
-              close the space up instead of leaving a gap-sized empty box. */}
-          {indented ? null : (
-            // A compact fixed square keeps every card's image footprint equal.
-            // The former self-stretch/min-h-[5rem] slot let image content set
-            // the card height, producing visibly uneven rows.
-            <button
-              type="button"
-              className="relative flex-shrink-0 self-stretch rounded-xl text-left"
-              aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
-              aria-disabled={!thumbnailState.hasImage}
-              onMouseDown={(event) => event.stopPropagation()}
-              onMouseUp={(event) => event.stopPropagation()}
-              onTouchStart={(event) => event.stopPropagation()}
-              onTouchEnd={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation()
-                if (thumbnailState.hasImage) openLightbox(thumbnailState.gallery, 0, productName)
-              }}
-            >
-              {thumbnailState.hasImage
-                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-12 w-12 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" />
-                : <ProductImagePlaceholder className="h-12 w-12 rounded-xl" />}
-              <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
-            </button>
-          )}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
-                <div {...getKhmerTextProps(productName, 'min-w-0 text-sm font-semibold text-gray-900 dark:text-white')} {...copy(productName)}>
-                  <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
-                    <ProductNameRail name={productName} />
-                  </EntityLink>
-                </div>
-              </div>
-              {/* Batch count rides the name row as a small YELLOW badge
-                  (user, Aug 30: "add number of batches yellow next to the
-                  standalone product rows and child rows"); the truncating
-                  name above can never touch it. */}
-              {Number((p as { batch_count?: number }).batch_count || 0) > 0 ? (
-                <span
-                  className="mt-0.5 inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                  title={`${Number((p as { batch_count?: number }).batch_count || 0)} ${t('batches') || 'received dates'}`}
-                >
-                  {Number((p as { batch_count?: number }).batch_count || 0)}
-                </span>
-              ) : null}
-            </div>
-            {/* min-h matches one chip's height (text-[10px] line ~15px +
-                py-0.5 = 19px) so a product with NO barcode/brand keeps the
-                price/qty line at the same vertical spot as its neighbours
-                instead of the row sliding up into the gap (user, Aug 30:
-                "instead of moving the price and quantity row just keep it
-                constant there"). */}
-            <div className="mt-0.5 flex min-h-[1.1875rem] flex-wrap gap-1">
-              {/* Small-screen default card shows the BARCODE here in place of
-                  the category (user, Aug 29: "hide the category inside the
-                  details ... replace the outside with barcode"). Category is
-                  one tap away in the detail view; a scannable code is more
-                  useful on the card face. Brand stays. */}
-              {barcode ? (
-                <span
-                  className="inline-flex shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-1 py-0.5 font-mono text-[10px] tracking-tight text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                  {...copy(barcode)}
-                  title={barcode}
-                >
-                    <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={barcode} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{barcode}</EntityLink>
-                </span>
-              ) : null}
-              {brandName ? (
-                <span
-                  className={`inline-block max-w-[4.5rem] truncate rounded-full px-1 py-0.5 text-[10px] font-medium sm:max-w-[6rem] ${getBrandColor(brandName) ? '' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
-                  style={getBrandColor(brandName) ? {
-                    background: getBrandColor(brandName),
-                    color: getContrastingTextColor(getBrandColor(brandName)),
-                  } : undefined}
-                  {...copy(brandName)}
-                  title={brandName}
-                >
-                  <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={brandName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{brandName}</EntityLink>
-                </span>
-              ) : null}
-            </div>
-            {/* Price/stock lines moved in here, inside the same flex-1 column
-                as the name/category/brand above it, instead of living as a
-                sibling block with its own hand-tuned `pl-[5.35rem]` meant to
-                eyeball-match the image width + gap. That fixed value didn't
-                actually match the flex layout's real offset, so this line
-                sat further right than the category/brand row above it. Being
-                a normal child of the same column means it now lines up
-                exactly, with no hardcoded offset to keep in sync by hand.
-
-                ONE row, only one row (user, Aug 28 2026, with a screenshot
-                of the two-row card): every price AND the stock qty share a
-                single line. This SUPERSEDES the earlier "selling price
-                should get its own row" split from the Aug-25 backlog --
-                the user saw the split live and rejected it, so don't
-                re-split without a fresh ask. Selling (green) leads and
-                keeps its bigger weight so it still reads first; special/
-                discount figures ride beside it; then cost (red) and the
-                status-colored qty+unit, "|"-separated like before.
-
-                N36 (owner, Sep 6 2026): "the qty unit is being pushed to next
-                row if selling price, wholesale price, cost price is fully
-                there. 2 digits, if 3 even worse ... keep it visible compact
-                one line." flex-wrap WAS the overflow protection, and at 375px
-                with three full prices it is what fires -- see the width
-                arithmetic on `.price-strip` in styles/main.css. The row is
-                now nowrap and pays for it in divider blanks and one step of
-                digit size (tabular-nums, tighter tracking) rather than in a
-                second line; no value is dropped or hidden. */}
-            <div className="price-strip mt-1">
-              <span className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
-              {wholesaleUsd > 0 ? (
-                // The wholesale price (wholesale_price_usd). This used to read
-                // special_price_usd and be labelled "VIP"; the 2026-09-04
-                // ruling established that tier was never a VIP price and
-                // deleted it, so the card shows the same figure -- migration
-                // 0111 moved the values across -- as wholesale. On the
-                // small-screen default
-                // card it shows as JUST the number, colour-coded (primary/blue)
-                // with no text label -- the colour distinguishes it from selling
-                // (green) and cost (red) on this compact one-line price row
-                // (user, Aug 29 2026). A "|" separates it from the selling price
-                // beside it, matching the cost/qty dividers on this same row
-                // (user, Aug 31). The desktop table row keeps its own labelling.
-                <>
-                  <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
-                  <span className="font-medium text-primary-700 dark:text-primary-400">
-                    {fmtUSD(wholesaleUsd)}
-                  </span>
-                </>
-              ) : null}
-              {promotion.active ? (
-                <span className="font-medium text-rose-600 dark:text-rose-300">
-                  {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
-                </span>
-              ) : null}
-              <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
-              <span className="text-red-600">{fmtUSD(costUsd)}</span>
-              <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
-              {/* Colored by stock status (red/yellow/green) instead of the
-                  separate "In"/"Low"/"Out" badge this row used to show up
-                  in its header line -- see stockStatusTextClass above. */}
-              <span className={withKhmerTextClass(unitName, `price-strip-qty inline-flex items-center font-medium ${stockStatusTextClass}`)}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
-            </div>
-            <ProductBatchPreview product={p} branchId={branchFilter} tr={tr} compact />
-            {/* Description is intentionally NOT shown on the small-screen list
-                card (user, Sep 1 2026: "only hide in the default view, keep it
-                in click-to-view details") -- it stays available in the product
-                detail modal opened on tap (ProductDetailModal). */}
-            {dupInfo ? (
-              <DuplicateResolverControl
-                tr={tr}
-                memberCount={dupInfo.members.length}
-                busy={dupResolverBusyKey === dupInfo.key}
-                disabled={!canMergeDuplicates}
-                onKeepThis={() => void handleDuplicateKeepThis(Number(productId), dupInfo)}
-                onKeepBoth={() => void handleDuplicateKeepBoth(dupInfo)}
-              />
-            ) : null}
-          </div>
-        </div>
-      </div>
-    )
-  }, [branchFilter, catMap, copy, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
+  const renderMobileProductCard = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => (
+    <ProductMobileCard key={p.id} product={p} indented={indented} ctx={productRowCtx} />
+  ), [productRowCtx])
 
   // One unified thumbnail for a whole name-group (see the `indented`
   // branches just above, which omit each row's own image once a group

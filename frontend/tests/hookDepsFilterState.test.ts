@@ -59,28 +59,29 @@ export const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/products/Products.tsx',
     names: ['branchFilter', 'brandFilter', 'catFilter', 'groupFilter', 'stockFilter', 'supplierFilter'],
-    line: 1497,
+    line: 2141,
     reason:
       'Deferred filter-metadata fallback. filterMetaScope includes all six filters; '
       + 'its own effect just above invalidates the outstanding fallback and clears readiness, '
       + 'while the main load callback is keyed by the effective server filter scope and '
       + 'consumes filter metadata returned with that product response. Adding the raw filters '
       + 'to this fallback effect would launch a redundant request in the same commit before '
-      + 'the readiness reset lands. RE-VERIFIED 2026-09-15 after P4-4b fix 6 (patchProductRow/ '
-      + 'refreshAdjustedProduct) inserted lines above this effect and shifted it from :1418 to '
-      + ':1497: the filter scope, invalidation order and main-load dependency chain are '
-      + 'unchanged, only the line number moved. '
+      + 'the readiness reset lands. RE-VERIFIED 2026-09-15 after P4-4b item 3 (ProductDesktopRow/ '
+      + 'ProductMobileCard memo extraction) inserted the two new row components above '
+      + 'ProductsFullEditor and shifted it from :1497 to :2141: the filter scope, invalidation '
+      + 'order and main-load dependency chain are unchanged, only the line number moved. '
       + 'FRAGILE: re-verify if metadata stops arriving with the main product response.',
   },
   {
     file: 'components/products/Products.tsx',
     names: ['stockFilter'],
-    line: 2653,
+    line: 3359,
     reason:
       'False-positive class 3. `stockFilter:` here is an OBJECT KEY -- the value read is '
       + 'effectiveStockState, which IS in the deps. Nothing to fix. Re-verified and '
-      + 'repinned 2026-09-12 (the `filtered` useMemo) after scoped merge code moved the '
-      + 'source position; effectiveStockState remains in the dependency array.',
+      + 'repinned 2026-09-15 (the `filtered` useMemo) after P4-4b item 3\'s row-component '
+      + 'extraction moved the source position from :2653 to :3359; effectiveStockState '
+      + 'remains in the dependency array.',
   },
 ]
 
