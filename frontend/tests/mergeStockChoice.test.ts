@@ -252,8 +252,13 @@ test('a barcode or identity mismatch is NEVER offered in the selected batch', ()
     'a differing cost is a MERGE under the Sep-4 ruling, not a fork')
   assert.match(guard, /resolveMergedCostDetail\(products\)\.outliers\.length/,
     'only an un-averageable cost pair may block the automatic path')
-  assert.match(guard, /leftBarcode !== rightBarcode/,
-    'only a leading-zero-equivalent barcode may auto-merge, judged by the SHARED fold')
+  // Sep 15 2026 ruling: a leading-zero-equivalent REAL barcode pair still
+  // auto-merges, and now so does a real-vs-broken/empty/word pair (a broken
+  // barcode is a wildcard, never a second identity) -- both judged by the
+  // SHARED barcodeIdentityMatches fold, not plain key equality. Two
+  // DIFFERENT real barcodes still never auto-merge.
+  assert.match(guard, /barcodeIdentityMatches\(left\.barcode, right\.barcode\)/,
+    'only the shared wildcard-aware barcode fold may auto-merge a pair')
   assert.match(duplicatesTab, /partitionSelectedConflictClusters\(targets\)/, 'selected merge must run through the guard')
 })
 

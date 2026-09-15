@@ -7,7 +7,7 @@ import { parseImportNumericValue, normalizeImportCost4, normalizeImportSellingPr
 // The ONE fold. Imported from the rule module both packages carry verbatim, so
 // this path cannot reach a different verdict from the create/edit guard, the
 // Conflicts sweep, the merge tool or the client's own sheet review.
-import { identityBarcodeKey } from './productDetailRule'
+import { identityBarcodeKey, identityBarcodeClassKey, barcodeIdentityMatches } from './productDetailRule'
 import {
   resolveStockActions,
   type StockActionMode,
@@ -148,10 +148,21 @@ function matchProduct(
   products: UnifiedStockCatalogProduct[],
 ): { product: UnifiedStockCatalogProduct | null; conflict: string | null } {
   const nameKey = key(name)
-  const barcodeKey = identityBarcodeKey(barcode)
-  const candidates = products.filter((product) => (
-    (!nameKey || key(product.name) === nameKey) && identityBarcodeKey(product.barcode) === barcodeKey
-  ))
+  // Wildcard-aware (Sep 15 2026 ruling): a real-vs-broken barcode pair
+  // within the same name is the SAME identity. When more than one candidate
+  // still matches -- only reachable when the sheet's barcode is broken/
+  // empty and the catalog already holds two-plus real barcodes under this
+  // name -- the ambiguity is surfaced for manual review below rather than
+  // silently guessed at, same as an already-duplicated catalog today.
+  //
+  // The wildcard half of the rule is scoped to "same name" (the owner's
+  // ruling opens "for same name 100% products"); with NO name at all on the
+  // sheet there is no group to scope it to, so a nameless row only ever
+  // matches an EXACT real-barcode candidate, never wildcards onto every
+  // broken-barcode product in the whole catalog regardless of name.
+  const candidates = nameKey
+    ? products.filter((product) => key(product.name) === nameKey && barcodeIdentityMatches(product.barcode, barcode))
+    : products.filter((product) => identityBarcodeKey(product.barcode) === identityBarcodeKey(barcode) && identityBarcodeKey(barcode))
   if (candidates.length === 1) return { product: candidates[0], conflict: null }
   if (candidates.length > 1) {
     // More than one row IS this identity, i.e. the catalog already holds
@@ -233,9 +244,18 @@ export function resolveUnifiedStockImportRows(
     // file listing the same article at two prices minted two products, and the
     // raw barcode used to be part of it, so '0601' and '601' in one file minted
     // the twin pair N15 exists to remove.
+    // The class-folded key, not the raw leading-zero-only fold: a broken/
+    // short/word barcode folds to '' here, same as an empty one, so two
+    // sheet rows for one NEW same-name product that both lack a real
+    // barcode collapse to one identity ("if both is empty merge into one
+    // empty"). A real-vs-broken pair across two would-be-new rows is a
+    // narrower remaining gap (this key alone cannot express the wildcard
+    // when one row IS real and the other is not); matchProduct's wildcard
+    // already covers the common case of matching against the EXISTING
+    // catalog, which is where the barcode-omitted sheet row usually lands.
     let identityKey = matched.product
       ? `product:${matched.product.id}`
-      : `new:${key(productName)}|${identityBarcodeKey(barcode)}`
+      : `new:${key(productName)}|${identityBarcodeClassKey(barcode)}`
     if (!matched.product && key(productName) && identityBarcodeKey(barcode) && key(effectiveBatchLabel)) {
       const batchOwnerKey = `${key(productName)}|${identityBarcodeKey(barcode)}|batch:${key(effectiveBatchLabel)}`
       const earlierIdentity = newBatchIdentityByKey.get(batchOwnerKey)

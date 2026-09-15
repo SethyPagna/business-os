@@ -1,5 +1,5 @@
 import { compareInitialKeys, getInitialKey } from './initials.ts'
-import { normalizeLeadingZeroBarcodeForCleanup, productIdentitySignature } from './productDetailRule.ts'
+import { normalizeLeadingZeroBarcodeForCleanup, clusterRowsByBarcodeIdentity, isRealBarcode } from './productDetailRule.ts'
 import { resolveProductMergeEconomics } from './productMerge.ts'
 
 type ProductId = number
@@ -110,10 +110,6 @@ export interface ProductGroupRow extends ProductRecord {
 // quantity is exactly what is SUPPOSED to differ between the merged rows,
 // and it is combined into the merged row's branch_stock/stock_quantity
 // below rather than compared.
-function buildRowMergeSignature(item: ProductRecord): string {
-  return productIdentitySignature(item as Record<string, unknown>)
-}
-
 function mergeBranchStockEntries(items: ProductRecord[]): Array<{ branch_id: unknown; branch_name: unknown; quantity: number }> {
   const byBranch = new Map<string, { branch_id: unknown; branch_name: unknown; quantity: number }>()
   for (const item of items) {
@@ -144,19 +140,43 @@ function mergeBranchStockEntries(items: ProductRecord[]): Array<{ branch_id: unk
 // imposed here; rows come back in first-seen order within `items`.
 export function mergeSameDetailRows(items: ProductRecord[] = []): ProductGroupRow[] {
   const source = Array.isArray(items) ? items : []
-  const clusters = new Map<string, ProductRecord[]>()
-  const order: string[] = []
+  // Some callers pass one already-same-name group (buildProductGroups);
+  // others pass the whole unsorted catalog (mergePortalCatalogProducts), so
+  // this groups by exact name FIRST -- clusterRowsByBarcodeIdentity only
+  // resolves the barcode half of identity and must never see two different
+  // names in the same call, or an unrelated pair sharing a broken/empty
+  // barcode would wildcard-merge across names.
+  //
+  // Within one name group, clusterRowsByBarcodeIdentity implements the Sep
+  // 15 2026 wildcard ruling: two rows are the same product when their real
+  // barcodes fold to the same key, OR when at least one side has no real
+  // barcode (a broken/empty/word barcode is a wildcard, never a second
+  // identity on its own); two DIFFERENT real barcodes remain separate child
+  // rows. Not a plain signature map -- see productDetailRule for why (non-
+  // transitive: a broken row can only attach to ONE ranked real-barcode
+  // winner when the group holds more than one real code).
+  const byName = new Map<string, ProductRecord[]>()
   for (const item of source) {
-    const signature = buildRowMergeSignature(item)
-    if (!clusters.has(signature)) {
-      clusters.set(signature, [])
-      order.push(signature)
-    }
-    clusters.get(signature)?.push(item)
+    const key = normalizeProductGroupName(item?.name)
+    const bucket = byName.get(key)
+    if (bucket) bucket.push(item)
+    else byName.set(key, [item])
   }
+  const clusters = [...byName.values()].flatMap((nameGroup) => clusterRowsByBarcodeIdentity(
+    nameGroup as unknown as Array<{ id?: unknown; barcode?: unknown; live_stock_quantity?: unknown; stock_quantity?: unknown }>,
+  )) as unknown as ProductRecord[][]
+  // Preserve first-seen order across clusters, matching the prior signature-
+  // map's insertion-order guarantee.
+  const orderOf = new Map<ProductRecord, number>()
+  source.forEach((item, index) => orderOf.set(item, index))
+  const orderedClusters = [...clusters].sort((a, b) => {
+    const aRank = Math.min(...a.map((item) => orderOf.get(item) ?? Number.MAX_SAFE_INTEGER))
+    const bRank = Math.min(...b.map((item) => orderOf.get(item) ?? Number.MAX_SAFE_INTEGER))
+    return aRank - bRank
+  })
 
-  return order.flatMap((signature): ProductGroupRow[] => {
-    const cluster = [...(clusters.get(signature) || [])].sort((a, b) => toProductId(a?.id) - toProductId(b?.id))
+  return orderedClusters.flatMap((clusterItems): ProductGroupRow[] => {
+    const cluster = [...clusterItems].sort((a, b) => toProductId(a?.id) - toProductId(b?.id))
     const lead = cluster[0] || {}
     const mergedProductIds = cluster.map((item) => toProductId(item?.id)).filter((id) => Number.isFinite(id) && id > 0)
     const economics = resolveProductMergeEconomics(cluster as Record<string, unknown>[])
@@ -187,7 +207,13 @@ export function mergeSameDetailRows(items: ProductRecord[] = []): ProductGroupRo
       // costs merge, and the merged row shows the mean of the DISTINCT costs
       // rounded once to 4dp, so one article is one row no matter how many
       // prices it was bought at. `economics` resolves all fields together.
-      barcode: normalizeLeadingZeroBarcodeForCleanup(lead.barcode),
+      //
+      // A real barcode always outranks a broken/empty wildcard row for
+      // display (Sep 15 2026 ruling), so a wildcard row with the lowest id
+      // never hides the cluster's real code behind an empty display value.
+      barcode: normalizeLeadingZeroBarcodeForCleanup(
+        (cluster.find((item) => isRealBarcode(item?.barcode)) || lead).barcode,
+      ),
       stock_quantity: stockTotal,
       branch_stock: branchStock,
       __mergedProductIds: mergedProductIds,

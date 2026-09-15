@@ -137,32 +137,47 @@ async function refusal(commit, env, request) {
 
 async function main() {
   const { commitStockSession, sessionProductDuplicateReason } = loadModule('lib/stockSession.ts')
-  const { identityBarcodeKeySql } = loadModule('lib/productIdentity.ts')
-  const { identityBarcodeKey } = loadModule('lib/productDetailRule.ts')
+  const { identityBarcodeKeySql, identityBarcodeIsRealSql } = loadModule('lib/productIdentity.ts')
+  const { identityBarcodeKey, identityBarcodeClassKey, isRealBarcode } = loadModule('lib/productDetailRule.ts')
 
-  // --- 1. the SQL copy of the fold and the real fold answer identically ----
-  await check('identityBarcodeKeySql agrees with identityBarcodeKey on every edge case', () => {
+  // --- 1. the SQL copy of the CLASS fold and the real one answer identically
+  // (Sep 15 2026: identityBarcodeKeySql now folds to the barcode's CLASS
+  // key -- the real folded key, or '' for anything broken/short/a word --
+  // not the raw leading-zero fold identityBarcodeKey alone gives).
+  await check('identityBarcodeKeySql agrees with identityBarcodeClassKey on every edge case', () => {
     const probes = [
       '', ' ', '0', '00', '000', '0012', '00012', '0123', '123', '000123',
       '3614274226546', '03614274226546', '  03614274226546  ',
       'ABC0', 'abc0', '0abc12', 'SER-1', '0000000000000', '1000', '01000',
+      // Broken by the Sep 15 2026 class test (all-digit but short of
+      // MIN_REAL_BARCODE_DIGITS=6): must fold to '' now, unlike the old
+      // raw fold which kept these as themselves.
+      '1234', '12345', '99999',
+      // Real (>=6 digits): must fold through the leading-zero strip.
+      '123456', '0123456',
     ]
     const db = new Database(':memory:')
     db.exec('CREATE TABLE p(barcode TEXT)')
     const insert = db.prepare('INSERT INTO p(barcode) VALUES(?)')
     for (const probe of probes) insert.run(probe)
-    const rows = db.prepare(`SELECT barcode, ${identityBarcodeKeySql('barcode')} AS folded FROM p`).all()
+    const rows = db.prepare(`SELECT barcode, ${identityBarcodeKeySql('barcode')} AS folded, ${identityBarcodeIsRealSql('barcode')} AS is_real FROM p`).all()
     for (const row of rows) {
-      assert.equal(row.folded, identityBarcodeKey(row.barcode),
-        `SQL fold disagrees with identityBarcodeKey on ${JSON.stringify(row.barcode)}`)
+      assert.equal(row.folded, identityBarcodeClassKey(row.barcode),
+        `SQL class fold disagrees with identityBarcodeClassKey on ${JSON.stringify(row.barcode)}`)
+      assert.equal(Boolean(row.is_real), isRealBarcode(row.barcode),
+        `SQL isReal disagrees with isRealBarcode on ${JSON.stringify(row.barcode)}`)
     }
     // A NULL column must fold to '' the same way, not to NULL.
     db.prepare('INSERT INTO p(barcode) VALUES(NULL)').run()
     const nulled = db.prepare(`SELECT ${identityBarcodeKeySql('barcode')} AS folded FROM p WHERE barcode IS NULL`).get()
-    assert.equal(nulled.folded, identityBarcodeKey(null))
+    assert.equal(nulled.folded, identityBarcodeClassKey(null))
     // And the probes actually discriminate: at least one folds, one does not.
-    assert.equal(identityBarcodeKey('03614274226546'), '3614274226546')
-    assert.equal(identityBarcodeKey('0012'), '0012')
+    assert.equal(identityBarcodeClassKey('03614274226546'), '3614274226546')
+    assert.equal(identityBarcodeClassKey('0012'), '')
+    // A short numeric ('1234') is broken -- not real -- so it folds to '',
+    // unlike the raw leading-zero-only fold identityBarcodeKey still gives it.
+    assert.equal(identityBarcodeKey('1234'), '1234')
+    assert.equal(identityBarcodeClassKey('1234'), '')
   })
 
   // --- 2. a leading-zero retype is the SAME product, not a new row ---------
@@ -210,8 +225,10 @@ async function main() {
     }))
     assert.equal(result, null, `a different barcode is a child row, not a duplicate: ${result && result.message}`)
     assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, 2)
-    // A short zero-padded code is NOT folded (stripping would leave < 3
-    // characters), so it is also its own row -- the control for section 2.
+    // A short numeric code (below MIN_REAL_BARCODE_DIGITS=6) is BROKEN, not
+    // a real barcode, under the Sep 15 2026 ruling -- a wildcard, so a
+    // SECOND broken/short code on the SAME name is now refused as the same
+    // identity rather than minted as a second row.
     const short = await refusal(commitStockSession, env, createRequest({
       name: 'Tiny Balm', barcode: '0012', cost_price_usd: 1,
     }))
@@ -219,8 +236,20 @@ async function main() {
     const alsoShort = await refusal(commitStockSession, env, createRequest({
       name: 'Tiny Balm', barcode: '12', cost_price_usd: 1,
     }))
-    assert.equal(alsoShort, null, "'0012' and '12' are NOT the same code -- the fold is bounded")
-    assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, 4)
+    assert.ok(alsoShort, "'0012' and '12' are both broken/short codes -- a wildcard match under the Sep 15 2026 ruling, not two rows")
+    assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, 3)
+    // Two DIFFERENT REAL (>=6 digit) barcodes on the same name remain two
+    // genuinely different child rows -- the actual positive control for the
+    // wildcard rule (only a real-vs-real mismatch stays a sibling).
+    const realOne = await refusal(commitStockSession, env, createRequest({
+      name: 'Real Code Balm', barcode: '600123', cost_price_usd: 1,
+    }))
+    assert.equal(realOne, null)
+    const realTwo = await refusal(commitStockSession, env, createRequest({
+      name: 'Real Code Balm', barcode: '700456', cost_price_usd: 1,
+    }))
+    assert.equal(realTwo, null, 'two different REAL barcodes remain two child rows')
+    assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, 5)
   })
 
   // --- 6. two lines in ONE request are held to the same rule ---------------

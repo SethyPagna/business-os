@@ -171,6 +171,125 @@ export function identityBarcodeKey(value: unknown): string {
   return normalizeLeadingZeroBarcodeForCleanup(normalizedBarcode(value))
 }
 
+/**
+ * REAL vs BROKEN barcode classification -- the owner's Sep 15 2026 ruling
+ * (verbatim): "for same name 100% products: same barcode (difference only
+ * leading barcode), or different barcode but the barcode is empty or words
+ * or broken not actual barcode, use the one with actual barcode.... or if
+ * both is empty merge into one empty. etc... so current group/child rules
+ * only apply to completely different barcode (correct barcodes)".
+ *
+ * A barcode is REAL when it is entirely digits and at least
+ * MIN_REAL_BARCODE_DIGITS long and not all zeros. Production's genuine
+ * barcodes measured 8-14 digits; 6 is the floor rather than 8 so a short
+ * EAN-8/UPC-E code (8 digits already, but some retailers truncate further)
+ * is not misclassified as broken. Everything else -- '', NULL, a bare '0'
+ * placeholder, or a word like 'Mask'/'BrowWizTaupe'/'NoBox188' -- is
+ * BROKEN: not evidence the two rows are different articles, just evidence
+ * nobody typed a real code for this row.
+ */
+export const MIN_REAL_BARCODE_DIGITS = 6
+
+export function isRealBarcode(value: unknown): boolean {
+  const trimmed = String(value ?? '').trim()
+  if (!/^[0-9]+$/.test(trimmed)) return false
+  if (trimmed.length < MIN_REAL_BARCODE_DIGITS) return false
+  if (/^0+$/.test(trimmed)) return false
+  return true
+}
+
+export type BarcodeIdentityClass = 'real' | 'none'
+
+/** `'real'` -> the folded identity key; `'none'` -> '' (empty/word/broken -- a wildcard). */
+export function barcodeIdentityClass(value: unknown): { cls: BarcodeIdentityClass; key: string } {
+  return isRealBarcode(value) ? { cls: 'real', key: identityBarcodeKey(value) } : { cls: 'none', key: '' }
+}
+
+/** Convenience: the class-folded key alone -- the real folded key, or '' for a broken/empty barcode. */
+export function identityBarcodeClassKey(value: unknown): string {
+  return barcodeIdentityClass(value).key
+}
+
+/**
+ * THE barcode identity comparison under the Sep 15 2026 ruling: two barcodes
+ * are the SAME identity when both are real and fold to the same key, OR when
+ * AT LEAST ONE side is not a real barcode (a broken/empty barcode is a
+ * wildcard that never creates a new child row on its own). Two REAL barcodes
+ * that differ are, and remain, two different articles (siblings/children).
+ *
+ * NOT TRANSITIVE: real A matches broken, and broken matches real B, but A and
+ * B (if different) do not match each other. Any caller clustering more than
+ * two rows at once must use clusterRowsByBarcodeIdentity below rather than
+ * chaining this pairwise check, or a three-row group can silently merge two
+ * genuinely different real barcodes through a broken middle row.
+ */
+export function barcodeIdentityMatches(a: unknown, b: unknown): boolean {
+  const aReal = isRealBarcode(a)
+  const bReal = isRealBarcode(b)
+  if (!aReal || !bReal) return true
+  return identityBarcodeKey(a) === identityBarcodeKey(b)
+}
+
+type RankableIdentityRow = {
+  id?: unknown
+  live_stock_quantity?: unknown
+  stock_quantity?: unknown
+}
+
+/**
+ * Picks the representative row a broken-barcode row should attach to when a
+ * name group holds two or more DIFFERENT real barcodes (so the wildcard rule
+ * cannot pick a side for free): the real-barcode row with the most stock,
+ * then the lowest id. Mirrors canonicalProductBarcode's own ranking so the
+ * same row wins both "what barcode does the merge show" and "whose cluster
+ * does the broken row join".
+ */
+export function rankBarcodeIdentityWinner<T extends RankableIdentityRow>(rows: readonly T[]): T {
+  return [...rows].sort((a, b) => {
+    const stockOf = (row: T) => Number(row.live_stock_quantity ?? row.stock_quantity ?? 0) || 0
+    const stockDiff = stockOf(b) - stockOf(a)
+    if (stockDiff) return stockDiff
+    return (Number(a.id) || 0) - (Number(b.id) || 0)
+  })[0]
+}
+
+/**
+ * Clusters a set of SAME-NAME rows into product-identity groups under the
+ * wildcard barcode rule. Callers must pre-filter to one exact name group
+ * (normalizeProductGroupName) -- this function only resolves the barcode
+ * half.
+ *
+ *   - No row has a real barcode: every row merges into ONE cluster (the
+ *     owner's "if both is empty merge into one empty" case).
+ *   - Exactly one distinct real barcode exists: every broken-barcode row
+ *     attaches to it -- one cluster.
+ *   - Two or more distinct real barcodes exist: each real barcode is its own
+ *     cluster (genuine siblings/children), and every broken-barcode row
+ *     attaches to the single ranked winner (rankBarcodeIdentityWinner) among
+ *     ALL the real rows in the group -- not one broken row per real cluster,
+ *     since the wildcard match is not transitive and a broken row cannot be
+ *     "the same as" two different real codes at once.
+ */
+export function clusterRowsByBarcodeIdentity<T extends { barcode?: unknown } & RankableIdentityRow>(
+  rows: readonly T[],
+): T[][] {
+  if (!rows.length) return []
+  const real = rows.filter((row) => isRealBarcode(row.barcode))
+  const none = rows.filter((row) => !isRealBarcode(row.barcode))
+  if (!real.length) return [[...rows]]
+  const byKey = new Map<string, T[]>()
+  for (const row of real) {
+    const key = identityBarcodeKey(row.barcode)
+    if (!byKey.has(key)) byKey.set(key, [])
+    byKey.get(key)!.push(row)
+  }
+  if (none.length) {
+    const winner = rankBarcodeIdentityWinner(real)
+    byKey.get(identityBarcodeKey(winner.barcode))!.push(...none)
+  }
+  return [...byKey.values()]
+}
+
 export type ProductDetailInput = {
   barcode?: unknown
   cost_price_usd?: unknown
@@ -202,12 +321,23 @@ export function productIdentitySignature(row: ProductDetailInput & { name?: unkn
   return `${normalizeProductGroupName(row.name)}${productDetailSignature(row)}`
 }
 
-/** True when two rows are the same product row (same name group AND same details). */
+/**
+ * True when two rows are the same product row: same name group, AND (their
+ * barcodes fold to the same real key, OR at least one side has no real
+ * barcode -- see barcodeIdentityMatches). Deliberately NOT
+ * `productIdentitySignature(a) === productIdentitySignature(b)`: that plain
+ * key equality cannot express the wildcard half of the Sep 15 2026 ruling
+ * (a broken/empty barcode never forces a new child row), only the leading-
+ * zero fold. productIdentitySignature itself is unaffected and still used
+ * where an exact hashable key is required (import job dedup, display
+ * grouping's within-cluster key).
+ */
 export function isSameProductIdentity(
   a: ProductDetailInput & { name?: unknown },
   b: ProductDetailInput & { name?: unknown },
 ): boolean {
-  return productIdentitySignature(a) === productIdentitySignature(b)
+  return normalizeProductGroupName(a.name) === normalizeProductGroupName(b.name)
+    && barcodeIdentityMatches(a.barcode, b.barcode)
 }
 
 export type CostVerdict = 'same' | 'missing' | 'differs'

@@ -1957,16 +1957,37 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   }
 
   // 2b) A human-readable product name is a safe fallback only when it is
-  // unique. This makes the template usable without barcodes while never
-  // guessing between two catalog records sharing a name.
+  // unique -- OR when every same-name candidate's barcode is broken (non-
+  // numeric/word/too-short), per the Sep 15 2026 ruling ("if both is empty
+  // merge into one empty"): two BROKEN-barcode rows sharing a name are one
+  // identity, not an ambiguity, so the name-only fallback resolves them via
+  // the same real-barcode-first/stock/id winner ranking used elsewhere. Two
+  // DISTINCT REAL barcodes sharing a name remain genuinely ambiguous and
+  // must still error rather than guess.
   {
     const db = makeFakeDb()
     const results = await classifySales(db, [row({ receipt_number: 'R-2b', name: 'Gadget', quantity: 1 }, 1)], null)
     assert.strictEqual(results[0].data.items[0].product_id, 2, 'unique product name matches when sku/barcode are blank')
 
-    const ambiguousDb = makeFakeDb({ products: [...defaultProducts, { ...defaultProducts[0], id: 3, sku: 'SKU-3', barcode: 'BAR-3' }] })
-    const ambiguous = await classifySales(ambiguousDb, [row({ receipt_number: 'R-2c', name: 'Widget', quantity: 1 }, 1)], null)
-    assert.strictEqual(ambiguous[0].action, 'error', 'an ambiguous product name must not guess')
+    // BAR-1/BAR-3 are both word-shaped (non-numeric), so both are BROKEN
+    // under isRealBarcode -- the wildcard rule collapses them into one
+    // identity instead of leaving the name-only match ambiguous.
+    const wildcardDb = makeFakeDb({ products: [...defaultProducts, { ...defaultProducts[0], id: 3, sku: 'SKU-3', barcode: 'BAR-3' }] })
+    const wildcard = await classifySales(wildcardDb, [row({ receipt_number: 'R-2c', name: 'Widget', quantity: 1 }, 1)], null)
+    assert.strictEqual(wildcard[0].action, 'create', 'two broken/word barcodes sharing a name are one identity, not an ambiguity')
+
+    // '600001'/'700001' are both REAL (all-digit, >=6 digits) and distinct --
+    // a genuine sibling pair, so the name-only fallback must still refuse to
+    // guess between them.
+    const ambiguousDb = makeFakeDb({
+      products: [
+        { ...defaultProducts[0], barcode: '600001' },
+        defaultProducts[1],
+        { ...defaultProducts[0], id: 3, sku: 'SKU-3', barcode: '700001' },
+      ],
+    })
+    const ambiguous = await classifySales(ambiguousDb, [row({ receipt_number: 'R-2d', name: 'Widget', quantity: 1 }, 1)], null)
+    assert.strictEqual(ambiguous[0].action, 'error', 'an ambiguous product name (two distinct real barcodes) must not guess')
   }
 
   // 3) unknown sku/barcode -> the whole order errors (one bad line spoils

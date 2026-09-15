@@ -14,11 +14,13 @@
 //
 // Cost is NOT part of the question (the Sep-4 ruling: only a different barcode
 // mints a child row; two costs for one article are averaged by the merge), and
-// the barcode is compared through identityBarcodeKey, so '0880123' and '880123'
-// are one identity here exactly as they are everywhere else. The stored
-// barcode is never rewritten -- only the comparison folds.
+// the barcode is compared through barcodeIdentityMatches (Sep 15 2026: real
+// barcodes fold past leading zeros -- '0880123' and '880123' are one identity
+// -- AND a broken/empty/word barcode on either side is a wildcard, never a
+// second identity on its own) exactly as every other comparison site does.
+// The stored barcode is never rewritten -- only the comparison folds.
 
-import { identityBarcodeKey } from '../../../utils/productDetailRule.ts'
+import { identityBarcodeKey, barcodeIdentityMatches, isRealBarcode, rankBarcodeIdentityWinner } from '../../../utils/productDetailRule.ts'
 
 export interface CreateMatchCandidate {
   id: number | string
@@ -79,8 +81,25 @@ export function classifyCreateMatches(
   if (!typedName && !typedBarcode) return none
 
   const nameRows = typedName ? candidates.filter((row) => norm(row.name) === typedName) : []
-  const barcodeRows = typedBarcode ? candidates.filter((row) => identityBarcodeKey(row.barcode) === typedBarcodeKey) : []
-  const twin = nameRows.find((row) => identityBarcodeKey(row.barcode) === typedBarcodeKey) || null
+  // Cross-NAME barcode collision is only meaningful evidence with a REAL
+  // barcode on both sides -- a broken/empty typed value is a wildcard
+  // WITHIN a name group, never a signal that an unrelated-name row is the
+  // same product.
+  const barcodeRows = typedBarcode && isRealBarcode(typed.barcode)
+    ? candidates.filter((row) => identityBarcodeKey(row.barcode) === typedBarcodeKey)
+    : []
+  // When the typed barcode is broken/empty AND the name group already holds
+  // 2+ DISTINCT real barcodes, barcodeIdentityMatches wildcards true against
+  // every one of them (not transitive -- see productDetailRule) so a naive
+  // .find() would arbitrarily pick whichever row happens to come first. Use
+  // the same ranked-winner rule clusterRowsByBarcodeIdentity/
+  // pickSameIdentityRow apply server-side: attach to the real-barcode row
+  // with the most stock, then lowest id (falls back to id alone here -- this
+  // candidate shape carries no stock).
+  const realNameRows = nameRows.filter((row) => isRealBarcode(row.barcode))
+  const twin = isRealBarcode(typed.barcode)
+    ? nameRows.find((row) => barcodeIdentityMatches(row.barcode, typed.barcode)) || null
+    : (nameRows.length ? rankBarcodeIdentityWinner(realNameRows.length ? realNameRows : nameRows) : null)
 
   if (twin) {
     const canonical = String(nameRows[0]?.name || twin.name || '').trim()

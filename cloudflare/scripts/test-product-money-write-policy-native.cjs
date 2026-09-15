@@ -286,7 +286,15 @@ function seed(name = 'Existing') {
   for (const mutation of ['cost', 'description', 'membership', 'destination_cost', 'destination_membership']) {
     const leader = seed(`Group ${mutation}`), sibling = seed(`Group ${mutation}`)
     const destination = seed(`Renamed ${mutation}`)
-    raw.prepare('UPDATE products SET barcode=? WHERE id=?').run(`destination-${destination}`, destination)
+    // Give the leader/sibling group a REAL barcode distinct from the
+    // destination row's REAL barcode. Under the Sep 15 2026 wildcard rule a
+    // broken barcode on either side of a same-name pair always matches --
+    // this loop renames the leader to the destination's exact name to
+    // exercise the money-write-policy race guard, not the (correct,
+    // separate) same-identity duplicate guard, so both sides need real,
+    // differing barcodes to stay genuinely distinct identities.
+    raw.prepare('UPDATE products SET barcode=? WHERE id IN (?,?)').run(`900${leader}00`, leader, sibling)
+    raw.prepare('UPDATE products SET barcode=? WHERE id=?').run(`901${destination}00`, destination)
     let expectedLeader, expectedSibling, expectedDestination, expectedCount
     const auditAtStart = auditCount
     beforeBatch = () => {

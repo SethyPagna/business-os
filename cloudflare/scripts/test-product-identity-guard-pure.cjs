@@ -68,7 +68,11 @@ assert.equal(canonicalProductBarcode([
 ]), '3614274226546', 'the display removes equivalent leading zeroes even when no row was already clean')
 
 // ---- 1. The guard's SQL against the real schema, then the real comparison ----
-const sqlMatch = source.match(/`\s*\n\s*(SELECT id, name, barcode, cost_price_usd, cost_price_khr FROM products[\s\S]*?LIMIT 200)\s*\n\s*`/)
+// Sep 15 2026: the query grew a live_stock_quantity subquery (feeds
+// pickSameIdentityRow's wildcard-attachment ranking when this name group
+// already holds 2+ distinct real barcodes and the incoming one is broken),
+// so it is no longer the plain "SELECT id, name, barcode, ..." shape.
+const sqlMatch = source.match(/`\s*\n\s*(SELECT p\.id, p\.name, p\.barcode, p\.cost_price_usd, p\.cost_price_khr,[\s\S]*?LIMIT 200)\s*\n\s*`/)
 assert.ok(sqlMatch, 'products.ts still contains the identity-guard query')
 assert.ok(!/ROUND\(COALESCE\(cost_price_usd/.test(sqlMatch[1]),
   'cost must NOT be part of the identity guard any more -- it stopped being identity on Sep 4 2026')
@@ -105,10 +109,18 @@ assert.equal(run('Dior Lip Glow 001', '3348901', null)?.cost_price_usd, 5.25,
 // barcode, so the form minted exactly the pairs N15 exists to clean up.
 assert.equal(run('Zero Twin', '03614274226546', null)?.id, 5, 'a leading zero is not a different barcode')
 assert.equal(run('Zero Twin', '003614274226546', null)?.id, 5, 'the fold is idempotent, so a double zero is caught too')
-// NEGATIVE CONTROLS: nothing but a leading zero folds.
-assert.equal(run('Dior Lip Glow 001', '1234567', null), null, 'different barcode is a legitimate child row')
-assert.equal(run('Short Code', '12', null), null, 'a 2-digit survivor is too short to fold')
-assert.equal(run('Placeholder', '', null), null, "the placeholder '0' never collides with an unbarcoded row")
+// NEGATIVE CONTROLS: nothing but a leading zero folds -- when BOTH sides are
+// REAL barcodes, that is. '1234567' (7 digits) is real and differs from the
+// row's real code, so it stays a legitimate child row.
+assert.equal(run('Dior Lip Glow 001', '1234567', null), null, 'different REAL barcode is a legitimate child row')
+// Wildcard-aware (Sep 15 2026 ruling): '0012' (4 digits) and '12' (2 digits)
+// are BOTH below MIN_REAL_BARCODE_DIGITS -- two broken barcodes of the same
+// name wildcard together instead of staying two "different" short codes.
+assert.equal(run('Short Code', '12', null)?.id, 6, "a 2-digit incoming code wildcards onto the row's own broken '0012' -- both are broken, not two different short codes")
+// '0' is all-zeros (never real, isRealBarcode's own "not all zeros" clause)
+// and '' is empty -- both broken, so they wildcard together too ("if both is
+// empty merge into one empty" reads the same for the all-zeros placeholder).
+assert.equal(run('Placeholder', '', null)?.id, 7, "the placeholder '0' and a blank incoming barcode are both broken -- they wildcard together")
 assert.equal(run('Something Else', '3348901', null), null, 'same barcode + different name is not this rule')
 assert.equal(run('Retired Twin', '3348901', null), null, 'inactive products never block')
 assert.equal(run('Dior Lip Glow 001', '3348901', 1), null, 'a product never collides with itself on edit')

@@ -220,8 +220,11 @@ async function main() {
   await testAsync('falls back to barcode when no SKU is given', async () => {
     const { rawDb, db } = freshDb()
     seedBranch(rawDb, 1, 'Shop')
-    seedProduct(rawDb, { id: 11, name: 'Gadget', barcode: '12345' })
-    const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '12345', productName: 'unrelated name' })])
+    // Real (all-digit, >=6-digit) barcode -- identityBarcodeClassKey folds a
+    // short/broken barcode to '' by the Sep 15 2026 ruling, so this lookup
+    // deliberately would not exercise the barcode path with a short one.
+    seedProduct(rawDb, { id: 11, name: 'Gadget', barcode: '912345' })
+    const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '912345', productName: 'unrelated name' })])
     assert.strictEqual(unresolved.length, 0, JSON.stringify(unresolved))
     assert.strictEqual(resolved[0].productId, 11)
   })
@@ -238,9 +241,9 @@ async function main() {
   await testAsync('a barcode shared by two real products is reported ambiguous, not silently guessed', async () => {
     const { rawDb, db } = freshDb()
     seedBranch(rawDb, 1, 'Shop')
-    seedProduct(rawDb, { id: 13, name: 'Product A', barcode: '777' })
-    seedProduct(rawDb, { id: 14, name: 'Product B', barcode: '777' })
-    const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '777' })])
+    seedProduct(rawDb, { id: 13, name: 'Product A', barcode: '777777' })
+    seedProduct(rawDb, { id: 14, name: 'Product B', barcode: '777777' })
+    const { resolved, unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '777777' })])
     assert.strictEqual(resolved.length, 0)
     assert.strictEqual(unresolved.length, 1)
     assert.strictEqual(unresolved[0].reason, 'ambiguous_barcode')
@@ -271,9 +274,9 @@ async function main() {
   await testAsync('an ambiguous_barcode row carries both candidateProductIds and link/create options', async () => {
     const { rawDb, db } = freshDb()
     seedBranch(rawDb, 1, 'Shop')
-    seedProduct(rawDb, { id: 30, name: 'A', barcode: '111' })
-    seedProduct(rawDb, { id: 31, name: 'B', barcode: '111' })
-    const { unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '111', productName: null })])
+    seedProduct(rawDb, { id: 30, name: 'A', barcode: '111111' })
+    seedProduct(rawDb, { id: 31, name: 'B', barcode: '111111' })
+    const { unresolved } = await resolveDatedStockCountRows(db, [row({ barcode: '111111', productName: null })])
     assert.strictEqual(unresolved.length, 1)
     assert.strictEqual(unresolved[0].reason, 'ambiguous_barcode')
     assert.deepStrictEqual([...unresolved[0].candidateProductIds].sort(), [30, 31])

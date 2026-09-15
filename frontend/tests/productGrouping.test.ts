@@ -195,10 +195,14 @@ await runTest('buildProductGroups returns an empty branchNames array for product
 // it in the Products FilterMenu ("Rows" -> "Hide out-of-stock rows"). These
 // two tests pin BOTH halves: the default reaches every row, and the opt-in
 // reports what it removed.
+// Real (all-digit, >=6-digit) and genuinely distinct barcodes -- a short
+// code like '111'/'222' is BROKEN under the Sep 15 2026 realness floor and
+// would wildcard-merge product 1 and 2 into one row instead of staying two
+// child rows of "Same Name".
 const zeroStockGroupProducts = [
-  { id: 1, name: 'Same Name', barcode: '111', cost_price_usd: 1, stock_quantity: 0, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 0 }, { branch_id: 2, branch_name: 'Shop', quantity: 0 }] },
-  { id: 2, name: 'Same Name', barcode: '222', cost_price_usd: 2, stock_quantity: 3, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 2 }, { branch_id: 2, branch_name: 'Shop', quantity: 1 }] },
-  { id: 3, name: 'Standalone Zero', barcode: '333', cost_price_usd: 3, stock_quantity: 0, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 0 }, { branch_id: 2, branch_name: 'Shop', quantity: 0 }] },
+  { id: 1, name: 'Same Name', barcode: '111111', cost_price_usd: 1, stock_quantity: 0, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 0 }, { branch_id: 2, branch_name: 'Shop', quantity: 0 }] },
+  { id: 2, name: 'Same Name', barcode: '222222', cost_price_usd: 2, stock_quantity: 3, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 2 }, { branch_id: 2, branch_name: 'Shop', quantity: 1 }] },
+  { id: 3, name: 'Standalone Zero', barcode: '333333', cost_price_usd: 3, stock_quantity: 0, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 0 }, { branch_id: 2, branch_name: 'Shop', quantity: 0 }] },
 ]
 const zeroStockSections = () => buildProductCategorySections(zeroStockGroupProducts, {
   productsById: new Map(zeroStockGroupProducts.map((product) => [product.id, product])),

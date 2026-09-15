@@ -63,9 +63,12 @@ await runTest('mergeSameDetailRows combines branch_stock quantities for the same
 })
 
 await runTest('mergeSameDetailRows keeps rows separate when a DETAIL differs (barcode)', () => {
+  // Both real (all-digit, >=6 digits) and genuinely different -- a short
+  // code like '111'/'222' is BROKEN under the Sep 15 2026 realness floor and
+  // would wildcard-merge instead of staying separate (covered elsewhere).
   const rows = mergeSameDetailRows([
-    { id: 1, name: 'Gloss Nude', barcode: '111', stock_quantity: 1 },
-    { id: 2, name: 'Gloss Nude', barcode: '222', stock_quantity: 1 },
+    { id: 1, name: 'Gloss Nude', barcode: '111111', stock_quantity: 1 },
+    { id: 2, name: 'Gloss Nude', barcode: '222222', stock_quantity: 1 },
   ])
   assert.equal(rows.length, 2)
   assert.deepEqual(rows.map((row) => row.id), [1, 2])
