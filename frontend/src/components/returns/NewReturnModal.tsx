@@ -867,8 +867,13 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-      await Promise.resolve(onSuccess?.(result))
+      // The save already succeeded server-side, so the modal can close (and
+      // show the success state) immediately -- Returns.tsx's list refetch,
+      // history snapshot fetch and undo-entry push run in the background
+      // instead of holding the modal open for them (same pattern as
+      // Products.tsx's row patch replacing a full-page reload).
       onClose()
+      void Promise.resolve(onSuccess?.(result))
     } catch (error) {
       // A replacement line the Worker refuses (its branch is the warehouse)
       // is shown as the same pack sentence the replacement picker greys the
@@ -977,8 +982,11 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       setPendingV1(null)
       notify(T('success', 'Return created successfully'), 'success')
       for (const channel of ['returns', 'inventory', 'sales']) window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel } }))
-      await Promise.resolve(onSuccess?.(result))
+      // Same close-before-refetch as handleSubmit above: the save already
+      // succeeded, so the modal closes immediately and the list refetch runs
+      // in the background instead of holding the modal open for it.
       if (current()) onClose()
+      void Promise.resolve(onSuccess?.(result))
     } catch (error) {
       if (!current()) return
       // Unknown, permission and capability failures never rewrite/remove the
