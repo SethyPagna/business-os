@@ -439,7 +439,7 @@ function LegalReader({
       data-portal-legal-page={page}
       className="fixed inset-0 z-[90] overflow-y-auto overscroll-contain bg-white text-slate-800 dark:bg-neutral-950 dark:text-neutral-200"
     >
-      <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
+      <div className="sticky top-0 z-10 border-b border-slate-200 bg-white dark:border-neutral-800 dark:bg-neutral-950">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
           <h1
             id={titleId}

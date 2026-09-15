@@ -258,7 +258,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   }
 
   return <div className="space-y-3">
-    <div className="sticky top-0 z-20 flex gap-2 bg-gray-50/95 py-1 backdrop-blur dark:bg-gray-900/95">
+    <div className="sticky top-0 z-20 flex gap-2 bg-gray-50 py-1 dark:bg-gray-900">
       <div className="min-w-0 flex-1"><SearchInput id="stock-in-session-search" value={search} onChange={(value) => { setSearch(value); setPage(1) }} placeholder={tr('search_stock_sessions', 'Search products, suppliers, users…')} /></div>
       <ScanSearchButton onDetected={(value) => { setSearch(value); setPage(1) }} t={t} />
     </div>

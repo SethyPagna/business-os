@@ -1112,7 +1112,7 @@ export default function Users() {
           sat crowded right up against Add User/Create role with barely
           any visual gap. Search box stays on its own line below so it
           always gets full width to breathe. */}
-      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
         <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pt-1">
           <ActionHistoryBar history={actionHistory} t={t} className="min-w-0 flex-1" showLabel />
           {tab === 'users' && canManage ? <button type="button" className="btn-primary inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-2 text-xs sm:text-sm" onClick={openCreateUser}><UserPlus className="h-4 w-4 shrink-0" /><span className="truncate">{t('add_user') || 'Add user'}</span></button> : null}

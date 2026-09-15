@@ -413,7 +413,7 @@ export default function ManageBatchesModal({
                         onChange={(event) => setDraft((prev) => ({ ...prev, notes: event.target.value }))}
                       />
                     </label>
-                    <div className="sticky bottom-0 -mx-1 flex justify-end gap-2 border-t border-amber-100 bg-amber-50/95 px-1 pt-2 backdrop-blur-sm dark:border-amber-900/50 dark:bg-amber-950/95">
+                    <div className="sticky bottom-0 -mx-1 flex justify-end gap-2 border-t border-amber-100 bg-amber-50 px-1 pt-2 dark:border-amber-900/50 dark:bg-amber-950">
                       <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={cancelEdit} disabled={isSaving}>
                         {t('cancel') || 'Cancel'}
                       </button>

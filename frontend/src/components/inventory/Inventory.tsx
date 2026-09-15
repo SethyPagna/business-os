@@ -2701,7 +2701,7 @@ ${inventoryFeesFormulaText}`,
           same box); the select-all/bulk-action card underneath only
           renders for the Products tab, same as before. */}
       {showInventorySections ? (
-      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
         {/* N10: the Products list's Net sold / Revenue / COGS / Profit columns
             are scoped server-side by this range, so the tab needs the same
             Start → End row every other list pins above its search box. It is

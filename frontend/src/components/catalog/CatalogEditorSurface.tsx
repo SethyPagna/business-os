@@ -373,7 +373,7 @@ function CatalogEditorSurfaceContent() {
 
   return (
     <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-4 overflow-x-hidden pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
-      <div className="sticky top-0 z-30 -mx-4 rounded-none border-y border-slate-200 bg-white/95 px-3 py-2 shadow-md backdrop-blur dark:border-slate-700 dark:bg-slate-950/95 sm:top-2 sm:mx-0 sm:rounded-2xl sm:border">
+      <div className="sticky top-0 z-30 -mx-4 rounded-none border-y border-slate-200 bg-white px-3 py-2 shadow-md dark:border-slate-700 dark:bg-slate-950 sm:top-2 sm:mx-0 sm:rounded-2xl sm:border">
         <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 flex-1 flex-nowrap gap-1 overflow-x-auto pb-1 xl:pb-0">
             {editorSections.map(([sectionId, sectionKey, label]) => (

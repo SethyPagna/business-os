@@ -1565,7 +1565,7 @@ export default function FilesPage() {
               input / filter chip aren't boxed twice. Only the bulk-action
               row below keeps card chrome, and only while a selection is
               active. */}
-          <div className="sticky top-0 z-30 -mx-1 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+          <div className="sticky top-0 z-30 -mx-1 bg-gray-50 pb-2 pt-2 dark:bg-gray-900 sm:mx-0">
             {/* Search row: media type + rows-per-page are now one icon-only
                 Filter trigger instead of two separate dropdowns. */}
             <div className="flex min-w-0 flex-wrap items-center gap-2 px-0.5">

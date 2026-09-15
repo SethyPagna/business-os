@@ -182,12 +182,6 @@ body.lang-km:not([data-public-portal='true']) .fixed.bottom-16 button span {
   line-height: var(--km-line-height, 1.6);
 }
 
-body.lang-km:not([data-public-portal='true']) .app-topbar .font-medium,
-body.lang-km:not([data-public-portal='true']) .app-topbar .font-semibold,
-body.lang-km:not([data-public-portal='true']) .app-topbar .font-bold {
-  font-weight: 600 !important;
-}
-
 body.lang-km .text-xs {
   font-size: calc(0.79rem * var(--ui-text-scale, 1)) !important;
   line-height: var(--km-line-height, 1.6) !important;
@@ -500,15 +494,10 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
    a login screen, not a data surface) but shrank it and moved it onto the
    same neutral base as everything else, so it reads as "dark UI with a
    brand accent" rather than "dark blue app". */
-.app-topbar {
-  border-color: #d9e2ec;
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(16px);
-}
-.dark .app-topbar {
-  border-color: var(--dm-border-strong);
-  background: rgba(20, 20, 20, 0.92);
-}
+/* P4-4b: `.app-topbar` itself (light+dark) removed -- zero elements in
+   frontend/src carry this class (grep confirmed), so the rule above this
+   comment plus the Khmer-font-weight override that targeted it were both
+   unreachable. The history comment stays; the dead declarations do not. */
 .auth-shell {
   background:
     linear-gradient(135deg, #f9f8f6 0%, #f3efe6 46%, #f8f6f2 100%);

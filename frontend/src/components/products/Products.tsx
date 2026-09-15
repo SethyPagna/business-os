@@ -4530,7 +4530,7 @@ function ProductsFullEditor() {
           bg-gray-50/dark:bg-gray-900 matches #app-root's background (the
           page-scroll itself is transparent) so list rows scrolling
           underneath don't show through while this is stuck. */}
-      <div className="sticky top-0 z-30 -mx-1 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-0 z-30 -mx-1 bg-gray-50 pb-2 pt-2 dark:bg-gray-900 sm:mx-0">
         {/* Y13: a plain page-level search row (the folding "Search &
             Filters" SectionCard wrapper was removed). SearchInput's own
             `min-w-0 flex-1` default handles narrow-screen shrink; every

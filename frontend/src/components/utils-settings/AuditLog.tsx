@@ -948,7 +948,7 @@ export default function AuditLog() {
           logs are now cleared on a schedule (default 21 days, configurable
           from the Settings page) instead of requiring an admin to remember
           to click something. */}
-      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
         <div
           className="flex flex-wrap items-center gap-2 pt-1 sm:flex-nowrap"
           title={t('audit_log_desc') || 'Default columns: Record, Device, User, Action. Click a row to see full details and data changes.'}
