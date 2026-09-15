@@ -118,41 +118,45 @@ test('the Worker response cannot trigger an older cached POS auto-retry or auto-
   assert.doesNotMatch(route, /body\.confirmDuplicate/)
 })
 
-// ---- P3-9: a same-name supplier is a decision, not a silent create -------
+// ---- P4-2: a same-name supplier merges directly, never a prompt ----------
+//
+// Owner ruling (2026-09-15): "for supplier prevent this issue from happening
+// just merge directly if same." This supersedes P3-9's decision-required
+// prompt above (2deb30ec) for suppliers only -- customers and delivery
+// contacts keep the advisory-only banner, unchanged (see the test below).
 
-test('a name-only supplier duplicate can be answered with create-separate', () => {
-  const nameOnlyMatch = { ...match, matchedPhone: null, severity: 'name_only' as const }
-  const nameOnlyCheck: ContactDuplicateCheck = {
-    matches: [nameOnlyMatch],
-    duplicateReview: review,
-    allowedActions: ['use_existing', 'create_separate'],
-  }
-  assert.deepEqual(createSeparateContactDecision(nameOnlyCheck), { action: 'create_separate', ...review },
-    'the server now offers both choices for a name-only match, so the form can echo the review')
-})
-
-test('the supplier form asks for a decision on ANY blocking match, not just an exact one', () => {
+test('the supplier form no longer asks for a decision on a same-name match', () => {
   const suppliers = read('../src/components/contacts/SuppliersTab.tsx')
-  assert.match(suppliers, /const decisionMatch = duplicateMatches\.find\(\(match\) => match\.severity !== 'phone_conflict'\)/,
-    'a same-name supplier must reach the confirm dialog -- otherwise the 409 loops forever')
-  assert.match(suppliers, /setPendingDuplicateCheck\(decisionMatch \? activeDuplicateCheck : null\)/)
-  assert.doesNotMatch(suppliers, /const exactMatch = duplicateMatches\.find/, 'the exact-only gate is gone')
-  assert.match(suppliers, /contact_duplicate_same_name_message/, 'and the dialog says what the duplicate actually is')
+  assert.doesNotMatch(suppliers, /setPendingDuplicateCheck/, 'no pending-decision state -- the server resolves silently')
+  assert.doesNotMatch(suppliers, /const decisionMatch = duplicateMatches\.find/, 'no decision gate before submit')
+  assert.match(suppliers, /const existingNameMatch = duplicateMatches\.find\(\(match\) => match\.severity !== 'phone_conflict'\)/,
+    'the worst non-phone-conflict match is still read, but only to show which record saving will use')
+  assert.match(suppliers, /contact_duplicate_will_use_existing/, 'the note tells the user saving will use the existing record, not ask them to choose')
 })
 
-test('only replays of an already-confirmed write carry allow_duplicate_name', () => {
+test('allow_duplicate_name and create-separate plumbing are fully gone from the supplier form', () => {
   const suppliers = read('../src/components/contacts/SuppliersTab.tsx')
-  assert.equal((suppliers.match(/allow_duplicate_name: true/g) || []).length, 2,
-    'buildSupplierPayload (undo/redo) and the bulk restore -- and nothing else')
-  const commit = suppliers.slice(suppliers.indexOf('const commitSupplier'), suppliers.indexOf('const commitSupplier') + 1200)
-  assert.doesNotMatch(commit, /allow_duplicate_name/, 'the Add/Edit form itself must face the prompt')
+  assert.doesNotMatch(suppliers, /allow_duplicate_name/, 'the server never offers a create-separate escape hatch for suppliers anymore')
+  assert.doesNotMatch(suppliers, /createSeparateContactDecision/, 'suppliers never send a create_separate decision')
+  assert.doesNotMatch(suppliers, /duplicateDecision: /, 'the supplier submit path sends no client-chosen decision at all')
 })
 
-test('customers and delivery keep their advisory name-only banner', () => {
+test('the supplier banner tells the user saving will use the existing record, and hides the choice buttons', () => {
+  const banner = read('../src/components/contacts/DuplicateFlagBanner.tsx')
+  assert.match(banner, /autoResolves/, 'the banner knows some callers auto-resolve instead of prompting')
+  assert.match(banner, /contact_duplicate_will_use_existing/)
+  const suppliers = read('../src/components/contacts/SuppliersTab.tsx')
+  assert.match(suppliers, /<DuplicateFlagBanner matches=\{duplicateMatches\} entityLabel="supplier" autoResolves onUseExisting=\{onUseExisting\} t=\{t\} \/>/,
+    'the supplier tab passes autoResolves; customers/delivery do not (checked below)')
+})
+
+test('customers and delivery keep their advisory name-only banner and never auto-resolve', () => {
   const banner = read('../src/components/contacts/DuplicateFlagBanner.tsx')
   assert.match(banner, /name_only:/, 'a name-only match is still shown, on every contact table')
   for (const file of ['../src/components/contacts/CustomerFormModal.tsx', '../src/components/contacts/DeliveryTab.tsx']) {
-    assert.doesNotMatch(read(file), /allow_duplicate_name/, `${file} needs no escape hatch -- its name-only matches are not gated`)
+    const source = read(file)
+    assert.doesNotMatch(source, /allow_duplicate_name/, `${file} needs no escape hatch -- its name-only matches are not gated`)
+    assert.doesNotMatch(source, /autoResolves/, `${file} still prompts -- P4-2 is suppliers-only`)
   }
 })
 
@@ -169,7 +173,7 @@ test('all duplicate-decision copy is available in both languages', () => {
     'contact_duplicate_review_changed',
     'contact_duplicate_existing_load_failed',
     'contact_duplicate_existing_choices',
-    'contact_duplicate_same_name_message',
+    'contact_duplicate_will_use_existing',
   ]) {
     assert.equal(typeof en[key], 'string', `English ${key}`)
     assert.equal(typeof km[key], 'string', `Khmer ${key}`)

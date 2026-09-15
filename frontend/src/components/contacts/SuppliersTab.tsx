@@ -31,7 +31,7 @@ import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countA
 import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
-import { createSeparateContactDecision, readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
+import { readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateCheck, type ContactDuplicateMatch } from './contactDuplicates'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -122,11 +122,7 @@ interface SupplierPayload {
   gender?: string | null
   userId?: string | number | null
   userName?: string | null
-  duplicateDecision?: ContactDuplicateDecision
   __rename_cascade?: 'carry' | 'record_only'
-  // P3-9: replays of a write the user already confirmed skip the server's
-  // same-name decision prompt; the Add form itself never sends this.
-  allow_duplicate_name?: boolean
 }
 
 interface SupplierMutationResult {
@@ -242,19 +238,22 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // P4-2: a same-name supplier is no longer a choice the operator makes --
+  // the server (routes/contacts.ts checkContactDuplicateBlock) resolves it
+  // straight to the existing record, silently, so there is nothing left to
+  // echo back on save. `serverDuplicateCheck` stays only for the one case
+  // that IS still a real conflict server-side: a stale client missed a
+  // phone_conflict (a different name already owns this phone), and the 409
+  // refreshes the banner below with the current match.
   const [serverDuplicateCheck, setServerDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
-  const [pendingDuplicateCheck, setPendingDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
   const primaryOptionPhone = getPrimaryContactOption(options).phone || form.phone || ''
   const duplicateCheck = useContactDuplicateFlag('suppliers', form.name || '', [form.phone || '', ...options.map((option) => option.phone)], supplier?.id)
   const activeDuplicateCheck = serverDuplicateCheck || duplicateCheck
   const duplicateMatches = activeDuplicateCheck.matches
-  // P3-9: a same-name supplier now needs an explicit choice, not just an
-  // advisory banner -- the server refuses a name-only duplicate create or
-  // rename without one (routes/contacts.ts checkContactDuplicateBlock). A
-  // phone conflict is not a choice at all and is refused above, so the
-  // decision match is simply the worst non-conflict match.
-  const decisionMatch = duplicateMatches.find((match) => match.severity !== 'phone_conflict')
-  const pendingDecisionMatch = pendingDuplicateCheck?.matches.find((match) => match.severity !== 'phone_conflict')
+  // The worst non-phone-conflict match currently known -- purely informational
+  // now (see above): saving resolves to this record instead of creating or
+  // renaming onto a second row, and the confirm dialog says so below.
+  const existingNameMatch = duplicateMatches.find((match) => match.severity !== 'phone_conflict')
   const clearServerDuplicateCheck = () => setServerDuplicateCheck(null)
   const set = (key: keyof SupplierPayload, value: string) => { clearServerDuplicateCheck(); setForm((current) => ({ ...current, [key]: value })) }
   const addOption = () => {
@@ -264,8 +263,7 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
   const updateOption = (index: number, nextOption: ContactOption) => { clearServerDuplicateCheck(); setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option))) }
   const removeOption = (index: number) => { clearServerDuplicateCheck(); setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index)) }
   // Part 563: validate, then open the review dialog; commitSupplier saves on
-  // confirm. The exact-duplicate window.confirm() is folded into the dialog
-  // (danger note) instead of a separate native popup.
+  // confirm.
   const handleSubmit = () => {
     if (saving) return
     const phoneConflict = duplicateMatches.find((match) => match.severity === 'phone_conflict')
@@ -274,7 +272,6 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
       return
     }
     setLocalError('')
-    setPendingDuplicateCheck(decisionMatch ? activeDuplicateCheck : null)
     setConfirmOpen(true)
   }
 
@@ -295,7 +292,6 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
     setSaving(true)
     try {
       const primaryOption = getPrimaryContactOption(options)
-      const duplicateDecision = pendingDuplicateCheck ? createSeparateContactDecision(pendingDuplicateCheck) : null
       const result = await Promise.resolve(onSave({
         ...form,
         phone: primaryOption.phone || form.phone || '',
@@ -303,14 +299,11 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
         address: serializeContactOptions(options) || '',
         contact_person: primaryOption.name || form.contact_person || '',
         gender: form.gender || '',
-        ...(duplicateDecision ? { duplicateDecision } : {}),
       }))
       const nextCheck = (result as { duplicateDecisionRequired?: ContactDuplicateCheck } | null)?.duplicateDecisionRequired
       if (nextCheck) {
         setServerDuplicateCheck(nextCheck)
         setLocalError(t('contact_duplicate_review_changed') || 'Review the current possible duplicate records before saving.')
-      } else if (duplicateDecision && (result as { success?: boolean } | null)?.success === true) {
-        resolveContactDuplicateSyncError(pendingDuplicateCheck)
       }
     } finally {
       setSaving(false)
@@ -423,7 +416,7 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
           </div>
         ) : null}
 
-        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="supplier" onUseExisting={onUseExisting} t={t} />
+        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="supplier" autoResolves onUseExisting={onUseExisting} t={t} />
 
         {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx/
             CustomerFormModal.tsx's own fix. */}
@@ -438,13 +431,13 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
           title={supplier ? (t('edit_supplier') || 'Edit Supplier') : (t('add_supplier') || 'Add Supplier')}
           message={String(form.name || '').trim()}
           items={buildSupplierReviewItems()}
-          note={pendingDecisionMatch
-            ? (pendingDecisionMatch.severity === 'name_only'
-              ? (t('contact_duplicate_same_name_message') || 'A supplier with this exact name already exists. Use that record, or confirm this is a separate one.')
-              : (t('contact_duplicate_possible_message') || 'A contact already has this name and phone number. Use the existing record or create a separate one.'))
+          // P4-2: a same-name match is never a choice for suppliers any more
+          // (the server resolves it silently) -- this note is purely
+          // informational, naming the record the save will actually land on.
+          note={existingNameMatch
+            ? (t('contact_duplicate_will_use_existing') || `This name matches an existing supplier. Saving will use "${existingNameMatch.name}" instead of creating a new one.`)
             : undefined}
-          danger={!!pendingDecisionMatch}
-          confirmLabel={pendingDecisionMatch ? (t('contact_duplicate_create_separately') || 'Create separately') : supplier ? (t('save') || 'Save') : (t('add_supplier') || 'Add Supplier')}
+          confirmLabel={supplier ? (t('save') || 'Save') : (t('add_supplier') || 'Add Supplier')}
           cancelLabel={t('cancel') || 'Cancel'}
           working={saving}
           workingLabel={t('saving') || 'Saving...'}
@@ -715,11 +708,6 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     userId: user?.id,
     userName: user?.name,
     __rename_cascade: 'carry',
-    // Only undo/redo replays build a payload this way (the Add/Edit form
-    // builds its own). Re-applying a create or a rename the user already
-    // confirmed must not stop on the P3-9 same-name prompt -- restoring two
-    // deleted same-name suppliers would otherwise fail on the second one.
-    allow_duplicate_name: true,
   }), [user?.id, user?.name])
 
   const runSupplierMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<SupplierMutationResult> => (
@@ -1026,9 +1014,6 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
                 notes: snapshot.notes || '',
                 userId: user?.id,
                 userName: user?.name,
-                // Same replay rule as buildSupplierPayload: a bulk restore
-                // re-creates rows the user already had, same names included.
-                allow_duplicate_name: true,
               }), 'Restore deleted suppliers')
               return { restoredId: Number(result?.id || result?.data?.id || 0) }
             })
