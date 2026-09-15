@@ -140,17 +140,31 @@ function mergeBranchStockEntries(items: ProductRecord[]): Array<{ branch_id: unk
 // imposed here; rows come back in first-seen order within `items`.
 export function mergeSameDetailRows(items: ProductRecord[] = []): ProductGroupRow[] {
   const source = Array.isArray(items) ? items : []
-  // Callers pass ONE already-same-name group. clusterRowsByBarcodeIdentity
-  // implements the Sep 15 2026 wildcard ruling: two rows are the same
-  // product when their real barcodes fold to the same key, OR when at least
-  // one side has no real barcode (a broken/empty/word barcode is a wildcard,
-  // never a second identity on its own); two DIFFERENT real barcodes remain
-  // separate child rows. Not a plain signature map -- see productDetailRule
-  // for why (non-transitive: a broken row can only attach to ONE ranked
-  // real-barcode winner when the group holds more than one real code).
-  const clusters = clusterRowsByBarcodeIdentity(
-    source as unknown as Array<{ id?: unknown; barcode?: unknown; live_stock_quantity?: unknown; stock_quantity?: unknown }>,
-  ) as unknown as ProductRecord[][]
+  // Some callers pass one already-same-name group (buildProductGroups);
+  // others pass the whole unsorted catalog (mergePortalCatalogProducts), so
+  // this groups by exact name FIRST -- clusterRowsByBarcodeIdentity only
+  // resolves the barcode half of identity and must never see two different
+  // names in the same call, or an unrelated pair sharing a broken/empty
+  // barcode would wildcard-merge across names.
+  //
+  // Within one name group, clusterRowsByBarcodeIdentity implements the Sep
+  // 15 2026 wildcard ruling: two rows are the same product when their real
+  // barcodes fold to the same key, OR when at least one side has no real
+  // barcode (a broken/empty/word barcode is a wildcard, never a second
+  // identity on its own); two DIFFERENT real barcodes remain separate child
+  // rows. Not a plain signature map -- see productDetailRule for why (non-
+  // transitive: a broken row can only attach to ONE ranked real-barcode
+  // winner when the group holds more than one real code).
+  const byName = new Map<string, ProductRecord[]>()
+  for (const item of source) {
+    const key = normalizeProductGroupName(item?.name)
+    const bucket = byName.get(key)
+    if (bucket) bucket.push(item)
+    else byName.set(key, [item])
+  }
+  const clusters = [...byName.values()].flatMap((nameGroup) => clusterRowsByBarcodeIdentity(
+    nameGroup as unknown as Array<{ id?: unknown; barcode?: unknown; live_stock_quantity?: unknown; stock_quantity?: unknown }>,
+  )) as unknown as ProductRecord[][]
   // Preserve first-seen order across clusters, matching the prior signature-
   // map's insertion-order guarantee.
   const orderOf = new Map<ProductRecord, number>()
