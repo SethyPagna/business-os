@@ -85,6 +85,7 @@ const STOREFRONT_ICON = '/leang-cosmetics-icon-512.png'
 const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v1.png'
 const STOREFRONT_MANIFEST = '/portal-manifest.json'
 const PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
+const CONTACT_MINIMIZED_STORAGE_KEY = 'business-os-portal-contact-minimized-v1'
 const PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID = 'business-os-portal-bootstrap'
 const PUBLIC_PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
 const PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT = 80
@@ -700,6 +701,26 @@ export default function PublicCatalogPage() {
   // once. Keeping the drawer's shortcut on its own state removes that
   // cross-talk entirely.
   const [contactOpen, setContactOpen] = useState(false)
+  // Minimized state is remembered per viewer, not per store -- a shopper who
+  // tucks the contact button away should not see it pop back on their next
+  // page view in this browser. Read once at mount; localStorage throws in
+  // Safari private mode, so a blocked read/write just falls back to "not
+  // minimized" instead of taking the storefront down.
+  const [contactMinimized, setContactMinimizedState] = useState(() => {
+    try {
+      return window.localStorage?.getItem(CONTACT_MINIMIZED_STORAGE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const setContactMinimized = (value: boolean) => {
+    setContactMinimizedState(value)
+    try {
+      window.localStorage?.setItem(CONTACT_MINIMIZED_STORAGE_KEY, value ? '1' : '0')
+    } catch {
+      // Storage unavailable -- the choice still applies for this page view.
+    }
+  }
   const [bucketContactOpen, setBucketContactOpen] = useState(false)
   const [bucketCopyState, setBucketCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [scrollButtonsVisible, setScrollButtonsVisible] = useState(false)
@@ -1892,17 +1913,51 @@ export default function PublicCatalogPage() {
     </button>
   )
 
+  // Minimized: a slim edge tab, same vertical slot as the full button, that
+  // restores it on tap. Full: the round button plus a small X pinned to its
+  // top-right corner that minimizes it. The X stays fully opaque on touch
+  // (there is no hover to reveal it there) and only fades in on genuine
+  // hover-capable pointers, via the `hover: hover` media feature rather than
+  // Tailwind's plain `hover:`, which also fires on a tap in most mobile
+  // browsers and would otherwise leave it stuck visible after one touch.
   const contactFab = contactChannels.length > 0 ? (
-    <button
-      type="button"
-      className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex h-12 w-12 items-center justify-center rounded-full bg-white text-slate-700 shadow-xl ring-1 ring-slate-200 transition hover:bg-slate-50 dark:bg-neutral-900 dark:text-neutral-100 dark:ring-neutral-700 dark:hover:bg-neutral-800"
-      onClick={() => setContactOpen((current) => !current)}
-      aria-label={copy('contactUs', 'Contact us')}
-      title={copy('contactUs', 'Contact us')}
-      aria-expanded={contactOpen}
-    >
-      <Headset className="h-5 w-5" />
-    </button>
+    contactMinimized ? (
+      <button
+        type="button"
+        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-0 z-50 flex h-11 w-7 items-center justify-center rounded-l-full bg-white text-slate-700 shadow-xl ring-1 ring-slate-200 transition hover:w-9 dark:bg-neutral-900 dark:text-neutral-100 dark:ring-neutral-700"
+        onClick={() => setContactMinimized(false)}
+        aria-label={copy('contactUsRestore', 'Show the contact us button')}
+        title={copy('contactUsRestore', 'Show the contact us button')}
+      >
+        <Headset className="h-4 w-4" />
+      </button>
+    ) : (
+      <div className="group fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50">
+        <button
+          type="button"
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-slate-700 shadow-xl ring-1 ring-slate-200 transition hover:bg-slate-50 dark:bg-neutral-900 dark:text-neutral-100 dark:ring-neutral-700 dark:hover:bg-neutral-800"
+          onClick={() => setContactOpen((current) => !current)}
+          aria-label={copy('contactUs', 'Contact us')}
+          title={copy('contactUs', 'Contact us')}
+          aria-expanded={contactOpen}
+        >
+          <Headset className="h-5 w-5" />
+        </button>
+        <button
+          type="button"
+          className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-white opacity-100 shadow transition [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 dark:bg-neutral-200 dark:text-neutral-900"
+          onClick={(event) => {
+            event.stopPropagation()
+            setContactOpen(false)
+            setContactMinimized(true)
+          }}
+          aria-label={copy('contactUsMinimize', 'Minimize the contact us button')}
+          title={copy('contactUsMinimize', 'Minimize the contact us button')}
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    )
   ) : null
 
   const contactPopover = contactOpen && contactChannels.length > 0 ? (

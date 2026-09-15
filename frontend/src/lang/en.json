@@ -3108,6 +3108,8 @@
       "clickNewPromotionHint": "Click \"New promotion\" above to add your first banner.",
       "company": "Company",
       "contactUs": "Contact us",
+      "contactUsMinimize": "Minimize the contact us button",
+      "contactUsRestore": "Show the contact us button",
       "contactVisibility": "Contact visibility",
       "content": "Portal content",
       "coverImage": "Cover image",
