@@ -50,6 +50,8 @@ import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
 import PortalFooter from './legal/LegalPages.tsx'
 import { getPortalLanguageText } from './portalLanguagePacks.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
+import InstallPromptBand from '../shared/InstallPromptBand.tsx'
+import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
 import {
   ALL_PUBLIC_TRANSLATE_OPTIONS,
   GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
@@ -856,6 +858,24 @@ export default function PublicCatalogPage() {
     document.documentElement.lang = portalDocumentLanguage
     return () => { document.documentElement.lang = previous }
   }, [portalDocumentLanguage])
+
+  // G5/B9: arm the same install-prompt capture and standalone external-link
+  // guard App.tsx arms at boot for the admin app. The storefront never mounts
+  // App.tsx (see PublicCatalogRoot.tsx), so neither installer ever ran here
+  // before -- an installed storefront PWA had no install offer of its own,
+  // AND (per standaloneNavigation.ts's own doc comment, written assuming
+  // this WAS already wired) a same-origin `target="_blank"` link on this
+  // exact page could still strand a shopper in a second chromeless window
+  // with no way back. Both installers are idempotent no-ops in an ordinary
+  // browser tab.
+  useEffect(() => {
+    const stopInstallPromptCapture = installBeforeInstallPromptCapture()
+    const stopExternalLinkGuard = installStandaloneExternalLinkGuard()
+    return () => {
+      stopInstallPromptCapture()
+      stopExternalLinkGuard()
+    }
+  }, [])
 
   // Widget isn't "ready" while an external translation is pending setup.
   useEffect(() => {
@@ -1891,6 +1911,17 @@ export default function PublicCatalogPage() {
     pullToRefreshEnabled,
   )
 
+  // The one automatic system notice the public portal is allowed to show
+  // unprompted (every other banner needs a merchant-configured reason) --
+  // pinned to the TOP, clear of the bottom-right bucket/contact FABs below,
+  // and dismissible exactly like the admin app's own IosInstallHint (shared
+  // logic, see InstallPromptBand.tsx's doc comment).
+  const installBand = (
+    <div className="pointer-events-none fixed inset-x-2 top-[calc(0.75rem+env(safe-area-inset-top))] z-40 flex justify-center sm:inset-x-auto sm:right-4 sm:w-[22rem] sm:justify-end">
+      <InstallPromptBand translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} />
+    </div>
+  )
+
   // Bucket ("My List") and Contact us are two separate floating icons,
   // stacked bottom-right with the bucket on top -- the bucket stays visible
   // at all times so it's discoverable even before a shopper adds anything,
@@ -2017,6 +2048,7 @@ export default function PublicCatalogPage() {
         if (event.button === 1 && event.target instanceof Element && event.target.closest('img, video, [data-protected-media="true"]')) event.preventDefault()
       }}
     >
+    {installBand}
     {bucketFab}
     {contactFab}
     {contactPopover}

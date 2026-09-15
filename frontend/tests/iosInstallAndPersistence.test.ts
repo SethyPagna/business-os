@@ -34,6 +34,13 @@ const appUpdate = read('src/utils/appUpdate.ts')
 const standaloneNavigation = read('src/utils/standaloneNavigation.ts')
 const standaloneDisplay = read('src/utils/standaloneDisplay.ts')
 const installHint = read('src/components/shared/IosInstallHint.tsx')
+// 2026-09-15: the device/prompt logic and both rendered halves moved out of
+// IosInstallHint.tsx into InstallPromptBand.tsx so the public storefront
+// wrapper (PublicCatalogPage.tsx) could share it -- App.tsx, which mounts
+// IosInstallHint, never renders for the public route at all. The checks that
+// exercise that shared behavior read the band, not the now-thin admin
+// wrapper.
+const installBand = read('src/components/shared/InstallPromptBand.tsx')
 const en = readJson('src/lang/en.json')
 const km = readJson('src/lang/km.json')
 
@@ -143,7 +150,7 @@ check('G5 the install hint is excluded from standalone mode and from desktop', (
   // fires beforeinstallprompt too but is not what the owner's iOS rule is
   // about.
   assert.match(standaloneNavigation, /if \(isStandaloneDisplayMode\(\)\) return false/, 'the iOS hint must bail in standalone')
-  assert.match(installHint, /if \(!isHandheldInstallTarget\(\)\) return undefined/, 'neither half may run on desktop')
+  assert.match(installBand, /if \(!isHandheldInstallTarget\(\)\) return undefined/, 'neither half may run on desktop')
 })
 
 check('G5 only Mobile Safari on a real iOS device gets the Share hint', () => {
@@ -157,8 +164,11 @@ check('G5 only Mobile Safari on a real iOS device gets the Share hint', () => {
 check('G5 the install hint renders its real content from first paint', () => {
   // CATCHES the forbidden "minimized stub that expands once a prerequisite is
   // answered" shape. The component has exactly two real renders plus null.
-  assert.ok(!/collapsed|minimi[sz]ed/i.test(stripComments(installHint)), 'the band must not have a collapsed stub state')
-  assert.match(installHint, /t\('ios_install_hint'\)/, 'the visible line must be the real hint text')
+  assert.ok(!/collapsed|minimi[sz]ed/i.test(stripComments(installBand)), 'the band must not have a collapsed stub state')
+  assert.match(installBand, /translate\('ios_install_hint'/, 'the visible line must be the real hint text')
+  // The admin wrapper must actually mount the shared band rather than
+  // re-implementing it -- otherwise the two could silently drift apart.
+  assert.match(installHint, /<InstallPromptBand translate=\{\(key, fallback\) => t\(key\) \|\| fallback\}/, 'IosInstallHint must adapt t() into the shared band, not duplicate its logic')
 })
 
 check('G5 the dismissal is a versioned, device-scoped, snoozed key', () => {
