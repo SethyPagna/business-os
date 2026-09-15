@@ -50,6 +50,10 @@ function cleanLine(value: unknown, max = 300): string {
 // grow a third way of printing a dollar amount.
 const round2 = (value: number) => Math.round(value * 100) / 100
 const usd = (value: unknown) => `$${round2(Number(value) || 0).toFixed(2)}`
+// p5/losses (Sep 15 2026): a terse, numbers-only suffix for the "loss" line
+// when some of its rows carried no cost anywhere -- the concise-report rule
+// (no explanatory prose) means this is a bare count, not a sentence.
+const unvaluedSuffix = (count: unknown) => (Number(count) > 0 ? ` (${Math.round(Number(count))}?)` : '')
 const riel = (value: unknown) => `${Math.round(Number(value) || 0).toLocaleString('en-US')}៛`
 function money(usd: unknown, khr: unknown, separator = ' · '): string {
   const usdValue = Number(usd) || 0; const khrValue = Number(khr) || 0; const parts: string[] = []
@@ -203,6 +207,10 @@ type SalesBucket = {
    * nothing was destroyed.
    */
   removalLossUsd?: number
+  /** Of removalLossUsd's rows, how many carried no cost anywhere -- p5/losses
+   *  (Sep 15 2026), owner: "i see the report says row removed has 1 no cost
+   *  price. this is impossible find issue and fix". Never dropped silently. */
+  removalLossUnvaluedRows?: number
 }
 type DayStats = { date: string; sales: SalesBucket; fees: MoneyBucket; stockIn: UnitBucket; stockOut: UnitBucket }
 type CashierRow = { cashier: string; count: number; usd: number }
@@ -257,6 +265,7 @@ async function dayStats(env: Env, date: string): Promise<DayStats> {
       // the `stockOut` line below is NOT this figure: it counts quantity over
       // remove + transfer_out + move_out, and a transfer is not a loss.
       removalLossUsd: totals.removal_loss_usd,
+      removalLossUnvaluedRows: totals.removal_loss_unvalued_rows,
     },
     fees,
     stockIn,
@@ -377,7 +386,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // reports as well". One number, no sentence. Like Credit it is a POSITIVE
   // memo and is never subtracted from the Sales/Profit lines above -- those
   // stay the canonical figures the app's own stats show.
-  if (showSales && stats.sales?.removalLossUsd) header.push(labeled('loss', usd(stats.sales.removalLossUsd)))
+  if (showSales && stats.sales?.removalLossUsd) header.push(labeled('loss', usd(stats.sales.removalLossUsd) + unvaluedSuffix(stats.sales.removalLossUnvaluedRows)))
   if (header.length) lines.push(RULE, ...header)
 
   if (showSales) {
@@ -599,6 +608,8 @@ export type ShiftReportFigures = {
    * nothing was destroyed, so the row is omitted rather than printed as $0.00.
    */
   removalLossUsd?: number
+  /** Same meaning as SalesBucket's field above. */
+  removalLossUnvaluedRows?: number
   otherExpenseUsd: number
   otherExpenseKhr: number
   // Native tender currencies, never USD-equivalent sales totals. Null/absent
@@ -667,7 +678,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // unpaid in reports as well"). A POSITIVE memo, one number and no sentence:
   // Sales and Profit above stay the canonical figures and are never reduced
   // by it, exactly as Credit behaves.
-  if (figures.removalLossUsd) lines.push(labeled('loss', usd(figures.removalLossUsd)))
+  if (figures.removalLossUsd) lines.push(labeled('loss', usd(figures.removalLossUsd) + unvaluedSuffix(figures.removalLossUnvaluedRows)))
 
   lines.push(RULE, labeled('invoices', figures.invoices))
 
@@ -813,6 +824,7 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number):
     // Stock destroyed during the shift, at cost -- the same kernel field the
     // day summary and the Reports hub read, so the surfaces cannot disagree.
     removalLossUsd: totals.removal_loss_usd,
+    removalLossUnvaluedRows: totals.removal_loss_unvalued_rows,
     otherExpenseUsd: expenses.usd,
     otherExpenseKhr: expenses.khr,
     // Refunds and courier payouts no longer suppress the estimate: they are

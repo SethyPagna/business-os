@@ -482,6 +482,11 @@ export type ShiftFigures = {
    *  with removal_loss_usd. profit may be negative -- that is the loss view. */
   revenue_after_losses_usd?: number
   profit_after_losses_usd?: number
+  /** Of the removal-loss rows above, how many carried no cost anywhere --
+   *  the figure is understated by whatever they were worth (p5/losses, Sep
+   *  15 2026, owner: "i see the report says row removed has 1 no cost
+   *  price. this is impossible find issue and fix"). Never dropped. */
+  removal_loss_unvalued_rows?: number
   /**
    * The two halves of the window's expenses, per currency:
    * delivery_cost = courier payouts + fees typed 'delivery';
@@ -502,6 +507,7 @@ export type ShiftFiguresInput = {
     delivery_usd?: unknown; pending_revenue_usd?: unknown; refund_usd?: unknown
     removal_loss_usd?: unknown
     revenue_after_losses_usd?: unknown; profit_after_losses_usd?: unknown
+    removal_loss_unvalued_rows?: unknown
   } | null | undefined
   /** Every fee in the window. */
   expenses: Partial<ShiftMoney> | null | undefined
@@ -535,6 +541,9 @@ export function composeShiftFigures(input: ShiftFiguresInput): ShiftFigures {
       removal_loss_usd: Math.max(0, round2(finite(totals.removal_loss_usd))),
       revenue_after_losses_usd: round2(finite(totals.revenue_after_losses_usd)),
       profit_after_losses_usd: round2(finite(totals.profit_after_losses_usd)),
+      ...(totals.removal_loss_unvalued_rows === undefined ? {} : {
+        removal_loss_unvalued_rows: Math.max(0, Math.round(finite(totals.removal_loss_unvalued_rows))),
+      }),
     }),
     delivery_cost: {
       usd: round2(deliveryFees.usd + courier.usd),

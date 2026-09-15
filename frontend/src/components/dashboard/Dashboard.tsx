@@ -1219,6 +1219,14 @@ export default function Dashboard() {
   // figures -- this is reported beside them, never subtracted from them.
   const aHasLosses = typeof analytics?.totals?.removal_loss_usd === 'number'
   const aRemovalLoss = analytics?.totals?.removal_loss_usd || 0
+  // p5/losses (Sep 15 2026): removed rows the loss chain still could not
+  // price at all -- the owner's own example ("i see the report says row
+  // removed has 1 no cost price") -- must say so beside the figure rather
+  // than silently reading as "every removal was accounted for".
+  const aRemovalUnvalued = Number(analytics?.totals?.removal_loss_unvalued_rows) || 0
+  const aRemovalLossLabel = aRemovalUnvalued > 0
+    ? `${fmtUSD(aRemovalLoss)} (${translateOr('rpt_note_removal_unvalued', '{count} removed row(s) had no recorded cost').replace('{count}', String(aRemovalUnvalued))})`
+    : fmtUSD(aRemovalLoss)
   const aRevenueInclLosses = analytics?.totals?.revenue_after_losses_usd ?? (aRevenue - aRemovalLoss)
   const aPrevRevenue = analytics?.prevTotals?.revenue_usd || 0
   const aTxCount  = analytics?.totals?.tx_count || 0
@@ -1452,7 +1460,7 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
         // a new one. The headline above IS the excluding figure, so only the
         // loss and the including figure need naming.
         ...(aHasLosses ? [
-          { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: fmtUSD(aRemovalLoss) },
+          { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: aRemovalLossLabel },
           { label: translateOr('rpt_revenue_after_losses', 'Revenue incl. losses'), value: fmtUSD(aRevenueInclLosses) },
         ] : []),
       ],
@@ -1507,7 +1515,7 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
         { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_cost_usd) || 0) },
         { label: translateOr('profit_margin', 'Profit margin'), value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
         ...(aHasLosses ? [
-          { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: fmtUSD(aRemovalLoss) },
+          { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: aRemovalLossLabel },
           { label: translateOr('rpt_profit_after_losses', 'Profit incl. losses'), value: fmtUSD(aProfitInclLosses) },
         ] : []),
       ],
