@@ -3,8 +3,8 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier, isAdminControlUser } from './permissions'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
-import { identityBarcodeKey, normalizeProductGroupName } from './productDetailRule'
-import { identityBarcodeKeySql } from './productIdentity'
+import { identityBarcodeKey, barcodeIdentityMatches, normalizeProductGroupName } from './productDetailRule'
+import { identityBarcodeMatchSql } from './productIdentity'
 import { barcodeKeysMatch } from './searchMatch'
 import { planReceiveBatchStock, type StockWriteStatement } from './productBatches'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from './stockReceiptGate'
@@ -679,11 +679,13 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     for (const line of createLines) {
       const product = line.product as CanonicalProduct
       // The SQL above narrows to the name group; the barcode is compared
-      // here, folded, mirroring pickSameIdentityRow. Same rule, same answer
-      // as the manual product form and the CSV import.
+      // here through the full wildcard rule (barcodeIdentityMatches, Sep 15
+      // 2026 -- a broken/empty barcode on either side never forces a new
+      // row), mirroring pickSameIdentityRow. Same rule, same answer as the
+      // manual product form and the CSV import.
       const duplicate = duplicateCandidates.find((row) =>
         normalizeProductGroupName(row.name) === normalizeProductGroupName(product.name)
-        && identityBarcodeKey(row.barcode) === identityBarcodeKey(product.barcode))
+        && barcodeIdentityMatches(row.barcode, product.barcode))
       if (duplicate) fail(`"${duplicate.name}" already exists with this barcode.`, 409, 'duplicate_product', { duplicate })
     }
   }
@@ -789,13 +791,18 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       // The commit-time race guard for the JS check above, and it has to ask
       // the SAME question or it lets through exactly what that check refuses.
       // It is a SQL predicate inside the batch, so it cannot call the fold --
-      // identityBarcodeKeySql is the one SQL copy of it, pinned against the
-      // real function by test-stock-session-identity-guard-pure.cjs. Cost is
-      // gone from here for the same reason it left the guard above.
+      // identityBarcodeMatchSql is the one SQL copy of the wildcard match,
+      // pinned against the real function by
+      // test-stock-session-identity-guard-pure.cjs. Cost is gone from here
+      // for the same reason it left the guard above. A broken/empty incoming
+      // barcode has no real-key predicate to add (it wildcard-matches every
+      // row in the name group already), so the fragment is omitted entirely
+      // rather than emitting an always-true clause.
+      const barcodeMatch = identityBarcodeMatchSql('barcode', product.barcode)
       statements.push(assertion(`NOT EXISTS(SELECT 1 FROM products WHERE is_active=1
-        AND ${identityBarcodeKeySql('barcode')}=@barcodeKey
+        ${barcodeMatch ? `AND ${barcodeMatch.sql}` : ''}
         AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey)`, {
-        barcodeKey: identityBarcodeKey(product.barcode), nameKey: normalizeProductGroupName(product.name),
+        ...(barcodeMatch?.params || {}), nameKey: normalizeProductGroupName(product.name),
       }))
     }
   }
@@ -1040,10 +1047,11 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
         // blocked on a cost the operator has since corrected, or waved
         // through because someone retyped the barcode with a leading zero,
         // are both the same bug in opposite directions.
+        const barcodeMatch = identityBarcodeMatchSql('barcode', row.barcode)
         statements.push(assertion(`NOT EXISTS(SELECT 1 FROM products WHERE id<>@product AND is_active=1
-          AND ${identityBarcodeKeySql('barcode')}=@barcodeKey
+          ${barcodeMatch ? `AND ${barcodeMatch.sql}` : ''}
           AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey)`, {
-          product: row.id, barcodeKey: identityBarcodeKey(row.barcode), nameKey: normalizeProductGroupName(row.name),
+          ...(barcodeMatch?.params || {}), product: row.id, nameKey: normalizeProductGroupName(row.name),
         }))
       }
       if (key === 'branchStock' && !created && !members.some(m => m.product_id === row.product_id && m.branch_id === row.branch_id)) continue
