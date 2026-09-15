@@ -18,6 +18,13 @@ const RETRY_DELAY_MS = 30_000
 const SYNC_LEASE_MS = 60_000
 const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024
 const PRECACHE_CONCURRENCY = 4
+// P4-4b fix 5: the deferred (non-eager) chunks are never a paint-blocking or
+// install-blocking gate -- they only need to be ready before the user
+// happens to open that route offline -- so they run at a lower concurrency
+// than the install-time precache to leave more of a constrained iOS
+// connection free for whatever the user is actually doing right after an
+// update installs.
+const DEFERRED_PRECACHE_CONCURRENCY = 2
 const CACHE_METADATA_URL = '/__business_os_cache_metadata__'
 const FILE_CHUNK_ENDPOINTS = {
   init: '/api/sync/files/chunks/init',
@@ -200,6 +207,23 @@ async function cacheVerifiedStaticAsset(cache, url) {
   await cache.put(request, response.clone())
 }
 
+// Set by precacheAppShell() during install, consumed by precacheDeferredAssets()
+// after activate. Module-scoped because the two run in different event
+// handlers of the same worker instance; a fresh install always overwrites it
+// before activate can read it.
+let pendingDeferredAssets = []
+
+async function precacheDeferredAssets() {
+  const assets = pendingDeferredAssets
+  pendingDeferredAssets = []
+  if (!assets.length) return
+  const staticCache = await caches.open(STATIC_CACHE)
+  // Soft-fail, same as the optional assets this replaces: a missing/failed
+  // deferred chunk must never throw and take the worker down -- it is only
+  // ever a route the user has not visited yet.
+  await mapWithConcurrency(assets, DEFERRED_PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url))
+}
+
 async function precacheAppShell() {
   const cache = await caches.open(APP_SHELL_CACHE)
   // One missing optional icon or manifest must not strand a new worker in
@@ -227,6 +251,17 @@ async function precacheAppShell() {
   const generatedAssets = Array.isArray(precachePayload?.assets)
     ? precachePayload.assets.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
     : []
+  // P4-4b fix 5: an older/degraded manifest without eager/deferred fields
+  // (a manifest fetched before this worker's own build, or a manifest a
+  // future rollback serves) falls back to treating every generated asset as
+  // eager -- the pre-fix behaviour -- rather than silently dropping the
+  // deferred half of the app forever.
+  const eagerAssets = Array.isArray(precachePayload?.eager)
+    ? precachePayload.eager.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
+    : generatedAssets
+  const deferredAssets = Array.isArray(precachePayload?.deferred)
+    ? precachePayload.deferred.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
+    : []
   const staticCache = await caches.open(STATIC_CACHE)
   const requiredEntryAssets = [...new Set(htmlEntryAssets)]
   const entryResults = await mapWithConcurrency(
@@ -237,15 +272,25 @@ async function precacheAppShell() {
   if (entryResults.some((result) => result.status === 'rejected')) {
     throw new Error('Application entry assets could not be cached')
   }
-  // Lazy route chunks make offline navigation richer, but they must not be a
-  // hard install gate. A single optional/missing chunk should never prevent a
-  // new worker from installing on a memory- or network-constrained iPhone.
-  const optionalAssets = [...new Set(generatedAssets.filter((url) => !requiredEntryAssets.includes(url)))]
-  await mapWithConcurrency(optionalAssets, PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url))
+  // The eager set (app shell + entry + active language packs + the routes an
+  // offline POS needs) makes install take a little longer than the bare
+  // shell, but still nowhere near the old "every generated chunk" precache --
+  // and it must not be a hard install gate either: a single optional/missing
+  // chunk should never prevent a new worker from installing on a memory- or
+  // network-constrained iPhone.
+  const optionalEagerAssets = [...new Set(eagerAssets.filter((url) => !requiredEntryAssets.includes(url)))]
+  await mapWithConcurrency(optionalEagerAssets, PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url))
   await cache.put(CACHE_METADATA_URL, new Response(JSON.stringify({
     version: APP_SHELL_VERSION,
     installedAt: Date.now(),
   }), { headers: { 'Content-Type': 'application/json' } }))
+  // Everything else is real but non-urgent: precached in the background after
+  // activation (precacheDeferredAssets), never blocking install/activate, so
+  // a fresh build does not saturate the connection before the app the user is
+  // already looking at finishes loading.
+  pendingDeferredAssets = [...new Set(deferredAssets.filter((url) => (
+    !requiredEntryAssets.includes(url) && !optionalEagerAssets.includes(url)
+  )))]
 }
 
 async function cacheNamesToRetain(keys) {
@@ -549,6 +594,12 @@ self.addEventListener('activate', (event) => {
       message: 'New version ready',
     })
   })())
+  // Deliberately NOT inside the waitUntil above: the deferred chunks are
+  // optional route assets the user has not opened yet, so this must not
+  // delay clients.claim() or the update-ready broadcast. A worker killed
+  // before this finishes just retries on the next activate/visit; nothing
+  // here is a correctness requirement the way the app shell is.
+  precacheDeferredAssets().catch(() => {})
 })
 
 self.addEventListener('sync', (event) => {

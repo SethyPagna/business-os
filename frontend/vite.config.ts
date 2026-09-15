@@ -124,6 +124,24 @@ function emitBuildManifest(): Plugin {
         .map((output) => `/${output.fileName.replace(/\\/g, '/')}`)
         .filter((fileName) => /\.(?:js|css|woff2)$/i.test(fileName))
         .sort()
+      const eagerFromRoutes = new Set(
+        toRoutePreloadFiles(bundle, eagerPrecacheChunkNames).map((fileName) => `/${fileName.replace(/\\/g, '/')}`),
+      )
+      // Entry chunks (the ones index.html itself references) are always
+      // eager -- they are already a hard install gate via requiredEntryAssets
+      // in service-worker.ts; this just keeps the manifest's own eager/
+      // deferred split consistent with that gate instead of contradicting it.
+      for (const output of Object.values(bundle)) {
+        if (isBundleChunk(output) && output.isEntry) {
+          eagerFromRoutes.add(`/${output.fileName.replace(/\\/g, '/')}`)
+        }
+      }
+      // The Khmer font is always eager too -- it is only cached opportunistically
+      // otherwise, and a deferred pass could still be running when the user
+      // switches to Khmer, briefly showing the wrong font (see the woff2 comment
+      // above for why this actually matters on iOS).
+      const eagerAssetUrls = offlineAssetUrls.filter((url) => eagerFromRoutes.has(url) || url.endsWith('.woff2'))
+      const deferredAssetUrls = offlineAssetUrls.filter((url) => !eagerAssetUrls.includes(url))
       this.emitFile({
         type: 'asset',
         fileName: 'business-os-build.json',
@@ -136,7 +154,12 @@ function emitBuildManifest(): Plugin {
       this.emitFile({
         type: 'asset',
         fileName: 'business-os-precache.json',
-        source: JSON.stringify({ hash: buildHash, assets: offlineAssetUrls }, null, 2),
+        source: JSON.stringify({
+          hash: buildHash,
+          assets: offlineAssetUrls,
+          eager: eagerAssetUrls,
+          deferred: deferredAssetUrls,
+        }, null, 2),
       })
     },
     writeBundle(options): void {
@@ -251,6 +274,25 @@ function toRoutePreloadFiles(bundle: OutputBundle, names: readonly string[]): st
 
   return Array.from(files).sort()
 }
+
+// P4-4b fix 5: the service worker used to precache all generated chunks
+// (274 assets / 7.92 MB at the time this was measured) synchronously at
+// install, so a new build saturated a cellular/iOS connection before the
+// app shell could even finish activating -- part of the same "takes a
+// while to load" complaint fix 4 addressed for navigations. Only the app
+// shell chunks, the active language packs and the routes an offline POS
+// actually needs (POS itself plus the shared product/API chunks it
+// depends on) need to be ready before first paint; everything else is
+// precached lazily after the worker activates (see precacheDeferredAssets
+// in service-worker.ts). This reuses the SAME chunk-name lists already
+// computed for route preloading (routePreloadChunkNames,
+// toRoutePreloadFiles) instead of a new classification mechanism.
+const eagerPrecacheChunkNames = [...new Set([
+  ...routePreloadChunkNames.admin,
+  ...routePreloadChunkNames.pos,
+  'lang-en',
+  'lang-km',
+])]
 
 function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
   return `<script data-business-os-route-preloads>${escapeInlineScript(`(function installBusinessOsRoutePreloads() {
