@@ -158,9 +158,15 @@ async function drainAnalyze(env, jobId) {
     __queue: queue,
   }
   await db.prepare(`INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1), (2, 'Warehouse', 1, 0)`).run({})
+  // name_normalized is set explicitly -- real product writes populate it via
+  // productWrites.ts, but this fixture inserts raw SQL directly. It matters
+  // here specifically because 'ANCHOR' is a word/broken barcode (Sep 15 2026
+  // realness floor): stockActionCatalog.ts's readCatalogProducts prefilters
+  // by the CLASS-folded barcode (which nulls out broken codes on purpose) and
+  // relies on name_normalized to still surface this candidate.
   await db.prepare(`INSERT INTO products
-      (id, name, barcode, selling_price_usd, cost_price_usd, stock_quantity, is_active)
-    VALUES (10, 'Anchor Serum', 'ANCHOR', 12, 4, 0, 1)`).run({})
+      (id, name, name_normalized, barcode, selling_price_usd, cost_price_usd, stock_quantity, is_active)
+    VALUES (10, 'Anchor Serum', 'anchor serum', 'ANCHOR', 12, 4, 0, 1)`).run({})
   await db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 0), (10, 2, 0)`).run({})
   await seedJob(db, 'analyze-e2e', Buffer.byteLength(csv))
 

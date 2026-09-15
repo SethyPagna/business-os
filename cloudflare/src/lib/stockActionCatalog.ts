@@ -6,7 +6,7 @@
 import type { D1Compat } from './db'
 import { buildInClause, chunkForBinding } from './sqlBinding'
 import { normalizeSearchText } from './searchMatch'
-import { identityBarcodeKey, identityBarcodeKeySql } from './productIdentity'
+import { identityBarcodeClassKey, identityBarcodeKeySql } from './productIdentity'
 import {
   getUnifiedStockMode,
   resolveUnifiedStockImportRows,
@@ -33,11 +33,16 @@ async function readCatalogProducts(
   db: D1Compat,
   rows: Array<Record<string, unknown>>,
 ): Promise<UnifiedStockCatalogProduct[]> {
-  // FOLDED, not raw. A candidate the SQL never selects is a candidate
-  // matchProduct can never fold in JS, so a barcode-only sheet row written in
-  // the GTIN-14 form of a code the catalog stores as EAN-13 read as "no such
-  // product" and the import created the leading-zero twin itself.
-  const barcodes = [...new Set(rows.map((row) => identityBarcodeKey(row.barcode)).filter(Boolean))]
+  // CLASS-FOLDED (Sep 15 2026), not raw. A candidate the SQL never selects is
+  // a candidate matchProduct can never fold in JS, so a barcode-only sheet
+  // row written in the GTIN-14 form of a code the catalog stores as EAN-13
+  // read as "no such product" and the import created the leading-zero twin
+  // itself. A broken/short barcode never drives this prefilter on its own
+  // (identityBarcodeClassKey folds it to '', filtered out below); the
+  // name_normalized prefilter just underneath already brings in every
+  // broken-barcode candidate of a matching name for matchProduct's wildcard
+  // fold to consider.
+  const barcodes = [...new Set(rows.map((row) => identityBarcodeClassKey(row.barcode)).filter(Boolean))]
   const names = [...new Set(rows.map((row) => normalizeSearchText(row.name)).filter(Boolean))]
   const found = new Map<number, UnifiedStockCatalogProduct>()
 

@@ -122,7 +122,11 @@ const differentCost = subject.resolveUnifiedStockImportRows([
   { name: 'Serum', barcode: 'ABC', cost_price: '7', shop: '1', date: '08/28/2026', action: 'add', batch: 'NEW' },
 ], 'direct', variants, branches, [])[0]
 assert.strictEqual(differentCost.productId, null, 'a third cost does not mint a third product either')
-assert.strictEqual(differentCost.identityKey, 'new:serum|abc', 'the identity carries no cost component any more')
+// 'ABC' is a word, not a real (all-digit, >=6-digit) barcode, so the Sep 15
+// 2026 wildcard rule folds it to '' in the identity key (identityBarcodeClassKey)
+// -- it carries neither a cost component (already true) nor a broken-barcode
+// component any more.
+assert.strictEqual(differentCost.identityKey, 'new:serum|', 'the identity carries no cost component, and a broken barcode folds to empty')
 assert.ok(differentCost.conflicts.some((message) => /merge the exact duplicates/.test(message)))
 const sameBatch = subject.resolveUnifiedStockImportRows([
   { name: 'Serum', barcode: 'ABC', cost_price: '7', shop: '1', date: '08/27/2026', action: 'add' },

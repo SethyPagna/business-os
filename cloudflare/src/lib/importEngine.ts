@@ -23,7 +23,7 @@
 // UPDATE (this session, correcting the paragraph above -- it had gone
 // stale and was actively misleading, having sent a full trace down a path
 // that turned out to already be built): products import DOES have a real
-import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, productDetailSignature, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing } from './productDetailRule'
+import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing, barcodeIdentityMatches, clusterRowsByBarcodeIdentity, rankBarcodeIdentityWinner, isRealBarcode } from './productDetailRule'
 import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
 import { planReconcileBranchSnapshot } from './productBatches'
@@ -1836,14 +1836,20 @@ export async function classifyProducts(
     // several distinct products (see the guard below), this is what lets a
     // re-import correctly find "this specific one" back instead of only
     // ever seeing whichever candidate happened to be last in the list.
-    const sameNameBarcodeCandidates = barcodeCandidates
-      ? barcodeCandidates.filter((c) => normalizeProductGroupName(c.name) === normalizeProductGroupName(name))
+    //
+    // Wildcard-aware (Sep 15 2026 ruling): narrowed from the SAME-NAME pool
+    // directly (byName), not only the raw-barcode Map above -- that Map
+    // cannot surface a real-barcode candidate when this row's barcode is
+    // broken/empty, or a broken-barcode candidate when this row's barcode
+    // is real. barcodeIdentityMatches decides membership either way.
+    const sameNameCandidates = byName.get(normalizeProductGroupName(name)) || []
+    const sameNameBarcodeCandidates = !skuMatch && barcode
+      ? sameNameCandidates.filter((c) => barcodeIdentityMatches(c.barcode, barcode))
       : []
     const barcodeMatch = sameNameBarcodeCandidates[0] || barcodeCandidates?.[0] || null
-    const incomingDetails = productDetailSignature(data as Record<string, unknown>)
     const isExactIdentity = (candidate: typeof existing[number] | null | undefined) => Boolean(candidate)
       && normalizeProductGroupName(candidate?.name) === normalizeProductGroupName(name)
-      && productDetailSignature(candidate as unknown as Record<string, unknown>) === incomingDetails
+      && barcodeIdentityMatches(candidate?.barcode, barcode)
     const activeLotProductIds = productsByActiveLot.get(lower(data.lot_code)) || new Set<number>()
     // True only when the active lot is what picked this product out of a set
     // of same-identity candidates -- the receipt evidence the old same-batch
@@ -1879,10 +1885,10 @@ export async function classifyProducts(
     }
 
     // A blank cost is unknown, not evidence that the cost is zero. It may
-    // inherit only when name+barcode identifies exactly one catalog row;
-    // multiple cost children stay ambiguous and are never guessed.
-    const sameNameSameBarcode = (byName.get(normalizeProductGroupName(name)) || [])
-      .filter((candidate) => identityBarcodeKey(candidate.barcode) === identityBarcodeKey(barcode))
+    // inherit only when name+barcode identifies exactly one catalog row
+    // (wildcard-aware, Sep 15 2026 ruling); multiple cost children stay
+    // ambiguous and are never guessed.
+    const sameNameSameBarcode = sameNameCandidates.filter((candidate) => barcodeIdentityMatches(candidate.barcode, barcode))
     if (!match && costWasBlank && sameNameSameBarcode.length === 1) {
       match = sameNameSameBarcode[0]
     }
@@ -1965,9 +1971,8 @@ export async function classifyProducts(
     // row named just gets its own branch_stock entry on that single product
     // via the existing update-path write below.
     if (!match) {
-      const candidates = byName.get(normalizeProductGroupName(name)) || []
-      for (const candidate of candidates) {
-        if (productDetailSignature(candidate as unknown as Record<string, unknown>) === incomingDetails) { match = candidate; break }
+      for (const candidate of sameNameCandidates) {
+        if (barcodeIdentityMatches(candidate.barcode, barcode)) { match = candidate; break }
       }
     }
 
@@ -2705,6 +2710,22 @@ async function preserveAnalyzedInventoryCostSnapshots(
   return applyAnalyzedInventoryCostSnapshots(results, analyzedByRow)
 }
 
+// Picks the ONE product a wildcard-collapsed same-name cluster (see
+// clusterRowsByBarcodeIdentity) resolves an import row to. Ranking has to
+// run over the REAL-barcode rows first, never the whole cluster: a cluster
+// already carries its broken/empty-barcode rows folded in, and ranking the
+// full mixed list by id could hand the import row to a broken row whose id
+// happens to be lower than the real row's -- the opposite of the rule
+// ("use the one with actual barcode"). Only when the cluster holds no real
+// barcode at all (every row is broken/empty, "both is empty merge into one
+// empty") does ranking fall back to the whole cluster.
+function pickIdentityClusterWinner<T extends { barcode?: unknown; id?: unknown; stock_quantity?: unknown; live_stock_quantity?: unknown }>(
+  cluster: readonly T[],
+): T {
+  const real = cluster.filter((row) => isRealBarcode(row.barcode))
+  return rankBarcodeIdentityWinner(real.length ? real : cluster)
+}
+
 export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inventoryAction?: InventoryImportAction | null): Promise<ImportRowResult[]> {
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, stock_quantity, cost_price_usd, cost_price_khr FROM products`)
@@ -2718,18 +2739,16 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
   // product happened to load last -- wrong-product stock changes with no
   // error.
   const bySku = new Map<string, (typeof products)[number][]>()
-  const byBarcode = new Map<string, (typeof products)[number][]>()
-  const byName = new Map<string, (typeof products)[number] | null>() // null = ambiguous (several products share the name)
+  // Every product of an exact name, not a single-or-null marker: the
+  // wildcard rule (Sep 15 2026 ruling) needs the WHOLE group to decide
+  // whether it is one identity (at most one real barcode present) or a
+  // genuine ambiguity (2+ distinct real barcodes) -- see the name-only
+  // fallback below.
+  const byNameAll = new Map<string, (typeof products)[number][]>()
   for (const product of products) {
     if (str(product.sku)) { const k = lower(product.sku); bySku.set(k, [...(bySku.get(k) || []), product]) }
-    // Keyed by the FOLDED barcode (identityBarcodeKey), and looked up the
-    // same way below: a stock/sale line whose code carries a leading zero the
-    // catalog row does not resolves to that row instead of failing "Product
-    // not found" -- the same equivalence classifyProducts and the merge tool
-    // already apply. The stored barcode is never rewritten.
-    if (str(product.barcode)) { const k = identityBarcodeKey(product.barcode); byBarcode.set(k, [...(byBarcode.get(k) || []), product]) }
     const nameKey = normalizeProductGroupName(product.name)
-    if (nameKey) byName.set(nameKey, byName.has(nameKey) ? null : product)
+    if (nameKey) { const list = byNameAll.get(nameKey) || []; list.push(product); byNameAll.set(nameKey, list) }
   }
   const canonicalImportBranches = indexCanonicalImportBranches(branches)
 
@@ -2758,7 +2777,22 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       if (picked.message) resolveError = `SKU "${sku}": ${picked.message}`
     }
     if (!product && !resolveError && barcode) {
-      const picked = pickCompatible(byBarcode.get(identityBarcodeKey(barcode)), rowName)
+      // Wildcard-aware (Sep 15 2026 ruling): scans by IDENTITY match, not a
+      // raw-key Map, so a real incoming code also matches an existing
+      // broken/empty-barcode row of a compatible name and vice versa. Same
+      // fold as stockActionImport.ts's matchProduct and the create/edit
+      // duplicate guard -- one comparison, never a second hand-copy of it.
+      //
+      // The wildcard reach is scoped to "same name" (the owner's ruling
+      // opens "for same name 100% products"); with NO name on this row
+      // there is no group to scope it to, so it falls back to an EXACT
+      // real-barcode key match only -- never every broken-barcode product
+      // in the whole catalog regardless of name (matchProduct's own guard,
+      // mirrored here).
+      const barcodeMatches = rowName
+        ? products.filter((candidate) => barcodeIdentityMatches(candidate.barcode, barcode))
+        : products.filter((candidate) => identityBarcodeKey(candidate.barcode) === identityBarcodeKey(barcode) && identityBarcodeKey(barcode))
+      const picked = pickCompatible(barcodeMatches, rowName)
       product = picked.product
       if (picked.message) resolveError = `Barcode "${barcode}": ${picked.message}`
     }
@@ -2767,9 +2801,21 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     // matched nothing (or a different-name product) is a different identity,
     // not "close enough".
     if (!product && !resolveError && !sku && !barcode && rowName) {
-      product = byName.get(normalizeProductGroupName(rowName)) || null
-      if (!product && byName.get(normalizeProductGroupName(rowName)) === null) {
-        resolveError = `Name "${rowName}" matches several products -- add the barcode so the right one is chosen.`
+      const group = byNameAll.get(normalizeProductGroupName(rowName)) || []
+      if (group.length === 1) {
+        product = group[0]
+      } else if (group.length > 1) {
+        // Wildcard-aware: several same-name catalog rows still resolve to ONE
+        // product when at most one of them carries a real barcode (the rest
+        // are broken/empty/tagged rows the rule folds into it) -- only 2+
+        // DISTINCT real barcodes stay a genuine ambiguity requiring the
+        // sheet to carry a barcode.
+        const clusters = clusterRowsByBarcodeIdentity(group)
+        if (clusters.length === 1) {
+          product = pickIdentityClusterWinner(clusters[0])
+        } else {
+          resolveError = `Name "${rowName}" matches several products -- add the barcode so the right one is chosen.`
+        }
       }
     }
     if (!product) {
@@ -3006,34 +3052,41 @@ export function parseSalesImportDateTime(value: unknown): string | null {
 
 export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise<ImportRowResult[]> {
   const products = await db
-    .prepare(`SELECT id, sku, barcode, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products`)
-    .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
+    .prepare(`SELECT id, sku, barcode, name, stock_quantity, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products`)
+    .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
   // Same collision-aware identity resolution as classifyInventory above
-  // (and classifyProducts): sku/barcode maps keep every candidate, and a
-  // row that names its product only attaches to a name-compatible one --
-  // the old single-value byBarcode put a sale line on whichever
-  // same-barcode product loaded last. byName keys use
-  // normalizeProductGroupName so "same name" means the same thing here as
-  // in every other import path.
+  // (and classifyProducts): sku maps keep every candidate, and a row that
+  // names its product only attaches to a name-compatible one -- the old
+  // single-value byBarcode put a sale line on whichever same-barcode
+  // product loaded last. byNameAll keys use normalizeProductGroupName so
+  // "same name" means the same thing here as in every other import path.
   const bySku = new Map<string, (typeof products)[number][]>()
-  const byBarcode = new Map<string, (typeof products)[number][]>()
-  const byName = new Map<string, (typeof products)[number] | null>()
+  // Every product of an exact name (see classifyInventory's own byNameAll
+  // for why this replaced a single-or-null marker under the wildcard rule).
+  const byNameAll = new Map<string, (typeof products)[number][]>()
   for (const product of products) {
     if (str(product.sku)) { const k = lower(product.sku); bySku.set(k, [...(bySku.get(k) || []), product]) }
-    // Keyed by the FOLDED barcode (identityBarcodeKey), and looked up the
-    // same way below: a stock/sale line whose code carries a leading zero the
-    // catalog row does not resolves to that row instead of failing "Product
-    // not found" -- the same equivalence classifyProducts and the merge tool
-    // already apply. The stored barcode is never rewritten.
-    if (str(product.barcode)) { const k = identityBarcodeKey(product.barcode); byBarcode.set(k, [...(byBarcode.get(k) || []), product]) }
     const nameKey = normalizeProductGroupName(product.name)
-    if (nameKey) byName.set(nameKey, byName.has(nameKey) ? null : product)
+    if (nameKey) { const list = byNameAll.get(nameKey) || []; list.push(product); byNameAll.set(nameKey, list) }
   }
   const pickSaleProduct = (candidates: (typeof products)[number][] | undefined, rowName: string): (typeof products)[number] | null => {
     if (!candidates?.length) return null
     if (!rowName) return candidates.length === 1 ? candidates[0] : null
     const compatible = candidates.filter((candidate) => normalizeProductGroupName(candidate.name) === normalizeProductGroupName(rowName))
     return compatible.length === 1 ? compatible[0] : null
+  }
+  // Name-only fallback, wildcard-aware (Sep 15 2026 ruling): several
+  // same-name catalog rows still resolve to ONE product when at most one of
+  // them carries a real barcode -- only 2+ distinct real barcodes stay a
+  // genuine ambiguity ("Product not found", same as today).
+  const pickSaleProductByName = (rowName: string): (typeof products)[number] | null => {
+    const group = byNameAll.get(normalizeProductGroupName(rowName)) || []
+    if (group.length === 1) return group[0]
+    if (group.length > 1) {
+      const clusters = clusterRowsByBarcodeIdentity(group)
+      if (clusters.length === 1) return pickIdentityClusterWinner(clusters[0])
+    }
+    return null
   }
 
   const branches = await db.prepare(`SELECT id, name, is_active FROM branches`).all<{ id: number; name: string; is_active?: number | null }>()
@@ -3287,9 +3340,18 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       const sku = str(row.sku || row.product_sku)
       const barcode = str(row.barcode)
       const productName = str(row.name || row.product_name)
+      // The wildcard reach (Sep 15 2026 ruling) is scoped to "same name";
+      // with no product name on the row there is no group to scope it to,
+      // so an unnamed barcode falls back to an EXACT real-barcode match
+      // only -- never every broken-barcode product catalog-wide.
+      const barcodeCandidates = barcode
+        ? (productName
+          ? products.filter((candidate) => barcodeIdentityMatches(candidate.barcode, barcode))
+          : products.filter((candidate) => identityBarcodeKey(candidate.barcode) === identityBarcodeKey(barcode) && identityBarcodeKey(barcode)))
+        : []
       const product = (sku ? pickSaleProduct(bySku.get(lower(sku)), productName) : null)
-        || (barcode ? pickSaleProduct(byBarcode.get(identityBarcodeKey(barcode)), productName) : null)
-        || (productName ? byName.get(normalizeProductGroupName(productName)) || null : null)
+        || (barcode ? pickSaleProduct(barcodeCandidates, productName) : null)
+        || (productName ? pickSaleProductByName(productName) : null)
       if (!product) {
         error = `Product not found for sku/barcode/name "${sku || barcode || productName}"`
         break
