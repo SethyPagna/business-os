@@ -240,6 +240,8 @@ app.post('/', async (c) => {
   if (!product) return c.json({ error: 'Product not found' }, 404)
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = ?').get<{ id: number; name: string }>([branchId])
 
+  const explicitBatchId = Number.isFinite(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null
+  const sessionId = Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null
   let received: { batchId: number; batchNumber: number | null; lotCode: string }
   try {
     received = await receiveBatchStock(db, {
@@ -248,13 +250,64 @@ app.post('/', async (c) => {
       quantity,
       expiryDate: body.expiry_date || null,
       receivedDate: body.received_date || null,
-      batchId: Number.isFinite(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null,
+      batchId: explicitBatchId,
       notes: body.notes || null,
       supplierId: Number.isFinite(Number(body.supplier_id)) && Number(body.supplier_id) > 0 ? Number(body.supplier_id) : null,
       supplierName: body.supplier_name || null,
       unitCostUsd,
       paymentStatus,
       creditDueDate,
+      // receiveBatchStock now also moves branch_stock/products.stock_quantity
+      // (see that function's own comment for why -- it used to only touch
+      // branch_batch_stock, silently leaving the aggregate stock unchanged).
+      // Log it as an ordinary inventory_movements 'add' row too, same as any
+      // other stock addition, so this doesn't become a receipt that's visible
+      // in the batch ledger and the audit log but invisible in Stock History.
+      // P4-4a: folded into receiveBatchStock's own db.batch call (via the
+      // resolved-batch-id subquery it hands back) instead of a second,
+      // separate INSERT round trip after receiveBatchStock returns.
+      buildBatchStatements: ({ batchKey, lotCode: planLotCode, resolvedBatchIdSql }) => [{
+        sql: `
+          INSERT INTO inventory_movements (
+            product_id, product_name, branch_id, branch_name, movement_type, quantity,
+            unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name,
+            created_at, batch_id
+          )
+          VALUES (
+            @productId, @productName, @branchId, @branchName, 'add', @quantity,
+            @unitCostUsd, @totalCostUsd, @reason, @referenceId, @userId, @userName,
+            CURRENT_TIMESTAMP, ${resolvedBatchIdSql}
+          )
+        `,
+        params: {
+          productId,
+          productName: product.name,
+          branchId,
+          branchName: branch?.name || null,
+          quantity,
+          // A receipt's money belongs to this movement, not only to the
+          // cumulative lot row. Same-day top-ups can share one
+          // product_batches row while carrying different costs; movement
+          // snapshots let Stock-in Sessions report each receipt accurately
+          // without mutating the product's cost.
+          unitCostUsd,
+          totalCostUsd,
+          // planLotCode matches the batch's real lot_code for every newly
+          // created lot (by far the common case -- it is the exact value
+          // just inserted into product_batches.lot_code). It can differ from
+          // the FINAL received.lotCode only when topping up an EXISTING lot
+          // (an explicit batch picked from a different date) via a request
+          // that also leaves reason blank -- a narrow, cosmetic edge case in
+          // the auto-generated label, traded here for not re-adding the
+          // round trip this fix removes.
+          reason: appendReceiptNotes(reason || `Stock received (${planLotCode})`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
+          referenceId: sessionId,
+          userId: user?.id ?? null,
+          userName: actorSnapshot(user),
+          batchId: explicitBatchId,
+          batchKey,
+        },
+      }],
     })
   } catch (err) {
     // The explicit-lot pick can fail validation ("Selected batch does not
@@ -264,52 +317,18 @@ app.post('/', async (c) => {
   }
   const { batchId, batchNumber, lotCode } = received
 
-  // receiveBatchStock now also moves branch_stock/products.stock_quantity
-  // (see that function's own comment for why -- it used to only touch
-  // branch_batch_stock, silently leaving the aggregate stock unchanged).
-  // Log it as an ordinary inventory_movements 'add' row too, same as any
-  // other stock addition, so this doesn't become a receipt that's visible
-  // in the batch ledger and the audit log but invisible in Stock History.
-  await db.prepare(`
-    INSERT INTO inventory_movements (
-      product_id, product_name, branch_id, branch_name, movement_type, quantity,
-      unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name,
-      created_at, batch_id
-    )
-    VALUES (
-      @productId, @productName, @branchId, @branchName, 'add', @quantity,
-      @unitCostUsd, @totalCostUsd, @reason, @referenceId, @userId, @userName,
-      CURRENT_TIMESTAMP, @batchId
-    )
-  `).run({
-    productId,
-    productName: product.name,
-    branchId,
-    branchName: branch?.name || null,
-    quantity,
-    // A receipt's money belongs to this movement, not only to the cumulative
-    // lot row. Same-day top-ups can share one product_batches row while
-    // carrying different costs; movement snapshots let Stock-in Sessions
-    // report each receipt accurately without mutating the product's cost.
-    unitCostUsd,
-    totalCostUsd,
-    reason: appendReceiptNotes(reason || `Stock received (${lotCode})`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
-    referenceId: Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null,
-    userId: user?.id ?? null,
-    userName: actorSnapshot(user),
-    batchId,
-  })
-
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_receive', 'product_batch', batchId, {
-    product_id: productId,
-    product_name: product.name,
-    branch_id: branchId,
-    quantity,
-    expiry_date: body.expiry_date || null,
-    lot_code: lotCode,
-    reason,
-  })
+  // P4-4a: the response below does not read the audit row, so it can run
+  // alongside the cache bump/broadcasts instead of its own awaited round trip.
   c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_receive', 'product_batch', batchId, {
+      product_id: productId,
+      product_name: product.name,
+      branch_id: branchId,
+      quantity,
+      expiry_date: body.expiry_date || null,
+      lot_code: lotCode,
+      reason,
+    }),
     bumpVersion(c.env, 'products'),
     broadcast(c.env, 'inventory', { type: 'batch_received', productId, branchId }),
     broadcast(c.env, 'products', { action: 'update', id: productId }),

@@ -505,6 +505,15 @@ export async function receiveBatchStock(db: D1Compat, input: {
   creditDueDate?: string | null
   provenanceKey?: string
   preserveHistoricalUnitCost?: boolean
+  // P4-4a: statements that need this receipt's own resolved batch_id (e.g. an
+  // inventory_movements row logging the receipt) but can only be built once
+  // batchKey is known -- built here, after that, and folded into the SAME
+  // db.batch call below instead of costing the caller its own separate round
+  // trip after this function returns. `resolvedBatchIdSql` is a subquery
+  // fragment matching the exact same batch-identity rule the final SELECT
+  // below uses (explicit @batchId when one was picked, else @productId +
+  // @batchKey), so it can be dropped into a statement's own VALUES list.
+  buildBatchStatements?: (ctx: { batchKey: string; lotCode: string; resolvedBatchIdSql: string }) => StockWriteStatement[]
 }): Promise<{ batchId: number; created: boolean; batchNumber: number | null; lotCode: string }> {
   const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
   const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : dateToBatchCode(receivedAt) as string
@@ -523,9 +532,15 @@ export async function receiveBatchStock(db: D1Compat, input: {
       ? { batchExists: Boolean(before), receivedCostUsd: before?.received_cost_usd ?? null }
       : undefined,
   })
+  const resolvedBatchIdSql = `(SELECT id FROM product_batches WHERE variant_product_id = @productId AND
+        ((@batchId IS NOT NULL AND id = @batchId) OR (@batchId IS NULL AND batch_key = @batchKey)) LIMIT 1)`
+  const extraStatements = input.buildBatchStatements
+    ? input.buildBatchStatements({ batchKey: plan.batchKey, lotCode: plan.lotCode, resolvedBatchIdSql })
+    : []
   await db.batch([
     ...plan.statements,
     ...(hasEnteredCost ? [{ sql: 'DELETE FROM stock_session_guards', params: {} }] : []),
+    ...extraStatements,
   ])
   const batch = await db.prepare(
     `SELECT id, batch_number, lot_code FROM product_batches
