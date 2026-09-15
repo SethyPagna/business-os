@@ -2222,30 +2222,58 @@ function ProductsFullEditor() {
     }
   }
 
+  // P4-4b item 5: images used to upload one-at-a-time (a `for...of` + `await`
+  // loop), so a 5-image gallery paid for 5 sequential round trips even though
+  // each upload is independent. A small worker pool now runs up to
+  // GALLERY_UPLOAD_CONCURRENCY uploads at once while writing each result into
+  // its ORIGINAL index of a pre-sized array, so final gallery order is still
+  // exactly the order the person picked/cropped the images in, regardless of
+  // which upload happens to finish first. Error behaviour is unchanged: any
+  // failed upload still fails the whole save (uploadGalleryImages still
+  // throws), it just now reports the first failure encountered rather than
+  // necessarily the first entry in gallery order, since later entries may
+  // already be in flight by the time an earlier one fails.
+  const GALLERY_UPLOAD_CONCURRENCY = 3
+
   const uploadGalleryImages = async (productId: EntityId | null | undefined, gallery: unknown[] = []): Promise<string[]> => {
-    const next: string[] = []
-    for (const entry of normalizeProductGallery(gallery)) {
-      if (!entry.startsWith('data:image/')) {
-        next.push(entry)
-        continue
+    const entries = normalizeProductGallery(gallery)
+    const results: string[] = new Array(entries.length)
+    let firstError: Error | null = null
+    let cursor = 0
+    const runWorker = async () => {
+      while (cursor < entries.length) {
+        const index = cursor
+        cursor += 1
+        const entry = entries[index]
+        if (!entry.startsWith('data:image/')) {
+          results[index] = entry
+          continue
+        }
+        const ext = entry.startsWith('data:image/png')
+          ? '.png'
+          : entry.startsWith('data:image/webp')
+            ? '.webp'
+            : entry.startsWith('data:image/gif')
+              ? '.gif'
+              : '.jpg'
+        const fileName = `product_${productId || 'new'}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`
+        try {
+          const uploaded = await runProductWriteMutation(
+            () => productApi.uploadProductImage({ productId, filePath: entry, fileName }),
+            'Upload product image',
+            PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS,
+          )
+          if (!uploaded?.path) throw new Error(uploaded?.error || 'Image upload failed')
+          results[index] = uploaded.path
+        } catch (e) {
+          if (!firstError) firstError = e instanceof Error ? e : new Error(String(e))
+        }
       }
-      const ext = entry.startsWith('data:image/png')
-        ? '.png'
-        : entry.startsWith('data:image/webp')
-          ? '.webp'
-          : entry.startsWith('data:image/gif')
-            ? '.gif'
-            : '.jpg'
-      const fileName = `product_${productId || 'new'}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`
-      const uploaded = await runProductWriteMutation(
-        () => productApi.uploadProductImage({ productId, filePath: entry, fileName }),
-        'Upload product image',
-        PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS,
-      )
-      if (!uploaded?.path) throw new Error(uploaded?.error || 'Image upload failed')
-      next.push(uploaded.path)
     }
-    return normalizeProductGallery(next)
+    const workerCount = Math.max(1, Math.min(GALLERY_UPLOAD_CONCURRENCY, entries.length))
+    await Promise.all(Array.from({ length: workerCount }, runWorker))
+    if (firstError) throw firstError
+    return normalizeProductGallery(results)
   }
 
   // S4-12: one product, written for the create-products session. Deliberately
