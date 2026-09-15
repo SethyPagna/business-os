@@ -124,7 +124,8 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
   './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision,
   './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision,
 })
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
+const schemaProbeReal = loadReal('lib/schemaProbe.ts')
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
   './db': { getDb: () => db },
   './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
   './reportMoneyPrecision': reportMoneyPrecision,

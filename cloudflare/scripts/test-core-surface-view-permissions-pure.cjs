@@ -135,11 +135,24 @@ async function main() {
   try {
     for (const file of fs.readdirSync(path.join(__dirname, '../migrations')).filter(f => f.endsWith('.sql')).sort()) sqlite.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
     sqlite.exec("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1); INSERT INTO products(id,name,sku,barcode,stock_quantity,cost_price_usd,purchase_price_usd,selling_price_usd) VALUES(1,'Example','SKU1','BAR1',5,12,12,20); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,5)")
-    const fixture = { prepare(sql) {
-      reads++
-      const stmt = sqlite.prepare(sql)
-      return Object.fromEntries(['all', 'get', 'run'].map(method => [method, async params => Array.isArray(params) ? stmt[method](...params) : stmt[method](params || {})]))
-    } }
+    const fixture = {
+      prepare(sql) {
+        reads++
+        const stmt = sqlite.prepare(sql)
+        return Object.fromEntries(['all', 'get', 'run'].map(method => [method, async params => Array.isArray(params) ? stmt[method](...params) : stmt[method](params || {})]))
+      },
+      // paginateProductFamilies sends its COUNT and ranked-page SELECT as one
+      // db.batch() round trip; both are reads here, so each item answers
+      // with its rows under `.results`, matching D1Result's shape.
+      async batch(items) {
+        return items.map((item) => {
+          reads++
+          const stmt = sqlite.prepare(item.sql)
+          const params = item.params
+          return { results: Array.isArray(params) ? stmt.all(...params) : stmt.all(params || {}) }
+        })
+      },
+    }
     const picker = await request('/branches', staff({}, revoked), {}, fixture)
     assert.equal(picker.status, 200)
     assert.deepEqual((await picker.json()).map(row => row.name).sort(), ['Shop', 'Warehouse'])

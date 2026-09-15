@@ -8,7 +8,7 @@ import { sendReturnTelegramEvent, sendTelegramEvent, formatSaleTelegramLines } f
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion } from '../lib/cache'
+import { bumpVersion, bumpVersions } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
@@ -2207,7 +2207,7 @@ app.post('/', async (c) => {
   const response = JSON.parse(committed.response_json) as ReturnCreateResponse
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: response.id }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(Promise.all([bumpVersion(c.env, 'products'), bumpVersion(c.env, 'returns'), bumpVersion(c.env, 'sales')]))
+  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: response.id }))
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, response.id, {
     kind: 'customer', returnNumber, receiptNumber: body.receipt_number || saleMeta?.receipt_number || null,
@@ -2498,11 +2498,7 @@ app.post('/supplier', async (c) => {
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'supplier_return', returnId, { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'supplier_return', id: returnId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env, 'products'),
-    bumpVersion(c.env, 'returns'),
-    bumpVersion(c.env, 'sales'),
-  ]))
+  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
   // Telegram: supplier return = stock out with the settlement money.
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, returnId, {
     kind: 'supplier', returnNumber, party: body.supplier_name || null,
@@ -3116,11 +3112,7 @@ app.patch('/:id', async (c) => {
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return_edit', id: Number(id) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env, 'products'),
-    bumpVersion(c.env, 'returns'),
-    bumpVersion(c.env, 'sales'),
-  ]))
+  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'update', id: Number(id) }))
   if (existing.sale_id) {
     c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: existing.sale_id }))

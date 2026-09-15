@@ -132,6 +132,7 @@
 // reports the reversal the COGS floor could not absorb, which is the missing
 // cost snapshot the floor used to swallow silently.
 import { getDb } from './db'
+import { tableColumnSet } from './schemaProbe'
 import type { Env } from '../index'
 import {
   localDateExpr,
@@ -936,9 +937,12 @@ function applySalesReportScalarScope<T extends { sql: string; params: Record<str
   return { ...base, sql: `(${base.sql}) AND (${scope.sql})`, params: { ...base.params, ...scope.params } }
 }
 
+// Report generation calls this up to nine times per request (see the
+// getSalesDayReport/getSalesPeriodSeries call sites below); each column set
+// is memoized per isolate by schemaProbe.ts's shared helper instead of
+// firing a fresh PRAGMA table_info() every time.
 async function reportTableColumns(db: ReturnType<typeof getDb>, table: string): Promise<Set<string>> {
-  const rows = await db.prepare(`PRAGMA table_info(${table})`).all<Record<string, unknown>>()
-  return new Set((rows || []).map((row) => String(row.name || '')))
+  return tableColumnSet(db, table)
 }
 
 async function reportRestoreActive(db: ReturnType<typeof getDb>): Promise<boolean> {

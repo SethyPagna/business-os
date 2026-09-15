@@ -4,7 +4,7 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
-import { cachedJsonResponse, getVersionWithFallback, bumpVersion } from '../lib/cache'
+import { cachedJsonResponse, getVersionWithFallback, bumpVersion, bumpVersions } from '../lib/cache'
 import { matchLibraryImagesStrict } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, isAdminControlUser } from '../lib/permissions'
@@ -648,19 +648,25 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     : 'lower(name) ASC, id ASC'
 
   const db = getDb(env)
-  const filters = buildSearchFilters(query, await loadLowStockConfig(env), options)
+  // loadLowStockConfig and the promotion-rules read are independent of each
+  // other (neither's SQL depends on the other's result), so they go out as
+  // one Promise.all instead of two sequential awaits.
+  const [lowStockConfig, promotionRules] = await Promise.all([
+    loadLowStockConfig(env),
+    // G1: promoted/discounted products occupy the block ABOVE the
+    // alphabetical run (Products page and POS both read this endpoint, so
+    // one ordering rule serves both). Which rules are live is decided by
+    // the shared kernel (lib/promotionRules.ts); their scope + the
+    // per-product discount condition are expressed in SQL so the ordering
+    // and the promo filters hold across server-side pagination, not just
+    // the loaded page.
+    query.money_precision_version==='1'
+      ? db.prepare('SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC').all<Record<string,unknown>>()
+        .then(rows => rows.map(row=>normalizePromotionRule(row,1)).filter((rule):rule is PromotionRule=>Boolean(rule && isRuleActive(rule))))
+      : loadActivePromotionRules(db),
+  ])
+  const filters = buildSearchFilters(query, lowStockConfig, options)
   const { where, joins, params, matchRankSql, matchTierSql, hasSearchTerm } = filters
-
-  // G1: promoted/discounted products occupy the block ABOVE the
-  // alphabetical run (Products page and POS both read this endpoint, so
-  // one ordering rule serves both). Which rules are live is decided by the
-  // shared kernel (lib/promotionRules.ts); their scope + the per-product
-  // discount condition are expressed in SQL so the ordering and the promo
-  // filters hold across server-side pagination, not just the loaded page.
-  const promotionRules = query.money_precision_version==='1'
-    ? (await db.prepare('SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC').all<Record<string,unknown>>())
-      .map(row=>normalizePromotionRule(row,1)).filter((rule):rule is PromotionRule=>Boolean(rule && isRuleActive(rule)))
-    : await loadActivePromotionRules(db)
   const promotedRankSql = `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
   const promoFilter = String(query.promo || '').trim().toLowerCase()
   if (promoFilter === 'promoted') {
@@ -761,15 +767,41 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // branch_stock/image_gallery data too, not left without it.
   const expandedItems = hasSearchTerm ? await expandSearchResultsToNameSiblings(env, items as Array<Record<string, unknown>>) : items
 
-  const itemsWithBranchStock = await attachBranchStock(env, expandedItems as Array<Record<string, unknown>>)
-  const itemsWithGallery = await attachImageGallery(env, itemsWithBranchStock)
-  // Scalar batch count per row (same shared helper Inventory uses), so the
-  // Products page shows "N batches" instead of 0 without shipping every
-  // product's full batch array. See lib/productBatches.ts's attachBatchCounts.
-  await attachBatchCounts(getDb(env), itemsWithGallery)
+  // attachBranchStock, attachImageGallery and attachBatchCounts each read
+  // off the same id list independently -- none needs another's output -- so
+  // they fan out with Promise.all instead of chaining. attachBranchStock and
+  // attachImageGallery each return a brand-new array (a `.map()` spread of
+  // `expandedItems`, never mutating it), so running them side by side
+  // against the same `expandedItems` is safe. attachBatchCounts is the one
+  // in-place mutator (writes only `batch_count` onto each `expandedItems`
+  // element -- see lib/productBatches.ts), and it is the only writer to that
+  // array, so there is no concurrent-write hazard; Promise.all only reads
+  // `expandedItems[i].batch_count` back out after every promise (including
+  // attachBatchCounts's) has settled, so the mutation is guaranteed visible
+  // by merge time. Scalar batch count per row (same shared helper Inventory
+  // uses) shows the Products page "N batches" instead of 0 without shipping
+  // every product's full batch array.
+  const [itemsWithBranchStock, itemsWithGallery] = await Promise.all([
+    attachBranchStock(env, expandedItems as Array<Record<string, unknown>>),
+    attachImageGallery(env, expandedItems as Array<Record<string, unknown>>),
+    attachBatchCounts(getDb(env), expandedItems as Array<Record<string, unknown>>),
+  ])
+  // Pick only the specific keys each helper actually adds/overrides, rather
+  // than spreading their whole returned objects -- both attachBranchStock's
+  // and attachImageGallery's output objects are `{...expandedItems[i], ...}`
+  // (a copy of every original field, since they read off the pre-fan-out
+  // `expandedItems`, not off each other), so a full-object spread of BOTH
+  // would have the second one's copy of the ORIGINAL `stock_quantity` column
+  // silently overwrite the first one's live-computed value.
+  const mergedItems = (expandedItems as Array<Record<string, unknown>>).map((base, index) => ({
+    ...base,
+    stock_quantity: itemsWithBranchStock[index].stock_quantity,
+    branch_stock: itemsWithBranchStock[index].branch_stock,
+    image_gallery: itemsWithGallery[index].image_gallery,
+  }))
 
   return {
-    items: itemsWithGallery,
+    items: mergedItems,
     total,
     page,
     pageSize,
@@ -1786,7 +1818,7 @@ app.post('/rename-brand', async (c) => {
   const library = await buildBrandLibraryMutationPlan(db, [from, to], to)
   await db.batch([...changed.statements, ...library.statements])
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'brand', null, { from, to, products: changed.products })
-  await Promise.all([bumpVersion(c.env, 'products'), bumpVersion(c.env, 'settings')])
+  await bumpVersions(c.env, ['products', 'settings'])
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'rename-brand', from, to }))
   return c.json({ renamed: true, products: changed.products, batches: 0, brands: library.brands })
 })

@@ -216,12 +216,6 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
   // `matched`, unchanged.
   const resultSource = familyMemberBaseWhereSql ? 'family_members' : 'matched'
 
-  const totalRow = await db.prepare(`
-    ${ctes}
-    SELECT COUNT(*) AS count FROM families
-  `).get<{ count: number }>(params)
-  const total = totalRow?.count || 0
-
   // `family_root_id ASC` is appended to EVERY caller's familyOrderSql as the
   // terminal key, and it is not decoration: family_root_id is the GROUP BY
   // key of `families`, so it is unique per row and makes the window
@@ -235,22 +229,34 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
   // results are shuffled / the one I want is at the bottom", which is the
   // symptom this lane was opened for. Appending rather than replacing keeps
   // every existing caller's intended order intact.
-  const rawRows = await db.prepare(`
-    ${ctes},
-    ranked AS (
-      SELECT family_root_id, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}, family_root_id ASC) AS family_rank
-      FROM families
-    )
-    SELECT ${resultSource}.*
-    FROM ${resultSource}
-    JOIN ranked ON ranked.family_root_id = ${resultSource}.__family_root_id
-    WHERE ranked.family_rank > @__familyOffset AND ranked.family_rank <= @__familyOffsetEnd
-    ORDER BY ranked.family_rank ASC, ${intraFamilyOrderSql}
-  `).all<Record<string, unknown>>({
-    ...params,
-    __familyOffset: offset,
-    __familyOffsetEnd: offset + pageSize,
-  })
+  //
+  // The COUNT and the ranked page SELECT share the same CTEs/params and have
+  // no data dependency on each other (the page query doesn't need the
+  // count's result), so they go over the wire as one db.batch() round trip
+  // instead of two sequential prepare().get()/prepare().all() calls -- same
+  // "independent reads, one batch" shape as
+  // productMergeSnapshot.ts's runProductMergeReadBatch.
+  const pageParams = { ...params, __familyOffset: offset, __familyOffsetEnd: offset + pageSize }
+  const [countResult, pageResult] = await db.batch([
+    { sql: `${ctes} SELECT COUNT(*) AS count FROM families`, params },
+    {
+      sql: `
+        ${ctes},
+        ranked AS (
+          SELECT family_root_id, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}, family_root_id ASC) AS family_rank
+          FROM families
+        )
+        SELECT ${resultSource}.*
+        FROM ${resultSource}
+        JOIN ranked ON ranked.family_root_id = ${resultSource}.__family_root_id
+        WHERE ranked.family_rank > @__familyOffset AND ranked.family_rank <= @__familyOffsetEnd
+        ORDER BY ranked.family_rank ASC, ${intraFamilyOrderSql}
+      `,
+      params: pageParams,
+    },
+  ])
+  const total = Number((countResult?.results?.[0] as { count?: number } | undefined)?.count) || 0
+  const rawRows = (pageResult?.results ?? []) as Record<string, unknown>[]
 
   const cleaned = (Array.isArray(rawRows) ? rawRows : []).map((row) => {
     const { __family_root_id, __family_name, __created_at, __match_rank, __match_tier, __promoted, __family_sort, ...rest } = row

@@ -136,7 +136,8 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
 // removalLosses.ts is deliberately import-free (see its own header), so it
 // loads with no overrides of its own.
 const removalLosses = loadReal('lib/removalLosses.ts')
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
+const schemaProbeReal = loadReal('lib/schemaProbe.ts')
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
   './db': { getDb: () => db },
   './businessDateWindow': businessDateWindow,
   './reportMoneyPrecision': reportMoneyPrecision,

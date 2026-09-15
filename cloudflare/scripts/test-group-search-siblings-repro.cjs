@@ -67,6 +67,12 @@ const dbShim = {
       async all(params) { return stmt.all(params || {}) },
     }
   },
+  // paginateProductFamilies sends its COUNT and ranked-page SELECT as one
+  // db.batch() round trip; both are reads here, so each item answers with
+  // its rows under `.results`, matching D1Result's shape.
+  async batch(items) {
+    return items.map((item) => ({ results: db.prepare(item.sql).all(item.params || {}) }))
+  },
 }
 
 const insert = db.prepare(`INSERT INTO products

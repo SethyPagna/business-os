@@ -16,7 +16,7 @@ function load(rel) {
   const source = fs.readFileSync(path.join(root, 'src', rel), 'utf8')
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const req = name => {
-    if (name.endsWith('/cache')) return { bumpVersion: async () => {} }
+    if (name.endsWith('/cache')) return { bumpVersion: async () => {}, bumpVersions: async () => {} }
     if (name.endsWith('/broadcastHub')) return { broadcast: async () => {} }
     if (name.startsWith('.')) {
       const target = path.posix.normalize(path.posix.join(path.posix.dirname(rel), name)) + '.ts'

@@ -73,7 +73,48 @@ export async function listObjects(bucket: R2Bucket, prefix: string) {
 // Serves an R2 object as an HTTP response, honoring conditional requests
 // (If-None-Match / If-Modified-Since) so browsers and CDNs can cache
 // uploaded assets without re-downloading them.
-export async function serveObject(bucket: R2Bucket, key: string, request: Request): Promise<Response> {
+//
+// `ctx` is optional and, when passed, turns on a `caches.default` (the free
+// Workers edge cache, same primitive lib/cache.ts's cachedJsonResponse
+// already uses) read-through in front of R2: /uploads/* never consulted it
+// before, so every image load -- including the SAME image requested by many
+// different visitors -- was a fresh R2 read through the Worker. Only a
+// SUCCESSFUL (200) response is ever cached, and the cache key is the bare
+// request URL (no headers), so this is only safe for a route that is
+// public/unauthenticated for everyone who can reach it -- which is exactly
+// why the one caller that passes `ctx` is index.ts's public `/uploads/*`,
+// and the one that must not is portal.ts's staff-only, explicitly
+// uncacheable submission-screenshot route (it omits `ctx`, so this stays a
+// plain R2 read for it, unchanged).
+export async function serveObject(
+  bucket: R2Bucket,
+  key: string,
+  request: Request,
+  ctx?: { waitUntil(promise: Promise<unknown>): void },
+): Promise<Response> {
+  // Keyed on the URL alone (method normalized to GET) -- never on the
+  // request's own conditional/auth headers, so every visitor's request for
+  // the same asset hits the same cache entry. `caches.default` is only
+  // touched when `ctx` is passed (never for the private, uncacheable
+  // portal.ts caller) -- both because that route must never share-cache and
+  // because `caches` does not exist as a global outside a real Workers
+  // runtime, so referencing it unconditionally would break every caller.
+  const cache = ctx ? caches.default : null
+  const cacheKey = ctx ? new Request(new URL(request.url).toString(), { method: 'GET' }) : null
+  if (cache && cacheKey) {
+    const cached = await cache.match(cacheKey)
+    if (cached) {
+      // Still honor a conditional request against the cached ETag -- the
+      // cache entry replaces the R2 read, not the conditional-request
+      // contract this route already had.
+      const etag = cached.headers.get('etag')
+      const ifNoneMatch = request.headers.get('if-none-match')
+      if (etag && ifNoneMatch && ifNoneMatch === etag) {
+        return new Response(null, { status: 304, headers: cached.headers })
+      }
+      return cached.clone()
+    }
+  }
   const object = await bucket.get(key, {
     onlyIf: request.headers,
   })
@@ -88,5 +129,11 @@ export async function serveObject(bucket: R2Bucket, key: string, request: Reques
     // Conditional request matched -- object unchanged.
     return new Response(null, { status: 304, headers })
   }
-  return new Response(object.body as ReadableStream, { headers })
+  const response = new Response(object.body as ReadableStream, { headers })
+  if (cache && cacheKey) {
+    // Don't make the caller wait for the cache write -- same fire-and-forget
+    // shape lib/cache.ts's cachedJsonResponse already uses.
+    ctx!.waitUntil(cache.put(cacheKey, response.clone()))
+  }
+  return response
 }

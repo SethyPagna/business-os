@@ -37,6 +37,12 @@ function loadProductWrites(db) {
     if (request === './batchCode') return { dateToBatchCode: () => '11092026' }
     if (request === './searchMatch') return { normalizeSearchText: String, compactSearchText: String }
     if (request === './importImageMatch') return { MAX_IMAGES_PER_PRODUCT: 3 }
+    if (request === './schemaProbe') return {
+      tableColumnSet: async (queryDb, table) => {
+        const rows = await queryDb.prepare(`PRAGMA table_info("${table}")`).all()
+        return new Set((Array.isArray(rows) ? rows : rows.results || []).map((row) => row.name))
+      },
+    }
     if (request === '../index') return {}
     return originalLoad.call(this, request, parent, isMain)
   }

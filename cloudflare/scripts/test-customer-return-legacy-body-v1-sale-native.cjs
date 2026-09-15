@@ -49,7 +49,7 @@ async function workerBundle() {
         auth: `export const requireAuth=async(c,next)=>{const raw=c.req.header('x-test-permissions');
           if(!raw)return c.json({error:'Unauthorized'},401);c.set('user',{id:7,username:'fixture',name:'Fixture',permissions:raw});return next()}`,
         audit: 'export const audit=async()=>{}',
-        cache: 'export const bumpVersion=async()=>{}',
+        cache: 'export const bumpVersion=async()=>{};export const bumpVersions=async()=>{};',
         broadcastHub: 'export const broadcast=async()=>{}',
         telegram: `export const sendReturnTelegramEvent=async()=>{};export const sendTelegramEvent=async()=>{};
           export const formatSaleTelegramLines=()=>[]`,
