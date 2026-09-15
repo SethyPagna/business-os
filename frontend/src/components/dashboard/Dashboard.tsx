@@ -323,14 +323,68 @@ const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
 
 // Shared list-body sizing for the dashboard's list cards (recent sales, top
 // products/customers, low/out of stock, expiry, branches, imports, payment).
-// The user REVISED the height rule (Sep 1): cards should be COMPACT and fit the
-// SHORTEST card in their row, NOT balloon up to a tall sibling (the analytics
-// chart, the best-hour heatmap). So the card grid rows below use items-start (no
-// stretch-to-tallest) and each list body clamps to a compact band -- a low min
-// floor so a short list stays short, and a max + scroll so a long one can't run
-// the card tall. flex-1 is kept so a card that IS structurally tall (best-hour:
-// fixed heatmap + list) still lets its list take the remaining height.
+// P6-7 (Sep 15, owner screenshots showed a misaligned "red line" under every
+// card row): the previous Sep-1 rule let each card size to its own content
+// and used items-start, so a short card's bottom border stopped short of a
+// tall sibling's. The owner reversed that explicitly ("cut the sales length
+// to match the analytics card... if the card went over, resize it, if the
+// card did not reach, resize it"). The card grid rows now use items-stretch
+// (CSS grid's default), so every card's outer box always matches the tallest
+// sibling in its row -- a short card's border grows to meet it, a tall card's
+// border stops there too. The list body itself keeps a compact min/max band
+// (a low min floor so a short list stays short when its row is also short,
+// a max + scroll so a very long list can't blow the row past a sane height)
+// and flex-1 so it fills whatever height the stretched card ends up with.
 const CARD_LIST_BODY = 'flex-1 min-h-[8rem] max-h-[16rem] overflow-y-auto'
+
+// A card's list body is capped at CARD_LIST_BODY's max-height and scrolls in
+// place, but scrolling inside a small tile is awkward on a phone -- so once a
+// card's full list is longer than fits comfortably (same >5 threshold the
+// Sales card already used), it also gets a "View more" row that opens the
+// same list at full size in a float. One shared modal shell (not a second
+// modal system) is reused by every card below instead of each pasting its
+// own header/close/backdrop markup.
+function DashboardListModal({ open, title, subtitle, closeLabel, onClose, children }: {
+  open: boolean
+  title: ReactNode
+  subtitle?: ReactNode
+  closeLabel: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  if (!open || typeof document === 'undefined') return null
+  return createPortal((
+    <div className="modal-viewport-safe fixed inset-0 z-[1040] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
+          <div className="min-w-0">
+            <h2 className="font-bold text-gray-900 dark:text-white">{title}</h2>
+            {subtitle ? <div className="mt-0.5 text-xs text-gray-400">{subtitle}</div> : null}
+          </div>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center text-sm text-gray-400 hover:text-gray-600">{closeLabel}</button>
+        </div>
+        <div className="modal-scroll divide-y divide-gray-100 dark:divide-gray-700">{children}</div>
+      </div>
+    </div>
+  ), document.body)
+}
+
+// Footer row shown at the bottom of a list card once its list is longer than
+// the compact CARD_LIST_BODY comfortably shows. mt-auto pins it to the
+// card's stretched bottom edge (see items-stretch on the grid rows) instead
+// of trailing right after a short list with blank space under it.
+function DashboardViewMoreFooter({ show, translateOr, onClick }: {
+  show: boolean
+  translateOr: (key: string, fallback: string, khmerFallback?: string) => string
+  onClick: () => void
+}) {
+  if (!show) return null
+  return (
+    <div className="relative z-10 mt-auto border-t border-gray-100 px-4 py-2 dark:border-gray-700">
+      <button type="button" onClick={onClick} className="relative z-10 w-full py-0.5 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400">{translateOr('view_more', 'View more')}</button>
+    </div>
+  )
+}
 
 function getDashboardFilterStorageKey(user?: AppUser | null): string {
   const userKey = user?.id ?? user?.username ?? user?.email
@@ -522,12 +576,12 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
           </button>
         ))}
       </div>
-      {sales.length > 5 ? <div className="relative z-10 border-t border-gray-100 px-4 py-2 dark:border-gray-700"><button type="button" onClick={onViewMore} className="relative z-10 w-full py-0.5 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400">{translateOr('view_more', 'View more')}</button></div> : null}
+      <DashboardViewMoreFooter show={sales.length > 5} translateOr={translateOr} onClick={onViewMore} />
     </div>
   )
 }
 
-function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, t, translateOr, fmtUSD, onOpen }: {
+function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, t, translateOr, fmtUSD, onOpen, onViewMore }: {
   analytics: DashboardAnalytics | null
   analyticsPending: boolean
   analyticsUnavailable: boolean
@@ -536,6 +590,7 @@ function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailab
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   fmtUSD: FormatMoneyFn
   onOpen: (branch: DashboardBranchRow) => void
+  onViewMore: () => void
 }) {
   const all = analytics?.byBranch || []
   const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0891b2']
@@ -543,38 +598,37 @@ function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailab
   return <div className="card flex flex-col p-3 sm:p-4">
     <h2 className="mb-2 text-base font-semibold text-gray-900 dark:text-white">{t('branch_performance')}</h2>
     {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : (
-      <div className={`space-y-1 ${CARD_LIST_BODY}`}>
-        {!all.length ? <p className="py-4 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : all.map((branch, index) => {
-          const percent = ((branch.revenue_usd || 0) / maxRevenue * 100).toFixed(0)
-          return <button key={`${branch.branch_id || branch.branch_name || 'branch'}-${index}`} type="button" onClick={() => onOpen(branch)} className="block w-full rounded-xl px-2 py-1.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"><div className="mb-0.5 flex justify-between text-xs"><span className="max-w-28 truncate text-gray-600 dark:text-gray-400">{branch.branch_name}</span><span className="font-medium text-gray-900 dark:text-white">{fmtUSD(branch.revenue_usd || 0)}</span></div><div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div className="h-full rounded-full" style={{ width: `${percent}%`, background: colors[index % colors.length] }} /></div><div className="mt-0.5 text-right text-xs text-gray-400">{branch.count} {t('sale')}</div></button>
-        })}
-      </div>
+      <>
+        <div className={`space-y-1 ${CARD_LIST_BODY}`}>
+          {!all.length ? <p className="py-4 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : all.map((branch, index) => {
+            const percent = ((branch.revenue_usd || 0) / maxRevenue * 100).toFixed(0)
+            return <button key={`${branch.branch_id || branch.branch_name || 'branch'}-${index}`} type="button" onClick={() => onOpen(branch)} className="block w-full rounded-xl px-2 py-1.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"><div className="mb-0.5 flex justify-between text-xs"><span className="max-w-28 truncate text-gray-600 dark:text-gray-400">{branch.branch_name}</span><span className="font-medium text-gray-900 dark:text-white">{fmtUSD(branch.revenue_usd || 0)}</span></div><div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div className="h-full rounded-full" style={{ width: `${percent}%`, background: colors[index % colors.length] }} /></div><div className="mt-0.5 text-right text-xs text-gray-400">{branch.count} {t('sale')}</div></button>
+          })}
+        </div>
+        <DashboardViewMoreFooter show={all.length > 5} translateOr={translateOr} onClick={onViewMore} />
+      </>
     )}
   </div>
 }
 
-function ExpiryAlertsCard({ summary, translateOr, onOpen }: {
+function ExpiryAlertsCard({ summary, translateOr, onOpen, onViewMore }: {
   summary: DashboardSummary | null
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   onOpen: (item: DashboardProduct) => void
+  onViewMore: () => void
 }) {
   const items = summary?.expiring_products || []
   return <div className="card flex flex-col">
     <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2.5 sm:px-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>{Number(summary?.expiring_count || 0) > 0 ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{summary?.expiring_count}</span> : null}</div>
     <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>{!items.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : items.map((item) => <button key={item.id} type="button" onClick={() => onOpen(item)} className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4"><p className="min-w-0 break-words text-[13px] leading-4 text-gray-700 dark:text-gray-300 sm:text-sm">{item.name}</p><span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span></button>)}</div>
+    <DashboardViewMoreFooter show={items.length > 5} translateOr={translateOr} onClick={onViewMore} />
   </div>
 }
 
-function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, t, translateOr, fmtUSD, onOpenHour }: {
-  analytics: DashboardAnalytics | null
-  analyticsPending: boolean
-  analyticsUnavailable: boolean
-  analyticsError: string
-  t: TranslateFn
-  translateOr: (key: string, fallback: string, khmerFallback?: string) => string
-  fmtUSD: FormatMoneyFn
-  onOpenHour: (hour: DashboardHourRow, rank?: number | null) => void
-}) {
+// Shared between BestHourCard and the dashboard's own "View more" float so
+// both agree on the exact same ranked list -- a single source of truth
+// instead of two copies of the merge/sort logic drifting apart.
+function computeDashboardBusyHours(analytics: DashboardAnalytics | null): DashboardHourRow[] {
   const hourly = analytics?.hourlyDist || []
   // The backend already emits UTC+7 business-hour buckets. Applying the
   // offset again here moved every value seven hours forward on the chart.
@@ -585,14 +639,40 @@ function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analy
     merged[localHour].count = (merged[localHour].count || 0) + (Number(hour.count) || 0)
     merged[localHour].revenue_usd = (merged[localHour].revenue_usd || 0) + (Number.parseFloat(String(hour.revenue_usd || 0)) || 0)
   })
+  return Object.values(merged).filter((hour) => (hour.count || 0) > 0).sort((left, right) => (right.count || 0) - (left.count || 0))
+}
+
+function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, t, translateOr, fmtUSD, onOpenHour, onViewMore }: {
+  analytics: DashboardAnalytics | null
+  analyticsPending: boolean
+  analyticsUnavailable: boolean
+  analyticsError: string
+  t: TranslateFn
+  translateOr: (key: string, fallback: string, khmerFallback?: string) => string
+  fmtUSD: FormatMoneyFn
+  onOpenHour: (hour: DashboardHourRow, rank?: number | null) => void
+  onViewMore: () => void
+}) {
+  const hourly = analytics?.hourlyDist || []
+  const merged: Record<number, DashboardHourRow> = {}
+  hourly.forEach((hour) => {
+    const localHour = ((Number.parseInt(String(hour.hour), 10) % 24) + 24) % 24
+    if (!merged[localHour]) merged[localHour] = { hour: localHour, count: 0, revenue_usd: 0 }
+    merged[localHour].count = (merged[localHour].count || 0) + (Number(hour.count) || 0)
+    merged[localHour].revenue_usd = (merged[localHour].revenue_usd || 0) + (Number.parseFloat(String(hour.revenue_usd || 0)) || 0)
+  })
   const maxCount = Math.max(...Object.values(merged).map((hour) => hour.count || 0), 1)
   const allHours = Array.from({ length: 24 }, (_, hour) => merged[hour] || { hour, count: 0, revenue_usd: 0 })
+  // Same merge, so this stays the same ranked list the "View more" float
+  // (computeDashboardBusyHours) shows -- one merge computed once, not two
+  // copies that could drift.
   const busyHours = Object.values(merged).filter((hour) => (hour.count || 0) > 0).sort((left, right) => (right.count || 0) - (left.count || 0))
   return <div className="card flex flex-col p-3 sm:p-4">
     <div className="mb-2 flex items-center justify-between gap-2"><h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('best_hour')}</h2><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{translateOr('tap_to_view', 'Tap to view')}</span></div>
     {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : <>
       <div className="relative mb-3"><div className="grid gap-px" style={{ gridTemplateColumns: 'repeat(24,1fr)' }}>{allHours.map((hour) => { const opacity = (hour.count || 0) === 0 ? 0.06 : 0.12 + (hour.count || 0) / maxCount * 0.88; return <button key={hour.hour} type="button" title={`${String(hour.hour).padStart(2, '0')}:00 - ${hour.count} ${t('sale')}(s), ${fmtUSD(hour.revenue_usd)}`} aria-label={`${translateOr('best_hour', 'Best hour')} ${formatDashboardHourLabel(hour.hour)}`} className="rounded-sm transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-700" style={{ height: 40, background: `rgba(37,99,235,${opacity.toFixed(2)})` }} onClick={() => onOpenHour(hour, busyHours.findIndex((item) => item.hour === hour.hour) + 1 || null)} /> })}</div><div className="relative mt-1 flex h-[18px] text-[11px] font-medium text-gray-400">{[0, 6, 12, 18, 23].map((hour) => <span key={hour} className="absolute" style={{ left: `${hour / 23 * 100}%`, transform: 'translateX(-50%)' }}>{formatDashboardHourLabel(hour).replace(' ', '')}</span>)}</div></div>
       <div className={`space-y-1 ${CARD_LIST_BODY}`}>{!busyHours.length ? <p className="text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : busyHours.map((hour, index) => <button key={hour.hour} type="button" className="flex w-full items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50/60 dark:border-gray-700 dark:bg-gray-900/40 dark:hover:border-blue-800 dark:hover:bg-blue-950/20" onClick={() => onOpenHour(hour, index + 1)}><div><div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{`#${index + 1} ${formatDashboardHourLabel(hour.hour)}`}</div><div className="text-[11px] text-gray-500 dark:text-gray-400">{String(hour.hour).padStart(2, '0')}:00 - {String((Number(hour.hour) + 1) % 24).padStart(2, '0')}:00</div></div><div className="text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{hour.count} {t('sale')}{hour.count !== 1 ? 's' : ''}</div><div className="text-[11px] text-green-600 dark:text-green-400">{fmtUSD(hour.revenue_usd)}</div></div></button>)}</div>
+      <DashboardViewMoreFooter show={busyHours.length > 5} translateOr={translateOr} onClick={onViewMore} />
     </>}
   </div>
 }
@@ -736,10 +816,19 @@ export default function Dashboard() {
   const [lowStockLoadError, setLowStockLoadError] = useState('')
   const [outOfStockLoadError, setOutOfStockLoadError] = useState('')
   // Every list card fills its row height and scrolls in place (see
-  // CARD_LIST_BODY) instead of a per-card show-all toggle, so those show-all
-  // flags were removed.
+  // CARD_LIST_BODY); a card whose full list is longer than that still needs
+  // a comfortable way to see the rest, so each in-memory list card also gets
+  // a "View more" float, same as the recentSalesOpen pattern below (P6-7,
+  // owner: "do like sale ... click on view to open a float to show even
+  // more"). Reused through the single DashboardListModal shell.
   const [recentSalesOpen, setRecentSalesOpen]   = useState(false)
   const [recentSaleDetail, setRecentSaleDetail] = useState<DashboardSale | null>(null)
+  const [topProductsListOpen, setTopProductsListOpen] = useState(false)
+  const [topCustomersListOpen, setTopCustomersListOpen] = useState(false)
+  const [branchPerformanceListOpen, setBranchPerformanceListOpen] = useState(false)
+  const [expiryAlertsListOpen, setExpiryAlertsListOpen] = useState(false)
+  const [bestHourListOpen, setBestHourListOpen] = useState(false)
+  const [recentImportsListOpen, setRecentImportsListOpen] = useState(false)
   const [recentImportFiles, setRecentImportFiles] = useState<ImportFileSummary[]>([])
   const [recentImportFilesLoading, setRecentImportFilesLoading] = useState(true)
   const [importReportJobId, setImportReportJobId] = useState<string | null>(null)
@@ -1278,6 +1367,7 @@ export default function Dashboard() {
   )
   const chartRenderData = useMemo(() => downsampleChartRows(chartData), [chartData])
   const topList   = topMode === 'qty' ? (analytics?.topProductsQty || []) : (analytics?.topProducts || [])
+  const dashboardBusyHours = useMemo(() => computeDashboardBusyHours(analytics), [analytics])
   const revenueFlowLabel = translateOr('revenue_flow', 'Revenue Flow')
   const grossSalesLabel = translateOr('gross_sales', 'Gross Sales')
   const netRevenueLabel = translateOr('net_revenue', 'Net Revenue')
@@ -1893,8 +1983,8 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
 
       {/* Charts */}
       <section className={`${mobileSection === 'overview' ? '' : 'hidden'} lg:block`}>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 lg:items-start">
-        <div className="lg:col-span-2 card p-3 sm:p-3.5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 items-stretch">
+        <div className="lg:col-span-2 card flex flex-col p-3 sm:p-3.5">
           <div className="mb-1.5 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-white">{t('analytics')}</h2>
             <div className="inline-flex w-full max-w-full rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800/90 sm:w-auto">
@@ -1974,7 +2064,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           (user-reported: "the row of top product, best hour, top customer
           can take more space in large screens"). */}
       <section className={`${mobileSection === 'performers' ? '' : 'hidden'} lg:block`}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-start">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-stretch">
         {/* Branch */}
         <BestHourCard
           analytics={analytics}
@@ -1985,6 +2075,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           translateOr={translateOr}
           fmtUSD={fmtUSD}
           onOpenHour={openHourDetail}
+          onViewMore={() => setBestHourListOpen(true)}
         />
 
         {/* Top Products */}
@@ -2053,6 +2144,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                   )
                 })}
               </div>
+              <DashboardViewMoreFooter show={topList.length > 5} translateOr={translateOr} onClick={() => setTopProductsListOpen(true)} />
             </>
           )}
         </div>
@@ -2102,6 +2194,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                             )
                           })}
                         </div>
+                        <DashboardViewMoreFooter show={customers.length > 5} translateOr={translateOr} onClick={() => setTopCustomersListOpen(true)} />
                       </>
                     )}
                 </>
@@ -2114,9 +2207,9 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
 
       {/* Hours, low stock, and recent activity */}
       <section className={`${mobileSection === 'inventory' ? '' : 'hidden'} lg:block`}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-start">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-stretch">
         {/* Best Hour */}
-        <ExpiryAlertsCard summary={summary} translateOr={translateOr} onOpen={openExpiryDetail} />
+        <ExpiryAlertsCard summary={summary} translateOr={translateOr} onOpen={openExpiryDetail} onViewMore={() => setExpiryAlertsListOpen(true)} />
 
         {/* Low Stock */}
         <div className="card flex flex-col">
@@ -2218,6 +2311,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           translateOr={translateOr}
           fmtUSD={fmtUSD}
           onOpen={openBranchDetail}
+          onViewMore={() => setBranchPerformanceListOpen(true)}
         />
 
         {/* Recent imports -- a general list of the last few imported files
@@ -2274,6 +2368,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                   </button>
                 ))}
           </div>
+          <DashboardViewMoreFooter show={recentImportFiles.length > 5} translateOr={translateOr} onClick={() => setRecentImportsListOpen(true)} />
         </div>
 
         <PaymentMethodCard
@@ -2288,42 +2383,162 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
       </div>
       </section>
 
-      {recentSalesOpen && typeof document !== 'undefined' ? createPortal((
-        <div className="modal-viewport-safe fixed inset-0 z-[1040] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setRecentSalesOpen(false)}>
-          <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-              <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{t('sales') || 'Sales'}</h2>
-                <div className="mt-0.5 text-xs text-gray-400">{summary?.recent_sales?.length || 0} {t('entries') || 'entries'}</div>
+      <DashboardListModal
+        open={recentSalesOpen}
+        title={t('sales') || 'Sales'}
+        subtitle={`${summary?.recent_sales?.length || 0} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setRecentSalesOpen(false)}
+      >
+        {(summary?.recent_sales || []).map((sale) => (
+          <button
+            key={`recent-sale-${sale.id}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => setRecentSaleDetail(sale)}
+          >
+            <div className="min-w-0">
+              <div className="detail-scroll-text text-sm font-semibold text-gray-800 dark:text-gray-100">{sale.receipt_number || `#${sale.id}`}</div>
+              <div className="detail-scroll-text text-xs text-gray-400">
+                {compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}
               </div>
-              <button onClick={() => setRecentSalesOpen(false)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>
-            <div className="modal-scroll divide-y divide-gray-100 dark:divide-gray-700">
-              {(summary?.recent_sales || []).map((sale) => (
-                <button
-                  key={`recent-sale-${sale.id}`}
-                  type="button"
-                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                  onClick={() => setRecentSaleDetail(sale)}
-                >
-                  <div className="min-w-0">
-                    <div className="detail-scroll-text text-sm font-semibold text-gray-800 dark:text-gray-100">{sale.receipt_number || `#${sale.id}`}</div>
-                    <div className="detail-scroll-text text-xs text-gray-400">
-                      {compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div>
-                    <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>
-                      {formatSaleStatus(sale.sale_status)}
-                    </div>
-                  </div>
-                </button>
-              ))}
+            <div className="shrink-0 text-right">
+              <div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div>
+              <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>
+                {formatSaleStatus(sale.sale_status)}
+              </div>
             </div>
-          </div>
-        </div>
-      ), document.body) : null}
+          </button>
+        ))}
+      </DashboardListModal>
+
+      <DashboardListModal
+        open={topProductsListOpen}
+        title={t('top_products')}
+        subtitle={`${topList.length} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setTopProductsListOpen(false)}
+      >
+        {topList.map((p, i) => (
+          <button
+            key={`top-product-${i}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => { setTopProductsListOpen(false); setProductDetail({ ...p, insightType: 'top_product', rank: i + 1 }) }}
+          >
+            <div className="min-w-0"><span className="text-gray-400">{i + 1}.</span> <span className="text-sm text-gray-700 dark:text-gray-300">{p.product_name}</span></div>
+            <div className="shrink-0 text-right text-sm font-semibold text-gray-900 dark:text-white">
+              {topMode === 'qty' ? `${p.qty_sold} ${t('qty_sold')}` : fmtUSD(p.revenue_usd)}
+            </div>
+          </button>
+        ))}
+      </DashboardListModal>
+
+      <DashboardListModal
+        open={topCustomersListOpen}
+        title={t('top_customers')}
+        subtitle={`${(analytics?.topCustomers || []).length} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setTopCustomersListOpen(false)}
+      >
+        {(analytics?.topCustomers || []).map((c, i) => (
+          <button
+            key={`top-customer-${i}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => { setTopCustomersListOpen(false); setCustomerDetail({ ...c, rank: i + 1 }) }}
+          >
+            <div className="min-w-0"><span className="text-gray-400">{i + 1}.</span> <span className="text-sm text-gray-700 dark:text-gray-300">{c.customer_name || t('walk_in') || 'General'}</span></div>
+            <div className="shrink-0 text-sm font-semibold text-green-700 dark:text-green-400">{fmtUSD(c.net_revenue_usd || 0)}</div>
+          </button>
+        ))}
+      </DashboardListModal>
+
+      <DashboardListModal
+        open={branchPerformanceListOpen}
+        title={t('branch_performance')}
+        subtitle={`${(analytics?.byBranch || []).length} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setBranchPerformanceListOpen(false)}
+      >
+        {(analytics?.byBranch || []).map((branch, i) => (
+          <button
+            key={`branch-performance-${branch.branch_id || branch.branch_name || i}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => { setBranchPerformanceListOpen(false); openBranchDetail(branch) }}
+          >
+            <div className="min-w-0 text-sm text-gray-700 dark:text-gray-300">{branch.branch_name}</div>
+            <div className="shrink-0 text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{fmtUSD(branch.revenue_usd || 0)}</div><div className="text-xs text-gray-400">{branch.count} {t('sale')}</div></div>
+          </button>
+        ))}
+      </DashboardListModal>
+
+      <DashboardListModal
+        open={expiryAlertsListOpen}
+        title={translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}
+        subtitle={`${(summary?.expiring_products || []).length} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setExpiryAlertsListOpen(false)}
+      >
+        {(summary?.expiring_products || []).map((item) => (
+          <button
+            key={`expiry-${item.id}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => { setExpiryAlertsListOpen(false); openExpiryDetail(item) }}
+          >
+            <div className="min-w-0 break-words text-sm text-gray-700 dark:text-gray-300">{item.name}</div>
+            <span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span>
+          </button>
+        ))}
+      </DashboardListModal>
+
+      <DashboardListModal
+        open={bestHourListOpen}
+        title={t('best_hour')}
+        subtitle={`${dashboardBusyHours.length} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setBestHourListOpen(false)}
+      >
+        {dashboardBusyHours.map((hour, i) => (
+          <button
+            key={`best-hour-${hour.hour}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => { setBestHourListOpen(false); openHourDetail(hour, i + 1) }}
+          >
+            <div className="min-w-0 text-sm text-gray-700 dark:text-gray-300">{`#${i + 1} ${formatDashboardHourLabel(hour.hour)}`}</div>
+            <div className="shrink-0 text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{hour.count} {t('sale')}{hour.count !== 1 ? 's' : ''}</div><div className="text-xs text-green-600 dark:text-green-400">{fmtUSD(hour.revenue_usd)}</div></div>
+          </button>
+        ))}
+      </DashboardListModal>
+
+      <DashboardListModal
+        open={recentImportsListOpen}
+        title={translateOr('recent_imports', 'Recent imports')}
+        subtitle={`${recentImportFiles.length} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setRecentImportsListOpen(false)}
+      >
+        {recentImportFiles.map((job) => (
+          <button
+            key={`recent-import-${job.id}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => { setRecentImportsListOpen(false); setImportReportJobId(job.id) }}
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm text-gray-700 dark:text-gray-300">{job.fileName || `${job.type || 'products'} import`}</p>
+              <p className="truncate text-xs text-gray-400 capitalize">{[job.created_at ? fmtTime(job.created_at) : job.status, job.fileName ? `${job.type || 'products'} import` : null].filter(Boolean).join(' · ')}</p>
+            </div>
+            {(job.warning_count || 0) > 0 && (
+              <span className="badge-yellow flex-shrink-0 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{job.warning_count} {translateOr('warnings_short', 'warnings')}</span>
+            )}
+          </button>
+        ))}
+      </DashboardListModal>
 
       {recentSaleDetail && typeof document !== 'undefined' ? createPortal((
         <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setRecentSaleDetail(null)}>
