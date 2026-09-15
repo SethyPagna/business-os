@@ -16,7 +16,9 @@ What shipped (six lane branches merged, history sliced one fix per commit):
 
 Gates on the release tip (fresh worktree, committed HEAD): frontend typecheck, `verify:i18n` (5846 keys), `verify:public-runtime`, `test:utils` 448/448, build (265 chunks, zero cycles, public preload closure 36 chunks); Worker `tsc --noEmit` clean, sweep: 426 files, 0 red, completion sentinel seen; migrations rehearsed on the post-merge production replica (0168 421 ms, 0169 262 ms, both idempotent on rerun).
 
-Open after this checkpoint: **P6-9** conflict actions auto-resolution with before/after (lane `p6/conflict-actions` open from c596674e); the earlier deferred items listed under Program 4; receipt fix awaits a physical print by the owner.
+**Follow-up checkpoint (same day).** P6-9 conflict-actions auto-resolution: the identity rule reached the cluster list and the bulk group review on September 15 but not the merge write gate itself (`readMergeIdentityDiff` in `cloudflare/src/routes/products.ts`, behind "Keep this" on every Products → Duplicates card, the atomic sweep and the preview), which still compared raw barcode keys and refused wildcard-vs-real pairs with "these products do not have the same normalized name and barcode" — the owner's report verbatim. Fixed with `barcodeIdentityMatches` (2ab355a5; two genuinely different real barcodes still block, negative-control test in test-merge-identity-fk-pure); the duplicate "Review selected actions" button was removed (67c26239). Contacts merges never had an identity gate. Follow-up commit **7d8e22d7** live as Worker **fad5bfda-69b8-4a87-97a0-02509b6562ad** (revision `7d8e22d73bde`, tier paid).
+
+Open after this checkpoint: the earlier deferred items listed under Program 4; receipt fix awaits a physical print by the owner; the unreachable legacy selected-merge path in `ProductDuplicatesTab.tsx` (dead code flagged by the P6-9 lane) for a debloat pass.
 
 ## Program 5 checkpoint LIVE — same-name product/customer merges applied, identity rule, removal-loss consistency, one-row date range, D1/R2/KV debloat — September 15
 

@@ -11,7 +11,7 @@
 | P6-6 Storefront: rail, social icons one row, contact button minimize, pager order + count row, hint removed, install prompt (storefront + admin) | **Deployed** | 87dbb1cc, a9567778, b692d02b, feee8ad2, 07b7f964, 4eea45aa, 553b8b67; `publicStorefrontPhoneFixesSep15.test.ts`. |
 | P6-7 Dashboard card rows end on one line; View-more float | **Deployed** | 7e88d576, a26d9ecf; `dashboardCardRowsP6.test.ts`. |
 | P6-8 Sales last row scrolls horizontally | **Deployed** | 979c5609. |
-| P6-9 Conflict actions auto-resolution with before/after (contacts + products) | **In progress** | Lane `p6/conflict-actions` from c596674e. |
+| P6-9 Conflict actions auto-resolution with before/after (contacts + products) | **Deployed** (Worker fad5bfda-69b8-4a87-97a0-02509b6562ad, commit 7d8e22d7) | 2ab355a5 (merge write gate wildcard-aware; real-vs-real still blocks), 67c26239 (duplicate review button removed); contacts path had no gate. |
 | Migrations 0168, 0169 on production D1 | **Applied** by the coordinator | PRE/POST in the session ledger; bookmark 00001666-00000000-000050e7-e79a8764b52b722d6a1c17bfe4ae5075. |
 
 ---
