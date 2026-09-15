@@ -149,21 +149,34 @@ async function main() {
   const foldAdapterCalls = foldReads + foldWrites + foldBatches
   assert.equal(foldAdapterCalls, 25 * 5, 'each fold performs one provenance read plus exactly four bounded D1 batch calls')
   assert.equal(foldReads, 25, 'each fold checks once for immutable transfer provenance before changing either product identity')
+  // Updated 2026-09-15 for the transfer-aware merge (owner ruling: "transfer
+  // aware merge"): the guard now also reads replay_state (to still refuse a
+  // REVERSED transfer) and receipt_id/ordinal (to know which lots a merge
+  // must rewrite provenance for), via one JOIN -- still a single bounded
+  // read keyed on @keeper/@duplicate, no LIMIT needed since a real product
+  // pair is a source/destination of at most a handful of transfer member
+  // rows, never an unbounded scan. See migrations/0168_transfer_aware_merge.sql.
   assert.match(fs.readFileSync(path.join(srcRoot, 'routes', 'products.ts'), 'utf8'),
-    /SELECT receipt_id FROM transfer_operation_members\s+WHERE source_product_id IN \(@keeper,@duplicate\) OR destination_product_id IN \(@keeper,@duplicate\) LIMIT 1/,
-    'the single per-fold read must remain the bounded transfer-provenance guard')
+    /SELECT m\.receipt_id, m\.ordinal, m\.source_product_id, m\.destination_product_id, r\.replay_state\s+FROM transfer_operation_members m\s+JOIN transfer_operation_receipts r ON r\.id = m\.receipt_id\s+WHERE m\.source_product_id IN \(@keeper,@duplicate\) OR m\.destination_product_id IN \(@keeper,@duplicate\)/,
+    'the single per-fold read must remain the bounded transfer-provenance guard (now transfer-aware: replay_state + receipt/ordinal)')
   assert.equal(foldBatches, 25 * 4, 'each fold batches snapshot, writes, fingerprint and history finalization')
   const foldBatchSizes = counters.batchStatementCounts.slice(beforeFolds.batchStatementCounts.length)
+  // The 10-statement write batch grew to 18: foldDuplicateProductInto now
+  // also pushes the 8 linkedProductNameSnapshotStatements() UPDATEs (sale_items,
+  // inventory_movements, return_items, stock_transfers, damaged_stock_lots,
+  // return_replacement_items, stock_row_moves x2) into the SAME atomic batch as
+  // the reparent, so a merge's history rows never carry a stale product_name
+  // (see routes/products.ts foldDuplicateProductInto, migration 0171's header).
   assert.deepEqual(
     [...new Set(foldBatchSizes)].sort((a, b) => a - b),
-    [3, 8, 10, 21],
+    [3, 8, 18, 21],
     'the no-stock fold has bounded snapshot/write/fingerprint/finalize statement groups',
   )
   const { batchStatementCounts: _batchStatementCounts, ...reportedCounters } = counters
 
   console.log(JSON.stringify({
     candidates: 1600, chunk: 25, scanMs: Number(scanMs.toFixed(1)), runMs: Number(runMs.toFixed(1)),
-    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [21, 10, 8, 3],
+    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [21, 18, 8, 3],
     ...reportedCounters,
   }))
   console.log('test-product-merge-bulk-benchmark: all checks passed')

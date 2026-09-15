@@ -95,23 +95,37 @@ import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
+// Pure statement builder shared by the rename path (syncLinkedProductNameSnapshots,
+// batched through db.batch below) and the merge path (foldDuplicateProductInto,
+// which pushes these onto its own atomic statements array so a merge commit and
+// its name-snapshot repair land in the SAME transaction -- see MERGE_REPARENT_TABLES
+// in lib/undoAppliers.ts for the sibling table-list this must stay aligned with).
+// sale_amendments is deliberately excluded: it is an append-only snapshot table
+// (migration 0115's trigger refuses any UPDATE).
+function linkedProductNameSnapshotStatements(ids: number[], productName: string | null): Array<{ sql: string; params: Record<string, unknown> }> {
+  if (!ids.length || productName == null) return []
+  const placeholders = ids.map((_, index) => `@id${index}`).join(',')
+  const params: Record<string, unknown> = { productName }
+  ids.forEach((id, index) => { params[`id${index}`] = id })
+  return [
+    { sql: `UPDATE sale_items SET product_name = @productName WHERE product_id IN (${placeholders})`, params },
+    { sql: `UPDATE inventory_movements SET product_name = @productName WHERE product_id IN (${placeholders})`, params },
+    { sql: `UPDATE return_items SET product_name = @productName WHERE product_id IN (${placeholders})`, params },
+    { sql: `UPDATE stock_transfers SET product_name = @productName WHERE product_id IN (${placeholders})`, params },
+    { sql: `UPDATE damaged_stock_lots SET product_name = @productName WHERE product_id IN (${placeholders})`, params },
+    { sql: `UPDATE return_replacement_items SET product_name = @productName WHERE product_id IN (${placeholders})`, params },
+    { sql: `UPDATE stock_row_moves SET source_product_name = @productName WHERE source_product_id IN (${placeholders})`, params },
+    { sql: `UPDATE stock_row_moves SET destination_product_name = @productName WHERE destination_product_id IN (${placeholders})`, params },
+  ]
+}
+
 async function syncLinkedProductNameSnapshots(env: Env, productIds: number[], productName: string): Promise<void> {
   if (!productIds.length) return
   const db = getDb(env)
   for (const ids of chunkForBinding([...new Set(productIds)], 1)) {
-    const placeholders = ids.map(() => '?').join(',')
     // Update only rows carrying a stable product id. Name-only/null-id rows
     // remain untouched so ambiguous legacy conflicts stay visible for review.
-    await db.batch([
-      { sql: `UPDATE sale_items SET product_name = ? WHERE product_id IN (${placeholders})`, params: [productName, ...ids] },
-      { sql: `UPDATE inventory_movements SET product_name = ? WHERE product_id IN (${placeholders})`, params: [productName, ...ids] },
-      { sql: `UPDATE return_items SET product_name = ? WHERE product_id IN (${placeholders})`, params: [productName, ...ids] },
-      { sql: `UPDATE stock_transfers SET product_name = ? WHERE product_id IN (${placeholders})`, params: [productName, ...ids] },
-      { sql: `UPDATE damaged_stock_lots SET product_name = ? WHERE product_id IN (${placeholders})`, params: [productName, ...ids] },
-      { sql: `UPDATE return_replacement_items SET product_name = ? WHERE product_id IN (${placeholders})`, params: [productName, ...ids] },
-      { sql: `UPDATE stock_row_moves SET source_product_name = ? WHERE source_product_id IN (${placeholders})`, params: [productName, ...ids] },
-      { sql: `UPDATE stock_row_moves SET destination_product_name = ? WHERE destination_product_id IN (${placeholders})`, params: [productName, ...ids] },
-    ])
+    await db.batch(linkedProductNameSnapshotStatements(ids, productName))
   }
 }
 // The real backend requires auth on GET /api/products/search (this is
@@ -2909,10 +2923,56 @@ export async function foldDuplicateProductInto(
   reversal: MergeReversal
 }> {
   const writeOffStock = stockDisposition === 'write_off'
-  const transferReference = await db.prepare(`SELECT receipt_id FROM transfer_operation_members
-    WHERE source_product_id IN (@keeper,@duplicate) OR destination_product_id IN (@keeper,@duplicate) LIMIT 1`)
-    .get({ keeper: canonical.id, duplicate: dup.id })
-  if (transferReference) throw new Error('merge_state_conflict: Product has immutable transfer provenance and cannot be merged.')
+  // Transfer-aware merge (owner ruling 2026-09-15, verbatim: "transfer aware
+  // merge"): a product that is one side of a committed branch transfer is no
+  // longer refused outright. 0151's replay-provenance trigger family only
+  // actually blocks two statements THIS fold can emit -- the duplicate's
+  // is_active flip further down, and a non-colliding lot's variant_product_id
+  // repoint -- and both are made to pass by rewriting the transfer's OWN
+  // provenance onto the keeper first, inside this same atomic db.batch(),
+  // exactly the technique migration 0168_transfer_aware_merge.sql uses for
+  // the one production pair this was written for ("dior addict lip glow new
+  // 075", ids 1616/7161: a transfer receipt whose destination branch had no
+  // local row minted a second product identity to receive it). After the
+  // rewrite, transfer_operation_members.source_product_id/destination_
+  // product_id both read the keeper id -- a true statement: the merchandise,
+  // now identified as the keeper, moved between those two branches.
+  //
+  // The one case that STAYS refused: a REVERSED (undone) transfer
+  // (transfer_operation_receipts.replay_state <> 'applied'). A reversed
+  // transfer's live branch_stock/batches no longer necessarily reflect what
+  // its allocations_json describes -- silently repointing product identity
+  // there would paper over a reconciliation gap a human should look at
+  // directly, not something a merge should resolve as a side effect.
+  const transferMemberRows = await db.prepare(`
+    SELECT m.receipt_id, m.ordinal, m.source_product_id, m.destination_product_id, r.replay_state
+    FROM transfer_operation_members m
+    JOIN transfer_operation_receipts r ON r.id = m.receipt_id
+    WHERE m.source_product_id IN (@keeper,@duplicate) OR m.destination_product_id IN (@keeper,@duplicate)
+  `).all<{ receipt_id: number; ordinal: number; source_product_id: number; destination_product_id: number; replay_state: string }>({ keeper: canonical.id, duplicate: dup.id })
+  if (transferMemberRows.some((row) => String(row.replay_state) !== 'applied')) {
+    throw new Error('merge_state_conflict: Product has a reversed transfer pending reconciliation and cannot be merged yet.')
+  }
+  // Every product_batches lot this transfer's allocations_json names (on
+  // either side) -- only these are blocked by transfer_batch_identity_update
+  // when their variant_product_id would be repointed (see the batch loop
+  // below); a same-batch_key collision never touches variant_product_id at
+  // all (it folds into the keeper's existing lot instead), so most evidenced
+  // lots never actually need the trigger dropped.
+  const transferEvidencedBatchIds = new Set<number>()
+  if (transferMemberRows.length) {
+    const receiptIds = [...new Set(transferMemberRows.map((row) => Number(row.receipt_id)))]
+    const placeholders = receiptIds.map(() => '?').join(',')
+    const allocationRows = await db.prepare(`
+      SELECT json_extract(a.value, '$.source_batch_id') AS src, json_extract(a.value, '$.destination_batch_id') AS dst
+      FROM transfer_operation_members m, json_each(m.allocations_json) a
+      WHERE m.receipt_id IN (${placeholders})
+    `).all<{ src: number | null; dst: number | null }>(receiptIds)
+    for (const row of allocationRows) {
+      if (row.src != null) transferEvidencedBatchIds.add(Number(row.src))
+      if (row.dst != null) transferEvidencedBatchIds.add(Number(row.dst))
+    }
+  }
   const canonicalId = canonical.id
   const canonicalName = canonical.name
   const adjustmentMovementMarker = atomicHistory ? `[merge:${atomicHistory.operationId}]` : ''
@@ -3108,6 +3168,22 @@ export async function foldDuplicateProductInto(
     })
   }
 
+  // Rewrite the duplicate's transfer provenance onto the keeper BEFORE
+  // deactivating it -- 0151's transfer_product_identity_update trigger
+  // refuses to flip is_active on a product still referenced by ANY member
+  // row, so this must land first, in the same batch. transfer_members_
+  // immutable_update refuses any UPDATE unconditionally, so it is dropped
+  // immediately before and recreated byte-identically immediately after
+  // (same construction as 0165's/0168's statement-scoped trigger drops).
+  if (transferMemberRows.some((row) => row.source_product_id === dup.id || row.destination_product_id === dup.id)) {
+    statements.push({ sql: 'DROP TRIGGER IF EXISTS transfer_members_immutable_update' })
+    statements.push({ sql: 'UPDATE transfer_operation_members SET source_product_id = @canonicalId WHERE source_product_id = @dupId', params: { canonicalId, dupId: dup.id } })
+    statements.push({ sql: 'UPDATE transfer_operation_members SET destination_product_id = @canonicalId WHERE destination_product_id = @dupId', params: { canonicalId, dupId: dup.id } })
+    statements.push({
+      sql: `CREATE TRIGGER transfer_members_immutable_update BEFORE UPDATE ON transfer_operation_members
+BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
+    })
+  }
   statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
   statements.push({
     sql: `UPDATE products
@@ -3255,6 +3331,15 @@ export async function foldDuplicateProductInto(
       statements.push({ sql: 'UPDATE return_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
       batchesFoldedThisDup += 1
     } else {
+      // A transfer-evidenced lot (its id appears in some committed transfer's
+      // allocations_json) has an immutable variant_product_id under 0151's
+      // transfer_batch_identity_update trigger -- dropped for this one
+      // statement, recreated byte-identically right after (see the header
+      // comment above the transfer_operation_members rewrite for why this is
+      // safe: this merge is exactly what collapses the two sides of that
+      // transfer into one identity).
+      const batchIsTransferEvidenced = transferEvidencedBatchIds.has(batchRow.id)
+      if (batchIsTransferEvidenced) statements.push({ sql: 'DROP TRIGGER IF EXISTS transfer_batch_identity_update' })
       statements.push({
         sql: `UPDATE product_batches SET variant_product_id = @canonicalId, batch_number = @batchNumber,
               is_active = CASE WHEN EXISTS (SELECT 1 FROM branch_batch_stock WHERE batch_id = @id AND quantity > 0)
@@ -3262,6 +3347,15 @@ export async function foldDuplicateProductInto(
               updated_at = CURRENT_TIMESTAMP WHERE id = @id`,
         params: { canonicalId, batchNumber: nextCanonicalBatchNumber, id: batchRow.id },
       })
+      if (batchIsTransferEvidenced) {
+        statements.push({
+          sql: `CREATE TRIGGER transfer_batch_identity_update BEFORE UPDATE OF id,variant_product_id ON product_batches
+WHEN (NEW.id IS NOT OLD.id OR NEW.variant_product_id IS NOT OLD.variant_product_id)
+ AND EXISTS(SELECT 1 FROM transfer_operation_members m,json_each(m.allocations_json) a
+   WHERE json_extract(a.value,'$.source_batch_id')=OLD.id OR json_extract(a.value,'$.destination_batch_id')=OLD.id)
+BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
+        })
+      }
       canonicalBatchIdByKey.set(batchRow.batch_key, batchRow.id)
       nextCanonicalBatchNumber += 1
       repointedBatches.push({ id: batchRow.id, batchNumber: batchRow.batch_number })
@@ -3292,6 +3386,21 @@ export async function foldDuplicateProductInto(
       sql: `UPDATE ${table} SET ${column} = @canonicalId WHERE ${column} = @dupId`,
       params: { canonicalId, dupId: dup.id },
     })
+  }
+  // Keep the denormalized product_name snapshot columns (sale_items,
+  // inventory_movements, return_items, stock_transfers, damaged_stock_lots,
+  // return_replacement_items, stock_row_moves source_/destination_) in sync
+  // with the keeper's CURRENT name in the SAME atomic batch as the reparent
+  // above -- the rename path already does this via syncLinkedProductNameSnapshots
+  // (line ~98); without this, a merge silently leaves every history row still
+  // reading the loser's OLD name even though product_id now points at the
+  // keeper (this is exactly what migration 0171 had to backfill for 0165/0168,
+  // a one-time repair this call makes unnecessary for every future merge).
+  // canonicalId covers both the just-reparented dup rows AND any of the
+  // keeper's own pre-existing rows -- both are safe to normalize since a
+  // same-name merge only ever happens between rows sharing one product name.
+  for (const { sql, params } of linkedProductNameSnapshotStatements([canonicalId], canonicalName)) {
+    statements.push({ sql, params })
   }
   // promotion_rules.product_ids: a LIVE product link the walk above structurally
   // cannot reach -- it is a JSON array of ids inside a TEXT column, not an
@@ -4009,9 +4118,15 @@ function leadingZeroScopeAtomicAssertions(
     )) THEN 1 ELSE json_extract('', '$') END AS leading_zero_product_guard`,
     params: { rows: JSON.stringify(productState) },
   }, {
+    // Transfer-aware (see foldDuplicateProductInto's header comment): a
+    // product referenced by a committed, still-APPLIED transfer no longer
+    // fails this guard -- foldDuplicateProductInto rewrites that provenance
+    // onto the keeper itself. Only a REVERSED (undone) transfer still blocks
+    // the leading-zero approved-plan path, same carve-out as the direct fold.
     sql: `SELECT CASE WHEN
-      NOT EXISTS(SELECT 1 FROM transfer_operation_members
-        WHERE source_product_id IN (@keeper,@duplicate) OR destination_product_id IN (@keeper,@duplicate))
+      NOT EXISTS(SELECT 1 FROM transfer_operation_members m JOIN transfer_operation_receipts r ON r.id=m.receipt_id
+        WHERE (m.source_product_id IN (@keeper,@duplicate) OR m.destination_product_id IN (@keeper,@duplicate))
+          AND r.replay_state<>'applied')
       AND NOT EXISTS(SELECT 1 FROM stock_session_members sm JOIN stock_session_operations so ON so.id=sm.operation_id
         JOIN action_history sh ON sh.id=so.history_id
         WHERE sm.product_id IN (@keeper,@duplicate) AND sh.status IN ('undoable','redoable'))
