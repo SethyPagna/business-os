@@ -887,7 +887,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
           search bar row and the date both can be pinned and stick ... for
           all sections and pages") -- same sticky treatment as the Products
           listing's own search row above this section. */}
-      <div className="sticky top-0 z-30 -mx-1 space-y-3 bg-gray-50/95 px-1 pb-2 pt-1 backdrop-blur dark:bg-gray-900/95 sm:mx-0 sm:px-0">
+      <div className="sticky top-0 z-30 -mx-1 space-y-3 bg-gray-50 px-1 pb-2 pt-1 dark:bg-gray-900 sm:mx-0 sm:px-0">
       {/* Row 1: the date-range + search bar row. It leads; every mini-section
           drops BELOW it (user, Aug 31 2026: "move all mini sections (filters,
           stats, etc.) below the date range and search bar row"). Unified

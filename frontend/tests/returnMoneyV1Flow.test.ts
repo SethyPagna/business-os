@@ -83,11 +83,21 @@ for (const outcome of ['success', 'error', 'unmount']) {
   assert.ok(!h.events.includes('clear'), 'late acknowledgement after UI timeout does not discard frozen retry')
 }
 {
+  // P4-4b item 1: onClose() now fires synchronously once the write settles
+  // (guarded by the same current()/lifecycle check as before), BEFORE
+  // onSuccess -- Returns.tsx's list refetch/snapshot fetch -- is even
+  // invoked, instead of after awaiting it. There is therefore no async gap
+  // left between "write succeeded" and "close" for an actor switch to land
+  // in; the modal has already closed for the acting user by the time
+  // onSuccess starts running in the background, so a LATER actor switch
+  // while onSuccess is still in flight can no longer touch it either way.
   const h = setup(); const pending = h.handler()()
   await new Promise(resolve => setTimeout(resolve, 0)); h.network.resolve({ id: 1 })
-  await new Promise(resolve => setTimeout(resolve, 0)); assert.ok(h.events.includes('success'))
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.ok(h.events.includes('close'), 'close fires once the write succeeds')
+  assert.ok(h.events.indexOf('close') < h.events.indexOf('success'), 'close precedes the backgrounded onSuccess call')
   h.switchActor(); h.success.resolve(); await pending
-  assert.ok(!h.events.includes('close'), 'actor switch during onSuccess await cannot close new actor UI')
+  assert.equal(h.events.filter(x => x === 'close').length, 1, 'a later actor switch while onSuccess is still in flight does not trigger a second close')
 }
 {
   const h = setup(), response = deferred()

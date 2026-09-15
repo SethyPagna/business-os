@@ -165,7 +165,7 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
           offset the Customers/Suppliers/Delivery search rows use one level
           up. The sticky wrapper is outside the overflow-x-auto row because a
           horizontally scrolling box cannot itself be the sticky element. */}
-      <div className="sticky top-2 z-30 -mx-3 -mt-3 space-y-1.5 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
+      <div className="sticky top-2 z-30 -mx-3 -mt-3 space-y-1.5 bg-gray-50 px-3 pb-2 pt-3 dark:bg-gray-900">
       {/* P3-10: the Start→End range leads the pinned block on its own
           full-width row with its preset chips, instead of being the third
           control inside the horizontally scrolling filter line below -- the

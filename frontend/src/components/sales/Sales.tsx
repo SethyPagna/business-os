@@ -2547,7 +2547,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           search row, which pinned the bar but let the search box scroll
           away. Pagination now lives above this group instead of below it,
           matching Products/Inventory's order. */}
-      <div className="sticky top-0 z-30 -mx-1 space-y-1.5 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-0 z-30 -mx-1 space-y-1.5 bg-gray-50 pb-2 pt-2 dark:bg-gray-900 sm:mx-0">
         {/* The Start→End range that scopes the stats strip above now leads
             this pinned toolbar as its own row, directly above the search bar
             (user, Aug 31: "fish out the start date and end date from the stats

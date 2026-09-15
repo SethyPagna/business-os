@@ -170,7 +170,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
           that scrolls horizontally cannot itself be the sticky element. The
           negative margins let the blurred background span the section's own
           p-3 padding instead of leaving a bright gutter beside it. */}
-      <div className="sticky top-2 z-30 -mx-3 -mt-3 space-y-1.5 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
+      <div className="sticky top-2 z-30 -mx-3 -mt-3 space-y-1.5 bg-gray-50 px-3 pb-2 pt-3 dark:bg-gray-900">
       {/* P3-10: the Start→End range leads the pinned block on its own
           full-width row (same shape as Sales), instead of being the fourth
           control inside the horizontally scrolling filter line below where a
