@@ -344,14 +344,15 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             <label htmlFor="variant-form-unit" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {t('unit') || 'Unit'}
             </label>
-            <AppSelect
+            <SuggestionTextInput
               id="variant-form-unit"
               name="variant_unit"
-              className="w-full min-w-0"
-              buttonClassName="min-h-11 w-full min-w-0"
+              className="min-w-0"
+              inputClassName="input min-h-11 w-full min-w-0"
               value={form.unit}
-              options={unitOptions}
+              options={unitOptions.map((option) => String(option.label ?? option.value))}
               onChange={(value) => setField('unit', value)}
+              placeholder={tr('type_or_select_unit', 'Type or select unit...', 'វាយ ឬជ្រើសរើសឯកតា...')}
               ariaLabel={t('unit') || 'Unit'}
             />
           </div>

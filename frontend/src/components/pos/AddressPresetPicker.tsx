@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Modal from '../shared/Modal.tsx'
+import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import { getPosAddressPresets, savePosAddressPresets } from '../../api/posAddressPresetsTransport.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import {
@@ -179,34 +180,68 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
         <div className="grid gap-2 sm:grid-cols-3">
           {ADDRESS_PRESET_CATEGORIES.map((category) => (
             <section key={category} className="min-w-0 rounded-xl border border-gray-200 p-2 dark:border-gray-700" aria-labelledby={`address-preset-${category}`}>
-              <h3 id={`address-preset-${category}`} className="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-200">{labels[category]}</h3>
+              <label htmlFor={`address-preset-${category}`} className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">{labels[category]}</label>
               {loading ? <div className="py-2 text-xs text-gray-400">{tr('loading', 'Loading...')}</div> : (
                 <div className="space-y-1">
-                  {presets[category].map((value) => {
-                    const isEditing = editing?.category === category && editing.original === value
-                    const removeKey = `${category}:${value}`
-                    return isEditing ? (
-                      <div key={value} className="flex min-w-0 gap-1">
-                        <input className="input h-8 min-w-0 flex-1 px-2 text-xs" value={editing.value} onChange={(event) => setEditing({ ...editing, value: event.target.value })} />
-                        <button type="button" className="btn-primary h-8 px-2 text-[11px]" disabled={saving} onClick={() => void saveEdit()}>{tr('save', 'Save')}</button>
-                      </div>
-                    ) : (
-                      <div key={value} className="flex min-w-0 items-center gap-0.5">
-                        <button type="button" className={`min-w-0 flex-1 break-words rounded-md px-2 py-1.5 text-left text-xs ${selected[category] === value ? 'bg-blue-100 font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200' : 'bg-gray-50 text-gray-700 dark:bg-gray-900/40 dark:text-gray-300'}`} aria-pressed={selected[category] === value} onClick={() => setSelected((current) => ({ ...current, [category]: current[category] === value ? '' : value }))}>{value}</button>
-                        {manage && pendingRemove === removeKey ? <>
-                          <button type="button" className="h-7 shrink-0 rounded px-1 text-[10px] text-gray-500" disabled={saving} onClick={() => setPendingRemove('')}>{tr('cancel', 'Cancel')}</button>
-                          <button type="button" className="h-7 shrink-0 rounded bg-rose-600 px-1.5 text-[10px] font-semibold text-white" disabled={saving} onClick={() => void remove(category, value)}>{tr('remove', 'Remove')}</button>
-                        </> : manage ? <>
-                          <button type="button" className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-blue-600" disabled={saving} onClick={() => setEditing({ category, original: value, value })} aria-label={`${tr('rename', 'Rename')} ${value}`}><Pencil className="h-3.5 w-3.5" /></button>
-                          <button type="button" className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-rose-600" disabled={saving} onClick={() => setPendingRemove(removeKey)} aria-label={`${tr('remove', 'Remove')} ${value}`}><Trash2 className="h-3.5 w-3.5" /></button>
-                        </> : null}
-                      </div>
-                    )
-                  })}
+                  {/* ONE compact row per category: the same "type or select"
+                      combobox used across the rest of the app (ProductForm's
+                      Category/Brand/Unit/Supplier, PromotionsPage's scope
+                      pickers). Presets can grow up to
+                      MAX_ADDRESS_PRESETS_PER_CATEGORY (100) -- showing them
+                      all as the only way to choose does not scale, and a
+                      filter box bolted above a chip wall still shows
+                      everything. This opens the full list on focus, filters
+                      as typed, and Enter/click chooses -- see the owner's
+                      "province, district, subdistrict ... able to search and
+                      choose. instead of showing everything" rule. Free text
+                      is still allowed (composeAddress below uses whatever is
+                      typed); it is not silently saved as a new preset -- that
+                      stays an explicit "Manage" action, same as before. */}
+                  <SuggestionTextInput
+                    id={`address-preset-${category}`}
+                    value={selected[category] || ''}
+                    options={presets[category]}
+                    onChange={(value) => setSelected((current) => ({ ...current, [category]: value }))}
+                    placeholder={tr('address_preset_search_or_type', 'Search or type...')}
+                    ariaLabel={labels[category]}
+                    emptyHint={presets[category].length === 0
+                      ? tr('address_preset_none_yet', 'Nothing saved yet -- this will be used as typed. Open "Manage" to save it.')
+                      : tr('address_preset_no_match', 'No match -- this will be used as typed. Open "Manage" to save it.')}
+                  />
+                  {/* Existing preset management (rename/delete/add) stays
+                      fully reachable, just tucked behind the "Manage" toggle
+                      below instead of always rendered as a wall of chips --
+                      no functionality lost, only the default (select) view
+                      got compact. */}
                   {manage ? (
-                    <div className="flex min-w-0 gap-1 pt-1">
-                      <input className="input h-8 min-w-0 flex-1 px-2 text-xs" value={drafts[category]} onChange={(event) => setDrafts((current) => ({ ...current, [category]: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter') void add(category) }} placeholder={tr('add_address_option', 'Add option')} />
-                      <button type="button" className="btn-secondary h-8 px-2 text-[11px]" disabled={saving || !drafts[category].trim()} onClick={() => void add(category)}>{tr('add', 'Add')}</button>
+                    <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg bg-gray-50 p-1.5 dark:bg-gray-900/30">
+                      {presets[category].length === 0 ? (
+                        <div className="px-1 py-1 text-[11px] text-gray-400">{tr('address_preset_none_saved', 'No saved options yet.')}</div>
+                      ) : presets[category].map((value) => {
+                        const isEditing = editing?.category === category && editing.original === value
+                        const removeKey = `${category}:${value}`
+                        return isEditing ? (
+                          <div key={value} className="flex min-w-0 gap-1">
+                            <input className="input h-8 min-w-0 flex-1 px-2 text-xs" value={editing.value} onChange={(event) => setEditing({ ...editing, value: event.target.value })} />
+                            <button type="button" className="btn-primary h-8 px-2 text-[11px]" disabled={saving} onClick={() => void saveEdit()}>{tr('save', 'Save')}</button>
+                          </div>
+                        ) : (
+                          <div key={value} className="flex min-w-0 items-center gap-0.5">
+                            <button type="button" className={`min-w-0 flex-1 break-words rounded-md px-2 py-1.5 text-left text-xs ${selected[category] === value ? 'bg-blue-100 font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200' : 'bg-white text-gray-700 dark:bg-gray-900/40 dark:text-gray-300'}`} aria-pressed={selected[category] === value} onClick={() => setSelected((current) => ({ ...current, [category]: current[category] === value ? '' : value }))}>{value}</button>
+                            {pendingRemove === removeKey ? <>
+                              <button type="button" className="h-7 shrink-0 rounded px-1 text-[10px] text-gray-500" disabled={saving} onClick={() => setPendingRemove('')}>{tr('cancel', 'Cancel')}</button>
+                              <button type="button" className="h-7 shrink-0 rounded bg-rose-600 px-1.5 text-[10px] font-semibold text-white" disabled={saving} onClick={() => void remove(category, value)}>{tr('remove', 'Remove')}</button>
+                            </> : <>
+                              <button type="button" className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-blue-600" disabled={saving} onClick={() => setEditing({ category, original: value, value })} aria-label={`${tr('rename', 'Rename')} ${value}`}><Pencil className="h-3.5 w-3.5" /></button>
+                              <button type="button" className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-rose-600" disabled={saving} onClick={() => setPendingRemove(removeKey)} aria-label={`${tr('remove', 'Remove')} ${value}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                            </>}
+                          </div>
+                        )
+                      })}
+                      <div className="flex min-w-0 gap-1 pt-1">
+                        <input className="input h-8 min-w-0 flex-1 px-2 text-xs" value={drafts[category]} onChange={(event) => setDrafts((current) => ({ ...current, [category]: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter') void add(category) }} placeholder={tr('add_address_option', 'Add option')} />
+                        <button type="button" className="btn-secondary h-8 px-2 text-[11px]" disabled={saving || !drafts[category].trim()} onClick={() => void add(category)}>{tr('add', 'Add')}</button>
+                      </div>
                     </div>
                   ) : null}
                 </div>
