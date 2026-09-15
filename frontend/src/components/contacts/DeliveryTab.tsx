@@ -188,6 +188,26 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
+// P4-4b item 6 (parity): handleSave's edit path used to call
+// load({ silent: true }) after every update -- a full re-search of the
+// current filtered/sorted/paginated Delivery contacts page just to reflect
+// one row changing. updateDeliveryContact's PUT response already IS that
+// one row (routes/contacts.ts's PUT handler: `SELECT * FROM
+// delivery_contacts WHERE id = @id`), so this patches it into place
+// instead -- same pattern CustomersTab.tsx's patchCustomerRow and
+// SuppliersTab.tsx's patchSupplierRow use. Returns null (asking the caller
+// to fall back to a full load) when the id isn't present on the
+// currently-loaded page.
+function patchDeliveryContact(rows: DeliveryContact[], id: number | string, patch: Record<string, unknown>): DeliveryContact[] | null {
+  let matched = false
+  const next = rows.map((row) => {
+    if (Number(row.id) !== Number(id)) return row
+    matched = true
+    return { ...row, ...patch }
+  })
+  return matched ? next : null
+}
+
 // ?€?€ Options helpers ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // Options stored as JSON array in the 'address' TEXT column.
 // Each option: { label, name, phone, area }
@@ -915,7 +935,23 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       } else {
         notify(selected ? (t('delivery_contact_updated')||'Updated') : (t('delivery_contact_added')||'Added'))
       }
-      setModal(null); setSelected(null); await load({ silent: true, label: 'Delivery contacts after save' }); return { success: true }
+      setModal(null); setSelected(null)
+      // P4-4b item 6 (parity): patch the edited row in place instead of the
+      // full load() -- same "patch only when the target position is
+      // already known" rule CustomersTab.tsx/SuppliersTab.tsx use; a create
+      // still needs the full load() since its page/sort slot can't be
+      // derived from the response alone.
+      if (selected && res && typeof res === 'object') {
+        const patched = patchDeliveryContact(contacts, selected.id, res as Record<string, unknown>)
+        if (patched) {
+          setContacts(patched)
+        } else {
+          await load({ silent: true, label: 'Delivery contacts after save' })
+        }
+      } else {
+        await load({ silent: true, label: 'Delivery contacts after save' })
+      }
+      return { success: true }
     } catch (error: unknown) {
       const duplicateCheck = readContactDuplicateDecisionError(error)
       if (duplicateCheck) return { duplicateDecisionRequired: duplicateCheck }
