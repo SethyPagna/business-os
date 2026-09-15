@@ -338,7 +338,8 @@ async function main() {
   const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
   const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 
-  const closeAnalytics = loadReal('lib/salesAnalytics.ts', {
+const schemaProbeReal = loadReal('lib/schemaProbe.ts')
+  const closeAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
     './db': { getDb: () => settingsOnly }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision,
   })
   const telegram = loadReal('lib/telegram.ts', {

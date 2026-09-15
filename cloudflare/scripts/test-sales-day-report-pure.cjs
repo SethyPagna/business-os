@@ -43,7 +43,7 @@ fs.writeFileSync(path.join(tmpDir, 'salesAnalytics.ts'), kernelSrc)
 fs.writeFileSync(path.join(tmpDir, 'businessDateWindow.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
 fs.writeFileSync(path.join(tmpDir, 'moneyPrecision.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'moneyPrecision.ts'), 'utf8'))
 fs.writeFileSync(path.join(tmpDir, 'reportMoneyPrecision.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'reportMoneyPrecision.ts'), 'utf8'))
-const readerDependencies = ['customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts', 'removalLosses.ts']
+const readerDependencies = ['customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts', 'removalLosses.ts', 'schemaProbe.ts']
 for (const file of readerDependencies) {
   fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', file), 'utf8'))
 }

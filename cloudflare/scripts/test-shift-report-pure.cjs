@@ -89,7 +89,8 @@ const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', {
 })
 const lang = loadReal('lib/telegramLang.ts')
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
-const analytics = loadReal('lib/salesAnalytics.ts', {
+const schemaProbeReal = loadReal('lib/schemaProbe.ts')
+const analytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
   ...analyticsPrecision,
@@ -529,7 +530,7 @@ const stubDb = {
     }
   },
 }
-const stubAnalytics = loadReal('lib/salesAnalytics.ts', {
+const stubAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
   './db': { getDb: () => stubDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision,
 })
 const wired = loadReal('lib/telegram.ts', {
@@ -593,8 +594,8 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './telegramLang': lang,
     './saleTotals': saleTotals,
     './nativeSaleChange': nativeSaleChange,
-    './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision }),
-    './shiftReconciliation': reconciliationFor(() => emptyDb, loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })),
+    './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': { getDb: () => emptyDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision }),
+    './shiftReconciliation': reconciliationFor(() => emptyDb, loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': { getDb: () => emptyDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })),
   })
   return wiredEmpty.telegramCommandReply({}, '/shift 03/09/2026', NOW)
 }).then((reply) => {
@@ -664,7 +665,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
       }
     },
   }
-  const mappingAnalyticsReal = loadReal('lib/salesAnalytics.ts', {
+  const mappingAnalyticsReal = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
     './db': { getDb: () => mappingDb },
     './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
     ...analyticsPrecision,

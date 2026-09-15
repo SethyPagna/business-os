@@ -64,6 +64,9 @@ fs.writeFileSync(path.join(tmpDir, 'removalLosses.ts'), fs.readFileSync(path.joi
 const kernelDependencies = [
   'moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts',
   'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts',
+  // salesAnalytics.ts's reportTableColumns now delegates to this shared,
+  // per-isolate-memoized PRAGMA table_info() probe (schemaProbe.ts).
+  'schemaProbe.ts',
 ]
 for (const file of kernelDependencies) {
   fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))

@@ -197,7 +197,8 @@ const branchWrites = loadReal('lib/branchWrites.ts', {
   './canonicalBranchIdentity': canonicalBranchIdentity,
 })
 const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRoles })
-const productWrites = loadReal('lib/productWrites.ts', {
+const schemaProbeReal = loadReal('lib/schemaProbe.ts')
+const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schemaProbeReal,
   './moneyPrecision': loadReal('lib/moneyPrecision.ts'),
   ...dbStub,
   './media': { sanitizeMediaList: (list) => (Array.isArray(list) ? list : []) },

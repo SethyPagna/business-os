@@ -98,7 +98,8 @@ const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
   './branchRoles': branchRoles,
 })
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
+const schemaProbeReal = loadReal('lib/schemaProbe.ts')
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
   './db': { getDb: () => db },
   './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
   ...analyticsPrecision,

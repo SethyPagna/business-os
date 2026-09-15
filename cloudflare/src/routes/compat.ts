@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { tableColumnSet } from '../lib/schemaProbe'
 import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
 import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } from '../lib/backup'
@@ -80,9 +81,11 @@ function isoNow() {
   return new Date().toISOString()
 }
 
+// Memoized per isolate by schemaProbe.ts -- was a fresh PRAGMA table_info()
+// on every write through this compat route that needed to know which
+// columns exist.
 async function columnsFor(env: Env, table: string): Promise<Set<string>> {
-  const rows = await env.DB.prepare(`PRAGMA table_info("${table}")`).all<{ name: string }>()
-  return new Set((rows.results || []).map((row) => row.name))
+  return tableColumnSet(getDb(env), table)
 }
 
 function payloadForColumns(body: Record<string, unknown>, columns: Set<string>) {

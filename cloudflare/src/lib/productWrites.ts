@@ -9,6 +9,7 @@
 // to change its import path.
 
 import { getDb } from './db'
+import { tableColumnSet } from './schemaProbe'
 import { sanitizeMediaList } from './media'
 import { dateToBatchCode } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
@@ -163,9 +164,10 @@ export function nowIso() {
   return new Date().toISOString()
 }
 
+// Memoized per isolate by schemaProbe.ts -- was a fresh PRAGMA table_info()
+// on every product write that needed to know which columns exist.
 export async function tableColumns(env: Env, table: string): Promise<Set<string>> {
-  const rows = await env.DB.prepare(`PRAGMA table_info("${table}")`).all<{ name: string }>()
-  return new Set((rows.results || []).map((row) => row.name))
+  return tableColumnSet(getDb(env), table)
 }
 
 // This app doesn't support negative stock -- see routes/products.ts's own

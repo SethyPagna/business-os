@@ -117,7 +117,8 @@ async function main() {
     './saleTotals': saleTotals,
   })
   const paymentMethodRegistry = loadReal('lib/paymentMethodRegistry.ts')
-  const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
+const schemaProbeReal = loadReal('lib/schemaProbe.ts')
+  const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
     './db': dbModule,
     './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
     ...analyticsPrecision,

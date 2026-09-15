@@ -62,7 +62,8 @@ const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision':
 const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
 const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
-const analytics = loadReal('lib/salesAnalytics.ts', {
+const schemaProbeReal = loadReal('lib/schemaProbe.ts')
+const analytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
   './db': { getDb: () => fakeDb },
   './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   './reportMoneyPrecision': reportMoneyPrecision,
