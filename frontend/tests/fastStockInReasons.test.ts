@@ -181,7 +181,10 @@ runTest('Worker parity: /inventory/adjust still refuses a missing reason; /batch
   assert.match(inventoryRoute, /if \(!reason\) return c\.json\(\{ error: 'A reason is required for stock adjustments' \}, 400\)/)
   assert.match(batchesRoute, /reason\?: string \| null/)
   assert.match(batchesRoute, /const reason = String\(body\.reason \?\? ''\)\.trim\(\) \|\| null/)
-  assert.match(batchesRoute, /reason: appendReceiptNotes\(reason \|\| `Stock received \(\$\{lotCode\}\)`, freeGoods \? \[FREE_GOODS_REASON_NOTE\] : \[\]\),/)
+  // P4-4a folded the movement INSERT into receiveBatchStock's own batch, so the
+  // fallback label reads the planned lot code (planLotCode), not the post-write
+  // one; the wording and the optional-reason contract are unchanged.
+  assert.match(batchesRoute, /reason: appendReceiptNotes\(reason \|\| `Stock received \(\$\{planLotCode\}\)`, freeGoods \? \[FREE_GOODS_REASON_NOTE\] : \[\]\),/)
   assert.match(transport, /reason: payload\.reason \|\| null,/)
   assert.match(transport, /export type ReceiveBatchPayload = \{[^]*?\n  reason\?: string \| null\n/)
 })
