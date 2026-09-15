@@ -800,7 +800,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
     noReturns: 'មិនទាន់មានប្រវត្តិត្រឡប់សម្រាប់សមាជិកនេះទេ។',
     active: 'សកម្ម',
     liveCatalog: 'ស្តុកបច្ចុប្បន្ន និងព័ត៌មានដែលសមស្របសម្រាប់អតិថិជន។',
-    filterCompactHint: 'ប្រើតម្រងរហ័សដើម្បីកាត់បន្ថយបញ្ជីផលិតផល។',
     filterSummary: 'លទ្ធផល {count}',
     loadingProducts: 'កំពុងផ្ទុកផលិតផល...',
     refreshing: 'កំពុងធ្វើបច្ចុប្បន្នភាព...',
@@ -886,7 +885,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   'zh-CN': {
     liveCatalog: '实时库存,仅显示适合顾客查看的资料。',
-    filterCompactHint: '使用快捷筛选更快缩小产品范围。',
     filterSummary: '{count} 个结果',
     loadingProducts: '正在加载产品...',
     refreshing: '正在刷新...',
@@ -927,7 +925,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   'zh-TW': {
     liveCatalog: '即時庫存,只顯示適合顧客查看的資料。',
-    filterCompactHint: '使用快速篩選更快縮小產品範圍。',
     filterSummary: '{count} 個結果',
     loadingProducts: '正在載入產品...',
     refreshing: '正在重新整理...',
@@ -968,7 +965,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   vi: {
     liveCatalog: 'Tồn kho trực tiếp, chỉ hiển thị thông tin an toàn cho khách.',
-    filterCompactHint: 'Dùng bộ lọc nhanh để thu hẹp sản phẩm.',
     filterSummary: '{count} kết quả',
     loadingProducts: 'Đang tải sản phẩm...',
     refreshing: 'Đang làm mới...',
@@ -1004,7 +1000,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   th: {
     liveCatalog: 'สต็อกสด แสดงเฉพาะข้อมูลที่ปลอดภัยสำหรับลูกค้า',
-    filterCompactHint: 'ใช้ตัวกรองด่วนเพื่อจำกัดสินค้าให้เร็วขึ้น',
     filterSummary: '{count} ผลลัพธ์',
     loadingProducts: 'กำลังโหลดสินค้า...',
     refreshing: 'กำลังรีเฟรช...',
@@ -1040,7 +1035,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   ru: {
     liveCatalog: 'Живой каталог с данными, безопасными для клиента.',
-    filterCompactHint: 'Используйте быстрые фильтры, чтобы быстрее сузить список.',
     filterSummary: '{count} результат(ов)',
     loadingProducts: 'Загрузка товаров...',
     refreshing: 'Обновление...',
@@ -1076,7 +1070,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   fr: {
     liveCatalog: 'Inventaire en direct, détails sûrs pour les clients uniquement.',
-    filterCompactHint: 'Utilisez les filtres rapides pour réduire la liste.',
     filterSummary: '{count} résultat(s)',
     loadingProducts: 'Chargement des produits...',
     refreshing: 'Actualisation...',
@@ -1112,7 +1105,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   es: {
     liveCatalog: 'Inventario en vivo, solo detalles seguros para clientes.',
-    filterCompactHint: 'Usa filtros rápidos para reducir productos más rápido.',
     filterSummary: '{count} resultado(s)',
     loadingProducts: 'Cargando productos...',
     refreshing: 'Actualizando...',
@@ -1148,7 +1140,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   de: {
     liveCatalog: 'Live-Bestand, nur kundenfreundliche Details.',
-    filterCompactHint: 'Nutzen Sie Schnellfilter, um Produkte schneller einzugrenzen.',
     filterSummary: '{count} Ergebnis(se)',
     loadingProducts: 'Produkte werden geladen...',
     refreshing: 'Aktualisierung...',
@@ -1170,7 +1161,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   ja: {
     liveCatalog: 'リアルタイム在庫、顧客向けの安全な情報のみ。',
-    filterCompactHint: 'クイックフィルターで商品をすばやく絞り込めます。',
     filterSummary: '{count}件の結果',
     loadingProducts: '商品を読み込み中...',
     refreshing: '更新中...',
@@ -1192,7 +1182,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   ko: {
     liveCatalog: '실시간 재고, 고객에게 안전한 정보만 표시합니다.',
-    filterCompactHint: '빠른 필터로 제품을 더 쉽게 좁혀보세요.',
     filterSummary: '{count}개 결과',
     loadingProducts: '제품을 불러오는 중...',
     refreshing: '새로고침 중...',
@@ -1214,7 +1203,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   pt: {
     liveCatalog: 'Estoque ao vivo, apenas detalhes seguros para clientes.',
-    filterCompactHint: 'Use filtros rápidos para reduzir produtos mais rápido.',
     filterSummary: '{count} resultado(s)',
     loadingProducts: 'Carregando produtos...',
     refreshing: 'Atualizando...',
@@ -1236,7 +1224,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   it: {
     liveCatalog: 'Disponibilità in tempo reale, solo dettagli sicuri per i clienti.',
-    filterCompactHint: 'Usa i filtri rapidi per restringere i prodotti più velocemente.',
     filterSummary: '{count} risultato/i',
     loadingProducts: 'Caricamento prodotti...',
     refreshing: 'Aggiornamento...',
@@ -1258,7 +1245,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   ar: {
     liveCatalog: 'مخزون مباشر، تفاصيل آمنة للعملاء فقط.',
-    filterCompactHint: 'استخدم الفلاتر السريعة لتضييق المنتجات بسرعة.',
     filterSummary: '{count} نتيجة',
     loadingProducts: 'جاري تحميل المنتجات...',
     refreshing: 'جاري التحديث...',
@@ -1280,7 +1266,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   hi: {
     liveCatalog: 'लाइव स्टॉक, केवल ग्राहक-सुरक्षित जानकारी।',
-    filterCompactHint: 'उत्पादों को जल्दी सीमित करने के लिए त्वरित फ़िल्टर उपयोग करें।',
     filterSummary: '{count} परिणाम',
     loadingProducts: 'उत्पाद लोड हो रहे हैं...',
     refreshing: 'रीफ़्रेश हो रहा है...',
@@ -1302,7 +1287,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   id: {
     liveCatalog: 'Stok langsung, hanya detail aman untuk pelanggan.',
-    filterCompactHint: 'Gunakan filter cepat untuk mempersempit produk lebih cepat.',
     filterSummary: '{count} hasil',
     loadingProducts: 'Memuat produk...',
     refreshing: 'Menyegarkan...',
@@ -1324,7 +1308,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   ms: {
     liveCatalog: 'Stok langsung, hanya butiran selamat untuk pelanggan.',
-    filterCompactHint: 'Gunakan penapis pantas untuk mengecilkan pilihan produk.',
     filterSummary: '{count} hasil',
     loadingProducts: 'Memuatkan produk...',
     refreshing: 'Menyegar semula...',
@@ -1346,7 +1329,6 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   },
   tr: {
     liveCatalog: 'Canlı stok, yalnızca müşteri için güvenli bilgiler.',
-    filterCompactHint: 'Ürünleri daha hızlı daraltmak için hızlı filtreleri kullanın.',
     filterSummary: '{count} sonuç',
     loadingProducts: 'Ürünler yükleniyor...',
     refreshing: 'Yenileniyor...',
