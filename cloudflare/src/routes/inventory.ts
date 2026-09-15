@@ -1508,12 +1508,18 @@ app.post('/adjust', async (c) => {
   if (stockReasonTooLong(reason)) return c.json({ error: `Reason is too long (max ${STOCK_REASON_MAX_LENGTH} characters)`, code: 'reason_too_long' }, 400)
 
   const db = getDb(c.env)
-  const product = unlockPricing
-    ? await db.prepare(`SELECT ${STOCK_ROW_COLUMNS} FROM products WHERE id = @id`).get<StockRowFields>({ id: productId })
-    : await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId })
+  // Perf-2: product and the default-branch lookup read different tables and
+  // neither depends on the other's result, so they go in one round trip
+  // instead of two sequential ones (`branchId` only needs `defaultBranchId`
+  // when the request omitted it -- an explicit requestedBranchId already
+  // skips that query, unchanged from before).
+  const [product, branchId] = await Promise.all([
+    unlockPricing
+      ? db.prepare(`SELECT ${STOCK_ROW_COLUMNS} FROM products WHERE id = @id`).get<StockRowFields>({ id: productId })
+      : db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId }),
+    requestedBranchId ? Promise.resolve(requestedBranchId) : defaultBranchId(c.env),
+  ])
   if (!product) return c.json({ error: 'Product not found' }, 404)
-
-  const branchId = requestedBranchId || (await defaultBranchId(c.env))
   if (!branchId) return c.json({ error: 'An active branch is required before stock can be changed' }, 400)
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
 
@@ -2059,10 +2065,16 @@ app.post('/adjust', async (c) => {
   // above), so the audit action must key off `originalType` -- keying off
   // `type` would make 'stock_set' unreachable and misreport every "Set
   // stock to X" as a plain add/remove in the audit log.
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing, receivedDate })
-  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: targetProductId }))
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: targetProductId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  // Perf-2: the response below is built entirely from values already in
+  // scope (targetProductId/branchId/movementType/...) and reads nothing
+  // audit() writes, so the insert can run after the response is sent --
+  // same reasoning as the broadcast/bumpVersion calls it now joins.
+  c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing, receivedDate }),
+    broadcast(c.env, 'products', { action: 'update', id: targetProductId }),
+    broadcast(c.env, 'inventory', { action: 'adjust', id: targetProductId }),
+    bumpVersion(c.env, 'products'),
+  ]))
   if (delta !== 0) {
     // The alert carries the RESULTING on-hand figures (this branch and all
     // branches), read back after the write -- not just the delta.
