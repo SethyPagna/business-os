@@ -837,6 +837,34 @@ function sanitizeReceiptTemplateValue(raw: unknown): string {
   return JSON.stringify(parsed)
 }
 
+// Same stance as sanitizeReceiptTemplateValue above, and for the same reason:
+// pageSizeMode decides whether every future continuous-roll print gets an
+// explicit `@page size` at all (see frontend/src/utils/printReceipt.ts). An
+// invalid value here would silently misprint every receipt from then on, so
+// it is enum-validated on write instead of trusted like the rest of the
+// receipt_print_settings blob. Mirrors
+// frontend/src/utils/receiptAppliedConfig.ts's normalizeReceiptPrintSettings
+// -- duplicated rather than imported for the same cross-package reason as
+// sanitizeReceiptTemplateValue.
+const RECEIPT_PAGE_SIZE_MODES = new Set(['measured', 'fixed', 'driver', 'auto-longest'])
+function sanitizeReceiptPrintSettingsValue(raw: unknown): string {
+  const asString = typeof raw === 'string' ? raw : JSON.stringify(raw)
+  let parsed: Record<string, unknown>
+  try {
+    const candidate = JSON.parse(asString)
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return asString
+    parsed = candidate as Record<string, unknown>
+  } catch {
+    // Malformed JSON is preserved as-is, same "never guess at unparsable
+    // legacy data" stance as the rest of this file.
+    return asString
+  }
+  parsed.pageSizeMode = RECEIPT_PAGE_SIZE_MODES.has(String(parsed.pageSizeMode)) ? String(parsed.pageSizeMode) : 'measured'
+  const fixedLength = Number.parseFloat(String(parsed.fixedPageLengthMm ?? ''))
+  parsed.fixedPageLengthMm = Number.isFinite(fixedLength) && fixedLength > 0 ? String(fixedLength) : '100'
+  return JSON.stringify(parsed)
+}
+
 app.post('/', async (c) => {
   const user = c.get('user')
   const body = await c.req.json<Record<string, unknown>>()
@@ -984,7 +1012,9 @@ app.post('/', async (c) => {
   const db = getDb(c.env)
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = attemptedKeys.map((key) => {
     const raw = body[key]
-    const value = key === 'receipt_template' ? sanitizeReceiptTemplateValue(raw) : (typeof raw === 'string' ? raw : JSON.stringify(raw))
+    const value = key === 'receipt_template' ? sanitizeReceiptTemplateValue(raw)
+      : key === 'receipt_print_settings' ? sanitizeReceiptPrintSettingsValue(raw)
+        : (typeof raw === 'string' ? raw : JSON.stringify(raw))
     return {
       sql: `INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
