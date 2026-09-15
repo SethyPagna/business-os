@@ -450,7 +450,7 @@ export function buildVisibleProductCards(
 // its `variants` prop, so a "no variants" product must get the SAME empty
 // array reference across renders or the memo's shallow prop comparison
 // fails every time and the memo never actually skips a re-render.
-const NO_VARIANT_CHOICES: ProductRecord[] = Object.freeze([] as ProductRecord[])
+const NO_VARIANT_CHOICES = Object.freeze([] as ProductRecord[]) as ProductRecord[]
 
 export function getVariantChoices(product: ProductRecord | null | undefined, variantChildrenByParentId: Map<number, ProductRecord[]> = new Map()): ProductRecord[] {
   if (Array.isArray(product?.__groupChoices) && product.__groupChoices.length) {

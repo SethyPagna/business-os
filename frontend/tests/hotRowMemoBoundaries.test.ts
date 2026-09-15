@@ -51,7 +51,7 @@ runTest('ProductCard is wrapped in React.memo', () => {
 })
 
 runTest('getVariantChoices returns a shared stable empty array, not a fresh literal', () => {
-  assert.match(posCore, /const NO_VARIANT_CHOICES: ProductRecord\[\] = Object\.freeze\(\[\] as ProductRecord\[\]\)/, 'a shared frozen empty-array constant must exist')
+  assert.match(posCore, /const NO_VARIANT_CHOICES = Object\.freeze\(\[\] as ProductRecord\[\]\) as ProductRecord\[\]/, 'a shared frozen empty-array constant must exist')
   assert.match(posCore, /variantChildrenByParentId\.get\(rootId\) \|\| NO_VARIANT_CHOICES/, 'the no-match branch must return the shared constant')
   // Positive control: the pre-fix code built a brand-new `[]` on every call
   // with no match, which broke ProductCard's memo for every standalone
