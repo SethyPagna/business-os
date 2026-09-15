@@ -280,6 +280,32 @@ body[data-public-portal='true'] video,
     min-width: 44px;
     min-height: 44px;
   }
+
+  /* AlphaIndexRail's entries are not independent 44px targets: every entry
+     carries an aria-label (its accessible name), so the rule above matched
+     them too and forced the collapsed 2x10 dashes and expanded 20x24 letters
+     up to 44x44 -- a screen-edge column of blank grey circles that blocked
+     the page underneath it (owner, 2026-09-15 phone report, image 3). The
+     RAIL ITSELF is the tap target (a press/drag scrubs across entries; see
+     AlphaIndexRail.tsx), so its entries keep their own intrinsic sizes. */
+  body[data-public-portal='true'] [data-alpha-rail] button,
+  [data-public-media-protection='true'] [data-alpha-rail] button {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* Same floor, same aria-label match, against the header's social/account
+     icon row: those intentionally shrink below 44px under `sm` (h-8 w-8,
+     CatalogPreviewSurface.tsx) so all of them fit on one row at 320-375px.
+     Left unexempted the rule silently re-widened every icon back past that
+     width and reopened the overflow/wrap the nowrap fix closed. */
+  body[data-public-portal='true'] [data-portal-header-icons] a[aria-label],
+  body[data-public-portal='true'] [data-portal-header-icons] button[aria-label],
+  [data-public-media-protection='true'] [data-portal-header-icons] a[aria-label],
+  [data-public-media-protection='true'] [data-portal-header-icons] button[aria-label] {
+    min-width: 0;
+    min-height: 0;
+  }
 }
 
 /* ---------------------------------------------------------------------------

@@ -359,8 +359,13 @@ export default function CatalogPreviewSurface({
                       down again underneath it. Icons shrink one size below
                       `sm` instead, which keeps all three (and a fourth, if a
                       merchant adds a website link) on the one row every
-                      phone width the storefront targets. */}
-                  <div className="flex min-w-0 flex-nowrap items-center gap-0.5 sm:gap-1">
+                      phone width the storefront targets. `data-portal-header-
+                      icons` is the hook public-portal.css's pointer:coarse
+                      44px floor exempts -- every icon below carries an
+                      aria-label, which matched that rule and would otherwise
+                      silently re-widen it past `h-8`/`h-9` and reopen this
+                      same overflow. */}
+                  <div data-portal-header-icons="" className="flex min-w-0 flex-nowrap items-center gap-0.5 sm:gap-1">
                     {headerLinks.map((item) => {
                       const Icon = item.icon
                       return (
@@ -405,8 +410,9 @@ export default function CatalogPreviewSurface({
                   {/* Same one-row rule as the social links opposite it --
                       `flex-nowrap` plus the sub-`sm` shrink keeps wishlist/
                       account/language/theme together even with all four
-                      present. */}
-                  <div className="flex flex-nowrap items-center justify-end gap-0.5 sm:gap-1">
+                      present. Same `data-portal-header-icons` exemption
+                      hook too (see the social row's comment above). */}
+                  <div data-portal-header-icons="" className="flex flex-nowrap items-center justify-end gap-0.5 sm:gap-1">
                     {/* Wishlist + Account live in the top bar (public storefront
                         only — the admin editor preview doesn't wire these
                         handlers, so they don't render there). Each opens its own

@@ -320,6 +320,12 @@ export default function AlphaIndexRail({
   const railNode = (
     <div
       ref={railRef}
+      // Stable hook for public-portal.css's pointer:coarse 44px floor: every
+      // entry below carries an aria-label, which matched that rule and
+      // forced each dash/letter up to a 44x44 box -- a screen-edge column of
+      // blank grey circles blocking the page (owner, 2026-09-15). The rail
+      // itself is the tap target; see the exemption keyed off this attribute.
+      data-alpha-rail=""
       role="toolbar"
       aria-label={railLabel}
       aria-orientation="vertical"
