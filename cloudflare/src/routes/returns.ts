@@ -1570,11 +1570,27 @@ app.post('/', async (c) => {
       if (lot) lot.available -= take.quantity
     }
   }
+  // Perf-2: this used to run one product_batches SELECT per replacement
+  // line with an explicit batch chosen. Read every explicit batch id once
+  // (IN-chunked for D1's bound-param cap) and re-check id+variant_product_id
+  // in JS -- same match, same 'does not belong to this replacement product'
+  // refusal, one or a handful of round trips instead of one per line.
+  const explicitBatchIds = [...new Set(replacementLines
+    .filter((line) => line.batchId != null)
+    .map((line) => line.batchId as number))]
+  const explicitLotById = new Map<number, { lot_code: string | null; expiry_date: string | null; variant_product_id: number }>()
+  if (explicitBatchIds.length) {
+    const rows = await selectInChunks(explicitBatchIds, 0, (chunk) => db.prepare(
+      `SELECT id,lot_code,expiry_date,variant_product_id FROM product_batches WHERE id IN (${chunk.map(() => '?').join(',')}) AND is_active=1`,
+    ).all<{ id: number; lot_code: string | null; expiry_date: string | null; variant_product_id: number }>(chunk))
+    for (const row of rows) explicitLotById.set(Number(row.id), row)
+  }
   for (const [index, line] of replacementLines.entries()) {
     if (line.batchId == null) continue
-    const lot = await db.prepare('SELECT lot_code,expiry_date FROM product_batches WHERE id=? AND variant_product_id=? AND is_active=1')
-      .get<{ lot_code: string | null; expiry_date: string | null }>([line.batchId, line.productId])
-    if (!lot) return c.json({ error: 'Selected received date does not belong to this replacement product' }, 400)
+    const lot = explicitLotById.get(line.batchId)
+    if (!lot || Number(lot.variant_product_id) !== line.productId) {
+      return c.json({ error: 'Selected received date does not belong to this replacement product' }, 400)
+    }
     replacementExplicitTakes.set(index, [{ batchId: line.batchId, lotCode: lot.lot_code, expiryDate: lot.expiry_date, quantity: line.quantity }])
   }
 
@@ -1674,17 +1690,30 @@ app.post('/', async (c) => {
       addBatchDelta(take.batchId, line.productId, line.branchId, -take.quantity, true)
     }
   }
-  const branchSnapshots = []
-  for (const value of branchDeltas.values()) {
-    const row = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id=? AND branch_id=?')
-      .get<{ quantity: number }>([value.product_id, value.branch_id])
-    branchSnapshots.push({ ...value, before: Number(row?.quantity) || 0, after: (Number(row?.quantity) || 0) + value.delta })
-  }
-  const batchSnapshots = []
-  for (const value of batchDeltas.values()) {
-    const row = await db.prepare(`SELECT pb.variant_product_id AS product_id,pb.is_active,pb.lot_code,pb.expiry_date,COALESCE(bbs.quantity,0) quantity
+  // Perf-2: branchDeltas/batchDeltas hold one entry per distinct
+  // product+branch (or batch+branch) touched by this return -- each row's
+  // snapshot read is independent of every other's, so both maps read in
+  // one Promise.all fan-out (one round trip per map) instead of one
+  // sequential await per entry.
+  const branchDeltaEntries = [...branchDeltas.values()]
+  const branchRows = await Promise.all(branchDeltaEntries.map((value) =>
+    db.prepare('SELECT quantity FROM branch_stock WHERE product_id=? AND branch_id=?')
+      .get<{ quantity: number }>([value.product_id, value.branch_id]),
+  ))
+  const branchSnapshots = branchDeltaEntries.map((value, index) => {
+    const row = branchRows[index]
+    return { ...value, before: Number(row?.quantity) || 0, after: (Number(row?.quantity) || 0) + value.delta }
+  })
+  const batchDeltaEntries = [...batchDeltas.values()]
+  const batchRows = await Promise.all(batchDeltaEntries.map((value) =>
+    db.prepare(`SELECT pb.variant_product_id AS product_id,pb.is_active,pb.lot_code,pb.expiry_date,COALESCE(bbs.quantity,0) quantity
       FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=? WHERE pb.id=?`)
-      .get<{ product_id: number; is_active: number; lot_code: string | null; expiry_date: string | null; quantity: number }>([value.branch_id, value.batch_id])
+      .get<{ product_id: number; is_active: number; lot_code: string | null; expiry_date: string | null; quantity: number }>([value.branch_id, value.batch_id]),
+  ))
+  const batchSnapshots = []
+  for (let index = 0; index < batchDeltaEntries.length; index += 1) {
+    const value = batchDeltaEntries[index]
+    const row = batchRows[index]
     if (!row || Number(row.product_id) !== value.product_id || (value.requires_active === 1 && Number(row.is_active) !== 1)) {
       return c.json({ error: 'A selected received date is no longer active for this product', code: 'write_conflict' }, 409)
     }
