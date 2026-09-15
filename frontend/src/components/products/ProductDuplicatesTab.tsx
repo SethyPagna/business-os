@@ -16,13 +16,7 @@ import {
   finalizeSelectedConflictGroupReview,
   getSelectedConflictGroupReviewPage,
   makeSelectedConflictGroupApplyBody,
-  makeSelectedConflictMergeApplyBody,
-  previewSelectedConflictMerges,
-  runSelectedConflictMergeBatch,
   updateProduct,
-  type SelectedConflictMergeApplyBody,
-  type SelectedConflictMergeApplyResult,
-  type SelectedConflictMergePreviewResult,
   type SelectedConflictGroupReviewResult,
   type SelectedConflictGroupFinalizeResult,
   type SelectedConflictGroupApplyBody,
@@ -32,20 +26,13 @@ import { createClientRequestId } from '../../api/requestIds.ts'
 import { normalizeProductGroupName } from '../../utils/productGrouping.ts'
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import Modal from '../shared/Modal'
-import SelectedConflictMergeReviewModal, { SelectedConflictGroupReviewModal } from './SelectedConflictMergeReviewModal.tsx'
+import { SelectedConflictGroupReviewModal } from './SelectedConflictMergeReviewModal.tsx'
 import {
   createSelectedConflictRequestCoordinator,
-  partitionSelectedConflictClusters,
-  mergeSelectedConflictCommittedCases,
-  preserveSelectedConflictChoices,
-  selectedConflictCanResumeSameRequest,
   selectedConflictCaseKey,
-  selectedConflictChangedCases,
   selectedConflictOutcomeIsUnknown,
   type ProductConflictCluster,
   type ProductConflictProduct,
-  type SelectedConflictLocalSkip,
-  type SelectedConflictStockChoice,
 } from '../../utils/selectedConflictMerge.ts'
 import {
   buildSelectedConflictGroupReviewRequest,
@@ -338,17 +325,6 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkProgress, setBulkProgress] = useState('')
-  const [batchPreview, setBatchPreview] = useState<SelectedConflictMergePreviewResult | null>(null)
-  const [batchLocalSkipped, setBatchLocalSkipped] = useState<SelectedConflictLocalSkip[]>([])
-  const [batchChoices, setBatchChoices] = useState<Record<string, SelectedConflictStockChoice>>({})
-  const [batchResult, setBatchResult] = useState<SelectedConflictMergeApplyResult | null>(null)
-  const [batchApplyBody, setBatchApplyBody] = useState<SelectedConflictMergeApplyBody | null>(null)
-  const [batchCommittedCases, setBatchCommittedCases] = useState<SelectedConflictMergeApplyResult['committedCases']>([])
-  const [batchChangedCases, setBatchChangedCases] = useState<Record<string, SelectedConflictMergePreviewResult['cases'][number]>>({})
-  const [batchUnknownOutcome, setBatchUnknownOutcome] = useState(false)
-  const [batchNeedsRefresh, setBatchNeedsRefresh] = useState(false)
-  const batchRequestRef = useRef(createSelectedConflictRequestCoordinator())
-  const batchWriteInFlightRef = useRef(false)
   const [groupReviewPages, setGroupReviewPages] = useState<SelectedConflictGroupReviewResult[]>([])
   const [groupReviewPageIndex, setGroupReviewPageIndex] = useState(0)
   const [groupReviewChoices, setGroupReviewChoices] = useState<Record<string, SelectedConflictGroupResolutionChoice>>({})
@@ -384,7 +360,6 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
   }, [])
 
   useEffect(() => () => {
-    batchRequestRef.current.cancel()
     groupReviewRequestRef.current.cancel()
   }, [])
 
@@ -526,40 +501,6 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
       notify(replaceVars(t('bulk_dismiss_partial_failure') || '{count} of the selected duplicates could not be dismissed', { count: failed }), 'error')
     } else {
       notify(t('bulk_dismiss_success') || 'Dismissed the selected duplicates')
-    }
-  }
-
-  const openSelectedMergeReview = async () => {
-    const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(cluster)))
-    if (!targets.length || bulkBusy) return
-    const partition = partitionSelectedConflictClusters(targets)
-    if (!partition.cases.length) {
-      const reasons = [...new Set(partition.skipped.map((item) => t(`selected_conflict_${item.code}`) || item.code))]
-      notify([t('selected_conflict_none_eligible') || 'None of the selected groups is an eligible two-product merge.', ...reasons].join(' '), 'info')
-      return
-    }
-    const request = batchRequestRef.current.begin()
-    setBulkBusy(true)
-    setBulkProgress(t('selected_conflict_loading_preview') || 'Loading combined review…')
-    setBatchResult(null)
-    setBatchApplyBody(null)
-    setBatchCommittedCases([])
-    setBatchChangedCases({})
-    setBatchUnknownOutcome(false)
-    setBatchNeedsRefresh(false)
-    try {
-      const preview = await previewSelectedConflictMerges(partition.cases, { signal: request.signal })
-      if (!request.isCurrent()) return
-      setBatchPreview(preview)
-      setBatchLocalSkipped(partition.skipped)
-      setBatchChoices({})
-    } catch (error: unknown) {
-      if (request.isCurrent()) notify(selectedConflictErrorMessage(t, error, 'selected_conflict_preview_failed', 'Could not load the combined merge review'), 'error')
-    } finally {
-      if (request.finish()) {
-        setBulkBusy(false)
-        setBulkProgress('')
-      }
     }
   }
 
@@ -806,127 +747,6 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
     await executeSelectedGroupApply(groupApplyBody)
   }
 
-  const refreshSelectedMergeReview = async () => {
-    if (!batchPreview || bulkBusy) return
-    const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(cluster)))
-    const partition = partitionSelectedConflictClusters(targets)
-    if (!partition.cases.length) {
-      const reasons = [...new Set(partition.skipped.map((item) => t(`selected_conflict_${item.code}`) || item.code))]
-      notify([t('selected_conflict_none_eligible') || 'None of the selected groups is an eligible two-product merge.', ...reasons].join(' '), 'info')
-      closeSelectedMergeReview()
-      return
-    }
-    const previous = batchPreview
-    const request = batchRequestRef.current.begin()
-    setBulkBusy(true)
-    setBulkProgress(t('selected_conflict_loading_preview') || 'Loading combined review…')
-    try {
-      const preview = await previewSelectedConflictMerges(partition.cases, { signal: request.signal })
-      if (!request.isCurrent()) return
-      setBatchChoices((current) => preserveSelectedConflictChoices(previous.cases, preview.cases, current))
-      setBatchChangedCases(selectedConflictChangedCases(previous.cases, preview.cases))
-      setBatchPreview(preview)
-      setBatchLocalSkipped(partition.skipped)
-      setBatchResult(null)
-      setBatchApplyBody(null)
-      setBatchUnknownOutcome(false)
-      setBatchNeedsRefresh(false)
-    } catch (error: unknown) {
-      if (request.isCurrent()) notify(selectedConflictErrorMessage(t, error, 'selected_conflict_preview_failed', 'Could not load the combined merge review'), 'error')
-    } finally {
-      if (request.finish()) {
-        setBulkBusy(false)
-        setBulkProgress('')
-      }
-    }
-  }
-
-  const closeSelectedMergeReview = () => {
-    const writeWillReconcileWhenSettled = batchWriteInFlightRef.current
-    batchRequestRef.current.cancel()
-    setBatchPreview(null)
-    setBatchLocalSkipped([])
-    setBatchChoices({})
-    setBatchResult(null)
-    setBatchApplyBody(null)
-    setBatchCommittedCases([])
-    setBatchChangedCases({})
-    setBatchUnknownOutcome(false)
-    setBatchNeedsRefresh(false)
-    setBulkBusy(false)
-    setBulkProgress('')
-    if (!writeWillReconcileWhenSettled) void load()
-  }
-
-  const executeSelectedMergeBody = async (body: SelectedConflictMergeApplyBody) => {
-    const request = batchRequestRef.current.begin()
-    batchWriteInFlightRef.current = true
-    setBulkBusy(true)
-    setBulkProgress(t('selected_conflict_merging_progress') || 'Merging reviewed pairs…')
-    try {
-      const result = await runSelectedConflictMergeBatch(body, {
-        signal: request.signal,
-        onProgress: (progress) => {
-          if (!request.isCurrent()) return
-          const committed = progress.committedCases.length
-          const remaining = progress.remainingCaseCount == null ? (t('unknown') || 'Unknown') : progress.remainingCaseCount
-          setBulkProgress(replaceVars(t('selected_conflict_progress_counts') || '{committed} committed · {remaining} remaining', { committed, remaining }))
-        },
-      })
-      if (!request.isCurrent()) return
-      setBatchResult(result)
-      setBatchUnknownOutcome(false)
-      setBatchNeedsRefresh(false)
-      setBatchCommittedCases((current) => mergeSelectedConflictCommittedCases(current, result.committedCases))
-      setSelectedKeys((current) => {
-        const next = new Set(current)
-        for (const item of result.committedCases) next.delete(item.caseKey)
-        return next
-      })
-      if (result.complete && !result.refusals.length) notify(t('bulk_merge_success') || 'Merged the selected duplicates')
-    } catch (error: unknown) {
-      if (!request.isCurrent()) return
-      const unknown = selectedConflictOutcomeIsUnknown(error)
-      setBatchUnknownOutcome(unknown)
-      if (!unknown) {
-        setBatchNeedsRefresh(true)
-      }
-      notify(selectedConflictErrorMessage(
-        t,
-        unknown && !(error as { code?: unknown } | null)?.code ? null : error,
-        unknown ? 'selected_conflict_apply_failed' : 'selected_conflict_preview_stale',
-        unknown
-          ? 'The selected merge outcome is unknown. Product data will be refreshed.'
-          : 'The review changed. Product data was refreshed; refresh the review before confirming.',
-      ), 'error')
-    } finally {
-      batchWriteInFlightRef.current = false
-      // The same-request Resume action is enabled only after the cache was
-      // invalidated by the transport and this authoritative reload settled.
-      await load()
-      if (request.finish()) {
-        setBulkBusy(false)
-        setBulkProgress('')
-      }
-    }
-  }
-
-  const applySelectedMergeReview = async () => {
-    if (!batchPreview || bulkBusy || batchResult || batchUnknownOutcome || batchNeedsRefresh) return
-    const body = makeSelectedConflictMergeApplyBody(batchPreview, batchChoices, createClientRequestId('product-conflict-merge'))
-    if (!body.cases.length) return
-    setBatchApplyBody(body)
-    await executeSelectedMergeBody(body)
-  }
-
-  const resumeSelectedMergeReview = async () => {
-    if (!batchApplyBody || bulkBusy) return
-    setBatchResult(null)
-    setBatchUnknownOutcome(false)
-    setBatchNeedsRefresh(false)
-    await executeSelectedMergeBody(batchApplyBody)
-  }
-
   const normalizedSearch = search.trim().toLowerCase()
   const visibleClusters = useMemo(() => clusters.filter((cluster) => {
     if (severityFilter !== 'all' && cluster.severity !== severityFilter) return false
@@ -1137,28 +957,6 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
           review grid; the Apply and bulk flows AWAIT it (the shared
           ConfirmDialog, never window.confirm). */}
       {mergeStockChoiceDialog}
-      {batchPreview ? (
-        <SelectedConflictMergeReviewModal
-          preview={batchPreview}
-          localSkipped={batchLocalSkipped}
-          choices={batchChoices}
-          working={bulkBusy}
-          result={batchResult}
-          committedCases={batchCommittedCases}
-          changedCases={batchChangedCases}
-          choicesFrozen={Boolean(batchApplyBody)}
-          unknownOutcome={batchUnknownOutcome}
-          needsRefresh={batchNeedsRefresh}
-          canResume={Boolean(batchApplyBody) && (batchUnknownOutcome || selectedConflictCanResumeSameRequest(batchResult))}
-          canRepreview={batchResult?.interruptionCode === 'merge_state_conflict'}
-          onChoice={(caseKey, choice) => { if (!batchApplyBody) setBatchChoices((current) => ({ ...current, [caseKey]: choice })) }}
-          onConfirm={() => void applySelectedMergeReview()}
-          onResume={() => void resumeSelectedMergeReview()}
-          onRefresh={() => void refreshSelectedMergeReview()}
-          onClose={closeSelectedMergeReview}
-          t={t}
-        />
-      ) : null}
       {groupReviewPages.length ? (
         <SelectedConflictGroupReviewModal
           pages={groupReviewPages}

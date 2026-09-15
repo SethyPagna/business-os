@@ -30,15 +30,30 @@ test('Select all selects the FILTERED view, not hidden clusters', () => {
   assert.match(src, /setSelectedKeys\(new Set\(visibleClusters\.map\(\(cluster\) => clusterKey\(cluster\)\)\)\)/)
 })
 
-test('selected merge partitions candidates before requesting one combined preview', () => {
-  assert.match(src, /const partition = partitionSelectedConflictClusters\(targets\)/)
-  assert.match(src, /previewSelectedConflictMerges\(partition\.cases, \{ signal: request\.signal \}\)/)
-  assert.match(src, /setBatchLocalSkipped\(partition\.skipped\)/, 'client-ineligible and over-limit selections stay visible in the review')
-  assert.match(src, /preserveSelectedConflictChoices\(previous\.cases, preview\.cases, current\)/, 'an explicit re-preview keeps a stock choice only when pair membership and keeper are unchanged')
-  assert.match(src, /<SelectedConflictMergeReviewModal/, 'all eligible pairs share one before/after review')
+test('the durable group review is the ONLY selected-merge entry point — the retired exact-pairs batch preview is gone', () => {
+  // Sep 13's 194529b3 repointed "Merge selected" onto the durable group
+  // review (openSelectedGroupReview); the older exact-pairs-only preview
+  // (openSelectedMergeReview / batchPreview / SelectedConflictMergeReviewModal)
+  // was left behind unreachable and is now removed entirely (P7 debloat).
+  for (const deadSymbol of [
+    'openSelectedMergeReview', 'resumeSelectedMergeReview', 'refreshSelectedMergeReview',
+    'closeSelectedMergeReview', 'executeSelectedMergeBody', 'applySelectedMergeReview',
+    'batchPreview', 'batchLocalSkipped', 'batchChoices', 'batchResult', 'batchApplyBody',
+    'batchCommittedCases', 'batchChangedCases', 'batchUnknownOutcome', 'batchNeedsRefresh',
+    'batchRequestRef', 'batchWriteInFlightRef', 'partitionSelectedConflictClusters',
+    'previewSelectedConflictMerges', 'runSelectedConflictMergeBatch', 'makeSelectedConflictMergeApplyBody',
+    'preserveSelectedConflictChoices', 'selectedConflictChangedCases', 'mergeSelectedConflictCommittedCases',
+    'selectedConflictCanResumeSameRequest',
+  ]) {
+    assert.ok(!src.includes(deadSymbol), `${deadSymbol} must not remain — it was only reachable from the retired exact-pairs batch preview`)
+  }
+  // The default export used to render the exact-pairs review; only the named
+  // group-review export (the file itself still holds both modals) is imported now.
+  assert.doesNotMatch(src, /<SelectedConflictMergeReviewModal/, 'the retired default-export modal is never rendered')
+  assert.doesNotMatch(src, /import SelectedConflictMergeReviewModal[,\s]/, 'the retired default export is never imported')
 })
 
-test('N-row selections can open one durable paged review without replacing the legacy pair merge', () => {
+test('N-row selections open one durable paged group review', () => {
   assert.match(src, /buildSelectedConflictGroupReviewRequest\(targets, createClientRequestId\('product-conflict-group-review'\), removalReasons\)/)
   assert.match(src, /createSelectedConflictGroupReview\(body, \{ signal: request\.signal \}\)/)
   assert.match(src, /setGroupReviewPages\(\[review\]\)/)
@@ -46,7 +61,6 @@ test('N-row selections can open one durable paged review without replacing the l
   assert.match(src, /next\.draft_digest === current\.draft_digest[\s\S]*next\.page\.cursor !== cursor/, 'a mismatched page cannot be joined to a different or changed review')
   assert.match(src, /<SelectedConflictGroupReviewModal/)
   assert.match(src, /buildSelectedConflictGroupReviewRequest/, 'the durable group review request builder is wired for every selection')
-  assert.doesNotMatch(src, /onClick=\{\(\) => void openSelectedMergeReview\(\)\}/, 'new selections use the durable group route, never the retired exact-pairs-only preview')
   // P6-9: "Review selected actions" and "Merge selected" used to render as two
   // separate buttons calling the exact same openSelectedGroupReview() handler
   // with the same title -- a leftover from Sep 13's "Route duplicate
@@ -59,7 +73,7 @@ test('N-row selections can open one durable paged review without replacing the l
   assert.equal(groupReviewButtonCount, 1, 'the bulk bar must offer exactly one button that opens the group review, not a duplicate')
   assert.match(src, /Remove independently in the global review[\s\S]*Reason for removing this product/, 'independent removal is explicit and requires its own reason')
   assert.doesNotMatch(src, /selected_conflict_remove_unavailable/, 'the reviewed removal path is no longer presented as unavailable')
-  assert.match(src, /groupReviewRequestRef[\s\S]*batchRequestRef/, 'read-only paging and legacy writes have independent cancellation ownership')
+  assert.match(src, /const groupReviewRequestRef = useRef\(createSelectedConflictRequestCoordinator\(\)\)/, 'the group review has its own request coordinator')
 })
 
 test('independent removal is rendered only when the caller has product-delete authority', () => {
@@ -81,24 +95,17 @@ test('global review freezes once, then reuses one apply receipt across bounded c
   assert.match(src, /const code = String\(\(error as \{ code\?: unknown \} \| null\)\?\.code \|\| ''\)[\s\S]*setGroupApplyError\(\{ code, message:/, 'stable backend interruption codes reach the review recovery surface')
   assert.match(src, /selectedConflictOutcomeIsUnknown\(error\)/, 'ambiguous transport outcomes expose same-receipt resume')
   assert.match(src, /if \(!groupFinalizeResult\) setGroupReviewChoices/, 'late input cannot mutate the finalized review')
-  assert.doesNotMatch(src.slice(src.indexOf('const executeSelectedGroupApply'), src.indexOf('const refreshSelectedMergeReview')), /deleteProduct|handleApplyDecisions|runSelectedConflictMergeBatch/, 'global independent removals do not use direct delete or legacy pair merge')
+  assert.doesNotMatch(src.slice(src.indexOf('const executeSelectedGroupApply'), src.indexOf('const applySelectedGroupReview')), /deleteProduct|handleApplyDecisions|runSelectedConflictMergeBatch/, 'global independent removals do not use direct delete or legacy pair merge')
 })
 
-test('dismiss remains sequential while merge uses the atomic batch continuation contract', () => {
+test('dismiss remains sequential and the group review write path owns its own cancellation and reload', () => {
   assert.match(src, /bulk_dismissing_progress/)
   assert.match(src, /catch \{\s*\n\s*failed \+= 1/, 'one failed cluster must not abort the rest')
   assert.match(src, /bulk_dismiss_partial_failure/)
-  assert.match(src, /makeSelectedConflictMergeApplyBody\(batchPreview, batchChoices, createClientRequestId\('product-conflict-merge'\)\)/, 'one stable request id is created at final confirmation')
-  assert.match(src, /setBatchApplyBody\(body\)[\s\S]*executeSelectedMergeBody\(body\)/, 'the exact confirmed request body is retained before the first write')
-  assert.match(src, /resumeSelectedMergeReview[\s\S]*executeSelectedMergeBody\(batchApplyBody\)/, 'manual resume reuses the same request id, manifest, cases, and choices')
-  assert.match(src, /choicesFrozen=\{Boolean\(batchApplyBody\)\}/, 'stock controls freeze for the lifetime of the confirmed request receipt')
-  assert.match(src, /if \(!batchApplyBody\) setBatchChoices/, 'late input cannot change the projection while Resume retains the original body')
-  assert.match(src, /runSelectedConflictMergeBatch\(body, \{/)
-  assert.match(src, /for \(const item of result\.committedCases\) next\.delete\(item\.caseKey\)/, 'only committed pairs leave the current selection')
-  assert.match(src, /batchWriteInFlightRef\.current = false[\s\S]*await load\(\)/, 'a cancelled or unknown write reloads only after transport cache invalidation settles')
-  assert.match(src, /if \(!writeWillReconcileWhenSettled\) void load\(\)/, 'closing a read-only preview refreshes immediately without racing an in-flight write')
+  assert.match(src, /const writeWillReconcileWhenSettled = groupWriteInFlightRef\.current/)
+  assert.match(src, /groupWriteInFlightRef\.current = false[\s\S]*await load\(\)/, 'a cancelled or unknown write reloads only after transport cache invalidation settles')
+  assert.match(src, /if \(!writeWillReconcileWhenSettled\) void load\(\)/, 'closing a read-only review refreshes immediately without racing an in-flight write')
   assert.match(src, /t\(`selected_conflict_\$\{code\}`\)/, 'stable API error codes use the bilingual error map before server fallback prose')
-  assert.match(src, /selectedConflictChangedCases\(previous\.cases, preview\.cases\)/, 'a fresh preview retains the old values for every changed fingerprint')
 })
 
 test('selection is cleared after any bulk action and pruned when a cluster resolves', () => {

@@ -128,40 +128,6 @@ export function detectCsvDelimiter(text: string): string {
     .sort((left, right) => right.count - left.count)[0]?.delimiter || ','
 }
 
-export function splitCsvLine(line: unknown, delimiter = ','): string[] {
-  const result: string[] = []
-  const source = String(line || '')
-  let current = ''
-  let inQuotes = false
-
-  for (let index = 0; index < source.length; index += 1) {
-    const char = source[index]
-    const nextChar = source[index + 1]
-
-    if (char === '"' && inQuotes && nextChar === '"') {
-      current += '"'
-      index += 1
-      continue
-    }
-
-    if (char === '"') {
-      inQuotes = !inQuotes
-      continue
-    }
-
-    if (char === delimiter && !inQuotes) {
-      result.push(current)
-      current = ''
-      continue
-    }
-
-    current += char
-  }
-
-  result.push(current)
-  return result
-}
-
 export function parseDelimitedRows(text: string, { delimiter = detectCsvDelimiter(text) }: ParseDelimitedOptions = {}): string[][] {
   const source = stripBom(text)
   const rows: string[][] = []
@@ -387,15 +353,6 @@ export function parseCsvNumber(value: unknown, fallback = 0, options: ParseCsvNu
   const numeric = Number(normalized)
   if (!Number.isFinite(numeric)) return fallback
   if (options.allowNegative === false && numeric < 0) return fallback
-  return numeric
-}
-
-export function parseRequiredCsvNumber(value: unknown, field: string, options: ParseCsvNumberOptions = {}): number {
-  if (value === undefined || value === null || String(value).trim() === '') return options.fallback ?? 0
-  const normalized = normalizeNumberSeparators(value)
-  const numeric = normalized ? Number(normalized) : Number.NaN
-  if (!Number.isFinite(numeric)) throw new Error(`Invalid ${field}`)
-  if (options.allowNegative === false && numeric < 0) throw new Error(`${field} cannot be negative`)
   return numeric
 }
 
