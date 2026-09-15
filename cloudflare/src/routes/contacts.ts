@@ -391,12 +391,19 @@ function duplicateErrorResponse(
 // requires the caller to echo the exact candidate ids and identity versions
 // it reviewed. A phone_conflict can never be overridden because that would
 // let two different names claim the same phone.
+//
+// P4-2 (owner ruling, superseding P3-9's prompt below): a supplier name is a
+// company identity -- this app keeps exactly one row per company, so a
+// same-name match (`exact_match` or `name_only`; anything left once a
+// phone_conflict is ruled out) is never offered as a choice. It resolves
+// straight to the existing record via `resolvedExisting`, silently, on
+// every writer. Customers and delivery contacts are unchanged: shared names
+// are normal there (walk-ins, common Khmer given names) and stay advisory.
 async function checkContactDuplicateBlock(
   env: Env,
   config: ContactConfig,
   subject: { id?: number | string | null; name: string; phone: unknown; address: unknown },
   decisionInput: unknown,
-  options: { allowDuplicateName?: boolean } = {},
 ): Promise<{
   block: { body: Record<string, unknown>; status: number } | null
   decision: ContactDuplicateCreateSeparateDecision | null
@@ -404,6 +411,7 @@ async function checkContactDuplicateBlock(
   review: ContactDuplicateReview
   snapshots: ContactDuplicateCandidateSnapshot[]
   phones: string[]
+  resolvedExisting: ContactDuplicateMatch | null
 }> {
   const db = getDb(env)
   const phones = collectContactPhones({ phone: subject.phone, address: subject.address }, config.optionMode)
@@ -422,33 +430,32 @@ async function checkContactDuplicateBlock(
       review,
       snapshots,
       phones,
+      resolvedExisting: null,
     }
   }
   const phoneConflict = matches.find((m) => m.severity === 'phone_conflict')
-  if (phoneConflict) return { block: duplicateErrorResponse(config.entity, phoneConflict, matches, review), decision: null, matches, review, snapshots, phones }
-  const exactMatch = matches.find((m) => m.severity === 'exact_match')
-  if (exactMatch && !decision) return { block: duplicateErrorResponse(config.entity, exactMatch, matches, review), decision: null, matches, review, snapshots, phones }
-  // P3-9: a name-only duplicate used to pass straight through, which is how
-  // the removed `ensureSupplierExists()` writer minted ten "j secrat" rows
-  // and six "lang" rows without anybody ever seeing a warning. A supplier is
-  // a company, so a second row with the identical name is almost always the
-  // same company -- the caller must now say which it is, either by echoing
-  // the reviewed candidates (duplicateDecision) or by sending
-  // allow_duplicate_name: true, which is what a replay of a write the user
-  // already confirmed (undo/redo of a create or delete) carries.
-  //
-  // Customers and delivery contacts are deliberately NOT gated here: people
-  // legitimately share a name, walk-ins are registered by name alone all day,
-  // and the POS creates them mid-sale where there is nobody to answer a
-  // prompt. Their name-only matches stay advisory (DuplicateFlagBanner) and
-  // land in the Conflicts tab.
-  const nameOnly = config.table === 'suppliers' ? matches.find((m) => m.severity === 'name_only') : undefined
-  if (nameOnly && !decision && options.allowDuplicateName !== true) {
-    return { block: duplicateErrorResponse(config.entity, nameOnly, matches, review), decision: null, matches, review, snapshots, phones }
+  if (phoneConflict) return { block: duplicateErrorResponse(config.entity, phoneConflict, matches, review), decision: null, matches, review, snapshots, phones, resolvedExisting: null }
+  // P4-2: suppliers stop here -- whatever is left once a phone_conflict is
+  // ruled out shares this subject's normalized name (exact_match requires it
+  // too), so it is the same company. Resolve to it and never fall through to
+  // a create/rename. This replaces the P3-9 decision-required prompt below
+  // (kept, commented, for the customers/delivery_contacts path only) --
+  // the ten "j secrat" / six "lang" rows P3-9 was built to catch are exactly
+  // what this now auto-resolves onto instead of ever minting.
+  if (config.table === 'suppliers') {
+    const nameMatch = matches.find((match) => match.severity !== 'phone_conflict')
+    return { block: null, decision: null, matches, review, snapshots, phones, resolvedExisting: nameMatch || null }
   }
+  const exactMatch = matches.find((m) => m.severity === 'exact_match')
+  if (exactMatch && !decision) return { block: duplicateErrorResponse(config.entity, exactMatch, matches, review), decision: null, matches, review, snapshots, phones, resolvedExisting: null }
+  // Customers and delivery contacts are deliberately NOT gated on a
+  // name_only match: people legitimately share a name, walk-ins are
+  // registered by name alone all day, and the POS creates them mid-sale
+  // where there is nobody to answer a prompt. Their name-only matches stay
+  // advisory (DuplicateFlagBanner) and land in the Conflicts tab.
   if (decision && !contactDuplicateDecisionMatches(review, decision)) {
     const top = exactMatch || matches[0]
-    if (top) return { block: duplicateErrorResponse(config.entity, top, matches, review, 'contact_duplicate_candidates_changed'), decision: null, matches, review, snapshots, phones }
+    if (top) return { block: duplicateErrorResponse(config.entity, top, matches, review, 'contact_duplicate_candidates_changed'), decision: null, matches, review, snapshots, phones, resolvedExisting: null }
     const duplicate = { matches, duplicateReview: review, allowedActions: [] }
     return {
       block: { status: 409, body: { error: 'The possible duplicate records changed. Review again before saving.', code: 'contact_duplicate_candidates_changed', duplicate, matches, duplicateReview: review, allowedActions: [] } },
@@ -457,6 +464,7 @@ async function checkContactDuplicateBlock(
       review,
       snapshots,
       phones,
+      resolvedExisting: null,
     }
   }
   return {
@@ -466,6 +474,7 @@ async function checkContactDuplicateBlock(
     review,
     snapshots,
     phones,
+    resolvedExisting: null,
   }
 }
 
@@ -506,6 +515,48 @@ async function hasTable(db: ReturnType<typeof getDb>, name: string): Promise<boo
     .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name = @name LIMIT 1")
     .get<{ ok: number }>({ name })
   return Boolean(row)
+}
+
+// P4-2: the auto-resolve half of checkContactDuplicateBlock's supplier rule.
+// A create that resolved onto an existing supplier writes nothing (see the
+// POST handler); a create/rename/edit surface that had already loaded a
+// DIFFERENT full row (`merged`, e.g. the PUT handler's own `current`) has
+// something to reconcile instead -- fold it into the existing `keeper` via
+// the exact same writer the Conflicts tab's manual merge button uses
+// (buildContactMergePlan), so every linked table (products, product_batches,
+// returns, supplier_invoices) repoints the same way a reviewed merge does.
+// Suppliers have no membership/portal/anonymous complexity, so this needs
+// none of those merge-route guards -- just the plan, the batch, and a cache
+// bump.
+async function mergeSupplierIntoExisting(
+  env: Env,
+  config: ContactConfig,
+  user: SessionUser | undefined,
+  keeper: Record<string, unknown>,
+  merged: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const db = getDb(env)
+  const hasSupplierInvoices = await hasTable(db, 'supplier_invoices')
+  const plan = buildContactMergePlan({
+    table: config.table,
+    entity: config.entity,
+    editableColumns: config.columns,
+    keeper,
+    merged,
+    hasCustomerReceivables: false,
+    hasSupplierInvoices,
+    audit: {
+      operationId: crypto.randomUUID(),
+      userId: user?.id ?? null,
+      userName: actorSnapshot(user),
+      deviceName: null,
+      deviceTz: null,
+    },
+  })
+  await db.batch(plan.statements)
+  await Promise.allSettled(['suppliers', 'products', 'returns'].map((namespace) => bumpVersion(env, namespace)))
+  const keeperId = Number(keeper.id)
+  return (await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keeperId })) || plan.finalKeeper
 }
 
 // Bulk points computation for the admin side (customer list + points
@@ -1253,8 +1304,16 @@ function registerContactRoutes(config: ContactConfig) {
       payload.phone_normalized = canonicalizePhone(payload.phone)
     }
 
-    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.duplicateDecision, { allowDuplicateName: body.allow_duplicate_name === true })
+    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.duplicateDecision)
     if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
+    // P4-2: a supplier name that matches an existing one resolves straight to
+    // that record -- no row is created, nothing else on it changes, and the
+    // caller (the Add Supplier form, undo/redo replay, or anything else that
+    // posts here) gets back the same shape it would from a create.
+    if (duplicateDecision.resolvedExisting) {
+      const existing = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: duplicateDecision.resolvedExisting.id })
+      if (existing) return c.json(existing)
+    }
     const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
 
     // Customers only. A number staff typed in wins (after a reuse check);
@@ -1313,6 +1372,17 @@ function registerContactRoutes(config: ContactConfig) {
         })
         : await runContactInsert()
     } catch (error) {
+      // P4-2: a concurrent create of the same supplier name can lose this
+      // race (the guard's atomic recheck throws) after this request already
+      // passed the check above with no match. Re-resolve rather than error --
+      // the loser of the race silently attaches to the winner too.
+      if (config.table === 'suppliers') {
+        const raceMatch = (await findContactDuplicates(db, config.table, { name, phones: duplicateDecision.phones }, config.optionMode)).find((match) => match.severity !== 'phone_conflict')
+        if (raceMatch) {
+          const existing = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: raceMatch.id })
+          if (existing) return c.json(existing)
+        }
+      }
       const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, config, { name, phones: duplicateDecision.phones }, duplicateDecision.decision)
       if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
       throw error
@@ -1403,13 +1473,20 @@ function registerContactRoutes(config: ContactConfig) {
       if (renameScope !== 'carry' && renameScope !== 'record_only') {
         return c.json({ error: 'Choose whether to update linked live records or rename only this contact.', code: 'rename_choice_required' }, 409)
       }
-      const collision = await db.prepare(`SELECT id, name FROM ${config.table} WHERE id != @id AND lower(trim(name)) = lower(trim(@name)) LIMIT 1`).get<{ id: number; name: string }>({ id, name })
-      if (collision) {
-        return c.json({
-          error: `"${name}" already exists. Open Possible Duplicates and explicitly choose which record to keep, or cancel this rename.`,
-          code: 'merge_required',
-          duplicate: collision,
-        }, 409)
+      // P4-2: suppliers do not stop here on a collision -- checkContactDuplicateBlock's
+      // resolvedExisting further down folds this record into the existing
+      // same-name one automatically (mergeSupplierIntoExisting), the same
+      // "one row per company, resolved silently" rule POST now uses. Customers
+      // and delivery contacts keep asking, unchanged.
+      if (config.table !== 'suppliers') {
+        const collision = await db.prepare(`SELECT id, name FROM ${config.table} WHERE id != @id AND lower(trim(name)) = lower(trim(@name)) LIMIT 1`).get<{ id: number; name: string }>({ id, name })
+        if (collision) {
+          return c.json({
+            error: `"${name}" already exists. Open Possible Duplicates and explicitly choose which record to keep, or cancel this rename.`,
+            code: 'merge_required',
+            duplicate: collision,
+          }, 409)
+        }
       }
     }
 
@@ -1459,8 +1536,23 @@ function registerContactRoutes(config: ContactConfig) {
     // to check the phones already on `current`, not an empty set.
     const effectivePhone = Object.prototype.hasOwnProperty.call(payload, 'phone') ? payload.phone : current.phone
     const effectiveAddress = Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address
-    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { id, name, phone: effectivePhone, address: effectiveAddress }, body.duplicateDecision, { allowDuplicateName: body.allow_duplicate_name === true })
+    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { id, name, phone: effectivePhone, address: effectiveAddress }, body.duplicateDecision)
     if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
+    // P4-2: this edit's resulting name (or phone) now identifies a DIFFERENT
+    // existing supplier -- most commonly a rename onto an existing name, the
+    // case the collision check above deferred here for suppliers. Fold this
+    // record into the existing one instead of saving the edit, silently and
+    // without asking, same as the create path just above.
+    if (duplicateDecision.resolvedExisting) {
+      const keeper = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: duplicateDecision.resolvedExisting.id })
+      if (keeper) {
+        const mergedResult = await mergeSupplierIntoExisting(c.env, config, user, keeper, current)
+        c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: Number(keeper.id), mergedId: Number(current.id) }).catch(() => {}))
+        return c.json(mergedResult)
+      }
+      // The matched row vanished between the check above and now (a race) --
+      // nothing left to fold into; fall through and save the edit normally.
+    }
     const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
 
     // Customers only, same deferred-mint shape as the POST route above: a

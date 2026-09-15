@@ -180,9 +180,14 @@ async function main() {
     assert.doesNotMatch(route, /code: 'phone_conflict'/)
   })
 
-  // ---- P3-9: a same-name supplier now needs an explicit decision --------
-  // Ten "j secrat" rows and six "lang" rows reached production because the
-  // gate let every name_only match through silently.
+  // ---- P4-2: a same-name supplier resolves silently, it is never a choice
+  // -------------------------------------------------------------------
+  // P3-9 (superseded) made a name-only supplier match into a 409 the caller
+  // had to answer -- the owner reported that prompt itself as the unwanted
+  // behaviour ("just merge directly if same"). Ten "j secrat" rows and six
+  // "lang" rows had reached production before P3-9 existed; P4-2 keeps
+  // catching that exact shape but resolves it onto the existing record
+  // instead of stopping to ask.
   const SUPPLIERS = { table: 'suppliers', path: '/suppliers', entity: 'supplier', columns: [], channel: 'suppliers', optionMode: 'address' }
   const CUSTOMERS = { table: 'customers', path: '/customers', entity: 'customer', columns: [], channel: 'customers', optionMode: 'address' }
   const DELIVERY = { table: 'delivery_contacts', path: '/delivery-contacts', entity: 'delivery_contact', columns: [], channel: 'deliveryContacts', optionMode: 'area' }
@@ -199,45 +204,41 @@ async function main() {
     })
   }
 
-  await check('a name-only supplier duplicate is refused until the caller decides', async () => {
+  await check('a name-only supplier duplicate resolves onto the existing record instead of being refused (positive control: 409-blocked on the pre-P4-2 gate)', async () => {
     const db = openDb(loadAll())
     db.prepare("INSERT INTO suppliers(id,name,phone) VALUES(20,'j secrat',NULL)").run()
     const gate = gateFor(db)
-    const blocked = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { name: 'J Secrat', phone: null, address: null }, null)
-    assert.ok(blocked.block, 'the exact shape that minted the production cluster must stop')
-    assert.equal(blocked.block.status, 409)
-    assert.equal(blocked.block.body.code, 'contact_duplicate_decision_required')
-    assert.deepEqual(blocked.block.body.allowedActions, ['use_existing', 'create_separate'], 'both choices are offered')
-    assert.equal(blocked.block.body.matches[0].severity, 'name_only')
-    assert.match(String(blocked.block.body.error), /already exists/)
-    assert.doesNotMatch(String(blocked.block.body.error), /phone number/, 'the exact-match wording does not leak into a name-only block')
+    const resolved = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { name: 'J Secrat', phone: null, address: null }, null)
+    assert.equal(resolved.block, null, 'the exact shape that minted the production cluster must no longer stop -- it silently resolves')
+    assert.ok(resolved.resolvedExisting, 'the caller is told which existing row to use instead of inserting')
+    assert.equal(resolved.resolvedExisting.id, 20)
+    assert.equal(resolved.resolvedExisting.severity, 'name_only')
+    assert.equal(resolved.decision, null, 'no decision is needed or produced -- there is no choice to record')
   })
 
-  await check('an echoed review or an explicit allow_duplicate_name lets the separate supplier through', async () => {
+  await check('an exact_match (same name AND phone) also resolves silently for suppliers, not just name_only', async () => {
     const db = openDb(loadAll())
-    db.prepare("INSERT INTO suppliers(id,name,phone) VALUES(20,'j secrat',NULL)").run()
+    db.prepare("INSERT INTO suppliers(id,name,phone) VALUES(20,'j secrat','012 345 678')").run()
     const gate = gateFor(db)
-    const { review } = await exactReview(db, 'suppliers', 'j secrat', [])
-    const decided = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { name: 'j secrat', phone: null, address: null }, createDecision(review))
-    assert.equal(decided.block, null, 'reviewing the candidates is a valid answer')
-    assert.ok(decided.decision, 'and the decision is carried into the write guard')
-    const replayed = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { name: 'j secrat', phone: null, address: null }, null, { allowDuplicateName: true })
-    assert.equal(replayed.block, null, 'an undo/redo replay of a confirmed write is not re-prompted')
-    assert.equal(replayed.decision, null, 'the escape hatch is not a create-separate decision')
+    const resolved = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { name: 'j secrat', phone: '012 345 678', address: null }, null)
+    assert.equal(resolved.block, null)
+    assert.equal(resolved.resolvedExisting?.id, 20)
+    assert.equal(resolved.resolvedExisting?.severity, 'exact_match')
   })
 
-  await check('renaming a supplier onto an existing name is gated the same way', async () => {
+  await check('renaming a supplier onto an existing name resolves the same way', async () => {
     const db = openDb(loadAll())
     db.prepare("INSERT INTO suppliers(id,name,phone) VALUES(20,'j secrat',NULL),(21,'Lang',NULL)").run()
     const gate = gateFor(db)
     const rename = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { id: 21, name: 'j secrat', phone: null, address: null }, null)
-    assert.ok(rename.block, 'a rename can create a duplicate just as easily as a create')
-    assert.equal(rename.block.body.code, 'contact_duplicate_decision_required')
+    assert.equal(rename.block, null, 'a rename can create a duplicate just as easily as a create, and is resolved the same way')
+    assert.equal(rename.resolvedExisting?.id, 20, 'the OTHER record (id 20) is what the caller must fold this one into')
     const keptName = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { id: 21, name: 'Lang', phone: null, address: null }, null)
-    assert.equal(keptName.block, null, 'a record never counts as its own duplicate')
+    assert.equal(keptName.block, null)
+    assert.equal(keptName.resolvedExisting, null, 'a record never counts as its own duplicate')
   })
 
-  await check('customers and delivery contacts keep sharing a name without a prompt', async () => {
+  await check('customers and delivery contacts keep sharing a name without a prompt or an auto-resolve', async () => {
     const db = openDb(loadAll())
     db.prepare("INSERT INTO customers(id,name,phone,membership_number) VALUES(1,'Sok',NULL,'LC-00001')").run()
     db.prepare("INSERT INTO delivery_contacts(id,name,phone) VALUES(1,'Sok',NULL)").run()
@@ -245,23 +246,37 @@ async function main() {
     const customer = await gate.checkContactDuplicateBlock({}, CUSTOMERS, { name: 'Sok', phone: null, address: null }, null)
     assert.equal(customer.block, null, 'walk-ins share names all day and the POS has nobody to answer a prompt')
     assert.equal(customer.matches.length, 1, 'it is still reported as a possible duplicate for the banner')
+    assert.equal(customer.resolvedExisting, null, 'P4-2 is suppliers-only -- a customer create still actually creates')
     const rider = await gate.checkContactDuplicateBlock({}, DELIVERY, { name: 'Sok', phone: null, address: null }, null)
     assert.equal(rider.block, null)
+    assert.equal(rider.resolvedExisting, null)
   })
 
-  await check('a phone conflict is still not a choice, on any table', async () => {
+  await check('a phone conflict is still not a choice, on any table -- including suppliers, even though a name match now auto-resolves', async () => {
     const db = openDb(loadAll())
     db.prepare("INSERT INTO suppliers(id,name,phone) VALUES(20,'Other Name','012 345 678')").run()
     const gate = gateFor(db)
-    const blocked = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { name: 'j secrat', phone: '012 345 678', address: null }, null, { allowDuplicateName: true })
-    assert.ok(blocked.block, 'allow_duplicate_name must never unlock a phone conflict')
+    const blocked = await gate.checkContactDuplicateBlock({}, SUPPLIERS, { name: 'j secrat', phone: '012 345 678', address: null }, null)
+    assert.ok(blocked.block, 'a different name can never silently take over an existing phone')
+    assert.equal(blocked.resolvedExisting, null)
     assert.deepEqual(blocked.block.body.allowedActions, ['use_existing'])
   })
 
-  await check('the create and update routes both pass the escape hatch through', async () => {
+  await check('the escape hatch this replaced (allow_duplicate_name) is gone from the gate and both routes', async () => {
     const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8')
-    assert.equal((route.match(/allowDuplicateName: body\.allow_duplicate_name === true/g) || []).length, 2, 'create AND update')
-    assert.match(route, /config\.table === 'suppliers' \? matches\.find\(\(m\) => m\.severity === 'name_only'\)/)
+    assert.doesNotMatch(route, /allow_duplicate_name/, 'suppliers never need to bypass a prompt that no longer exists')
+    assert.doesNotMatch(route, /options: \{ allowDuplicateName/, 'checkContactDuplicateBlock dropped the now-meaningless options parameter')
+    assert.match(route, /if \(config\.table === 'suppliers'\) \{\s*\n\s*const nameMatch = matches\.find/, 'the suppliers auto-resolve branch is the real, shipped gate')
+  })
+
+  await check('both the create and update routes act on resolvedExisting instead of writing a second row', async () => {
+    const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8')
+    assert.match(route, /if \(duplicateDecision\.resolvedExisting\) \{\s*\n\s*const existing = await db\.prepare/, 'POST returns the existing row and skips the insert')
+    assert.match(route, /if \(duplicateDecision\.resolvedExisting\) \{\s*\n\s*const keeper = await db\.prepare/, 'PUT folds the edited record into the existing one instead of saving the rename')
+    assert.match(route, /mergeSupplierIntoExisting\(c\.env, config, user, keeper, current\)/, 'the rename path reuses the real contact-merge writer, not a copy of it')
+    // A race that loses to a concurrent identical create is re-resolved onto
+    // the winner rather than surfacing an error to the loser.
+    assert.match(route, /if \(config\.table === 'suppliers'\) \{\s*\n\s*const raceMatch = /)
   })
 
   console.log(`\n${passed} check(s) passed.`)

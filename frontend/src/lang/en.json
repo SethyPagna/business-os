@@ -2824,7 +2824,7 @@
   "no_possible_duplicates_found": "No possible duplicates found.",
   "contact_duplicate_decision_title": "Possible duplicate",
   "contact_duplicate_possible_message": "A contact already has this name and phone number. Use the existing record or create a separate one.",
-  "contact_duplicate_same_name_message": "A supplier with this exact name already exists. Use that record, or confirm this is a separate one.",
+  "contact_duplicate_will_use_existing": "This name matches an existing record. Saving will use that record instead of creating a new one.",
   "contact_duplicate_phone_conflict_message": "This phone number belongs to another contact. Use the existing record or enter a different phone number.",
   "contact_duplicate_use_existing": "Use existing",
   "contact_duplicate_create_separately": "Create separately",
