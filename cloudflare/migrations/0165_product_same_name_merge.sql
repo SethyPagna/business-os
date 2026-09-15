@@ -33,11 +33,34 @@
 --   only ever classifies >=6-digit codes as "actual barcode".)
 -- "Same real code": two real barcodes whose value with leading zeros
 --   stripped (LTRIM(barcode,'0')) is identical -- a leading-zero twin.
--- Eligible rows: is_active=1, COALESCE(is_group,0)=0, tag_label IS NULL.
---   Inactive rows are left alone (not merged, not repointed). Tagged
---   (damaged) child rows are NEVER merged and never keepers -- the
---   Sep-14-2026 broken/damaged child-row rule stays untouched by this
---   migration; only ordinary catalog rows cluster here.
+-- Eligible rows: is_active=1, COALESCE(is_group,0)=0, tag_label IS NULL, and
+--   NOT transfer-evidenced (see below). Inactive rows are left alone (not
+--   merged, not repointed). Tagged (damaged) child rows are NEVER merged and
+--   never keepers -- the Sep-14-2026 broken/damaged child-row rule stays
+--   untouched by this migration; only ordinary catalog rows cluster here.
+--
+-- Transfer-provenance exclusion: a product referenced as source_product_id/
+--   destination_product_id in transfer_operation_members, or that owns a
+--   product_batches row referenced as source_batch_id/destination_batch_id in
+--   any transfer_operation_members.allocations_json, is excluded from
+--   clustering entirely -- it can never be a loser OR a keeper-of-a-loser
+--   that would require repointing it. Migration 0151's replay-provenance
+--   trigger family (transfer_product_delete, transfer_product_identity_
+--   update, transfer_batch_identity_update, transfer_batch_delete,
+--   transfer_members_immutable_update) makes such a product/lot's id and
+--   parentage immutable so committed transfer history can be exactly
+--   replayed; forcing the merge through by dropping/recreating those
+--   triggers would satisfy the schema but not the invariant they protect,
+--   since replay also compares live product-row content against captured
+--   JSON snapshots (lib/transferOperation.ts) which a cost/barcode/field
+--   rewrite already breaks regardless of whether the id columns move. This
+--   is exactly the refusal the live merge-duplicates route already applies
+--   (routes/products.ts: `merge_state_conflict: Product has immutable
+--   transfer provenance and cannot be merged.`) -- this migration mirrors
+--   that business rule instead of overriding it. A transfer-evidenced
+--   duplicate is left as a live, unmerged row; it will merge cleanly once
+--   its transfer history ages out of relevance, at the coordinator's
+--   discretion, not automatically here.
 --
 -- ============================= KEEPER RULE ==============================
 -- Cluster = eligible rows sharing LOWER(TRIM(name)).
@@ -90,18 +113,53 @@
 --                        by batch_id, follow product_batches automatically.
 -- inventory_movements, sale_items, return_items, return_replacement_items,
 -- damaged_stock_lots, stock_transfers, rfid_tags, rfid_events,
--- rfid_session_items, sale_amendments, import_auto_merges,
--- legacy_deleted_sale_items, legacy_inventory_effects,
--- legacy_sale_item_corrections -- product_id repointed 1:1 (MERGE_REPARENT_
---                        TABLES in lib/undoAppliers.ts is the authoritative
---                        list the live merge route uses; the legacy_*/
---                        import_auto_merges/sale_amendments additions here
---                        are the extra product_id-bearing tables that list
---                        does not need to cover because the live route never
---                        deletes a row, only this one-time backfill does).
+-- rfid_session_items, import_auto_merges, legacy_deleted_sale_items,
+-- legacy_inventory_effects, legacy_sale_item_corrections -- product_id
+--                        repointed 1:1 (MERGE_REPARENT_TABLES in lib/
+--                        undoAppliers.ts is the authoritative list the live
+--                        merge route uses; the legacy_*/import_auto_merges
+--                        additions here are the extra product_id-bearing
+--                        tables that list does not need to cover because the
+--                        live route never deletes a row, only this one-time
+--                        backfill does).
 -- promotions.link_product_id, products.parent_id, stock_row_moves.source_/
--- destination_product_id, transfer_operation_members.source_/
 -- destination_product_id -- repointed 1:1.
+-- sale_amendments -- DELIBERATELY NOT repointed: migration 0115's
+--                        sale_amendments_append_only_update trigger
+--                        unconditionally refuses any UPDATE (append-only
+--                        audit trail: "correct an entry by appending a
+--                        compensating entry, never by rewriting one"). A
+--                        merged loser's id can still appear in old
+--                        sale_amendments.product_id rows after this
+--                        migration -- that is the correct outcome for an
+--                        append-only ledger, same treatment as product_
+--                        conflict_*/product_duplicate_dismissals below.
+-- transfer_operation_members.source_/destination_product_id -- DELIBERATELY
+--                        NOT repointed: unreachable by construction, since
+--                        the transfer-provenance exclusion above guarantees
+--                        no product referenced here is ever a loser. Also
+--                        migration 0151's transfer_members_immutable_update
+--                        trigger refuses any UPDATE on this table
+--                        unconditionally, and (per the note above) repointing
+--                        the id columns would not restore replay-ability
+--                        anyway since replay compares live product-row
+--                        content against a captured snapshot.
+-- latest_data_cache_fix_runs, latest_data_reconciliation_runs -- NOT
+--                        repointed (outside the migration chain, historical):
+--                        keyed by run_id only, no product/customer entity id.
+-- latest_data_reconciliation_removed_rows -- NOT repointed (outside the
+--                        migration chain, historical): archived row_json by
+--                        (run_id, table_name, record_id TEXT), a frozen
+--                        archive, not a live reference.
+-- latest_data_source_links -- NOT repointed (outside the migration chain,
+--                        historical): target_table/target_id TEXT is an
+--                        import-audit link never read by the app's runtime
+--                        paths; also outside the migration chain, so a
+--                        migration statement against it would fail on a
+--                        fresh DB.
+-- product_conflict_cleanup_backup_20260903 -- NOT repointed (outside the
+--                        migration chain, historical): a frozen snapshot copy
+--                        of products taken on 2026-09-03, not a live table.
 -- product_images     -- deduplicated by image_path against the keeper's
 --                        existing gallery, then repointed.
 -- promotion_rules.product_ids (JSON array) -- rewritten in place with
@@ -210,6 +268,20 @@ WITH cluster_rows AS (
     END AS is_real
   FROM products
   WHERE is_active = 1 AND COALESCE(is_group, 0) = 0 AND tag_label IS NULL
+    -- Transfer-provenance exclusion (see header): never cluster a product
+    -- that migration 0151's triggers would refuse to reparent or delete.
+    AND id NOT IN (
+      SELECT source_product_id FROM transfer_operation_members
+      UNION
+      SELECT destination_product_id FROM transfer_operation_members
+      UNION
+      SELECT pb.variant_product_id FROM product_batches pb
+      WHERE EXISTS (
+        SELECT 1 FROM transfer_operation_members m, json_each(m.allocations_json) a
+        WHERE json_extract(a.value, '$.source_batch_id') = pb.id
+           OR json_extract(a.value, '$.destination_batch_id') = pb.id
+      )
+    )
 ),
 real_rows AS (
   SELECT id, name_key, bc, live_stock, LTRIM(bc, '0') AS real_code_key
@@ -407,7 +479,7 @@ UPDATE stock_transfers SET product_id = (SELECT keeper_id FROM product_merge_map
 UPDATE rfid_tags SET product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = rfid_tags.product_id) WHERE product_id IN (SELECT loser_id FROM product_merge_map_0165);
 UPDATE rfid_events SET product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = rfid_events.product_id) WHERE product_id IN (SELECT loser_id FROM product_merge_map_0165);
 UPDATE rfid_session_items SET product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = rfid_session_items.product_id) WHERE product_id IN (SELECT loser_id FROM product_merge_map_0165);
-UPDATE sale_amendments SET product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = sale_amendments.product_id) WHERE product_id IN (SELECT loser_id FROM product_merge_map_0165);
+-- sale_amendments: DELIBERATELY NOT repointed (append-only trigger; see header).
 UPDATE import_auto_merges SET product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = import_auto_merges.product_id) WHERE product_id IN (SELECT loser_id FROM product_merge_map_0165);
 UPDATE legacy_deleted_sale_items SET product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = legacy_deleted_sale_items.product_id) WHERE product_id IN (SELECT loser_id FROM product_merge_map_0165);
 UPDATE legacy_inventory_effects SET product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = legacy_inventory_effects.product_id) WHERE product_id IN (SELECT loser_id FROM product_merge_map_0165);
@@ -416,8 +488,10 @@ UPDATE promotions SET link_product_id = (SELECT keeper_id FROM product_merge_map
 UPDATE products SET parent_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = products.parent_id), updated_at = CURRENT_TIMESTAMP WHERE parent_id IN (SELECT loser_id FROM product_merge_map_0165);
 UPDATE stock_row_moves SET source_product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = stock_row_moves.source_product_id) WHERE source_product_id IN (SELECT loser_id FROM product_merge_map_0165);
 UPDATE stock_row_moves SET destination_product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = stock_row_moves.destination_product_id) WHERE destination_product_id IN (SELECT loser_id FROM product_merge_map_0165);
-UPDATE transfer_operation_members SET source_product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = transfer_operation_members.source_product_id) WHERE source_product_id IN (SELECT loser_id FROM product_merge_map_0165);
-UPDATE transfer_operation_members SET destination_product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = transfer_operation_members.destination_product_id) WHERE destination_product_id IN (SELECT loser_id FROM product_merge_map_0165);
+-- transfer_operation_members: DELIBERATELY NOT repointed (unreachable by
+-- construction -- transfer-evidenced products are excluded from clustering
+-- above -- and blocked unconditionally by migration 0151's
+-- transfer_members_immutable_update trigger; see header).
 
 -- product_images: dedupe against the keeper's existing gallery by image_path, then repoint.
 DELETE FROM product_images

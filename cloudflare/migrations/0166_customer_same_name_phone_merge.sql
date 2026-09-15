@@ -122,8 +122,39 @@ JOIN keepers k ON k.cluster_key = cr.cluster_key
 WHERE cr.id <> k.keeper_id
   AND NOT EXISTS (SELECT 1 FROM customer_merge_map_0166 m WHERE m.loser_id = cr.id);
 
+-- Keeper backfill (phone/email/address/company/notes/gender/membership_number)
+-- happens AFTER the loser rows are deleted below, not here -- membership_
+-- number sits under idx_customers_membership_lower_pg, a UNIQUE index on
+-- lower(membership_number) (migration 0015). Writing a loser's membership_
+-- number onto the keeper WHILE that same loser row (still holding that exact
+-- value) has not been deleted yet collides with itself under that unique
+-- index (SQLITE_CONSTRAINT_UNIQUE) -- confirmed by rehearsal against the
+-- production replica. Deleting losers first, then backfilling the keeper
+-- from their preserved loser_json, avoids the transient self-collision.
+
+-- Repoint every customer_id-bearing table.
+UPDATE sales SET customer_id = (SELECT keeper_id FROM customer_merge_map_0166 WHERE loser_id = sales.customer_id) WHERE customer_id IN (SELECT loser_id FROM customer_merge_map_0166);
+UPDATE returns SET customer_id = (SELECT keeper_id FROM customer_merge_map_0166 WHERE loser_id = returns.customer_id) WHERE customer_id IN (SELECT loser_id FROM customer_merge_map_0166);
+UPDATE customer_receivables SET customer_id = (SELECT keeper_id FROM customer_merge_map_0166 WHERE loser_id = customer_receivables.customer_id) WHERE customer_id IN (SELECT loser_id FROM customer_merge_map_0166);
+UPDATE loyalty_point_adjustments SET customer_id = (SELECT keeper_id FROM customer_merge_map_0166 WHERE loser_id = loyalty_point_adjustments.customer_id) WHERE customer_id IN (SELECT loser_id FROM customer_merge_map_0166);
+UPDATE customer_share_submissions SET customer_id = (SELECT keeper_id FROM customer_merge_map_0166 WHERE loser_id = customer_share_submissions.customer_id) WHERE customer_id IN (SELECT loser_id FROM customer_merge_map_0166);
+
+-- One audit_logs row per merged loser, carrying its full pre-image (recovery).
+INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, table_name, record_id, old_value, details)
+SELECT NULL, 'migration:0166_customer_same_name_phone_merge', 'customer_same_name_phone_merge', 'customer', CAST(m.keeper_id AS TEXT),
+  'customers', CAST(m.loser_id AS TEXT), m.loser_json,
+  json_object('keeper_id', m.keeper_id, 'cluster_key', m.cluster_key)
+FROM customer_merge_map_0166 m
+WHERE NOT EXISTS (
+  SELECT 1 FROM audit_logs a WHERE a.user_name = 'migration:0166_customer_same_name_phone_merge' AND a.record_id = CAST(m.loser_id AS TEXT)
+);
+
+DELETE FROM customers WHERE id IN (SELECT loser_id FROM customer_merge_map_0166);
+
 -- Keeper backfill: blank fields filled from the lowest-id loser carrying a
--- non-blank value. Name is never touched.
+-- non-blank value. Name is never touched. Runs AFTER the DELETE above (see
+-- the note before the repoint block) so membership_number's unique index
+-- never sees the keeper and a not-yet-deleted loser holding the same value.
 UPDATE customers SET
   phone = CASE WHEN COALESCE(NULLIF(phone, ''), '') <> '' THEN phone ELSE (
     SELECT json_extract(m.loser_json, '$.phone') FROM customer_merge_map_0166 m
@@ -155,22 +186,3 @@ UPDATE customers SET
     ORDER BY m.loser_id ASC LIMIT 1) END,
   updated_at = CURRENT_TIMESTAMP
 WHERE id IN (SELECT DISTINCT keeper_id FROM customer_merge_map_0166);
-
--- Repoint every customer_id-bearing table.
-UPDATE sales SET customer_id = (SELECT keeper_id FROM customer_merge_map_0166 WHERE loser_id = sales.customer_id) WHERE customer_id IN (SELECT loser_id FROM customer_merge_map_0166);
-UPDATE returns SET customer_id = (SELECT keeper_id FROM customer_merge_map_0166 WHERE loser_id = returns.customer_id) WHERE customer_id IN (SELECT loser_id FROM customer_merge_map_0166);
-UPDATE customer_receivables SET customer_id = (SELECT keeper_id FROM customer_merge_map_0166 WHERE loser_id = customer_receivables.customer_id) WHERE customer_id IN (SELECT loser_id FROM customer_merge_map_0166);
-UPDATE loyalty_point_adjustments SET customer_id = (SELECT keeper_id FROM customer_merge_map_0166 WHERE loser_id = loyalty_point_adjustments.customer_id) WHERE customer_id IN (SELECT loser_id FROM customer_merge_map_0166);
-UPDATE customer_share_submissions SET customer_id = (SELECT keeper_id FROM customer_merge_map_0166 WHERE loser_id = customer_share_submissions.customer_id) WHERE customer_id IN (SELECT loser_id FROM customer_merge_map_0166);
-
--- One audit_logs row per merged loser, carrying its full pre-image (recovery).
-INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, table_name, record_id, old_value, details)
-SELECT NULL, 'migration:0166_customer_same_name_phone_merge', 'customer_same_name_phone_merge', 'customer', CAST(m.keeper_id AS TEXT),
-  'customers', CAST(m.loser_id AS TEXT), m.loser_json,
-  json_object('keeper_id', m.keeper_id, 'cluster_key', m.cluster_key)
-FROM customer_merge_map_0166 m
-WHERE NOT EXISTS (
-  SELECT 1 FROM audit_logs a WHERE a.user_name = 'migration:0166_customer_same_name_phone_merge' AND a.record_id = CAST(m.loser_id AS TEXT)
-);
-
-DELETE FROM customers WHERE id IN (SELECT loser_id FROM customer_merge_map_0166);

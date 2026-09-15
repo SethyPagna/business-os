@@ -19,6 +19,15 @@
 //  P6 is_active=0 row sharing the name -> left alone entirely.
 //  P7 sale_items/branch_stock/product_images/promotion_rules repoint +
 //     branch_stock SUM-on-overlap + product_images dedupe-by-path.
+//  P8 a product directly referenced as transfer_operation_members.source_
+//     product_id -> excluded from clustering entirely (both rows survive);
+//     migration 0151's transfer_product_delete trigger still refuses a
+//     post-migration illegal delete of it.
+//  P9 a product that owns a product_batches lot referenced only via
+//     transfer_operation_members.allocations_json (source_batch_id) ->
+//     also excluded from clustering; 0151's transfer_batch_identity_update
+//     trigger still refuses a post-migration illegal variant_product_id
+//     rewrite of that lot.
 //  C1 customer pair sharing name+phone -> keeper backfilled, sales/
 //     receivables repointed; a same-name DIFFERENT-phone customer is
 //     untouched (negative control).
@@ -96,6 +105,27 @@ db.prepare("INSERT INTO product_images (product_id, image_path, sort_order) VALU
 db.prepare("INSERT INTO product_images (product_id, image_path, sort_order) VALUES (101, 'b.jpg', 1)").run() // unique path -> repoint
 db.prepare(`INSERT INTO promotion_rules (id, product_ids) VALUES (1, '[101, 999]')`).run()
 
+// -- P8/P9: transfer-provenance exclusion --------------------------------
+insertProduct({ id: 161, name: 'Serum Elixir', barcode: '800111222' })
+insertProduct({ id: 162, name: 'Serum Elixir', barcode: '800111222' })
+insertProduct({ id: 171, name: 'Batch Guard', barcode: '850111222' })
+insertProduct({ id: 172, name: 'Batch Guard', barcode: '850111222' })
+db.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key) VALUES (5001, 171, 'LOT-A')").run()
+db.prepare(`INSERT INTO transfer_operation_receipts (id, actor_id, request_id, request_digest, request_json, status, provenance_version)
+  VALUES (1, 1, 'r-p8', 'd-p8', '{}', 'pending', 1)`).run()
+db.prepare(`INSERT INTO transfer_operation_receipts (id, actor_id, request_id, request_digest, request_json, status, provenance_version)
+  VALUES (2, 1, 'r-p9', 'd-p9', '{}', 'pending', 1)`).run()
+// P8: 161 directly referenced as source_product_id.
+db.prepare(`INSERT INTO transfer_operation_members
+    (receipt_id, ordinal, source_product_id, destination_product_id, source_branch_id, destination_branch_id,
+     quantity, untracked_quantity, source_snapshot, destination_snapshot, allocations_json)
+  VALUES (1, 0, 161, 990001, 1, 2, 1, 0, '{}', '{}', '[]')`).run()
+// P9: no product directly referenced; 171's lot 5001 is referenced only via allocations_json.
+db.prepare(`INSERT INTO transfer_operation_members
+    (receipt_id, ordinal, source_product_id, destination_product_id, source_branch_id, destination_branch_id,
+     quantity, untracked_quantity, source_snapshot, destination_snapshot, allocations_json)
+  VALUES (2, 0, 990002, 990003, 1, 2, 1, 0, '{}', '{}', '[{"source_batch_id":5001,"destination_batch_id":null}]')`).run()
+
 db.exec(sql0165)
 
 const mapRows = db.prepare('SELECT * FROM product_merge_map_0165 ORDER BY loser_id').all()
@@ -159,6 +189,34 @@ const mapRows = db.prepare('SELECT * FROM product_merge_map_0165 ORDER BY loser_
   assert.deepStrictEqual(images, ['a.jpg', 'b.jpg'], 'P7: images deduped by path, unique paths repointed')
   const ruleIds = JSON.parse(db.prepare('SELECT product_ids FROM promotion_rules WHERE id = 1').get().product_ids)
   assert.deepStrictEqual(ruleIds, [102, 999], 'P7: promotion_rules.product_ids rewritten, untouched id kept')
+}
+
+// P8: transfer-evidenced product (direct source_product_id reference) is
+// excluded from clustering -- both same-name/same-barcode rows survive --
+// and the transfer trigger family is still intact and still enforced.
+{
+  assert.ok(db.prepare('SELECT 1 FROM products WHERE id = 161').get(), 'P8: transfer-evidenced row survives, never merged away')
+  assert.ok(db.prepare('SELECT 1 FROM products WHERE id = 162').get(), 'P8: its same-name/same-barcode twin is also left alone (161 could not be a keeper either)')
+  assert.ok(!mapRows.find((r) => r.loser_id === 161 || r.loser_id === 162), 'P8: neither row entered the merge map')
+  assert.throws(
+    () => db.prepare('DELETE FROM products WHERE id = 161').run(),
+    /immutable transfer provenance/,
+    'P8: transfer_product_delete trigger still refuses to delete a transfer-evidenced product after 0165 ran'
+  )
+}
+
+// P9: a product whose LOT (not the product row itself) is transfer-evidenced
+// via allocations_json is also excluded, and the lot trigger still holds.
+{
+  assert.ok(db.prepare('SELECT 1 FROM products WHERE id = 171').get(), 'P9: lot-evidenced row survives, never merged away')
+  assert.ok(db.prepare('SELECT 1 FROM products WHERE id = 172').get(), 'P9: its same-name/same-barcode twin is also left alone')
+  assert.ok(!mapRows.find((r) => r.loser_id === 171 || r.loser_id === 172), 'P9: neither row entered the merge map')
+  assert.strictEqual(db.prepare('SELECT variant_product_id FROM product_batches WHERE id = 5001').get().variant_product_id, 171, 'P9: the evidenced lot was never repointed')
+  assert.throws(
+    () => db.prepare('UPDATE product_batches SET variant_product_id = 172 WHERE id = 5001').run(),
+    /immutable transfer provenance/,
+    'P9: transfer_batch_identity_update trigger still refuses to reparent a transfer-evidenced lot after 0165 ran'
+  )
 }
 
 // Idempotence for 0165

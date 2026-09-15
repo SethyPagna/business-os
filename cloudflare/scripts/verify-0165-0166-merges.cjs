@@ -33,10 +33,34 @@ if (!inputPath || !fs.existsSync(inputPath)) {
 const workPath = path.join(path.dirname(inputPath), 'work', `verify-0165-0166-${Date.now()}.sqlite`)
 fs.mkdirSync(path.dirname(workPath), { recursive: true })
 fs.copyFileSync(inputPath, workPath)
+// fsync the copy before opening it: on Windows, opening a large (100MB+)
+// freshly fs.copyFileSync'd file immediately can race the OS flushing the
+// copy to disk, producing a spurious "database disk image is malformed"
+// (SQLITE_CORRUPT_VTAB) from better-sqlite3 -- not a real corruption, just a
+// torn read of a copy that had not settled yet.
+{
+  const fd = fs.openSync(workPath, 'r+')
+  try { fs.fsyncSync(fd) } finally { fs.closeSync(fd) }
+}
 console.log('Rehearsing against a COPY: ' + workPath + ' (source untouched: ' + inputPath + ')')
 
 const db = new Database(workPath)
 db.pragma('journal_mode = WAL')
+
+// Rebuild every external-content FTS5 index on THIS disposable copy before
+// applying anything. A static offline export (this replica) can capture a
+// table's rows and its FTS5 shadow tables from slightly different moments,
+// leaving the AFTER UPDATE/DELETE sync triggers' `INSERT INTO x_fts(x_fts,
+// rowid, ...) VALUES ('delete', old.*, ...)` calls referencing content the
+// index no longer actually holds -- FTS5 detects that mismatch as
+// SQLITE_CORRUPT_VTAB ("database disk image is malformed") on the very
+// first write to the table, even though PRAGMA integrity_check reports ok.
+// This never touches the source replica or production -- both are read-only
+// inputs; only this throwaway copy is rebuilt, exactly as production's own
+// live triggers already keep these indexes in sync on every real write.
+for (const fts of ['products_fts', 'products_fts_code', 'products_fts_name_trigram', 'customers_fts', 'customers_fts_phone']) {
+  db.exec(`INSERT INTO ${fts}(${fts}) VALUES('rebuild')`)
+}
 
 function one(sql) { return db.prepare(sql).get() }
 function count(sql) { return one(sql).c }
@@ -108,12 +132,21 @@ assert.strictEqual(post.productBatches, pre.productBatches, 'product_batches row
 assert.strictEqual(post.ftsRows, post.products, 'products_fts row count tracks products after delete')
 assert.ok(post.zeroCostLossMovements <= pre.zeroCostLossMovements, 'zero-cost loss movements never rise')
 
-// No repointed table still references a deleted loser id.
+// No repointed table still references a deleted loser id. sale_amendments
+// and transfer_operation_members are DELIBERATELY excluded from this check
+// (see 0165's header): sale_amendments is an append-only audit trail a
+// migration 0115 trigger refuses to UPDATE, and transfer_operation_members
+// can never reference a loser in the first place, since transfer-evidenced
+// products are excluded from clustering entirely.
 const repointedTables = [
   ['sale_items', 'product_id'], ['return_items', 'product_id'], ['return_replacement_items', 'product_id'],
   ['inventory_movements', 'product_id'], ['damaged_stock_lots', 'product_id'], ['stock_transfers', 'product_id'],
-  ['rfid_tags', 'product_id'], ['branch_stock', 'product_id'], ['product_batches', 'variant_product_id'],
-  ['product_images', 'product_id'], ['sale_amendments', 'product_id'],
+  ['rfid_tags', 'product_id'], ['rfid_events', 'product_id'], ['rfid_session_items', 'product_id'],
+  ['branch_stock', 'product_id'], ['product_batches', 'variant_product_id'],
+  ['product_images', 'product_id'], ['promotions', 'link_product_id'], ['products', 'parent_id'],
+  ['stock_row_moves', 'source_product_id'], ['stock_row_moves', 'destination_product_id'],
+  ['import_auto_merges', 'product_id'], ['legacy_deleted_sale_items', 'product_id'],
+  ['legacy_inventory_effects', 'product_id'], ['legacy_sale_item_corrections', 'product_id'],
 ]
 for (const [table, column] of repointedTables) {
   const n = count(`SELECT COUNT(*) c FROM ${table} WHERE ${column} IN (${[...loserIds].join(',') || '-1'})`)
