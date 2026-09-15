@@ -4,6 +4,8 @@ import {
   normalizeProductFuzzyName,
   normalizeProductGroupName,
   resolveMergedCostDetail,
+  barcodeIdentityMatches,
+  isRealBarcode,
 } from './productDetailRule.ts'
 
 export const SELECTED_CONFLICT_MAX_CASES = 12
@@ -118,9 +120,11 @@ export function selectedConflictEligibility(cluster: ProductConflictCluster): {
 
   const leftName = normalizeProductGroupName(left.name || '')
   const rightName = normalizeProductGroupName(right.name || '')
-  const leftBarcode = identityBarcodeKey(left.barcode)
-  const rightBarcode = identityBarcodeKey(right.barcode)
-  if (!leftName || leftName !== rightName || !leftBarcode || leftBarcode !== rightBarcode) {
+  // Wildcard-aware (Sep 15 2026 ruling): a real-vs-broken barcode pair
+  // within the same exact name is the SAME identity -- barcodeIdentityMatches
+  // carries that; plain identityBarcodeKey equality (and the old blanket
+  // "both must be non-empty" guard) cannot.
+  if (!leftName || leftName !== rightName || !barcodeIdentityMatches(left.barcode, right.barcode)) {
     return { eligible: false, code: 'incompatible_product_identity' }
   }
   if (resolveMergedCostDetail(products).outliers.length) {
@@ -133,12 +137,18 @@ export function selectedConflictEligibility(cluster: ProductConflictCluster): {
 export function chooseSelectedConflictKeeper(products: ProductConflictProduct[]): [ProductConflictProduct, ProductConflictProduct] {
   if (products.length !== 2) throw new Error('A selected conflict merge requires exactly two products.')
   const rawBarcodes = new Set(products.map((product) => String(product.barcode || '').trim().toLowerCase()))
-  const isLeadingZeroPair = rawBarcodes.size > 1
+  const isLeadingZeroPair = rawBarcodes.size > 1 && products.every((product) => isRealBarcode(product.barcode))
   const zerosShed = (product: ProductConflictProduct) => {
     const raw = String(product.barcode || '').trim().toLowerCase()
     return raw.length - normalizeLeadingZeroBarcodeForCleanup(raw).length
   }
   const ordered = [...products].sort((left, right) => {
+    // A real barcode always outranks a broken/empty wildcard row as the
+    // keeper (Sep 15 2026 ruling), so the merge never discards the row
+    // carrying the real code.
+    const leftReal = isRealBarcode(left.barcode) ? 0 : 1
+    const rightReal = isRealBarcode(right.barcode) ? 0 : 1
+    if (leftReal !== rightReal) return leftReal - rightReal
     if (isLeadingZeroPair) {
       const zeroDifference = zerosShed(left) - zerosShed(right)
       if (zeroDifference) return zeroDifference

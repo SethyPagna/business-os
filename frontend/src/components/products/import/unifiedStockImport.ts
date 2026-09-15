@@ -6,7 +6,7 @@
 // grouping below must reach the same verdict the server's matchProduct does, or
 // the review screen reads a leading-zero pair as two products while the import
 // that follows treats them as one.
-import { identityBarcodeKey } from '../../../utils/productDetailRule.ts'
+import { identityBarcodeClassKey } from '../../../utils/productDetailRule.ts'
 // The pre-submit half of the stock-in receipt gate (N14-D) -- the same kernel
 // FastStockInModal, ReceiveBatchModal and the adjust forms run. The Worker's
 // lib/stockActionCommit.ts enforces it on the wire; this only lets the operator
@@ -258,10 +258,12 @@ export function buildUnifiedStockTemplateCsv(): string {
 export function findUnifiedStockCostBatchConflicts(rows: readonly UnifiedStockParsedRow[]): Map<number, string> {
   const groups = new Map<string, UnifiedStockParsedRow[]>()
   for (const row of rows) {
-    // Same key the server groups by: collapsed name + FOLDED barcode. Keyed on
-    // the raw barcode, one sheet listing '0601' and '601' looked like two
-    // products here and the cost/batch gate below never fired for the pair.
-    const key = `${row.name.trim().toLowerCase().replace(/\s+/g, ' ')}|${identityBarcodeKey(row.barcode)}`
+    // Same key the server groups by: collapsed name + CLASS-folded barcode
+    // (Sep 15 2026: broken/short/word barcodes fold to '', same as empty --
+    // "if both is empty merge into one empty"). Keyed on the raw barcode,
+    // one sheet listing '0601' and '601' looked like two products here and
+    // the cost/batch gate below never fired for the pair.
+    const key = `${row.name.trim().toLowerCase().replace(/\s+/g, ' ')}|${identityBarcodeClassKey(row.barcode)}`
     const group = groups.get(key) || []
     group.push(row)
     groups.set(key, group)

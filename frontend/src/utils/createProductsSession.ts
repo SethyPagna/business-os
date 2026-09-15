@@ -20,7 +20,7 @@
 // agrees and a "Multiple ..." label when they do not -- so a header that was
 // overridden on one item can never make the session summary lie.
 
-import { identityBarcodeKey, normalizeProductGroupName } from './productDetailRule.ts'
+import { barcodeIdentityMatches, normalizeProductGroupName } from './productDetailRule.ts'
 import { barcodeKeysMatch } from './searchMatch.ts'
 
 export type CreateProductsHeader = {
@@ -238,10 +238,12 @@ export function summarizeCreateProductsSession(
  * reaching the create path, where it forks the catalog rather than merely
  * failing a search.
  *
- * The barcode is compared through identityBarcodeKey, the one fold both
- * packages carry; name and cost keep the comparisons they already had (a
- * cost difference is deliberately a DIFFERENT line -- the session records
- * what each delivery actually cost).
+ * The barcode is compared through barcodeIdentityMatches (Sep 15 2026: real
+ * barcodes fold past leading zeros, AND a broken/empty/word barcode on
+ * either side is a wildcard, never a second identity by itself); name and
+ * cost keep the comparisons they already had (a cost difference is
+ * deliberately a DIFFERENT line -- the session records what each delivery
+ * actually cost).
  */
 export function isSameQueuedProduct(
   left: { name?: unknown; barcode?: unknown; unitCostUsd?: unknown },
@@ -253,7 +255,7 @@ export function isSameQueuedProduct(
     return Math.round((Number.isFinite(parsed) ? parsed : 0) * 10000)
   }
   return name(left.name) === name(right.name)
-    && identityBarcodeKey(left.barcode) === identityBarcodeKey(right.barcode)
+    && barcodeIdentityMatches(left.barcode, right.barcode)
     && cents(left.unitCostUsd) === cents(right.unitCostUsd)
 }
 

@@ -14,11 +14,13 @@
 //
 // Cost is NOT part of the question (the Sep-4 ruling: only a different barcode
 // mints a child row; two costs for one article are averaged by the merge), and
-// the barcode is compared through identityBarcodeKey, so '0880123' and '880123'
-// are one identity here exactly as they are everywhere else. The stored
-// barcode is never rewritten -- only the comparison folds.
+// the barcode is compared through barcodeIdentityMatches (Sep 15 2026: real
+// barcodes fold past leading zeros -- '0880123' and '880123' are one identity
+// -- AND a broken/empty/word barcode on either side is a wildcard, never a
+// second identity on its own) exactly as every other comparison site does.
+// The stored barcode is never rewritten -- only the comparison folds.
 
-import { identityBarcodeKey } from '../../../utils/productDetailRule.ts'
+import { identityBarcodeKey, barcodeIdentityMatches, isRealBarcode } from '../../../utils/productDetailRule.ts'
 
 export interface CreateMatchCandidate {
   id: number | string
@@ -79,8 +81,14 @@ export function classifyCreateMatches(
   if (!typedName && !typedBarcode) return none
 
   const nameRows = typedName ? candidates.filter((row) => norm(row.name) === typedName) : []
-  const barcodeRows = typedBarcode ? candidates.filter((row) => identityBarcodeKey(row.barcode) === typedBarcodeKey) : []
-  const twin = nameRows.find((row) => identityBarcodeKey(row.barcode) === typedBarcodeKey) || null
+  // Cross-NAME barcode collision is only meaningful evidence with a REAL
+  // barcode on both sides -- a broken/empty typed value is a wildcard
+  // WITHIN a name group, never a signal that an unrelated-name row is the
+  // same product.
+  const barcodeRows = typedBarcode && isRealBarcode(typed.barcode)
+    ? candidates.filter((row) => identityBarcodeKey(row.barcode) === typedBarcodeKey)
+    : []
+  const twin = nameRows.find((row) => barcodeIdentityMatches(row.barcode, typed.barcode)) || null
 
   if (twin) {
     const canonical = String(nameRows[0]?.name || twin.name || '').trim()
