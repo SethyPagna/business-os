@@ -1318,6 +1318,50 @@ function ProductsFullEditor() {
       : []
   }, [])
 
+  // P4-4b fix 6: a single stock adjust used to call load(true) -- a full
+  // re-search of the current filtered/sorted/paginated page (every visible
+  // row, with branch_stock/images/batches joins) -- to reflect a change to
+  // ONE row. patchProductRow replaces that row in place; the page's own
+  // totals/badges (low-stock counts, stock-value sums, etc.) all derive from
+  // the `products` array itself via memoized selectors, so they recompute
+  // correctly from the same array with just the one row's data updated,
+  // without a network round trip for the other rows on the page.
+  const patchProductRow = useCallback((updated: ProductRecord | undefined | null): boolean => {
+    const id = Number(updated?.id || 0)
+    if (!id) return false
+    const exists = products.some((product) => Number(product?.id || 0) === id)
+    if (!exists) return false
+    setProducts((prev) => prev.map((product) => (
+      Number(product?.id || 0) === id ? { ...product, ...updated } : product
+    )))
+    return true
+  }, [products])
+
+  // StockAdjustModal.tsx (owned by another lane) only reports completion as
+  // onDone: () => void -- no adjust API response reaches Products.tsx, so
+  // "patch from the response" is not reachable here. The productId the
+  // adjustment targeted IS already known locally (it is the product the
+  // modal was opened for), so this refetches exactly that one product
+  // instead of the whole page, and only falls back to a full load(true) when
+  // the product id is unknown (the rare minimized-and-restored session,
+  // where the modal already clears its own draft before calling onDone) or
+  // the refetch comes back empty (the product no longer matches the active
+  // filter/page, e.g. an adjustment moved it out of a stock-state filter --
+  // only a full reload can reflect that correctly).
+  const refreshAdjustedProduct = useCallback(async (productId: EntityId | null | undefined): Promise<void> => {
+    const id = Number(productId || 0)
+    if (!id) {
+      await load(true)
+      return
+    }
+    try {
+      const [latest] = await fetchProductsByIds([id])
+      if (!latest || !patchProductRow(latest)) await load(true)
+    } catch {
+      await load(true)
+    }
+  }, [fetchProductsByIds, load, patchProductRow])
+
   useEffect(() => {
     let disposed = false
     const restoreEdit = async (entry: MinimizedWorkEntry | null | undefined) => {
@@ -5104,7 +5148,12 @@ function ProductsFullEditor() {
             restoreDraftKey={restoreStockAdjustDraftKey}
             t={t}
             onClose={() => { setAdjustStockProduct(null); setRestoreStockAdjustDraftKey(null) }}
-            onDone={() => { setAdjustStockProduct(null); setRestoreStockAdjustDraftKey(null); void load(true) }}
+            onDone={() => {
+              const adjustedProductId = adjustStockProduct?.id ?? null
+              setAdjustStockProduct(null)
+              setRestoreStockAdjustDraftKey(null)
+              void refreshAdjustedProduct(adjustedProductId)
+            }}
             onMinimize={(label: string, detail: { draftKey: string; productId: EntityId }) => {
               minimizeWork({
                 key: `stock-adjust-${String(detail.productId)}`,
