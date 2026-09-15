@@ -1,3 +1,16 @@
+## September 15 Program 5 checkpoint LIVE
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| P5-1 Same-name product merge done in production data by the coordinator (real-barcode / wildcard rule, cost = mean of distinct non-zero costs, damage tag and different real barcodes stay separate) | **Deployed** (code, Worker e8f0a886-3b48-4d31-9ef0-d907e439b89b, commit 6bd39bd9) and **applied** (migration 0165 on production D1) | 1879 losers → 1855 keepers, products 10357 → 8478, map + 1879 audit rows, no references to losers, stock qty unchanged 24302. First apply failed with D1 error 7429; rewrite f1202597 (93 s → 3.6 s on the replica) applied at the second attempt. Known exception: "dior addict lip glow new 075" ids 1616/7161 (transfer-evidenced). |
+| P5-1 Same-name + same-phone customer merge | **Applied** (migration 0166) | 10 losers → 9 keepers, customers 5039 → 5029, `customer_merge_map_0166`, 10 audit rows. |
+| P5-1 Supplier duplicates | **Done earlier** (Program 4: migration 0164 + auto-resolve on every writer) | See the Program 4 section. |
+| P5-2 Start/End date range on ONE compact row (date + time never wrap) | **Deployed** | cbcd73d1; `frontend/tests/dateRangeTriggerOneRow.test.ts`. |
+| P5-3 Removal-loss consistency (removed = loss; restocked as damaged/tagged = not; returns consistent) and the "removed row with no cost" report | **Deployed**; backfill 0167 **applied** | fddadf7e, 6c04b546, 1699898e, d29e792c; uncosted rows 17 → 10. The 10 left (Girlactik ×9, Morphe ×1, imported 2026-08-29 with cost 0) are truly uncosted → **owner action:** enter their cost on the product. |
+| P5-3 Regression tests so the same classes never need re-asking | **Deployed** | e5469fe4, 11fc1c39, 324e4abd, 15b8d2ea, 6f61c5fe (`npm run test:regression` in both packages). |
+| P5-4 Debloat D1 round trips, R2, KV, Cloudflare requests | **Deployed** | 2945c5e5, 6bd84b02, 6a711f09, 0b460821, 521312ab, 3e0cc4a3, 0aaf15a9, b8d9a63d; plus P4-4b (24d824de … 4620d90c) and the one-request fast stock-in commit (f4711391, d7d6b545). |
+| P4-4 wave 2 leftovers (`contacts.ts:557` three-namespace bump, catalog/portal list paths) | **Not yet** | Listed in progress.md top entry. |
+
 ## September 15 Program 4 checkpoint LIVE
 
 | Item | State | Evidence |
@@ -6,7 +19,7 @@
 | P4-2 Same-name supplier resolves to the existing record on every writer; existing clusters merged | **Deployed** (Worker dfef9f7b-76e8-4868-bff1-d1916cd8c48e, commit 38a3eb5e); **migration 0164 applied** | aa3ab4b5, 2f94d4c4, 8c2d903c, 87a6ba18, 7db5f8fc; ids 38–46→20, 33–37→23, 14 audit rows, neighbours 24–32 untouched; `verify-0164-supplier-clusters.cjs` 10/10. |
 | P4-3 Damaged returns share the remove-stock keep-tag / remove-entirely rule (prospective only) | **Deployed** | 7e0f8c38, 3c38eddf, 9f420b7b, ec4dd2ca; `test-returns-batch-restock-pure` pins the prospective boundary. |
 | P4-4 System slowness ("is it free vs paid?") — wave 1 | **Deployed** | Paid plan live; cause = sequential cross-region D1 round trips. Worker e18f46ed…66cffaed, frontend a1850912…a2f61dca. |
-| P4-4 wave 2 (remaining N+1 and sequential paths, listed in progress.md) | **Not yet** | Lanes open after this checkpoint. |
+| P4-4 wave 2 (remaining N+1 and sequential paths, listed in progress.md) | **Deployed** (P4-4b, Program 5 checkpoint 6bd39bd9); leftovers listed in the Program 5 section | 24d824de, 9cbe1697, db7e371a, 19935961, f4a1800d, b8dc8b7b, 36d94375, bbaa1cd6, be6d3aea, 4620d90c, f4711391, d7d6b545. |
 | Migrations 0162, 0163, 0164 on production D1 | **Applied** by the coordinator (owner delegated: "for migrations and merge, i want you to do it for me") | `wrangler d1 migrations apply business-os --remote`, pre/post assertions recorded. Supersedes the "owner action" rows in the Program 3 section. |
 
 ## September 15 Program 3 checkpoint LIVE
