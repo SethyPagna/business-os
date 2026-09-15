@@ -78,13 +78,16 @@ assert.match(salesDetailSource, /return claimSyncProblemPresentation\(statusReco
 assert.match(contactSource, /matches: check\.matches\.map\(\(match\) => \(\{ \.\.\.match, syncProblem \}\)\)/)
 assert.match(contactSource, /dispatchResolvedSyncError\(value\?\.syncProblem\)/)
 
+// P4-2: a supplier can no longer choose create_separate (the auto-resolve
+// gate never offers that decision), so SuppliersTab has no pendingDuplicateCheck
+// left to clear this way -- only customers and delivery contacts still do.
 for (const [label, source] of [
   ['customer form', customerFormSource],
-  ['supplier form', supplierSource],
   ['delivery form', deliverySource],
 ] as const) {
   assert.match(source, /duplicateDecision && \(result as \{ success\?: boolean \} \| null\)\?\.success === true[\s\S]*resolveContactDuplicateSyncError\(pendingDuplicateCheck\)/, `${label} clears only after a confirmed successful separate create`)
 }
+assert.doesNotMatch(supplierSource, /pendingDuplicateCheck/, 'supplier form: no pending-decision state -- P4-2 never offers create_separate to confirm')
 
 for (const [label, source] of [
   ['customer parent', read('../src/components/contacts/CustomersTab.tsx')],
