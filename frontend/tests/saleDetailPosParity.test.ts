@@ -123,7 +123,10 @@ const productCard = read('../src/components/pos/ProductCard.tsx')
 assert.doesNotMatch(detail, /ProductSearchRow/)
 assert.doesNotMatch(detail, /ProductSearchGroupRow/)
 assert.match(detail, /import ProductCard from '\.\.\/pos\/ProductCard\.tsx'/)
-assert.match(pos, /import ProductCard from '\.\/ProductCard\.tsx'/)
+// P4-4b fix 2: POS.tsx also imports the ProductCardProduct type alongside
+// the memoized default export -- SaleDetailModal.tsx does not need the type
+// and keeps the plain default import above.
+assert.match(pos, /import ProductCard(?:, \{ type ProductCardProduct \})? from '\.\/ProductCard\.tsx'/)
 // The POS uses the extracted piece: exactly one <ProductCard, inside the
 // .pos-product-grid it always drew its cards in.
 assert.equal((pos.match(/<ProductCard\b/g) || []).length, 1, 'POS renders the shared card exactly once')
