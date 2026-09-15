@@ -1022,7 +1022,12 @@ app.get('/movements', async (c) => {
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
-  const total = await db.prepare(`SELECT COUNT(*) AS count FROM inventory_movements ${whereSql}`).get<{ count: number }>(params)
+  // N13 (round 2): the COUNT and the page SELECT are independent reads over
+  // the same WHERE/params -- no data dependency on each other -- so they go
+  // over the wire as one db.batch() round trip instead of two sequential
+  // prepare().get()/prepare().all() calls, same shape as
+  // familyPagination.ts's paginateProductFamilies.
+  //
   // N13: the branch a movement happened at. Sale/return-family rows carry
   // branch_id but no branch_name snapshot, so this drill showed an empty
   // Branch column for them; resolved from the id (snapshot-first) via the
@@ -1035,16 +1040,24 @@ app.get('/movements', async (c) => {
   // N13: and the RECORD the row belongs to -- reference_id alone identifies
   // nothing to a person, so the receipt it names is resolved here too. These
   // two are new column names, so they need no fold.
-  const items = await db.prepare(`
-    SELECT *, ${movementBranchNameSql('inventory_movements')} AS ${RESOLVED_BRANCH_NAME_COLUMN},
-      ${movementActorNameSql('inventory_movements')} AS ${RESOLVED_ACTOR_NAME_COLUMN},
-      ${movementReferenceSelectSql('inventory_movements')}
-    FROM inventory_movements
-    ${whereSql}
-    ORDER BY created_at DESC, id DESC
-    LIMIT @pageSize OFFSET @offset
-  `).all<Record<string, unknown>>({ ...params, pageSize, offset })
-  return c.json({ items: (items || []).map((row) => withResolvedActorName(withResolvedBranchName(row))), total: total?.count || 0, page, pageSize, totalPages: Math.max(1, Math.ceil((total?.count || 0) / pageSize)) })
+  const [totalResult, itemsResult] = await db.batch([
+    { sql: `SELECT COUNT(*) AS count FROM inventory_movements ${whereSql}`, params },
+    {
+      sql: `
+        SELECT *, ${movementBranchNameSql('inventory_movements')} AS ${RESOLVED_BRANCH_NAME_COLUMN},
+          ${movementActorNameSql('inventory_movements')} AS ${RESOLVED_ACTOR_NAME_COLUMN},
+          ${movementReferenceSelectSql('inventory_movements')}
+        FROM inventory_movements
+        ${whereSql}
+        ORDER BY created_at DESC, id DESC
+        LIMIT @pageSize OFFSET @offset
+      `,
+      params: { ...params, pageSize, offset },
+    },
+  ])
+  const total = (totalResult?.results?.[0] as { count?: number } | undefined)?.count || 0
+  const items = (itemsResult?.results ?? []) as Record<string, unknown>[]
+  return c.json({ items: (items || []).map((row) => withResolvedActorName(withResolvedBranchName(row))), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) })
 })
 
 // ---- Reasons (saved as JSON in settings, matching the Docker backend) ----
@@ -1084,10 +1097,17 @@ app.get('/reasons/impact', async (c) => {
   const to = String(c.req.query('to') || '').trim()
   if (!from || !to) return c.json({ error: 'Source and target reasons are required' }, 400)
   const db = getDb(c.env)
-  const row = await db.prepare("SELECT value FROM settings WHERE key = 'inventory_saved_reasons'").get<{ value: string }>()
+  // Two independent reads (the saved-reasons settings row, the linked-movement
+  // count) with no data dependency on each other -- one db.batch() round trip
+  // instead of two sequential get() calls.
+  const [settingsResult, countResult] = await db.batch([
+    { sql: "SELECT value FROM settings WHERE key = 'inventory_saved_reasons'" },
+    { sql: "SELECT COUNT(*) AS n FROM inventory_movements WHERE lower(trim(COALESCE(reason,''))) = @from", params: { from: from.toLowerCase() } },
+  ])
+  const row = settingsResult?.results?.[0] as { value?: string } | undefined
   let saved: InventoryReason[] = []
   try { saved = normalizeReasons(JSON.parse(row?.value || '[]')) } catch { saved = [] }
-  const movements = Number((await db.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE lower(trim(COALESCE(reason,''))) = @from").get<{ n: number }>({ from: from.toLowerCase() }))?.n || 0)
+  const movements = Number((countResult?.results?.[0] as { n?: number } | undefined)?.n || 0)
   return c.json({
     type, from, to,
     configured: saved.some((item) => item.type === type && item.label.toLowerCase() === from.toLowerCase()),
