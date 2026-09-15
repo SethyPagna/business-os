@@ -68,24 +68,28 @@ const row = (id, barcode, stock = 0, rest = {}) => ({
   id, name: ' Tea  Cream ', barcode, is_active: 1, is_group: 0, stock_quantity: stock,
   cost_price_usd: 4, cost_price_khr: 16000, ...rest,
 })
-let result = selected.chooseProductConflictMergePair([row(9, '001234', 99), row(10, '01234', 1)])
+// Both codes must clear MIN_REAL_BARCODE_DIGITS (6) so this stays a genuine
+// leading-zero-spelling pair (two REAL barcodes of one identity) rather than
+// tripping the Sep 15 2026 wildcard rule, which would instead prefer the
+// REAL row outright regardless of spelling cleanliness or stock.
+let result = selected.chooseProductConflictMergePair([row(9, '0012340', 99), row(10, '012340', 1)])
 assert.equal(result.eligible, true)
 assert.equal(result.keeper.id, 10, 'the cleaner leading-zero barcode wins before stock')
-result = selected.chooseProductConflictMergePair([row(9, '1234', 2), row(10, '1234', 9)])
+result = selected.chooseProductConflictMergePair([row(9, '123400', 2), row(10, '123400', 9)])
 assert.equal(result.keeper.id, 10, 'stock wins for identical raw barcodes')
-result = selected.chooseProductConflictMergePair([row(9, '1234', 2), row(10, '1234', 2)])
+result = selected.chooseProductConflictMergePair([row(9, '123400', 2), row(10, '123400', 2)])
 assert.equal(result.keeper.id, 9, 'id is the final deterministic tie-break')
 
 for (const [rows, code] of [
-  [[row(1, '1234')], 'not_exact_pair'],
-  [[row(1, '1234'), row(2, '1234'), row(3, '1234')], 'not_exact_pair'],
-  [[row(1, '1234'), row(2, '1234', 0, { is_active: 0 })], 'not_exact_pair'],
-  [[row(1, '1234'), row(2, '1234', 0, { is_group: 1 })], 'not_exact_pair'],
-  [[row(1, '1234', 0, { name: '  ' }), row(2, '1234', 0, { name: '' })], 'incompatible_product_identity'],
-  [[row(1, '1234'), row(2, '1234', 0, { name: 'Other' })], 'incompatible_product_identity'],
-  [[row(1, '1234'), row(2, '5678')], 'incompatible_product_identity'],
-  [[row(1, '1234'), row(2, '1234', 0, { cost_price_usd: 400 })], 'cost_outlier_review'],
-  [[row(1, '1234'), row(2, '1234', 0, { selling_price_usd: -1 })], 'invalid_merge_numeric'],
+  [[row(1, '123400')], 'not_exact_pair'],
+  [[row(1, '123400'), row(2, '123400'), row(3, '123400')], 'not_exact_pair'],
+  [[row(1, '123400'), row(2, '123400', 0, { is_active: 0 })], 'not_exact_pair'],
+  [[row(1, '123400'), row(2, '123400', 0, { is_group: 1 })], 'not_exact_pair'],
+  [[row(1, '123400', 0, { name: '  ' }), row(2, '123400', 0, { name: '' })], 'incompatible_product_identity'],
+  [[row(1, '123400'), row(2, '123400', 0, { name: 'Other' })], 'incompatible_product_identity'],
+  [[row(1, '123400'), row(2, '567800')], 'incompatible_product_identity'],
+  [[row(1, '123400'), row(2, '123400', 0, { cost_price_usd: 400 })], 'cost_outlier_review'],
+  [[row(1, '123400'), row(2, '123400', 0, { selling_price_usd: -1 })], 'invalid_merge_numeric'],
 ]) {
   const refusal = selected.chooseProductConflictMergePair(rows)
   assert.equal(refusal.eligible, false)

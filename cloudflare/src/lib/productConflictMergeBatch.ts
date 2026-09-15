@@ -1,5 +1,5 @@
-import { identityBarcodeKey, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey } from './productIdentity'
-import { normalizeProductGroupName, resolveMergedCostDetail } from './productDetailRule'
+import { normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey } from './productIdentity'
+import { normalizeProductGroupName, resolveMergedCostDetail, barcodeIdentityMatches, isRealBarcode } from './productDetailRule'
 import { resolveProductMergeEconomics } from './productMerge'
 
 export const PRODUCT_CONFLICT_MERGE_MANIFEST_VERSION = 1 as const
@@ -217,8 +217,12 @@ export function chooseProductConflictMergePair(rows: readonly ProductConflictEli
   }
   const [left, right] = rows
   const name = normalizeProductGroupName(left.name)
+  // Wildcard-aware (Sep 15 2026 ruling): a real-vs-broken barcode pair
+  // within the same exact name is the SAME identity, not just an exact
+  // fold match -- barcodeIdentityMatches carries that, identityBarcodeKey
+  // equality alone cannot.
   if (!name || name !== normalizeProductGroupName(right.name)
-    || identityBarcodeKey(left.barcode) !== identityBarcodeKey(right.barcode)) {
+    || !barcodeIdentityMatches(left.barcode, right.barcode)) {
     return { eligible: false, code: 'incompatible_product_identity', message: 'The products no longer share the same normalized name and barcode.' }
   }
   const economics = resolveProductMergeEconomics(rows)
@@ -229,12 +233,18 @@ export function chooseProductConflictMergePair(rows: readonly ProductConflictEli
     return { eligible: false, code: 'cost_outlier_review', message: 'The product costs are too far apart for an automatic merge.' }
   }
   const rawBarcodes = new Set(rows.map((row) => String(row.barcode ?? '').trim().toLowerCase()))
-  const leadingZeroPair = rawBarcodes.size > 1
+  const leadingZeroPair = rawBarcodes.size > 1 && rows.every((row) => isRealBarcode(row.barcode))
   const zerosShed = (row: ProductConflictEligibilityRow) => {
     const raw = String(row.barcode ?? '').trim().toLowerCase()
     return raw.length - normalizeLeadingZeroBarcodeForCleanup(raw).length
   }
   const ordered = [...rows].sort((a, b) => {
+    // A real barcode always outranks a broken/empty wildcard row as the
+    // keeper -- canonicalProductBarcode's own rule -- so the merge never
+    // discards the row carrying the real code.
+    const aReal = isRealBarcode(a.barcode) ? 0 : 1
+    const bReal = isRealBarcode(b.barcode) ? 0 : 1
+    if (aReal !== bReal) return aReal - bReal
     if (leadingZeroPair) {
       const zeroDifference = zerosShed(a) - zerosShed(b)
       if (zeroDifference) return zeroDifference
