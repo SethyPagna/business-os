@@ -3,12 +3,13 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
 import { actorSnapshot } from './actorSnapshot'
-import { allocateAcrossLots, readFifoLotAvailability } from './productBatches'
+import { allocateAcrossLots, readFifoLotAvailabilityForCart, type FifoLotAvailability } from './productBatches'
 import { canonicalTransferAuthorityGuardStatement } from './canonicalBranchIdentity'
 import { transferIntentAuditStatement } from './transferOperationReceipt'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
 import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
+import { buildInClause, selectInChunks } from './sqlBinding'
 
 export const TRANSFER_OPERATION_KIND = 'stock.transfer'
 type Statement = { sql: string; params?: Record<string, unknown> }
@@ -20,6 +21,13 @@ export type TransferLine = { productId: number; destProductId: number; quantity:
 export class TransferConflictError extends Error { statusCode = 409 }
 const productSnapshotSql = `json_object('id',id,'name',name,'barcode',barcode,'created_at',created_at,'is_active',is_active)`
 const lotSnapshotSql = `json_object('id',id,'variant_product_id',variant_product_id,'batch_key',batch_key,'lot_code',lot_code,'received_at',received_at,'expiry_date',expiry_date,'notes',notes)`
+// lotSnapshotSql's column names are bare -- fine in a plain single-table
+// SELECT, but ambiguous the moment the query also joins json_each() (which
+// has its own `id`/`value`/etc. pseudo-columns), same problem the
+// transfer_operation_members INSERT below already solves inline. Shared here
+// for the destination-lot batch lookups added by P4-4a.
+const qualifyLotSnapshot = (alias: string) =>
+  lotSnapshotSql.replaceAll(/\b(id|variant_product_id|batch_key|lot_code|received_at|expiry_date|notes)\b(?=[,)])/g, `${alias}.$1`)
 const receiptSql = `(SELECT id FROM transfer_operation_receipts WHERE operation_id=@operation)`
 const assert = (condition: string, params: Record<string, unknown>): Statement => ({ sql: `INSERT INTO branches(name) SELECT NULL WHERE COALESCE((${condition}),0)=0`, params })
 
@@ -44,10 +52,106 @@ export async function planTransferOperation(db: D1Compat, args: {
   }, transferIntentAuditStatement({ actorId: args.user.id, actorName: actorSnapshot(args.user), requestId: args.requestId, requestJson: args.requestJson, digest: args.digest, bulk: args.lines.length > 1 })]
   const members: Member[] = []
   const pendingLots = new Map<string, string>()
+
+  // ---------------------------------------------------------------------
+  // P4-4a: pre-read every product/lot/destination-lot the loop below will
+  // need, in a constant number of chunked round trips instead of one (or
+  // several) per line -- the loop itself stays pure (no awaits), so its
+  // statement output and FIFO allocation order are byte-identical to the
+  // old per-line-awaited version; only WHEN the reads happen changed.
+  // ---------------------------------------------------------------------
+
+  // 1. Every product referenced by any line, source or destination.
+  const productIds = [...new Set(args.lines.flatMap(line => [line.productId, line.destProductId]))]
+  const productRows = await selectInChunks(productIds, 0, chunk => {
+    const { sql, params: inParams } = buildInClause('id', chunk)
+    return db.prepare(`SELECT id,${productSnapshotSql} AS snapshot,cost_price_usd,cost_price_khr FROM products WHERE id IN (${sql}) AND is_active=1`)
+      .all<{ id: number; snapshot: string; cost_price_usd: number | null; cost_price_khr: number | null }>(inParams)
+  })
+  const productById = new Map(productRows.map(row => [Number(row.id), row]))
+
+  // 2. FIFO lot availability for every (source product, from-branch) pair --
+  // the batched cart-checkout reader already does this in one round trip.
+  const lotsByProductBranch = await readFifoLotAvailabilityForCart(
+    db, productIds.map(productId => ({ productId, branchId: args.fromBranchId })),
+  )
+
+  // 3. allocateAcrossLots is pure -- run it for every line now so the exact
+  // set of source batch ids this transfer touches is known up front.
+  const linePlans = args.lines.map(line => {
+    const lots = lotsByProductBranch.get(`${line.productId}:${args.fromBranchId}`) || []
+    const selected: FifoLotAvailability[] = line.batchId == null ? lots : lots.filter(lot => lot.batchId === line.batchId)
+    const { takes, uncovered } = allocateAcrossLots(selected, line.quantity)
+    if (line.batchId != null && uncovered > 0) throw new TransferConflictError('The selected received date no longer has enough stock.')
+    return { takes, uncovered }
+  })
+
+  // 4. Every source lot (product_batches row) any line's takes reference.
+  const takenBatchIds = [...new Set(linePlans.flatMap(plan => plan.takes.map(take => take.batchId)))]
+  const lotRows = await selectInChunks(takenBatchIds, 0, chunk => {
+    const { sql, params: inParams } = buildInClause('id', chunk)
+    return db.prepare(`SELECT id,${lotSnapshotSql} AS snapshot,unit_cost_usd FROM product_batches WHERE id IN (${sql}) AND is_active=1`)
+      .all<{ id: number; snapshot: string; unit_cost_usd: number | null }>(inParams)
+  })
+  const lotById = new Map(lotRows.map(row => [Number(row.id), row]))
+
+  // 5. Destination-lot matches for cross-product lines, by lot code or (when
+  // a take's source lot has none) by expiry date. Reading isn't possible
+  // before the source lots above are known (the match key comes from the
+  // source lot's own lot_code/expiry_date), so this is a second wave, still
+  // fixed at 2 round trips regardless of how many lines/takes there are.
+  const lotCodePairs = new Map<string, { destProductId: number; lotCode: string }>()
+  const expiryPairs = new Map<string, { destProductId: number; expiryDate: string }>()
+  for (const [i, line] of args.lines.entries()) {
+    if (line.destProductId === line.productId) continue
+    for (const take of linePlans[i].takes) {
+      const lot = lotById.get(take.batchId)
+      if (!lot) continue // reported as a conflict below, once per take
+      const sourceLot = JSON.parse(lot.snapshot) as Lot
+      const lotCode = String(sourceLot.lot_code || '').trim() || null
+      if (lotCode) lotCodePairs.set(`${line.destProductId}:${lotCode}`, { destProductId: line.destProductId, lotCode })
+      else if (sourceLot.expiry_date) expiryPairs.set(`${line.destProductId}:${sourceLot.expiry_date}`, { destProductId: line.destProductId, expiryDate: sourceLot.expiry_date })
+    }
+  }
+  // json_each(@pairs) joins, same unbounded-list idiom this file already
+  // uses for @allocations below -- a composite (product, key) match has no
+  // natural IN-clause form, and a transfer's line count is bounded by the
+  // request body size long before this JSON payload could be.
+  const lotCodeMatchByKey = new Map<string, Lot>()
+  if (lotCodePairs.size) {
+    const rows = await db.prepare(`
+      SELECT ${qualifyLotSnapshot('pb')} AS snapshot
+      FROM json_each(@pairs) j
+      JOIN product_batches pb ON pb.variant_product_id=json_extract(j.value,'$.destProductId')
+        AND pb.batch_key=json_extract(j.value,'$.lotCode') AND pb.is_active=1
+    `).all<{ snapshot: string }>({ pairs: JSON.stringify([...lotCodePairs.values()]) })
+    for (const row of rows) {
+      const lot = JSON.parse(row.snapshot) as Lot
+      lotCodeMatchByKey.set(`${lot.variant_product_id}:${lot.batch_key}`, lot)
+    }
+  }
+  const expiryMatchByKey = new Map<string, Lot>()
+  if (expiryPairs.size) {
+    const rows = await db.prepare(`
+      SELECT ${qualifyLotSnapshot('pb')} AS snapshot
+      FROM json_each(@pairs) j
+      JOIN product_batches pb ON pb.variant_product_id=json_extract(j.value,'$.destProductId')
+        AND pb.expiry_date=json_extract(j.value,'$.expiryDate') AND pb.is_active=1
+    `).all<{ snapshot: string }>({ pairs: JSON.stringify([...expiryPairs.values()]) })
+    // ORDER BY id LIMIT 1 in the old per-line query -- keep only the
+    // lowest-id row per (product, expiry_date) group.
+    for (const row of rows) {
+      const lot = JSON.parse(row.snapshot) as Lot
+      const key = `${lot.variant_product_id}:${lot.expiry_date}`
+      const existing = expiryMatchByKey.get(key)
+      if (!existing || lot.id < existing.id) expiryMatchByKey.set(key, lot)
+    }
+  }
+
+  // ---- The loop itself: pure, no awaits, identical statement output. ----
   for (const [ordinal, line] of args.lines.entries()) {
-    const sourceProduct = await db.prepare(`SELECT ${productSnapshotSql} AS snapshot,cost_price_usd,cost_price_khr FROM products WHERE id=@id AND is_active=1`).get<{ snapshot: string; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: line.productId })
-    const destinationProduct = line.productId === line.destProductId ? sourceProduct
-      : await db.prepare(`SELECT ${productSnapshotSql} AS snapshot FROM products WHERE id=@id AND is_active=1`).get<{ snapshot: string }>({ id: line.destProductId })
+    const sourceProduct = productById.get(line.productId)
+    const destinationProduct = line.productId === line.destProductId ? sourceProduct : productById.get(line.destProductId)
     const snapshots = [sourceProduct, destinationProduct]
     if (snapshots.some(row => !row)) throw new TransferConflictError('A transfer product changed. Refresh and try again.')
     // Only planning reads mutable catalog costs. Both movement directions and
@@ -55,13 +159,10 @@ export async function planTransferOperation(db: D1Compat, args: {
     const fallback = { fallbackUnitCostUsd: sourceProduct!.cost_price_usd, fallbackUnitCostKhr: sourceProduct!.cost_price_khr }
     statements.push(assert(`EXISTS(SELECT 1 FROM products WHERE id=@product AND cost_price_usd IS @usd AND cost_price_khr IS @khr)`,
       { product: line.productId, usd: sourceProduct!.cost_price_usd, khr: sourceProduct!.cost_price_khr }))
-    const lots = await readFifoLotAvailability(db, line.productId, args.fromBranchId)
-    const selected = line.batchId == null ? lots : lots.filter(lot => lot.batchId === line.batchId)
-    const { takes, uncovered } = allocateAcrossLots(selected, line.quantity)
-    if (line.batchId != null && uncovered > 0) throw new TransferConflictError('The selected received date no longer has enough stock.')
+    const { takes, uncovered } = linePlans[ordinal]
     const allocations: Allocation[] = []
     for (const take of takes) {
-      const source = await db.prepare(`SELECT ${lotSnapshotSql} AS snapshot,unit_cost_usd FROM product_batches WHERE id=@id AND is_active=1`).get<{ snapshot: string; unit_cost_usd: number | null }>({ id: take.batchId })
+      const source = lotById.get(take.batchId)
       if (!source) throw new TransferConflictError('The source received date changed.')
       const costSnapshot = resolveMovementCostSnapshot({ quantity: take.quantity,
         // Lots store USD only. KHR uses the captured source product currency,
@@ -75,9 +176,9 @@ export async function planTransferOperation(db: D1Compat, args: {
       if (line.destProductId !== line.productId) {
         const lotCode = String(sourceLot.lot_code || '').trim() || null
         const match = lotCode
-          ? await db.prepare(`SELECT ${lotSnapshotSql} AS snapshot FROM product_batches WHERE variant_product_id=@product AND is_active=1 AND batch_key=@key`).get<{ snapshot: string }>({ product: line.destProductId, key: lotCode })
-          : sourceLot.expiry_date ? await db.prepare(`SELECT ${lotSnapshotSql} AS snapshot FROM product_batches WHERE variant_product_id=@product AND is_active=1 AND expiry_date=@expiry ORDER BY id LIMIT 1`).get<{ snapshot: string }>({ product: line.destProductId, expiry: sourceLot.expiry_date }) : undefined
-        destination = match ? JSON.parse(match.snapshot) as Lot : null
+          ? lotCodeMatchByKey.get(`${line.destProductId}:${lotCode}`)
+          : sourceLot.expiry_date ? expiryMatchByKey.get(`${line.destProductId}:${sourceLot.expiry_date}`) : undefined
+        destination = match ?? null
         const pendingKey = `${line.destProductId}:${lotCode || sourceLot.expiry_date || sourceLot.id}`
         key = destination?.batch_key || pendingLots.get(pendingKey) || lotCode || `transfer-${crypto.randomUUID()}`
         if (!destination && !pendingLots.has(pendingKey)) {
