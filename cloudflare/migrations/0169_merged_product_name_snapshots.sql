@@ -1,10 +1,12 @@
--- 0171: repair the denormalized product_name snapshots migrations 0165 and
+-- 0169: repair the denormalized product_name snapshots migrations 0165 and
 -- 0168 left stale on every row they repointed.
 --
--- PREPARED, NOT APPLIED. Data-only; no DDL. Append-only chain (0170 is the
--- prior migration slot, reserved by the efficiency lane; this file does not
--- touch routes/compat.ts or routes/sales.ts GROUP BY code, which that lane
--- owns).
+-- PREPARED, NOT APPLIED. Data-only; no DDL. Append-only chain (0168 is the
+-- prior migration; numbering coordinated 2026-09-15 -- the efficiency lane
+-- decided not to write 0170, and this lane's uncosted-removal review found
+-- nothing resolvable, so no 0169/0170 migration exists for either besides
+-- this file; this file does not touch routes/compat.ts or routes/sales.ts
+-- GROUP BY code, which the efficiency lane owns).
 --
 -- WHY THIS EXISTS: 0165/0168 repointed product_id on sale_items, inventory_
 -- movements, return_items, stock_transfers, damaged_stock_lots, return_

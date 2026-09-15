@@ -1,8 +1,8 @@
-// Pins migration 0171 (merged product_name snapshot repair) against a small
+// Pins migration 0169 (merged product_name snapshot repair) against a small
 // SYNTHETIC fixture built on the REAL migration chain (better-sqlite3, no
-// production data). See migrations/0171_merged_product_name_snapshots.sql.
+// production data). See migrations/0169_merged_product_name_snapshots.sql.
 //
-// Run: node scripts/test-migration-0171-pure.cjs
+// Run: node scripts/test-migration-0169-pure.cjs
 const fs = require('fs')
 const path = require('path')
 const assert = require('assert')
@@ -12,7 +12,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 const migrationsDir = path.join(__dirname, '..', 'migrations')
 const sql0165 = fs.readFileSync(path.join(migrationsDir, '0165_product_same_name_merge.sql'), 'utf8')
 const sql0168 = fs.readFileSync(path.join(migrationsDir, '0168_transfer_aware_merge.sql'), 'utf8')
-const sql0171 = fs.readFileSync(path.join(migrationsDir, '0171_merged_product_name_snapshots.sql'), 'utf8')
+const sql0169 = fs.readFileSync(path.join(migrationsDir, '0169_merged_product_name_snapshots.sql'), 'utf8')
 
 const db = new Database(':memory:')
 db.pragma('foreign_keys = OFF')
@@ -66,11 +66,11 @@ db.exec(sql0165)
 db.exec(sql0168)
 
 // Rename the keeper AFTER the merges, same as production ("Old Spelling
-// Serum" -> "Clean Spelling Serum") so post-0171 the snapshot columns must
+// Serum" -> "Clean Spelling Serum") so post-0169 the snapshot columns must
 // read the RENAMED current name, not the name captured at merge time.
 db.prepare("UPDATE products SET name='Clean Spelling Serum' WHERE id=202").run()
 
-db.exec(sql0171)
+db.exec(sql0169)
 
 // sale_items / inventory_movements: repaired to the keeper's CURRENT name.
 assert.strictEqual(db.prepare('SELECT product_name FROM sale_items WHERE id=1').get().product_name, 'Clean Spelling Serum', 'sale_items.product_name repaired to the keeper current name')
@@ -84,15 +84,15 @@ assert.strictEqual(move.destination_product_name, 'Clean Spelling Serum', 'stock
 // 0168 transfer-aware pair: return_items repaired too.
 assert.strictEqual(db.prepare('SELECT product_name FROM return_items WHERE id=1').get().product_name, 'Dior Addict Lip Glow New 075', 'return_items.product_name repaired via the 0168 map')
 // sale_amendments untouched (none seeded; just confirm the migration never references it as a write target)
-assert.ok(!/UPDATE sale_amendments/i.test(sql0171), 'sale_amendments is never written by this migration')
+assert.ok(!/UPDATE sale_amendments/i.test(sql0169), 'sale_amendments is never written by this migration')
 
 // Idempotence: second run changes nothing further.
 const before = {
   saleItems: db.prepare('SELECT product_name FROM sale_items WHERE id=1').get().product_name,
   moves: db.prepare('SELECT source_product_name, destination_product_name FROM stock_row_moves WHERE id=1').get(),
 }
-db.exec(sql0171)
+db.exec(sql0169)
 assert.strictEqual(db.prepare('SELECT product_name FROM sale_items WHERE id=1').get().product_name, before.saleItems, 'second run is a no-op (sale_items)')
 assert.deepStrictEqual(db.prepare('SELECT source_product_name, destination_product_name FROM stock_row_moves WHERE id=1').get(), before.moves, 'second run is a no-op (stock_row_moves)')
 
-console.log('OK test-migration-0171-pure.cjs')
+console.log('OK test-migration-0169-pure.cjs')

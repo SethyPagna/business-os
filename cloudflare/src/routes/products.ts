@@ -3394,7 +3394,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   // above -- the rename path already does this via syncLinkedProductNameSnapshots
   // (line ~98); without this, a merge silently leaves every history row still
   // reading the loser's OLD name even though product_id now points at the
-  // keeper (this is exactly what migration 0171 had to backfill for 0165/0168,
+  // keeper (this is exactly what migration 0169 had to backfill for 0165/0168,
   // a one-time repair this call makes unnecessary for every future merge).
   // canonicalId covers both the just-reparented dup rows AND any of the
   // keeper's own pre-existing rows -- both are safe to normalize since a

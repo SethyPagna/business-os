@@ -5,7 +5,7 @@
 // CURRENT name, in the SAME atomic batch as the reparent -- the same job
 // syncLinkedProductNameSnapshots (routes/products.ts:98-129) already does for
 // the rename path. Before this fix, a merged loser's OLD name silently
-// survived on every history row forever (this is exactly what migration 0171
+// survived on every history row forever (this is exactly what migration 0169
 // had to backfill for 0165/0168 -- a one-time repair this route fix makes
 // unnecessary for every future merge). sale_amendments is deliberately never
 // touched (append-only snapshot trigger).
@@ -150,7 +150,7 @@ async function main() {
 
   // Seed history rows carrying the DUP's product_id but a name captured
   // BEFORE the earlier rename to the current spelling was ever synced onto
-  // these history rows -- reproducing the exact stale-snapshot scenario 0171
+  // these history rows -- reproducing the exact stale-snapshot scenario 0169
   // had to backfill after 0165/0168.
   raw.prepare("INSERT INTO sales(id, receipt_number) VALUES (900, 'R-sync')").run()
   raw.prepare(`INSERT INTO sale_items(id, sale_id, product_id, product_name, quantity)

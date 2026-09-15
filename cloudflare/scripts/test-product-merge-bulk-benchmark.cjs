@@ -166,7 +166,7 @@ async function main() {
   // inventory_movements, return_items, stock_transfers, damaged_stock_lots,
   // return_replacement_items, stock_row_moves x2) into the SAME atomic batch as
   // the reparent, so a merge's history rows never carry a stale product_name
-  // (see routes/products.ts foldDuplicateProductInto, migration 0171's header).
+  // (see routes/products.ts foldDuplicateProductInto, migration 0169's header).
   assert.deepEqual(
     [...new Set(foldBatchSizes)].sort((a, b) => a - b),
     [3, 8, 18, 21],
