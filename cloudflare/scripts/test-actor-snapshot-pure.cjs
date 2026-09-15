@@ -180,17 +180,33 @@ ok(true, `no writer hides a JS comment inside a prepared SQL statement (${WRITER
 // Write-offs: customer return creation now plans the damaged-lot INSERT in
 // the atomic batch. Pin the planned statement's actor and the separate edit
 // batch rather than expecting the removed pre-transaction helper call.
+// P4-3 moved both paths onto the shared planDamagedReturnLine kernel
+// (lib/returnsStock.ts), which forwards userId/userName unchanged into
+// createDamagedLotStatement, so the pin follows the call site.
 const returnsSrc = read('src/routes/returns.ts')
 assert.doesNotMatch(returnsSrc, /createDamagedLot\(db, \{/, 'customer return create must keep damaged-lot creation inside its atomic statement plan')
 assert.match(
   returnsSrc,
-  /createDamagedLotStatement\(\{[\s\S]*?userId: authenticatedActorId, userName: actorSnapshot\(user\)/,
+  /planDamagedReturnLine\(\{[\s\S]*?userId: authenticatedActorId, userName: actorSnapshot\(user\)/,
   'the atomic create plan must stamp damaged lots with the session username',
 )
 assert.match(
   returnsSrc,
-  /INSERT INTO damaged_stock_lots\([\s\S]*?created_by_user_id,created_by_user_name[\s\S]*?userId: user\?\.id \?\? null, userName: actorSnapshot\(user\)/,
+  /planDamagedReturnLine\(\{[\s\S]*?userId: user\?\.id \?\? null, userName: actorSnapshot\(user\)/,
   'the atomic edit batch must stamp new damaged lots with the session username too',
+)
+// ...and the kernel itself must carry that actor into the lot INSERT rather
+// than dropping it on the way (the edit path used to hand-roll this INSERT).
+const returnsStockSrc = read('src/lib/returnsStock.ts')
+assert.match(
+  returnsStockSrc,
+  /INSERT INTO damaged_stock_lots \([\s\S]*?created_by_user_id, created_by_user_name[\s\S]*?user_name: input\.userName/,
+  'createDamagedLotStatement must write created_by_user_name from the caller-supplied session username',
+)
+assert.match(
+  returnsStockSrc,
+  /planDamagedReturnLine[\s\S]*?createDamagedLotStatement\(\{[\s\S]*?userId: input\.userId,\s*userName: input\.userName/,
+  'planDamagedReturnLine must forward userId/userName unchanged into createDamagedLotStatement',
 )
 ok(true, 'write-off (damaged_stock_lots) actor is session-derived in both atomic create and edit paths')
 
