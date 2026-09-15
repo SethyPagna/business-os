@@ -9,18 +9,19 @@ const end = pagination.indexOf('\n  if (compact', start)
 assert.ok(start > 0 && end > start, 'the centered branch must remain isolated from admin layouts')
 const centered = pagination.slice(start, end)
 
-// The page-size selector is back on this row (owner, 2026-09-14) and it is
-// the FIRST control in it, using the same shared control as the admin pagers.
+// The page-size selector is back on this row (owner, 2026-09-14), using the
+// same shared control as the admin pagers. 2026-09-15 (owner, supersedes
+// 2026-09-14's order): Back leads the row, then the size selector.
 assert.match(centered, /<PageSizeSelect/, 'centered pagination renders the shared page-size control')
 assert.match(centered, /ariaLabel=\{perPageLabel\}/, 'the selector is named from the translated per-page label')
 assert.doesNotMatch(centered, /Filters (?:panel|field)/i, 'shared pagination must not claim the selector lives somewhere else')
 
-const sizeAt = centered.indexOf('ariaLabel={perPageLabel}')
 const backAt = centered.indexOf('aria-label={backLabel}')
+const sizeAt = centered.indexOf('ariaLabel={perPageLabel}')
 const pageAt = centered.indexOf('aria-label={pageLabel}', backAt)
 const totalAt = centered.indexOf('<span className={countClass}>')
 const nextAt = centered.indexOf('aria-label={nextLabel}')
-assert.ok(sizeAt > 0 && backAt > sizeAt && pageAt > backAt && totalAt > pageAt && nextAt > totalAt, 'the row is page size, Back, editable page, total, Next')
+assert.ok(backAt > 0 && sizeAt > backAt && pageAt > sizeAt && totalAt > pageAt && nextAt > totalAt, 'the row is Back, page size, editable page, total, Next')
 
 assert.equal((centered.match(/<button\b/g) || []).length, 2, 'Back and Next are the only buttons this branch writes itself')
 assert.equal((centered.match(/<input\b/g) || []).length, 1, 'the page remains directly editable')

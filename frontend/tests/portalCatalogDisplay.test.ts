@@ -414,9 +414,11 @@ runTest('public catalog scrolls through the document and keeps its pager control
   const nextAt = pagerBranch.indexOf('aria-label={nextLabel}')
   assert.ok(backAt > 0 && pageFieldAt > 0 && totalPagesAt > 0 && nextAt > 0,
     'the storefront pager must keep a Back control, an editable page field, a total-page count and a Next control')
-  assert.ok(pageSizeSelectAt > 0 && pageSizeSelectAt < backAt,
-    'the page-size selector must sit BEFORE Back: [20/50/100] [Back] [page / total] [Next] (owner, 2026-09-14)')
-  assert.ok(backAt < pageFieldAt, 'Back must precede the page indicator')
+  // 2026-09-15 (owner, supersedes 2026-09-14's [size][Back] order): Back
+  // leads the row, then the page-size selector.
+  assert.ok(pageSizeSelectAt > backAt,
+    'the page-size selector must sit AFTER Back: [Back] [20/50/100] [page / total] [Next] (owner, 2026-09-15)')
+  assert.ok(backAt < pageSizeSelectAt && pageSizeSelectAt < pageFieldAt, 'Back and the size selector must precede the page indicator')
   assert.ok(pageFieldAt < totalPagesAt, 'the page number must precede its total')
   assert.ok(totalPagesAt < nextAt, 'the page indicator must precede Next')
   const navAt = pagerBranch.indexOf('<nav ')
@@ -430,7 +432,7 @@ runTest('public catalog scrolls through the document and keeps its pager control
   assert.match(paginationControlsSource, /const nextLabel = typeof t === 'function' \? \(t\('next'\) \|\| 'Next'\)/)
 })
 
-runTest('the public pager carries a 20/50/100 size selector before Back, wired end to end on both public paths', () => {
+runTest('the public pager carries a 20/50/100 size selector, wired end to end on both public paths', () => {
   const pagerBranch = paginationControlsSource.slice(
     paginationControlsSource.indexOf("if (layout === 'centered')"),
     paginationControlsSource.indexOf('if (compact && rangeAsPageSize)'),

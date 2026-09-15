@@ -9,9 +9,11 @@
 // branch, which catalogPagination.tsx reached by passing no layout at all.
 // This test pins the storefront's own shape instead: one centred single-line
 // pill, mounted symmetrically above AND below the grid, with no summary row
-// anywhere. The pill leads with a compact page-size selector -- restored by
-// the owner on 2026-09-14, after the 2026-09-07 decision to drop it -- and it
-// is the FIRST control in the row, ahead of Back.
+// anywhere. The compact page-size selector was restored by the owner on
+// 2026-09-14 (after the 2026-09-07 decision to drop it) leading the row; the
+// owner's 2026-09-15 report superseded that order -- Back now leads, then the
+// page-size selector, then the editable page/total, then Next, with the
+// total result count printed on the SAME row as the pill.
 //
 // It is a source-shape test on purpose -- the storefront pager is JSX with no
 // pure kernel to call, and the defect was entirely "which branch renders".
@@ -59,18 +61,19 @@ runTest('the shared control offers a centred storefront layout without changing 
   assert.match(pagination, /layout = 'default',/, "the default must stay 'default' so all 28 admin consumers are untouched")
 })
 
-runTest('the centred branch prints no summary, and leads with the per-page selector', () => {
+runTest('the centred branch prints no summary, and Back leads the row', () => {
   const branch = centeredBranch()
   assert.doesNotMatch(branch, /\{showingLabel\}/, 'the storefront pager must not render the Showing summary')
   assert.doesNotMatch(branch, /\{label\}/, 'the storefront pager must not render the "products" tail of the summary')
   // Restored 2026-09-14 by the owner, reversing the 2026-09-07 removal: the
   // shared PageSizeSelect (a native <select> is banned in components/ --
-  // tests/sourceSyntaxCheck.ts), named from the translated per-page label,
-  // first in the row.
+  // tests/sourceSyntaxCheck.ts), named from the translated per-page label.
+  // 2026-09-15 (owner, supersedes 2026-09-14's order): Back leads the row,
+  // ahead of the size selector.
   assert.match(branch, /ariaLabel=\{perPageLabel\}/, 'the size selector carries the translated per-page name')
   assert.ok(
-    branch.indexOf('ariaLabel={perPageLabel}') < branch.indexOf('aria-label={backLabel}'),
-    'the size selector comes BEFORE Back: [20/50/100] [Back] [page / total] [Next]',
+    branch.indexOf('aria-label={backLabel}') < branch.indexOf('ariaLabel={perPageLabel}'),
+    'Back comes BEFORE the size selector: [Back] [20/50/100] [page / total] [Next]',
   )
 })
 
@@ -80,14 +83,16 @@ runTest('the centred page field grows with its digits and keeps a 40px floor', (
   assert.match(branch, /className=\{`h-10 min-w-10/)
 })
 
-runTest('the centred branch centres the pill and orders it Back / page / total / Next', () => {
+runTest('the centred branch centres the pill and orders it Back / size / page / total / Next', () => {
   const branch = centeredBranch()
-  assert.match(branch, /flex w-full justify-center/, 'the pager row must centre itself')
+  assert.match(branch, /flex w-full flex-wrap items-center justify-center gap-2/, 'the pager row must centre itself')
   const backAt = branch.indexOf('aria-label={backLabel}')
+  const sizeAt = branch.indexOf('ariaLabel={perPageLabel}')
   const pageAt = branch.indexOf('aria-label={pageLabel}', backAt)
   const countAt = branch.indexOf('<span className={countClass}>')
   const nextAt = branch.indexOf('aria-label={nextLabel}')
-  assert.ok(backAt > 0 && pageAt > backAt, 'page must follow Back')
+  assert.ok(backAt > 0 && sizeAt > backAt, 'the size selector must follow Back')
+  assert.ok(pageAt > sizeAt, 'page must follow the size selector')
   assert.ok(countAt > pageAt, 'total page count must follow the editable page')
   assert.ok(nextAt > countAt, 'Next must close the pill')
 })

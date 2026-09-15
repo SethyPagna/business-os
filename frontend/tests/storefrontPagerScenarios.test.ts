@@ -283,14 +283,16 @@ await runTest('server bootstrap/search responses never overwrite the viewer-sele
   assert.match(publicCatalogPage, /pageSize: productPageSize,/, 'the product search request must send the CURRENT viewer size back to the server')
 })
 
-await runTest('the row order is [size] [Back] [page / total] [Next] -- and both mounts share one gate', () => {
+await runTest('the row order is [Back] [size] [page / total] [Next] -- and both mounts share one gate', () => {
+  // 2026-09-15 (owner, supersedes 2026-09-14's [size][Back] order): Back
+  // leads the row, then the page-size selector.
   const branch = centeredBranch()
-  const sizeAt = branch.indexOf('ariaLabel={perPageLabel}')
   const backAt = branch.indexOf('aria-label={backLabel}')
+  const sizeAt = branch.indexOf('ariaLabel={perPageLabel}')
   const pageAt = branch.indexOf('aria-label={pageLabel}', backAt)
   const totalAt = branch.indexOf('<span className={countClass}>')
   const nextAt = branch.indexOf('aria-label={nextLabel}')
-  assert.ok(sizeAt > 0 && backAt > sizeAt && pageAt > backAt && totalAt > pageAt && nextAt > totalAt)
+  assert.ok(backAt > 0 && sizeAt > backAt && pageAt > sizeAt && totalAt > pageAt && nextAt > totalAt)
 
   const mounts = catalogProducts.match(/<CatalogPaginationControls\b/g) || []
   assert.equal(mounts.length, 2)
