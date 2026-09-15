@@ -69,8 +69,11 @@ runTest('every queued line freezes its reason and every adjust write sends it', 
   assert.equal((modal.match(/reason: stockLineReason\(line, tr\), branchId: Number\(branchId\),/g) || []).length, 4)
   assert.doesNotMatch(modal, /reason: tr\('stock_change_session_reason'/, 'no hardcoded reason is left on a write')
   assert.doesNotMatch(modal, /reason: tr\('stock_in_session_reason'/, 'no hardcoded reason is left on a write')
-  // the plain add sends the text or null so the Worker keeps its lot label
-  assert.match(modal, /await receiveBatchStock\(\{[^]*?reason: line\.reason\.trim\(\) \|\| null,[^]*?\}\)/)
+  // the plain add sends the text or null so the Worker keeps its lot label.
+  // P4-B: the body is built once in buildLineRequest and sent either through
+  // receiveBatchStock (404 fallback) or the batched commit endpoint -- both
+  // read this same 'receive' wire branch, not a per-call-site copy.
+  assert.match(modal, /wire: 'receive', body: \{[^]*?reason: line\.reason\.trim\(\) \|\| null,[^]*?\}/)
   // the draft carries it across reload like every other in-progress value
   assert.match(modal, /type FastStockInDraft = \{[^]*?\n  reason\?: string\n/)
   assert.match(modal, /const \[reason, setReason\] = useState\(draft\?\.reason \|\| ''\)/)

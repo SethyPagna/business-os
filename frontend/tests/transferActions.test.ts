@@ -38,6 +38,10 @@ for (const kind of ['submit', 'undo', 'redo']) for (const direction of [[1, 2], 
       if (id === './branchTransport.ts') return module.exports
       if (id === './requestIds.ts') return { ensureClientRequestId }
       if (id === '../utils/deviceInfo.ts') return { getClientDeviceInfo: () => ({ device_name: 'changed after reload' }) }
+      // P4-B: inventoryWriteTransport.ts's commitFastStockIn() reuses
+      // batchesTransport.ts's receive-body conversion; unused by this
+      // transfer-only test, but the module graph still imports it.
+      if (id === './batchesTransport.ts') return { receiveBatchWireBody: (payload: unknown) => payload }
       if (id === './http.ts') return {
         route: (_key: string, online: () => unknown) => online(),
         apiFetch: async (_method: string, path: string, body: any) => {

@@ -2,6 +2,7 @@ import { apiFetch, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { executeTransferRun, loadTransferRun, prepareTransferRun, saveTransferRun, type PendingTransferRun } from './branchTransport.ts'
+import { receiveBatchWireBody, type ReceiveBatchPayload } from './batchesTransport.ts'
 
 type InventoryPayload = Record<string, unknown>
 
@@ -117,6 +118,52 @@ export function adjustStock(payload: InventoryPayload = {}): Promise<unknown> {
     null,
     true,
   )
+}
+
+// P4-B: one input line for the batched fast stock-in commit. `wire` picks
+// which single-line kernel the Worker runs the line through (see
+// cloudflare/src/routes/stockInCommit.ts) -- 'adjust' carries the same
+// camelCase body adjustStock() above sends to POST /api/inventory/adjust;
+// 'receive' carries the same camelCase ReceiveBatchPayload
+// batchesTransport.ts's receiveBatchStock() takes (converted to the wire's
+// snake_case shape below, via the one shared conversion both callers use).
+export type FastStockInCommitLine =
+  | { key: string; wire: 'adjust'; body: InventoryPayload }
+  | { key: string; wire: 'receive'; body: ReceiveBatchPayload }
+
+export type FastStockInCommitLineResult = {
+  ok: boolean
+  key?: string
+  error?: string
+  [field: string]: unknown
+}
+
+// POST /api/inventory/fast-stock-in/commit -- the whole fast stock-in
+// session in one request instead of one per line (FastStockInModal.tsx used
+// to `for (const line of pending) await adjustStock(...)/receiveBatchStock(...)`,
+// N sequential Worker round trips for an N-line shipment).
+//
+// Returns null ONLY on a 404 -- the deployed Worker predates this route (a
+// rolling-deploy window with an old build still live) -- so the caller can
+// fall back to the original per-line loop. Any other failure (network, 5xx)
+// propagates as a thrown error; the caller decides how to report a whole-
+// commit failure, since there is no per-line detail to show in that case.
+export async function commitFastStockIn(lines: FastStockInCommitLine[]): Promise<FastStockInCommitLineResult[] | null> {
+  const wireLines = lines.map((line) => (
+    line.wire === 'receive' ? { key: line.key, wire: line.wire, body: receiveBatchWireBody(line.body) } : line
+  ))
+  try {
+    const result = await route(
+      'inventory:fastStockIn:commit',
+      () => apiFetch('POST', '/api/inventory/fast-stock-in/commit', { ...getDevicePayload(), lines: wireLines }),
+      null,
+      true,
+    ) as { results?: FastStockInCommitLineResult[] } | null
+    return result?.results ?? []
+  } catch (error) {
+    if (error && typeof error === 'object' && (error as { status?: number }).status === 404) return null
+    throw error
+  }
 }
 
 // Milestone A stock-session wire. The caller owns stable request/line ids:

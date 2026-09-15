@@ -62,7 +62,11 @@ runTest('F2: Add queues editable lines; completion writes through the one D4 ker
   assert.match(modalSource, /const removeLine = \(key: string\)/)
   // N27: a saved ADD still shows its lot code; remove / set lines say what
   // they did instead (there is no lot to name)
-  assert.match(modalSource, /status: 'saved', detail: line\.mode === 'remove'[^]*?: line\.mode === 'set'[^]*?: result\?\.lotCode/)
+  // P4-B: the per-outcome message moved into describeLineResult(line, result),
+  // reused by both the batched commit result and the sequential fallback --
+  // same ternary chain, one place instead of a copy at each call site.
+  assert.match(modalSource, /const describeLineResult = \(line: ReceivedLine, result[^)]*\): string => \(\s*line\.mode === 'remove'[^]*?: line\.mode === 'set'[^]*?: result\?\.lotCode/)
+  assert.equal((modalSource.match(/detail: describeLineResult\(line, result/g) || []).length, 2, 'both the batched-result branch and the sequential fallback report through the same function')
   assert.match(modalSource, /status: 'error', detail: message/)
   // Add clears the line and refocuses for the next product
   assert.match(modalSource, /const resetLine = \(\) => \{/)
@@ -84,7 +88,9 @@ runTest('the same product cannot be added twice in one stock session', () => {
 })
 
 runTest('changed cost offers and uses the existing price-variant path', () => {
-  assert.match(modalSource, /import \{ adjustStock \} from '\.\.\/\.\.\/api\/inventoryWriteTransport\.tsx?'/)
+  // P4-B: the same import now also brings in the batched fast-stock-in
+  // commit transport (commitFastStockIn) alongside adjustStock.
+  assert.match(modalSource, /import \{ adjustStock[^}]*\} from '\.\.\/\.\.\/api\/inventoryWriteTransport\.tsx?'/)
   assert.match(modalSource, /setCreatePriceVariant\(costChanged\(picked, next\)\)/, 'a changed cost enables the safe variant choice by default')
   assert.match(modalSource, /create_price_variant.*Create\/use a price variant/, 'the choice is visible beside the edited cost')
   assert.match(modalSource, /unlockPricing: true/)

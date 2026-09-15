@@ -110,13 +110,16 @@ runTest('a set can target zero; an add or a remove of nothing still cannot', () 
 })
 
 runTest('the write honours the mode through the one adjust kernel; add keeps its receipt gate', () => {
+  // P4-B: the mode-to-wire-body mapping moved into buildLineRequest(line),
+  // reused by both the batched commit endpoint and the sequential fallback.
   // remove: the chosen lot or the oldest lots; no receipt fields
-  assert.match(modalSource, /line\.mode === 'remove'\s*\? await adjustStock\(\{\s*productId: Number\(line\.product\.id\), type: 'remove', quantity: line\.quantity,[^]*?batchId: typeof line\.batchChoice === 'number' \? line\.batchChoice : null,[^]*?sessionId: sessionIdRef\.current,/)
+  assert.match(modalSource, /if \(line\.mode === 'remove'\) \{\s*return \{ key: line\.key, wire: 'adjust', body: \{\s*productId: Number\(line\.product\.id\), type: 'remove', quantity: line\.quantity,[^]*?batchId: typeof line\.batchChoice === 'number' \? line\.batchChoice : null,[^]*?sessionId: sessionIdRef\.current,/)
   // set: the branch total; receipt fields ride along because a set that
   // raises stock is an add server-side
-  assert.match(modalSource, /line\.mode === 'set'\s*\? await adjustStock\(\{\s*productId: Number\(line\.product\.id\), type: 'set', quantity: line\.quantity,[^]*?supplierId: supplier\.supplierId, supplierName: supplier\.supplierName\.trim\(\) \|\| null,[^]*?sessionId: sessionIdRef\.current,/)
-  // add is unchanged: still exactly one receiveBatchStock call site
-  assert.equal((modalSource.match(/receiveBatchStock\(/g) || []).length, 1)
+  assert.match(modalSource, /if \(line\.mode === 'set'\) \{\s*return \{ key: line\.key, wire: 'adjust', body: \{\s*productId: Number\(line\.product\.id\), type: 'set', quantity: line\.quantity,[^]*?supplierId: supplier\.supplierId, supplierName: supplier\.supplierName\.trim\(\) \|\| null,[^]*?sessionId: sessionIdRef\.current,/)
+  // add is unchanged: still exactly one call site to the transport itself
+  // (the 404-fallback sequential loop); the batched endpoint is the primary path.
+  assert.equal((modalSource.match(/await receiveBatchStock\(/g) || []).length, 1)
   // the gate guards adds as the line is queued -- and only adds; a remove
   // has no supplier or cost to gate, a set's direction is decided server-side
   assert.match(modalSource, /if \(mode === 'add'\) \{\s*const receiptGate = stockReceiptGateCode\(\{/)

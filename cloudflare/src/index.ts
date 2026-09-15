@@ -11,6 +11,7 @@ import backupsRoute from './routes/backups'
 import lookupsRoute from './routes/lookups'
 import contactsRoute from './routes/contacts'
 import inventoryRoute from './routes/inventory'
+import stockInCommitRoute from './routes/stockInCommit'
 import compatRoute from './routes/compat'
 import aiRoute from './routes/ai'
 import importJobsRoute from './routes/importJobs'
@@ -453,6 +454,7 @@ app.route('/api/backups', backupsRoute)
 app.route('/api', lookupsRoute)
 app.route('/api', contactsRoute)
 app.route('/api/inventory', inventoryRoute)
+app.route('/api/inventory/fast-stock-in', stockInCommitRoute)
 app.route('/api/ai', aiRoute)
 app.route('/api/import-jobs', importJobsRoute)
 app.route('/api/returns', returnsRoute)

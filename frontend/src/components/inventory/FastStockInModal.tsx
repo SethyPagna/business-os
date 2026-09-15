@@ -17,7 +17,7 @@ import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPick
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import Modal from '../shared/Modal.tsx'
 import { receiveBatchStock, getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
-import { adjustStock } from '../../api/inventoryWriteTransport.ts'
+import { adjustStock, commitFastStockIn, type FastStockInCommitLine, type FastStockInCommitLineResult } from '../../api/inventoryWriteTransport.ts'
 import StockConditionTagRow from './StockConditionTagRow'
 import { searchProducts } from '../../api/methods.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
@@ -639,107 +639,161 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     setPendingCommit(pending)
   }
 
-  const performCommit = async (pending: ReceivedLine[]) => {
-    if (saving) return
-    setSaving(true)
+  // N27: the mode frozen on the line decides the write. Remove and set take
+  // the same POST /api/inventory/adjust the one-by-one modal used, carrying
+  // this session id so the ledger groups them with the rest. P3-L6 "Restock
+  // with tag": the ordinary add wire is POST /api/batches (receiveBatchStock);
+  // the tagged one is POST /api/inventory/adjust, because that is the single
+  // writer that receives the purchase AND holds the units as a tagged row in
+  // one request. Split out from performCommit (P4-B) so the SAME per-line
+  // body this function builds can go either through one batched
+  // POST /api/inventory/fast-stock-in/commit request or, on a 404 fallback,
+  // through the original adjustStock / receiveBatchStock transports -- one
+  // source of the wire/body shape, not two that can drift apart.
+  const buildLineRequest = (line: ReceivedLine): FastStockInCommitLine => {
+    if (line.mode === 'remove') {
+      return { key: line.key, wire: 'adjust', body: {
+        productId: Number(line.product.id), type: 'remove', quantity: line.quantity,
+        // P3-L6: a tagged removal keeps the units in the group.
+        conditionTag: line.conditionTag || undefined,
+        reason: stockLineReason(line, tr), branchId: Number(branchId),
+        // A chosen lot is drained by id; otherwise the oldest lots first.
+        batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
+        sessionId: sessionIdRef.current,
+      } }
+    }
+    if (line.mode === 'set') {
+      return { key: line.key, wire: 'adjust', body: {
+        productId: Number(line.product.id), type: 'set', quantity: line.quantity,
+        reason: stockLineReason(line, tr), branchId: Number(branchId),
+        // Receipt fields ride along: a set that RAISES stock is an add
+        // server-side and is gated like one; a set that lowers it ignores them.
+        receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
+        supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
+        unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
+        freeGoods: line.freeGoods, paymentStatus,
+        creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
+        sessionId: sessionIdRef.current,
+      } }
+    }
+    if (line.mode === 'add' && line.conditionTag) {
+      return { key: line.key, wire: 'adjust', body: {
+        productId: Number(line.product.id), type: 'add', quantity: line.quantity,
+        reason: stockLineReason(line, tr), branchId: Number(branchId),
+        conditionTag: line.conditionTag,
+        batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
+        receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
+        supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
+        unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
+        freeGoods: line.freeGoods, paymentStatus,
+        creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
+        sessionId: sessionIdRef.current,
+      } }
+    }
+    if (line.createPriceVariant) {
+      return { key: line.key, wire: 'adjust', body: {
+        productId: Number(line.product.id), type: 'add', quantity: line.quantity,
+        reason: stockLineReason(line, tr), branchId: Number(branchId),
+        unlockPricing: true,
+        receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
+        supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
+        unitCostUsd: Number(line.unitCost), freeGoods: line.freeGoods, paymentStatus,
+        creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
+        sessionId: sessionIdRef.current,
+        pricing: pricingForVariant(line.product, Number(line.unitCost)),
+      } }
+    }
+    return { key: line.key, wire: 'receive', body: {
+      productId: Number(line.product.id), branchId: Number(branchId), quantity: line.quantity,
+      // Same two-line rule as ReceiveBatchModal: a chosen lot is topped up by
+      // id and keeps its own received date; only 'new' derives a lot code
+      // from this shipment's date.
+      batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
+      receivedDate: line.batchChoice === 'new' ? (receivedDate.trim() || null) : null,
+      expiryDate: line.expiryDate.trim() || null,
+      supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
+      unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
+      freeGoods: line.freeGoods,
+      // Typed text or null: a blank line keeps the Worker's own "Stock
+      // received (<lot>)" label (see utils/stockLineReason.ts).
+      reason: line.reason.trim() || null,
+      paymentStatus, creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
+      sessionId: sessionIdRef.current,
+    } }
+  }
+
+  const describeLineResult = (line: ReceivedLine, result?: { lotCode?: string | null } | null): string => (
+    line.mode === 'remove'
+      ? tr('stock_line_removed', 'Removed')
+      : line.mode === 'set'
+      ? tr('stock_line_set', 'Set')
+      : result?.lotCode
+      // Z1a: the server hands back an MMDDYYYY lot code; show it as the
+      // received date it encodes, not as a raw 8-digit run.
+      ? `${tr('received_date', 'Received date')} ${lotCodeAsDate(result.lotCode) || result.lotCode}`
+      : line.createPriceVariant
+        ? tr('price_variant_received', 'Price variant received')
+        : tr('received', 'Received')
+  )
+
+  // Fallback path: one POST per line, exactly as before P4-B. Reached only
+  // when the batched endpoint answers 404 (an old Worker build still live
+  // during a rolling deploy) -- receiveBatchStock and adjustStock are the
+  // same two transports the batched route's Worker-side kernels wrap, so a
+  // stale client and a stale server both keep working against each other.
+  const performCommitSequential = async (pending: ReceivedLine[]): Promise<number> => {
     let failed = 0
     for (const line of pending) {
       setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'saving' } : item))
+      const request = buildLineRequest(line)
       try {
-        // N27: the mode frozen on the line decides the write. Remove and set
-        // take the same POST /api/inventory/adjust the one-by-one modal used,
-        // carrying this session id so the ledger groups them with the rest.
-        const result = line.mode === 'remove'
-          ? await adjustStock({
-              productId: Number(line.product.id), type: 'remove', quantity: line.quantity,
-              // P3-L6: a tagged removal keeps the units in the group.
-              conditionTag: line.conditionTag || undefined,
-              reason: stockLineReason(line, tr), branchId: Number(branchId),
-              // A chosen lot is drained by id; otherwise the oldest lots first.
-              batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
-              sessionId: sessionIdRef.current,
-            }) as { batchNumber?: number | null; lotCode?: string | null; createdSibling?: boolean }
-          : line.mode === 'set'
-          ? await adjustStock({
-              productId: Number(line.product.id), type: 'set', quantity: line.quantity,
-              reason: stockLineReason(line, tr), branchId: Number(branchId),
-              // Receipt fields ride along: a set that RAISES stock is an add
-              // server-side and is gated like one; a set that lowers it
-              // ignores them.
-              receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
-              supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
-              unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
-              freeGoods: line.freeGoods, paymentStatus,
-              creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
-              sessionId: sessionIdRef.current,
-            }) as { batchNumber?: number | null; lotCode?: string | null; createdSibling?: boolean }
-          // P3-L6 "Restock with tag". The ordinary add wire here is POST
-          // /api/batches (receiveBatchStock); the tagged one is POST
-          // /api/inventory/adjust, because that is the single writer that
-          // receives the purchase AND holds the units as a tagged row in one
-          // request. Every receipt fact still rides along, so the supplier
-          // ledger, the invoice and the credit balance are identical to an
-          // untagged receipt of the same goods.
-          : line.mode === 'add' && line.conditionTag
-          ? await adjustStock({
-              productId: Number(line.product.id), type: 'add', quantity: line.quantity,
-              reason: stockLineReason(line, tr), branchId: Number(branchId),
-              conditionTag: line.conditionTag,
-              batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
-              receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
-              supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
-              unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
-              freeGoods: line.freeGoods, paymentStatus,
-              creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
-              sessionId: sessionIdRef.current,
-            }) as { batchNumber?: number | null; lotCode?: string | null; createdSibling?: boolean }
-          : line.createPriceVariant
-          ? await adjustStock({
-              productId: Number(line.product.id), type: 'add', quantity: line.quantity,
-              reason: stockLineReason(line, tr), branchId: Number(branchId),
-              unlockPricing: true,
-              receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
-              supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
-              unitCostUsd: Number(line.unitCost), freeGoods: line.freeGoods, paymentStatus,
-              creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
-              sessionId: sessionIdRef.current,
-              pricing: pricingForVariant(line.product, Number(line.unitCost)),
-            }) as { batchNumber?: number | null; lotCode?: string | null; createdSibling?: boolean }
-          : await receiveBatchStock({
-              productId: Number(line.product.id), branchId: Number(branchId), quantity: line.quantity,
-              // Same two-line rule as ReceiveBatchModal: a chosen lot is topped
-              // up by id and keeps its own received date; only 'new' derives a
-              // lot code from this shipment's date.
-              batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
-              receivedDate: line.batchChoice === 'new' ? (receivedDate.trim() || null) : null,
-              expiryDate: line.expiryDate.trim() || null,
-              supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
-              unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
-              freeGoods: line.freeGoods,
-              // Typed text or null: a blank line keeps the Worker's own
-              // "Stock received (<lot>)" label (see utils/stockLineReason.ts).
-              reason: line.reason.trim() || null,
-              paymentStatus, creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
-              sessionId: sessionIdRef.current,
-            })
-        setReceived((prev) => prev.map((item) => item.key === line.key ? {
-          ...item, status: 'saved', detail: line.mode === 'remove'
-            ? tr('stock_line_removed', 'Removed')
-            : line.mode === 'set'
-            ? tr('stock_line_set', 'Set')
-            : result?.lotCode
-            // Z1a: the server hands back an MMDDYYYY lot code; show it as the
-            // received date it encodes, not as a raw 8-digit run.
-            ? `${tr('received_date', 'Received date')} ${lotCodeAsDate(result.lotCode) || result.lotCode}`
-            : line.createPriceVariant
-              ? tr('price_variant_received', 'Price variant received')
-              : tr('received', 'Received'),
-        } : item))
+        const result = request.wire === 'adjust'
+          ? await adjustStock(request.body) as { lotCode?: string | null } | null
+          : await receiveBatchStock(request.body)
+        setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'saved', detail: describeLineResult(line, result) } : item))
       } catch (error) {
         failed += 1
         const message = error instanceof Error ? error.message : tr('error', 'Error')
         setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'error', detail: message } : item))
       }
+    }
+    return failed
+  }
+
+  const performCommit = async (pending: ReceivedLine[]) => {
+    if (saving) return
+    setSaving(true)
+    pending.forEach((line) => setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'saving' } : item)))
+    let failed = 0
+    // P4-B: one request for the whole session instead of one per line (see
+    // cloudflare/src/routes/stockInCommit.ts). `batched` stays null only when
+    // the endpoint 404s (old Worker build); any other failure of the request
+    // itself -- network/5xx -- fails every still-saving line with that one
+    // message rather than retrying the old N-request loop, which would just
+    // fail the same way N times.
+    let batched: FastStockInCommitLineResult[] | null = null
+    try {
+      batched = await commitFastStockIn(pending.map(buildLineRequest))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr('error', 'Error')
+      failed = pending.length
+      setReceived((prev) => prev.map((item) => pending.some((line) => line.key === item.key) ? { ...item, status: 'error', detail: message } : item))
+      batched = []
+    }
+    if (batched === null) {
+      // The deployed Worker predates POST /api/inventory/fast-stock-in/commit.
+      failed = await performCommitSequential(pending)
+    } else if (batched.length > 0) {
+      pending.forEach((line, index) => {
+        const result = batched![index]
+        if (result?.ok) {
+          setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'saved', detail: describeLineResult(line, result as { lotCode?: string | null }) } : item))
+        } else {
+          failed += 1
+          const message = result?.error || tr('error', 'Error')
+          setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'error', detail: message } : item))
+        }
+      })
     }
     setSaving(false)
     setPendingCommit(null)

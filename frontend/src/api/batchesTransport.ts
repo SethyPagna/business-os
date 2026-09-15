@@ -142,29 +142,38 @@ export function getProductBatches(productId: number | string, branchId: number |
   )
 }
 
+// The camelCase ReceiveBatchPayload -> snake_case POST /api/batches wire
+// body, pulled out (P4-B) so FastStockInModal.tsx's batched commit
+// (inventoryWriteTransport.ts's commitFastStockIn) can build the exact same
+// wire shape for its 'receive'-wire lines as this endpoint's own single-line
+// call below, instead of a second hand-written copy that could drift.
+export function receiveBatchWireBody(payload: ReceiveBatchPayload): Record<string, unknown> {
+  return {
+    product_id: payload.productId,
+    branch_id: payload.branchId,
+    quantity: payload.quantity,
+    expiry_date: payload.expiryDate || null,
+    received_date: payload.receivedDate || null,
+    batch_id: payload.batchId ?? null,
+    notes: payload.notes || null,
+    reason: payload.reason || null,
+    supplier_id: payload.supplierId ?? null,
+    supplier_name: payload.supplierName || null,
+    unit_cost_usd: payload.unitCostUsd ?? null,
+    free_goods: payload.freeGoods === true,
+    payment_status: payload.paymentStatus || null,
+    credit_due_date: payload.creditDueDate || null,
+    session_id: payload.sessionId ?? null,
+  }
+}
+
 // POST /api/batches -- receive stock into a batch (creates a new batch, or
 // tops up an existing one when the received date's derived code already
 // matches one on this product -- see cloudflare/src/lib/batchCode.ts).
 export function receiveBatchStock(payload: ReceiveBatchPayload): Promise<{ success: boolean; batchId: number; lotCode?: string }> {
   return route(
     'batches:receive',
-    () => apiFetch('POST', '/api/batches', {
-      product_id: payload.productId,
-      branch_id: payload.branchId,
-      quantity: payload.quantity,
-      expiry_date: payload.expiryDate || null,
-      received_date: payload.receivedDate || null,
-      batch_id: payload.batchId ?? null,
-      notes: payload.notes || null,
-      reason: payload.reason || null,
-      supplier_id: payload.supplierId ?? null,
-      supplier_name: payload.supplierName || null,
-      unit_cost_usd: payload.unitCostUsd ?? null,
-      free_goods: payload.freeGoods === true,
-      payment_status: payload.paymentStatus || null,
-      credit_due_date: payload.creditDueDate || null,
-      session_id: payload.sessionId ?? null,
-    }),
+    () => apiFetch('POST', '/api/batches', receiveBatchWireBody(payload)),
     null,
     true,
   )
