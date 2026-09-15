@@ -38,7 +38,7 @@ import { buildSalesCustomerMatchClause } from '../lib/salesCustomerSearch'
 import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
 import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
-import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -554,7 +554,14 @@ async function mergeSupplierIntoExisting(
     },
   })
   await db.batch(plan.statements)
-  await Promise.allSettled(['suppliers', 'products', 'returns'].map((namespace) => bumpVersion(env, namespace)))
+  // p6/efficiency-3: bumpVersions() batches every namespace's D1 fallback
+  // upsert into one db.batch() round trip instead of three independent
+  // bumpVersion() calls each re-deriving its own KV/D1 plan (see
+  // lib/cache.ts's bumpVersions doc comment). It already swallows its own
+  // KV/D1 write errors per namespace the same way the old Promise.allSettled
+  // did; wrap it too so a cache-bump failure never surfaces to the caller,
+  // matching the previous allSettled behavior exactly.
+  await bumpVersions(env, ['suppliers', 'products', 'returns']).catch(() => {})
   const keeperId = Number(keeper.id)
   return (await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keeperId })) || plan.finalKeeper
 }
@@ -1268,7 +1275,12 @@ function registerContactRoutes(config: ContactConfig) {
     // The merge and audit are already committed. Cache, broadcast, and the
     // convenience refresh may fail independently but must never tell the user
     // their data was not saved.
-    await Promise.allSettled([...new Set(mergeVersions)].map((namespace) => bumpVersion(c.env, namespace)))
+    // p6/efficiency-3: same batched-bump shape as mergeSupplierIntoExisting
+    // above -- bumpVersions() folds every namespace's D1 fallback into one
+    // db.batch() instead of N independent per-namespace plans, and already
+    // swallows its own KV/D1 errors, so wrap it the same way the old
+    // Promise.allSettled did to keep a cache-bump failure from surfacing.
+    await bumpVersions(c.env, [...new Set(mergeVersions)]).catch(() => {})
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: keepId, mergedId: mergeId }).catch(() => {}))
     try {
       committedKeeper = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId }) || committedKeeper

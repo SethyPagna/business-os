@@ -666,7 +666,12 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   const items = snapshot.items
   const total = snapshot.total
   const portalRules = snapshotRules
-  const itemsWithStockStatus = await attachPortalStockStatus(env, (items || []) as Array<Record<string, unknown>>)
+  // p6/efficiency-3: attachPortalStockStatus (branches + threshold settings +
+  // chunked branch_stock reads) and the initials/A-Z rail query below are
+  // independent -- the rail counts across the WHOLE visible product set via
+  // visibleFilter, not this page's `items` -- so they used to run as two
+  // sequential awaits for no reason. Fan them out together.
+  //
   // Two things were wrong here, and both made the storefront's A-Z rail
   // disagree with what the page below it actually shows.
   //
@@ -689,14 +694,17 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   // and uses the existing index rather than a fresh expression.
   // G4: the rail indexes BRANDS now -- one letter per brand initial,
   // counting distinct products under brands starting with it.
-  const initials = await db.prepare(`
-    SELECT upper(substr(trim(p.brand), 1, 1)) AS value,
-           COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
-    FROM products p
-    WHERE ${visibleFilter} AND trim(COALESCE(p.brand, '')) <> ''
-    GROUP BY value
-    ORDER BY value ASC
-  `).all<{ value: string; count: number }>()
+  const [itemsWithStockStatus, initials] = await Promise.all([
+    attachPortalStockStatus(env, (items || []) as Array<Record<string, unknown>>),
+    db.prepare(`
+      SELECT upper(substr(trim(p.brand), 1, 1)) AS value,
+             COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
+      FROM products p
+      WHERE ${visibleFilter} AND trim(COALESCE(p.brand, '')) <> ''
+      GROUP BY value
+      ORDER BY value ASC
+    `).all<{ value: string; count: number }>(),
+  ])
   return {
     items: itemsWithStockStatus,
     total,
@@ -2131,16 +2139,25 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
       // that is not a safe integer, so no user input reaches the SQL text.
       const fuzzyParams: Record<string, unknown> = { ...params }
       const fuzzyWhereSql = `WHERE ${[...fallbackBaseWhere, `p.id IN (${inlineIntegerIds(fuzzyIds)})`].join(' AND ')}`
-      const fuzzyTotalRow = await db.prepare(`SELECT COUNT(*) AS count FROM products p ${joinSql} ${fuzzyWhereSql}`).get<{ count: number }>(fuzzyParams)
-      total = fuzzyTotalRow?.count || 0
-      items = await db.prepare(`
-        SELECT ${selectColumnsSql}
-        FROM products p
-        ${joinSql}
-        ${fuzzyWhereSql}
-        ORDER BY lower(p.name) ASC, p.id ASC
-        LIMIT @pageSize OFFSET @offset
-      `).all({ ...fuzzyParams, pageSize, offset })
+      // p6/efficiency-3: COUNT then page used to run as two sequential
+      // awaits against the identical WHERE -- same COUNT+page pattern as
+      // familyPagination.ts's paginateProductFamilies, batched the same way.
+      const [fuzzyTotalResult, fuzzyItemsResult] = await db.batch([
+        { sql: `SELECT COUNT(*) AS count FROM products p ${joinSql} ${fuzzyWhereSql}`, params: fuzzyParams },
+        {
+          sql: `
+            SELECT ${selectColumnsSql}
+            FROM products p
+            ${joinSql}
+            ${fuzzyWhereSql}
+            ORDER BY lower(p.name) ASC, p.id ASC
+            LIMIT @pageSize OFFSET @offset
+          `,
+          params: { ...fuzzyParams, pageSize, offset },
+        },
+      ])
+      total = (fuzzyTotalResult?.results?.[0] as { count?: number } | undefined)?.count || 0
+      items = (fuzzyItemsResult?.results ?? []) as Record<string, unknown>[]
     }
   }
 
@@ -2150,8 +2167,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // filter/page/search change actually hits, so leaving it out here would
   // re-leak raw quantities/thresholds on every interaction after the first
   // page load.
-  const itemsWithStockStatus = await attachPortalStockStatus(c.env, (items || []) as Array<Record<string, unknown>>)
-
+  //
   // Alphabet-bar counts scoped to the SAME filters as the main query above
   // (with `initial` itself forced to 'all', so the bar shows every letter
   // reachable under the current brand/category/branch/stock/search
@@ -2159,20 +2175,29 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // pattern as routes/products.ts's loadProductFilters, which exists
   // specifically because an unscoped alphabet bar shows non-zero counts
   // for letters that have zero real matches once filters are applied.
+  //
+  // p6/efficiency-3: this rail query does not depend on `items`/stock-status
+  // at all -- buildPortalProductFilters() is pure JS -- so it used to run as
+  // a second sequential await after attachPortalStockStatus for no reason.
+  // Fan the two independent D1 round trips out together, same shape as
+  // buildPortalCatalog's rail above.
   const { where: initialsWhere, joins: initialsJoins, params: initialsParams } = buildPortalProductFilters({ ...query, initial: 'all' }, allowStockStateFilter, showOutOfStockProducts)
   // Counts name GROUPS, not rows -- a group renders as ONE card on the
   // storefront, so counting rows would promise more products under a letter
   // than the grid can possibly show. Matches buildPortalCatalog's rail above
   // and loadProductFilters' rail in admin.
-  const initials = await db.prepare(`
-    SELECT upper(substr(trim(p.brand), 1, 1)) AS value,
-           COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
-    FROM products p
-    ${initialsJoins.join('\n')}
-    WHERE ${initialsWhere.join(' AND ')} AND trim(COALESCE(p.brand, '')) <> ''
-    GROUP BY value
-    ORDER BY value ASC
-  `).all<{ value: string; count: number }>(initialsParams)
+  const [itemsWithStockStatus, initials] = await Promise.all([
+    attachPortalStockStatus(c.env, (items || []) as Array<Record<string, unknown>>),
+    db.prepare(`
+      SELECT upper(substr(trim(p.brand), 1, 1)) AS value,
+             COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
+      FROM products p
+      ${initialsJoins.join('\n')}
+      WHERE ${initialsWhere.join(' AND ')} AND trim(COALESCE(p.brand, '')) <> ''
+      GROUP BY value
+      ORDER BY value ASC
+    `).all<{ value: string; count: number }>(initialsParams),
+  ])
 
   return {
     items: itemsWithStockStatus,
