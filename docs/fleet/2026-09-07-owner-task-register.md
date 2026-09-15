@@ -1,3 +1,21 @@
+## September 15 Program 6 checkpoint LIVE
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| P6-1 Transfer-aware merge (dior 1616/7161) in data and on the live merge route | **Deployed** (Worker 482774b9-2e1c-4109-b87c-b3c7f72289bb, commit c596674e) and **applied** (migration 0168) | a49cc4c3, 6ee54feb; products 8478 → 8477, `product_merge_map_0168` 1, transfer member 7/0 = 7161/7161. |
+| P6-1b The 10 uncosted removal rows ("you can do so") | **Done** — verdict: genuinely uncostable, no backfill written | Synthetic import lots 2026-08-29, unit cost 0, product cost 0, no costed twin; brand averages deliberately not applied. Supersedes the "owner enters costs" wording in the Program 5 section. |
+| P6-2 Everything linked after merges (batches, suppliers, category, brand, sales, invoices, reports) | **Deployed** and **applied** (migration 0169) | Sweep: 0 loser refs in 27 + 5 id columns; stale name snapshots repaired (sale_items 135 → 0, movements 56 → 0); 72d4ea09/920e27b2, 3c6a4c1e. |
+| P6-3 Searchable pickers everywhere (province/district/subdistrict; supplier, brand, category, product name, unit, barcode) | **Deployed** | 44b56265, fdd83485, 2f0b7209, 6680de19, 83ce8eb6, 86bd7f0a; `searchablePickersP6.test.ts`. |
+| P6-4 Efficiency 3 (inventory list, stock-in sessions, dashboard internals, queue consumers, index-vs-query cross-reference, reports linkage) | **Deployed** | 5e97329d, b93505f7, 3c6a4c1e, e8730f77, b425b7fa, d0939aa5; 16/16 hot queries indexed, no 0170. |
+| P6-5 Receipt print: no top band, one continuous 80 mm strip, 20+ items on one page | **Deployed** (not physically printed) | 6c3c8869 + 0e3a31c3; `receiptPrintPagination.test.ts`. |
+| P6-6 Storefront: rail, social icons one row, contact button minimize, pager order + count row, hint removed, install prompt (storefront + admin) | **Deployed** | 87dbb1cc, a9567778, b692d02b, feee8ad2, 07b7f964, 4eea45aa, 553b8b67; `publicStorefrontPhoneFixesSep15.test.ts`. |
+| P6-7 Dashboard card rows end on one line; View-more float | **Deployed** | 7e88d576, a26d9ecf; `dashboardCardRowsP6.test.ts`. |
+| P6-8 Sales last row scrolls horizontally | **Deployed** | 979c5609. |
+| P6-9 Conflict actions auto-resolution with before/after (contacts + products) | **In progress** | Lane `p6/conflict-actions` from c596674e. |
+| Migrations 0168, 0169 on production D1 | **Applied** by the coordinator | PRE/POST in the session ledger; bookmark 00001666-00000000-000050e7-e79a8764b52b722d6a1c17bfe4ae5075. |
+
+---
+
 ## September 15 Program 5 checkpoint LIVE
 
 | Item | State | Evidence |
@@ -6,10 +24,10 @@
 | P5-1 Same-name + same-phone customer merge | **Applied** (migration 0166) | 10 losers → 9 keepers, customers 5039 → 5029, `customer_merge_map_0166`, 10 audit rows. |
 | P5-1 Supplier duplicates | **Done earlier** (Program 4: migration 0164 + auto-resolve on every writer) | See the Program 4 section. |
 | P5-2 Start/End date range on ONE compact row (date + time never wrap) | **Deployed** | cbcd73d1; `frontend/tests/dateRangeTriggerOneRow.test.ts`. |
-| P5-3 Removal-loss consistency (removed = loss; restocked as damaged/tagged = not; returns consistent) and the "removed row with no cost" report | **Deployed**; backfill 0167 **applied** | fddadf7e, 6c04b546, 1699898e, d29e792c; uncosted rows 17 → 10. The 10 left (Girlactik ×9, Morphe ×1, imported 2026-08-29 with cost 0) are truly uncosted → **owner action:** enter their cost on the product. |
+| P5-3 Removal-loss consistency (removed = loss; restocked as damaged/tagged = not; returns consistent) and the "removed row with no cost" report | **Deployed**; backfill 0167 **applied** | fddadf7e, 6c04b546, 1699898e, d29e792c; uncosted rows 17 → 10. The 10 left (Girlactik ×9, Morphe ×1, imported 2026-08-29 with cost 0) are truly uncosted; resolved under P6-1b (Program 6 section): no reachable cost anywhere, no backfill written. |
 | P5-3 Regression tests so the same classes never need re-asking | **Deployed** | e5469fe4, 11fc1c39, 324e4abd, 15b8d2ea, 6f61c5fe (`npm run test:regression` in both packages). |
 | P5-4 Debloat D1 round trips, R2, KV, Cloudflare requests | **Deployed** | 2945c5e5, 6bd84b02, 6a711f09, 0b460821, 521312ab, 3e0cc4a3, 0aaf15a9, b8d9a63d; plus P4-4b (24d824de … 4620d90c) and the one-request fast stock-in commit (f4711391, d7d6b545). |
-| P4-4 wave 2 leftovers (`contacts.ts:557` three-namespace bump, catalog/portal list paths) | **Not yet** | Listed in progress.md top entry. |
+| P4-4 wave 2 leftovers (`contacts.ts:557` three-namespace bump, catalog/portal list paths) | **Deployed** (Program 6 checkpoint c596674e) | b425b7fa (contacts.ts batch bump at both merge writers; portal catalog/search fan-out). |
 
 ## September 15 Program 4 checkpoint LIVE
 
