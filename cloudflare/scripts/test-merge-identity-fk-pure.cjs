@@ -450,6 +450,47 @@ async function main() {
     assert.deepEqual(identity.differs.map((d) => d.field).sort(), ['barcode', 'name'])
   })
 
+  // ---- P6-9: the Sep 15 2026 wildcard ruling, at the ACTUAL write gate ----
+  // productIdentity.ts's cluster sweep (findPossiblySameProductClusters) and
+  // the client's own eligibility check (selectedConflictMerge.ts) were both
+  // already wildcard-aware, so a real-vs-broken-barcode pair showed up as ONE
+  // mergeable group in the Products > Duplicates list and its bulk "Merge
+  // selected" flow. But the "Keep this" button on the cluster card -- the
+  // primary, always-visible action, no selection required -- calls this same
+  // readMergeIdentityDiff through /possible-duplicates/merge, which still
+  // compared raw identityBarcodeKey equality. A real barcode's key and an
+  // empty/word/broken barcode's key are never equal, so `same` was false and
+  // the route refused with "These products do not have the same normalized
+  // name and barcode" -- the owner's own words -- for exactly the pairs the
+  // ruling says ARE one product, even though the fold this gate protects
+  // (foldDuplicateProductInto's canonicalProductBarcode) already resolves the
+  // wildcard correctly and was never reached.
+  await check('DISCRIMINATING (P6-9): an EMPTY barcode against the keeper\'s real one is a wildcard, not a block', async () => {
+    d1.db.prepare(`INSERT INTO products (id, name, barcode, is_active, is_group)
+                   VALUES (304, 'Zero Twin', '', 1, 0)`).run()
+    const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, 304)
+    assert.equal(identity.same, true, 'an empty barcode must never block a same-name merge')
+    // Still reported for the before/after preview -- informative, not blocking.
+    assert.deepEqual(identity.differs.map((d) => d.field), ['barcode'])
+  })
+
+  await check('DISCRIMINATING (P6-9): a WORD/broken barcode against the keeper\'s real one is also a wildcard', async () => {
+    d1.db.prepare(`INSERT INTO products (id, name, barcode, is_active, is_group)
+                   VALUES (305, 'Zero Twin', 'NoBox188', 1, 0)`).run()
+    const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, 305)
+    assert.equal(identity.same, true, 'a word/broken barcode must never block a same-name merge')
+  })
+
+  await check('NEGATIVE CONTROL (P6-9): two DIFFERENT REAL barcodes still block, with the difference reported', async () => {
+    // Reuses product 300 ('9999999999999', a real 13-digit code) seeded above --
+    // this is the case the ruling keeps as two genuine siblings, and the merge
+    // must still refuse it (delete/keep, offered by the cluster card's per-row
+    // buttons independent of this endpoint, is the correct manual resolution).
+    const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, 300)
+    assert.equal(identity.same, false, 'two different real barcodes are two different products')
+    assert.deepEqual(identity.differs.map((d) => d.field), ['barcode'])
+  })
+
   await check('DISCRIMINATING: the merge that fills in the kept row\'s cost says so', async () => {
     const identity = await mod.readMergeIdentityDiff(adapter, KEEPER, DUP)
     // The keeper has no cost of its own; after the fold it costs 6.45. That is
