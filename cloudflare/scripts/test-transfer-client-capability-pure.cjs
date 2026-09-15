@@ -13,6 +13,10 @@ function load(name) {
     if (id === '../utils/deviceInfo.ts') return { getClientDeviceInfo: () => ({device_name:'fixture'}) }
     if (id === './branchTransport.ts') return branch
     if (id === '../utils/syncProblemLifecycle.ts') return { dispatchResolvedSyncError: () => {} }
+    // P4-B: inventoryWriteTransport.ts's commitFastStockIn() reuses
+    // batchesTransport.ts's receive-body conversion; unused by this
+    // transfer-capability test, but the module graph still imports it.
+    if (id === './batchesTransport.ts') return { receiveBatchWireBody: payload => payload }
     if (id === './query.ts' || id === './expectedUpdatedAt.ts') return {}
     throw new Error(`Unexpected dependency ${id}`)
   },module)
