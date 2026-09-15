@@ -44,6 +44,7 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
   const [editing, setEditing] = useState<EditState>(null)
   const [pendingRemove, setPendingRemove] = useState('')
   const [manage, setManage] = useState(false)
+  const [filters, setFilters] = useState<Record<AddressPresetCategory, string>>({ province: '', district: '', subdistrict: '' })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -81,6 +82,7 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
     setPrefix(initialPrefix)
     setSelected({})
     setDrafts({ province: '', district: '', subdistrict: '' })
+    setFilters({ province: '', district: '', subdistrict: '' })
     setEditing(null)
     setPendingRemove('')
     setSaving(false)
@@ -182,7 +184,26 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
               <h3 id={`address-preset-${category}`} className="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-200">{labels[category]}</h3>
               {loading ? <div className="py-2 text-xs text-gray-400">{tr('loading', 'Loading...')}</div> : (
                 <div className="space-y-1">
-                  {presets[category].map((value) => {
+                  {/* Type-to-filter box above the chip list: presets can grow
+                      up to MAX_ADDRESS_PRESETS_PER_CATEGORY (100), so showing
+                      every option as the only way to choose does not scale --
+                      see the owner's "province, district, subdistrict ...
+                      able to search and choose. instead of showing
+                      everything" rule. Typing narrows the chips below; an
+                      empty box still shows (and lets you scroll/click) the
+                      full list, so nothing is hidden behind typing alone. */}
+                  {presets[category].length > 6 ? (
+                    <input
+                      className="input mb-1 h-8 w-full px-2 text-xs"
+                      value={filters[category]}
+                      onChange={(event) => setFilters((current) => ({ ...current, [category]: event.target.value }))}
+                      placeholder={tr('search', 'Search')}
+                      aria-label={`${tr('search', 'Search')} ${labels[category]}`}
+                    />
+                  ) : null}
+                  {presets[category]
+                    .filter((value) => !filters[category].trim() || value.toLocaleLowerCase().includes(filters[category].trim().toLocaleLowerCase()))
+                    .map((value) => {
                     const isEditing = editing?.category === category && editing.original === value
                     const removeKey = `${category}:${value}`
                     return isEditing ? (
