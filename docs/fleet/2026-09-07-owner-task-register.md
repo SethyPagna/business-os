@@ -1,22 +1,33 @@
+## September 15 Program 4 checkpoint LIVE
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| P4-1 "Failed to load tagged stock" on iOS PWA | **Deployed** — migrations 0162 + 0163 applied to production D1 | Live tagged-lot SELECT succeeds; pre/post assertions in the session ledger. |
+| P4-2 Same-name supplier resolves to the existing record on every writer; existing clusters merged | **Deployed** (Worker dfef9f7b-76e8-4868-bff1-d1916cd8c48e, commit 38a3eb5e); **migration 0164 applied** | aa3ab4b5, 2f94d4c4, 8c2d903c, 87a6ba18, 7db5f8fc; ids 38–46→20, 33–37→23, 14 audit rows, neighbours 24–32 untouched; `verify-0164-supplier-clusters.cjs` 10/10. |
+| P4-3 Damaged returns share the remove-stock keep-tag / remove-entirely rule (prospective only) | **Deployed** | 7e0f8c38, 3c38eddf, 9f420b7b, ec4dd2ca; `test-returns-batch-restock-pure` pins the prospective boundary. |
+| P4-4 System slowness ("is it free vs paid?") — wave 1 | **Deployed** | Paid plan live; cause = sequential cross-region D1 round trips. Worker e18f46ed…66cffaed, frontend a1850912…a2f61dca. |
+| P4-4 wave 2 (remaining N+1 and sequential paths, listed in progress.md) | **Not yet** | Lanes open after this checkpoint. |
+| Migrations 0162, 0163, 0164 on production D1 | **Applied** by the coordinator (owner delegated: "for migrations and merge, i want you to do it for me") | `wrangler d1 migrations apply business-os --remote`, pre/post assertions recorded. Supersedes the "owner action" rows in the Program 3 section. |
+
 ## September 15 Program 3 checkpoint LIVE
 
 | Item | State | Evidence |
 | --- | --- | --- |
-| P3-1 Stock-in edits and reverts mirror into the supplier record | **Deployed** — Worker 410bc7d2-2807-4974-b52e-300e91b0dca6, commit 2e016e08 | d3f8f06c, e3bf6fbf, ac11bf99, 344d5d97, c0a16cce; `test-supplier-mirror-writers-pure` 13/13. Backfill of the four pre-fix reverts = migration 0163, **not applied** (owner's production action; code first, then 0163). |
+| P3-1 Stock-in edits and reverts mirror into the supplier record | **Deployed** — Worker 410bc7d2-2807-4974-b52e-300e91b0dca6, commit 2e016e08 | d3f8f06c, e3bf6fbf, ac11bf99, 344d5d97, c0a16cce; `test-supplier-mirror-writers-pure` 13/13. Backfill of the four pre-fix reverts = migration 0163, **applied** September 15 (Program 4 section). |
 | P3-2 / P3-12 Supplier and invoice navigation as floats; invoice row click opens the detail float | **Deployed** | fd8554d5, 1613d109, 763ada95. |
-| P3-3 Broken/damaged tagged child rows: keep-in-group vs remove entirely, Restock with tag, loss at cost, English tag in Khmer, one-row controls | **Deployed** (code); migration 0162 (condition-tag columns) **not applied** | 4a5b71bc…9d4eb1bd; `test-stock-condition-tag-pure` 18; `stockConditionTag.test.ts`. Until 0162 is applied the tagged-row actions refuse with the schema error rather than writing. |
+| P3-3 Broken/damaged tagged child rows: keep-in-group vs remove entirely, Restock with tag, loss at cost, English tag in Khmer, one-row controls | **Deployed**; migration 0162 (condition-tag columns) **applied** September 15 | 4a5b71bc…9d4eb1bd; `test-stock-condition-tag-pure` 18; `stockConditionTag.test.ts`. Until 0162 is applied the tagged-row actions refuse with the schema error rather than writing. |
 | P3-4 Promotion links open the product, no shareable URL; promotion name on receipt/detail/Telegram capped at 40 | **Deployed** | 5235e571, 880f88c1, c0e7f469, bb80d391, 04c42aa0, b4d05aae, 072fb70c, 7615d068. |
 | P3-5 Reasons on add/remove/set, per-product reveal on click | **Deployed** | bd058a39…e255028e; one 512-character cap on all four wires (`test-reason-length-cap-pure`). Stock-in receipt reason optional with the server label (default taken). |
 | P3-6 "Not Yet Paid" wording on the supplier side | **Deployed** | 0bb4ae9b, 3db96d42, 18b5dec7. |
 | P3-7 No automatic storefront notice | **Deployed** | 9673152d, e428de82, 9632605c, d76058ac, bfb94704; policy 05ab5efc. Legal name, registration and email still to be filled in the portal editor by the owner. |
 | P3-8 Supplier surfaces over all past stock changes | **Deployed** for receipts, reverts and undo/redo; multi-lot FIFO drain (E3) **not yet** | P3-1 writers; invoice report and purchases float share the zeroed-lot rule. |
-| P3-9 Duplicate same-name suppliers from the stock-change picker | **Deployed** fix; **owner action** to merge the existing clusters | 2deb30ec, c1e79b87, eef366c6. "j secrat" ids 20, 38–46 and "lang" ids 23–37 via Contacts → Conflicts bulk merge. |
+| P3-9 Duplicate same-name suppliers from the stock-change picker | **Deployed** fix; clusters **merged** by migration 0164 (Program 4 section) | 2deb30ec, c1e79b87, eef366c6. "j secrat" ids 20, 38–46 and "lang" ids 23–37 via Contacts → Conflicts bulk merge. |
 | P3-10 Invoice Start–End range visible on small screens | **Deployed** | 7cffe0d6, 1c476076, d13f80ab. |
 | P3-11 Removal losses: revenue/profit excluding and including losses, one row below Not Paid in every report | **Deployed** | 5e430b70…b2f2a52a; abab12a4, 60949d4b, 6e6ea6f7 (disposal and product-delete write-offs count; `test-removal-losses-pure` 20). Defaults: dated stock-count removals excluded; compat cost/profit keys admin-only; including-losses figures unclamped but toned. |
 | P3-13 Shift "additional" = extra change money used during the shift, labels match en/km everywhere, field before the closing count | **Deployed** | 27eae5dd, 794dcd19, 3937a36c, 8c0e53c2, 90cca732; `shiftAdditionalCash.test.ts` 10/10. |
 | P3-14 Shifts editable by employees with before/after record, one row per shift | **Deployed** | a9b0a98b…3e31a93b; `shiftAmendForm.test.ts`; `test-shift-security-pure`. Default taken: amend gated on the shift capability, not branch visibility (**owner ruling** if it should be branch-scoped). |
 | P3-15 Every change updates dependent reports/calculations/links/docs | **Done** for this checkpoint | Each lane's dependents enumerated in its verifier matrix; progress.md, this register, Part 613, CLAUDE_HANDOFF, portal policy updated in the docs commit. |
-| Migrations 0162 and 0163 on production D1 | **Not applied** — owner's production action | `cloudflare/migrations/0162_*.sql`, `0163_*.sql`; apply after the code is live, 0163 last; pre/post assertions in the files. |
+| Migrations 0162 and 0163 on production D1 | **Applied** September 15 (superseded: the owner delegated migrations to the coordinator) | `cloudflare/migrations/0162_*.sql`, `0163_*.sql`; apply after the code is live, 0163 last; pre/post assertions in the files. |
 | Supplier E3 (multi-lot FIFO drain unmirrored), E4 predicate divergence, E5 numeric reference collision; reason editor without `code`; nav guard on reason-only typing; portal `buildPortalConfig` editor fields; catalog preview promotionRules; same-day two-supplier lot; telegram/promotion astral-char divergence; CDP calls without timeout; unreachable `bulkImport*` wrappers | **Not yet** | Listed in progress.md top entry. |
 
 ## September 14 iOS PWA program LIVE
