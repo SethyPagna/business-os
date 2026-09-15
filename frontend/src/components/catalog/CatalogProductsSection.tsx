@@ -301,6 +301,16 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     return aggregateInitialOptions([...counts.entries()].map(([key, count]) => ({ key, count })))
   }, [filteredProducts])
   const initialOptions = serverPaged && Array.isArray(serverInitialOptions) ? serverInitialOptions : localInitialOptions
+  // The storefront's rail is `fixed` at the right screen edge (edge="screen"
+  // below) rather than laid out in flow like the admin editor preview's
+  // `inline` variant, which reserves its own `w-9` track. Nothing here ever
+  // shrank the content column to match, so a right-aligned line that reaches
+  // the real edge -- the brand-header rule (`flex-1` divider), the results
+  // count -- ran straight under the rail's tap/scrub zone. This is the one
+  // gutter that keeps both clear; it only applies where the rail actually
+  // mounts (public view, 2+ letters).
+  const railGutterActive = publicView && initialOptions.length > 1
+  const railGutterClass = railGutterActive ? 'pr-[calc(1.75rem+env(safe-area-inset-right))]' : ''
 
   const letterFilteredProducts = useMemo(() => (
     serverPaged || effectiveInitialFilter === 'all'
@@ -536,7 +546,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               AlphaIndexRail mounted at the end of this section. */}
         </aside>
 
-        <div className="min-w-0">
+        <div className={`min-w-0 ${railGutterClass}`}>
       {/* G3: the auto-scrolling promo row sits ABOVE search, public view
           only, and only when the merchant shows promotions at all. */}
       {publicView && previewConfig.showPromotions !== false ? (
@@ -633,18 +643,23 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             strip of `h-8 min-w-9` buttons pinned under the search field. On a
             375px screen it was a full-width horizontal scroller directly
             above the grid, and it was the phone half of a control the
-            screen-edge rail now provides at every breakpoint. */}
+            screen-edge rail now provides at every breakpoint.
 
-        <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-1 pt-2 text-xs text-slate-500 dark:border-neutral-800 dark:text-neutral-400">
-          <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : copy('filterCompactHint', 'Use quick filters to narrow products faster.')}</span>
-          <span className="font-semibold text-slate-600 dark:text-neutral-200">
-            {refreshingProducts
-              ? copy('refreshing', 'Refreshing...')
-              : loadingProducts
-                ? copy('loadingProducts', 'Loading products...')
-              : replaceVars(copy('filterSummary', '{count} result(s)'), { count: totalProducts })}
-          </span>
-        </div>
+            The always-on "Use quick filters to narrow products faster."
+            hint that used to sit here is gone (owner, 2026-09-15): it never
+            said anything a shopper could act on, and the result COUNT it
+            sat beside now prints on the pagination row below/above the grid
+            instead -- one number, not two. This row is left only for the
+            two states that actually change between renders: an active
+            filter count, and load feedback while a request is in flight. */}
+        {portalActiveFilterCount > 0 || refreshingProducts || loadingProducts ? (
+          <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-1 pt-2 text-xs text-slate-500 dark:border-neutral-800 dark:text-neutral-400">
+            <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : ''}</span>
+            <span className="font-semibold text-slate-600 dark:text-neutral-200">
+              {refreshingProducts ? copy('refreshing', 'Refreshing...') : loadingProducts ? copy('loadingProducts', 'Loading products...') : ''}
+            </span>
+          </div>
+        ) : null}
         </div>
       </div>
 
@@ -731,17 +746,22 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         </div>
       ) : null}
 
-      {/* Back / page / total / Next, centred, above the grid -- and the
-          identical mount below it. `back` and `next` have to be in this map:
-          PaginationControls treats any truthy return as the label, so the
-          map's `|| key` fallback was printing the raw lowercase keys "back"
-          and "next" as the button captions in every language.
+      {/* Back / page-size / page / total / Next, centred, above the grid --
+          and the identical mount below it. `back` and `next` have to be in
+          this map: PaginationControls treats any truthy return as the
+          label, so the map's `|| key` fallback was printing the raw
+          lowercase keys "back" and "next" as the button captions in every
+          language.
 
-          `perPage` joins them for the same reason: the page-size selector is
-          back ON this row (owner, 2026-09-14), first in the pill, and every
-          portal language pack already translates that key -- so it must be
-          mapped here or the select's accessible name would read "per_page".
-          It is NOT a Filters field; renderFilterFields above carries none. */}
+          `perPage` joins them for the same reason: the page-size selector
+          is on this row, every portal language pack already translates
+          that key -- so it must be mapped here or the select's accessible
+          name would read "per_page". It is NOT a Filters field;
+          renderFilterFields above carries none.
+
+          `resultsCount` is the one number that used to live in the border-t
+          hint row above the search field -- owner, 2026-09-15: put the
+          total on the SAME row as Back/Next instead of a second row. */}
       {showPager ? (
         <CatalogPaginationControls
           className="mb-4"
@@ -749,6 +769,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           pageSize={effectivePageSize}
           totalItems={totalProducts}
           label={copy('products', 'products')}
+          resultsCount={replaceVars(copy('filterSummary', '{count} result(s)'), { count: totalProducts })}
           t={(key) => ({
             page: copy('page', 'Page'),
             of: copy('of', 'of'),
@@ -1022,6 +1043,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           pageSize={effectivePageSize}
           totalItems={totalProducts}
           label={copy('products', 'products')}
+          resultsCount={replaceVars(copy('filterSummary', '{count} result(s)'), { count: totalProducts })}
           t={(key) => ({
             page: copy('page', 'Page'),
             of: copy('of', 'of'),

@@ -60,10 +60,15 @@ export interface PaginationControlsProps {
   // edge -- is what a shopper was being shown above and below the product
   // grid. This variant drops the summary, keeps an editable page number
   // between visible Back/Next controls, and centres the whole thing. It shows
-  // a page-size selector only when the caller passes onPageSizeChange, and
-  // puts it FIRST, before Back. 'default' stays the default, so every admin
-  // consumer of this control renders exactly as before.
+  // a page-size selector only when the caller passes onPageSizeChange.
+  // 2026-09-15 (owner, supersedes the 2026-09-14 order): Back first, then the
+  // size selector, then page/total, then Next. 'default' stays the default,
+  // so every admin consumer of this control renders exactly as before.
   layout?: 'default' | 'centered'
+  /** `centered` layout only: printed on the SAME row as the pill, e.g.
+   * "3,585 result(s)". Omit to leave the row exactly as wide as the pill
+   * (the merge-review modal's own `centered` pager never passes this). */
+  resultsCount?: string
 }
 
 export function clampPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
@@ -96,6 +101,7 @@ export default function PaginationControls({
   rangeAsPageSize = false,
   compactCentered = false,
   layout = 'default',
+  resultsCount,
 }: PaginationControlsProps) {
   // One shared kernel (utils/pagerState.ts) answers all of it: the clamped
   // page, the page count, the item range, whether each arrow is dead, and
@@ -153,13 +159,14 @@ export default function PaginationControls({
   if (!state.visible) return null
 
   if (layout === 'centered') {
-    // Storefront pager: ONE centred pill, "20 < Back  1 / 72  Next >", mounted
+    // Storefront pager: ONE centred pill, "< Back  20  1 / 72  Next >", mounted
     // identically above and below the grid.
     //
-    // Order is the owner's (2026-09-14): the page-size selector sits BEFORE
-    // Back, then the editable page field, the total page count and Next. All
-    // controls keep a 40px hit area and an inset keyboard focus ring so the
-    // rounded pill does not clip the indicator.
+    // Order is the owner's (2026-09-15, supersedes 2026-09-14's page-size-
+    // first order): Back, then the page-size selector, then the editable
+    // page field and total page count, then Next. All controls keep a 40px
+    // hit area and an inset keyboard focus ring so the rounded pill does not
+    // clip the indicator.
     const focusRingClass = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500'
     const showPageSizeSelect = typeof onPageSizeChange === 'function'
     // A configured size that is not on the menu (the store's own 50 while the
@@ -211,8 +218,18 @@ export default function PaginationControls({
     // one can be the pager being operated; a reader on a page with both will
     // hear the move once per region.
     return (
-      <nav className={`flex w-full justify-center ${className}`} aria-label={pageLabel}>
+      <nav className={`flex w-full flex-wrap items-center justify-center gap-2 ${className}`} aria-label={pageLabel}>
         <div className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+          <button
+            type="button"
+            className={`${arrowButtonClass} rounded-l-full`}
+            disabled={backDisabled}
+            onClick={() => onPageChange?.(safePage - 1)}
+            aria-label={backLabel}
+          >
+            <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
+            <span className="whitespace-nowrap">{backLabel}</span>
+          </button>
           {showPageSizeSelect ? (
             // The same control the other two branches use, not a native OS
             // dropdown: components/ may not ship one (tests/sourceSyntaxCheck.ts
@@ -237,21 +254,11 @@ export default function PaginationControls({
               // not by the order classes appear here: the trigger's own
               // `text-sm` would otherwise outrank a plain `text-xs` and print
               // the size two pixels larger than the page number beside it.
-              buttonClassName="h-10 gap-1 rounded-l-full rounded-r-none border-0 border-r border-slate-200 bg-white px-3 py-0 !text-xs font-semibold text-slate-800 shadow-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              buttonClassName="h-10 gap-1 rounded-none border-0 border-x border-slate-200 bg-white px-3 py-0 !text-xs font-semibold text-slate-800 shadow-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
               menuClassName="min-w-[6rem]"
               optionClassName="text-xs"
             />
           ) : null}
-          <button
-            type="button"
-            className={`${arrowButtonClass} ${showPageSizeSelect ? '' : 'rounded-l-full'}`}
-            disabled={backDisabled}
-            onClick={() => onPageChange?.(safePage - 1)}
-            aria-label={backLabel}
-          >
-            <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
-            <span className="whitespace-nowrap">{backLabel}</span>
-          </button>
           <div className="inline-flex min-w-0 shrink items-center">
             {editablePageInput ? (
               <>
@@ -284,6 +291,12 @@ export default function PaginationControls({
             <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
         </div>
+        {/* Same row as the pill, not a separate line above/below it -- the
+            owner's 2026-09-15 ask. Wraps onto its own line only if the pill
+            itself doesn't fit (320px width with a long translated count). */}
+        {resultsCount ? (
+          <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-500 dark:text-slate-400">{resultsCount}</span>
+        ) : null}
         <span className="sr-only" aria-live="polite">{pageLabel} {safePage} {ofLabel} {totalPages}</span>
       </nav>
     )
