@@ -144,6 +144,10 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/customerReturnEntitlement': customerReturnEntitlement,
   '../lib/productMergeLineage': productMergeLineage,
   '../lib/returnsStock': loadReal('lib/returnsStock.ts', { './db': { getDb: () => db }, './productBatches': productBatches, './sqlBinding': sqlBinding, './stockCondition': loadReal('lib/stockCondition.ts') }),
+  // P4-3: routes/returns.ts now reads TAGGED_DISPOSAL_MOVEMENT_TYPE directly
+  // (its postcondition movement-count check), so the route itself needs the
+  // real module too, not just returnsStock.ts's copy above.
+  '../lib/stockCondition': loadReal('lib/stockCondition.ts'),
   '../lib/receiptNumber': { uniqueBusinessDateTimeNumber: async (prefix) => `${prefix ? `${prefix}-` : ''}20260830-120000` },
   // Real money kernel -- the replacement sale derives its totals through the
   // same function routes/sales.ts uses, so it must be the real one here too.

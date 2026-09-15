@@ -27,7 +27,11 @@
 // real logic against a real sqlite database.
 import type { D1Compat } from './db'
 import { InsufficientBatchStockError, planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
-import { DEFAULT_STOCK_CONDITION_TAG, type StockConditionSource, type StockConditionTag } from './stockCondition'
+import {
+  DEFAULT_STOCK_CONDITION_TAG, parseStockConditionTag,
+  TAGGED_DISPOSAL_MOVEMENT_TYPE, taggedReasonText,
+  type StockConditionSource, type StockConditionTag,
+} from './stockCondition'
 
 export type ReturnStockAction = 'none' | 'restock' | 'damaged'
 
@@ -44,6 +48,39 @@ export function normalizeStockAction(input: { stock_action?: unknown; return_to_
   const explicit = String(input.stock_action ?? '').trim().toLowerCase()
   if (explicit === 'none' || explicit === 'restock' || explicit === 'damaged') return explicit
   return input.return_to_stock !== false ? 'restock' : 'none'
+}
+
+// P4-3. Owner: "if restock as damaged etc... Don't we have the remove tag
+// rule for returns. that should be consistent." A returned line marked
+// 'damaged' now carries the SAME two-way choice the remove-stock flow's
+// StockConditionTagRow offers: keep the units as a tagged, held row (the
+// existing/default behavior -- untouched for old clients that never send
+// either field below) or destroy them immediately as a booked loss. 'none'
+// (no restock at all) is UNCHANGED by this -- the owner's ruling names the
+// 'damaged' branch only.
+export type DamagedDisposition = 'keep' | 'remove'
+
+// Absent/blank means 'keep' -- the ONLY behavior a return's 'damaged' items
+// have ever had, so an old client or test payload that never sends this
+// field gets back exactly what it always got: a held, tagged row.
+export function parseDamagedDisposition(value: unknown): { ok: true; disposition: DamagedDisposition } | { ok: false; error: string } {
+  if (value == null || String(value).trim() === '') return { ok: true, disposition: 'keep' }
+  const raw = String(value).trim().toLowerCase()
+  if (raw === 'keep' || raw === 'remove') return { ok: true, disposition: raw }
+  return { ok: false, error: `Unknown damaged disposition "${String(value)}". Use "keep" or "remove".` }
+}
+
+// The one place a return item's condition tag + disposition are decided,
+// shared by POST / (create) and PATCH /:id (edit) so the two writers cannot
+// drift on what counts as a valid tag or a valid disposition.
+export function resolveDamagedReturnChoice(item: { condition_tag?: unknown; damaged_disposition?: unknown }):
+  | { ok: true; tag: StockConditionTag; disposition: DamagedDisposition }
+  | { ok: false; error: string } {
+  const tagResult = parseStockConditionTag(item.condition_tag)
+  if (!tagResult.ok) return { ok: false, error: tagResult.error }
+  const dispositionResult = parseDamagedDisposition(item.damaged_disposition)
+  if (!dispositionResult.ok) return { ok: false, error: dispositionResult.error }
+  return { ok: true, tag: tagResult.tag ?? DEFAULT_STOCK_CONDITION_TAG, disposition: dispositionResult.disposition }
 }
 
 // What one returned line refunds. The ONLY authority is the price the
@@ -189,6 +226,112 @@ export class ConsumedDamagedStockError extends Error {
     super(`${consumed} unit(s) of "${productName}" from this return's damaged stock ${consumed === 1 ? 'has' : 'have'} already been drawn (sold or written off) -- the return can no longer be edited. Record a separate adjustment instead.`)
     this.name = 'ConsumedDamagedStockError'
   }
+}
+
+// P4-3. ONE writer for a return line marked 'damaged', called by BOTH POST /
+// (create) and PATCH /:id (edit) so the lot's condition_tag/source/
+// unit_cost_usd are stamped identically everywhere instead of the edit path
+// hand-rolling its own INSERT (which is what left those three columns NULL
+// on every return-created lot before this).
+//
+// 'keep' (the default, and the ONLY behavior before this lane): a damage_in
+// movement records the physical return, and createDamagedLotStatement opens
+// a held row -- exactly damagedLotActions.ts's HOLD, minus the sellable-stock
+// leg, because a return's damaged units never entered sellable stock to
+// begin with (they came from the customer, not off the shelf). From here on
+// the row is indistinguishable from a remove-stock-created tagged row: the
+// SAME planDisposeTagged/planRestoreTagged and the SAME product-page Tagged
+// Stock Rows surface own it (readTaggedLotGroups/readOpenTaggedLots read
+// damaged_stock_lots without caring about `source`).
+//
+// 'remove' (new): the units are destroyed immediately -- damage_in still
+// records the return, then the SAME row is opened and drained to zero in one
+// batch, with a write_off booking the loss (removalLosses.ts counts
+// 'write_off' at cost). Opening the row rather than skipping it is
+// deliberate: reverseDamagedLots (return edit/cancel) finds it exactly like
+// an already-disposed remove-stock row -- quantity_remaining(0) <
+// quantity(original) -- and refuses the edit with the SAME
+// ConsumedDamagedStockError a sold-from lot gets, rather than silently
+// leaving an unreversed loss with nothing in `damaged_stock_lots` to key off.
+// This mirrors DISPOSE's own "no undo path" rule (removalLosses.ts): once
+// destroyed, a separate adjustment is the only way to correct it.
+export function planDamagedReturnLine(input: {
+  productId: number
+  productName: string | null
+  branchId: number
+  batchId: number | null
+  /** SQL expression (with its own params bound by the caller) identifying
+   *  the return row -- returnCreateIdSql()'s subquery for POST /, '@return_id'
+   *  for PATCH /:id. */
+  returnIdSql: string
+  quantity: number
+  reason: string | null
+  userId: number | string | null
+  userName: string | null
+  tag: StockConditionTag
+  disposition: DamagedDisposition
+  unitCostUsd: number | null
+  unitCostKhr: number | null
+}): StockWriteStatement[] {
+  const quantity = Number(input.quantity)
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Damaged quantity must be positive')
+  const statements: StockWriteStatement[] = [
+    createDamagedLotStatement({
+      productId: input.productId,
+      productName: input.productName,
+      branchId: input.branchId,
+      batchId: input.batchId,
+      returnIdSql: input.returnIdSql,
+      quantity,
+      reason: input.reason,
+      userId: input.userId,
+      userName: input.userName,
+      conditionTag: input.tag,
+      source: 'return',
+      unitCostUsd: input.unitCostUsd,
+    }),
+    {
+      sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+            VALUES(@dmg_product_id,@dmg_product_name,@dmg_branch_id,'${DAMAGE_IN_MOVEMENT}',@dmg_quantity,@dmg_unit_cost_usd,@dmg_unit_cost_khr,@dmg_reason,${input.returnIdSql},@dmg_user_id,@dmg_user_name,@dmg_batch_id)`,
+      params: {
+        dmg_product_id: input.productId, dmg_product_name: input.productName, dmg_branch_id: input.branchId,
+        dmg_quantity: quantity, dmg_unit_cost_usd: input.unitCostUsd, dmg_unit_cost_khr: input.unitCostKhr,
+        dmg_reason: input.reason, dmg_user_id: input.userId, dmg_user_name: input.userName, dmg_batch_id: input.batchId,
+      },
+    },
+  ]
+  if (input.disposition === 'remove') {
+    // The row this SAME call just opened, keyed the same way the create
+    // path's own fallback-batch subquery pattern keys a just-inserted row:
+    // by business identity within THIS batch/transaction, not a returned id.
+    const lotRefSql = `(SELECT id FROM damaged_stock_lots WHERE return_id=${input.returnIdSql} AND product_id=@dsp_product_id AND branch_id=@dsp_branch_id ORDER BY id DESC LIMIT 1)`
+    statements.push(
+      {
+        sql: `UPDATE damaged_stock_lots SET quantity_remaining = quantity_remaining - @dsp_quantity, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ${lotRefSql} AND quantity_remaining >= @dsp_quantity`,
+        params: { dsp_product_id: input.productId, dsp_branch_id: input.branchId, dsp_quantity: quantity },
+      },
+      {
+        // reference_id = the return (SAME as damage_in above), not a
+        // damaged_lot: marker: routes/returns.ts's create-path postcondition
+        // counts every return-tied movement by reference_id=<this return>,
+        // and movementReference.ts never resolves a write_off's reference_id
+        // to a receipt label regardless of its shape, so there is nothing to
+        // gain from the marker here -- unlike damagedLotActions.ts's DISPOSE,
+        // this write_off is not reachable from the generic Stock Change
+        // ledger revert in the first place ('write_off' is not on
+        // stockRevert.ts's REVERTIBLE_MOVEMENT_TYPES allowlist at all).
+        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+              VALUES(@wo_product_id,@wo_product_name,@wo_branch_id,'${TAGGED_DISPOSAL_MOVEMENT_TYPE}',@wo_quantity,@wo_unit_cost_usd,@wo_unit_cost_khr,@wo_reason,${input.returnIdSql},@wo_user_id,@wo_user_name,@wo_batch_id)`,
+        params: {
+          wo_product_id: input.productId, wo_product_name: input.productName, wo_branch_id: input.branchId,
+          wo_quantity: quantity, wo_unit_cost_usd: input.unitCostUsd, wo_unit_cost_khr: input.unitCostKhr,
+          wo_reason: taggedReasonText(input.tag, input.reason), wo_user_id: input.userId, wo_user_name: input.userName, wo_batch_id: input.batchId,
+        },
+      },
+    )
+  }
+  return statements
 }
 
 // Editing a return re-applies its stock from scratch (see PATCH /:id in

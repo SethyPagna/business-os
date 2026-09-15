@@ -697,6 +697,8 @@
   "sort_total_low": "Total: low → high",
   "sort_rows": "Sort rows",
   "stock_action_damaged_hint": "Tracked as damaged stock tied to this return — kept out of sellable stock.",
+  "stock_action_damaged_remove_hint": "Destroyed immediately -- booked as a loss at cost.",
+  "stock_action_damaged_remove_hint_short": "destroyed immediately (booked loss)",
   "stock_action_restock": "Restock",
   "stock_action_restock_desc": "Back to sellable stock (same received date when known)",
   "stock_action_damaged": "Damaged",

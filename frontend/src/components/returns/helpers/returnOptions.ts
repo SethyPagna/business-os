@@ -11,6 +11,14 @@
 
 export type ReturnStockAction = 'none' | 'restock' | 'damaged'
 
+// P4-3. Owner: "if restock as damaged etc... Don't we have the remove tag
+// rule for returns. that should be consistent." Mirrors the backend kernel's
+// DamagedDisposition (cloudflare/src/lib/returnsStock.ts) byte for byte:
+// 'keep' (default, untouched legacy behavior) holds the units as a tagged
+// row; 'remove' destroys them immediately as a booked loss. Only meaningful
+// when stock_action is 'damaged'.
+export type DamagedDisposition = 'keep' | 'remove'
+
 export interface StockActionOption {
   value: ReturnStockAction
   icon: string

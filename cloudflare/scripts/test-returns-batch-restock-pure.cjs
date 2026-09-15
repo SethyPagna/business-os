@@ -138,6 +138,10 @@ const batchCode = loadReal('lib/batchCode.ts')
 // Real, pure -- no stubbing needed.
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': loadReal('lib/sqlBinding.ts'), './moneyPrecision': loadReal('lib/moneyPrecision.ts') })
 const permissions = loadReal('lib/permissions.ts')
+// P4-3: real, pure -- used by the new damaged-return-disposition tests below
+// to confirm a "remove entirely" write_off is actually counted as a loss
+// through the SAME kernel the stats surfaces use, not a parallel check.
+const removalLosses = loadReal('lib/removalLosses.ts')
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ returns: true }) }
 // Swapped for one request at a time by reqAs() so a permission-shaped probe
@@ -222,6 +226,10 @@ const returnsRoute = loadReal('routes/returns.ts', {
   // kernel the route now imports (test-returns-replace-damaged-pure.cjs
   // covers it in isolation; here it runs under the real route).
   '../lib/returnsStock': loadReal('lib/returnsStock.ts', { './db': { getDb: () => db }, './productBatches': productBatches, './sqlBinding': loadReal('lib/sqlBinding.ts'), './stockCondition': loadReal('lib/stockCondition.ts') }),
+  // P4-3: routes/returns.ts now reads TAGGED_DISPOSAL_MOVEMENT_TYPE directly
+  // (its postcondition movement-count check), so the route itself needs the
+  // real module too, not just returnsStock.ts's copy above.
+  '../lib/stockCondition': loadReal('lib/stockCondition.ts'),
   // Part 519 (session 0b) gave the route a datetime return-number generator;
   // the real one reads the DB for same-second collisions -- a deterministic
   // stub keeps this suite's return numbers stable.
@@ -940,6 +948,95 @@ async function main() {
     assert.deepStrictEqual(actions, ['none', 'restock', 'damaged'])
     const damageMove = rawDb.prepare("SELECT quantity FROM inventory_movements WHERE movement_type = 'damage_in' AND reference_id = @id").get({ id: json.id })
     assert.strictEqual(damageMove.quantity, 3)
+  })
+
+  // P4-3. Owner: "if restock as damaged etc... Don't we have the remove tag
+  // rule for returns. that should be consistent." -- a damaged return line
+  // now offers the SAME keep-or-remove choice as remove-stock, through the
+  // SAME shared writers (createDamagedLotStatement, the stockCondition tag
+  // constants) and the SAME loss kernel (removalLosses.ts) as remove-stock's
+  // own "remove entirely" path.
+  await check('P4-3: a damaged return kept as tagged (default) holds a fully-open lot and books no loss', async () => {
+    seed()
+    const { status, json } = await req('POST', '/', {
+      items: [{ product_id: 1, quantity: 2, stock_action: 'damaged', condition_tag: 'broken', branch_id: 1, applied_price_usd: 10, cost_price_usd: 4 }],
+      reason: 'Arrived cracked',
+    })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    const lot = rawDb.prepare('SELECT quantity, quantity_remaining, condition_tag, source, unit_cost_usd FROM damaged_stock_lots WHERE return_id = @id').get({ id: json.id })
+    assert.deepStrictEqual({ ...lot }, { quantity: 2, quantity_remaining: 2, condition_tag: 'broken', source: 'return', unit_cost_usd: 4 })
+    const writeOff = rawDb.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE movement_type = 'write_off' AND reference_id = @id").get({ id: json.id })
+    assert.strictEqual(writeOff.n, 0, 'kept-as-tagged never books a write_off')
+    const lossRows = rawDb.prepare(`SELECT quantity, unit_cost_usd FROM inventory_movements m WHERE ${removalLosses.removalLossMovementWhere('m')} AND reference_id = @id`).all({ id: json.id })
+    assert.strictEqual(lossRows.length, 0, 'a kept tagged row is not a loss')
+  })
+
+  await check('P4-3: a damaged return marked "remove entirely" books a loss at cost and drains the lot in one batch', async () => {
+    seed()
+    const { status, json } = await req('POST', '/', {
+      items: [{ product_id: 1, quantity: 2, stock_action: 'damaged', condition_tag: 'expired', damaged_disposition: 'remove', branch_id: 1, applied_price_usd: 10, cost_price_usd: 4 }],
+      reason: 'Past expiry, destroyed on the spot',
+    })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    // the lot still exists (condition_tag/source/cost are stamped exactly as
+    // the "keep" case) but is immediately drained to zero -- the SAME
+    // ConsumedDamagedStockError guard that blocks editing an already-drawn
+    // lot therefore also blocks editing/cancelling this line, with no new
+    // schema needed to track "was disposed".
+    const lot = rawDb.prepare('SELECT quantity, quantity_remaining, condition_tag, source, unit_cost_usd FROM damaged_stock_lots WHERE return_id = @id').get({ id: json.id })
+    assert.deepStrictEqual({ ...lot }, { quantity: 2, quantity_remaining: 0, condition_tag: 'expired', source: 'return', unit_cost_usd: 4 })
+    const writeOff = rawDb.prepare("SELECT quantity, unit_cost_usd, reason FROM inventory_movements WHERE movement_type = 'write_off' AND reference_id = @id").get({ id: json.id })
+    assert.strictEqual(writeOff.quantity, 2)
+    assert.strictEqual(writeOff.unit_cost_usd, 4)
+    assert.match(writeOff.reason, /expired/)
+    // booked as a real business loss through the SAME kernel remove-stock's
+    // own write-offs are counted through -- not a parallel check.
+    const lossRows = rawDb.prepare(`SELECT quantity, unit_cost_usd FROM inventory_movements m WHERE ${removalLosses.removalLossMovementWhere('m')} AND reference_id = @id`).all({ id: json.id })
+    assert.strictEqual(lossRows.length, 1)
+    assert.strictEqual(removalLosses.removalRowLossUsd(lossRows[0]), 8)
+    // reversal: editing (or cancelling) this line must be refused, exactly
+    // like the pre-existing "already drawn" guard -- disposing immediately
+    // is a one-way door, same as remove-stock's own DISPOSE action.
+    const edited = await req('PATCH', `/${json.id}`, {
+      items: [{ product_id: 1, quantity: 1, stock_action: 'damaged', branch_id: 1, applied_price_usd: 10 }],
+      reason: 'Trying to shrink a destroyed line',
+    })
+    assert.strictEqual(edited.status, 400)
+    assert.match(edited.json.error, /already been drawn/)
+    // the write-off/lot are untouched by the refused edit
+    assert.strictEqual(rawDb.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE return_id = @id').get({ id: json.id }).quantity_remaining, 0)
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE movement_type = 'write_off' AND reference_id = @id").get({ id: json.id }).n, 1)
+  })
+
+  await check('P4-3: prospective only -- an existing pre-tag damaged lot and an existing write-off are untouched by the new code paths', async () => {
+    seed()
+    // Simulate history from BEFORE this feature: a plain damaged lot with no
+    // condition_tag/source/unit_cost_usd (the pre-P3-L6/P4-3 shape) and an
+    // unrelated write_off row from an old remove-stock action.
+    rawDb.prepare(`INSERT INTO damaged_stock_lots(product_id, branch_id, batch_id, return_id, quantity, quantity_remaining, reason, created_by_user_id, created_by_user_name)
+      VALUES(1, 1, NULL, NULL, 5, 5, 'Legacy damaged batch, pre-tag', 1, 'Legacy User')`).run()
+    const legacyLotId = rawDb.prepare('SELECT id FROM damaged_stock_lots WHERE return_id IS NULL').get().id
+    rawDb.prepare(`INSERT INTO inventory_movements(product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, reason, reference_id, user_id, user_name)
+      VALUES(1, 'Widget', 1, 'write_off', 5, 3, 'Legacy write-off, pre-tag', 'legacy-remove-1', 1, 'Legacy User')`).run()
+    const legacyMovementId = rawDb.prepare("SELECT id FROM inventory_movements WHERE reference_id = 'legacy-remove-1'").get().id
+    const before = {
+      lot: rawDb.prepare('SELECT * FROM damaged_stock_lots WHERE id = ?').get([legacyLotId]),
+      movement: rawDb.prepare('SELECT * FROM inventory_movements WHERE id = ?').get([legacyMovementId]),
+    }
+
+    // Exercise BOTH new dispositions on an unrelated NEW return.
+    const created = await req('POST', '/', {
+      items: [{ product_id: 1, quantity: 1, stock_action: 'damaged', damaged_disposition: 'remove', branch_id: 1, applied_price_usd: 10, cost_price_usd: 2 }],
+      reason: 'New disposition run',
+    })
+    assert.strictEqual(created.status, 200, JSON.stringify(created.json))
+
+    const after = {
+      lot: rawDb.prepare('SELECT * FROM damaged_stock_lots WHERE id = ?').get([legacyLotId]),
+      movement: rawDb.prepare('SELECT * FROM inventory_movements WHERE id = ?').get([legacyMovementId]),
+    }
+    assert.deepStrictEqual(after.lot, before.lot, 'the pre-tag legacy lot is byte-for-byte unchanged')
+    assert.deepStrictEqual(after.movement, before.movement, 'the pre-tag legacy write-off is byte-for-byte unchanged')
   })
 
   await check('K2: Replace accepts a different product and creates a linked sale receipt', async () => {

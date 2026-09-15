@@ -5,7 +5,9 @@ import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getLoaderErrorMessage, withLoaderTimeout } from '../../utils/loaders.ts'
-import { STOCK_ACTION_OPTIONS, normalizeStockAction, type ReturnStockAction } from './helpers/returnOptions.ts'
+import { STOCK_ACTION_OPTIONS, normalizeStockAction, type ReturnStockAction, type DamagedDisposition } from './helpers/returnOptions.ts'
+import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
+import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { useFormDirty } from '../../utils/formDirty.ts'
@@ -49,6 +51,13 @@ interface EditableReturnItem {
   // legacy boolean) by normalizeStockAction.
   stock_action?: ReturnStockAction
   branch_id?: number | string | null
+  // P4-3: return_items has no persisted condition_tag/damaged_disposition
+  // column (only damaged_stock_lots/inventory_movements do), so there is
+  // nothing to seed here on open -- these always start at the defaults
+  // (DEFAULT_STOCK_CONDITION_TAG / 'keep') and only matter for a NEW
+  // 'damaged' choice made in this edit.
+  condition_tag?: string
+  damaged_disposition?: DamagedDisposition
 }
 
 interface ExistingReturnItem extends Omit<EditableReturnItem, 'returnQty'> {}
@@ -184,7 +193,24 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     i === idx ? { ...it, returnQty: clampReturnQuantity(qty, toNumber(it.quantity)) } : it
   ))
   const updateAction = (idx: number, action: ReturnStockAction) => setItems(prev => prev.map((it, i) =>
-    i === idx ? { ...it, stock_action: action, return_to_stock: action === 'restock' } : it
+    i === idx
+      ? {
+          ...it, stock_action: action, return_to_stock: action === 'restock',
+          ...(action === 'damaged' && !it.condition_tag
+            ? { condition_tag: DEFAULT_STOCK_CONDITION_TAG, damaged_disposition: 'keep' as DamagedDisposition }
+            : null),
+        }
+      : it
+  ))
+  // P4-3: same remove-stock choice as the create flow -- '' means keep the
+  // default tag/held row, a tag string means "remove entirely, tagged
+  // <tag>" for the write-off's reason/audit trail.
+  const updateItemDamagedChoice = (idx: number, value: string) => setItems(prev => prev.map((it, i) =>
+    i === idx
+      ? value === ''
+        ? { ...it, damaged_disposition: 'remove' as DamagedDisposition }
+        : { ...it, condition_tag: value, damaged_disposition: 'keep' as DamagedDisposition }
+      : it
   ))
 
   const activeItems    = items.filter(it => it.returnQty > 0)
@@ -230,6 +256,11 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           return_to_stock:   it.return_to_stock !== false,
           stock_action:      it.stock_action || 'restock',
           branch_id:         it.branch_id || ret.branch_id || null,
+          // P4-3: same shared remove-stock tag/disposition as the create
+          // flow, only meaningful when stock_action is 'damaged'.
+          ...(it.stock_action === 'damaged'
+            ? { condition_tag: it.condition_tag || DEFAULT_STOCK_CONDITION_TAG, damaged_disposition: it.damaged_disposition || 'keep' }
+            : null),
         })),
       }
       const prepared = activePendingRequest?.body || freezeDirectMutationBody(await prepareReturnRequest(ret.id, {
@@ -399,6 +430,25 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
                           <span className="flex-shrink-0 text-xs font-semibold text-blue-600 dark:text-blue-400">
                             {fmtUSD(toNumber(item.applied_price_usd) * item.returnQty)}
                           </span>
+                        </div>
+                      )}
+                      {isActive && item.stock_action === 'damaged' && (
+                        <div className="mt-1.5 space-y-1">
+                          {/* P4-3: the SAME remove-stock chooser (StockConditionTagRow,
+                              mode='remove') -- keep as a tagged, held row (default)
+                              or destroy immediately as a booked loss. */}
+                          <StockConditionTagRow
+                            mode="remove"
+                            value={item.damaged_disposition === 'remove' ? '' : (item.condition_tag || DEFAULT_STOCK_CONDITION_TAG)}
+                            onChange={(next) => updateItemDamagedChoice(idx, next)}
+                            tr={(key, fallback) => T(key, fallback ?? key)}
+                            id={`return-edit-damaged-tag-${idx}`}
+                          />
+                          <div className="text-[10px] text-orange-500 dark:text-orange-400">
+                            {item.damaged_disposition === 'remove'
+                              ? T('stock_action_damaged_remove_hint', 'Destroyed immediately -- booked as a loss at cost.')
+                              : T('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
+                          </div>
                         </div>
                       )}
                     </div>

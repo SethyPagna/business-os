@@ -28,6 +28,12 @@ type CanonicalItem = {
   stock_action: 'none' | 'restock' | 'damaged'
   branch_id: number | null
   batch_id: number | null
+  // P4-3: only meaningful when stock_action is 'damaged'. In the digest so a
+  // retry of the same client_request_id with a genuinely different tag or
+  // disposition is caught as a changed request, not replayed as an exact
+  // repeat -- see resolveDamagedReturnChoice.
+  condition_tag: string | null
+  damaged_disposition: string | null
 }
 
 type CanonicalReplacementItem = {
@@ -46,6 +52,8 @@ type CanonicalV1Item = {
   stock_action: 'none' | 'restock' | 'damaged'
   branch_id: number | null
   batch_id: number | null
+  condition_tag: string | null
+  damaged_disposition: string | null
 }
 
 function positiveId(value: unknown): number | null {
@@ -98,6 +106,8 @@ function canonicalItem(value: unknown, index: number): CanonicalItem {
     stock_action: canonicalStockAction(item),
     branch_id: positiveId(item.branch_id),
     batch_id: positiveId(item.batch_id),
+    condition_tag: boundedText(item.condition_tag, 40),
+    damaged_disposition: boundedText(item.damaged_disposition, 40),
   }
 }
 
@@ -138,7 +148,8 @@ function canonicalV1Item(value: unknown, index: number): CanonicalV1Item {
     return value
   }
   return { sale_item_id: item.sale_item_id, quantity: item.quantity, stock_action: canonicalStockAction(item),
-    branch_id: optionalId('branch_id'), batch_id: optionalId('batch_id') }
+    branch_id: optionalId('branch_id'), batch_id: optionalId('batch_id'),
+    condition_tag: boundedText(item.condition_tag, 40), damaged_disposition: boundedText(item.damaged_disposition, 40) }
 }
 
 function canonicalReturnCreateIntentV1(body: Record<string, unknown>): Record<string, unknown> {
