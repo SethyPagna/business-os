@@ -1,5 +1,4 @@
 import { getDb } from './db'
-import { ACTOR_USERNAME_SQL, resolveActorUsername } from './actorSnapshot'
 import type { Env } from '../index'
 
 // Default retention window, in days, for automatic audit-log cleanup. This
@@ -78,26 +77,6 @@ export function buildAuditLogRetentionDeleteSql(): string {
 // allowed-fields lists) -- left null here rather than guessed at with the
 // server's own clock, since `auditTimezoneLabel`'s fallback already
 // produces a reasonable "Server time" label for that case.
-async function lookupAuditDeviceInfo(
-  env: Env,
-  userId: number | null,
-): Promise<{ device_name: string | null; device_tz: string | null }> {
-  if (!userId) return { device_name: null, device_tz: null }
-  try {
-    const db = getDb(env)
-    const row = await db.prepare(`
-      SELECT device_name, device_tz
-      FROM user_sessions
-      WHERE user_id = @user_id AND revoked_at IS NULL
-      ORDER BY last_seen_at DESC, id DESC
-      LIMIT 1
-    `).get<{ device_name: string | null; device_tz: string | null }>({ user_id: userId })
-    return { device_name: row?.device_name ?? null, device_tz: row?.device_tz ?? null }
-  } catch (_) {
-    return { device_name: null, device_tz: null }
-  }
-}
-
 // N13: the actor stored on an audit row is the account USERNAME, resolved here
 // from users.id rather than taken on trust from the caller.
 //
@@ -112,23 +91,20 @@ async function lookupAuditDeviceInfo(
 // audit_logs stays OUT of the rename cascade (see userIdentity.ts) because an
 // audit row is a point-in-time record; storing the username at write time is
 // what makes that exclusion harmless instead of a second naming convention.
-async function resolveAuditActorName(
-  env: Env,
-  userId: number | null,
-  provided: string | null,
-): Promise<string | null> {
-  if (!userId) return resolveActorUsername(null, provided)
-  try {
-    const db = getDb(env)
-    const row = await db.prepare(ACTOR_USERNAME_SQL).get<{ username: string | null }>({ user_id: userId })
-    return resolveActorUsername(row, provided)
-  } catch (_) {
-    // Audit failures must never crash the main request -- fall back to the
-    // value the caller already resolved (post-N13 that is itself the username).
-    return resolveActorUsername(null, provided)
-  }
-}
-
+//
+// P4-4a: this used to be two SELECTs (lookupAuditDeviceInfo, resolveAuditActorName)
+// plus the INSERT -- three sequential D1 round trips, awaited at 135 call sites.
+// Both lookups are expressed here as LEFT JOINs against the same @user_id bind,
+// folded into ONE `INSERT ... SELECT`, so audit() costs exactly one round trip
+// regardless of whether userId is set. The fallback semantics are unchanged:
+//   - user_name: the account's own username when the users row exists and is
+//     non-blank, else the caller-provided name (mirrors resolveActorUsername's
+//     `trimmed(row?.username) || trimmed(fallback) || null`); when userId is
+//     null the LEFT JOIN matches no row, which is the same "no account" case
+//     resolveAuditActorName short-circuited on before.
+//   - device_name/device_tz: the most-recently-active live session's device
+//     info (mirrors lookupAuditDeviceInfo's ORDER BY last_seen_at DESC, id DESC
+//     LIMIT 1), NULL when there is no such session or no userId.
 export async function audit(
   env: Env,
   userId: number | null,
@@ -142,15 +118,27 @@ export async function audit(
     const detailsStr = details != null
       ? (typeof details === 'object' ? JSON.stringify(details) : String(details))
       : null
-    const { device_name: deviceName, device_tz: deviceTz } = await lookupAuditDeviceInfo(env, userId)
-    const actorName = await resolveAuditActorName(env, userId, userName)
     const db = getDb(env)
     await db.prepare(`
       INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, new_value, device_name, device_tz)
-      VALUES (@user_id, @user_name, @action, @entity, @entity_id, @details, @table_name, @record_id, @new_value, @device_name, @device_tz)
+      SELECT
+        @user_id,
+        COALESCE(NULLIF(TRIM(u.username), ''), NULLIF(TRIM(@user_name), '')),
+        @action, @entity, @entity_id, @details, @table_name, @record_id, @new_value,
+        s.device_name,
+        s.device_tz
+      FROM (SELECT 1 AS one) AS _dummy
+      LEFT JOIN users u ON u.id = @user_id
+      LEFT JOIN (
+        SELECT device_name, device_tz
+        FROM user_sessions
+        WHERE user_id = @user_id AND revoked_at IS NULL
+        ORDER BY last_seen_at DESC, id DESC
+        LIMIT 1
+      ) AS s ON 1 = 1
     `).run({
       user_id: userId,
-      user_name: actorName,
+      user_name: userName,
       action,
       entity,
       entity_id: entityId,
@@ -158,8 +146,6 @@ export async function audit(
       table_name: entity,
       record_id: entityId,
       new_value: detailsStr,
-      device_name: deviceName,
-      device_tz: deviceTz,
     })
   } catch (_) {
     // Swallow -- see comment above.

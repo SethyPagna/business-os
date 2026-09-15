@@ -232,9 +232,19 @@ for (const [label, rel] of [['sales', 'src/routes/sales.ts'], ['returns', 'src/r
 
 // audit_logs is written from 130+ call sites that pass a name positionally, so
 // the resolution has to live inside audit() itself.
+//
+// P4-4a folded the old two-SELECT resolution (ACTOR_USERNAME_SQL +
+// resolveActorUsername, called before the INSERT) into a single
+// `INSERT ... SELECT` with a `LEFT JOIN users` on the same @user_id bind, so
+// this now pins the SQL-level invariant instead of the removed helper names:
+// the account's OWN username (resolved server-side, by id) must win over
+// whatever name the caller passed, which COALESCE only reaches as a fallback.
 const auditSrc = read('src/lib/audit.ts')
-assert.ok(/ACTOR_USERNAME_SQL/.test(auditSrc), 'lib/audit.ts does not resolve the actor username server-side')
-assert.ok(/resolveActorUsername/.test(auditSrc), 'lib/audit.ts does not use resolveActorUsername')
+assert.ok(/LEFT JOIN users u ON u\.id = @user_id/.test(auditSrc), 'lib/audit.ts does not resolve the actor username server-side from users.id')
+assert.ok(
+  /COALESCE\(\s*NULLIF\(TRIM\(u\.username\), ''\),\s*NULLIF\(TRIM\(@user_name\), ''\)\)/.test(auditSrc),
+  'lib/audit.ts must prefer the resolved account username over the caller-provided name, falling back to it only when the account row is missing/blank',
+)
 ok(true, 'audit_logs actor is resolved from users.id inside audit(), covering every call site')
 
 console.log(`\nOK ${checks} checks`)
