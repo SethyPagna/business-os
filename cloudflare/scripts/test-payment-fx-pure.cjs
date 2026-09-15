@@ -23,6 +23,10 @@ const actual = new Set(['actorSnapshot','movementBranchName',
   // real modules, so POST /sales here rejects a warehouse line exactly as
   // the Worker does rather than silently resolving to an empty stub.
   'branchRoleGuards','branchRoles',
+  // Shared per-isolate PRAGMA table_info() memoization sales.ts's
+  // saleMoneySchemaReady/readStripMoneyRows now delegate to; no imports of
+  // its own, so it is loaded for real rather than stubbed.
+  'schemaProbe',
 ])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
@@ -34,7 +38,7 @@ function load(rel) {
   const req = (name) => {
     if (name === 'hono') return require(name)
     if (name.endsWith('/auth')) return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
-    if (name.endsWith('/cache')) return { bumpVersion: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_e,_k,_t,fn) => fn() }
+    if (name.endsWith('/cache')) return { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_e,_k,_t,fn) => fn() }
     if (name.endsWith('/broadcastHub')) return { broadcast: async () => {} }
     if (name.endsWith('/audit')) return { audit: async () => {} }
     if (name.endsWith('/telegram')) return { formatSaleTelegramLines: () => [], sendTelegramEvent: async () => {}, telegramMoney: () => '' }

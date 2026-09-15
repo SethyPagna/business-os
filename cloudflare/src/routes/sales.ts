@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
+import { hasColumn, tableColumnSet } from '../lib/schemaProbe'
 import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePricingError } from '../lib/historicalSalePricing'
 import { normalizePromotionRule } from '../lib/promotionRules'
@@ -17,7 +18,7 @@ function canReadSales(user: SessionUser): boolean {
   return getPermissionTier(user, 'sales') !== 'none'
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 // The POS payment-method field is free text (a datalist, not a select), so a
 // sale can introduce a method Settings has never heard of. See
 // lib/paymentMethodRegistry.ts for why the merge is server-side and shared by
@@ -319,12 +320,19 @@ async function saleMutationDigest(value: unknown): Promise<string> {
 
 async function saleMoneySchemaReady(db: ReturnType<typeof getDb>): Promise<boolean> {
   const required = ['money_precision_version','calculated_total_usd','rounding_adjustment_usd']
-  const columns = await db.prepare('PRAGMA table_info(sales)').all<{ name: string }>()
-  const returns = await db.prepare('PRAGMA table_info(returns)').all<{ name: string }>()
-  const items = await db.prepare('PRAGMA table_info(sale_items)').all<{ name: string }>()
-  return required.every(name => columns.some(column => column.name === name))
-    && ['money_precision_version','calculated_refund_usd','rounding_adjustment_usd'].every(name => returns.some(column => column.name === name))
-    && items.some(column => column.name === 'pricing_snapshot_json')
+  // Was three fresh PRAGMA table_info() round trips on every call (and this
+  // gates several hot POST/GET routes -- see call sites below); each column
+  // set is now memoized per isolate by schemaProbe.ts and the three
+  // independent probes are fetched concurrently rather than one after
+  // another.
+  const [columns, returns, items] = await Promise.all([
+    tableColumnSet(db, 'sales'),
+    tableColumnSet(db, 'returns'),
+    tableColumnSet(db, 'sale_items'),
+  ])
+  return required.every(name => columns.has(name))
+    && ['money_precision_version','calculated_refund_usd','rounding_adjustment_usd'].every(name => returns.has(name))
+    && items.has('pricing_snapshot_json')
 }
 
 function canonicalSaleItemsSql() {
@@ -2838,8 +2846,7 @@ app.patch('/:id/customer', async (c) => {
       membership_number: customer?.membership_number ?? null,
       cleared: shouldClear,
     }),
-    bumpVersion(c.env, 'sales'),
-    bumpVersion(c.env, 'returns'),
+    bumpVersions(c.env, ['sales', 'returns']),
   ]))
 
   return c.json(response)
@@ -5337,7 +5344,14 @@ app.get('/', async (c) => {
   // one `?limit=101` away from the same crash GET /api/products hit.
     const saleIds = sales.map((s) => s.id)
 
-    const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
+    // itemRows, refundRows and recordsBySale are three independent read
+    // chains off the same saleIds -- none reads a value the others produce
+    // -- so they fan out with Promise.all instead of running one after
+    // another. Each keeps its own chunking (selectInChunks/chunkForBinding)
+    // exactly as before; only the sequencing between the three changed.
+    const [itemsBySale, refundsBySale, recordsBySale] = await Promise.all([
+      (async () => {
+        const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
       SELECT si.*, b.name AS branch_name, p.barcode AS barcode, p.category AS category,
         p.unit AS unit, p.supplier AS supplier,
         -- A single received date is factual only for an explicit lot or a
@@ -5374,42 +5388,52 @@ app.get('/', async (c) => {
       WHERE si.sale_id IN (${chunk.map(() => '?').join(',')})
       ORDER BY si.id ASC
     `).all<{ sale_id: number; [key: string]: unknown }>(chunk))
-    const itemsBySale = new Map<number, unknown[]>()
-    for (const row of itemRows) {
-      if (!itemsBySale.has(row.sale_id)) itemsBySale.set(row.sale_id, [])
-      itemsBySale.get(row.sale_id)!.push(row)
-    }
-
-    const returnColumns=await db.prepare('PRAGMA table_info(returns)').all<{name:string}>()
-    const returnVersion=returnColumns.some(row=>row.name==='money_precision_version')?'money_precision_version':'0 AS money_precision_version'
-    // Read recorded operands, never SQLite binary-money SUM. A bounded page
-    // must refuse excessive linked history rather than silently omit refunds.
-    const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
+        const map = new Map<number, unknown[]>()
+        for (const row of itemRows) {
+          if (!map.has(row.sale_id)) map.set(row.sale_id, [])
+          map.get(row.sale_id)!.push(row)
+        }
+        return map
+      })(),
+      (async () => {
+        // Was a fresh `PRAGMA table_info(returns)` every GET /api/sales
+        // cache miss just to learn whether money_precision_version exists;
+        // hasColumn() memoizes the column set per isolate instead.
+        const returnVersion = await hasColumn(db, 'returns', 'money_precision_version')
+          ? 'money_precision_version' : '0 AS money_precision_version'
+        // Read recorded operands, never SQLite binary-money SUM. A bounded page
+        // must refuse excessive linked history rather than silently omit refunds.
+        const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
       SELECT id,sale_id,total_refund_usd,total_refund_khr,${returnVersion}
       FROM returns
       WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
       ORDER BY id LIMIT ${REPORT_MONEY_MAX_ROWS+1}
     `).all<Record<string,unknown>>(chunk))
-    if(refundRows.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
-    const refundsBySale=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal}>()
-    for(const row of refundRows){
-      const id=Number(row.sale_id),group=refundsBySale.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero()}
-      group.count++;group.usd=group.usd.add(stripMoney(row,'total_refund_usd'));group.khr=group.khr.add(stripMoney(row,'total_refund_khr'))
-      refundsBySale.set(id,group)
-    }
-
-    // "Records n" on every row. ONE statement per chunk over three tables
-    // rather than a query per sale -- a 500-row page would otherwise fire 500
-    // reads. chunkForBinding is told the real cost (each id is bound into
-    // three IN lists, not one) so a full page cannot trip D1's 100-parameter
-    // ceiling the way GET /api/products once did.
-    const recordsBySale = new Map<number, number>()
-    for (const chunk of chunkForBinding(saleIds, 0, SALE_RECORDS_COUNT_BINDS_PER_ID)) {
-      const placeholders = chunk.map(() => '?').join(',')
-      const countRows = await db.prepare(buildSaleRecordsCountSql(placeholders))
-        .all<{ sale_id: number; n: number }>(saleRecordsCountBinds(chunk))
-      for (const row of countRows) recordsBySale.set(Number(row.sale_id), Number(row.n) || 0)
-    }
+        if(refundRows.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
+        const map=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal}>()
+        for(const row of refundRows){
+          const id=Number(row.sale_id),group=map.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero()}
+          group.count++;group.usd=group.usd.add(stripMoney(row,'total_refund_usd'));group.khr=group.khr.add(stripMoney(row,'total_refund_khr'))
+          map.set(id,group)
+        }
+        return map
+      })(),
+      (async () => {
+        // "Records n" on every row. ONE statement per chunk over three tables
+        // rather than a query per sale -- a 500-row page would otherwise fire 500
+        // reads. chunkForBinding is told the real cost (each id is bound into
+        // three IN lists, not one) so a full page cannot trip D1's 100-parameter
+        // ceiling the way GET /api/products once did.
+        const map = new Map<number, number>()
+        for (const chunk of chunkForBinding(saleIds, 0, SALE_RECORDS_COUNT_BINDS_PER_ID)) {
+          const placeholders = chunk.map(() => '?').join(',')
+          const countRows = await db.prepare(buildSaleRecordsCountSql(placeholders))
+            .all<{ sale_id: number; n: number }>(saleRecordsCountBinds(chunk))
+          for (const row of countRows) map.set(Number(row.sale_id), Number(row.n) || 0)
+        }
+        return map
+      })(),
+    ])
 
     return Promise.all(sales.map(async(sale) => {
       const { linked_driver_name, linked_driver_phone, ...snapshot } = sale
@@ -5593,8 +5617,7 @@ export function gateSalesCourierMoney(row:Record<string,unknown>,isAdmin:boolean
 }
 
 async function readStripMoneyRows(db:ReturnType<typeof getDb>,table:'sales'|'returns',where:string,params:Record<string,unknown>) {
-  const columns=await db.prepare(`PRAGMA table_info(${table})`).all<{name:string}>()
-  const version=columns.some(row=>row.name==='money_precision_version')?'money_precision_version':'0 AS money_precision_version'
+  const version=await hasColumn(db,table,'money_precision_version')?'money_precision_version':'0 AS money_precision_version'
   const amount=table==='sales'?'total_usd,sale_status':'total_refund_usd'
   const rows:Record<string,unknown>[]=[]
   let after=0
