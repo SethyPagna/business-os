@@ -116,7 +116,7 @@ await runTest('a fixed sheet does not inherit the frozen on-screen card height',
 })
 
 await runTest('the print document consumes the layout flags so a single sheet cannot paginate', () => {
-  assert.match(printSource, /const \{ markup, widthMm, pageHeightMm, continuousRoll, singleSheet \} = layout/,
+  assert.match(printSource, /const \{ markup, widthMm, pageHeightMm, continuousRoll, singleSheet, pageSizeMode = 'measured' \} = layout/,
     'continuousRoll was computed and returned but never read')
   assert.match(printSource, /const clipToOnePage = singleSheet && !continuousRoll/)
   assert.match(printSource, /const pageOverflow = clipToOnePage \? 'hidden' : 'visible'/)

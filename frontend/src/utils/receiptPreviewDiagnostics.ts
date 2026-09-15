@@ -34,6 +34,12 @@ export const RECEIPT_PREVIEW_COPY = {
   // what the driver is set to.
   receipt_preview_length: 'Receipt length',
   receipt_preview_driver_hint: 'Set the printer driver to roll / continuous paper at Actual size (no "fit to page"). A driver form taller than the receipt shows as blank space before the print that this page cannot remove.',
+  receipt_preview_page_size_mode: 'Page length mode',
+  receipt_preview_mode_measured: 'Measured (auto-fit)',
+  receipt_preview_mode_fixed: 'Fixed length',
+  receipt_preview_mode_driver: 'Printer driver default',
+  receipt_preview_mode_auto_longest: 'Longest roll (auto)',
+  receipt_preview_mode_troubleshoot: 'Still seeing a blank band or a split strip? In Print Settings, try Fixed length, then Longest roll, then Printer driver default.',
 } as const
 
 export type ReceiptPreviewTranslate = (key: string) => string | undefined
@@ -48,8 +54,15 @@ export function receiptLengthDiagnosticLine(heightMm: number, translate?: Receip
   return `${label}: ${Number(heightMm.toFixed(2)).toString()} mm`
 }
 
+const RECEIPT_PAGE_SIZE_MODE_LABELS: Record<string, keyof typeof RECEIPT_PREVIEW_COPY> = {
+  measured: 'receipt_preview_mode_measured',
+  fixed: 'receipt_preview_mode_fixed',
+  driver: 'receipt_preview_mode_driver',
+  'auto-longest': 'receipt_preview_mode_auto_longest',
+}
+
 export function receiptPreviewDiagnosticLines(
-  layout: { widthMm: number; pageHeightMm: number; continuousRoll: boolean; singleSheet: boolean },
+  layout: { widthMm: number; pageHeightMm: number; continuousRoll: boolean; singleSheet: boolean; pageSizeMode?: string },
   settings: ReceiptPreviewSettings,
   translate?: ReceiptPreviewTranslate,
 ): string[] {
@@ -60,11 +73,21 @@ export function receiptPreviewDiagnosticLines(
   const dimension = (value: number) => Number(value.toFixed(2)).toString()
   const mode = layout.continuousRoll ? 'receipt_preview_continuous_roll'
     : layout.singleSheet ? 'receipt_preview_single_card' : 'receipt_preview_fixed_document'
+  const pageSizeMode = layout.pageSizeMode || 'measured'
+  // A page-size-mode fallback only ever applies to continuous-roll paper: the
+  // roll's OWN measured page (continuousRoll true) or one of the three
+  // fallbacks a roll can be switched to (pageSizeMode !== 'measured'). A
+  // genuine fixed sheet/document (80x50mm/A4/Letter/custom height) always
+  // reports pageSizeMode 'measured' and continuousRoll false, so this line
+  // never appears for it.
+  const showPageSizeMode = layout.continuousRoll || pageSizeMode !== 'measured'
   return [
     `${text('receipt_preview_requested_paper')}: ${dimension(layout.widthMm)} × ${dimension(layout.pageHeightMm)} mm · ${text(mode)}`,
     `${text('receipt_preview_app_scale')}: ${dimension(settings.scalePercent)}% · ${text('receipt_preview_margins')}: ${settings.marginsMm.map(dimension).join(' / ')} mm`,
     text('receipt_preview_actual_size'),
+    ...(showPageSizeMode ? [`${text('receipt_preview_page_size_mode')}: ${text(RECEIPT_PAGE_SIZE_MODE_LABELS[pageSizeMode] || 'receipt_preview_mode_measured')}`] : []),
     ...(layout.continuousRoll ? [text('receipt_preview_roll_warning'), text('receipt_preview_driver_hint')]
       : layout.singleSheet ? [text('receipt_preview_card_note')] : []),
+    ...(showPageSizeMode ? [text('receipt_preview_mode_troubleshoot')] : []),
   ]
 }

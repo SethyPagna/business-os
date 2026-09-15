@@ -108,7 +108,10 @@ await runTest('print export normalizes receipt root width inside paper frame', (
 await runTest('thermal print keeps configured margins inside one measured-height roll page', () => {
   const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
   assert.match(source, /const measuredHeightMm = renderedHeightPx \* \(widthMm \/ renderedWidthPx\)/)
-  assert.match(source, /const pageHeightMm = fixedHeightMm \?\? Math\.max\(1, measuredHeightMm \+ 1\)/)
+  assert.match(source, /return \{ pageHeightMm: fixedHeightMm, continuousRoll: false, pageSizeMode \}/,
+    'a genuine fixed sheet keeps its own explicit height')
+  assert.match(source, /return \{ pageHeightMm: Math\.max\(1, measuredHeightMm \+ 1\), continuousRoll: true, pageSizeMode: 'measured' \}/,
+    'the default measured mode still grows the page with the complete receipt content')
   assert.match(source, /const pageSizeCss = `\$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm`/,
     'the @page size is always an explicit, valid width-by-height pair -- CSS Paged Media never accepts a length combined with `auto`')
   assert.doesNotMatch(source, /\$\{widthMm\}mm auto/,

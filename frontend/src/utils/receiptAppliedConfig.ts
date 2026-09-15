@@ -90,7 +90,11 @@ export const DEFAULT_RECEIPT_PRINT_SETTINGS: ReceiptPrintSettings = {
   scale: '100',
   customWidth: '80',
   customHeight: '297',
+  pageSizeMode: 'measured',
+  fixedPageLengthMm: '100',
 }
+
+const RECEIPT_PAGE_SIZE_MODES = new Set(['measured', 'fixed', 'driver', 'auto-longest'])
 
 function parseObject(value: unknown): Record<string, unknown> {
   if (!value) return {}
@@ -174,6 +178,18 @@ export function normalizeReceiptPrintSettings(value: unknown): ReceiptPrintSetti
     scale: String(parsed.scale || DEFAULT_RECEIPT_PRINT_SETTINGS.scale),
     customWidth: String(parsed.customWidth || DEFAULT_RECEIPT_PRINT_SETTINGS.customWidth),
     customHeight: String(parsed.customHeight || DEFAULT_RECEIPT_PRINT_SETTINGS.customHeight),
+    // A record saved before this field existed (or any unrecognized value)
+    // must resolve to 'measured' -- today's own in-document remeasure -- so
+    // an old saved settings blob keeps printing exactly as it did before.
+    pageSizeMode: RECEIPT_PAGE_SIZE_MODES.has(String(parsed.pageSizeMode))
+      ? (String(parsed.pageSizeMode) as ReceiptPrintSettings['pageSizeMode'])
+      : DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode,
+    fixedPageLengthMm: (() => {
+      const parsedLength = Number.parseFloat(String(parsed.fixedPageLengthMm ?? ''))
+      return Number.isFinite(parsedLength) && parsedLength > 0
+        ? String(parsedLength)
+        : DEFAULT_RECEIPT_PRINT_SETTINGS.fixedPageLengthMm
+    })(),
   }
 }
 
