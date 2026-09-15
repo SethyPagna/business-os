@@ -59,15 +59,17 @@ export const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/products/Products.tsx',
     names: ['branchFilter', 'brandFilter', 'catFilter', 'groupFilter', 'stockFilter', 'supplierFilter'],
-    line: 1418,
+    line: 1497,
     reason:
-      'Deferred filter-metadata fallback. filterMetaScope includes all six filters at :1334; '
-      + 'its effect at :1342 invalidates the outstanding fallback and clears readiness, while '
-      + 'the main load callback at :1001 is keyed by the effective server filter scope and '
+      'Deferred filter-metadata fallback. filterMetaScope includes all six filters; '
+      + 'its own effect just above invalidates the outstanding fallback and clears readiness, '
+      + 'while the main load callback is keyed by the effective server filter scope and '
       + 'consumes filter metadata returned with that product response. Adding the raw filters '
       + 'to this fallback effect would launch a redundant request in the same commit before '
-      + 'the readiness reset lands. RE-VERIFIED 2026-09-07 after the session-restore insertion: '
-      + 'the filter scope, invalidation order and main-load dependency chain are unchanged. '
+      + 'the readiness reset lands. RE-VERIFIED 2026-09-15 after P4-4b fix 6 (patchProductRow/ '
+      + 'refreshAdjustedProduct) inserted lines above this effect and shifted it from :1418 to '
+      + ':1497: the filter scope, invalidation order and main-load dependency chain are '
+      + 'unchanged, only the line number moved. '
       + 'FRAGILE: re-verify if metadata stops arriving with the main product response.',
   },
   {
