@@ -17,7 +17,7 @@ function load(rel) {
   const req = name => {
     if (name==='hono') return require(name)
     if (name.endsWith('/auth')) return { requireAuth: async(c,next)=>{c.set('user',user);return next()} }
-    if (name.endsWith('/cache')) return {bumpVersion:async()=>{},getVersionWithFallback:async()=>0}
+    if (name.endsWith('/cache')) return {bumpVersion:async()=>{},bumpVersions:async()=>{},getVersionWithFallback:async()=>0}
     if (name.endsWith('/broadcastHub')) return {broadcast:async()=>{}}
     if (name.endsWith('/audit')) return {audit:async()=>{}}
     if (name.endsWith('/telegram')) return {formatSaleTelegramLines:()=>[],sendTelegramEvent:async()=>{},telegramMoney:()=>''}

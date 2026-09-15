@@ -230,7 +230,7 @@ async function workerBundle() {
             if(!raw)return c.json({error:'Unauthorized'},401);
             c.set('user',{id:7,username:'admin',name:'Fixture Admin',role_code:'admin',permissions:raw});return next()}`,
           audit: 'export const audit=async()=>{}',
-          cache: `export const bumpVersion=async()=>{};export const getVersionWithFallback=async()=>0;
+          cache: `export const bumpVersion=async()=>{};export const bumpVersions=async()=>{};export const getVersionWithFallback=async()=>0;
             export const cachedJsonResponse=async(_e,_k,_t,fn)=>fn()`,
           broadcastHub: 'export const broadcast=async()=>{}',
           telegram: `export const sendReturnTelegramEvent=async()=>{};export const sendTelegramEvent=async()=>{};

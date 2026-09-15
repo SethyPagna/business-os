@@ -11,7 +11,7 @@ import { sanitizeMediaList } from '../lib/media'
 import { ensureCoreDataInvariants, dropAllCustomTables, FACTORY_RESET_TABLES, PRODUCTS_RESET_TABLES } from '../lib/coreDataInvariants'
 import { createCloudflareBackup, createSectionBackup } from '../lib/backup'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion } from '../lib/cache'
+import { bumpVersion, bumpVersions } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -1148,13 +1148,11 @@ app.post('/sale-not-paid-stock-recovery-20260909/apply', async (c) => {
   try {
     const result = await recovery.applySaleNotPaidStockRecovery(db, plan)
     const refreshes = await Promise.allSettled([
-      bumpVersion(c.env, 'sales'),
-      bumpVersion(c.env, 'products'),
-      bumpVersion(c.env, 'audit_log'),
+      bumpVersions(c.env, ['sales', 'products', 'audit_log']),
       broadcast(c.env, 'sales', { action: 'update', recovery: recovery.SALE_NOT_PAID_STOCK_RECOVERY_TARGET }),
       broadcast(c.env, 'products', { action: 'update', recovery: recovery.SALE_NOT_PAID_STOCK_RECOVERY_TARGET }),
     ])
-    const cacheInvalidated = refreshes.slice(0, 3).every((entry) => entry.status === 'fulfilled')
+    const cacheInvalidated = refreshes.slice(0, 1).every((entry) => entry.status === 'fulfilled')
     const refreshPending = refreshes.some((entry) => entry.status === 'rejected')
     return c.json({
       ...result,
