@@ -221,6 +221,31 @@ function getApiListPayload(value: unknown): ApiListResponse | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as ApiListResponse : null
 }
 
+// P4-4b item 6: handleSave's edit path used to call load({ silent: true })
+// after every update -- a full re-search of the current
+// filtered/sorted/paginated page (plus the loyalty-points and portal-
+// account joins load() runs per row) just to reflect one row changing.
+// updateCustomer's PUT response already IS that one row (`SELECT * FROM
+// customers WHERE id = @id`, see routes/contacts.ts), so this patches it
+// into place instead. It deliberately spreads the response OVER the
+// existing row rather than replacing it outright: the write response is a
+// bare table row and carries none of the computed fields load() joins in
+// (points_balance/points_earned/points_redeemed/points_rewarded/
+// points_deducted, portal_account) -- those keys are simply absent from
+// `patch`, so the spread leaves the previously-loaded values in place
+// instead of clobbering them with `undefined`. Returns null (asking the
+// caller to fall back to a full load) when the id isn't present in the
+// currently-loaded page at all, since there's no row to patch.
+function patchCustomerRow(rows: CustomerRow[], id: number | string, patch: Record<string, unknown>): CustomerRow[] | null {
+  let matched = false
+  const next = rows.map((row) => {
+    if (Number(row.id) !== Number(id)) return row
+    matched = true
+    return { ...row, ...patch }
+  })
+  return matched ? next : null
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
@@ -795,7 +820,27 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       }
       setModal(null)
       setSelected(null)
-      await load({ silent: true, label: 'Customers after save' })
+      // P4-4b item 6: an edit's PUT response already IS the updated row, so
+      // patch it into place instead of re-running the whole filtered/
+      // sorted/paginated search (with its loyalty-points/portal-account
+      // joins) just to reflect one row changing. A create's correct
+      // position on that same server-sorted/paginated list can't be
+      // determined from the response alone (it may land on a different
+      // page or sort slot entirely), so creates still take the full load()
+      // -- same "patch only when the target position is already known"
+      // rule productStockAdjustPatchNotRefetch.test.ts pins for Products.tsx.
+      // Falls back to the full load() if the id somehow isn't present in
+      // the currently-loaded page (patchCustomerRow returns null).
+      if (selected && result && typeof result === 'object') {
+        const patched = patchCustomerRow(customers, selected.id, result as Record<string, unknown>)
+        if (patched) {
+          setCustomers(patched)
+        } else {
+          await load({ silent: true, label: 'Customers after save' })
+        }
+      } else {
+        await load({ silent: true, label: 'Customers after save' })
+      }
       return { success: true }
     } catch (error: unknown) {
       const duplicateCheck = readContactDuplicateDecisionError(error)
