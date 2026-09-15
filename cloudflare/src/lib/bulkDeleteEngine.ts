@@ -62,8 +62,27 @@ interface EntityConfig {
   // Extra statements for this chunk of ids beyond the core delete --
   // e.g. products' per-branch inventory_movements rows. Reads (SELECT)
   // needed to build those extra statements happen here too, scoped to
-  // just this chunk's ids, not the whole job's id list.
-  buildExtraStatements: (db: D1Compat, ids: number[], reason: string, user: { id: number | null; name: string | null }) => Promise<D1Statement[]>
+  // just this chunk's ids, not the whole job's id list. `jobId` lets the
+  // products config stamp one shared reference_id per job (see
+  // bulkDeleteWriteOffReferenceId) -- removalLosses.ts p5/losses.
+  buildExtraStatements: (db: D1Compat, ids: number[], reason: string, user: { id: number | null; name: string | null }, jobId: string) => Promise<D1Statement[]>
+}
+
+/**
+ * The reference_id every 'delete' movement row from ONE bulk-delete job
+ * carries. Same shared-string-per-event shape productDelete.ts's
+ * productRemoveWriteOffReferenceId uses for its write_off rows, generalized
+ * to a plain job id since a bulk-delete job has no apply/redo generation
+ * concept -- a job runs exactly once. removalLosses.ts's revert guard
+ * (removalLossMovementWhere) excludes a 'delete' row when an 'add' row
+ * exists stamped `revert:` + this string, the same way it excludes a
+ * write_off. There is no undo action for a bulk-delete job today, so no
+ * writer ever produces that 'revert:' row -- this stamp exists so a future
+ * undo lands on a guard that is already wired, not one that has to be
+ * invented at the same time as the undo itself.
+ */
+export function bulkDeleteWriteOffReferenceId(jobId: string): string {
+  return `bulk_delete:${jobId}`
 }
 
 // Exported (alongside ENTITY_CONFIGS below) purely so
@@ -135,7 +154,7 @@ export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
     auditEntity: 'product',
     cacheKey: 'products',
     deleteMode: 'soft',
-    buildExtraStatements: async (db, ids, reason, user) => {
+    buildExtraStatements: async (db, ids, reason, user, jobId) => {
       // Same movement-logging rule as the single-delete route: one
       // inventory_movements row per branch that still had stock, so the
       // movement history isn't silently missing what a bulk delete removed.
@@ -165,16 +184,17 @@ export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
           WHERE bs.product_id IN (${placeholders}) AND bs.quantity > 0
         `).all<{ productId: number; branchId: number; quantity: number; productName: string | null; branchName: string | null; unitCostUsd: number | null; unitCostKhr: number | null }>(slice)
       })
+      const referenceId = bulkDeleteWriteOffReferenceId(jobId)
       return stockRows.map((row) => {
         const costs = bulkDeleteWriteOffCosts(row)
         return {
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name, created_at)
-                VALUES (@productId, @productName, @branchId, @branchName, 'delete', @quantity, @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
+          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at)
+                VALUES (@productId, @productName, @branchId, @branchName, 'delete', @quantity, @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr, @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP)`,
           params: {
             productId: row.productId, productName: row.productName, branchId: row.branchId, branchName: row.branchName,
             quantity: row.quantity,
             ...costs,
-            reason, userId: user.id, userName: actorSnapshot(user),
+            reason, referenceId, userId: user.id, userName: actorSnapshot(user),
           },
         }
       })
@@ -314,7 +334,7 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
       // Soft (products) vs hard (customers/suppliers/delivery_contacts)
       // decided by config.deleteMode -- see buildCoreDeleteStatement.
       const deleteStatements = buildCoreDeleteStatements(config, deleteChunk)
-      const extraStatements = await config.buildExtraStatements(db, deleteChunk, job.reason, user)
+      const extraStatements = await config.buildExtraStatements(db, deleteChunk, job.reason, user, jobId)
       if (job.entity_type === 'customers' && deleteChunk.length) {
         // The advisory read above lets unrelated profile ids continue when a
         // queued job contains a marker. This in-transaction assertion closes

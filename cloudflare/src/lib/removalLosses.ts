@@ -39,13 +39,24 @@
  *   'out'                     inventory CSV import remove -- a data
  *                             correction, not a business event (see
  *                             importEngine.ts classifyInventory)
- *   'delete'                  bulkDeleteEngine.ts's bulk product delete. A
- *                             DIFFERENT type than 'write_off' below and left
- *                             out for the exact reason 'write_off' used to be:
- *                             its undo writes a fresh row with no revert
- *                             marker this module can key off. Not this
- *                             lane's ruling to extend; see 'write_off' below
- *                             for the shape a fix would take.
+ *   'delete'                  bulkDeleteEngine.ts's bulk product delete. IN
+ *                             the set (p5/losses, Sep 15 2026): stock drained
+ *                             by a bulk delete is destroyed exactly as
+ *                             finally as a single product delete's
+ *                             'write_off' is, and the owner's ruling ("if
+ *                             remove directly it also counts toward losses")
+ *                             draws no distinction by which UI action did the
+ *                             removing. bulkDeleteEngine.ts now stamps
+ *                             `reference_id = 'bulk_delete:<jobId>'` on every
+ *                             row from one job (bulkDeleteWriteOffReferenceId),
+ *                             the same shared-string-per-event shape
+ *                             productRemoveWriteOffReferenceId uses below, so
+ *                             the write_off-shaped revert guard (clause 5)
+ *                             covers it too. There is currently no undo for a
+ *                             bulk-delete job at all, so that guard never
+ *                             actually excludes a 'delete' row today -- it is
+ *                             wired ahead of an undo landing rather than
+ *                             creating a gap once one does.
  *   'adjustment'              duplicate-product merge write-off
  *                             (routes/products.ts, the `writeOffStock` branch)
  *                             -- a NEGATIVE-quantity row cleaning up a phantom
@@ -74,20 +85,24 @@
  *     string, so an undone delete is excluded and a later redo (a NEW
  *     generation, a NEW string) is a fresh, uncounted-until-booked loss again.
  * See the second NOT EXISTS clause below -- it is keyed on `reference_id`,
- * not `id`, ONLY for 'write_off' rows, because unlike every other writer here
- * these two can post more than one loss-bearing row per real-world event.
+ * not `id`, for 'write_off'/'delete' rows, because unlike every other writer
+ * here these can post more than one loss-bearing row per real-world event.
  *
  * VALUATION IS AT READ TIME, not at write time. Several removal writers book
  * no cost columns at all (productDelete.ts, datedStockCountApply.ts, the
  * products.ts merge write-off), and `inventory_movements.unit_cost_usd` is
  * DEFAULT 0 since migration 0001, so a stored 0 means ABSENCE, not free goods.
- * removalRowLossUsd therefore treats 0 as missing and falls through to
- * COALESCE(product_batches.unit_cost_usd, products.cost_price_usd) -- see
- * REMOVAL_LOSS_SELECT below. Nothing needs cost columns added at write time,
- * and a row that is uncostable everywhere is counted in `unvalued_rows` rather
- * than being silently valued at zero.
+ * removalRowLossUsd therefore treats 0 as missing and falls through to a
+ * four-tier chain -- lot cost, product cost, the product's own latest costed
+ * lot, then a same-name twin product's latest costed lot -- see
+ * REMOVAL_LOSS_SELECT below (p5/losses, Sep 15 2026: extended past the first
+ * two tiers after a production row valued a real removal at $0 because its
+ * lot and its product row were both uncosted while a same-name duplicate
+ * product carried the true cost). Nothing needs cost columns added at write
+ * time, and a row that is uncostable everywhere is counted in
+ * `unvalued_rows` rather than being silently valued at zero.
  */
-export const REMOVAL_LOSS_MOVEMENT_TYPES = ['remove', 'write_off'] as const
+export const REMOVAL_LOSS_MOVEMENT_TYPES = ['remove', 'write_off', 'delete'] as const
 
 /**
  * Removal movements whose `reason` is one of these are NOT losses.
@@ -128,18 +143,22 @@ function quoted(values: readonly string[]): string {
  *                                   goods back on the shelf, so it must not
  *                                   count. Same correlated lookup
  *                                   stockInSessionsQuery.ts already uses.
- *  5. no revert exists FOR this row's reference_id (write_off only)
+ *  5. no revert exists FOR this row's reference_id (write_off/delete only)
  *                                   DISPOSE and productDelete's write_off
- *                                   rows are the identified exception: their
+ *                                   rows, and bulkDeleteEngine's 'delete'
+ *                                   rows, are the identified exception: their
  *                                   own numeric id is never what their undo
  *                                   references (productDelete can post SEVERAL
- *                                   write_off rows per delete and reverses
- *                                   them all with ONE counter -- see the
+ *                                   write_off rows per delete, and a bulk
+ *                                   delete job posts one 'delete' row per
+ *                                   product/branch, and each reverses them
+ *                                   all with ONE shared counter -- see the
  *                                   comment on REMOVAL_LOSS_MOVEMENT_TYPES).
- *                                   Scoped to `movement_type = 'write_off'`
- *                                   ONLY, so every other writer's behaviour
- *                                   (in particular guard 4 above, keyed on
- *                                   numeric id) is completely unchanged.
+ *                                   Scoped to `movement_type IN ('write_off',
+ *                                   'delete')` ONLY, so every other writer's
+ *                                   behaviour (in particular guard 4 above,
+ *                                   keyed on numeric id) is completely
+ *                                   unchanged.
  *
  *  plus the excluded-reason set above.
  */
@@ -151,7 +170,7 @@ export function removalLossMovementWhere(alias = 'm'): string {
     `COALESCE(${alias}.reason, '') NOT IN (${quoted(REMOVAL_LOSS_EXCLUDED_REASONS)})`,
     `NOT EXISTS (SELECT 1 FROM inventory_movements rv
        WHERE rv.reference_id = 'revert:' || CAST(${alias}.id AS TEXT))`,
-    `(${alias}.movement_type != 'write_off' OR ${alias}.reference_id IS NULL
+    `(${alias}.movement_type NOT IN ('write_off', 'delete') OR ${alias}.reference_id IS NULL
        OR NOT EXISTS (SELECT 1 FROM inventory_movements rv2
          WHERE rv2.reference_id = 'revert:' || CAST(${alias}.reference_id AS TEXT)))`,
   ].join(' AND ')
@@ -159,8 +178,29 @@ export function removalLossMovementWhere(alias = 'm'): string {
 
 /**
  * The SELECT list this module's reducer expects. `fallback_unit_cost_usd` is
- * the lot cost the units came from, or the product's cost price -- used only
- * when the movement itself carries no cost snapshot.
+ * a chain of increasingly indirect sources, tried in order, used only when
+ * the movement itself carries no (non-zero) cost snapshot:
+ *
+ *   1. the lot the units actually came from (`product_batches.unit_cost_usd`)
+ *   2. the product's own cost price (`products.cost_price_usd`)
+ *   3. the product's OWN most-recently-received costed lot, i.e. a different
+ *      batch than the one this movement drew from actually carries a price
+ *      (writers that never stamp a lot cost, or a lot whose cost was left 0)
+ *   4. the most-recently-received costed lot of a SAME-NAME product row --
+ *      a "twin" catalog row for the identical item (see productIdentity.ts's
+ *      productRowIdentityKey; matched here on normalized name only, since
+ *      SQL has no access to the JS barcode fold) whose stock was priced
+ *      while this row's was not. This is exactly the production case the
+ *      owner reported: `inventory_movements` id 47026 (product 2556
+ *      "Girlactik Face Glow Goldie", a leading-zero-barcode duplicate of the
+ *      product that actually carries the real cost) priced at $0 while its
+ *      same-name twin held the true cost the whole time.
+ *
+ * Every tier is NULLIF'd against 0 (see removalRowLossUsd's own comment: a
+ * stored/joined 0 means "no source", not "free"), so a lot or product row
+ * that is itself uncosted correctly falls through to the next tier instead
+ * of freezing the chain at zero. Only when NONE of the four sources exist is
+ * the row `unvalued`.
  */
 export const REMOVAL_LOSS_SELECT = `
   m.id AS id,
@@ -168,7 +208,18 @@ export const REMOVAL_LOSS_SELECT = `
   m.quantity AS quantity,
   m.unit_cost_usd AS unit_cost_usd,
   m.total_cost_usd AS total_cost_usd,
-  COALESCE(pb.unit_cost_usd, p.cost_price_usd) AS fallback_unit_cost_usd
+  COALESCE(
+    NULLIF(pb.unit_cost_usd, 0),
+    NULLIF(p.cost_price_usd, 0),
+    (SELECT NULLIF(pb2.unit_cost_usd, 0) FROM product_batches pb2
+       WHERE pb2.variant_product_id = p.id AND pb2.unit_cost_usd IS NOT NULL AND pb2.unit_cost_usd > 0
+       ORDER BY pb2.received_at DESC, pb2.id DESC LIMIT 1),
+    (SELECT NULLIF(pb3.unit_cost_usd, 0) FROM product_batches pb3
+       JOIN products p3 ON p3.id = pb3.variant_product_id
+       WHERE p3.id != p.id AND LOWER(TRIM(p3.name)) = LOWER(TRIM(p.name))
+         AND pb3.unit_cost_usd IS NOT NULL AND pb3.unit_cost_usd > 0
+       ORDER BY pb3.received_at DESC, pb3.id DESC LIMIT 1)
+  ) AS fallback_unit_cost_usd
 `
 
 /** The FROM/JOIN this module's SELECT list is written against. */

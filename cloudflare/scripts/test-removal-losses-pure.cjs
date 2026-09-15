@@ -87,7 +87,7 @@ CREATE TABLE inventory_movements (
   reason TEXT, reference_id TEXT, user_id INTEGER, user_name TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP, batch_id INTEGER
 );
-CREATE TABLE product_batches (id INTEGER PRIMARY KEY, variant_product_id INTEGER, unit_cost_usd REAL, is_active INTEGER DEFAULT 1);
+CREATE TABLE product_batches (id INTEGER PRIMARY KEY, variant_product_id INTEGER, unit_cost_usd REAL, is_active INTEGER DEFAULT 1, received_at TEXT);
 CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, cost_price_usd REAL DEFAULT 0);
 
 INSERT INTO products(id,name,cost_price_usd) VALUES (1,'Priced product',2.50),(2,'Lot-priced product',NULL),(3,'Costless product',NULL);
@@ -96,6 +96,19 @@ INSERT INTO products(id,name,cost_price_usd) VALUES (1,'Priced product',2.50),(2
 -- from product 3's NULL above. Both must be treated as "no cost recorded".
 INSERT INTO products(id,name,cost_price_usd) VALUES (4,'Zero-cost-price product',0);
 INSERT INTO product_batches(id,variant_product_id,unit_cost_usd) VALUES (77,2,4.00);
+-- p5/losses (Sep 15 2026): tiers 3 and 4 of the fallback chain -- the
+-- production case (inventory_movements #47026) was a remove whose own lot
+-- AND product row were both uncosted while a same-NAME duplicate product
+-- carried the real cost. Isolated on branch 3, section 9 below.
+INSERT INTO products(id,name,cost_price_usd) VALUES
+  (5,'Tier3 Product',NULL),           -- own-product fallback: a DIFFERENT lot of this same product is costed
+  (6,'Twin Product',NULL),            -- same-name-twin fallback: this row has no costed lot of its own
+  (7,'twin product',NULL),            -- the twin -- same normalized name, differs only by case
+  (8,'Bulk deleted product',1.75);    -- priced product, deleted via bulkDeleteEngine's 'delete' movement
+INSERT INTO product_batches(id,variant_product_id,unit_cost_usd,received_at) VALUES
+  (80,5,3.25,'2026-09-01 00:00:00'),  -- product 5's OWN older costed lot
+  (81,5,NULL,'2026-09-05 00:00:00'),  -- the lot movement #21 actually draws from -- uncosted
+  (90,7,5.50,'2026-09-01 00:00:00');  -- product 7 (the twin)'s costed lot
 
 -- Local UTC+7 day 2026-09-10 runs 2026-09-09 17:00Z .. 2026-09-10 16:59Z.
 INSERT INTO inventory_movements
@@ -150,7 +163,30 @@ INSERT INTO inventory_movements
   (17,1,5,'add',           2, 5.00, 10.00,'Hypothetical restore of #16', 'revert:damaged_lot:502',9,'2026-09-10 10:11:00',NULL),
   (18,1,5,'write_off',     5, 0.00,  0.00,'Removed product Gadget', 'product_remove:op-live:0',9,'2026-09-10 10:20:00',NULL),
   (19,1,5,'write_off',     9, 0.00,  0.00,'Removed product Gizmo',  'product_remove:op-undone:0',9,'2026-09-10 10:30:00',NULL),
-  (20,1,5,'add',           9, 0.00,  0.00,'Undo: Removed product Gizmo', 'revert:product_remove:op-undone:0',9,'2026-09-10 10:31:00',NULL);
+  (20,1,5,'add',           9, 0.00,  0.00,'Undo: Removed product Gizmo', 'revert:product_remove:op-undone:0',9,'2026-09-10 10:31:00',NULL),
+  -- ----------------------------------------------------------------------
+  -- Branch 3: the fallback chain's tiers 3/4, plus bulkDeleteEngine's
+  -- 'delete' movement type (p5/losses, Sep 15 2026).
+  --
+  --  #21 draws from batch 81 (product 5's OWN lot, but THAT lot is
+  --      uncosted) while product 5 itself has no cost_price_usd -- must
+  --      fall through to batch 80, a DIFFERENT, older, costed lot of the
+  --      SAME product -> tier 3, $3.25/u.
+  --  #22 product 6 has no batches of its own and no cost_price_usd -- must
+  --      fall through to product 7's lot, the SAME-NAME twin ("Twin
+  --      Product" vs "twin product") -> tier 4, $5.50/u.
+  --  #23 a LIVE bulkDeleteEngine 'delete' row, reference_id
+  --      'bulk_delete:job-live' -- COUNTS, priced from product 8's own
+  --      cost_price_usd ($1.75).
+  --  #24 a bulkDeleteEngine 'delete' row that WAS undone (#25 is its
+  --      counter, the same 'revert:' + reference_id shape write_off uses)
+  --      -> excluded.
+  --  #25 the undo counter for #24.
+  (21,5,3,'remove',   2, 0.00, 0.00,'Tier3 fallback test',              NULL,                    9,'2026-09-10 03:00:00',81),
+  (22,6,3,'remove',   4, 0.00, 0.00,'Tier4 twin fallback test',         NULL,                    9,'2026-09-10 03:10:00',NULL),
+  (23,8,3,'delete',   5, 0.00, 0.00,'Bulk delete of Bulk deleted product','bulk_delete:job-live', 9,'2026-09-10 03:20:00',NULL),
+  (24,8,3,'delete',   3, 0.00, 0.00,'Bulk delete, later undone',        'bulk_delete:job-undone',9,'2026-09-10 03:30:00',NULL),
+  (25,8,3,'add',      3, 0.00, 0.00,'Undo: bulk delete', 'revert:bulk_delete:job-undone',         9,'2026-09-10 03:31:00',NULL);
 `)
 
 // The business-day clause, byte-copied from lib/businessDateWindow.ts's
@@ -185,7 +221,7 @@ function readRows(params = { startDate: '2026-09-10', endDate: '2026-09-10', bra
 
   // The set is ONE constant so an owner ruling moves the boundary in one edit,
   // and the types below are outside it by NAME, not by accident.
-  assert.deepEqual([...lib.REMOVAL_LOSS_MOVEMENT_TYPES], ['remove', 'write_off'])
+  assert.deepEqual([...lib.REMOVAL_LOSS_MOVEMENT_TYPES], ['remove', 'write_off', 'delete'])
   for (const type of ['adjustment', 'damage_out', 'transfer_out', 'sale']) {
     assert.equal(lib.REMOVAL_LOSS_MOVEMENT_TYPES.includes(type), false, `${type} is not a removal loss`)
   }
@@ -367,6 +403,48 @@ function readRows(params = { startDate: '2026-09-10', endDate: '2026-09-10', bra
   sql.exec(`UPDATE inventory_movements SET reference_id = 'revert:damaged_lot:502' WHERE id = 17`)
   sql.exec(`UPDATE inventory_movements SET reference_id = 'revert:product_remove:op-undone:0' WHERE id = 20`)
   ok('the reference_id-keyed revert exclusion changes the answer (positive control)')
+}
+
+// ---------------------------------------------------------------------------
+// 9. p5/losses (Sep 15 2026): the fallback chain's tiers 3 and 4, and
+//    bulkDeleteEngine's 'delete' movement now counting. Isolated on branch 3.
+// ---------------------------------------------------------------------------
+{
+  const rows = readRows({ startDate: '2026-09-10', endDate: '2026-09-10', branchId: 3 })
+  const ids = rows.map((r) => Number(r.id)).sort((a, b) => a - b)
+  assert.deepEqual(ids, [21, 22, 23], `only the live delete + both fallback removes are selected, got ${JSON.stringify(ids)}`)
+  ok('a bulk-delete "delete" row with a matching undo counter (#24/#25) is excluded, same shape as write_off')
+
+  const tier3 = rows.find((r) => Number(r.id) === 21)
+  assert.equal(Number(tier3.fallback_unit_cost_usd), 3.25, "own lot (81) is uncosted and product 5 has no cost_price_usd -- falls to product 5's OTHER costed lot (80)")
+  assert.equal(lib.removalRowLossUsd(tier3), 6.5, '2 units x $3.25')
+  ok('fallback tier 3: the product\'s own most-recently-received costed lot, a DIFFERENT lot than the one drawn from')
+
+  const tier4 = rows.find((r) => Number(r.id) === 22)
+  assert.equal(Number(tier4.fallback_unit_cost_usd), 5.5, "product 6 has no batches and no cost_price_usd -- falls to the SAME-NAME twin product 7's lot")
+  assert.equal(lib.removalRowLossUsd(tier4), 22, '4 units x $5.50')
+  ok('fallback tier 4: a same-normalized-name twin product\'s most-recently-received costed lot -- the reported production case')
+
+  const bulkDelete = rows.find((r) => Number(r.id) === 23)
+  assert.equal(Number(bulkDelete.fallback_unit_cost_usd), 1.75, "product 8's own cost_price_usd")
+  assert.equal(lib.removalRowLossUsd(bulkDelete), 8.75, '5 units x $1.75')
+  ok("bulkDeleteEngine's 'delete' movement type is now a removal loss, priced the same way as 'remove'/'write_off'")
+
+  const summary = lib.summarizeRemovalLosses(rows)
+  assert.equal(summary.removal_loss_usd, 37.25, '6.50 + 22.00 + 8.75')
+  assert.equal(summary.removal_loss_qty, 11, '2 + 4 + 5 units')
+  assert.equal(summary.removal_loss_unvalued_rows, 0)
+  ok('branch-3 totals: both new fallback tiers and the delete movement all price correctly, nothing left unvalued')
+
+  // Positive control: break the twin-name match (park product 7's lot cost)
+  // and #22 falls all the way through to unvalued -- proving tier 4 is doing
+  // the work, not that #22 was reachable some other way.
+  sql.exec(`UPDATE product_batches SET unit_cost_usd = NULL WHERE id = 90`)
+  const withTwinGone = readRows({ startDate: '2026-09-10', endDate: '2026-09-10', branchId: 3 }).find((r) => Number(r.id) === 22)
+  assert.equal(withTwinGone.fallback_unit_cost_usd, null, 'with the twin\'s lot cost gone, #22 has nothing left to price it from')
+  assert.equal(lib.removalRowLossUsd(withTwinGone), null)
+  sql.exec(`UPDATE product_batches SET unit_cost_usd = 5.50 WHERE id = 90`)
+  ok('the twin-lookup fallback changes the answer (positive control)')
 }
 
 console.log(`\nOK - ${checks} checks passed`)
