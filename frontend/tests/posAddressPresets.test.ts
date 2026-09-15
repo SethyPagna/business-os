@@ -168,6 +168,18 @@ new Function('require', 'module', 'exports', compiledPicker)((id: string) => {
   if (id === 'react/jsx-runtime') return require(id)
   if (id.startsWith('lucide-react/')) return { __esModule: true, default: () => null }
   if (id.includes('../shared/Modal')) return { __esModule: true, default: ({ children }: { children: React.ReactNode }) => React.createElement('div', null, children) }
+  // Stubbed like Modal above: this test pins the actor-scope late-write
+  // guard around the GET (does a loaded preset actually reach the mounted
+  // tree, and does Loading clear), not SuggestionTextInput's own combobox
+  // UI -- that full contract lives in tests/suggestionTextInput.test.ts. The
+  // stub still renders `value` and every `options` entry as text so the
+  // "does data actually arrive" assertion below still means something.
+  if (id.includes('../shared/SuggestionTextInput')) return {
+    __esModule: true,
+    default: ({ value, options }: { value: string; options?: (string | { value: string })[] }) => React.createElement(
+      'div', null, value, ' ', (options || []).map((option) => (typeof option === 'string' ? option : option.value)).join(', '),
+    ),
+  }
   if (id.includes('posAddressPresetsTransport')) return {
     getPosAddressPresets: async () => {
       invalidateActorReadChannel('pos')
