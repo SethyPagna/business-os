@@ -1025,7 +1025,14 @@ app.get('/', async (c) => {
   const surface = parseProductReadSurface(c.req.query('surface'))
   const denial = productSurfaceDenialReason(user, surface)
   if (denial) return c.json({ error: denial }, 403)
-  const payload = await searchProductsPayload(c.env, { page: '1', pageSize: '100' })
+  // P4-4a: this bare list used to bypass the 20s versioned cache that
+  // /search (just above) already goes through, so every call re-ran the
+  // full product query. Same version namespace ('products'), same TTL --
+  // this endpoint is just /search with a fixed page/pageSize.
+  const version = await getVersionWithFallback(c.env, 'products')
+  const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
+    return searchProductsPayload(c.env, { page: '1', pageSize: '100' })
+  })
   const items = isImageOnlyRead(user, surface)
     ? payload.items.map((item) => restrictToImageOnlyFields(item as Record<string, unknown>, getMergedPermissions(user)))
     : payload.items
