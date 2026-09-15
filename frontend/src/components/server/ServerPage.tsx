@@ -455,7 +455,10 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
 
   useEffect(() => {
     if (!active || !syncUrl || !autoRefresh) return
-    const timer = setInterval(fetchServerLog, 3000)
+    // 15s, not 3s -- this debug log is an occasional diagnostics read, not a
+    // live feed anything depends on staying under a few seconds stale; 3s
+    // was 5x the request volume this view actually needs.
+    const timer = setInterval(fetchServerLog, 15000)
     return () => clearInterval(timer)
   }, [active, syncUrl, autoRefresh, fetchServerLog])
 
