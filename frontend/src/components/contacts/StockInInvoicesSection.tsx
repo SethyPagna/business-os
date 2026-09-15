@@ -275,7 +275,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           `sticky top-2` offset the Customers/Suppliers/Delivery search rows
           use one level up. Outside the overflow-x-auto row on purpose: a
           horizontally scrolling box cannot itself be the sticky element. */}
-      <div className="sticky top-2 z-30 -mx-3 -mt-3 space-y-1.5 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
+      <div className="sticky top-2 z-30 -mx-3 -mt-3 space-y-1.5 bg-gray-50 px-3 pb-2 pt-3 dark:bg-gray-900">
       {/* P3-10. The Start→End range leads the pinned block on its OWN
           full-width row, exactly as Sales/Inventory/Branches do, because it
           used to be the THIRD control inside the `overflow-x-auto` filter

@@ -8,9 +8,13 @@ import { fileURLToPath } from 'node:url'
 // zero visible difference -- the content behind it is already almost fully
 // hidden. Removing the blur class and making the background fully opaque
 // keeps the same visual result while dropping that per-scroll-frame cost on
-// every one of these headers. Scoped to files this lane owns; the sibling
-// sites in contacts/, products/StockChangeSection.tsx, returns/ and sales/
-// are owned by other in-flight lanes and are explicitly left for wave 2.
+// every one of these headers.
+//
+// Wave 2 (P4-4b item 2): the 9 sibling sites flagged in 8d89edc5's commit
+// message as owned by other in-flight lanes (contacts/, products/
+// StockChangeSection.tsx, returns/, sales/) have all since merged onto this
+// lane's base, so they moved from outOfScopeFiles into fixedFiles below --
+// same bg-*/95 + backdrop-blur -> opaque-no-blur fix, same pattern.
 
 const testDir = dirname(fileURLToPath(import.meta.url))
 const frontendRoot = resolve(testDir, '..')
@@ -51,12 +55,7 @@ const fixedFiles = [
   'src/components/review/ReviewQueue.tsx',
   'src/components/users/Users.tsx',
   'src/components/utils-settings/AuditLog.tsx',
-]
-
-// Owned by other in-flight P4-4b lanes -- must still carry backdrop-blur on
-// their sticky header (untouched), proving this fix did not silently absorb
-// files outside its ownership.
-const outOfScopeFiles = [
+  // Wave 2 (P4-4b item 2): merged onto this lane's base, now fixed too.
   'src/components/contacts/ApInvoicesSection.tsx',
   'src/components/contacts/ArInvoicesSection.tsx',
   'src/components/contacts/CustomersTab.tsx',
@@ -67,6 +66,14 @@ const outOfScopeFiles = [
   'src/components/returns/Returns.tsx',
   'src/components/sales/Sales.tsx',
 ]
+
+// No files remain out of scope for this sweep any more -- every sticky
+// header site this lane's earlier pass (8d89edc5) deferred has now been
+// fixed above. Kept as an empty list (rather than deleted) so a future
+// sticky+backdrop-blur site added elsewhere has an obvious place to land
+// pending review, and the "left untouched" test below still runs (over
+// zero files) instead of silently disappearing.
+const outOfScopeFiles: string[] = []
 
 const stickyBlurPattern = /sticky[^"']*backdrop-blur|backdrop-blur[^"']*sticky/
 

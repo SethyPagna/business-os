@@ -1165,7 +1165,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           separate select-all row here: ContactTable renders its own
           selectAll control inside the table header via the `selectAll`
           prop below. */}
-      <div className="sticky top-2 z-30 -mx-1 flex min-w-0 items-center gap-2 bg-gray-50/95 pb-2 pt-1 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 flex min-w-0 items-center gap-2 bg-gray-50 pb-2 pt-1 dark:bg-gray-900 sm:mx-0">
         <div className="flex flex-1 min-w-0 items-center gap-2">
           <SearchInput
             id="supplier-search"

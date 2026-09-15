@@ -1537,7 +1537,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           lives per-section inside ReturnsListSurface, and the "N selected"
           banner above the stat cards already has its own fixed position
           above them -- so only the search+filter row needs the wrapper. */}
-      <div className="sticky top-2 z-30 -mx-1 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
         <div className="flex min-w-0 flex-nowrap items-center gap-2">
           <SearchInput
             id="returns-search"
