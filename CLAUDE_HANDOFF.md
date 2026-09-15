@@ -1,5 +1,7 @@
 # Business OS — Claude takeover checkpoint
 
+> **Status update, September 15 (program 3 deployed).** Supplier mirror, stock-action reasons, tagged damaged rows, removal losses in every report, supplier/invoice floats, no automatic storefront notice, and employee-editable shifts are live: commit 2e016e08 as Worker 410bc7d2-2807-4974-b52e-300e91b0dca6 (paid configuration). Migrations 0162 and 0163 are prepared and not applied. Open items and owner rulings: progress.md top section, the owner task register (September 15 section) and session-log Part 613.
+
 > **Status update, September 14 (program 2 deployed).** iOS PWA hardening, one-tap scanner, the Playwright suite and the free/paid plan split are live: commit 4b20bd68 as Worker d972a943-659e-4210-a1c9-58afc7436c0f (paid configuration). Free variant exists (`wrangler.free.toml`, `npm run deploy:free`) and is not deployed. Open items and owner rulings: progress.md top section and the owner task register.
 
 > **Status update, September 14 (Claude takeover complete).** The checkpoint below was taken over, integrated, certified and **deployed**: commit 139fcbf8 is live as Worker f5b89429-6109-4627-87ff-a868292e4225 and migrations 01580161 are applied to production D1. Current provenance and the per-item ledger live in progress.md (top entry) and docs/history/session-log.md Part 611; the register is docs/fleet/2026-09-07-owner-task-register.md. Everything under this line is the pre-takeover picture and is kept for provenance only.
