@@ -660,8 +660,12 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     // per-product discount condition are expressed in SQL so the ordering
     // and the promo filters hold across server-side pagination, not just
     // the loaded page.
+    // Promise.resolve(...) rather than a bare .then() -- some test fixtures'
+    // db stubs implement .all() synchronously (a plain array, not a real
+    // Promise); Promise.resolve() normalizes either shape into a genuine
+    // thenable so this arm composes safely inside Promise.all regardless.
     query.money_precision_version==='1'
-      ? db.prepare('SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC').all<Record<string,unknown>>()
+      ? Promise.resolve(db.prepare('SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC').all<Record<string,unknown>>())
         .then(rows => rows.map(row=>normalizePromotionRule(row,1)).filter((rule):rule is PromotionRule=>Boolean(rule && isRuleActive(rule))))
       : loadActivePromotionRules(db),
   ])

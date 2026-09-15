@@ -35,7 +35,7 @@ const DB = {
   },
 }
 const env = { DB }
-const real = new Set(['productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade'])
+const real = new Set(['productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe'])
 const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
 class ProductImageAssetError extends Error {}
 const services = {
@@ -45,7 +45,7 @@ const services = {
     hasPermission: (u) => u.tier !== 'none', isActionBlocked: () => false, isAdminControlUser: () => true,
   },
   audit: { audit: async () => { auditCount++ } },
-  cache: { bumpVersion: async () => {} },
+  cache: { bumpVersion: async () => {}, bumpVersions: async () => {} },
   broadcastHub: { broadcast: async () => {} },
   media: { sanitizeMediaList: () => [] },
   importImageMatch: { MAX_IMAGES_PER_PRODUCT: 3 },

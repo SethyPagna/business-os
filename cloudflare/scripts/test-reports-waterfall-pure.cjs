@@ -39,6 +39,10 @@ fs.writeFileSync(
 // P3-L5: salesAnalytics.ts now imports ./removalLosses (stock removed entirely,
 // priced at cost). It is dependency-free, so copying the real file in is enough.
 fs.writeFileSync(path.join(tmpDir, 'removalLosses.ts'), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'removalLosses.ts'), 'utf8'))
+// Shared per-isolate PRAGMA table_info() memoization reportTableColumns now
+// delegates to; dependency-free, so copying the real file in is enough.
+const schemaProbePath = path.join(tmpDir, 'schemaProbe.ts')
+fs.writeFileSync(schemaProbePath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'schemaProbe.ts'), 'utf8'))
 const moneyPath = path.join(tmpDir, 'moneyPrecision.ts')
 const reportMoneyPath = path.join(tmpDir, 'reportMoneyPrecision.ts')
 const customerReturnPath = path.join(tmpDir, 'customerReturnEntitlement.ts')
@@ -58,7 +62,7 @@ fs.writeFileSync(refundMoneyPath, `
 export function validateRefundMoneySnapshot(): never { throw new Error('reader_not_available_in_formula_harness') }
 `)
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${path.join(tmpDir, 'businessDateWindow.ts')} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundMoneyPath} ${saleMoneyPath}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${path.join(tmpDir, 'businessDateWindow.ts')} ${schemaProbePath} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundMoneyPath} ${saleMoneyPath}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })

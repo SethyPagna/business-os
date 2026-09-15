@@ -34,7 +34,7 @@ function loadMoneyDependency(name) {
   const loaded = { exports: {} }
   const dependency = request => {
     if (request === './importImageMatch') return { MAX_IMAGES_PER_PRODUCT: 3 }
-    const allowed = new Set(['./moneyPrecision', './db', './media', './batchCode', './searchMatch'])
+    const allowed = new Set(['./moneyPrecision', './db', './media', './batchCode', './searchMatch', './schemaProbe'])
     if (allowed.has(request)) return loadMoneyDependency(request.slice(2))
     throw new Error(`Unmapped money-policy dependency: ${request}`)
   }

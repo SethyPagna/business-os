@@ -45,6 +45,7 @@ const productWrites = load('lib/productWrites.ts', {
   './searchMatch': { normalizeSearchText: String, compactSearchText: String },
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
   '../index': {},
+  './schemaProbe': load('lib/schemaProbe.ts'),
 })
 
 const { validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError } = productWrites

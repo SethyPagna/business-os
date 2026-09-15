@@ -1329,7 +1329,12 @@ runTest('the records route is gated on READING a sale, not on amending one', () 
 })
 
 runTest('the list badge is one statement per chunk, not one query per sale', () => {
-  const list = ROUTES.slice(ROUTES.indexOf('const recordsBySale'), ROUTES.indexOf('records_count:'))
+  // recordsBySale is now the third leg of a Promise.all fan-out (D5: three
+  // independent read chains off the same saleIds run concurrently instead
+  // of sequentially) -- its own IIFE still starts right after the
+  // "Records n" comment, so anchor there instead of a bare `const
+  // recordsBySale` declaration that no longer exists standalone.
+  const list = ROUTES.slice(ROUTES.indexOf('// "Records n" on every row.'), ROUTES.indexOf('records_count:'))
   assert.match(list, /chunkForBinding\(saleIds, 0, SALE_RECORDS_COUNT_BINDS_PER_ID\)/,
     'the chunker must account for every repeated id list in the count union')
   assert.ok(!/for \(const sale of sales\)/.test(list), 'a per-sale loop over the database is the N+1 this exists to avoid')

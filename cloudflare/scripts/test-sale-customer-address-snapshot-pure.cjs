@@ -44,6 +44,9 @@ const actual = new Set([
   'contactOptions', 'saleCreationSnapshot', 'saleRecordEvents', 'saleRecords', 'anonymousCustomer',
   'moneyPrecision', 'saleMoneyPrecision', 'saleItemPricing', 'promotionRules',
   'productMergeLineage', 'saleMutationHeaderQuote', 'reportMoneyPrecision',
+  // Shared per-isolate PRAGMA table_info() memoization saleMoneySchemaReady
+  // now delegates to; no imports of its own, so it is loaded for real.
+  'schemaProbe',
 ])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
