@@ -259,7 +259,12 @@ test('a barcode or identity mismatch is NEVER offered in the selected batch', ()
   // DIFFERENT real barcodes still never auto-merge.
   assert.match(guard, /barcodeIdentityMatches\(left\.barcode, right\.barcode\)/,
     'only the shared wildcard-aware barcode fold may auto-merge a pair')
-  assert.match(duplicatesTab, /partitionSelectedConflictClusters\(targets\)/, 'selected merge must run through the guard')
+  // Selected-merge is routed exclusively through the durable server-reviewed
+  // group flow (P7 debloat retired the client-side exact-pairs batch preview
+  // that used to call partitionSelectedConflictClusters directly); the server
+  // applies the equivalent eligibility rule per group and reports it back as
+  // group.blocked, rendered by SelectedConflictGroupReviewModal.
+  assert.match(duplicatesTab, /buildSelectedConflictGroupReviewRequest\(targets, createClientRequestId/, 'selected merge must run through the durable group review')
 })
 
 test('a cross-identity merge says which field differs, and is never silent', () => {
@@ -323,11 +328,12 @@ test('a whole-catalog run that skipped pairs does not report plain success', () 
   assert.match(productsPage, /undoPendingCount \+= Math\.max\(0, Number\(result\?\.undoPendingCount \|\| 0\)\)/)
   assert.match(productsPage, /merge_duplicates_undo_unavailable/,
     'committed cases whose recovery record is incomplete must stay visible to the operator')
-  // The selected Conflicts batch reports each refusal and its independent Undo
-  // identifier in the combined result instead of reducing them to one toast.
-  assert.match(selectedConflictReview, /result\.refusals\.map/)
-  assert.match(selectedConflictReview, /item\.undoReady/)
-  assert.match(selectedConflictReview, /item\.actionHistoryId/)
+  // The selected Conflicts group review reports each applied group/removal's
+  // status (including refused/undo-ready) in the combined receipt list rather
+  // than reducing them to one toast.
+  assert.match(selectedConflictReview, /appliedGroups\.map\(\(row\) =>/)
+  assert.match(selectedConflictReview, /appliedRemovals\.map\(\(row\) =>/)
+  assert.match(selectedConflictReview, /status === 'undo_ready'\) return tr\('selected_conflict_undo_ready'/)
   for (const key of ['merge_duplicates_refused_count', 'merge_duplicates_preview_cost_refused', 'merge_duplicates_preview_cost_refused_group']) {
     assert.ok(en[key], `en.json is missing ${key}`)
     assert.ok(km[key] && /[ក-៿]/.test(km[key]), `km.json is missing ${key}`)
