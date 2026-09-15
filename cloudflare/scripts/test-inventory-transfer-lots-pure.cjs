@@ -129,6 +129,7 @@ const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
     if (dep === './transferOperationReceipt') return loadModule('lib/transferOperationReceipt.ts', require)
     if (dep === '../durable-objects/broadcastHub') return { broadcast: asyncNoop }
     if (dep === './cache') return { bumpVersion: asyncNoop }
+    if (dep === './sqlBinding') return sqlBinding
     throw new Error('unexpected transfer dependency '+dep)
   })
   if (id === '../lib/transferOperationReceipt') return loadModule('lib/transferOperationReceipt.ts', require)

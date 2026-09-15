@@ -121,11 +121,12 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
     if (dep === './db') return {getDb:dbCompat}
     if (dep === './permissions') return {getActionTier:user=>user?.tier || 'none'}
     if (dep === './actorSnapshot') return {actorSnapshot:user=>user?.name || null}
-    if (dep === './productBatches') return {readFifoLotAvailability:async()=>[],allocateAcrossLots:(_lots,quantity)=>({takes:[],uncovered:quantity})}
+    if (dep === './productBatches') return {readFifoLotAvailability:async()=>[],readFifoLotAvailabilityForCart:async()=>new Map(),allocateAcrossLots:(_lots,quantity)=>({takes:[],uncovered:quantity})}
     if (dep === './canonicalBranchIdentity') return identity
     if (dep === './transferOperationReceipt') return transferReceipts
     if (dep === './cache') return {bumpVersion:async()=>{}}
     if (dep === '../durable-objects/broadcastHub') return {broadcast:async()=>{}}
+    if (dep === './sqlBinding') return { buildInClause, chunkForBinding: (values) => [values], selectInChunks }
     throw new Error('unexpected transfer dependency '+dep)
   })
   if (id === '../lib/transferOperationReceipt') return transferReceipts
