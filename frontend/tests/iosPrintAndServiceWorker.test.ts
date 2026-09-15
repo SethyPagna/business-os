@@ -311,14 +311,22 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
   })
 }
 
-// --- A11: the dead lookup is gone -------------------------------------------
+// --- A11 / P4-4b: navigation is cache-first with background revalidation ----
+// (Was network-first-with-no-timeout: a slow-but-alive iOS connection made
+// every navigation wait for the full round trip before the shell could even
+// start parsing -- the reported "takes a while to load" lag. Serving the
+// cached shell immediately and refreshing it via event.waitUntil is safe
+// because APP_SHELL_CACHE is named after this worker's own BUILD_HASH, so it
+// can never serve a stale build's shell under a new build's version.)
 
 for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]] as const) {
-  check(`appShellFallback does no unread cache lookup (${label})`, () => {
-    const body = functionBody(source, 'async function appShellFallback', 'async function networkFirstStatic')
-    const tryBlock = body.slice(0, body.indexOf('catch'))
-    assert.doesNotMatch(tryBlock, /const cached = await cache\.match/, 'one wasted caches.match per navigation')
-    assert.match(body, /catch[\s\S]*const cached = await cache\.match/, 'the offline fallback still reads the cached shell')
+  check(`appShellFallback serves the cached shell immediately and revalidates in the background (${label})`, () => {
+    const body = functionBody(source, 'async function appShellFallback', 'async function cacheFirstStatic')
+    assert.match(body, /const cached = await cache\.match\('\/index\.html'\) \|\| await cache\.match\('\/'\)/, 'the cache is read once, up front')
+    const beforeCacheCheck = body.slice(0, body.indexOf("if (cached)"))
+    assert.doesNotMatch(beforeCacheCheck, /await fetch/, 'the network must not be awaited before a cache hit can answer')
+    assert.match(body, /if \(cached\) \{[\s\S]*event\.waitUntil\(revalidate\)[\s\S]*return cached[;\s]*\}/, 'a cache hit returns immediately; the network refresh happens after, off the response path')
+    assert.match(body, /return fetch\(request, \{ ?cache: 'no-store' ?\}\)/, 'only a genuine cache miss (this worker\'s first navigation) still waits on the network')
   })
 }
 

@@ -253,9 +253,16 @@ assert.match(app, /const NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS = 30000/, 'n
 assert.match(app, /const NOTIFICATION_CENTER_IDLE_TIMEOUT_MS = 45000/, 'deferred notification center should still wake during a long-lived session')
 assert.match(app, /const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 180000/, 'global import tracker chunk should stay out of short-session first-load windows unless import activity wakes it')
 assert.match(app, /const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 60000/, 'deferred import tracker should still wake during a long-lived session')
-assert.match(serviceWorker, /function isHashedBuildAsset\(pathname\)[\s\S]*pathname\.startsWith\('\/assets\/'\)/, 'hashed build chunks should be recognized as safe cache-first static assets')
-assert.match(serviceWorker, /async function cacheFirstStatic\(request, event\)[\s\S]*const cached = await cache\.match\(request\)[\s\S]*if \(cached\)[\s\S]*return cached/, 'hashed build chunks should use cache-first service-worker reads so repeat visits do not pay tunnel latency')
-assert.match(serviceWorker, /event\.respondWith\(isHashedBuildAsset\(url\.pathname\)[\s\S]*\? cacheFirstStatic\(request, event\)[\s\S]*: networkFirstStatic\(request\)\)/, 'only hashed build chunks should switch to cache-first while mutable runtime assets stay network-first')
+// P4-4b: cache-first now covers EVERY cacheable static path, not just
+// hashed build chunks -- the unhashed set (manifest/icons/runtime-noise-
+// guard.js/theme-bootstrap.js) was needlessly paying the round trip on
+// networkFirstStatic even though STATIC_CACHE is scoped per BUILD_HASH
+// exactly like the hashed chunks, so there was nothing it was protecting
+// against. isHashedBuildAsset/networkFirstStatic no longer exist.
+assert.match(serviceWorker, /async function cacheFirstStatic\(request, event\)[\s\S]*const cached = await cache\.match\(request\)[\s\S]*if \(cached\)[\s\S]*return cached/, 'cacheable static assets should use cache-first service-worker reads so repeat visits do not pay tunnel latency')
+assert.match(serviceWorker, /if \(!isCacheableStaticPath\(url\.pathname\)\)[\s\S]{0,20}return[;\s]*\n[\s\S]{0,700}event\.respondWith\(cacheFirstStatic\(request, event\)\)/, 'every cacheable static path -- hashed chunks and the unhashed manifest/icon/runtime-guard set alike -- should go through cacheFirstStatic')
+assert.doesNotMatch(serviceWorker, /function isHashedBuildAsset/, 'the hashed/unhashed split is gone now that both use the same cache-first strategy')
+assert.doesNotMatch(serviceWorker, /function networkFirstStatic/, 'networkFirstStatic is dead now that its only caller was removed')
 assert.match(app, /function scheduleInitialPendingSyncRefresh\(refresh: \(\) => void\): CancelWarmup/, 'pending-sync startup refresh should use a cancellable idle scheduler')
 assert.match(app, /window\.requestIdleCallback\(run, \{ timeout: PENDING_SYNC_IDLE_TIMEOUT_MS \}\)/, 'pending-sync startup refresh should prefer idle time')
 assert.match(app, /if \(!user \|\| typeof window === 'undefined'\) \{[\s\S]*return undefined[\s\S]*const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh\(refreshPendingSync\)/, 'sync banner should not import API methods or register listeners during logged-out first shell render')

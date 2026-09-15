@@ -609,45 +609,42 @@ function isCacheableStaticPath(pathname) {
     || pathname === '/theme-bootstrap.js'
 }
 
-function isHashedBuildAsset(pathname) {
-  return pathname.startsWith('/assets/')
-}
-
-async function appShellFallback(request) {
+// P4-4b: navigation used to be network-first with no timeout, so a
+// slow-but-alive connection (the reported iOS lag) made every navigation
+// wait for the full round trip before the shell could even start parsing.
+// Serve the cached shell immediately when one exists and refresh it in the
+// background instead -- the cache is safe to trust because APP_SHELL_CACHE
+// is named after THIS worker's own BUILD_HASH (see the const above): a new
+// deploy runs an entirely new worker with an entirely new cache, so this
+// can never serve an old build's shell under a new build's version. That
+// guarantee lives in the cache-name boundary, not in this function, and is
+// unaffected by this change -- the BUSINESS_OS_APP_VERSION_REQUEST reply in
+// the message handler above is the actual new-build detector and still
+// answers with this worker's real APP_SHELL_VERSION either way. Falls back
+// to a live fetch (and its normal offline error) only when there is no
+// cached shell yet, e.g. the very first navigation this worker serves.
+async function appShellFallback(request, event) {
   const cache = await caches.open(APP_SHELL_CACHE)
-  try {
-    const response = await fetch(request, { cache: 'no-store' })
+  const cached = await cache.match('/index.html') || await cache.match('/')
+  if (cached) {
+    const revalidate = fetch(request, { cache: 'no-store' })
+      .then(async (response) => {
+        // Do not let a Cloudflare Access/login redirect or an app-owned HTTP
+        // error overwrite a good cached shell -- only a real 200 updates it.
+        if (response && response.ok && response.type === 'basic' && !response.redirected) {
+          await cache.put('/index.html', response.clone()).catch(() => {})
+        }
+      })
+      .catch(() => {})
+    event.waitUntil(revalidate)
+    return cached
+  }
+  return fetch(request, { cache: 'no-store' }).then(async (response) => {
     if (response && response.ok && response.type === 'basic' && !response.redirected) {
       await cache.put('/index.html', response.clone()).catch(() => {})
-      return response
     }
-    // Do not hide Cloudflare Access/login redirects or app-owned HTTP errors
-    // behind an old cached shell. Cached shell is only for true offline failure.
     return response
-  } catch (error) {
-    const cached = await cache.match('/index.html') || await cache.match('/')
-    if (cached) return cached
-    throw error
-  }
-}
-
-async function networkFirstStatic(request) {
-  const cache = await caches.open(STATIC_CACHE)
-  const cached = await cache.match(request)
-
-  try {
-    const response = await fetch(request, { cache: 'no-store' })
-    if (response && response.ok && response.type === 'basic' && !response.redirected) {
-      await cache.put(request, response.clone()).catch(() => {})
-      return response
-    }
-    // Returning the live error/redirect prevents stale hashed chunks from
-    // masking an expired Access session or a bad deployment.
-    return response
-  } catch (error) {
-    if (cached) return cached
-    throw error
-  }
+  })
 }
 
 async function cacheFirstStatic(request, event) {
@@ -681,12 +678,17 @@ self.addEventListener('fetch', (event) => {
   if (isNeverCachedPath(url.pathname)) return
 
   if (request.mode === 'navigate') {
-    event.respondWith(appShellFallback(request))
+    event.respondWith(appShellFallback(request, event))
     return
   }
 
   if (!isCacheableStaticPath(url.pathname)) return
-  event.respondWith(isHashedBuildAsset(url.pathname)
-    ? cacheFirstStatic(request, event)
-    : networkFirstStatic(request))
+  // P4-4b: every cacheable static path (hashed build assets AND the
+  // unhashed manifest/icons/runtime-noise-guard.js/theme-bootstrap.js) is
+  // now cache-first with background revalidation -- these were previously
+  // split, with the unhashed set on networkFirstStatic (always paying the
+  // round trip before the file could be used, even though STATIC_CACHE is
+  // scoped per BUILD_HASH exactly like the app shell above, so there was no
+  // staleness risk it was actually guarding against).
+  event.respondWith(cacheFirstStatic(request, event))
 })
