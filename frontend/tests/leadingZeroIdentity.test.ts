@@ -153,30 +153,37 @@ check('POSITIVE CONTROL: the pair the parity test already pinned still merges', 
   assert.equal(merged[0].cost_price_usd, 130.6596)
 })
 
-check('NEGATIVE CONTROL: rows that are not zero twins still render separately', () => {
+check('NEGATIVE CONTROL: two genuinely different REAL barcodes still render separately', () => {
   const twoSkus = mergeSameDetailRows([
     { id: 200, name: 'Real Two Skus', barcode: '1111111111111', stock_quantity: 1 },
     { id: 201, name: 'Real Two Skus', barcode: '2222222222222', stock_quantity: 1 },
   ] as never)
-  assert.equal(twoSkus.length, 2, 'two genuinely different barcodes are two child rows')
+  assert.equal(twoSkus.length, 2, 'two genuinely different real barcodes are two child rows')
+})
 
+// Sep 15 2026 ruling supersedes the earlier Sep 4 boundary here: a broken/
+// short/empty barcode on either side is a WILDCARD, never a second identity
+// on its own -- "if both is empty merge into one empty", and a real barcode
+// vs a broken one is still one identity, the real one just wins display.
+check('WILDCARD: a broken-vs-broken or broken-vs-real pair merges into one row', () => {
   const shortCodes = mergeSameDetailRows([
     { id: 300, name: 'Short Code', barcode: '0012', stock_quantity: 1 },
     { id: 301, name: 'Short Code', barcode: '12', stock_quantity: 1 },
   ] as never)
-  assert.equal(shortCodes.length, 2, 'a 2-digit survivor is too short to fold')
+  assert.equal(shortCodes.length, 1, 'two codes below the real-barcode floor (6 digits) wildcard-merge')
 
   const placeholders = mergeSameDetailRows([
     { id: 400, name: 'Placeholder', barcode: '0', stock_quantity: 1 },
     { id: 401, name: 'Placeholder', barcode: null, stock_quantity: 1 },
   ] as never)
-  assert.equal(placeholders.length, 2, "the placeholder '0' must never collapse into the unbarcoded row")
+  assert.equal(placeholders.length, 1, "two broken codes ('0' and empty) merge into one empty identity")
 
   const halfBarcoded = mergeSameDetailRows([
     { id: 500, name: 'Half Barcoded', barcode: null, stock_quantity: 1 },
     { id: 501, name: 'Half Barcoded', barcode: '5012345678900', stock_quantity: 1 },
   ] as never)
-  assert.equal(halfBarcoded.length, 2, 'an unbarcoded row is not absorbed into a barcoded sibling')
+  assert.equal(halfBarcoded.length, 1, 'an unbarcoded row is a wildcard and merges into its real-barcoded sibling')
+  assert.equal(halfBarcoded[0].barcode, '5012345678900', 'the real barcode wins the merged row\'s displayed barcode')
 })
 
 // --- the guard that must NOT be widened ------------------------------------

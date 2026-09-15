@@ -50,7 +50,10 @@ assert.deepEqual(
   'the cleaner equivalent barcode survives even when it has less stock or a lower-priority input position',
 )
 assert.equal(selectedConflictEligibility(cluster('pair', product(1, { name: 'Case Water' }), product(2, { name: 'Case Soda' }))).eligible, false)
-assert.equal(selectedConflictEligibility(cluster('pair', product(1), product(2, { barcode: '999' }))).eligible, false)
+// A REAL (>=6-digit) but genuinely different barcode -- '999' is BROKEN
+// under the Sep 15 2026 realness floor and would now wildcard-merge instead
+// of staying ineligible.
+assert.equal(selectedConflictEligibility(cluster('pair', product(1), product(2, { barcode: '999999' }))).eligible, false)
 assert.equal(selectedConflictEligibility(cluster('pair', product(1), product(2, { is_active: 0 }))).eligible, false)
 assert.equal(selectedConflictEligibility(cluster('pair', product(1), product(2, { group_id: 20 }))).eligible, false)
 assert.equal(selectedConflictEligibility(cluster('pair', product(1), product(2, { cost_price_usd: Number.NaN }))).eligible, false)

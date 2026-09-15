@@ -203,13 +203,18 @@ check('RULING 1: the grouped row merges them into one, averaging cost and '
   assert.equal(merged[0].stock_quantity, 5, 'stock adds')
 })
 
-check('RULING 1 boundary: an unbarcoded row is NOT absorbed into a barcoded '
-  + 'sibling of the same name', () => {
+// Sep 15 2026 ruling supersedes this Sep 4 boundary: an unbarcoded row is a
+// WILDCARD, never a second identity on its own, so it now merges into its
+// real-barcoded sibling of the same name (the real barcode wins the merged
+// row's displayed value).
+check('RULING 1 superseded (Sep 15 2026): an unbarcoded row IS absorbed into a '
+  + 'REAL-barcoded sibling of the same name', () => {
   const merged = mergeSameDetailRows([
     { id: 20, name: 'Half Barcoded', barcode: null, stock_quantity: 1 },
     { id: 21, name: 'Half Barcoded', barcode: '5012345678900', stock_quantity: 1 },
   ] as never)
-  assert.equal(merged.length, 2, 'the owner authorised merging two UNbarcoded rows, not this')
+  assert.equal(merged.length, 1, 'a broken/empty barcode is a wildcard, not a second identity')
+  assert.equal(merged[0].barcode, '5012345678900', 'the real barcode wins the merged row\'s displayed barcode')
 })
 
 console.log(`\n${passed} checks passed`)
