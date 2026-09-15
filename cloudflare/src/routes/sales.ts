@@ -2526,30 +2526,32 @@ app.patch('/:id/status', async (c) => {
     throw error
   }
 
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', id, {
-    operationId: settlementOperationId || statusOperationId,
-    ...(!paymentFieldsSent && statusSourceId ? { record_event: {
-      source_kind: 'sale_status', source_id: statusSourceId, generation: 0, sale_id: Number(id),
-    } } : {}),
-    oldStatus,
-    newStatus: saleStatus,
-    ...(cancelReason ? { cancelReason, cancelNote, cancelFeeUsd, cancelFeeKhr } : {}),
-    ...(oldStatus === 'cancelled' && sale.cancel_fee_id ? { removedCancelFeeId: sale.cancel_fee_id } : {}),
-    restoredUnits: plan.restoredUnits,
-    deductedUnits: plan.deductedUnits,
-    // S4-2: the second half of "record that stock was deliberately
-    // skipped" -- the sale carries the flag, the audit trail carries WHO,
-    // WHEN, HOW MANY units were not moved, and whether this transition
-    // asked for it or merely inherited an earlier skip.
-    ...(skipStock ? {
-      stockSkipped: true,
-      stockSkippedUnits: totalSkippedUnits,
-      stockSkipSource: skipStockRequested ? 'requested' : 'sale_already_stock_skipped',
-    } : {}),
-  })
-  // Same cache-invalidation reasoning as POST / above -- a status change
-  // here can deduct or restore stock.
+  // P4-4a: the response below (built from settlementResponse/directStatusResponse/
+  // the re-read `updated` row) does not read anything audit() writes, so the
+  // audit insert can run after the response is sent -- same reasoning as the
+  // bumpVersion/broadcast calls already deferred into this waitUntil.
   c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', id, {
+      operationId: settlementOperationId || statusOperationId,
+      ...(!paymentFieldsSent && statusSourceId ? { record_event: {
+        source_kind: 'sale_status', source_id: statusSourceId, generation: 0, sale_id: Number(id),
+      } } : {}),
+      oldStatus,
+      newStatus: saleStatus,
+      ...(cancelReason ? { cancelReason, cancelNote, cancelFeeUsd, cancelFeeKhr } : {}),
+      ...(oldStatus === 'cancelled' && sale.cancel_fee_id ? { removedCancelFeeId: sale.cancel_fee_id } : {}),
+      restoredUnits: plan.restoredUnits,
+      deductedUnits: plan.deductedUnits,
+      // S4-2: the second half of "record that stock was deliberately
+      // skipped" -- the sale carries the flag, the audit trail carries WHO,
+      // WHEN, HOW MANY units were not moved, and whether this transition
+      // asked for it or merely inherited an earlier skip.
+      ...(skipStock ? {
+        stockSkipped: true,
+        stockSkippedUnits: totalSkippedUnits,
+        stockSkipSource: skipStockRequested ? 'requested' : 'sale_already_stock_skipped',
+      } : {}),
+    }),
     bumpVersion(c.env, 'products'),
     bumpVersion(c.env, 'sales'),
     ...((sale.cancel_fee_id || (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)))
@@ -2826,15 +2828,16 @@ app.patch('/:id/customer', async (c) => {
     throw error
   }
 
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', saleId, {
-    record_event: { source_kind: 'sale_customer', source_id: sourceId, generation: 0, sale_id: saleId },
-    previous_customer_id: sale.customer_id ?? null,
-    next_customer_id: customer?.id ?? null,
-    membership_number: customer?.membership_number ?? null,
-    cleared: shouldClear,
-  })
-
+  // P4-4a: `response` is already fully built above and does not read the
+  // audit row, so defer it the same way as the bumpVersion calls below.
   c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', saleId, {
+      record_event: { source_kind: 'sale_customer', source_id: sourceId, generation: 0, sale_id: saleId },
+      previous_customer_id: sale.customer_id ?? null,
+      next_customer_id: customer?.id ?? null,
+      membership_number: customer?.membership_number ?? null,
+      cleared: shouldClear,
+    }),
     bumpVersion(c.env, 'sales'),
     bumpVersion(c.env, 'returns'),
   ]))
@@ -5007,35 +5010,21 @@ async function auditAmendment(
   sale: { receipt_number?: unknown; sale_status?: unknown },
   details: Record<string, unknown>,
 ): Promise<void> {
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', saleId, {
-    action: 'amend',
-    receipt_number: sale.receipt_number ?? null,
-    sale_status: sale.sale_status ?? null,
-    ...details,
-  })
+  // P4-4a: every caller `await`s auditAmendment() only to build its response
+  // afterward from the mutation's own committed receipt (committedMutationResponse)
+  // or from the mutationStamp it already computed in JS -- neither reads this
+  // audit row, so it can run alongside the cache bumps below instead of being
+  // its own separate round trip on the request's critical path.
   c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', saleId, {
+      action: 'amend',
+      receipt_number: sale.receipt_number ?? null,
+      sale_status: sale.sale_status ?? null,
+      ...details,
+    }),
     bumpVersion(c.env, 'products'),
     bumpVersion(c.env, 'sales'),
   ]))
-}
-
-/** The shape every amendment answers with, so the client never has to guess. */
-async function amendmentResponse(
-  c: AmendmentContext,
-  db: ReturnType<typeof getDb>,
-  input: {
-    saleId: number
-    sale: { amount_paid_usd?: unknown; amount_paid_khr?: unknown; receipt_number?: unknown }
-    money: { totalUsd: number; totalKhr: number; subtotalUsd: number }
-    exchangeRate: number
-    stockMoved: boolean
-    unitsMoved: number
-    stockSkipped: boolean
-    tax: AmendedTaxResult
-  },
-) {
-  const updated = await db.prepare('SELECT updated_at FROM sales WHERE id = ?').get<{ updated_at: string }>([input.saleId])
-  return c.json(buildAmendmentResponsePayload(input, updated?.updated_at || null))
 }
 
 function buildAmendmentResponsePayload(
