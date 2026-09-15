@@ -112,7 +112,20 @@ class D1Compat {
         // write path that works in production -- the worst kind of test
         // infrastructure bug, because it accuses correct code.
         const stmt = new Stmt(this.db, item.sql)
-        const info = stmt.run(item.params || {})
+        // Real D1 batch() answers a SELECT the same as a standalone
+        // prepare().all() would -- rows land on the result's `.results`
+        // array (see lib/db.ts's batch()/D1Result). node:sqlite's own
+        // StatementSync.run() never returns rows even for a SELECT (it only
+        // answers changes/lastInsertRowid), so routing a read statement
+        // through Stmt.run() here would silently hand every caller of
+        // db.batch([...reads]) (e.g. familyPagination.ts's COUNT + page
+        // query) an empty result set instead of failing loudly -- caught
+        // when familyPagination.ts moved from two prepare().get()/.all()
+        // calls to one db.batch() round trip.
+        const isRead = /^\s*(SELECT|WITH)\b/i.test(item.sql)
+        const info = isRead
+          ? { success: true, results: stmt.all(item.params || {}), meta: { changes: 0 } }
+          : stmt.run(item.params || {})
         results.push(info)
       }
       this.db.exec('COMMIT')
