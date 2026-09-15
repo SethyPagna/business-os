@@ -76,7 +76,12 @@ function withTimeout(work: Promise<unknown>, timeoutMs: number): Promise<void> {
   })
 }
 
-async function waitForFrameAssets(frameWindow: Window, frameDocument: Document): Promise<void> {
+// Exported so a caller that needs to act on the print document AFTER its
+// fonts/images have settled but BEFORE print() is invoked (receipt printing
+// re-measures its @page height in exactly that window) can await the same
+// wait this module already uses for the hidden-iframe path, instead of
+// inventing a second one that could disagree on timing.
+export async function waitForFrameAssets(frameWindow: Window, frameDocument: Document): Promise<void> {
   const fonts = (frameDocument as Document & { fonts?: FontFaceSet }).fonts
   await withTimeout(Promise.all([
     fonts?.ready ? Promise.resolve(fonts.ready) : Promise.resolve(),
@@ -114,8 +119,18 @@ function removeFrameAfterPrinting(frame: HTMLIFrameElement, frameWindow: Window)
  * Resolves once the platform print dialog has been asked for; returns false
  * only when this environment cannot host a frame at all, so the caller can
  * report a real failure rather than a silent no-op.
+ *
+ * `beforePrint`, when given, runs after fonts/images have settled and BEFORE
+ * print() is called -- the one moment a caller can still rewrite something in
+ * the frame's own document (receipt printing uses this to re-measure its
+ * @page height inside the actual document that is about to print, not the
+ * app's off-screen estimate). A throwing beforePrint must never cancel the
+ * print itself; the frame already carries a working fallback.
  */
-export async function printHtmlInHiddenFrame(html: string): Promise<boolean> {
+export async function printHtmlInHiddenFrame(
+  html: string,
+  options: { beforePrint?: (frameWindow: Window, frameDocument: Document) => void | Promise<void> } = {},
+): Promise<boolean> {
   if (typeof document === 'undefined' || !document.body) return false
   // Never two at once: the previous document is dropped before this one is
   // written, so repeated taps cannot leave frames (and their decoded fonts
@@ -144,6 +159,9 @@ export async function printHtmlInHiddenFrame(html: string): Promise<boolean> {
     frameDocument.write(html)
     frameDocument.close()
     await waitForFrameAssets(frameWindow, frameDocument)
+    if (options.beforePrint) {
+      try { await options.beforePrint(frameWindow, frameDocument) } catch { /* fallback @page rule already in the document */ }
+    }
     removeFrameAfterPrinting(frame, frameWindow)
     frameWindow.focus()
     // Safari (every iOS browser is Safari's engine) prints the frame's own

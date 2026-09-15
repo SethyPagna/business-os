@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { buildPrintablePreviewDocument, buildSingleImagePdf } from '../src/utils/printReceipt.ts'
+import {
+  buildPrintablePreviewDocument,
+  buildSingleImagePdf,
+  measureContinuousRollPageHeightMm,
+  remeasureContinuousRollBeforePrint,
+  writeContinuousRollPageSize,
+} from '../src/utils/printReceipt.ts'
 import { computeImagePageSegments } from '../src/utils/receiptPdfLayout.ts'
 
 let failed = 0
@@ -130,7 +136,7 @@ await runTest('explicit 80x50 card remains one fitted sheet', () => {
     'the compact caller cannot be confused with an arbitrary custom document')
 })
 
-await runTest('direct continuous print is one measured-height CSS page at constant width for 1/10/25 items', () => {
+await runTest('direct continuous print keeps a VALID width-by-measured-height @page (never `auto` combined with a length), and never a forced page break', () => {
   const samples = [
     { items: 1, heightMm: 124.83 },
     { items: 10, heightMm: 248.65 },
@@ -146,21 +152,151 @@ await runTest('direct continuous print is one measured-height CSS page at consta
       continuousRoll: true,
       singleSheet: false,
     })
-    assert.match(html, new RegExp(`size: 80mm ${sample.heightMm.toFixed(2)}mm`))
-    assert.match(html, new RegExp(`height: ${sample.heightMm.toFixed(2)}mm !important`))
+    // 2026-09-15 (owner, real 80mm print photos) + coordinator review:
+    // `size: 80mm auto` is INVALID CSS (a length combined with `auto` is a
+    // parse error under CSS Paged Media, which only accepts `auto` alone,
+    // one/two lengths, or a page-size keyword) -- the whole @page declaration
+    // is dropped and the printer falls back to its own default document
+    // size. That is exactly the a4d99ac0/943e9884 failure (Sep 12) repeated.
+    // The fallback baked into the initial markup must stay a VALID explicit
+    // width x height.
+    assert.match(html, new RegExp(`size: 80mm ${sample.heightMm.toFixed(2)}mm`),
+      `${sample.items} items keep a valid explicit fallback @page size`)
+    assert.doesNotMatch(html, /size:\s*[\d.]+mm\s+auto/, `${sample.items} items: size is never a length combined with auto`)
+    assert.doesNotMatch(html, /size:\s*auto\s*[,;)]/, `${sample.items} items: size never falls back to the printer default document size`)
+    // No fixed/min height forced on the print root -- it grows with content.
+    assert.doesNotMatch(html, /height:\s*[\d.]+mm !important/,
+      `${sample.items} items: no fixed page height on the print root`)
+    assert.match(html, /height:\s*auto !important/)
+    assert.match(html, /min-height:\s*0 !important/)
     assert.match(html, /width: 80mm !important/)
-    assert.doesNotMatch(html, /size:\s*auto/)
     assert.doesNotMatch(html, /transform:\s*scale\(/)
+    // Nothing forces a page break: no break-inside / page-break-inside rule
+    // anywhere in the document (that is what pushed the whole QR block onto
+    // its own physical strip when the measured height came up short).
+    assert.doesNotMatch(html, /break-inside/, `${sample.items} items: no break-inside rule anywhere`)
+    assert.doesNotMatch(html, /page-break-inside/, `${sample.items} items: no page-break-inside rule anywhere`)
+    assert.doesNotMatch(html, /page-break-before/, `${sample.items} items: no page-break-before rule anywhere`)
+    assert.doesNotMatch(html, /break-before/, `${sample.items} items: no break-before rule anywhere`)
     for (const id of itemIds) assert.ok(html.includes(id), `${id} is retained`)
     assert.ok(html.includes('TOTAL'))
     assert.ok(html.includes('QR-SYMBOL'))
+    // Everything -- items, totals and the QR footer -- lives inside the ONE
+    // print container; the markup was never split into more than one
+    // `.receipt-frame`.
+    assert.equal((html.match(/class="receipt-frame"/g) || []).length, 1,
+      `${sample.items} items render inside exactly one print container`)
+    // The dedicated, initially-empty stylesheet the in-document re-measure
+    // overwrites right before print(), and the visible length diagnostic it
+    // also updates.
+    assert.match(html, /<style id="receipt-page-size"><\/style>/)
+    assert.match(html, new RegExp(`data-receipt-length-line="true">Receipt length: ${sample.heightMm}`),
+      'the app-measured length shows in the toolbar diagnostics before the in-document re-measure runs')
   }
 
   const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
-  assert.match(source, /the web page cannot prevent the native print pipeline from shrinking or[\s\S]*clipping/,
-    'fixed driver media mismatch remains explicitly documented, not claimed solved')
   assert.doesNotMatch(source, /\.slice\(0, 260\)/,
     'the text fallback must not silently discard late receipt items or totals')
+})
+
+await runTest('a genuine fixed sheet (80x50 card / A4 / Letter / custom height) keeps its explicit @page height and break-avoidance, and never carries a length line', () => {
+  const html = buildPrintablePreviewDocument({
+    markup: '<section>ITEM-1|TOTAL|QR-SYMBOL</section>',
+    widthMm: 80,
+    pageHeightMm: 50,
+    continuousRoll: false,
+    singleSheet: true,
+  })
+  assert.match(html, /size: 80mm 50\.00mm/)
+  assert.doesNotMatch(html, /size:\s*80mm auto/)
+  assert.match(html, /break-inside: avoid-page/, 'a real single card still keeps its content from bleeding onto a second card')
+  assert.doesNotMatch(html, /data-receipt-length-line/, 'a fixed sheet is already fitted to its explicit height; it has no roll length to report')
+})
+
+function makeFakeReceiptFrame(scrollHeightPx: number, renderedWidthPx: number): HTMLElement {
+  return {
+    getBoundingClientRect: () => ({ width: renderedWidthPx, height: 0 }),
+    scrollHeight: scrollHeightPx,
+    offsetWidth: renderedWidthPx,
+    offsetHeight: scrollHeightPx,
+  } as unknown as HTMLElement
+}
+
+await runTest('measureContinuousRollPageHeightMm reads the ACTUAL print document (fake DOM), not the app off-screen estimate', () => {
+  // 1800px tall at a 300px-wide frame standing in for 80mm: 1800 * (80/300)
+  // = 480mm content, +3mm safety buffer = 483mm.
+  const fakeDoc = { querySelector: (selector: string) => (selector === '.receipt-frame' ? makeFakeReceiptFrame(1800, 300) : null) } as unknown as Document
+  assert.equal(measureContinuousRollPageHeightMm(fakeDoc, 80), 483)
+
+  const noFrameDoc = { querySelector: () => null } as unknown as Document
+  assert.equal(measureContinuousRollPageHeightMm(noFrameDoc, 80), null, 'a document with no .receipt-frame is a safe null, never a throw')
+
+  const zeroWidthDoc = { querySelector: () => makeFakeReceiptFrame(1800, 0) } as unknown as Document
+  assert.equal(measureContinuousRollPageHeightMm(zeroWidthDoc, 80), null, 'a zero-width frame cannot be converted to mm; stay null rather than divide by zero')
+})
+
+await runTest('writeContinuousRollPageSize overwrites #receipt-page-size with a VALID @page rule, never `auto`', () => {
+  let written = ''
+  const fakeStyleEl = { set textContent(value: string) { written = value } } as unknown as HTMLElement
+  const fakeDoc = { getElementById: (id: string) => (id === 'receipt-page-size' ? fakeStyleEl : null) } as unknown as Document
+  writeContinuousRollPageSize(fakeDoc, 80, 187.416)
+  assert.equal(written, '@page { size: 80mm 187.42mm; margin: 0; }')
+  assert.doesNotMatch(written, /auto/)
+
+  // Missing element (a fixed-sheet document, or a print with no JS) must not throw.
+  const noStyleDoc = { getElementById: () => null } as unknown as Document
+  assert.doesNotThrow(() => writeContinuousRollPageSize(noStyleDoc, 80, 187.42))
+})
+
+await runTest('remeasureContinuousRollBeforePrint runs the @page rewrite AND the visible length update together, and is a no-op for a fixed sheet', () => {
+  let pageSizeCss = ''
+  const fakeStyleEl = { set textContent(value: string) { pageSizeCss = value } } as unknown as HTMLElement
+  let lengthText = ''
+  const fakeLengthEl = { set textContent(value: string) { lengthText = value } } as unknown as HTMLElement
+  const fakeDoc = {
+    querySelector: (selector: string) => {
+      if (selector === '.receipt-frame') return makeFakeReceiptFrame(1800, 300)
+      if (selector === '[data-receipt-length-line]') return fakeLengthEl
+      return null
+    },
+    getElementById: (id: string) => (id === 'receipt-page-size' ? fakeStyleEl : null),
+  } as unknown as Document
+
+  remeasureContinuousRollBeforePrint(fakeDoc, { markup: '', widthMm: 80, pageHeightMm: 100, continuousRoll: true, singleSheet: false })
+  assert.equal(pageSizeCss, '@page { size: 80mm 483.00mm; margin: 0; }')
+  assert.match(lengthText, /483/)
+
+  pageSizeCss = ''
+  lengthText = ''
+  remeasureContinuousRollBeforePrint(fakeDoc, { markup: '', widthMm: 80, pageHeightMm: 50, continuousRoll: false, singleSheet: true })
+  assert.equal(pageSizeCss, '', 'a fixed sheet already fitted to its explicit height must never be rewritten')
+  assert.equal(lengthText, '')
+
+  // A throwing measurement must never propagate and block the print.
+  const throwingDoc = { querySelector: () => { throw new Error('boom') } } as unknown as Document
+  assert.doesNotThrow(() => remeasureContinuousRollBeforePrint(throwingDoc, { markup: '', widthMm: 80, pageHeightMm: 100, continuousRoll: true, singleSheet: false }))
+})
+
+await runTest('both print delivery paths re-measure inside the actual print document, right before print()', () => {
+  const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+  // Preview-window path: waits for the document's own fonts/images, THEN
+  // re-measures, THEN calls print() -- in that order, both on the Print
+  // button and on the auto-print schedule.
+  assert.match(source,
+    /const printNow = async \(\) => \{[\s\S]{0,200}await waitForFrameAssets\(previewWindow, doc\)[\s\S]{0,200}remeasureContinuousRollBeforePrint\(doc, layout, options\.previewTranslate\)[\s\S]{0,120}previewWindow\.print\?\.\(\)/,
+    'the preview window re-measures after asset-wait and before print()')
+  assert.match(source, /printButton\?\.addEventListener\('click', \(\) => \{ void printNow\(\) \}\)/)
+  assert.match(source, /const schedulePrint = \(\) => previewWindow\.setTimeout\?\.\(\(\) => \{ void printNow\(\) \}, 240\)/)
+  // Hidden-iframe path: printHtmlInHiddenFrame already awaits fonts/images
+  // internally; the beforePrint hook re-measures right before IT prints.
+  assert.match(source,
+    /printHtmlInHiddenFrame\(html, \{[\s\S]{0,400}beforePrint: \(_win, frameDoc\) => \{ remeasureContinuousRollBeforePrint\(frameDoc, layout, options\.previewTranslate\) \}/,
+    'the hidden-iframe path re-measures via beforePrint before it calls print()')
+
+  const surfaceSource = fs.readFileSync(new URL('../src/utils/printSurface.ts', import.meta.url), 'utf8')
+  assert.match(surfaceSource, /await waitForFrameAssets\(frameWindow, frameDocument\)[\s\S]{0,200}if \(options\.beforePrint\)/,
+    'printHtmlInHiddenFrame invokes beforePrint AFTER assets settle and BEFORE print()')
+  assert.match(surfaceSource, /if \(!printed\) frameWindow\.print\(\)/)
 })
 
 if (failed > 0) process.exitCode = 1
