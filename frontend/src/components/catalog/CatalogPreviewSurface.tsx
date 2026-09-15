@@ -351,7 +351,16 @@ export default function CatalogPreviewSurface({
                   {/* 6.2 (user): the LOGO is out of the top bar -- it still
                       lives on the About page hero. Social links take this
                       side; language + light/dark sit on the far side. */}
-                  <div className="flex min-w-0 flex-wrap items-center gap-1">
+                  {/* `flex-nowrap`, not `flex-wrap`: at 320-375px this row and
+                      the wishlist/account/language/theme row on the other
+                      side share one line with the brand name pushed to row
+                      2 below. Wrapping split Facebook/Instagram from
+                      Telegram onto a second row and pushed the brand name
+                      down again underneath it. Icons shrink one size below
+                      `sm` instead, which keeps all three (and a fourth, if a
+                      merchant adds a website link) on the one row every
+                      phone width the storefront targets. */}
+                  <div className="flex min-w-0 flex-nowrap items-center gap-0.5 sm:gap-1">
                     {headerLinks.map((item) => {
                       const Icon = item.icon
                       return (
@@ -360,11 +369,11 @@ export default function CatalogPreviewSurface({
                           href={item.value}
                           target="_blank"
                           rel="noreferrer"
-                          className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 ${item.accentClassName || ''}`}
+                          className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${item.accentClassName || ''}`}
                           aria-label={item.label}
                           title={item.label}
                         >
-                          <Icon className="h-[18px] w-[18px]" />
+                          <Icon className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
                         </a>
                       )
                     })}
@@ -393,7 +402,11 @@ export default function CatalogPreviewSurface({
                       </div>
                     ) : null}
                   </div>
-                  <div className="flex flex-wrap items-center justify-end gap-1">
+                  {/* Same one-row rule as the social links opposite it --
+                      `flex-nowrap` plus the sub-`sm` shrink keeps wishlist/
+                      account/language/theme together even with all four
+                      present. */}
+                  <div className="flex flex-nowrap items-center justify-end gap-0.5 sm:gap-1">
                     {/* Wishlist + Account live in the top bar (public storefront
                         only — the admin editor preview doesn't wire these
                         handlers, so they don't render there). Each opens its own
@@ -401,12 +414,12 @@ export default function CatalogPreviewSurface({
                     {onOpenWishlist ? (
                       <button
                         type="button"
-                        className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                        className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                         onClick={onOpenWishlist}
                         aria-label={copy('wishlistTitle', 'Wishlist')}
                         title={copy('wishlistTitle', 'Wishlist')}
                       >
-                        <Heart className="h-[18px] w-[18px]" />
+                        <Heart className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
                         {wishlistCount > 0 ? (
                           <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white">
                             {wishlistCount}
@@ -417,12 +430,12 @@ export default function CatalogPreviewSurface({
                     {onOpenAccount ? (
                       <button
                         type="button"
-                        className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-100 dark:hover:bg-neutral-800 ${accountSignedIn ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-700 dark:text-neutral-200'}`}
+                        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-100 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${accountSignedIn ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-700 dark:text-neutral-200'}`}
                         onClick={onOpenAccount}
                         aria-label={copy('account', 'Account')}
                         title={copy('account', 'Account')}
                       >
-                        <User className="h-[18px] w-[18px]" />
+                        <User className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
                       </button>
                     ) : null}
                     {displayConfig.translateWidgetEnabled ? (
@@ -434,11 +447,11 @@ export default function CatalogPreviewSurface({
                         trigger={(
                           <button
                             type="button"
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                             aria-label={copy('publicTranslation', 'Language tools')}
                             title={copy('publicTranslation', 'Language tools')}
                           >
-                            <Globe className="h-[18px] w-[18px]" />
+                            <Globe className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
                           </button>
                         )}
                         content={({ closeMenu }) => {
@@ -542,12 +555,12 @@ export default function CatalogPreviewSurface({
                     ) : null}
                     <button
                       type="button"
-                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                       onClick={toggleTheme}
                       aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
                       title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
                     >
-                      {darkMode ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
+                      {darkMode ? <Sun className="h-4 w-4 sm:h-[18px] sm:w-[18px]" /> : <Moon className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />}
                     </button>
                   </div>
                 </div>
