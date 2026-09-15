@@ -49,6 +49,20 @@ assert.throws(() => subject.canonicalReturnCreateIntent({ money_precision_versio
   items: [{ sale_item_id: 8, quantity: 1 }], replacement_items: [{ product_id: 2, quantity: 1 }], expected_quote: expectedQuote }), /replacement/i)
 assert.throws(() => subject.canonicalReturnCreateIntent({ money_precision_version: 1, sale_id: 4, reason: 'x',
   items: [{ sale_item_id: 9, quantity: 1 }], expected_quote: expectedQuote }), /does not match/i)
+// P4-3: the damaged-line choice is IN the digest only when the client sent it,
+// so a legacy request keeps its exact bytes while a changed tag/disposition is
+// a different intent (never replayed as an exact repeat).
+const tagged = subject.canonicalReturnCreateIntent({ sale_id: 4, reason: 'x',
+  items: [{ sale_item_id: 8, quantity: 1, stock_action: 'damaged', condition_tag: ' broken ', damaged_disposition: 'remove' }] })
+assert.deepEqual({ condition_tag: tagged.items[0].condition_tag, damaged_disposition: tagged.items[0].damaged_disposition },
+  { condition_tag: 'broken', damaged_disposition: 'remove' }, 'damaged choice joins the v0 digest when sent')
+assert.notDeepEqual(JSON.stringify(tagged), JSON.stringify(subject.canonicalReturnCreateIntent({ sale_id: 4, reason: 'x',
+  items: [{ sale_item_id: 8, quantity: 1, stock_action: 'damaged', condition_tag: 'expired', damaged_disposition: 'remove' }] })),
+  'a different tag is a different intent')
+const taggedV1 = subject.canonicalReturnCreateIntent({ money_precision_version: 1, sale_id: 4, reason: 'x',
+  items: [{ sale_item_id: 8, quantity: 1, stock_action: 'damaged', condition_tag: 'broken' }], expected_quote: expectedQuote })
+assert.deepEqual(taggedV1.items, [{ sale_item_id: 8, quantity: 1, stock_action: 'damaged', branch_id: null, batch_id: null, condition_tag: 'broken' }],
+  'v1 carries the tag only; an unsent disposition adds no key')
 assert.throws(() => subject.canonicalReturnCreateIntent({ reason: 'x', items: [] }), /items required/i)
 assert.throws(() => subject.canonicalReturnCreateIntent({ reason: 'x'.repeat(501), items: [{ quantity: 1 }] }), /500 UTF-8 bytes/)
 

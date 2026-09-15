@@ -31,9 +31,11 @@ type CanonicalItem = {
   // P4-3: only meaningful when stock_action is 'damaged'. In the digest so a
   // retry of the same client_request_id with a genuinely different tag or
   // disposition is caught as a changed request, not replayed as an exact
-  // repeat -- see resolveDamagedReturnChoice.
-  condition_tag: string | null
-  damaged_disposition: string | null
+  // repeat -- see resolveDamagedReturnChoice. The keys are PRESENT only when
+  // the client sent a value, so a request without them keeps the exact
+  // legacy digest bytes (an in-flight retry across the deploy still replays).
+  condition_tag?: string
+  damaged_disposition?: string
 }
 
 type CanonicalReplacementItem = {
@@ -52,8 +54,8 @@ type CanonicalV1Item = {
   stock_action: 'none' | 'restock' | 'damaged'
   branch_id: number | null
   batch_id: number | null
-  condition_tag: string | null
-  damaged_disposition: string | null
+  condition_tag?: string
+  damaged_disposition?: string
 }
 
 function positiveId(value: unknown): number | null {
@@ -87,6 +89,16 @@ function canonicalStockAction(item: Record<string, unknown>): 'none' | 'restock'
   return item.return_to_stock === false ? 'none' : 'restock'
 }
 
+// P4-3 damaged-line choice: keys only when sent, see CanonicalItem.
+function damagedChoiceKeys(item: Record<string, unknown>): { condition_tag?: string, damaged_disposition?: string } {
+  const conditionTag = boundedText(item.condition_tag, 40)
+  const disposition = boundedText(item.damaged_disposition, 40)
+  return {
+    ...(conditionTag ? { condition_tag: conditionTag } : {}),
+    ...(disposition ? { damaged_disposition: disposition } : {}),
+  }
+}
+
 function canonicalItem(value: unknown, index: number): CanonicalItem {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`Return item ${index + 1} must be an object`)
@@ -106,8 +118,7 @@ function canonicalItem(value: unknown, index: number): CanonicalItem {
     stock_action: canonicalStockAction(item),
     branch_id: positiveId(item.branch_id),
     batch_id: positiveId(item.batch_id),
-    condition_tag: boundedText(item.condition_tag, 40),
-    damaged_disposition: boundedText(item.damaged_disposition, 40),
+    ...damagedChoiceKeys(item),
   }
 }
 
@@ -148,8 +159,7 @@ function canonicalV1Item(value: unknown, index: number): CanonicalV1Item {
     return value
   }
   return { sale_item_id: item.sale_item_id, quantity: item.quantity, stock_action: canonicalStockAction(item),
-    branch_id: optionalId('branch_id'), batch_id: optionalId('batch_id'),
-    condition_tag: boundedText(item.condition_tag, 40), damaged_disposition: boundedText(item.damaged_disposition, 40) }
+    branch_id: optionalId('branch_id'), batch_id: optionalId('batch_id'), ...damagedChoiceKeys(item) }
 }
 
 function canonicalReturnCreateIntentV1(body: Record<string, unknown>): Record<string, unknown> {
