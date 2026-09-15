@@ -376,10 +376,16 @@ export default function DateTimeRangePicker({
   const showTimes = showTime && Boolean(value.startTime || value.endTime)
   const startTriggerDate = displayDate(value.startDate) || 'DD/MM/YYYY'
   const endTriggerDate = displayDate(value.endDate) || 'DD/MM/YYYY'
+  // Both endpoints stay on ONE line each -- date and time inline, never
+  // stacked (user, Sep 15: "i want them same compact one row"). Was a
+  // `grid` with the time in a second span underneath, which turned the
+  // whole trigger into two lines whenever a time was set. The clamp floor
+  // drops slightly when a time is shown so `dd/mm/yyyy HH:MM` still fits
+  // at the narrowest (375px) width without wrapping.
   const triggerEndpoint = (date: string, time: string) => (
-    <span className={`grid min-w-0 justify-items-center whitespace-nowrap tabular-nums leading-none ${compactTriggerLabels ? 'text-[clamp(10px,2.75vw,11px)]' : 'text-[clamp(10px,3vw,14px)]'}`}>
+    <span className={`inline-flex min-w-0 items-baseline justify-center gap-1 whitespace-nowrap tabular-nums leading-none ${compactTriggerLabels ? 'text-[clamp(10px,2.75vw,11px)]' : (showTimes ? 'text-[clamp(9px,2.6vw,14px)]' : 'text-[clamp(10px,3vw,14px)]')}`}>
       <span>{date}</span>
-      {showTimes ? <span className="mt-0.5 text-[0.9em] font-medium opacity-80">{time}</span> : null}
+      {showTimes ? <span className="font-medium opacity-80">{time}</span> : null}
     </span>
   )
 

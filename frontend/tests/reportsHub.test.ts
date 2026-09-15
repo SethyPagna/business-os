@@ -777,7 +777,11 @@ test('the control row keeps every control at each width: nothing is dropped, not
   assert.ok(hub.includes("triggerClassName={compact ? 'reports-mobile-range flex w-full min-w-0"), 'the range trigger goes full-width and shrinkable on phones')
   assert.match(hub, /showQuickRanges=\{false\}/, 'Reports keeps its external quick-range rail without duplicating those presets inside the picker')
   const picker = read('src/components/shared/DateTimeRangePicker.tsx')
-  assert.match(picker, /const triggerEndpoint = \(date: string, time: string\) => \([\s\S]*?grid min-w-0 justify-items-center whitespace-nowrap tabular-nums/, 'both picker endpoints share the shrinkable, fully visible trigger layout')
+  // P5 (Sep 15 2026): the trigger endpoint went from a `grid` (date over
+  // time, two lines whenever a time was set) to an `inline-flex` row so
+  // date and time stay on ONE line -- owner: "i want them same compact one
+  // row". Still shrinkable (min-w-0, whitespace-nowrap) and fully visible.
+  assert.match(picker, /const triggerEndpoint = \(date: string, time: string\) => \([\s\S]*?inline-flex min-w-0 items-baseline justify-center gap-1 whitespace-nowrap tabular-nums/, 'both picker endpoints share the shrinkable, fully visible, single-line trigger layout')
   assert.match(picker, /\{triggerEndpoint\(startTriggerDate, value\.startTime \|\| '00:00'\)\}[\s\S]*?\{triggerEndpoint\(endTriggerDate, value\.endTime \|\| '23:59'\)\}/, 'the report trigger renders both complete endpoint labels through the shared layout')
 })
 
