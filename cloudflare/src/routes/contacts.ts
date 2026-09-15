@@ -1321,6 +1321,12 @@ function registerContactRoutes(config: ContactConfig) {
     // into the INSERT below so that when two walk-ins are registered at the
     // same instant, the writer that loses the UNIQUE index race is handed
     // the next free number instead of an error.
+    // NOTE: kept self-contained (its own normalize + its own DB read) rather
+    // than folded into a Promise.all with the duplicate check above --
+    // scripts/test-membership-defaults-20260905.cjs extracts this exact
+    // block verbatim by anchor text and runs it standalone against only
+    // (db, payload, body, config, c, normalizeMembershipNumber), so it must
+    // not read any variable computed outside its own anchors.
     let mintMembership = false
     if (config.table === 'customers') {
       const raw = normalizeMembershipNumber(payload.membership_number)
@@ -1388,16 +1394,22 @@ function registerContactRoutes(config: ContactConfig) {
       throw error
     }
     const id = result.lastInsertRowid
-    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', config.entity, id, {
-      name,
-      ...(duplicateDecision.decision ? {
-        duplicate_decision: 'create_separate',
-        duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
-        duplicate_candidate_fingerprint: duplicateDecision.decision.fingerprint,
-      } : {}),
-    })
-    await bumpVersion(c.env, config.table)
-    c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'create', id }))
+    // Perf-2: the response is the freshly-inserted row itself, which reads
+    // nothing audit()/bumpVersion() write -- defer both into the same
+    // waitUntil the broadcast already used, so the reply only waits on the
+    // one SELECT below instead of three sequential round trips.
+    c.executionCtx.waitUntil(Promise.all([
+      audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', config.entity, id, {
+        name,
+        ...(duplicateDecision.decision ? {
+          duplicate_decision: 'create_separate',
+          duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
+          duplicate_candidate_fingerprint: duplicateDecision.decision.fingerprint,
+        } : {}),
+      }),
+      bumpVersion(c.env, config.table),
+      broadcast(c.env, config.channel, { action: 'create', id }),
+    ]))
     const item = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get({ id })
     return c.json(item)
   })
