@@ -8,8 +8,12 @@
 -- different together and divide by number of different costs. (not
 -- including empty/0 value cost which is wrong."
 --
--- PREPARED, NOT APPLIED. Data-only; no DDL. Append-only chain (0164 is the
--- prior migration). TABLE-DRIVEN, not one statement per cluster -- 0164's
+-- PREPARED, NOT APPLIED. Append-only chain (0164 is the prior migration).
+-- DDL inside this file is limited to: the persistent map table and one index
+-- on it; four helper tables that are created, filled and DROPPED within the
+-- file; and two guard triggers that are dropped and recreated byte-identically
+-- around the two statements they would otherwise make quadratic (see the
+-- D1 CPU BUDGET section). TABLE-DRIVEN, not one statement per cluster -- 0164's
 -- 127-statements-for-14-rows shape does not scale to the 1838 production
 -- groups / 3700 rows this migration covers, so every cluster is computed
 -- IN SQL from the live `products` table at apply time via
@@ -190,6 +194,40 @@
 --                        table before assuming otherwise if this migration
 --                        is ever adapted).
 --
+-- ============================== D1 CPU BUDGET ============================
+-- The first production apply attempt (2026-09-15, revision 6bd39bd9) failed
+-- with "D1 DB exceeded its CPU time limit and was reset" (code 7429) and was
+-- rolled back in full. Timed statement by statement on a replica of that
+-- day's production data, four statements accounted for ~90 s of ~93 s:
+--   * the map INSERT: its CTE chain was referenced from correlated
+--     subqueries, which SQLite re-evaluates per outer row -> the eligible
+--     rows, the per-code keepers and the per-name best keeper are now
+--     materialized ONCE into product_merge_rows_0165 / _keepers_0165 /
+--     _best_0165 and joined;
+--   * the branch_stock fold: a correlated SUM over an unindexed map per
+--     keeper row -> the per-(keeper, branch) sums are computed once into
+--     product_merge_fold_0165 and applied by primary-key lookup, and the map
+--     gains an index on keeper_id;
+--   * the product_batches repoint: migration 0155's
+--     positive_lot_reject_parent_update_orphan_0155 AFTER UPDATE trigger
+--     rescans every positive branch_batch_stock row for every updated lot
+--     (a global invariant checked per row) -> the trigger is dropped for
+--     that one statement, recreated byte-identically, and its invariant is
+--     evaluated ONCE afterwards through product_merge_guard_0165 (a CHECK
+--     constraint that aborts the whole file if any positive lot stock were
+--     orphaned);
+--   * the final DELETE of the losers: migration 0010's
+--     trg_products_ad_name_key AFTER DELETE trigger updates every same-name
+--     sibling per deleted row, which in turn fires the FTS5 and revision
+--     triggers on each sibling -> the trigger is dropped for that one
+--     statement, recreated byte-identically, and is_grouped_cached is
+--     recomputed once for the affected names (only rows whose flag actually
+--     changes are written). The FTS5 AFTER DELETE triggers, the transfer
+--     provenance triggers and the stock revision triggers stay in place and
+--     fire normally.
+-- The five helper tables and the guard table are dropped at the end of the file
+-- so the schema gains only product_merge_map_0165 and its keeper index.
+--
 -- ============================== IDEMPOTENCE =============================
 -- The map INSERT recomputes clusters from LIVE products data every run and
 -- guards on `NOT EXISTS (... WHERE loser_id = ...)`. After the first run the
@@ -249,85 +287,101 @@ CREATE TABLE IF NOT EXISTS product_merge_map_0165 (
 );
 
 -- Populate the map from LIVE data: cluster, classify barcodes, pick keepers.
-INSERT INTO product_merge_map_0165 (loser_id, keeper_id, name_key, loser_json)
-WITH cluster_rows AS (
-  SELECT
-    id,
-    LOWER(TRIM(name)) AS name_key,
-    TRIM(COALESCE(barcode, '')) AS bc,
-    -- Live stock, not the denormalized products.stock_quantity column (which
-    -- can be stale) -- same precedent as lib/productIdentity.ts's
-    -- findIdentityMatch, which sources live_stock_quantity from branch_stock
-    -- to choose a merge survivor.
-    (SELECT COALESCE(SUM(bs.quantity), 0) FROM branch_stock bs WHERE bs.product_id = products.id) AS live_stock,
-    CASE
-      WHEN LENGTH(TRIM(COALESCE(barcode, ''))) >= 6
-        AND TRIM(barcode) NOT GLOB '*[^0-9]*'
-        AND CAST(TRIM(barcode) AS INTEGER) <> 0
-      THEN 1 ELSE 0
-    END AS is_real
-  FROM products
-  WHERE is_active = 1 AND COALESCE(is_group, 0) = 0 AND tag_label IS NULL
-    -- Transfer-provenance exclusion (see header): never cluster a product
-    -- that migration 0151's triggers would refuse to reparent or delete.
-    AND id NOT IN (
-      SELECT source_product_id FROM transfer_operation_members
-      UNION
-      SELECT destination_product_id FROM transfer_operation_members
-      UNION
-      SELECT pb.variant_product_id FROM product_batches pb
-      WHERE EXISTS (
-        SELECT 1 FROM transfer_operation_members m, json_each(m.allocations_json) a
-        WHERE json_extract(a.value, '$.source_batch_id') = pb.id
-           OR json_extract(a.value, '$.destination_batch_id') = pb.id
-      )
+-- Step 1: materialize the eligible rows once (see D1 CPU BUDGET).
+CREATE TABLE IF NOT EXISTS product_merge_rows_0165 (
+  id INTEGER PRIMARY KEY,
+  name_key TEXT NOT NULL,
+  bc TEXT NOT NULL,
+  live_stock REAL NOT NULL,
+  is_real INTEGER NOT NULL,
+  real_code_key TEXT
+);
+DELETE FROM product_merge_rows_0165;
+INSERT INTO product_merge_rows_0165 (id, name_key, bc, live_stock, is_real, real_code_key)
+SELECT
+  p.id,
+  LOWER(TRIM(p.name)),
+  TRIM(COALESCE(p.barcode, '')),
+  COALESCE(ls.q, 0),
+  CASE
+    WHEN LENGTH(TRIM(COALESCE(p.barcode, ''))) >= 6
+      AND TRIM(p.barcode) NOT GLOB '*[^0-9]*'
+      AND CAST(TRIM(p.barcode) AS INTEGER) <> 0
+    THEN 1 ELSE 0
+  END,
+  CASE
+    WHEN LENGTH(TRIM(COALESCE(p.barcode, ''))) >= 6
+      AND TRIM(p.barcode) NOT GLOB '*[^0-9]*'
+      AND CAST(TRIM(p.barcode) AS INTEGER) <> 0
+    THEN LTRIM(TRIM(p.barcode), '0')
+  END
+FROM products p
+LEFT JOIN (SELECT product_id, SUM(quantity) AS q FROM branch_stock GROUP BY product_id) ls ON ls.product_id = p.id
+WHERE p.is_active = 1 AND COALESCE(p.is_group, 0) = 0 AND p.tag_label IS NULL
+  -- Transfer-provenance exclusion (see header): never cluster a product
+  -- that migration 0151's triggers would refuse to reparent or delete.
+  AND p.id NOT IN (
+    SELECT source_product_id FROM transfer_operation_members
+    UNION
+    SELECT destination_product_id FROM transfer_operation_members
+    UNION
+    SELECT pb.variant_product_id FROM product_batches pb
+    WHERE EXISTS (
+      SELECT 1 FROM transfer_operation_members m, json_each(m.allocations_json) a
+      WHERE json_extract(a.value, '$.source_batch_id') = pb.id
+         OR json_extract(a.value, '$.destination_batch_id') = pb.id
     )
-),
-real_rows AS (
-  SELECT id, name_key, bc, live_stock, LTRIM(bc, '0') AS real_code_key
-  FROM cluster_rows WHERE is_real = 1
-),
-real_keepers AS (
+  );
+CREATE INDEX IF NOT EXISTS idx_product_merge_rows_0165_name ON product_merge_rows_0165 (name_key, is_real, real_code_key);
+
+-- Step 2: one keeper per (name, real code) -- the spelling without leading
+-- zeros wins, else the lowest id.
+CREATE TABLE IF NOT EXISTS product_merge_keepers_0165 (
+  name_key TEXT NOT NULL,
+  real_code_key TEXT NOT NULL,
+  keeper_id INTEGER NOT NULL,
+  live_stock REAL NOT NULL,
+  PRIMARY KEY (name_key, real_code_key)
+);
+DELETE FROM product_merge_keepers_0165;
+INSERT INTO product_merge_keepers_0165 (name_key, real_code_key, keeper_id, live_stock)
+SELECT name_key, real_code_key, id, live_stock FROM (
   SELECT id, name_key, real_code_key, live_stock,
     ROW_NUMBER() OVER (
       PARTITION BY name_key, real_code_key
       ORDER BY (CASE WHEN bc = real_code_key THEN 0 ELSE 1 END), id ASC
     ) AS rn
-  FROM real_rows
-),
-cluster_best_keeper AS (
-  SELECT name_key, id AS keeper_id,
-    ROW_NUMBER() OVER (PARTITION BY name_key ORDER BY live_stock DESC, id ASC) AS brn
-  FROM real_keepers WHERE rn = 1
-),
-empty_only_keepers AS (
-  SELECT cr.name_key, MIN(cr.id) AS keeper_id
-  FROM cluster_rows cr
-  WHERE cr.is_real = 0
-    AND NOT EXISTS (SELECT 1 FROM cluster_rows r2 WHERE r2.name_key = cr.name_key AND r2.is_real = 1)
-  GROUP BY cr.name_key
-),
-assigned AS (
-  SELECT
-    cr.id AS row_id,
-    cr.name_key,
-    CASE
-      WHEN cr.is_real = 1 THEN (
-        SELECT rk.id FROM real_keepers rk
-        WHERE rk.name_key = cr.name_key AND rk.real_code_key = LTRIM(cr.bc, '0') AND rk.rn = 1
-      )
-      WHEN EXISTS (SELECT 1 FROM cluster_rows r2 WHERE r2.name_key = cr.name_key AND r2.is_real = 1) THEN (
-        SELECT bk.keeper_id FROM cluster_best_keeper bk WHERE bk.name_key = cr.name_key AND bk.brn = 1
-      )
-      ELSE (SELECT eok.keeper_id FROM empty_only_keepers eok WHERE eok.name_key = cr.name_key)
-    END AS keeper_id
-  FROM cluster_rows cr
-)
+  FROM product_merge_rows_0165 WHERE is_real = 1
+) WHERE rn = 1;
+
+-- Step 3: the keeper that no-barcode rows attach to: the real-code keeper
+-- with the highest live stock (tie: lowest id); for a cluster with no real
+-- code at all, the lowest id.
+CREATE TABLE IF NOT EXISTS product_merge_best_0165 (
+  name_key TEXT PRIMARY KEY,
+  keeper_id INTEGER NOT NULL
+);
+DELETE FROM product_merge_best_0165;
+INSERT INTO product_merge_best_0165 (name_key, keeper_id)
+SELECT name_key, keeper_id FROM (
+  SELECT name_key, keeper_id,
+    ROW_NUMBER() OVER (PARTITION BY name_key ORDER BY live_stock DESC, keeper_id ASC) AS brn
+  FROM product_merge_keepers_0165
+) WHERE brn = 1;
+INSERT INTO product_merge_best_0165 (name_key, keeper_id)
+SELECT r.name_key, MIN(r.id)
+FROM product_merge_rows_0165 r
+WHERE r.is_real = 0
+  AND NOT EXISTS (SELECT 1 FROM product_merge_best_0165 b WHERE b.name_key = r.name_key)
+GROUP BY r.name_key;
+
+-- Step 4: the map -- one row per loser, carrying its full pre-image.
+INSERT INTO product_merge_map_0165 (loser_id, keeper_id, name_key, loser_json)
 SELECT
-  a.row_id,
-  a.keeper_id,
-  a.name_key,
-  (SELECT json_object(
+  r.id,
+  k.keeper_id,
+  r.name_key,
+  json_object(
       'id', p.id, 'name', p.name, 'sku', p.sku, 'barcode', p.barcode, 'category', p.category,
       'unit', p.unit, 'description', p.description,
       'selling_price_usd', p.selling_price_usd, 'selling_price_khr', p.selling_price_khr,
@@ -336,11 +390,20 @@ SELECT
       'stock_quantity', p.stock_quantity, 'image_path', p.image_path, 'supplier', p.supplier,
       'brand', p.brand, 'parent_id', p.parent_id, 'is_active', p.is_active, 'created_at', p.created_at,
       'special_price_usd', p.special_price_usd, 'special_price_khr', p.special_price_khr)
-   FROM products p WHERE p.id = a.row_id)
-FROM assigned a
-WHERE a.keeper_id IS NOT NULL
-  AND a.row_id <> a.keeper_id
-  AND NOT EXISTS (SELECT 1 FROM product_merge_map_0165 m WHERE m.loser_id = a.row_id);
+FROM product_merge_rows_0165 r
+JOIN products p ON p.id = r.id
+JOIN (
+  SELECT r2.id,
+    CASE WHEN r2.is_real = 1
+      THEN (SELECT kk.keeper_id FROM product_merge_keepers_0165 kk WHERE kk.name_key = r2.name_key AND kk.real_code_key = r2.real_code_key)
+      ELSE (SELECT b.keeper_id FROM product_merge_best_0165 b WHERE b.name_key = r2.name_key)
+    END AS keeper_id
+  FROM product_merge_rows_0165 r2
+) k ON k.id = r.id
+WHERE k.keeper_id IS NOT NULL
+  AND k.keeper_id <> r.id
+  AND NOT EXISTS (SELECT 1 FROM product_merge_map_0165 m WHERE m.loser_id = r.id);
+CREATE INDEX IF NOT EXISTS idx_product_merge_map_0165_keeper ON product_merge_map_0165 (keeper_id);
 
 -- Keeper cost: AVG of DISTINCT non-zero cost across keeper + its losers.
 UPDATE products SET
@@ -429,18 +492,23 @@ UPDATE products SET
 WHERE id IN (SELECT DISTINCT keeper_id FROM product_merge_map_0165);
 
 -- branch_stock: fold overlapping (keeper+loser share a branch) quantities by SUM.
+CREATE TABLE IF NOT EXISTS product_merge_fold_0165 (
+  keeper_id INTEGER NOT NULL,
+  branch_id INTEGER NOT NULL,
+  quantity REAL NOT NULL,
+  rfid_confirmed_qty REAL NOT NULL,
+  PRIMARY KEY (keeper_id, branch_id)
+);
+DELETE FROM product_merge_fold_0165;
+INSERT INTO product_merge_fold_0165 (keeper_id, branch_id, quantity, rfid_confirmed_qty)
+SELECT m.keeper_id, bs.branch_id, SUM(bs.quantity), SUM(COALESCE(bs.rfid_confirmed_qty, 0))
+FROM branch_stock bs
+JOIN product_merge_map_0165 m ON m.loser_id = bs.product_id
+GROUP BY m.keeper_id, bs.branch_id;
 UPDATE branch_stock SET
-  quantity = quantity + (
-    SELECT COALESCE(SUM(bs2.quantity), 0) FROM branch_stock bs2
-    JOIN product_merge_map_0165 m ON m.loser_id = bs2.product_id
-    WHERE m.keeper_id = branch_stock.product_id AND bs2.branch_id = branch_stock.branch_id
-  ),
-  rfid_confirmed_qty = rfid_confirmed_qty + (
-    SELECT COALESCE(SUM(bs2.rfid_confirmed_qty), 0) FROM branch_stock bs2
-    JOIN product_merge_map_0165 m ON m.loser_id = bs2.product_id
-    WHERE m.keeper_id = branch_stock.product_id AND bs2.branch_id = branch_stock.branch_id
-  )
-WHERE product_id IN (SELECT DISTINCT keeper_id FROM product_merge_map_0165);
+  quantity = quantity + (SELECT f.quantity FROM product_merge_fold_0165 f WHERE f.keeper_id = branch_stock.product_id AND f.branch_id = branch_stock.branch_id),
+  rfid_confirmed_qty = rfid_confirmed_qty + (SELECT f.rfid_confirmed_qty FROM product_merge_fold_0165 f WHERE f.keeper_id = branch_stock.product_id AND f.branch_id = branch_stock.branch_id)
+WHERE EXISTS (SELECT 1 FROM product_merge_fold_0165 f WHERE f.keeper_id = branch_stock.product_id AND f.branch_id = branch_stock.branch_id);
 
 -- Delete loser branch rows already folded into a matching keeper branch row.
 DELETE FROM branch_stock
@@ -458,6 +526,10 @@ WHERE product_id IN (SELECT loser_id FROM product_merge_map_0165);
 
 -- product_batches: repoint, disambiguating a batch_key collision with an
 -- existing keeper batch (UNIQUE(variant_product_id,batch_key)).
+-- The 0155 orphan guard is a global invariant evaluated per updated row; it
+-- is dropped for this one statement, recreated byte-identically below and
+-- evaluated once afterwards (product_merge_guard_0165).
+DROP TRIGGER IF EXISTS positive_lot_reject_parent_update_orphan_0155;
 UPDATE product_batches SET
   batch_key = CASE WHEN EXISTS (
       SELECT 1 FROM product_batches pb2
@@ -468,6 +540,26 @@ UPDATE product_batches SET
   variant_product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = product_batches.variant_product_id),
   updated_at = CURRENT_TIMESTAMP
 WHERE variant_product_id IN (SELECT loser_id FROM product_merge_map_0165);
+CREATE TRIGGER positive_lot_reject_parent_update_orphan_0155
+AFTER UPDATE ON product_batches
+WHEN (OLD.id IS NOT NEW.id OR OLD.variant_product_id IS NOT NEW.variant_product_id OR OLD.batch_key IS NOT NEW.batch_key)
+ AND EXISTS (
+  SELECT 1 FROM branch_batch_stock bbs INDEXED BY idx_branch_batch_stock_positive_batch_0155
+  WHERE bbs.quantity>0 AND NOT EXISTS (SELECT 1 FROM product_batches WHERE id=bbs.batch_id)
+)
+BEGIN
+  SELECT RAISE(ABORT,'Cannot orphan positive branch stock by replacing a received lot');
+END;
+CREATE TABLE IF NOT EXISTS product_merge_guard_0165 (
+  check_name TEXT PRIMARY KEY,
+  ok INTEGER NOT NULL CHECK (ok = 1)
+);
+DELETE FROM product_merge_guard_0165;
+INSERT INTO product_merge_guard_0165 (check_name, ok)
+SELECT 'positive_lot_parent_orphans', CASE WHEN EXISTS (
+  SELECT 1 FROM branch_batch_stock bbs INDEXED BY idx_branch_batch_stock_positive_batch_0155
+  WHERE bbs.quantity>0 AND NOT EXISTS (SELECT 1 FROM product_batches WHERE id=bbs.batch_id)
+) THEN 0 ELSE 1 END;
 
 -- Simple 1:1 product_id/link repoints, driven by the map.
 UPDATE inventory_movements SET product_id = (SELECT keeper_id FROM product_merge_map_0165 WHERE loser_id = inventory_movements.product_id) WHERE product_id IN (SELECT loser_id FROM product_merge_map_0165);
@@ -539,4 +631,52 @@ WHERE NOT EXISTS (
 -- fts_code_ad/products_fts_name_trigram_ad AFTER DELETE triggers (migrations
 -- 0018/0019/0021) -- this DELETE keeps them in sync without any extra
 -- statement here.
+-- trg_products_ad_name_key (migration 0010) updates every same-name sibling
+-- per deleted row and cascades into the FTS5/revision triggers on each; it is
+-- dropped for this one statement, recreated byte-identically and its effect
+-- (is_grouped_cached for the affected names) recomputed once below.
+DROP TRIGGER IF EXISTS trg_products_ad_name_key;
 DELETE FROM products WHERE id IN (SELECT loser_id FROM product_merge_map_0165);
+CREATE TRIGGER IF NOT EXISTS trg_products_ad_name_key
+AFTER DELETE ON products
+BEGIN
+  UPDATE products
+    SET is_grouped_cached = (
+      (SELECT COUNT(*) FROM products p2 WHERE p2.name_key = OLD.name_key AND p2.is_active = 1) > 1
+    )
+    WHERE name_key = OLD.name_key AND is_active = 1 AND OLD.name_key <> '';
+END;
+-- The sibling count is computed once per affected name (a correlated count
+-- per row makes the planner pick the (is_active, is_grouped_cached) index
+-- and rescan every active product per row).
+CREATE TABLE IF NOT EXISTS product_merge_regroup_0165 (
+  name_key TEXT PRIMARY KEY,
+  grouped INTEGER NOT NULL
+);
+DELETE FROM product_merge_regroup_0165;
+INSERT INTO product_merge_regroup_0165 (name_key, grouped)
+SELECT p.name_key, COUNT(*) > 1
+FROM products p
+WHERE p.is_active = 1 AND p.name_key <> ''
+  AND p.name_key IN (SELECT name_key FROM product_merge_map_0165)
+GROUP BY p.name_key;
+UPDATE products SET
+  is_grouped_cached = (SELECT g.grouped FROM product_merge_regroup_0165 g WHERE g.name_key = products.name_key)
+WHERE is_active = 1
+  AND name_key IN (SELECT name_key FROM product_merge_regroup_0165)
+  AND is_grouped_cached IS NOT (SELECT g.grouped FROM product_merge_regroup_0165 g WHERE g.name_key = products.name_key);
+
+-- Both guard triggers must be back before the file is allowed to commit.
+INSERT INTO product_merge_guard_0165 (check_name, ok)
+SELECT 'guard_triggers_restored', CASE WHEN (
+  SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger'
+    AND name IN ('positive_lot_reject_parent_update_orphan_0155', 'trg_products_ad_name_key')
+) = 2 THEN 1 ELSE 0 END;
+
+-- Helper tables are derivable scratch; only the map and its index persist.
+DROP TABLE IF EXISTS product_merge_guard_0165;
+DROP TABLE IF EXISTS product_merge_regroup_0165;
+DROP TABLE IF EXISTS product_merge_fold_0165;
+DROP TABLE IF EXISTS product_merge_best_0165;
+DROP TABLE IF EXISTS product_merge_keepers_0165;
+DROP TABLE IF EXISTS product_merge_rows_0165;
