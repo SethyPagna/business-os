@@ -150,6 +150,16 @@ async function postSale(db, items, suffix, overrides = {}, hooks = {}) {
 }
 
 function fixture({ legacyThrough0153 = false } = {}) {
+  // routes/sales.ts is loaded (and module-cached) ONCE for this whole file,
+  // so its real lib/schemaProbe.ts import is also a singleton whose
+  // per-isolate column-set cache would otherwise leak across fixture() calls
+  // -- a fully-migrated db from an earlier case would permanently answer
+  // "money_precision_version exists" for every later db this file creates,
+  // including the deliberately-legacy-through-0153 one below. Each
+  // fixture() call models a distinct database, so reset the probe cache here
+  // to match; production never needs this (one isolate == one real D1
+  // database whose schema does not change mid-lifetime).
+  load('lib/schemaProbe.ts').__resetSchemaProbeCacheForTests()
   const db = openDb(legacyThrough0153 ? legacyMigrationsThrough0153 : loadAll())
   run(db, `INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)`)
   run(db, `INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)

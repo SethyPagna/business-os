@@ -47,6 +47,7 @@ const realProductWrites = loadTs('lib/productWrites.ts', {
   './batchCode': loadTs('lib/batchCode.ts'),
   './searchMatch': loadTs('lib/searchMatch.ts'),
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
+  './schemaProbe': loadTs('lib/schemaProbe.ts'),
 })
 const branchRoles = loadTs('lib/branchRoles.ts')
 const canonicalBranchIdentity = loadTs('lib/canonicalBranchIdentity.ts', {

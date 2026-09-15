@@ -70,6 +70,7 @@ const analytics = compile('salesAnalytics.ts', {
   './customerReturnEntitlement': customerReturnEntitlement,
   './refundMoneyPrecision': refundMoneyPrecision,
   './saleMoneyPrecision': saleMoneyPrecision,
+  './schemaProbe': compile('schemaProbe.ts'),
 })
 
 const migration = (name) => fs.readFileSync(path.join(__dirname, '..', 'migrations', name), 'utf8')
