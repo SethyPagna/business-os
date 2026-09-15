@@ -200,19 +200,33 @@ function buildStatus(env: Env, resource: QuotaResource, used: number): QuotaStat
  * a COUNT query failed is the opposite of that.
  */
 export async function consumeQuota(env: Env, resource: QuotaResource, amount = 1): Promise<QuotaStatus> {
+  // P4-4a: on the paid tier, kv_write's ceiling (1,000,000/day, see
+  // PAID_QUOTA_LIMITS above) protects nothing this shop's volume can reach --
+  // it exists only so the zone maths/stored counter/admin readout keep
+  // working uniformly. Spending a D1 round trip on every version bump (31
+  // call sites) to compute a status that can only ever come back 'ok' is
+  // exactly the "roundabout for no reason" this program exists to remove, so
+  // paid-tier kv_write skips the counter entirely. Every OTHER resource
+  // (r2_class_a, cf_images_transform, cloudinary_transform) shares the SAME
+  // ceiling on both tiers via PLAN_INDEPENDENT_LIMITS and still needs real
+  // tracking regardless of tier.
+  if (resource === 'kv_write' && resolvePlanTier(env) === 'paid') {
+    return { ...buildStatus(env, resource, 0), zone: 'ok', reservedZone: 'ok', allowed: true }
+  }
   const { window } = limitsFor(env)[resource]
   const windowKey = windowKeyFor(window)
   try {
     const db = getDb(env)
-    await db.prepare(`
+    // RETURNING folds the write and the read-back into ONE round trip instead
+    // of two -- the row this UPSERT just wrote/updated is exactly the row the
+    // old code re-SELECTed afterward by the same (resource, window_key) key.
+    const row = await db.prepare(`
       INSERT INTO quota_usage (resource, window_key, used, updated_at)
       VALUES (@resource, @windowKey, @amount, CURRENT_TIMESTAMP)
       ON CONFLICT(resource, window_key)
       DO UPDATE SET used = used + @amount, updated_at = CURRENT_TIMESTAMP
-    `).run({ resource, windowKey, amount })
-    const row = await db
-      .prepare(`SELECT used FROM quota_usage WHERE resource = @resource AND window_key = @windowKey`)
-      .get<{ used: number }>({ resource, windowKey })
+      RETURNING used
+    `).get<{ used: number }>({ resource, windowKey, amount })
     const status = buildStatus(env, resource, Number(row?.used || 0))
     // Only the moment a zone CHANGES, not every consumption. The point is to
     // be able to answer "when did we start running out" without writing a
