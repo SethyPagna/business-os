@@ -93,6 +93,11 @@ import { addMoney4, roundMoney4 } from '../lib/moneyPrecision'
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 
+// Shared with lib/stockInCommit.ts (batched fast stock-in) and this file's
+// own runTaggedLotAction below: one context type for every handler that was
+// pulled out from behind `app.post`/`app.get` into a plain callable function.
+export type InventoryContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
+
 function explicitReceiptMoney4(value: unknown, field: string): number {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${field} must be a non-negative finite number`)
@@ -1400,7 +1405,13 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
   ])
 }
 
-app.post('/adjust', async (c) => {
+// Pulled out from behind `app.post('/adjust', ...)` (P4-B, batched fast
+// stock-in) so lib/stockInCommit.ts's batched-commit route can run the exact
+// same validation/write kernel per line instead of re-implementing it -- the
+// body only, no logic changed. The route registration right below is now a
+// three-line wrapper: parse the body, call this, done. Exported for that one
+// other caller; nothing else should import it (use POST /adjust).
+export async function runAdjustAction(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
   const user = c.get('user')
   // Part 152: not yet wired into the Review Required queue (see the
   // comment above /reasons for why -- live batch/stock state at apply
@@ -1411,7 +1422,6 @@ app.post('/adjust', async (c) => {
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
     return c.json({ error: 'Stock adjustments require Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
   }
-  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const productId = Number.parseInt(String(body.productId ?? ''), 10)
   let type = String(body.type || '')
   let quantity = Number(body.quantity)
@@ -2115,6 +2125,11 @@ app.post('/adjust', async (c) => {
     lotCode,
     autoBatchDrainIds,
   })
+}
+
+app.post('/adjust', async (c) => {
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  return runAdjustAction(c, body)
 })
 
 // Dated stock-reconciliation import -- route wiring for
@@ -2581,7 +2596,6 @@ app.get('/tagged-lots', async (c) => {
 // both refuse outright when the held quantity no longer covers the request
 // -- a stale page must not partially apply. Gated exactly like /adjust: this
 // is a stock write.
-type InventoryContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
 async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'restore') {
   const user = c.get('user')
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {

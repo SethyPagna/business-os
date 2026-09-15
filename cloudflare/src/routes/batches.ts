@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
@@ -20,6 +20,11 @@ import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
 // routes/inventory.ts, since receiving/correcting batch stock is the same
 // class of action as any other stock adjustment.
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+
+// Shared with lib/stockInCommit.ts (batched fast stock-in): the same context
+// type as POST '/' below, pulled out from runReceiveAction's own handler
+// wrapper so a batched caller can build one without going through Hono.
+export type BatchesContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
 
 async function positiveBatchStock(db: ReturnType<typeof getDb>, batchId: number): Promise<number> {
   const row = await db.prepare(`
@@ -161,34 +166,42 @@ app.get('/', async (c) => {
 // POST /api/batches -- receive stock into a batch (creates a new batch, or
 // tops up an existing one if the received date's derived code matches one
 // already on this product -- see lib/batchCode.ts).
-app.post('/', async (c) => {
+//
+// `ReceiveBody` moved to module scope (P4-B) so it names the parameter type
+// of both runReceiveBatchAction below and the batched-commit route in
+// lib/stockInCommit.ts, instead of only existing inside the POST '/' closure.
+export type ReceiveBody = {
+  product_id?: number
+  branch_id?: number
+  quantity?: number
+  expiry_date?: string | null
+  received_date?: string | null
+  // D4b: explicit existing lot to top up -- the same picker every adjust
+  // surface has. receiveBatchStock validates it belongs to product_id and
+  // keeps the lot's own received_at (first attribution sticks).
+  batch_id?: number | null
+  notes?: string | null
+  // P3-L2: the operator's own reason for this receipt, written onto the
+  // inventory_movements row as typed. Optional: a caller that sends none
+  // keeps the generated "Stock received (<lot>)" label below.
+  reason?: string | null
+  supplier_id?: number | null
+  supplier_name?: string | null
+  unit_cost_usd?: number | null
+  /** N14-D: the operator's explicit declaration that a $0.00 receipt was free. */
+  free_goods?: boolean
+  payment_status?: string | null
+  credit_due_date?: string | null
+  session_id?: number | null
+}
+
+// Pulled out from behind `app.post('/', ...)` (P4-B, batched fast stock-in)
+// so lib/stockInCommit.ts's batched-commit route can run the exact same
+// validation/write kernel per line instead of re-implementing it -- the body
+// only, no logic changed.
+export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody): Promise<Response> {
   const db = getDb(c.env)
   const user = c.get('user')
-  type ReceiveBody = {
-    product_id?: number
-    branch_id?: number
-    quantity?: number
-    expiry_date?: string | null
-    received_date?: string | null
-    // D4b: explicit existing lot to top up -- the same picker every adjust
-    // surface has. receiveBatchStock validates it belongs to product_id and
-    // keeps the lot's own received_at (first attribution sticks).
-    batch_id?: number | null
-    notes?: string | null
-    // P3-L2: the operator's own reason for this receipt, written onto the
-    // inventory_movements row as typed. Optional: a caller that sends none
-    // keeps the generated "Stock received (<lot>)" label below.
-    reason?: string | null
-    supplier_id?: number | null
-    supplier_name?: string | null
-    unit_cost_usd?: number | null
-    /** N14-D: the operator's explicit declaration that a $0.00 receipt was free. */
-    free_goods?: boolean
-    payment_status?: string | null
-    credit_due_date?: string | null
-    session_id?: number | null
-  }
-  const body = await c.req.json<ReceiveBody>().catch(() => ({} as ReceiveBody))
 
   const productId = Number(body.product_id)
   const branchId = Number(body.branch_id)
@@ -335,6 +348,11 @@ app.post('/', async (c) => {
   ]))
 
   return c.json({ success: true, batchId, batchNumber, lotCode })
+}
+
+app.post('/', async (c) => {
+  const body = await c.req.json<ReceiveBody>().catch(() => ({} as ReceiveBody))
+  return runReceiveBatchAction(c, body)
 })
 
 // PATCH /api/batches/:id -- edit a batch's own fields (expiry/lot/notes) or
