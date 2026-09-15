@@ -19,6 +19,7 @@
     "preview": "vite preview",
     "smoke:local": "vite --host 127.0.0.1 --port 4173",
     "test:utils": "node tests/runTestChain.ts",
+    "test:regression": "node tests/runRegressionPack.mjs",
     "test:e2e": "playwright test",
     "test:e2e:fresh": "npm run build && playwright test",
     "test:e2e:ios": "playwright test --project=ios-webkit",
