@@ -114,6 +114,16 @@ run_worker_first = [
 [triggers]
 crons = ["0 */6 * * *"]
 
+# P4-4a: Smart Placement lets Cloudflare run this Worker's invocation next to
+# the D1 primary/whatever backend it talks to most, instead of always at the
+# edge location closest to the requesting browser -- this Worker's own
+# request path is D1-round-trip-bound (see the audit()/transfer/etc. fixes
+# elsewhere in this program), which is exactly the workload Smart Placement
+# is for. Free on both Workers plans (no [limits]-style Paid gate), so it
+# needs no free/paid branch the way cpu_ms above does.
+[placement]
+mode = "smart"
+
 # CPU headroom for the import queue consumer (queue.ts) and other chunked
 # D1 work (importEngine.ts's runD1BatchInChunks). This block previously had
 # to be REMOVED because custom cpu_ms is a Workers Paid-only feature and
