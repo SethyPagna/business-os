@@ -30,7 +30,7 @@ import {
   EMPTY_CUSTOMER,
   createEmptyOrder,
 } from '../../constants'
-import ProductCard from './ProductCard.tsx'
+import ProductCard, { type ProductCardProduct } from './ProductCard.tsx'
 import { createPosTrackingOwner, needsPosTrackingSheet, posTrackingFingerprint, type PosTrackingState } from './posProductTracking.ts'
 import { readFreshPickerLots } from '../../utils/pickerLotFreshness.ts'
 import CartItem     from './CartItem'
@@ -2521,6 +2521,45 @@ export default function POS() {
     if (nextLightbox) setImageLightbox(nextLightbox)
   }, [t])
 
+  // P4-4b: ProductCard is React.memo'd because the grid renders 20-50+ of
+  // them per page and re-renders on every cart/keyboard change unrelated to
+  // the catalogue. That memo only pays off if the `onOpen`/`onOpenImage`
+  // props stay the SAME function reference across an unrelated re-render --
+  // the `.map()` below used to build `(options) => openProductCard(p, options)`
+  // fresh on every render (it closes over `p`), which would make every
+  // card's shallow prop comparison fail every time. Cache one pair of
+  // handlers per product id and only rebuild them when the row itself or
+  // the underlying (already-stable) openProductCard/openImageLightbox
+  // callbacks actually changed.
+  const productCardHandlersRef = useRef(new Map<string | number, {
+    p: ProductRecord
+    openProductCard: typeof openProductCard
+    openImageLightbox: typeof openImageLightbox
+    onOpen: (options: { groupProduct: boolean; inStock: boolean }) => void
+    onOpenImage: () => void
+  }>())
+  const getProductCardHandlers = useCallback((p: ProductRecord) => {
+    const cache = productCardHandlersRef.current
+    const cached = cache.get(p.id as string | number)
+    if (cached && cached.p === p && cached.openProductCard === openProductCard && cached.openImageLightbox === openImageLightbox) {
+      return cached
+    }
+    const next = {
+      p,
+      openProductCard,
+      openImageLightbox,
+      onOpen: (options: { groupProduct: boolean; inStock: boolean }) => openProductCard(p, options),
+      onOpenImage: () => openImageLightbox(p, 0),
+    }
+    cache.set(p.id as string | number, next)
+    return next
+  }, [openProductCard, openImageLightbox])
+
+  /** Stable across renders (only its deps -- primaryBranchFilterId via
+   *  getDisplayStock -- change its identity), so it doesn't defeat
+   *  ProductCard's memo the way a fresh `(row) => ...` per render would. */
+  const getPosCardStock = useCallback((row: ProductCardProduct) => getDisplayStock(row as ProductRecord), [getDisplayStock])
+
   /** Primary image used by cards/sheets, with gallery-first fallback. */
   const getPrimaryProductImage = useCallback((product: ProductRecord) => {
     return getProductGalleryImages(product)[0] || product?.image_path || ''
@@ -3566,24 +3605,27 @@ export default function POS() {
               />
             </div>
             <div className="pos-product-grid">
-              {pagedProductCards.map(p => (
-                <ProductCard
-                  key={p.id}
-                  product={p}
-                  variants={getVariantChoices(p)}
-                  groupMeta={p.__groupMeta || null}
-                  getStock={(row) => getDisplayStock(row as ProductRecord)}
-                  lowStockConfig={lowStockConfig}
-                  promotionRules={promotionRules}
-                  exchangeRate={exchangeRate}
-                  fmtUSD={fmtUSD}
-                  fmtKHR={fmtKHR}
-                  t={t}
-                  copy={posCopy}
-                  onOpen={(options) => openProductCard(p, options)}
-                  onOpenImage={() => openImageLightbox(p, 0)}
-                />
-              ))}
+              {pagedProductCards.map(p => {
+                const handlers = getProductCardHandlers(p)
+                return (
+                  <ProductCard
+                    key={p.id}
+                    product={p}
+                    variants={getVariantChoices(p)}
+                    groupMeta={p.__groupMeta || null}
+                    getStock={getPosCardStock}
+                    lowStockConfig={lowStockConfig}
+                    promotionRules={promotionRules}
+                    exchangeRate={exchangeRate}
+                    fmtUSD={fmtUSD}
+                    fmtKHR={fmtKHR}
+                    t={t}
+                    copy={posCopy}
+                    onOpen={handlers.onOpen}
+                    onOpenImage={handlers.onOpenImage}
+                  />
+                )
+              })}
               {visibleProductCards.length === 0 && (
                 <div className="col-span-full text-center py-12 text-gray-400">
                   {catalogRefreshing ? (

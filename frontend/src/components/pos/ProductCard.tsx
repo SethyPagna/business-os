@@ -15,7 +15,19 @@ import ProductNameRail from '../shared/ProductNameRail'
  * this card" means a different shelf on each surface: the POS reads its
  * branch filter / best branch, the sale screen reads the sale's own branch.
  * The card never decides that; it only renders what `getStock` answers.
+ *
+ * P4-4b: memoized (default-exported wrapped in `memo`). The POS grid renders
+ * 20-50+ of these per page and re-renders on every cart edit / cash-drawer
+ * keystroke unrelated to the catalogue; without memo every card re-ran its
+ * price/promotion/expiry math each time. Memo only pays off because every
+ * caller now hands it referentially stable props for an unchanged product
+ * (POS.tsx caches `onOpen`/`onOpenImage` per product id and hoists
+ * `getStock`; `getVariantChoices` no longer returns a fresh `[]` per call --
+ * see posCore.ts). Do not add an inline arrow-function prop at a call site
+ * without checking it stays stable across renders, or this memo goes back to
+ * comparing different functions every time and buys nothing.
  */
+import { memo } from 'react'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import ProductImage from './ProductImage'
 import { computeExpiryStatus } from './posCore.ts'
@@ -100,7 +112,7 @@ function ProductDiscountBadge({
   )
 }
 
-export default function ProductCard({
+function ProductCardComponent({
   product,
   variants,
   groupMeta,
@@ -220,3 +232,6 @@ export default function ProductCard({
     </div>
   )
 }
+
+const ProductCard = memo(ProductCardComponent)
+export default ProductCard
