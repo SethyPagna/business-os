@@ -109,11 +109,12 @@ await runTest('thermal print keeps configured margins inside one measured-height
   const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
   assert.match(source, /const measuredHeightMm = renderedHeightPx \* \(widthMm \/ renderedWidthPx\)/)
   assert.match(source, /const pageHeightMm = fixedHeightMm \?\? Math\.max\(1, measuredHeightMm \+ 1\)/)
-  assert.match(source, /const pageSizeCss = `\$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm`/)
+  assert.match(source, /const pageSizeCss = continuousRoll \? `\$\{widthMm\}mm auto` : `\$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm`/,
+    'a continuous roll hands its length to the printer (auto); only a fixed sheet still declares a measured height')
   assert.match(source, /size: \$\{pageSizeCss\};/,
-    'continuous print must declare exactly one width-by-content-height roll page')
-  assert.match(source, /const documentHeightCss = continuousRoll \|\| clipToOnePage/,
-    'a continuous receipt pins html/body to the measured roll height instead of inserting page breaks')
+    'continuous print must declare exactly one width-by-auto-height roll page')
+  assert.match(source, /const documentHeightCss = clipToOnePage/,
+    'only a genuine fixed sheet pins html/body to a measured height; a continuous roll grows with content instead of inserting page breaks')
   assert.match(source, /clone\.style\.minWidth = `\$\{widthMm\}mm`/)
   assert.doesNotMatch(source, /clone\.style\.padding = '0'/)
   assert.doesNotMatch(source, /node\.style\.width = `\$\{widthMm\}mm`[\s\S]{0,120}node\.style\.maxWidth = `\$\{widthMm\}mm`/)

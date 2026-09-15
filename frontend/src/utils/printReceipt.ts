@@ -1140,14 +1140,21 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
   // clipping here prevents rounding from spilling a second card.
   const clipToOnePage = singleSheet && !continuousRoll
   const pageOverflow = clipToOnePage ? 'hidden' : 'visible'
-  // An explicit width x measured-height @page is the browser contract for a
-  // continuous strip. The printer driver must expose matching roll/custom
-  // media and use Actual size. If it forces a fixed sheet such as 98 x 148 mm,
-  // the web page cannot prevent the native print pipeline from shrinking or
-  // clipping; switching to `auto` here would instead insert page breaks, which
-  // violates continuous-receipt semantics.
-  const pageSizeCss = `${widthMm}mm ${pageHeightMm.toFixed(2)}mm`
-  const documentHeightCss = continuousRoll || clipToOnePage
+  // 2026-09-15 (owner, two photos of a real 80mm print): an explicit
+  // width x measured-height @page looked correct in every browser preview,
+  // but real thermal drivers do not treat it as "this exact length" -- they
+  // reconciled it against their own registered continuous-roll form, which
+  // showed up as a blank band inserted before the first line AND the
+  // JS-measured height coming up short against the driver's own font/layout
+  // pass, which pushed the trailing QR block (kept atomic by the avoid-page
+  // rules below) onto a second physical strip. `size: <width>mm auto` hands
+  // the roll's length to the printer/driver entirely -- there is no
+  // JS-measured number for it to disagree with, so there is nothing left to
+  // reconcile a gap or a break out of. Only a REAL fixed sheet (the 80x50
+  // card, or an A4/Letter/custom document height) still needs an explicit
+  // page length; those media genuinely end at that length.
+  const pageSizeCss = continuousRoll ? `${widthMm}mm auto` : `${widthMm}mm ${pageHeightMm.toFixed(2)}mm`
+  const documentHeightCss = clipToOnePage
     ? `height: ${pageHeightMm.toFixed(2)}mm !important;
           min-height: ${pageHeightMm.toFixed(2)}mm !important;`
     : `height: auto !important;
@@ -1156,6 +1163,31 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
     ? `height: ${pageHeightMm.toFixed(2)}mm !important;
           max-height: ${pageHeightMm.toFixed(2)}mm !important;`
     : ''
+  // The atomic "keep this block on one page" rules exist for a genuine
+  // multi-page document (A4/Letter/custom) and the single fixed 80x50 card,
+  // where a second page is expected and an item or the QR block must not be
+  // sliced mid-block across it. A continuous roll never legitimately has a
+  // second page, so forcing its top-level blocks (items, totals, the QR
+  // footer) to stay together is exactly what pushed a whole block onto a
+  // manufactured page 2 when the roll's real height differed from the
+  // JS estimate by even a fraction of a millimetre. `auto` removes the risk
+  // at the source; these rules would only reintroduce it.
+  const pageBreakAvoidanceCss = continuousRoll
+    ? ''
+    : `
+        .receipt-frame {
+          break-inside: avoid-page;
+          page-break-inside: avoid;
+        }
+        .receipt-frame > * {
+          break-inside: avoid-page;
+          page-break-inside: avoid;
+        }
+        .receipt-frame [data-receipt-line="true"],
+        .receipt-frame img {
+          break-inside: avoid-page;
+          page-break-inside: avoid;
+        }`
   const title = options.title === '' ? '' : (options.title || 'Receipt')
   const toolbarTitle = title || 'Receipt Preview'
   const note = options.note ? `<div class="receipt-note">${escapeHtml(options.note)}</div>` : ''
@@ -1327,19 +1359,10 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
           box-shadow: none;
           overflow: ${pageOverflow} !important;
           ${fixedFrameHeightCss}
-          break-inside: avoid-page;
-          page-break-inside: avoid;
         }
         .receipt-frame > * {
           margin: 0 !important;
-          break-inside: avoid-page;
-          page-break-inside: avoid;
-        }
-        .receipt-frame [data-receipt-line="true"],
-        .receipt-frame img {
-          break-inside: avoid-page;
-          page-break-inside: avoid;
-        }
+        }${pageBreakAvoidanceCss}
       }
     </style>
   </head>

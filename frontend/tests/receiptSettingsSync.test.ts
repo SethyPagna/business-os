@@ -60,10 +60,17 @@ assert.match(printUtilSource, /RECEIPT_PRINT_SETTINGS_STORAGE_KEY/)
 assert.match(printUtilSource, /normalizeReceiptPrintSettings/)
 assert.match(printUtilSource, /applyHighContrastBold\(host, printSettings\)/)
 assert.match(printUtilSource, /sourceSettings && typeof sourceSettings === 'object' && sourceSettings\.receipt_print_settings/)
-assert.match(printUtilSource, /const pageSizeCss = `\$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm`/,
-  'width-only thermal media uses one explicit measured-height CSS page')
-assert.doesNotMatch(printUtilSource, /const pageSizeCss = continuousRoll \? 'auto'/,
-  'continuous receipt printing must not delegate page breaks to fixed driver media')
+// 2026-09-15 (owner, real 80mm print photos): a continuous roll now hands
+// its LENGTH to the printer (`auto`) instead of a JS-measured mm figure --
+// that measured number is what disagreed with real thermal drivers and
+// produced a blank lead-in band plus a forced second page for the QR
+// footer. The WIDTH still stays the exact configured paper width; only a
+// bare, width-less `size: auto` (which would let the printer substitute
+// its own default document size, e.g. Letter/A4) remains forbidden.
+assert.match(printUtilSource, /const pageSizeCss = continuousRoll \? `\$\{widthMm\}mm auto` : `\$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm`/,
+  'a continuous roll uses an explicit width with an auto (printer-driven) length; a fixed sheet keeps its explicit measured-height CSS page')
+assert.doesNotMatch(printUtilSource, /size:\s*auto\s*[,;)]/,
+  'the page size must never fall back to the printer default document size (width-less auto)')
 
 assert.match(receiptConfigSource, /export const DEFAULT_RECEIPT_TEMPLATE/)
 assert.match(receiptConfigSource, /export const DEFAULT_RECEIPT_PRINT_SETTINGS/)

@@ -20,7 +20,7 @@ for (const height of [165.31, 426.72, 701.89]) {
   assert.ok(html.includes('App scale: 85%'), 'captured render settings win over newer popup options')
   assert.ok(html.includes('0 / 1 / 2 / 3 mm'))
   assert.ok(html.includes(RECEIPT_PREVIEW_COPY.receipt_preview_roll_warning))
-  assert.ok(html.includes(`size: 80mm ${height.toFixed(2)}mm;`), 'diagnostics do not change the requested page size')
+  assert.ok(html.includes('size: 80mm auto;'), 'a continuous roll always hands the length to the printer, whatever the measured diagnostic reads')
   assert.ok(html.includes(layout.markup), 'receipt markup is untouched')
   assert.match(html, /\.receipt-toolbar, \.receipt-note \{ display: none !important; \}/)
   assert.ok(html.indexOf('data-receipt-print-diagnostics="true"') < html.indexOf('<div class="receipt-stage">'), 'diagnostics stay in the non-printing toolbar')

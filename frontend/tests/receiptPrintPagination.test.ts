@@ -130,7 +130,7 @@ await runTest('explicit 80x50 card remains one fitted sheet', () => {
     'the compact caller cannot be confused with an arbitrary custom document')
 })
 
-await runTest('direct continuous print is one measured-height CSS page at constant width for 1/10/25 items', () => {
+await runTest('direct continuous print hands the roll length to the printer (auto height) at constant width for 1/10/25 items, never a second page', () => {
   const samples = [
     { items: 1, heightMm: 124.83 },
     { items: 10, heightMm: 248.65 },
@@ -146,21 +146,56 @@ await runTest('direct continuous print is one measured-height CSS page at consta
       continuousRoll: true,
       singleSheet: false,
     })
-    assert.match(html, new RegExp(`size: 80mm ${sample.heightMm.toFixed(2)}mm`))
-    assert.match(html, new RegExp(`height: ${sample.heightMm.toFixed(2)}mm !important`))
+    // 2026-09-15 (owner, real 80mm print photos): a fixed JS-measured @page
+    // height disagreed with the printer's own driver and produced a blank
+    // band before the shop name plus a forced second page carrying only the
+    // QR footer. `size: 80mm auto` hands the roll length to the printer
+    // entirely, so there is nothing left to disagree with.
+    assert.match(html, /size:\s*80mm auto/, `${sample.items} items use auto page height, not a JS-measured one`)
+    assert.doesNotMatch(html, new RegExp(`size: 80mm ${sample.heightMm.toFixed(2)}mm`),
+      'the fixed measured-height @page contract must not return')
+    // No fixed/min height forced on the print root -- it grows with content.
+    assert.doesNotMatch(html, /height:\s*[\d.]+mm !important/,
+      `${sample.items} items: no fixed page height on the print root`)
+    assert.match(html, /height:\s*auto !important/)
+    assert.match(html, /min-height:\s*0 !important/)
     assert.match(html, /width: 80mm !important/)
-    assert.doesNotMatch(html, /size:\s*auto/)
     assert.doesNotMatch(html, /transform:\s*scale\(/)
+    // Nothing forces a page break: no break-inside / page-break-inside rule
+    // anywhere in the document (that is what pushed the whole QR block onto
+    // its own physical strip when the measured height came up short).
+    assert.doesNotMatch(html, /break-inside/, `${sample.items} items: no break-inside rule anywhere`)
+    assert.doesNotMatch(html, /page-break-inside/, `${sample.items} items: no page-break-inside rule anywhere`)
+    assert.doesNotMatch(html, /page-break-before/, `${sample.items} items: no page-break-before rule anywhere`)
+    assert.doesNotMatch(html, /break-before/, `${sample.items} items: no break-before rule anywhere`)
     for (const id of itemIds) assert.ok(html.includes(id), `${id} is retained`)
     assert.ok(html.includes('TOTAL'))
     assert.ok(html.includes('QR-SYMBOL'))
+    // Everything -- items, totals and the QR footer -- lives inside the ONE
+    // print container; the markup was never split into more than one
+    // `.receipt-frame`.
+    assert.equal((html.match(/class="receipt-frame"/g) || []).length, 1,
+      `${sample.items} items render inside exactly one print container`)
   }
 
   const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
-  assert.match(source, /the web page cannot prevent the native print pipeline from shrinking or[\s\S]*clipping/,
-    'fixed driver media mismatch remains explicitly documented, not claimed solved')
+  assert.match(source, /the roll's length to the printer\/driver entirely/,
+    'the auto-height rationale for the continuous roll remains explicitly documented')
   assert.doesNotMatch(source, /\.slice\(0, 260\)/,
     'the text fallback must not silently discard late receipt items or totals')
+})
+
+await runTest('a genuine fixed sheet (80x50 card / A4 / Letter / custom height) keeps its explicit @page height and break-avoidance', () => {
+  const html = buildPrintablePreviewDocument({
+    markup: '<section>ITEM-1|TOTAL|QR-SYMBOL</section>',
+    widthMm: 80,
+    pageHeightMm: 50,
+    continuousRoll: false,
+    singleSheet: true,
+  })
+  assert.match(html, /size: 80mm 50\.00mm/)
+  assert.doesNotMatch(html, /size:\s*80mm auto/)
+  assert.match(html, /break-inside: avoid-page/, 'a real single card still keeps its content from bleeding onto a second card')
 })
 
 if (failed > 0) process.exitCode = 1
