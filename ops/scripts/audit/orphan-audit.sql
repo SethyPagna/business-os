@@ -14,6 +14,8 @@
 -- Deliberately NOT audited, because the id is provenance and the row it
 -- named is meant to be gone:
 --   sale_amendments.sale_item_id -- the removed line is gone by design; the ledger keeps its id as provenance
+--   product_merge_map_0165.loser_id -- the merged product is deleted by 0165; the map keeps its id as provenance
+--   customer_merge_map_0166.loser_id -- the merged customer is deleted by 0166; the map keeps its id as provenance
 --
 -- Every statement is a SELECT. There are no writes and no PRAGMA here.
 -- A healthy database answers 0 for every relation. A nonzero count on a
@@ -31,6 +33,7 @@ SELECT 'branch_stock.branch_id->branches' AS relation, COUNT(*) AS orphan_count 
 SELECT 'branch_stock.product_id->products' AS relation, COUNT(*) AS orphan_count FROM branch_stock c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
 SELECT 'bulk_delete_jobs.created_by_id->users' AS relation, COUNT(*) AS orphan_count FROM bulk_delete_jobs c LEFT JOIN users p ON p.id = c.created_by_id WHERE c.created_by_id IS NOT NULL AND p.id IS NULL;
 SELECT 'contact_duplicate_dismissals.dismissed_by_id->users' AS relation, COUNT(*) AS orphan_count FROM contact_duplicate_dismissals c LEFT JOIN users p ON p.id = c.dismissed_by_id WHERE c.dismissed_by_id IS NOT NULL AND p.id IS NULL;
+SELECT 'customer_merge_map_0166.keeper_id->customers' AS relation, COUNT(*) AS orphan_count FROM customer_merge_map_0166 c LEFT JOIN customers p ON p.id = c.keeper_id WHERE c.keeper_id IS NOT NULL AND p.id IS NULL;
 SELECT 'customer_receivables.customer_id->customers' AS relation, COUNT(*) AS orphan_count FROM customer_receivables c LEFT JOIN customers p ON p.id = c.customer_id WHERE c.customer_id IS NOT NULL AND p.id IS NULL;
 SELECT 'customer_share_submissions.customer_id->customers' AS relation, COUNT(*) AS orphan_count FROM customer_share_submissions c LEFT JOIN customers p ON p.id = c.customer_id WHERE c.customer_id IS NOT NULL AND p.id IS NULL;
 SELECT 'customer_share_submissions.reviewed_by_id->users' AS relation, COUNT(*) AS orphan_count FROM customer_share_submissions c LEFT JOIN users p ON p.id = c.reviewed_by_id WHERE c.reviewed_by_id IS NOT NULL AND p.id IS NULL;
@@ -88,6 +91,7 @@ SELECT 'product_conflict_merge_run_cases.run_id->product_conflict_merge_runs' AS
 SELECT 'product_conflict_merge_runs.actor_id->users' AS relation, COUNT(*) AS orphan_count FROM product_conflict_merge_runs c LEFT JOIN users p ON p.id = c.actor_id WHERE c.actor_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_duplicate_dismissals.dismissed_by_id->users' AS relation, COUNT(*) AS orphan_count FROM product_duplicate_dismissals c LEFT JOIN users p ON p.id = c.dismissed_by_id WHERE c.dismissed_by_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_images.product_id->products' AS relation, COUNT(*) AS orphan_count FROM product_images c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
+SELECT 'product_merge_map_0165.keeper_id->products' AS relation, COUNT(*) AS orphan_count FROM product_merge_map_0165 c LEFT JOIN products p ON p.id = c.keeper_id WHERE c.keeper_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_remove_operations.action_history_id->action_history' AS relation, COUNT(*) AS orphan_count FROM product_remove_operations c LEFT JOIN action_history p ON p.id = c.action_history_id WHERE c.action_history_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_remove_operations.actor_id->users' AS relation, COUNT(*) AS orphan_count FROM product_remove_operations c LEFT JOIN users p ON p.id = c.actor_id WHERE c.actor_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_remove_operations.pending_action_id->pending_actions' AS relation, COUNT(*) AS orphan_count FROM product_remove_operations c LEFT JOIN pending_actions p ON p.id = c.pending_action_id WHERE c.pending_action_id IS NOT NULL AND p.id IS NULL;

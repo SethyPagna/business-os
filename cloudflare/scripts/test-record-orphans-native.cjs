@@ -87,6 +87,12 @@ const HISTORICAL_REFERENCE = {
   // this column back to sale_items; the ledger row carries its own product id,
   // name, quantities and money. Proven by the "amendment: line removed" step.
   'sale_amendments.sale_item_id': 'the removed line is gone by design; the ledger keeps its id as provenance',
+  // Migrations 0165/0166 delete every merged loser row and keep its id (plus the
+  // full row as loser_json) in the merge map so the merge can be reviewed or
+  // undone. Pinned by scripts/test-migration-0165-0166-pure.cjs, which asserts
+  // each loser row is gone while its map row survives.
+  'product_merge_map_0165.loser_id': 'the merged product is deleted by 0165; the map keeps its id as provenance',
+  'customer_merge_map_0166.loser_id': 'the merged customer is deleted by 0166; the map keeps its id as provenance',
 }
 /** Leading qualifiers that describe a ROLE, not a different kind of parent. */
 const QUALIFIER = new Set(['from', 'to', 'source', 'destination', 'expected', 'seen', 'last_seen', 'last',
@@ -104,6 +110,8 @@ const CHILD_SCOPED = {
   'sale_amendments.reverses_amendment_id': 'sale_amendments',
   'sale_amendments.undo_action_id': 'action_history',
   'sales.cancel_fee_id': 'fees',
+  'product_merge_map_0165.keeper_id': 'products',
+  'customer_merge_map_0166.keeper_id': 'customers',
 }
 
 function resolveOwner(base, known) {
