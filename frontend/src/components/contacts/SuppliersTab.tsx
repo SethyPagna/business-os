@@ -210,6 +210,29 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
+// P4-4b item 6 (parity): handleSave's edit path used to call
+// load({ silent: true }) after every update -- a full re-search of the
+// current filtered/sorted/paginated Suppliers page just to reflect one row
+// changing. updateSupplier's PUT response already IS that one row (see
+// routes/contacts.ts's PUT handler: `SELECT * FROM suppliers WHERE
+// id = @id`), so this patches it into place instead -- same pattern
+// CustomersTab.tsx's patchCustomerRow uses (see that file's own comment
+// for why the response is spread OVER the existing row rather than
+// replacing it, even though SupplierRow carries no computed-only fields
+// analogous to customers' points_balance/portal_account today; keeping the
+// merge direction identical guards against that changing later). Returns
+// null (asking the caller to fall back to a full load) when the id isn't
+// present on the currently-loaded page.
+function patchSupplierRow(rows: SupplierRow[], id: number | string, patch: Record<string, unknown>): SupplierRow[] | null {
+  let matched = false
+  const next = rows.map((row) => {
+    if (Number(row.id) !== Number(id)) return row
+    matched = true
+    return { ...row, ...patch }
+  })
+  return matched ? next : null
+}
+
 interface SupplierFormProps {
   supplier?: SupplierRow | null
   onSave: (payload: SupplierPayload) => Promise<unknown> | unknown
@@ -908,7 +931,24 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       }
       setModal(null)
       setSelected(null)
-      await load({ silent: true, label: 'Suppliers after save' })
+      // P4-4b item 6 (parity): patch the edited row in place instead of the
+      // full load() -- same "patch only when the target position is
+      // already known" rule CustomersTab.tsx's handleSave uses. `useUpdate`
+      // (not just `selected`) gates this: a rename-copy keeps `selected`
+      // truthy but the write created a DIFFERENT new row than the one
+      // selected, so that path (like every create) still needs the full
+      // load() to find where the new row landed on the server-sorted/
+      // paginated list.
+      if (useUpdate && result && typeof result === 'object') {
+        const patched = patchSupplierRow(suppliers, (selected as { id: number | string }).id, result as Record<string, unknown>)
+        if (patched) {
+          setSuppliers(patched)
+        } else {
+          await load({ silent: true, label: 'Suppliers after save' })
+        }
+      } else {
+        await load({ silent: true, label: 'Suppliers after save' })
+      }
       return { success: true }
     } catch (error: unknown) {
       const duplicateCheck = readContactDuplicateDecisionError(error)
