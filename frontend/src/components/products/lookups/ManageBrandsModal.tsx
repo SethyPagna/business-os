@@ -649,7 +649,7 @@ export default function ManageBrandsModal({
                   ) : null}
                 </div>
               ) : null}
-              <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white/95 px-3 py-2 text-xs shadow-sm backdrop-blur dark:border-gray-700 dark:bg-gray-900/95">
+              <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <label className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
                   <input
                     type="checkbox"

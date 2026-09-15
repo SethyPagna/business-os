@@ -570,7 +570,7 @@ export default function ReceiptSettings() {
             Tabs stay scrollable (min-w-0 + overflow-x-auto); the button
             group is flex-shrink-0 so it never gets squeezed off-screen. */}
         <div
-          className="sticky top-0 z-20 mb-4 flex items-center gap-2 border-b border-gray-200 bg-gray-50/95 px-4 pb-1 pt-4 backdrop-blur dark:border-gray-800 dark:bg-zinc-950/95 sm:px-6 sm:pt-6"
+          className="sticky top-0 z-20 mb-4 flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 pb-1 pt-4 dark:border-gray-800 dark:bg-zinc-950 sm:px-6 sm:pt-6"
           title={t('rs_auto_save_hint') || 'Toggle any field on/off. All changes auto-save and apply instantly to the live preview and to receipts printed from POS & Sales.'}
         >
           <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-3 sm:flex-wrap sm:overflow-visible">

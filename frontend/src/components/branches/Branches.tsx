@@ -1136,7 +1136,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           `visibleBranches.length`), the 'transfers' tab has no equivalent,
           and pulling a tab-conditional row up into this always-rendered
           wrapper would change its behavior, not just its position. */}
-      <div className="sticky top-2 z-30 -mx-1 mb-3 space-y-2 bg-gray-50/95 pb-1.5 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 mb-3 space-y-2 bg-gray-50 pb-1.5 dark:bg-gray-900 sm:mx-0">
         {/* Merged toolbar row. On phones (user-reported "buttons on each
             other"): four equal flex-1 buttons gave History only ~1/4 of a
             narrow row, and its nowrap "History" label overflowed its box into

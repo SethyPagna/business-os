@@ -99,9 +99,13 @@ assert.match(
 )
 assert.match(
   batches,
-  /sticky bottom-0[^\"]*border-t[^\"]*backdrop-blur-sm/,
+  /sticky bottom-0[^\"]*border-t[^\"]*bg-amber-50/,
   'batch edit actions must remain reachable while the modal body scrolls',
 )
+// P4-4b fix 3: backdrop-blur is GPU cost with nothing to blur once the
+// sticky footer's own background is opaque (bg-amber-50/dark:bg-amber-950,
+// no /NN opacity suffix) -- see tests/stickyHeaderBlurRemoval.test.ts.
+assert.doesNotMatch(batches, /sticky bottom-0[^"]*backdrop-blur/, 'an opaque sticky footer must not also pay for backdrop-blur')
 
 // Detail footer actions use the shared 40px toolbar contract while retaining
 // their responsive half-width wrapping behavior.

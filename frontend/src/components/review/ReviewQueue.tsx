@@ -210,7 +210,7 @@ export default function ReviewQueue() {
         </div>
       </div>
 
-      <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-3 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-3 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 pt-1">
           <span className="mr-1 text-xs font-semibold text-slate-500">{tr('sections', 'Sections')}:</span>
           {['', ...sectionOptions].map((section) => (

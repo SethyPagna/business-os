@@ -720,7 +720,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         </Suspense>
       ) : null}
 
-      <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-2 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:flex-nowrap">
           <SearchInput
             id="fees-search"
@@ -865,7 +865,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           <div className="space-y-3 md:hidden">
             {feeDayGroups.map((group) => (
               <section key={group.date || 'unknown'} className="space-y-1.5" aria-label={formatFeeDate(group.date)}>
-                <div className="sticky top-[7.25rem] z-10 rounded-md bg-slate-100/95 px-2 py-1 text-xs font-semibold text-slate-600 backdrop-blur dark:bg-slate-800/95 dark:text-slate-200">
+                <div className="sticky top-[7.25rem] z-10 rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-200">
                   {formatFeeDate(group.date)}
                 </div>
                 {group.rows.map((fee) => (

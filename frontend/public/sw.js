@@ -21,6 +21,13 @@ const RETRY_DELAY_MS = 30_000;
 const SYNC_LEASE_MS = 60_000;
 const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024;
 const PRECACHE_CONCURRENCY = 4;
+// P4-4b fix 5: the deferred (non-eager) chunks are never a paint-blocking or
+// install-blocking gate -- they only need to be ready before the user
+// happens to open that route offline -- so they run at a lower concurrency
+// than the install-time precache to leave more of a constrained iOS
+// connection free for whatever the user is actually doing right after an
+// update installs.
+const DEFERRED_PRECACHE_CONCURRENCY = 2;
 const CACHE_METADATA_URL = '/__business_os_cache_metadata__';
 const FILE_CHUNK_ENDPOINTS = {
     init: '/api/sync/files/chunks/init',
@@ -198,6 +205,22 @@ async function cacheVerifiedStaticAsset(cache, url) {
     }
     await cache.put(request, response.clone());
 }
+// Set by precacheAppShell() during install, consumed by precacheDeferredAssets()
+// after activate. Module-scoped because the two run in different event
+// handlers of the same worker instance; a fresh install always overwrites it
+// before activate can read it.
+let pendingDeferredAssets = [];
+async function precacheDeferredAssets() {
+    const assets = pendingDeferredAssets;
+    pendingDeferredAssets = [];
+    if (!assets.length)
+        return;
+    const staticCache = await caches.open(STATIC_CACHE);
+    // Soft-fail, same as the optional assets this replaces: a missing/failed
+    // deferred chunk must never throw and take the worker down -- it is only
+    // ever a route the user has not visited yet.
+    await mapWithConcurrency(assets, DEFERRED_PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url));
+}
 async function precacheAppShell() {
     const cache = await caches.open(APP_SHELL_CACHE);
     // One missing optional icon or manifest must not strand a new worker in
@@ -223,21 +246,40 @@ async function precacheAppShell() {
     const generatedAssets = Array.isArray(precachePayload?.assets)
         ? precachePayload.assets.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
         : [];
+    // P4-4b fix 5: an older/degraded manifest without eager/deferred fields
+    // (a manifest fetched before this worker's own build, or a manifest a
+    // future rollback serves) falls back to treating every generated asset as
+    // eager -- the pre-fix behaviour -- rather than silently dropping the
+    // deferred half of the app forever.
+    const eagerAssets = Array.isArray(precachePayload?.eager)
+        ? precachePayload.eager.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
+        : generatedAssets;
+    const deferredAssets = Array.isArray(precachePayload?.deferred)
+        ? precachePayload.deferred.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
+        : [];
     const staticCache = await caches.open(STATIC_CACHE);
     const requiredEntryAssets = [...new Set(htmlEntryAssets)];
     const entryResults = await mapWithConcurrency(requiredEntryAssets, PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url));
     if (entryResults.some((result) => result.status === 'rejected')) {
         throw new Error('Application entry assets could not be cached');
     }
-    // Lazy route chunks make offline navigation richer, but they must not be a
-    // hard install gate. A single optional/missing chunk should never prevent a
-    // new worker from installing on a memory- or network-constrained iPhone.
-    const optionalAssets = [...new Set(generatedAssets.filter((url) => !requiredEntryAssets.includes(url)))];
-    await mapWithConcurrency(optionalAssets, PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url));
+    // The eager set (app shell + entry + active language packs + the routes an
+    // offline POS needs) makes install take a little longer than the bare
+    // shell, but still nowhere near the old "every generated chunk" precache --
+    // and it must not be a hard install gate either: a single optional/missing
+    // chunk should never prevent a new worker from installing on a memory- or
+    // network-constrained iPhone.
+    const optionalEagerAssets = [...new Set(eagerAssets.filter((url) => !requiredEntryAssets.includes(url)))];
+    await mapWithConcurrency(optionalEagerAssets, PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url));
     await cache.put(CACHE_METADATA_URL, new Response(JSON.stringify({
         version: APP_SHELL_VERSION,
         installedAt: Date.now(),
     }), { headers: { 'Content-Type': 'application/json' } }));
+    // Everything else is real but non-urgent: precached in the background after
+    // activation (precacheDeferredAssets), never blocking install/activate, so
+    // a fresh build does not saturate the connection before the app the user is
+    // already looking at finishes loading.
+    pendingDeferredAssets = [...new Set(deferredAssets.filter((url) => (!requiredEntryAssets.includes(url) && !optionalEagerAssets.includes(url))))];
 }
 async function cacheNamesToRetain(keys) {
     const retained = new Set([APP_SHELL_CACHE, STATIC_CACHE]);
@@ -540,6 +582,12 @@ self.addEventListener('activate', (event) => {
             message: 'New version ready',
         });
     })());
+    // Deliberately NOT inside the waitUntil above: the deferred chunks are
+    // optional route assets the user has not opened yet, so this must not
+    // delay clients.claim() or the update-ready broadcast. A worker killed
+    // before this finishes just retries on the next activate/visit; nothing
+    // here is a correctness requirement the way the app shell is.
+    precacheDeferredAssets().catch(() => { });
 });
 self.addEventListener('sync', (event) => {
     if (event.tag === OUTBOX_SYNC_TAG) {
@@ -595,46 +643,42 @@ function isCacheableStaticPath(pathname) {
         || pathname === '/runtime-noise-guard.js'
         || pathname === '/theme-bootstrap.js';
 }
-function isHashedBuildAsset(pathname) {
-    return pathname.startsWith('/assets/');
-}
-async function appShellFallback(request) {
+// P4-4b: navigation used to be network-first with no timeout, so a
+// slow-but-alive connection (the reported iOS lag) made every navigation
+// wait for the full round trip before the shell could even start parsing.
+// Serve the cached shell immediately when one exists and refresh it in the
+// background instead -- the cache is safe to trust because APP_SHELL_CACHE
+// is named after THIS worker's own BUILD_HASH (see the const above): a new
+// deploy runs an entirely new worker with an entirely new cache, so this
+// can never serve an old build's shell under a new build's version. That
+// guarantee lives in the cache-name boundary, not in this function, and is
+// unaffected by this change -- the BUSINESS_OS_APP_VERSION_REQUEST reply in
+// the message handler above is the actual new-build detector and still
+// answers with this worker's real APP_SHELL_VERSION either way. Falls back
+// to a live fetch (and its normal offline error) only when there is no
+// cached shell yet, e.g. the very first navigation this worker serves.
+async function appShellFallback(request, event) {
     const cache = await caches.open(APP_SHELL_CACHE);
-    try {
-        const response = await fetch(request, { cache: 'no-store' });
+    const cached = await cache.match('/index.html') || await cache.match('/');
+    if (cached) {
+        const revalidate = fetch(request, { cache: 'no-store' })
+            .then(async (response) => {
+            // Do not let a Cloudflare Access/login redirect or an app-owned HTTP
+            // error overwrite a good cached shell -- only a real 200 updates it.
+            if (response && response.ok && response.type === 'basic' && !response.redirected) {
+                await cache.put('/index.html', response.clone()).catch(() => { });
+            }
+        })
+            .catch(() => { });
+        event.waitUntil(revalidate);
+        return cached;
+    }
+    return fetch(request, { cache: 'no-store' }).then(async (response) => {
         if (response && response.ok && response.type === 'basic' && !response.redirected) {
             await cache.put('/index.html', response.clone()).catch(() => { });
-            return response;
         }
-        // Do not hide Cloudflare Access/login redirects or app-owned HTTP errors
-        // behind an old cached shell. Cached shell is only for true offline failure.
         return response;
-    }
-    catch (error) {
-        const cached = await cache.match('/index.html') || await cache.match('/');
-        if (cached)
-            return cached;
-        throw error;
-    }
-}
-async function networkFirstStatic(request) {
-    const cache = await caches.open(STATIC_CACHE);
-    const cached = await cache.match(request);
-    try {
-        const response = await fetch(request, { cache: 'no-store' });
-        if (response && response.ok && response.type === 'basic' && !response.redirected) {
-            await cache.put(request, response.clone()).catch(() => { });
-            return response;
-        }
-        // Returning the live error/redirect prevents stale hashed chunks from
-        // masking an expired Access session or a bad deployment.
-        return response;
-    }
-    catch (error) {
-        if (cached)
-            return cached;
-        throw error;
-    }
+    });
 }
 async function cacheFirstStatic(request, event) {
     const cache = await caches.open(STATIC_CACHE);
@@ -666,12 +710,17 @@ self.addEventListener('fetch', (event) => {
     if (isNeverCachedPath(url.pathname))
         return;
     if (request.mode === 'navigate') {
-        event.respondWith(appShellFallback(request));
+        event.respondWith(appShellFallback(request, event));
         return;
     }
     if (!isCacheableStaticPath(url.pathname))
         return;
-    event.respondWith(isHashedBuildAsset(url.pathname)
-        ? cacheFirstStatic(request, event)
-        : networkFirstStatic(request));
+    // P4-4b: every cacheable static path (hashed build assets AND the
+    // unhashed manifest/icons/runtime-noise-guard.js/theme-bootstrap.js) is
+    // now cache-first with background revalidation -- these were previously
+    // split, with the unhashed set on networkFirstStatic (always paying the
+    // round trip before the file could be used, even though STATIC_CACHE is
+    // scoped per BUILD_HASH exactly like the app shell above, so there was no
+    // staleness risk it was actually guarding against).
+    event.respondWith(cacheFirstStatic(request, event));
 });

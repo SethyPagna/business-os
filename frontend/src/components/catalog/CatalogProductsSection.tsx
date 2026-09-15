@@ -551,7 +551,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         />
       ) : null}
       <div className="mb-5 space-y-3">
-        <div className="sticky top-16 z-20 -mx-1 space-y-2 rounded-[22px] border border-slate-200 bg-white/96 p-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/96 sm:top-20">
+        <div className="sticky top-16 z-20 -mx-1 space-y-2 rounded-[22px] border border-slate-200 bg-white p-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:border-neutral-700 dark:bg-neutral-900 sm:top-20">
           <div className="flex items-center gap-2">
           {/* The wrapping <label> held only the magnifier icon, so it gave the
               field no accessible name at all: a reader announced a bare "edit
