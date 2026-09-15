@@ -589,10 +589,15 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const supplierIds = request.items.flatMap((line) => line.supplier_id == null ? [] : [line.supplier_id])
   const explicitBatchIds = request.items.flatMap((line) => line.batch_id == null ? [] : [line.batch_id])
   const beforeFence = await snapshotFence(db, request)
-  const products = await rowsIn<Row>(db, receiveIds, 'id', 'SELECT * FROM products')
-  const branches = await rowsIn<Row>(db, branchIds, 'id', 'SELECT * FROM branches')
-  const suppliers = await rowsIn<Row>(db, supplierIds, 'id', 'SELECT * FROM suppliers')
-  const explicitBatches = await rowsIn<Row>(db, explicitBatchIds, 'id', 'SELECT * FROM product_batches')
+  // Four independent lookups over four different tables, keyed off the
+  // request's own id lists -- no data dependency on each other's results, so
+  // one Promise.all fan-out replaces four sequential round trips.
+  const [products, branches, suppliers, explicitBatches] = await Promise.all([
+    rowsIn<Row>(db, receiveIds, 'id', 'SELECT * FROM products'),
+    rowsIn<Row>(db, branchIds, 'id', 'SELECT * FROM branches'),
+    rowsIn<Row>(db, supplierIds, 'id', 'SELECT * FROM suppliers'),
+    rowsIn<Row>(db, explicitBatchIds, 'id', 'SELECT * FROM product_batches'),
+  ])
   const receiveProducts = new Map(products.map((row) => [Number(row.id), row]))
   const branchMap = new Map(branches.map((row) => [Number(row.id), row]))
   const supplierMap = new Map(suppliers.map((row) => [Number(row.id), row]))
@@ -641,7 +646,32 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   }
 
   const dateBatchLines = request.items.filter((line) => line.kind === 'receive' && line.batch_id == null)
-  const possibleDateBatches = await rowsIn<Row>(db, dateBatchLines.map((line) => line.product_id as number), 'variant_product_id', 'SELECT * FROM product_batches')
+  const createLines = request.items.filter((line) => line.kind === 'create_receive')
+  const stockCreateLines = createLines.filter((line) => line.quantity > 0)
+  const duplicateNameClause = createLines.length
+    ? buildInClause('name', [...new Set(createLines.map((line) => normalizeProductGroupName(line.product?.name)))])
+    : null
+  const imagePaths = [...new Set(createLines.flatMap((line) => {
+    const gallery = (line.product?.image_gallery as string[] | undefined) || []
+    const primary = String(line.product?.image_path || '')
+    return primary ? [primary, ...gallery] : gallery
+  }))]
+  const galleryLinkCount = createLines.reduce((count, line) => count + (((line.product?.image_gallery as string[] | undefined) || []).length), 0)
+  if (galleryLinkCount > STOCK_SESSION_MAX_GALLERY_LINKS) fail(`A stock session can link at most ${STOCK_SESSION_MAX_GALLERY_LINKS} product images.`, 400, 'child_row_limit')
+
+  // Five independent reads -- none depends on another's result, only on the
+  // request itself -- fanned into one Promise.all instead of five
+  // sequential round trips (dateBatch lookup, memoized schema probe, active
+  // branches, duplicate-name candidates, image asset lookup).
+  const [possibleDateBatches, productColumns, activeBranches, duplicateCandidates, assets] = await Promise.all([
+    rowsIn<Row>(db, dateBatchLines.map((line) => line.product_id as number), 'variant_product_id', 'SELECT * FROM product_batches'),
+    createLines.length ? tableColumns(env, 'products') : Promise.resolve(new Set<string>()),
+    stockCreateLines.length ? db.prepare('SELECT id FROM branches WHERE is_active=1 ORDER BY id').all<Row>() : Promise.resolve([] as Row[]),
+    duplicateNameClause
+      ? db.prepare(`SELECT id,name,barcode,cost_price_usd,cost_price_khr FROM products WHERE is_active=1 AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' '))) IN (${duplicateNameClause.sql})`).all<Row>(duplicateNameClause.params)
+      : Promise.resolve([] as Row[]),
+    rowsIn<Row>(db, imagePaths, 'public_path', 'SELECT id,public_path FROM file_assets'),
+  ])
   const dateBatchMap = new Map(possibleDateBatches.map((row) => [`${row.variant_product_id}:${row.batch_key}`, row]))
   const relevantBatches = [...explicitBatches]
   for (const line of dateBatchLines) {
@@ -650,10 +680,6 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     if (batch && !relevantBatches.some((row) => row.id === batch.id)) relevantBatches.push(batch)
   }
 
-  const productColumns = request.items.some((line) => line.kind === 'create_receive') ? await tableColumns(env, 'products') : new Set<string>()
-  const createLines = request.items.filter((line) => line.kind === 'create_receive')
-  const stockCreateLines = createLines.filter((line) => line.quantity > 0)
-  const activeBranches = stockCreateLines.length ? await db.prepare('SELECT id FROM branches WHERE is_active=1 ORDER BY id').all<Row>() : []
   // THE identity rule, as products.ts findSameProductIdentityProduct and the
   // import path already apply it: normalized name + FOLDED barcode.
   //
@@ -667,15 +693,11 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const identityKeys = new Set<string>()
   for (const line of createLines) {
     const product = line.product as CanonicalProduct
-    const key = `${normalizeProductGroupName(product.name)}\u0001${identityBarcodeKey(product.barcode)}`
+    const key = `${normalizeProductGroupName(product.name)}${identityBarcodeKey(product.barcode)}`
     if (identityKeys.has(key)) fail('Two create_receive lines describe the same product identity.', 409, 'duplicate_product')
     identityKeys.add(key)
   }
-  let duplicateCandidates: Row[] = []
   if (createLines.length) {
-    const names = [...new Set(createLines.map((line) => normalizeProductGroupName(line.product?.name)))]
-    const { sql, params } = buildInClause('name', names)
-    duplicateCandidates = await db.prepare(`SELECT id,name,barcode,cost_price_usd,cost_price_khr FROM products WHERE is_active=1 AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' '))) IN (${sql})`).all<Row>(params)
     for (const line of createLines) {
       const product = line.product as CanonicalProduct
       // The SQL above narrows to the name group; the barcode is compared
@@ -689,34 +711,29 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       if (duplicate) fail(`"${duplicate.name}" already exists with this barcode.`, 409, 'duplicate_product', { duplicate })
     }
   }
-
-  const imagePaths = [...new Set(createLines.flatMap((line) => {
-    const gallery = (line.product?.image_gallery as string[] | undefined) || []
-    const primary = String(line.product?.image_path || '')
-    return primary ? [primary, ...gallery] : gallery
-  }))]
-  const galleryLinkCount = createLines.reduce((count, line) => count + (((line.product?.image_gallery as string[] | undefined) || []).length), 0)
-  if (galleryLinkCount > STOCK_SESSION_MAX_GALLERY_LINKS) fail(`A stock session can link at most ${STOCK_SESSION_MAX_GALLERY_LINKS} product images.`, 400, 'child_row_limit')
-  const assets = await rowsIn<Row>(db, imagePaths, 'public_path', 'SELECT id,public_path FROM file_assets')
   const assetByPath = new Map(assets.map((row) => [String(row.public_path), row]))
   const missingAsset = imagePaths.find((path) => !assetByPath.has(path))
   if (missingAsset) fail(`Image asset ${missingAsset} does not exist.`, 409, 'missing_image_asset')
 
   const existingProductIds = [...new Set(receiveIds)]
   const existingBatchIds = relevantBatches.map((row) => Number(row.id))
-  const branchStocks = existingProductIds.length && branchIds.length
-    ? await db.prepare(`SELECT * FROM branch_stock WHERE product_id IN (${buildInClause('product', existingProductIds).sql}) AND branch_id IN (${buildInClause('branch', [...new Set(branchIds)]).sql})`)
-      .all<Row>({ ...buildInClause('product', existingProductIds).params, ...buildInClause('branch', [...new Set(branchIds)]).params })
-      .then((rows) => rows.filter((row) => request.items.some((line) => line.product_id === row.product_id && line.branch_id === row.branch_id)))
-    : []
-  const batchStocks = existingBatchIds.length && branchIds.length
-    ? await db.prepare(`SELECT * FROM branch_batch_stock WHERE batch_id IN (${buildInClause('batch', existingBatchIds).sql}) AND branch_id IN (${buildInClause('branch', [...new Set(branchIds)]).sql})`)
-      .all<Row>({ ...buildInClause('batch', existingBatchIds).params, ...buildInClause('branch', [...new Set(branchIds)]).params })
-      .then((rows) => rows.filter((row) => request.items.some((line) => {
-        const batch = line.batch_id != null ? explicitBatchMap.get(line.batch_id) : dateBatchMap.get(`${line.product_id}:${receivedBatchKey(line.received_date)}`)
-        return batch?.id === row.batch_id && line.branch_id === row.branch_id
-      })))
-    : []
+  // Independent per-table stock lookups -- fanned into one Promise.all
+  // instead of two sequential round trips.
+  const [branchStocks, batchStocks] = await Promise.all([
+    existingProductIds.length && branchIds.length
+      ? db.prepare(`SELECT * FROM branch_stock WHERE product_id IN (${buildInClause('product', existingProductIds).sql}) AND branch_id IN (${buildInClause('branch', [...new Set(branchIds)]).sql})`)
+        .all<Row>({ ...buildInClause('product', existingProductIds).params, ...buildInClause('branch', [...new Set(branchIds)]).params })
+        .then((rows) => rows.filter((row) => request.items.some((line) => line.product_id === row.product_id && line.branch_id === row.branch_id)))
+      : Promise.resolve([] as Row[]),
+    existingBatchIds.length && branchIds.length
+      ? db.prepare(`SELECT * FROM branch_batch_stock WHERE batch_id IN (${buildInClause('batch', existingBatchIds).sql}) AND branch_id IN (${buildInClause('branch', [...new Set(branchIds)]).sql})`)
+        .all<Row>({ ...buildInClause('batch', existingBatchIds).params, ...buildInClause('branch', [...new Set(branchIds)]).params })
+        .then((rows) => rows.filter((row) => request.items.some((line) => {
+          const batch = line.batch_id != null ? explicitBatchMap.get(line.batch_id) : dateBatchMap.get(`${line.product_id}:${receivedBatchKey(line.received_date)}`)
+          return batch?.id === row.batch_id && line.branch_id === row.branch_id
+        })))
+      : Promise.resolve([] as Row[]),
+  ])
   const branchStockMap = new Map(branchStocks.map((row) => [`${row.product_id}:${row.branch_id}`, row]))
   const batchStockMap = new Map(batchStocks.map((row) => [`${row.batch_id}:${row.branch_id}`, row]))
 

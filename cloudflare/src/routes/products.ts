@@ -1419,10 +1419,16 @@ app.get('/stock-in-session-lines', async (c) => {
   const movementIds = rows.map((row) => Number(row.id)).filter((id) => Number.isSafeInteger(id) && id > 0)
   if (movementIds.length) {
     const reverted = new Set<string>()
-    for (const chunk of chunkForBinding(movementIds)) {
+    // Independent chunks (each is its own IN-clause lookup with no data
+    // dependency on the others), fanned out with Promise.all instead of a
+    // sequential for-await loop -- one round trip per chunk in parallel
+    // rather than serialized.
+    const chunkResults = await Promise.all(chunkForBinding(movementIds).map((chunk) => {
       const refs = chunk.map((id) => `revert:${id}`)
       const clause = buildInClause('revert', refs)
-      const found = await db.prepare(`SELECT reference_id FROM inventory_movements WHERE reference_id IN (${clause.sql})`).all<{ reference_id: string | number }>({ ...clause.params })
+      return db.prepare(`SELECT reference_id FROM inventory_movements WHERE reference_id IN (${clause.sql})`).all<{ reference_id: string | number }>({ ...clause.params })
+    }))
+    for (const found of chunkResults) {
       for (const row of found) reverted.add(String(row.reference_id))
     }
     rows = rows.filter((row) => !reverted.has(`revert:${Number(row.id)}`))
@@ -1434,9 +1440,12 @@ app.get('/stock-in-session-lines', async (c) => {
   const batchIds = [...new Set(rows.map((row) => Number(row.batch_id)).filter((id) => Number.isSafeInteger(id) && id > 0))]
   const receiptCounts = new Map<number, number>()
   try {
-    for (const chunk of chunkForBinding(batchIds)) {
+    // Same fan-out as the revert lookup above -- independent per-chunk
+    // COUNT queries, run in parallel with Promise.all instead of a
+    // sequential for-await loop.
+    const chunkResults = await Promise.all(chunkForBinding(batchIds).map((chunk) => {
       const clause = buildInClause('batch', chunk)
-      const counts = await db.prepare(`
+      return db.prepare(`
         SELECT m.batch_id,
                COUNT(DISTINCT CASE
                  WHEN m.reference_id IS NOT NULL AND CAST(m.reference_id AS TEXT) NOT LIKE 'revert:%'
@@ -1450,6 +1459,8 @@ app.get('/stock-in-session-lines', async (c) => {
         WHERE ${STOCK_RECEIPT_TYPE_SQL} AND m.batch_id IN (${clause.sql})
         GROUP BY m.batch_id
       `).all<{ batch_id: number; receipt_session_count: number }>({ ...clause.params })
+    }))
+    for (const counts of chunkResults) {
       for (const row of counts) receiptCounts.set(Number(row.batch_id), Number(row.receipt_session_count) || 0)
     }
   } catch {
