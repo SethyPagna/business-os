@@ -1043,16 +1043,16 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
               <span className="font-medium text-blue-700 dark:text-blue-300">
                 {bulkProgress || replaceVars(t('duplicates_bulk_selected_count') || '{count} selected', { count: selectedKeys.size })}
               </span>
-              <button
-                type="button"
-                onClick={() => void openSelectedGroupReview()}
-                disabled={bulkBusy}
-                title={t('selected_conflict_group_review_hint') || 'Review every selected merge group and independent removal in one durable, paged server review.'}
-                className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50"
-              >
-                <Search className="mr-1 inline h-3.5 w-3.5" />
-                {bulkBusy ? (t('loading') || 'Loading...') : (t('selected_conflict_group_review_action') || 'Review selected actions')}
-              </button>
+              {/* One action, not two: this used to render both "Review selected
+                  actions" and "Merge selected" as separate buttons calling the
+                  exact same openSelectedGroupReview() handler with the same
+                  title -- a leftover from the group-review flow replacing the
+                  old exact-pairs-only preview (see git history) that left both
+                  labels wired to the new function. A single button that opens
+                  the auto-resolve review (it already computes the automatic
+                  decision -- merge / blocked with a reason -- for every
+                  selected group and shows before/after before anything is
+                  written) is what "Auto-resolve selected" means here. */}
               <button
                 type="button"
                 onClick={() => void openSelectedGroupReview()}

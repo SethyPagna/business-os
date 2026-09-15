@@ -20,7 +20,7 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit } from '../lib/audit'
-import { canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
@@ -2734,14 +2734,31 @@ export async function readMergeIdentityDiff(
     db.prepare(`SELECT ${columns} FROM products WHERE id = @id`).get<Record<string, unknown>>({ id: dupId }),
   ])
   const differs: Array<{ field: string; keeper: string; discarded: string }> = []
-  if (normalizeProductGroupName(keeper?.name) !== normalizeProductGroupName(dup?.name)) {
+  const nameDiffers = normalizeProductGroupName(keeper?.name) !== normalizeProductGroupName(dup?.name)
+  if (nameDiffers) {
     differs.push({ field: 'name', keeper: String(keeper?.name ?? ''), discarded: String(dup?.name ?? '') })
   }
   // identityBarcodeKey, not the raw string: a leading zero is not a different
   // barcode, so it must not be reported to the reviewer as one.
-  if (identityBarcodeKey(keeper?.barcode) !== identityBarcodeKey(dup?.barcode)) {
+  const barcodeKeysDiffer = identityBarcodeKey(keeper?.barcode) !== identityBarcodeKey(dup?.barcode)
+  if (barcodeKeysDiffer) {
     differs.push({ field: 'barcode', keeper: String(keeper?.barcode ?? ''), discarded: String(dup?.barcode ?? '') })
   }
+  // Sep 15 2026 wildcard ruling: an empty/word/broken barcode on either side
+  // never blocks a merge on its own -- only two DIFFERENT REAL barcodes do.
+  // This gate used to be the raw key comparison above (barcodeKeysDiffer),
+  // which is why "Keep this" on the Products > Duplicates cluster card --
+  // the actual write path behind every merge, including the ones the
+  // wildcard-aware cluster sweep (productIdentity.ts) already groups
+  // together -- kept refusing with "these products do not have the same
+  // ... barcode" for exactly the pairs the ruling says ARE the same
+  // product: the cluster list and the confirmation dialog were fixed for
+  // the ruling, but the endpoint that actually performs the merge was not,
+  // so the refusal the owner reported kept happening after the ruling
+  // shipped. barcodeKeysDiffer above still records the raw difference for
+  // the reviewer's before/after (it is informative, not a block); only a
+  // genuine real-vs-real mismatch is disqualifying.
+  const barcodeBlocks = barcodeKeysDiffer && !barcodeIdentityMatches(keeper?.barcode, dup?.barcode)
   const costVerdict = compareCosts(keeper || {}, dup || {})
   const costFill: Array<{ field: string; value: number }> = []
   const costBefore: Record<string, number> = {}
@@ -2758,7 +2775,7 @@ export async function readMergeIdentityDiff(
     if (!before && after) costFill.push({ field, value: after })
   }
   return {
-    same: differs.length === 0,
+    same: !nameDiffers && !barcodeBlocks,
     differs,
     costVerdict,
     costFill,

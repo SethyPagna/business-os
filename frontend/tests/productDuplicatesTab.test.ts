@@ -45,8 +45,18 @@ test('N-row selections can open one durable paged review without replacing the l
   assert.match(src, /getSelectedConflictGroupReviewPage\(current\.review_id, cursor, SELECTED_CONFLICT_GROUP_REVIEW_PAGE_LIMIT/)
   assert.match(src, /next\.draft_digest === current\.draft_digest[\s\S]*next\.page\.cursor !== cursor/, 'a mismatched page cannot be joined to a different or changed review')
   assert.match(src, /<SelectedConflictGroupReviewModal/)
-  assert.match(src, /selected_conflict_group_review_action/)
-  assert.doesNotMatch(src, /onClick=\{\(\) => void openSelectedMergeReview\(\)\}/, 'new selections use the durable group route; legacy receipt recovery remains available')
+  assert.match(src, /buildSelectedConflictGroupReviewRequest/, 'the durable group review request builder is wired for every selection')
+  assert.doesNotMatch(src, /onClick=\{\(\) => void openSelectedMergeReview\(\)\}/, 'new selections use the durable group route, never the retired exact-pairs-only preview')
+  // P6-9: "Review selected actions" and "Merge selected" used to render as two
+  // separate buttons calling the exact same openSelectedGroupReview() handler
+  // with the same title -- a leftover from Sep 13's "Route duplicate
+  // selections through durable group review" migration, which repointed
+  // Merge selected at the new flow but left the older review-only button in
+  // place, now doing nothing different. One button, doing the one thing it
+  // does (open the auto-resolve review), replaces both.
+  const bulkBarBlock = src.slice(src.indexOf('duplicates_bulk_selected_count'), src.indexOf('duplicates_bulk_dismiss_action'))
+  const groupReviewButtonCount = (bulkBarBlock.match(/onClick=\{\(\) => void openSelectedGroupReview\(\)\}/g) || []).length
+  assert.equal(groupReviewButtonCount, 1, 'the bulk bar must offer exactly one button that opens the group review, not a duplicate')
   assert.match(src, /Remove independently in the global review[\s\S]*Reason for removing this product/, 'independent removal is explicit and requires its own reason')
   assert.doesNotMatch(src, /selected_conflict_remove_unavailable/, 'the reviewed removal path is no longer presented as unavailable')
   assert.match(src, /groupReviewRequestRef[\s\S]*batchRequestRef/, 'read-only paging and legacy writes have independent cancellation ownership')
