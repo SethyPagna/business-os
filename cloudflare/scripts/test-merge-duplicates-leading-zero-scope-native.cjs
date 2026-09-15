@@ -127,23 +127,34 @@ function seed() {
   const add = (id, name, barcode, stock = 0, cost = 4) => insert.run(
     id, name, barcode, cost, cost * 4000, 10, 40000, 8, 32000, stock,
   )
-  add(1, 'Clean Pair', '01234', 3, 4)
-  add(2, 'Clean Pair', '1234', 2, 6)
+  // Every barcode below is REAL (all-digit, >=MIN_REAL_BARCODE_DIGITS=6) --
+  // this scope/manifest feature is specifically the "two REAL barcodes
+  // differing only by leading zeros" case, and a SHORT/broken code (below
+  // the Sep 15 2026 realness floor) would instead wildcard-merge under the
+  // general rule with a stock/id tiebreak, not the "cleaner spelling always
+  // wins" tiebreak this file exercises. Short-code wildcard behavior has its
+  // own coverage in test-merge-rules-pure.cjs.
+  add(1, 'Clean Pair', '0123456', 3, 4)
+  add(2, 'Clean Pair', '123456', 2, 6)
   raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(1, 1, 3)
   raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(2, 1, 2)
-  add(3, 'Exact Raw', '7777')
-  add(4, 'Exact Raw', '7777')
-  add(5, 'Mismatch Pair', '08888', 9)
-  add(6, 'Mismatch Pair', '8888', 1)
+  add(3, 'Exact Raw', '777777')
+  add(4, 'Exact Raw', '777777')
+  add(5, 'Mismatch Pair', '0888888', 9)
+  add(6, 'Mismatch Pair', '888888', 1)
   raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(5, 1, 7)
   raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(6, 1, 1)
-  add(7, 'Collision Pair', '00999')
-  add(8, 'Collision Pair', '0999')
-  add(9, 'Other Name', '999')
-  add(11, 'Aardvark Pair', '05555', 0, 0)
-  add(12, 'Aardvark Pair', '5555', 0, 8)
-  add(13, 'Zebra Pair', '06666', 0, 2)
-  add(14, 'Zebra Pair', '6666', 0, 200)
+  add(7, 'Collision Pair', '0099999')
+  add(8, 'Collision Pair', '099999')
+  // Distinct RAW spelling from both Collision Pair rows (extra leading
+  // zero) so the manual-review "same raw barcode, different name" guard
+  // does not itself exclude id8 from the auto-eligible pool -- only the
+  // FOLDED key needs to collide with the Collision Pair group's folded key.
+  add(9, 'Other Name', '00099999')
+  add(11, 'Aardvark Pair', '0555555', 0, 0)
+  add(12, 'Aardvark Pair', '555555', 0, 8)
+  add(13, 'Zebra Pair', '0666666', 0, 2)
+  add(14, 'Zebra Pair', '666666', 0, 200)
   return { d1, raw }
 }
 
@@ -206,7 +217,10 @@ async function main() {
   raw.prepare('UPDATE products SET stock_quantity=3 WHERE id=1').run()
 
   const collisionPreview = await preview(context({ scope: 'leading_zero' }))
-  addOutsider(raw, 'Other Fresh Name', '00001234')
+  // Folds (leading zeros stripped) to '123456', the Clean Pair manifest
+  // group's canonical barcode -- a late collision introduced between
+  // preview and apply.
+  addOutsider(raw, 'Other Fresh Name', '000123456')
   const newCollision = await apply(context({ body: {
     ...collisionPreview.body.applyManifest,
   } }))
@@ -225,7 +239,11 @@ async function main() {
   assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 1)
 
   const refreshed = await preview(context({ scope: 'leading_zero' }))
-  addOutsider(raw, 'Clean Pair', '001234')
+  // A broken/short barcode (below the realness floor) wildcard-attaches to
+  // the Clean Pair group's one real cluster, changing its membership -- a
+  // genuinely different real barcode would instead form its own cluster and
+  // never join this group at all.
+  addOutsider(raw, 'Clean Pair', '99')
   const changedGroup = await apply(context({ body: {
     scope: 'leading_zero', manifest_version: 1, manifest_digest: refreshed.body.applyManifest.manifest_digest,
     groups: refreshed.body.applyManifest.groups,
@@ -257,7 +275,8 @@ async function main() {
     rawDb.prepare('UPDATE products SET selling_price_usd=99 WHERE id=1').run()
   })
   await concurrentGuard('cross-name folded outsider', (rawDb) => {
-    addOutsider(rawDb, 'Concurrent Other Name', '00001234')
+    // Folds to '123456', the Clean Pair manifest group's canonical barcode.
+    addOutsider(rawDb, 'Concurrent Other Name', '000123456')
   })
   await concurrentGuard('new linked history', (rawDb) => {
     rawDb.prepare(`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity)

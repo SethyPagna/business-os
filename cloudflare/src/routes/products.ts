@@ -20,7 +20,7 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit } from '../lib/audit'
-import { canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeKeySql, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
@@ -1585,14 +1585,21 @@ async function findSameProductIdentityProduct(
   // in SQL would mean a THIRD hand-copy of the fold (searchMatch.ts already
   // carries the deliberately-looser search one) and this codebase has been
   // bitten by exactly that before.
+  // live_stock_quantity feeds pickSameIdentityRow's wildcard-attachment
+  // ranking (most stock, then lowest id -- rankBarcodeIdentityWinner) for
+  // the case this name group already holds two or more DIFFERENT real
+  // barcodes and a broken/empty incoming value has to pick one to wildcard
+  // against.
   const rows = await getDb(env).prepare(`
-    SELECT id, name, barcode, cost_price_usd, cost_price_khr FROM products
-    WHERE is_active = 1
-      AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name, '  ', ' '), '  ', ' '), '  ', ' '))) = @nameKey
-      AND (@excludeId IS NULL OR id != @excludeId)
-    ORDER BY id ASC
+    SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr,
+           COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = p.id), 0) AS live_stock_quantity
+    FROM products p
+    WHERE p.is_active = 1
+      AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(p.name, '  ', ' '), '  ', ' '), '  ', ' '))) = @nameKey
+      AND (@excludeId IS NULL OR p.id != @excludeId)
+    ORDER BY p.id ASC
     LIMIT 200
-  `).all<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number }>({
+  `).all<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number; live_stock_quantity: number }>({
     nameKey, excludeId,
   })
   return pickSameIdentityRow(rows, barcode)
@@ -3741,7 +3748,7 @@ async function readLeadingZeroCrossNameCollisionKeys(
     const { sql, params } = buildInClause('foldedBarcode', chunk)
     return db.prepare(`SELECT id, name_key, barcode FROM products p
       WHERE p.is_active=1 AND COALESCE(p.is_group,0)=0
-        AND ${identityBarcodeKeySql('p.barcode')} IN (${sql})`)
+        AND ${identityBarcodeLeadingZeroFoldSql('p.barcode')} IN (${sql})`)
       .all<{ id: number; name_key: string | null; barcode: string | null }>(params)
   })
   const namesByFoldedBarcode = new Map<string, Set<string>>()
@@ -3946,10 +3953,10 @@ function leadingZeroScopeAtomicAssertions(
   const assertions: AtomicMergeStatement[] = [{
     sql: `SELECT CASE WHEN
       (SELECT COUNT(*) FROM products p WHERE p.is_active=1 AND COALESCE(p.is_group,0)=0
-        AND ${identityBarcodeKeySql('p.barcode')}=@folded)=json_array_length(json(@memberIds))
+        AND ${identityBarcodeLeadingZeroFoldSql('p.barcode')}=@folded)=json_array_length(json(@memberIds))
       AND NOT EXISTS(SELECT 1 FROM json_each(json(@memberIds)) expected WHERE NOT EXISTS(
         SELECT 1 FROM products p WHERE p.id=CAST(expected.value AS INTEGER) AND p.is_active=1
-          AND p.name_key=@nameKey AND ${identityBarcodeKeySql('p.barcode')}=@folded))
+          AND p.name_key=@nameKey AND ${identityBarcodeLeadingZeroFoldSql('p.barcode')}=@folded))
       THEN 1 ELSE json_extract('', '$') END AS leading_zero_identity_guard`,
     params: {
       folded: identityBarcodeKey(group.canonical.barcode),
@@ -4840,7 +4847,7 @@ const selectedConflictMoneyColumns = [
 
 function selectedConflictClusterPredicateSql(clusterType: ProductConflictPreviewCase['cluster_type']): string {
   if (clusterType === 'leadingzero') {
-    return `p.name_key=@clusterNameKey AND ${identityBarcodeKeySql('p.barcode')}=@clusterValue`
+    return `p.name_key=@clusterNameKey AND ${identityBarcodeLeadingZeroFoldSql('p.barcode')}=@clusterValue`
   }
   if (clusterType === 'barcode') return `TRIM(COALESCE(p.barcode,''))=@clusterValue`
   if (clusterType === 'name') return `p.name_key=@clusterValue`
