@@ -123,8 +123,18 @@ check('inventory.ts stock stats are the plain active catalog',
     /export async function getFamilyStockAlertPage/.test(familyStockStats)
     && /WHERE p\.is_active = 1/.test(familyStockStats)
     && /lowStockThresholdSql\(lowStock, 'p\.low_stock_threshold'\)/.test(familyStockStats))
+  // p6/efficiency-3 (3c6a4c1e): dashboardSummary used to run two identical
+  // WHERE/params queries (today_count/today_total and all_total -- same
+  // window, historical naming from when they scoped two different ones) as
+  // separate db.prepare() calls, each with its own localDateRangeClause
+  // occurrence. One query with a COUNT now backs both fields, so the
+  // literal-occurrence count dropped from 4 to 3 -- the three remaining
+  // matches (sales totals, returns, recent sales) are the same three
+  // range-scoped queries this check has always protected; none lost its
+  // scope. See test-compat-dashboard-daterange-pure.cjs's sibling 4->3
+  // locator-count update in the same commit.
   check('compat.ts keeps the range on the movement queries (sales, returns, recent sales)',
-    (summary.match(/localDateRangeClause\('created_at'\)/g) || []).length >= 4)
+    (summary.match(/localDateRangeClause\('created_at'\)/g) || []).length >= 3)
   check('compat.ts records the stock/alert exception in the code itself',
     /deliberate exception to the\s*\n?\s*\/\/ one-range-scopes-list-and-stats convention \(user, 2026-09-03\)/.test(summary)
     || /one-range-scopes-list-and-stats convention \(user, 2026-09-03\)/.test(summary))
