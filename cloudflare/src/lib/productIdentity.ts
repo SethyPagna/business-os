@@ -1,8 +1,11 @@
 import type { D1Compat } from './db'
 import { buildInClause, selectInChunks } from './sqlBinding'
 import {
-  productDetailSignature, normalizeProductGroupName, normalizeProductFuzzyName,
+  normalizeProductGroupName, normalizeProductFuzzyName,
   normalizeLeadingZeroBarcodeForCleanup, identityBarcodeKey,
+  isRealBarcode, barcodeIdentityMatches, identityBarcodeClassKey,
+  clusterRowsByBarcodeIdentity, rankBarcodeIdentityWinner,
+  MIN_REAL_BARCODE_DIGITS,
 } from './productDetailRule'
 
 // Re-exported so the many callers that reach identity through THIS module keep
@@ -10,29 +13,95 @@ import {
 // verbatim (frontend/tests/productDetailRuleParity.test.ts byte-compares them, so
 // the fold can no longer drift between the Worker and the client the way the old
 // hand-copied pair could).
-export { normalizeLeadingZeroBarcodeForCleanup, identityBarcodeKey }
+export {
+  normalizeLeadingZeroBarcodeForCleanup, identityBarcodeKey,
+  isRealBarcode, barcodeIdentityMatches, identityBarcodeClassKey,
+  clusterRowsByBarcodeIdentity, rankBarcodeIdentityWinner,
+}
 
 /**
- * identityBarcodeKey as a SQLite expression, for the ONE place that cannot
- * fold in JS: the stock-session commit assertions, which are SQL predicates
- * evaluated inside the batch being committed and so have no JS to run.
+ * identityBarcodeKey's REALNESS test (isRealBarcode) as a SQLite predicate:
+ * all digits, at least MIN_REAL_BARCODE_DIGITS long, not all zeros. Mirrors
+ * isRealBarcode exactly -- see identityBarcodeKeySql below for why this has
+ * to exist in SQL at all.
+ */
+export function identityBarcodeIsRealSql(column: string): string {
+  const value = `LOWER(TRIM(COALESCE(${column},'')))`
+  return `(${value} <> '' AND ${value} NOT GLOB '*[^0-9]*'`
+    + ` AND LENGTH(${value}) >= ${MIN_REAL_BARCODE_DIGITS} AND ${value} GLOB '*[1-9]*')`
+}
+
+/**
+ * identityBarcodeClassKey (barcodeIdentityClass(value).key) as a SQLite
+ * expression, for the ONE place that cannot fold in JS: the stock-session
+ * commit assertions, which are SQL predicates evaluated inside the batch
+ * being committed and so have no JS to run.
  *
- * Every other comparison site narrows in SQL and folds in JS on purpose (see
- * pickSameIdentityRow below) precisely to avoid a second copy of the rule.
- * This is the exception, so it is written ONCE, here, beside the rule it
- * mirrors, and cloudflare/scripts/test-stock-session-identity-guard-pure.cjs
- * runs this expression and the real identityBarcodeKey over the same fixture
- * set in a real SQLite and asserts they agree -- empty, '0', '000', '0012',
- * '0123', mixed alphanumerics and mixed case included. If the JS fold moves
- * and this does not, that test goes red.
+ * Every other comparison site narrows in SQL and folds/wildcard-matches in
+ * JS on purpose (see pickSameIdentityRow below) precisely to avoid a second
+ * copy of the rule. This is the exception, so it is written ONCE, here,
+ * beside the rule it mirrors, and
+ * cloudflare/scripts/test-stock-session-identity-guard-pure.cjs runs this
+ * expression and the real identityBarcodeClassKey over the same fixture set
+ * in a real SQLite and asserts they agree -- empty, '0', '000', '0012',
+ * '0123', a 4-digit code (broken -- below MIN_REAL_BARCODE_DIGITS), mixed
+ * alphanumerics and mixed case included. If the JS fold moves and this does
+ * not, that test goes red.
  *
- *   trim + lowercase; then, for an all-digit code whose stripped form is still
- *   at least 3 characters long, drop the leading zeros. Anything else is itself.
+ * A REAL barcode (identityBarcodeIsRealSql) folds past its leading zeros
+ * (same 3-digit floor identityBarcodeKey uses, e.g. the MAC shade codes);
+ * anything else -- broken, a word, too short, empty -- folds to ''. This
+ * makes two broken/empty barcodes compare EQUAL under plain SQL `=`, the
+ * "if both is empty merge into one empty" half of the Sep 15 2026 ruling.
+ * The other half -- a broken barcode is also a wildcard against a REAL one
+ * -- is NOT expressible as one equality and is intentionally not attempted
+ * here; the stock-session guard this feeds narrows on the incoming barcode's
+ * own class (identityBarcodeMatchSql below picks the right predicate for
+ * whichever side is asked about).
  */
 export function identityBarcodeKeySql(column: string): string {
   const value = `LOWER(TRIM(COALESCE(${column},'')))`
-  return `CASE WHEN ${value} <> '' AND ${value} NOT GLOB '*[^0-9]*' AND LENGTH(LTRIM(${value},'0')) >= 3`
-    + ` THEN LTRIM(${value},'0') ELSE ${value} END`
+  const folded = `CASE WHEN LENGTH(LTRIM(${value},'0')) >= 3 THEN LTRIM(${value},'0') ELSE ${value} END`
+  return `CASE WHEN ${identityBarcodeIsRealSql(column)} THEN (${folded}) ELSE '' END`
+}
+
+/**
+ * PLAIN leading-zero fold (identityBarcodeKey, NOT identityBarcodeClassKey)
+ * as a SQLite expression: the "same barcode, difference only leading zeros"
+ * half of the rule, with no realness gate at all. This is what the strict
+ * `leadingzero` cluster/scope call sites need -- isLeadingZeroDuplicateGroup
+ * (products.ts) accepts a pair on this SAME plain fold regardless of length,
+ * so a short/broken-length code (e.g. the MAC shade codes, or any 3-5 digit
+ * SKU-shaped barcode) can still land in that scope even though it is BROKEN
+ * under isRealBarcode. Using the CLASS-folded identityBarcodeKeySql here
+ * instead would fold every such code to '' and silently blind the
+ * cross-name-collision guard and the atomic-merge assertions for exactly the
+ * codes this scope exists to protect -- confirmed by
+ * test-merge-duplicates-leading-zero-scope-native.cjs's short-code fixtures.
+ */
+export function identityBarcodeLeadingZeroFoldSql(column: string): string {
+  const value = `LOWER(TRIM(COALESCE(${column},'')))`
+  const isDigits = `(${value} <> '' AND ${value} NOT GLOB '*[^0-9]*')`
+  const stripped = `LTRIM(${value}, '0')`
+  return `CASE WHEN ${isDigits} THEN (CASE WHEN LENGTH(${stripped}) >= 3 THEN ${stripped} ELSE ${value} END) ELSE ${value} END`
+}
+
+/**
+ * The full wildcard match as a SQL predicate against a KNOWN incoming
+ * barcode value: when the incoming value is real, match a column that is
+ * either not-real (wildcard) or folds to the same real key; when the
+ * incoming value is not real, every row in the (already name-scoped)
+ * candidate set matches, so the caller should simply omit the barcode
+ * predicate entirely -- returned as `null` to make that explicit rather
+ * than emitting an always-true SQL fragment a caller might misread as a
+ * guard. Params spread into the caller's bound-parameter object.
+ */
+export function identityBarcodeMatchSql(column: string, incomingBarcode: unknown): { sql: string; params: Record<string, unknown> } | null {
+  if (!isRealBarcode(incomingBarcode)) return null
+  return {
+    sql: `(NOT ${identityBarcodeIsRealSql(column)} OR ${identityBarcodeKeySql(column)} = @__identityBarcodeKey)`,
+    params: { __identityBarcodeKey: identityBarcodeClassKey(incomingBarcode) },
+  }
 }
 
 // Applies THE product identity rule (lib/productDetailRule.ts) at branch-
@@ -112,11 +181,16 @@ export function productRowIdentityKey(name: unknown, barcode: unknown): string {
   return `${normalizeProductGroupName(name)}${IDENTITY_KEY_DELIM}${identityBarcodeKey(barcode)}`
 }
 
+// Uses the full wildcard rule (barcodeIdentityMatches), not plain key
+// equality: a real-vs-broken barcode pair within the same name group shares
+// identity too (Sep 15 2026 ruling), which productRowIdentityKey's single
+// hashable string cannot express.
 export function productsShareExactIdentity(
   left: { name?: unknown; barcode?: unknown } | null | undefined,
   right: { name?: unknown; barcode?: unknown } | null | undefined,
 ): boolean {
-  return productRowIdentityKey(left?.name, left?.barcode) === productRowIdentityKey(right?.name, right?.barcode)
+  return normalizeProductGroupName(left?.name) === normalizeProductGroupName(right?.name)
+    && barcodeIdentityMatches(left?.barcode, right?.barcode)
 }
 
 // The displayed barcode of a folded identity is deterministic. Prefer a row
@@ -125,9 +199,19 @@ export function productsShareExactIdentity(
 // padded keeper converge to the clean catalog spelling inside the same merge.
 export function canonicalProductBarcode<T extends { id?: number; barcode?: unknown }>(rows: readonly T[]): string {
   if (!rows.length) return ''
-  const identityKeys = new Set(rows.map((row) => identityBarcodeKey(row.barcode)))
-  if (identityKeys.size !== 1) throw new Error('Cannot choose a canonical barcode for different product identities.')
-  const ranked = [...rows].map((row) => {
+  // Under the Sep 15 2026 wildcard ruling a mergeable set may hold at most
+  // ONE distinct REAL barcode plus any number of broken/empty ones (they are
+  // wildcards, not a second identity); two or more distinct real barcodes
+  // remain a genuine identity conflict.
+  const realRows = rows.filter((row) => isRealBarcode(row.barcode))
+  const realKeys = new Set(realRows.map((row) => identityBarcodeKey(row.barcode)))
+  if (realKeys.size > 1) throw new Error('Cannot choose a canonical barcode for different product identities.')
+  // With a real barcode present, only real-barcode rows compete for the
+  // display spelling -- a broken/wildcard row must never win over a real
+  // code. With none, fall back to ranking the broken/empty spellings (the
+  // "both is empty merge into one empty" case).
+  const candidateRows = realKeys.size === 1 ? realRows : rows
+  const ranked = [...candidateRows].map((row) => {
     const raw = String(row.barcode ?? '').trim()
     const key = identityBarcodeKey(raw)
     return { row, raw, key, zerosShed: raw.length - normalizeLeadingZeroBarcodeForCleanup(raw).length }
@@ -156,20 +240,43 @@ export function resolveProductIdentityEdit(
 ): { nextName: string; nextBarcode: unknown; changesIdentity: boolean } {
   const nextName = body.name !== undefined ? String(body.name || '').trim() : String(current?.name || '')
   const nextBarcode = body.barcode !== undefined ? body.barcode : current?.barcode
-  const changesIdentity = productRowIdentityKey(nextName, nextBarcode)
-    !== productRowIdentityKey(current?.name, current?.barcode)
+  // Wildcard-aware: switching FROM a real barcode TO a broken/empty one (or
+  // vice versa) does not move the row onto a different identity on its own,
+  // per the Sep 15 2026 ruling -- only a name change or a move between two
+  // DIFFERENT real barcodes does.
+  const changesIdentity = !productsShareExactIdentity(
+    { name: current?.name, barcode: current?.barcode },
+    { name: nextName, barcode: nextBarcode },
+  )
   return { nextName, nextBarcode, changesIdentity }
 }
 
-export function pickSameIdentityRow<T extends { barcode?: string | null }>(
+/**
+ * Picks, out of same-name-group `rows`, the row the incoming `barcode`
+ * should be treated as identical to under the wildcard rule:
+ *   - incoming real, some row shares that exact real code -> that row;
+ *   - incoming real, no row shares it but every row is broken/empty ->
+ *     wildcard match, attach to the ranked winner (rankBarcodeIdentityWinner);
+ *   - incoming real, but a row carries a DIFFERENT real code -> no match
+ *     (this is a genuine new sibling, not a duplicate);
+ *   - incoming broken/empty -> wildcard matches the ranked real-barcode
+ *     winner if any row is real, else the ranked winner of the (all
+ *     broken/empty) group -- "if both is empty merge into one empty".
+ */
+export function pickSameIdentityRow<T extends { id?: number; barcode?: string | null; live_stock_quantity?: number | null; stock_quantity?: number | null }>(
   rows: T[],
   barcode: unknown,
 ): T | null {
-  const key = identityBarcodeKey(barcode)
-  for (const row of rows) {
-    if (identityBarcodeKey(row.barcode) === key) return row
+  if (!rows.length) return null
+  if (isRealBarcode(barcode)) {
+    const key = identityBarcodeKey(barcode)
+    const exact = rows.find((row) => identityBarcodeKey(row.barcode) === key)
+    if (exact) return exact
+    if (rows.some((row) => isRealBarcode(row.barcode))) return null
+    return rankBarcodeIdentityWinner(rows)
   }
-  return null
+  const realRows = rows.filter((row) => isRealBarcode(row.barcode))
+  return rankBarcodeIdentityWinner(realRows.length ? realRows : rows)
 }
 
 // Finds another ACTIVE product row that is genuinely the same item as
@@ -190,16 +297,22 @@ export async function findIdentityMatch(
   if (!nameKey) return null
   const candidates = await db
     .prepare(`
-      SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr
-      FROM products
-      WHERE id != @id AND name_key = @nameKey AND is_active = 1
-      ORDER BY id ASC
+      SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr, p.selling_price_usd, p.selling_price_khr,
+             COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = p.id), 0) AS live_stock_quantity
+      FROM products p
+      WHERE p.id != @id AND p.name_key = @nameKey AND p.is_active = 1
+      ORDER BY p.id ASC
     `)
     .all<ProductIdentityRow>({ id: source.id, nameKey })
-  for (const candidate of candidates) {
-    if (productDetailSignature(candidate) === productDetailSignature(source)) return candidate
-  }
-  return null
+  // Wildcard-aware: every candidate that matches under barcodeIdentityMatches
+  // is a real candidate (not just an exact fold match), so a broken-barcode
+  // source or candidate does not get skipped past a genuine wildcard match.
+  // When more than one candidate matches (only possible when source or a
+  // candidate is broken/empty and the group holds several real codes),
+  // rankBarcodeIdentityWinner picks the same row canonicalProductBarcode
+  // would choose as the merge survivor -- most stock, then lowest id.
+  const matches = candidates.filter((candidate) => barcodeIdentityMatches(candidate.barcode, source.barcode))
+  return matches.length ? rankBarcodeIdentityWinner(matches) : null
 }
 
 // Batched counterpart for the bulk transfer route -- one query for every
@@ -221,10 +334,11 @@ export async function findIdentityMatches(
     const { sql, params } = buildInClause('nk', chunk)
     return db
       .prepare(`
-        SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr, name_key
-        FROM products
-        WHERE name_key IN (${sql}) AND is_active = 1
-        ORDER BY id ASC
+        SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr, p.selling_price_usd, p.selling_price_khr, p.name_key,
+               COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = p.id), 0) AS live_stock_quantity
+        FROM products p
+        WHERE p.name_key IN (${sql}) AND p.is_active = 1
+        ORDER BY p.id ASC
       `)
       .all<ProductIdentityRow & { name_key: string }>(params)
   })
@@ -237,10 +351,8 @@ export async function findIdentityMatches(
     const nameKey = nameKeyOf(source.name)
     if (!nameKey) continue
     const pool = candidatesByNameKey.get(nameKey) || []
-    for (const candidate of pool) {
-      if (candidate.id === source.id) continue
-      if (productDetailSignature(candidate) === productDetailSignature(source)) { result.set(source.id, candidate); break }
-    }
+    const matches = pool.filter((candidate) => candidate.id !== source.id && barcodeIdentityMatches(candidate.barcode, source.barcode))
+    if (matches.length) result.set(source.id, rankBarcodeIdentityWinner(matches))
   }
   return result
 }
@@ -435,6 +547,13 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
     // must never be shown as two.
     if (group.every((row) => leadingZeroIds.has(row.id))
       && new Set(group.map((row) => identityBarcodeKey(row.barcode))).size === 1) continue
+    // A same-exact-name group holding a real barcode alongside a broken/
+    // empty one (Sep 15 2026 ruling -- broken is a wildcard, not a second
+    // identity) is exactly this class -- same_name, strong evidence, NEVER
+    // demoted into the weaker fuzzy similar_name bucket below (that bucket
+    // requires >=2 distinct name_keys and can never see a same-name group
+    // at all; this comment records the invariant explicitly since it is the
+    // one this class most needs to hold).
     clusters.push({ type: 'name', value: group[0].name || nameKey, severity: 'same_name', products: group.map(toEntry) })
   }
   for (const [fuzzyKey, group] of byFuzzyKey) {
@@ -511,39 +630,26 @@ export async function findDuplicateProductGroups(db: D1Compat): Promise<ProductD
   for (const candidates of byNameKey.values()) {
     if (candidates.length < 2) continue
     // Within one name_key bucket there can be more than one genuinely
-    // distinct item (e.g. same name, different cost/price on purpose) --
-    // so still bucket by the full identity rule inside the name group,
-    // same fields findIdentityMatch/findIdentityMatches check, rather than
-    // assuming every same-name row belongs together.
-    const buckets = new Map<string, (ProductIdentityRow & { name_key: string })[]>()
-    for (const candidate of candidates) {
-      if (manualOnlyIds.has(candidate.id)) continue
-      // Exact barcode matches behave as before, and a pair differing only by
-      // leading zeros lands together -- inside the same exact NAME, which is the
-      // only bound left. (This comment used to end "and same-cost bucket"; cost
-      // left productDetailSignature on Sep 4 2026, so anyone auditing the fold
-      // from its own comments would have concluded the bulk merge was cost-gated
-      // when it is not.) Same barcode + different name therefore remains in the
-      // manual-review list, exactly as requested.
-      //
-      // productDetailSignature ALREADY folds leading zeros (identityBarcodeKey),
-      // so the explicit fold here is redundant -- kept because it is idempotent
-      // and because spelling it out is what makes the survivor ordering legible.
-      const bucketKey = productDetailSignature({
-        ...candidate,
-        barcode: normalizeLeadingZeroBarcodeForCleanup(candidate.barcode),
-      })
-      if (!buckets.has(bucketKey)) buckets.set(bucketKey, [])
-      buckets.get(bucketKey)!.push(candidate)
-    }
-    for (const bucket of buckets.values()) {
+    // distinct item -- so still bucket by the full identity rule inside the
+    // name group, same fields findIdentityMatch/findIdentityMatches check,
+    // rather than assuming every same-name row belongs together.
+    //
+    // clusterRowsByBarcodeIdentity is the wildcard-aware clustering (Sep 15
+    // 2026 ruling): two or more DISTINCT real barcodes stay separate
+    // clusters (genuine siblings), a broken/empty barcode is never a second
+    // identity and attaches to whichever cluster wins the ranking when more
+    // than one real cluster exists, and an all-broken name group collapses
+    // into ONE cluster ("if both is empty merge into one empty").
+    const eligible = candidates.filter((candidate) => !manualOnlyIds.has(candidate.id))
+    const buckets = clusterRowsByBarcodeIdentity(eligible)
+    for (const bucket of buckets) {
       if (bucket.length < 2) continue
       // For an extra-zero pair, the already-clean barcode must survive; the
       // fold moves all branch stock onto it even when the typo row owns that
       // stock today. Exact-barcode duplicates prefer the stocked row. Id is
       // the stable final tie-break.
       const rawBarcodes = new Set(bucket.map((row) => String(row.barcode ?? '').trim().toLowerCase()))
-      const isLeadingZeroPair = rawBarcodes.size > 1
+      const isLeadingZeroPair = rawBarcodes.size > 1 && bucket.every((row) => isRealBarcode(row.barcode))
       // How many leading zeros this row would shed. 0 means the row already
       // carries the clean barcode. Ranking on the COUNT rather than on a
       // was-it-normalized boolean is what lets a double-zero row lose to its
@@ -555,6 +661,13 @@ export async function findDuplicateProductGroups(db: D1Compat): Promise<ProductD
         return raw.length - normalizeLeadingZeroBarcodeForCleanup(raw).length
       }
       const ordered = [...bucket].sort((a, b) => {
+        // A real barcode always outranks a broken/empty wildcard row as the
+        // survivor -- the same rule canonicalProductBarcode applies -- so a
+        // wildcard row that merely attached to a real cluster can never
+        // become the displayed catalog barcode.
+        const aReal = isRealBarcode(a.barcode) ? 0 : 1
+        const bReal = isRealBarcode(b.barcode) ? 0 : 1
+        if (aReal !== bReal) return aReal - bReal
         if (isLeadingZeroPair) {
           const zeroDiff = zerosShed(a) - zerosShed(b)
           if (zeroDiff) return zeroDiff

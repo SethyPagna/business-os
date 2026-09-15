@@ -172,7 +172,10 @@ async function run() {
     // Ruling 1: both unbarcoded, same name -> auto-mergeable.
     { id: 10, name: 'No Barcode Twin', barcode: null },
     { id: 11, name: 'No Barcode Twin', barcode: '' },
-    // Ruling 1's boundary: one barcoded, one not -> NOT auto-mergeable.
+    // Ruling 1's original boundary (Sep 4 2026): one barcoded, one not, was
+    // NOT auto-mergeable. SUPERSEDED by the Sep 15 2026 wildcard ruling: a
+    // broken/empty barcode never establishes its own identity, so it matches
+    // ANY real barcode of the same name -- this pair now IS auto-mergeable.
     { id: 20, name: 'Half Barcoded', barcode: null },
     { id: 21, name: 'Half Barcoded', barcode: '5012345678900' },
     // Ruling 2: single extra leading zero -> auto-mergeable, clean row keeps.
@@ -182,13 +185,27 @@ async function run() {
     { id: 40, name: 'Double Zero Twin', barcode: '008339327539' },
     { id: 41, name: 'Double Zero Twin', barcode: '08339327539' },
     // Ruling 2's boundary: a length difference is NOT a leading-zero typo.
-    { id: 50, name: 'Length Twin', barcode: '1234' },
-    { id: 51, name: 'Length Twin', barcode: '12345' },
-    // Ruling 2 (owner ruling, 2026-09-04): the MAC shade codes merge after all.
+    // Both codes must clear MIN_REAL_BARCODE_DIGITS (6) so this stays a
+    // genuine two-different-REAL-codes case rather than tripping the Sep 15
+    // 2026 wildcard rule, which only ever applies to a BROKEN/short code.
+    { id: 50, name: 'Length Twin', barcode: '123456' },
+    { id: 51, name: 'Length Twin', barcode: '1234567' },
+    // Ruling 2 (owner ruling, 2026-09-04): the MAC shade codes merge after
+    // all. Both '0601' (4 digits) and '601' (3 digits) are BELOW
+    // MIN_REAL_BARCODE_DIGITS (6) -- under the Sep 15 2026 realness
+    // threshold neither is a REAL barcode, so they still merge (broken
+    // wildcards broken), but the keeper tiebreak is id/stock, not "cleanest
+    // leading-zero spelling" (that tiebreak is reserved for a pair where
+    // BOTH sides are real).
     { id: 60, name: 'Mac Matte Lipstick No Box 601', barcode: '0601' },
     { id: 61, name: 'Mac Matte Lipstick No Box 601', barcode: '601' },
-    // Ruling 2's boundary, moved down with it: a 2-digit survivor is still too
-    // short to fold, so a placeholder pair like this stays for manual review.
+    // Ruling 2's original boundary: a 2-digit survivor was too short to fold
+    // against a leading-zero peer, so this pair stayed for manual review.
+    // SUPERSEDED by the Sep 15 2026 wildcard ruling: '0012' (4 digits) and
+    // '12' (2 digits) are BOTH below MIN_REAL_BARCODE_DIGITS, so they are two
+    // BROKEN barcodes of one name -- broken-vs-broken wildcards together
+    // ("if both is empty merge into one empty"), not a genuine boundary case
+    // any more.
     { id: 70, name: 'Two Digit Twin', barcode: '0012' },
     { id: 71, name: 'Two Digit Twin', barcode: '12' },
   ]
@@ -204,8 +221,11 @@ async function run() {
 
   check('RULING 1: two same-name rows with NO barcode are proposed as one merge',
     !!groupFor('10,11'))
-  check('RULING 1 boundary: an unbarcoded row is NOT merged into a barcoded '
-    + 'sibling of the same name', !groupFor('20,21'))
+  check('SEP 15 2026 WILDCARD RULING: an unbarcoded row DOES now merge into '
+    + 'a barcoded sibling of the same name -- this is a deliberate reversal '
+    + "of Ruling 1's original boundary, and the real-barcode row (21) must "
+    + 'survive as the keeper, never the broken one',
+    groupFor('20,21')?.canonical.id === 21)
   check('RULING 2: a single extra leading zero is proposed as one merge',
     !!groupFor('30,31'))
   check('RULING 2: the CLEAN barcode row survives, so no barcode is ever '
@@ -216,15 +236,22 @@ async function run() {
     !!groupFor('40,41'))
   check('RULING 2 (the fix): the cleaner of the two zero-prefixed rows survives',
     groupFor('40,41')?.canonical.id === 41)
-  check("RULING 2 boundary: '1234' and '12345' are NOT proposed for merge",
+  check("RULING 2 boundary: '123456' and '1234567' are NOT proposed for merge "
+    + '-- both are real and distinct, so a length difference stays a genuine '
+    + 'different article, never a leading-zero typo',
     !groupFor('50,51'))
   check("OWNER RULING 2026-09-04: the MAC shade codes '0601'/'601' now ARE "
     + 'auto-merged -- the fold bound moved from 4 surviving digits to 3',
     !!groupFor('60,61'))
-  check('...and the CLEAN 3-digit row survives, so no barcode is rewritten',
-    groupFor('60,61')?.canonical.id === 61)
-  check("RULING 2 boundary: a 2-digit survivor still does NOT fold ('0012' vs '12')",
-    !groupFor('70,71'))
+  check('...and the SURVIVOR is the lower id, not the "cleaner" spelling -- '
+    + 'both codes are below MIN_REAL_BARCODE_DIGITS so neither is a REAL '
+    + 'barcode, and the zero-shed tiebreak is reserved for a pair where BOTH '
+    + 'sides are real',
+    groupFor('60,61')?.canonical.id === 60)
+  check("SEP 15 2026 WILDCARD RULING: '0012' and '12' are BOTH broken (below "
+    + 'MIN_REAL_BARCODE_DIGITS), so they now merge -- neither can outrank the '
+    + 'other as a real barcode, so the lower id survives (id tie-break)',
+    groupFor('70,71')?.canonical.id === 70)
 
   // --- Ruling 5: migration 0112, loaded BY FILENAME and actually run -----
   const migrationsDir = path.join(__dirname, '..', 'migrations')
