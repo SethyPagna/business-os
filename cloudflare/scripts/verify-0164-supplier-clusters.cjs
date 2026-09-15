@@ -2,6 +2,14 @@
 // local better-sqlite3 database built from the REAL migration chain. Never
 // touches remote D1.
 //
+// This is the CORRECTED shape: the migration's first draft used a wrong id
+// range ("lang" 23-37") that would have deleted nine unrelated suppliers
+// (ids 24-32) and repointed their batches/products/invoices onto "Lang".
+// The coordinator caught this with a fresh --remote SELECT (2026-09-15) and
+// gave the real cluster membership. This script's job now includes proving
+// that bug cannot recur: ids 24-32 are seeded as nine real, distinct
+// suppliers and asserted byte-for-byte untouched after the migration runs.
+//
 // Proves, per cluster:
 //   1. the migration's result on suppliers/product_batches/products/returns/
 //      supplier_invoices equals lib/contactMerge.ts buildContactMergePlan
@@ -13,8 +21,13 @@
 //   3. products/product_batches rows attributed to a loser BY NAME (no
 //      supplier_id) are repointed too, same as the writer;
 //   4. a same-shaped supplier that is not one of the pinned ids is untouched;
-//   5. one audit_logs row per merged id, carrying the loser's pre-image;
-//   6. re-running the file changes nothing (idempotent), and the full chain
+//   5. THE NINE UNRELATED SUPPLIERS AT IDS 24-32 (and everything that
+//      references them) are byte-for-byte untouched -- this is the specific
+//      positive control that would have caught the first draft's bug;
+//   6. a loser id that exists but whose name does NOT match its keeper is a
+//      no-op (the NAME GUARD), even though the id itself is "in range";
+//   7. one audit_logs row per merged id, carrying the loser's pre-image;
+//   8. re-running the file changes nothing (idempotent), and the full chain
 //      applies on an empty database (ids absent -> every statement no-op).
 //
 // Run: node scripts/verify-0164-supplier-clusters.cjs
@@ -60,9 +73,10 @@ const applyMigration = (sqlite) => sqlite.exec(migrationSql)
 const SUPPLIER_COLUMNS = ['name', 'phone', 'email', 'address', 'company', 'contact_person', 'notes', 'gender']
 const AUDIT_USER = 'migration:0164_supplier_duplicate_clusters'
 
-// The two production clusters, exactly as the coordinator gave them
-// (2026-09-14, read-only; this session could not re-confirm with a fresh
-// --remote SELECT -- see the migration header).
+// The two production clusters, CORRECTED (coordinator, --remote SELECT-only,
+// 2026-09-15): "j secrat" keeper 20, losers 38-46 (9, unchanged from the
+// first draft); "lang"/"Lang" keeper 23, losers 33-37 ONLY (5). Ids 24-32
+// are NOT part of either cluster -- see UNRELATED_SUPPLIERS below.
 const CLUSTERS = [
   {
     label: 'j_secrat',
@@ -82,14 +96,31 @@ const CLUSTERS = [
   {
     label: 'lang',
     keep: { id: 23, name: 'Lang', phone: null, email: null, address: null, company: null, contact_person: null, notes: null, gender: null },
-    losers: Array.from({ length: 14 }, (_, i) => ({
-      id: 24 + i,
-      name: i % 2 === 0 ? 'lang' : 'Lang',
-      phone: i === 0 ? '011222333' : null, // only the first loser carries a phone -> backfill positive control
-      email: null, address: null, company: null, contact_person: null, notes: null, gender: null,
-    })),
+    losers: [
+      { id: 33, name: 'lang', phone: '011222333', email: null, address: null, company: null, contact_person: null, notes: null, gender: null }, // backfill positive control
+      { id: 34, name: 'Lang', phone: null, email: null, address: null, company: null, contact_person: null, notes: null, gender: null },
+      { id: 35, name: 'lang', phone: null, email: null, address: null, company: null, contact_person: null, notes: null, gender: null },
+      { id: 36, name: 'Lang', phone: null, email: null, address: null, company: null, contact_person: null, notes: null, gender: null },
+      { id: 37, name: 'lang', phone: null, email: null, address: null, company: null, contact_person: null, notes: null, gender: null },
+    ],
   },
 ]
+// The nine REAL, DISTINCT suppliers the coordinator found sitting inside the
+// first draft's wrong "23-37" range (real names, per the coordinator).
+// These must come out of the migration completely untouched: still present,
+// same name, same linked rows. This is the exact positive control that
+// would have caught the first draft's bug -- it did not exist before.
+const UNRELATED_SUPPLIERS = [
+  { id: 24, name: 'japen' },
+  { id: 25, name: 'kaka' },
+  { id: 26, name: 'UTB' },
+  { id: 27, name: 'Malaysia' },
+  { id: 28, name: 'naomi' },
+  { id: 29, name: 'autralia' },
+  { id: 30, name: 'france' },
+  { id: 31, name: 'srun' },
+  { id: 32, name: 'piset' },
+].map((s) => ({ ...s, phone: null, email: null, address: null, company: null, contact_person: null, notes: null, gender: null }))
 // Same-shaped supplier, not a pinned id: must come out untouched.
 const CONTROL = { id: 999, name: 'srey now', phone: '099888777', email: null, address: null, company: null, contact_person: null, notes: null, gender: null }
 
@@ -111,6 +142,24 @@ function seed(sqlite) {
   insBatch.run({ id: ++batchId, productId, batchKey: '01012026', supplierId: CONTROL.id, supplierName: CONTROL.name })
   insReturn.run({ id: ++returnId, supplierId: CONTROL.id, supplierName: CONTROL.name })
   insInvoice.run({ id: ++invoiceId, supplierId: CONTROL.id, supplierName: CONTROL.name })
+
+  // the nine real, distinct suppliers the first draft's wrong id range would
+  // have wrongly merged into "Lang" -- each with its own linked rows, id-
+  // attributed and orphaned (name-only), so a wrong repoint of ANY kind
+  // (id, name, invoice, product) would be caught.
+  for (const s of UNRELATED_SUPPLIERS) {
+    insSupplier.run(s)
+    const pid = ++productId
+    insProduct.run({ id: pid, name: `${s.name} product`, supplier: s.name })
+    insBatch.run({ id: ++batchId, productId: pid, batchKey: '01012026', supplierId: s.id, supplierName: s.name })
+    insReturn.run({ id: ++returnId, supplierId: s.id, supplierName: s.name })
+    insInvoice.run({ id: ++invoiceId, supplierId: s.id, supplierName: s.name })
+    // an orphaned (supplier_id NULL) row naming this supplier -- must never
+    // be picked up by any cluster's name-based repoint.
+    const orphanPid = ++productId
+    insProduct.run({ id: orphanPid, name: `${s.name} orphan product`, supplier: s.name })
+    insBatch.run({ id: ++batchId, productId: orphanPid, batchKey: '01012026', supplierId: null, supplierName: s.name })
+  }
 
   const orphans = [] // { loserId, batchId, productId, invoiceId } -- named-only rows carrying a loser's name text
   for (const cluster of CLUSTERS) {
@@ -175,6 +224,14 @@ function run() {
   seed(twin)
   const controlBefore = SUP(a, CONTROL.id)
   const controlBatchesBefore = batchesFor(a, CONTROL.id)
+  // the exact snapshot the first draft's bug would have destroyed.
+  const unrelatedBefore = UNRELATED_SUPPLIERS.map((s) => ({
+    supplier: SUP(a, s.id),
+    batches: a.prepare(`SELECT id, supplier_id, supplier_name FROM product_batches WHERE supplier_id = @id OR (supplier_id IS NULL AND lower(trim(supplier_name)) = lower(trim(@name))) ORDER BY id`).all({ id: s.id, name: s.name }),
+    returns: returnsFor(a, s.id),
+    invoices: a.prepare(`SELECT id, supplier_id, supplier_name FROM supplier_invoices WHERE supplier_id = @id OR (supplier_id IS NULL AND lower(trim(supplier_name)) = lower(trim(@name))) ORDER BY id`).all({ id: s.id, name: s.name }),
+    products: a.prepare(`SELECT id, supplier FROM products WHERE lower(trim(COALESCE(supplier,''))) = lower(trim(@name)) ORDER BY id`).all({ name: s.name }),
+  }))
 
   applyMigration(a)
   applyHelper(twin)
@@ -227,7 +284,7 @@ function run() {
   console.log('PASS blank keeper columns backfilled from losers; an already-filled column is left alone')
 
   const lang = SUP(a, 23)
-  assert.strictEqual(lang.phone, '011222333', 'lang keeper phone backfilled from its first loser (24)')
+  assert.strictEqual(lang.phone, '011222333', 'lang keeper phone backfilled from its first loser (33)')
   console.log('PASS lang cluster backfill matches (single-column positive control)')
 
   // 3. unpinned control supplier is fully untouched.
@@ -235,16 +292,63 @@ function run() {
   assert.deepStrictEqual(batchesFor(a, CONTROL.id), controlBatchesBefore, "unpinned control's batches untouched")
   console.log('PASS unpinned control supplier and its rows are untouched')
 
-  // 4. one audit row per merged id, carrying the pre-image.
-  assert.strictEqual(auditCount(a), 23, 'one audit_logs row per merged id (9 + 14)')
+  // 4. THE POSITIVE CONTROL FOR THE ACTUAL BUG: the nine real, distinct
+  //    suppliers the first draft's wrong id range would have wrongly merged
+  //    into "Lang" are byte-for-byte untouched -- still present, same name,
+  //    same id-attributed AND orphaned linked rows, same product text.
+  for (let i = 0; i < UNRELATED_SUPPLIERS.length; i++) {
+    const s = UNRELATED_SUPPLIERS[i]
+    const before = unrelatedBefore[i]
+    assert.deepStrictEqual(SUP(a, s.id), before.supplier, `unrelated supplier ${s.id} (${s.name}) untouched`)
+    const afterBatches = a.prepare(`SELECT id, supplier_id, supplier_name FROM product_batches WHERE supplier_id = @id OR (supplier_id IS NULL AND lower(trim(supplier_name)) = lower(trim(@name))) ORDER BY id`).all({ id: s.id, name: s.name })
+    assert.deepStrictEqual(afterBatches, before.batches, `unrelated supplier ${s.id} (${s.name}): batches untouched`)
+    assert.deepStrictEqual(returnsFor(a, s.id), before.returns, `unrelated supplier ${s.id} (${s.name}): returns untouched`)
+    const afterInvoices = a.prepare(`SELECT id, supplier_id, supplier_name FROM supplier_invoices WHERE supplier_id = @id OR (supplier_id IS NULL AND lower(trim(supplier_name)) = lower(trim(@name))) ORDER BY id`).all({ id: s.id, name: s.name })
+    assert.deepStrictEqual(afterInvoices, before.invoices, `unrelated supplier ${s.id} (${s.name}): invoices untouched`)
+    const afterProducts = a.prepare(`SELECT id, supplier FROM products WHERE lower(trim(COALESCE(supplier,''))) = lower(trim(@name)) ORDER BY id`).all({ name: s.name })
+    assert.deepStrictEqual(afterProducts, before.products, `unrelated supplier ${s.id} (${s.name}): products untouched`)
+  }
+  console.log('PASS all nine unrelated suppliers (ids 24-32) and everything referencing them are byte-for-byte untouched (the actual bug this migration had)')
+
+  // 5. one audit row per merged id, carrying the pre-image. Exactly 14 --
+  //    9 "j secrat" + 5 "lang", not the first draft's 23.
+  assert.strictEqual(auditCount(a), 14, 'one audit_logs row per merged id (9 + 5 = 14, not the first draft\'s 23)')
+  for (const s of UNRELATED_SUPPLIERS) {
+    assert.strictEqual(a.prepare(`SELECT 1 FROM audit_logs WHERE user_name = @u AND record_id = @id`).get({ u: AUDIT_USER, id: String(s.id) }), undefined, `no audit row for untouched supplier ${s.id}`)
+  }
   const auditRow = a.prepare(`SELECT old_value, details FROM audit_logs WHERE user_name = @u AND record_id = '38'`).get({ u: AUDIT_USER })
   const old = JSON.parse(auditRow.old_value)
   assert.strictEqual(old.name, 'J Secrat', 'audit old_value is loser 38\'s own pre-image, not the keeper\'s')
   assert.strictEqual(old.email, 'jsecrat@example.com')
   assert.strictEqual(JSON.parse(auditRow.details).keeper_id, 20)
-  console.log('PASS one audit_logs row per merged id, carrying that loser\'s pre-image')
+  console.log('PASS exactly 14 audit_logs rows, one per merged id, carrying that loser\'s pre-image; none for the nine unrelated suppliers')
 
-  // 5. idempotent: a second run changes nothing.
+  // 6. NAME GUARD positive control: a loser id that exists but whose name
+  //    does NOT match its keeper (a hand-edit mistake, or exactly the class
+  //    of bug the first draft had) is a no-op -- proven on a THIRD, fresh
+  //    database so it cannot be masked by the main scenario's own state.
+  {
+    const g = chainBefore(MIGRATION)
+    g.prepare(`INSERT INTO suppliers (id, name) VALUES (20, 'j secrat')`).run()
+    // id 38 is in "j secrat"'s real loser range, but seeded with an
+    // unrelated name -- the guard must refuse to touch it even though the
+    // bare id match would have fired under the first draft.
+    g.prepare(`INSERT INTO suppliers (id, name) VALUES (38, 'totally different supplier')`).run()
+    g.prepare(`INSERT INTO products (id, name, supplier) VALUES (1, 'p', 'totally different supplier')`).run()
+    g.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, supplier_id, supplier_name) VALUES (1, 1, '01012026', 38, 'totally different supplier')`).run()
+    const before38 = g.prepare(`SELECT * FROM suppliers WHERE id = 38`).get()
+    const beforeBatch = g.prepare(`SELECT * FROM product_batches WHERE id = 1`).get()
+    const beforeProduct = g.prepare(`SELECT * FROM products WHERE id = 1`).get()
+    applyMigration(g)
+    assert.deepStrictEqual(g.prepare(`SELECT * FROM suppliers WHERE id = 38`).get(), before38, 'name-mismatched loser 38 is untouched (NAME GUARD no-op)')
+    assert.deepStrictEqual(g.prepare(`SELECT * FROM product_batches WHERE id = 1`).get(), beforeBatch, 'its batch is untouched (never repointed to keeper 20)')
+    assert.deepStrictEqual(g.prepare(`SELECT * FROM products WHERE id = 1`).get(), beforeProduct, 'its product is untouched')
+    assert.strictEqual(auditCount(g), 0, 'no audit row is written for a name-mismatched id')
+    assert.strictEqual(g.prepare(`SELECT COUNT(*) AS n FROM suppliers`).get().n, 2, 'both rows (keeper and the mismatched id) still present')
+  }
+  console.log('PASS a loser id that exists but whose name does not match its keeper is a no-op (NAME GUARD)')
+
+  // 7. idempotent: a second run changes nothing.
   const supplierSnapshot = a.prepare(`SELECT * FROM suppliers ORDER BY id`).all()
   const batchSnapshot = a.prepare(`SELECT * FROM product_batches ORDER BY id`).all()
   const auditCountBefore = auditCount(a)
