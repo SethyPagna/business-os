@@ -1,3 +1,12 @@
+## September 16 Program 7 checkpoint LIVE
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| P7-1 Receipt page-size fallback modes (measured roll / fixed length incl. 80×50 and longer / printer default / longest page) selectable in Print Settings with a test print | **Deployed** (Worker fe65bbef-52b3-4bf9-beb5-9a1c24a0cf2a, commit 20be849b); physical print still owner-side | c7ebbf41, 464bff0a, b1b2f7e5 (lane tip after trailer rewrite b35a3c73); `receiptPrintPagination.test.ts` per-mode `@page` pins; `test-receipt-page-size-mode-settings.cjs` parity. |
+| P7-2 Debloat: unreachable exact-pairs merge review + dead transport/helpers removed | **Deployed** | ff75e5cd, 068920c4, 3c972cdb, 7d3fef34 (−906 lines net); remaining candidates listed in progress.md. |
+
+---
+
 ## September 15 Program 6 checkpoint LIVE
 
 | Item | State | Evidence |
