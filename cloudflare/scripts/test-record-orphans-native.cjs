@@ -93,6 +93,14 @@ const HISTORICAL_REFERENCE = {
   // each loser row is gone while its map row survives.
   'product_merge_map_0165.loser_id': 'the merged product is deleted by 0165; the map keeps its id as provenance',
   'customer_merge_map_0166.loser_id': 'the merged customer is deleted by 0166; the map keeps its id as provenance',
+  // Migration 0168 (transfer-aware merge) follows the exact same shape as
+  // 0165: the loser row is deleted and its id survives only as provenance in
+  // the map. product_merge_pairs_0168 is the seed table naming the one
+  // pair 0165 was forced to exclude (transfer-evidenced); it is consumed by
+  // the same migration and is never read after (its loser_id is likewise a
+  // dead product id by design). Pinned by test-migration-0168-pure.cjs.
+  'product_merge_map_0168.loser_id': 'the merged product is deleted by 0168; the map keeps its id as provenance',
+  'product_merge_pairs_0168.loser_id': 'the seed pair names a product 0168 goes on to delete; kept for provenance/idempotence',
 }
 /** Leading qualifiers that describe a ROLE, not a different kind of parent. */
 const QUALIFIER = new Set(['from', 'to', 'source', 'destination', 'expected', 'seen', 'last_seen', 'last',
@@ -112,6 +120,8 @@ const CHILD_SCOPED = {
   'sales.cancel_fee_id': 'fees',
   'product_merge_map_0165.keeper_id': 'products',
   'customer_merge_map_0166.keeper_id': 'customers',
+  'product_merge_map_0168.keeper_id': 'products',
+  'product_merge_pairs_0168.keeper_id': 'products',
 }
 
 function resolveOwner(base, known) {

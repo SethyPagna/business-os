@@ -16,6 +16,8 @@
 --   sale_amendments.sale_item_id -- the removed line is gone by design; the ledger keeps its id as provenance
 --   product_merge_map_0165.loser_id -- the merged product is deleted by 0165; the map keeps its id as provenance
 --   customer_merge_map_0166.loser_id -- the merged customer is deleted by 0166; the map keeps its id as provenance
+--   product_merge_map_0168.loser_id -- the merged product is deleted by 0168; the map keeps its id as provenance
+--   product_merge_pairs_0168.loser_id -- the seed pair names a product 0168 goes on to delete; kept for provenance/idempotence
 --
 -- Every statement is a SELECT. There are no writes and no PRAGMA here.
 -- A healthy database answers 0 for every relation. A nonzero count on a
@@ -92,6 +94,8 @@ SELECT 'product_conflict_merge_runs.actor_id->users' AS relation, COUNT(*) AS or
 SELECT 'product_duplicate_dismissals.dismissed_by_id->users' AS relation, COUNT(*) AS orphan_count FROM product_duplicate_dismissals c LEFT JOIN users p ON p.id = c.dismissed_by_id WHERE c.dismissed_by_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_images.product_id->products' AS relation, COUNT(*) AS orphan_count FROM product_images c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_merge_map_0165.keeper_id->products' AS relation, COUNT(*) AS orphan_count FROM product_merge_map_0165 c LEFT JOIN products p ON p.id = c.keeper_id WHERE c.keeper_id IS NOT NULL AND p.id IS NULL;
+SELECT 'product_merge_map_0168.keeper_id->products' AS relation, COUNT(*) AS orphan_count FROM product_merge_map_0168 c LEFT JOIN products p ON p.id = c.keeper_id WHERE c.keeper_id IS NOT NULL AND p.id IS NULL;
+SELECT 'product_merge_pairs_0168.keeper_id->products' AS relation, COUNT(*) AS orphan_count FROM product_merge_pairs_0168 c LEFT JOIN products p ON p.id = c.keeper_id WHERE c.keeper_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_remove_operations.action_history_id->action_history' AS relation, COUNT(*) AS orphan_count FROM product_remove_operations c LEFT JOIN action_history p ON p.id = c.action_history_id WHERE c.action_history_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_remove_operations.actor_id->users' AS relation, COUNT(*) AS orphan_count FROM product_remove_operations c LEFT JOIN users p ON p.id = c.actor_id WHERE c.actor_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_remove_operations.pending_action_id->pending_actions' AS relation, COUNT(*) AS orphan_count FROM product_remove_operations c LEFT JOIN pending_actions p ON p.id = c.pending_action_id WHERE c.pending_action_id IS NOT NULL AND p.id IS NULL;
