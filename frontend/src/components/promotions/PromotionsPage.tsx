@@ -17,6 +17,7 @@ import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
+import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
@@ -941,17 +942,23 @@ export default function PromotionsPage() {
                 </div>
               )}
               {draft.scope_type === 'category' && (
-                <AppSelect
+                <SuggestionTextInput
+                  id="promo-scope-category"
                   value={draft.category}
                   onChange={(value: string) => setDraft({ ...draft, category: value })}
-                  options={[{ value: '', label: t('promo_pick_category') || 'Choose a category...' }, ...categories.map((c) => ({ value: c, label: c }))]}
+                  options={categories}
+                  placeholder={t('promo_pick_category') || 'Choose a category...'}
+                  ariaLabel={t('promo_pick_category') || 'Choose a category...'}
                 />
               )}
               {draft.scope_type === 'brand' && (
-                <AppSelect
+                <SuggestionTextInput
+                  id="promo-scope-brand"
                   value={draft.brand}
                   onChange={(value: string) => setDraft({ ...draft, brand: value })}
-                  options={[{ value: '', label: t('promo_pick_brand') || 'Choose a brand...' }, ...brands.map((b) => ({ value: b, label: b }))]}
+                  options={brands}
+                  placeholder={t('promo_pick_brand') || 'Choose a brand...'}
+                  ariaLabel={t('promo_pick_brand') || 'Choose a brand...'}
                 />
               )}
 
