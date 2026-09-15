@@ -57,16 +57,17 @@ runTest('N15: a zero-padded barcode is the same identity, and cost never splits 
   assert.equal(otherName.primary?.id, 3)
 })
 
-runTest('N15: an all-zero barcode is not folded to empty, and short codes stay literal', () => {
-  // '000' folds to '000' (stripping would leave nothing), so it matches itself
-  const same = classifyCreateMatches({ name: 'Zero Code Balm', barcode: '000' }, rows)
-  assert.equal(same.kind, 'exact_twin')
-  assert.equal(same.primary?.id, 4)
-  // ... and is NOT the same identity as '0' or '00'
-  assert.equal(classifyCreateMatches({ name: 'Zero Code Balm', barcode: '0' }, rows).kind, 'name_match')
-  assert.equal(classifyCreateMatches({ name: 'Zero Code Balm', barcode: '00' }, rows).kind, 'name_match')
-  // an empty typed barcode is not an identity match against a coded row
-  assert.equal(classifyCreateMatches({ name: 'Zero Code Balm', barcode: '' }, rows).kind, 'name_match')
+runTest('N15/Sep-15-2026: an all-zero barcode is BROKEN, so it wildcards onto the name-group row', () => {
+  // '000' is all-zero -> BROKEN under isRealBarcode (not a real barcode at
+  // all), same as '0', '00' and '' -- every one of them is a wildcard within
+  // the 'Zero Code Balm' name group (whose only row, id 4, is ALSO broken:
+  // '000'), so all four typed spellings are the SAME identity as id 4 per
+  // the Sep 15 2026 ruling ("if both is empty merge into one empty").
+  for (const barcode of ['000', '0', '00', '']) {
+    const verdict = classifyCreateMatches({ name: 'Zero Code Balm', barcode }, rows)
+    assert.equal(verdict.kind, 'exact_twin', `barcode=${JSON.stringify(barcode)}`)
+    assert.equal(verdict.primary?.id, 4, `barcode=${JSON.stringify(barcode)}`)
+  }
 })
 
 runTest('F1: same name + different barcode joins the virtual same-name group', () => {
@@ -83,13 +84,27 @@ runTest('F1: same name + different barcode joins the virtual same-name group', (
 })
 
 runTest('F1: price similarity is advisory only, flagged on a name match', () => {
-  const withPrice = classifyCreateMatches({ name: 'Aloe Vera Gel', selling_price_usd: 5.5 }, rows)
+  // A REAL but genuinely different barcode from both existing rows keeps
+  // this a name_match (not a wildcard) so price similarity stays advisory.
+  const withPrice = classifyCreateMatches({ name: 'Aloe Vera Gel', barcode: '881777', selling_price_usd: 5.5 }, rows)
   assert.equal(withPrice.kind, 'name_match')
   assert.equal(withPrice.priceMatches, true)
-  const differentPrice = classifyCreateMatches({ name: 'Aloe Vera Gel', selling_price_usd: 9.99 }, rows)
+  const differentPrice = classifyCreateMatches({ name: 'Aloe Vera Gel', barcode: '881777', selling_price_usd: 9.99 }, rows)
   assert.equal(differentPrice.priceMatches, false)
   // Price is advisory; the same normalized name still joins its group.
   assert.equal(withPrice.allowProceedAsNew, false)
+})
+
+runTest('Sep-15-2026: no barcode typed against a 2-distinct-real-barcode name group is an exact twin of the ranked winner, not a fresh name_match', () => {
+  // Neither typed barcode is real (both undefined/broken), so the wildcard
+  // rule attaches to the SAME single ranked winner clusterRowsByBarcodeIdentity
+  // would pick (id 1: tied on stock -- this candidate shape carries none --
+  // so the lower id wins), never leaving this as an open name_match that
+  // would let two rows silently share one broken identity.
+  const verdict = classifyCreateMatches({ name: 'Aloe Vera Gel', selling_price_usd: 5.5 }, rows)
+  assert.equal(verdict.kind, 'exact_twin')
+  assert.equal(verdict.primary?.id, 1)
+  assert.equal(verdict.allowProceedAsNew, false)
 })
 
 runTest('F1: different name + same barcode is a barcode match, legal but flagged', () => {
