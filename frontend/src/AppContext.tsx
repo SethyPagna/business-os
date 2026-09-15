@@ -623,6 +623,19 @@ function AccessDenied({ t }: { t: (key: string) => string }) {
   )
 }
 
+// Module-scope so its component type never changes across AppProvider
+// renders. The old inline `AccessDenied: () => <AccessDenied t={t} />` in
+// appValue minted a brand-new arrow function (a new component type) on
+// EVERY render; App.tsx renders it as JSX (`<AccessDenied/>`), so each
+// render of the provider was forcing React to unmount and remount whatever
+// was using it. Reading `t` from context here (rather than closing over the
+// provider's local `t`) keeps this component reference stable while still
+// re-rendering when the language/translations actually change.
+function AccessDeniedConnected() {
+  const { t } = useApp() as { t: (key: string) => string }
+  return <AccessDenied t={t} />
+}
+
 export function AppProvider({ children, publicMode = false }: { children: ReactNode; publicMode?: boolean }) {
   // The provider owns the app session lifecycle and hands lightweight helpers
   // to page components so business workflows do not duplicate global state.
@@ -2502,7 +2515,13 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   const canWriteToServer = !!syncUrl && !syncServerUnreachable && !isActorSessionQuarantined()
 
-  const appValue: AppContextValue = {
+  // Memoized on the actual fields so every consumer of useApp()/AppContext
+  // (91 call sites) gets the SAME object reference across renders that
+  // didn't change any of these values, instead of a brand-new object every
+  // render forcing every context consumer to re-render. Every field below
+  // is already stable (useCallback/useState setter/primitive) except
+  // `settings`, which is its own useState value.
+  const appValue: AppContextValue = useMemo(() => ({
     user, login, logout, persistAuthenticatedUser,
     authReady,
     page, setPage, navigateTo,
@@ -2524,14 +2543,35 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     syncServerUnreachable,
     canWriteToServer,
     storagePersisted,
-    AccessDenied: () => <AccessDenied t={t} />,
-  }
-
-  const syncValue: SyncContextValue = {
+    AccessDenied: AccessDeniedConnected,
+  }), [
+    user, login, logout, persistAuthenticatedUser,
+    authReady,
+    page, setPage, navigateTo,
+    navGuard, resolveNavGuard,
+    settings, loadSettings, saveSettings,
+    language, theme, t,
+    toggleTheme, toggleLanguage,
+    notify, notification,
+    writeConflict, dismissWriteConflict, reloadWriteConflict, dismissNotification,
+    hasPermission, canAccessPage, getPermissions, getPermissionTier, can,
+    formatPrice, fmtUSD, fmtKHR,
+    usdSymbol, khrSymbol, displayCurrency, exchangeRate,
+    usdToKhr, khrToUsd,
+    displayTimezone, deviceTimezone, formatDateTime,
+    syncUrl, updateSyncUrl,
     syncConnected,
     syncChannel,
     syncServerUnreachable,
-  }
+    canWriteToServer,
+    storagePersisted,
+  ])
+
+  const syncValue: SyncContextValue = useMemo(() => ({
+    syncConnected,
+    syncChannel,
+    syncServerUnreachable,
+  }), [syncConnected, syncChannel, syncServerUnreachable])
 
   return (
     <AppContext.Provider value={appValue as AppContextCoreValue}>
