@@ -83,6 +83,11 @@ export default function ShiftReportFigures({ shift, className = '' }: Props) {
                       : 'text-gray-800 dark:text-gray-100'
                 }`}>
                   {row.khr == null ? fmtUSD(row.usd) : `${fmtUSD(row.usd)} · ${fmtKHR(row.khr)}`}
+                  {row.unvaluedCount ? (
+                    <span className="block text-[10px] font-normal text-amber-600 dark:text-amber-400">
+                      {tr('rpt_note_removal_unvalued', '{count} removed row(s) had no recorded cost').replace('{count}', String(row.unvaluedCount))}
+                    </span>
+                  ) : null}
                 </dd>
               </div>
             ))}

@@ -24,6 +24,11 @@ export type ShiftFiguresShape = {
   removal_loss_usd?: number
   revenue_after_losses_usd?: number
   profit_after_losses_usd?: number
+  /** Of the rows above, how many carried no cost anywhere -- the loss is
+   *  understated by whatever they were worth (p5/losses, Sep 15 2026, owner:
+   *  "i see the report says row removed has 1 no cost price. this is
+   *  impossible find issue and fix"). Never dropped silently. */
+  removal_loss_unvalued_rows?: number
 }
 
 type ShiftWithFigures = Shift & { figures?: ShiftFiguresShape | null }
@@ -140,6 +145,9 @@ export type ShiftFigureRow = {
   khr?: number
   hintKey?: string
   tone?: 'positive' | 'negative'
+  /** Set only on the removal-loss row when some of its rows had no
+   *  recorded cost -- rendered as a count, never silently dropped. */
+  unvaluedCount?: number
 }
 
 /** Business results in reading order. Credit is a positive memo already inside sales/profit. */
@@ -151,7 +159,10 @@ export function shiftFigureRows(figures: ShiftFiguresShape | null | undefined): 
   // those stay the canonical figures and these say what the same shift looks
   // like including the loss. Rendered only when the server sent the block.
   const losses: ShiftFigureRow[] = typeof figures.removal_loss_usd !== 'number' ? [] : [
-    { key: 'rpt_removal_loss', usd: figures.removal_loss_usd, hintKey: 'rpt_hint_removal_loss' },
+    {
+      key: 'rpt_removal_loss', usd: figures.removal_loss_usd, hintKey: 'rpt_hint_removal_loss',
+      ...(figures.removal_loss_unvalued_rows ? { unvaluedCount: figures.removal_loss_unvalued_rows } : {}),
+    },
     { key: 'rpt_revenue_after_losses', usd: figures.revenue_after_losses_usd ?? 0 },
     ...(typeof figures.profit_after_losses_usd === 'number' ? [{
       key: 'rpt_profit_after_losses',
