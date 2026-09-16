@@ -270,6 +270,12 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
     findIdentityMatch: async () => null,
     identityBarcodeKey: productDetailRule.identityBarcodeKey,
   },
+  // P10-4: REAL, not stubbed -- see routes/inventory.ts's own comment above
+  // recomputeCatalogCost's call site.
+  '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
+    './db': { getDb: () => db },
+    './productDetailRule': productDetailRule,
+  }),
   // routes/products.ts + inventory.ts now build their search tail from the
   // one shared implementation (lib/productSearchQuery.ts). These tests
   // exercise write paths, not search, so an inert builder keeps the WHERE

@@ -38,6 +38,7 @@ import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/dated
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchRoleGuards'
+import { recomputeCatalogCost } from '../lib/catalogCostRecompute'
 import {
   CANONICAL_BRANCH_CONFIGURATION_CODE,
   CANONICAL_BRANCH_CONFIGURATION_ERROR,
@@ -1899,6 +1900,20 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
     }
+    // P10-4 (owner ruling 2026-09-16): a receipt just wrote a new lot cost --
+    // re-derive the catalog cost from the DISTINCT non-zero active-lot costs
+    // rather than leaving products.cost_price_* pinned to whatever an earlier
+    // receipt happened to write. See catalogCostRecompute.ts header.
+    //
+    // Skipped when this receipt just CREATED a brand-new sibling row: its
+    // INSERT already set cost_price_* from the operator's explicit unlocked
+    // pricing.cost_usd (mirrorCostFields above), which is the catalog-cost
+    // decision for a row that has never had one before and may deliberately
+    // differ from the entered receipt/lot unit cost (a landed-cost estimate
+    // vs. the literal per-unit invoice price). Recomputing here would
+    // silently overwrite that explicit first entry with the lot figure.
+    // Every LATER receipt onto this same row still recomputes normally.
+    if (!createdSibling) await recomputeCatalogCost(db, targetProductId)
   } else if (useBatchLedger && type === 'remove') {
     if (batchIdRequested != null) {
       try {

@@ -176,6 +176,12 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/productIdentity': { findIdentityMatch: async () => null },
+  // P10-4: REAL, not stubbed -- see routes/inventory.ts's own comment above
+  // recomputeCatalogCost's call site.
+  '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
+    './db': { getDb: () => db },
+    './productDetailRule': loadReal('lib/productDetailRule.ts', { './moneyPrecision': loadReal('lib/moneyPrecision.ts') }),
+  }),
   '../lib/productSearchQuery': {
     buildProductSearchQuery: () => ({ hasSearchTerm: false, titleOnly: false }),
     buildFamilyRelevanceOrderSql: (tail) => tail,

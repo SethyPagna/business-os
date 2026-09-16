@@ -34,6 +34,12 @@ const migrationsDir = path.join(__dirname, '..', 'migrations')
 const REAL = new Set([
   'batchCode', 'importNumbers', 'stockActionResolver', 'stockActionImport',
   'stockActionCatalog', 'stockActionCommit', 'sqlBinding', 'productDetailRule',
+  // P10-4: applyUnifiedStockAdd calls recomputeCatalogCost after every add
+  // receipt so products.cost_price_usd tracks the distinct-cost mean across
+  // active lots (owner ruling 2026-09-16). Real here for the same reason
+  // productDetailRule is real -- an inert `{}` stub would TypeError on every
+  // add row and every failure would misleadingly read as a receipt bug.
+  'catalogCostRecompute',
   // productIdentity holds identityBarcodeKeySql, the ONE SQL spelling of the
   // fold the bounded catalog query narrows with. Stubbed, this harness would
   // green over a query that never folds.
@@ -125,6 +131,7 @@ function makeDb() {
   sqlite.exec(`
     CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, name_normalized TEXT, barcode TEXT, unit TEXT, category TEXT, brand TEXT,
       selling_price_usd REAL DEFAULT 0, wholesale_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0,
+      cost_price_khr REAL DEFAULT 0, purchase_price_usd REAL DEFAULT 0, purchase_price_khr REAL DEFAULT 0,
       stock_quantity REAL DEFAULT 0, is_active INTEGER DEFAULT 1, client_request_id TEXT,
       created_at TEXT, updated_at TEXT);
     CREATE UNIQUE INDEX ux_products_crid ON products(client_request_id) WHERE client_request_id IS NOT NULL;

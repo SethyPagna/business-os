@@ -29,6 +29,7 @@ const saleCreationSnapshot = compile('saleCreationSnapshot.ts', {
   './actorSnapshot': actorSnapshot,
   './saleMoneyPrecision': saleMoneyPrecision,
 })
+const productDetailRule = compile('productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const subject = compile('stockActionCommit.ts', {
   './moneyPrecision': moneyPrecision,
   './db': {},
@@ -37,13 +38,21 @@ const subject = compile('stockActionCommit.ts', {
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
   './saleCreationSnapshot': saleCreationSnapshot,
+  // P10-4: the unified-import add writer re-derives products.cost_price_usd
+  // from the DISTINCT non-zero active-lot costs after every applied add --
+  // REAL, not stubbed, matching every other real gate/kernel in this list.
+  './catalogCostRecompute': compile('catalogCostRecompute.ts', {
+    './db': {},
+    './productDetailRule': productDetailRule,
+  }),
 })
 
 function setup() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
     CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, name_normalized TEXT, barcode TEXT, unit TEXT, stock_quantity REAL DEFAULT 0,
-      selling_price_usd REAL DEFAULT 0, wholesale_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0,
+      selling_price_usd REAL DEFAULT 0, wholesale_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0, cost_price_khr REAL DEFAULT 0,
+      purchase_price_usd REAL DEFAULT 0, purchase_price_khr REAL DEFAULT 0,
       is_active INTEGER DEFAULT 1, client_request_id TEXT UNIQUE, created_at TEXT, updated_at TEXT);
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
@@ -66,6 +75,7 @@ function setup() {
     prepare(sql) {
       return {
         get(params) { return Promise.resolve(sqlite.prepare(sql).get(params)) },
+        all(params) { return Promise.resolve(sqlite.prepare(sql).all(params)) },
         run(params) { const info = sqlite.prepare(sql).run(params); return Promise.resolve({ changes: info.changes, lastInsertRowid: Number(info.lastInsertRowid) }) },
       }
     },
@@ -100,9 +110,16 @@ function seedLot(sqlite, { supplierName = null, supplierId = null } = {}) {
   const retry = await subject.applyUnifiedStockAdd(db, input)
   assert.strictEqual(first.alreadyApplied, false)
   assert.strictEqual(retry.alreadyApplied, true)
+  // P10-4 (owner ruling 2026-09-16): products.cost_price_usd is now
+  // RE-DERIVED from the product's own active lots after every applied add --
+  // this row's only active lot is the one this import just created at 5, so
+  // the catalog cost follows it. (Was: "receipt cost is historical; it never
+  // overwrites the catalog cost" -- that was the pre-P10-4 behaviour this
+  // fix replaces; the retry is idempotent so it does not average 5 with
+  // itself into anything else.)
   assert.deepStrictEqual(sqlite.prepare(`SELECT stock_quantity, selling_price_usd, wholesale_price_usd, cost_price_usd FROM products WHERE id = 10`).get(), {
-    stock_quantity: 2, selling_price_usd: 12.35, wholesale_price_usd: 10, cost_price_usd: 0,
-  }, 'receipt cost is historical; it never overwrites the catalog cost')
+    stock_quantity: 2, selling_price_usd: 12.35, wholesale_price_usd: 10, cost_price_usd: 5,
+  }, 'catalog cost re-derived from the single active lot this import created')
   assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock`).get().quantity, 2)
   assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_batch_stock`).get().quantity, 2)
   assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) AS n FROM product_batches`).get().n, 1)

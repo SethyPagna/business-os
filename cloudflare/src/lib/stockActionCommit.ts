@@ -6,6 +6,7 @@ import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stock
 import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 import type { ActorLike } from './actorSnapshot'
 import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
+import { recomputeCatalogCost } from './catalogCostRecompute'
 
 /**
  * The FOURTH receipt wire (N14-D).
@@ -415,6 +416,13 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   // flips this row's status to 'applied', and the pre-read above already
   // returns early for an already-applied row -- a verify would only confirm
   // what the atomic batch guarantees. Dropped to save a round-trip per unit.
+
+  // P10-4 (owner ruling 2026-09-16): the batch above just wrote/topped a lot
+  // cost onto product_batches -- re-derive products.cost_price_* from the
+  // DISTINCT non-zero active-lot costs, same as the interactive receipt
+  // wire (routes/inventory.ts POST /adjust). See catalogCostRecompute.ts.
+  await recomputeCatalogCost(db, productId)
+
   return { actionKey, applied: true, alreadyApplied: false }
 }
 
