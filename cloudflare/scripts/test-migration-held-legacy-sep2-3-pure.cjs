@@ -1,19 +1,19 @@
-// Pins the HELD migration ops/scripts/migration/held/0176_legacy_sep2_3_
+// Pins the HELD migration ops/scripts/migration/held/legacy_sep2_3_
 // import_stock_deduction.sql (legacy Sep 2-3 sales imported without stock
 // deduction) on a SYNTHETIC fixture over the REAL migration chain. The file
 // is not in cloudflare/migrations/ (owner decision pending), so this test
 // loads it from the held folder; when it is promoted the path below moves.
 //
-// Run: node scripts/test-migration-held-0176-pure.cjs
+// Run: node scripts/test-migration-held-legacy-sep2-3-pure.cjs
 const fs = require('fs')
 const path = require('path')
 const assert = require('assert')
 const Database = require('better-sqlite3')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-const heldPath = path.join(__dirname, '..', '..', 'ops', 'scripts', 'migration', 'held', '0176_legacy_sep2_3_import_stock_deduction.sql')
+const heldPath = path.join(__dirname, '..', '..', 'ops', 'scripts', 'migration', 'held', 'legacy_sep2_3_import_stock_deduction.sql')
 const sql = fs.readFileSync(heldPath, 'utf8')
-assert.ok(!fs.existsSync(path.join(__dirname, '..', 'migrations', '0176_legacy_sep2_3_import_stock_deduction.sql')), 'held file must not also sit in the chain')
+assert.ok(!fs.existsSync(path.join(__dirname, '..', 'migrations', 'legacy_sep2_3_import_stock_deduction.sql')), 'held file must not also sit in the chain')
 assert.ok(!/\r/.test(sql), 'LF only')
 
 // Parse the static line table out of the SQL itself so the fixture cannot drift from it.
@@ -77,15 +77,15 @@ const db = fresh()
 seed(db)
 db.exec(sql)
 
-assert.strictEqual(db.prepare('SELECT COUNT(*) c, SUM(quantity) u FROM legacy_import_stock_repair_0176 WHERE applied = 1').get().c, 38)
-assert.strictEqual(db.prepare('SELECT SUM(quantity) u FROM legacy_import_stock_repair_0176 WHERE applied = 1').get().u, 107)
-assert.strictEqual(db.prepare("SELECT COUNT(*) c FROM inventory_movements WHERE user_name = 'migration:0176_legacy_sep2_3_import_stock_deduction'").get().c, 38)
+assert.strictEqual(db.prepare('SELECT COUNT(*) c, SUM(quantity) u FROM legacy_import_stock_repair_held WHERE applied = 1').get().c, 38)
+assert.strictEqual(db.prepare('SELECT SUM(quantity) u FROM legacy_import_stock_repair_held WHERE applied = 1').get().u, 107)
+assert.strictEqual(db.prepare("SELECT COUNT(*) c FROM inventory_movements WHERE user_name = 'migration:legacy_sep2_3_import_stock_deduction'").get().c, 38)
 for (const l of lines) {
   const [sale, product, qty, cost] = ITEMS[l.item]
   const a = db.prepare('SELECT batch_id, quantity, released_quantity, lot_code FROM sale_item_batch_allocations WHERE sale_item_id = ?').all(l.item)
   assert.strictEqual(a.length, 1, `one allocation for ${l.item}`)
   assert.deepStrictEqual(a[0], { batch_id: l.lot, quantity: qty, released_quantity: 0, lot_code: 'L' + l.lot })
-  const m = db.prepare("SELECT quantity, unit_cost_usd, batch_id, reason FROM inventory_movements WHERE reference_id = ? AND product_id = ? AND user_name LIKE 'migration:0176%'").get(sale, product)
+  const m = db.prepare("SELECT quantity, unit_cost_usd, batch_id, reason FROM inventory_movements WHERE reference_id = ? AND product_id = ? AND user_name LIKE 'migration:legacy%'").get(sale, product)
   assert.strictEqual(m.quantity, -qty)
   assert.strictEqual(m.unit_cost_usd, cost, `cost ${l.item} (lot fallback for 40183)`)
   assert.strictEqual(m.batch_id, l.lot)
@@ -94,9 +94,9 @@ for (const l of lines) {
 }
 // shared lot 55125 served 40170 (1) + 40173 (1) + 40176 (12): seeded 14+2 -> 2
 assert.strictEqual(db.prepare('SELECT quantity q FROM branch_batch_stock WHERE batch_id = 55125').get().q, 2)
-assert.strictEqual(db.prepare(`SELECT COUNT(*) c FROM products p WHERE p.id IN (SELECT product_id FROM legacy_import_stock_repair_0176)
+assert.strictEqual(db.prepare(`SELECT COUNT(*) c FROM products p WHERE p.id IN (SELECT product_id FROM legacy_import_stock_repair_held)
   AND p.stock_quantity <> (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = p.id)`).get().c, 0)
-assert.strictEqual(db.prepare(`SELECT COUNT(*) c FROM products p WHERE p.id IN (SELECT product_id FROM legacy_import_stock_repair_0176)
+assert.strictEqual(db.prepare(`SELECT COUNT(*) c FROM products p WHERE p.id IN (SELECT product_id FROM legacy_import_stock_repair_held)
   AND p.stock_quantity <> (SELECT COALESCE(SUM(b.quantity),0) FROM branch_batch_stock b JOIN product_batches pb ON pb.id=b.batch_id WHERE pb.variant_product_id=p.id)`).get().c, 0)
 // neighbours untouched
 assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM sale_item_batch_allocations WHERE sale_item_id IN (40175, 40184)').get().c, 1)
@@ -107,7 +107,7 @@ assert.strictEqual(db.prepare("SELECT COUNT(*) c FROM audit_logs WHERE action = 
 const payload = JSON.parse(db.prepare("SELECT payload_json FROM undo_snapshots WHERE kind = 'sale.legacy_import_stock_deduction'").get().payload_json)
 assert.strictEqual(payload.lines.length, 38)
 assert.strictEqual(payload.lines.filter((l) => l.invoice_day === '2026-09-02').length, 13)
-assert.ok(db.prepare('SELECT COUNT(*) c FROM legacy_import_stock_repair_0176 WHERE allocation_id IS NULL').get().c === 0)
+assert.ok(db.prepare('SELECT COUNT(*) c FROM legacy_import_stock_repair_held WHERE allocation_id IS NULL').get().c === 0)
 
 // second run: no-op
 const before = db.prepare('SELECT COUNT(*) c FROM inventory_movements').get().c
@@ -124,6 +124,6 @@ assert.strictEqual(db2.prepare('SELECT COUNT(*) c FROM sale_item_batch_allocatio
 // ------------------------------------------------ empty database: no-op
 const db3 = fresh()
 db3.exec(sql)
-assert.strictEqual(db3.prepare('SELECT COUNT(*) c FROM legacy_import_stock_repair_0176').get().c, 0)
+assert.strictEqual(db3.prepare('SELECT COUNT(*) c FROM legacy_import_stock_repair_held').get().c, 0)
 
-console.log('test-migration-held-0176-pure: ok (38 lines / 107 units, allocations, lot-cost fallback, shared lots, neighbours untouched, abort on shortfall, idempotent)')
+console.log('test-migration-held-legacy-sep2-3-pure: ok (38 lines / 107 units, allocations, lot-cost fallback, shared lots, neighbours untouched, abort on shortfall, idempotent)')
