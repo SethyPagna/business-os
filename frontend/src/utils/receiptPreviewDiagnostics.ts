@@ -39,6 +39,7 @@ export const RECEIPT_PREVIEW_COPY = {
   receipt_preview_mode_fixed: 'Fixed length',
   receipt_preview_mode_driver: 'Printer driver default',
   receipt_preview_mode_auto_longest: 'Longest roll (auto)',
+  receipt_preview_mode_driver_forms: 'Printer form (auto-fit)',
   receipt_preview_mode_troubleshoot: 'Still seeing a blank band or a split strip? In Print Settings, try Fixed length, then Longest roll, then Printer driver default.',
 } as const
 
@@ -59,6 +60,7 @@ const RECEIPT_PAGE_SIZE_MODE_LABELS: Record<string, keyof typeof RECEIPT_PREVIEW
   fixed: 'receipt_preview_mode_fixed',
   driver: 'receipt_preview_mode_driver',
   'auto-longest': 'receipt_preview_mode_auto_longest',
+  'driver-forms': 'receipt_preview_mode_driver_forms',
 }
 
 export function receiptPreviewDiagnosticLines(
@@ -81,8 +83,13 @@ export function receiptPreviewDiagnosticLines(
   // reports pageSizeMode 'measured' and continuousRoll false, so this line
   // never appears for it.
   const showPageSizeMode = layout.continuousRoll || pageSizeMode !== 'measured'
+  // driver-forms: name the exact registered form chosen (e.g. "72 × 297 mm
+  // form") so the owner can see it matches the printer dialog.
+  const sizeLabel = pageSizeMode === 'driver-forms'
+    ? `${dimension(layout.widthMm)} × ${dimension(layout.pageHeightMm)} mm form`
+    : `${dimension(layout.widthMm)} × ${dimension(layout.pageHeightMm)} mm`
   return [
-    `${text('receipt_preview_requested_paper')}: ${dimension(layout.widthMm)} × ${dimension(layout.pageHeightMm)} mm · ${text(mode)}`,
+    `${text('receipt_preview_requested_paper')}: ${sizeLabel} · ${text(mode)}`,
     `${text('receipt_preview_app_scale')}: ${dimension(settings.scalePercent)}% · ${text('receipt_preview_margins')}: ${settings.marginsMm.map(dimension).join(' / ')} mm`,
     text('receipt_preview_actual_size'),
     ...(showPageSizeMode ? [`${text('receipt_preview_page_size_mode')}: ${text(RECEIPT_PAGE_SIZE_MODE_LABELS[pageSizeMode] || 'receipt_preview_mode_measured')}`] : []),

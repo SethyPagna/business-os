@@ -80,6 +80,13 @@ export const DEFAULT_RECEIPT_TEMPLATE: NormalizedReceiptTemplate = {
   template_revision: RECEIPT_TEMPLATE_REVISION,
 }
 
+// The owner's photographed Chrome print dialog for their 72mm-head thermal
+// printer listed exactly these four registered forms (2026-09-16). Used as
+// the driver-forms fallback both here and in cloudflare/src/routes/settings.ts
+// (duplicated there for the same cross-package reason as RECEIPT_PAGE_SIZE_MODES).
+export const DEFAULT_DRIVER_FORM_WIDTH_MM = 72
+export const DEFAULT_DRIVER_FORM_HEIGHTS_MM = [210, 297, 400, 800]
+
 export const DEFAULT_RECEIPT_PRINT_SETTINGS: ReceiptPrintSettings = {
   paperSize: '80mm',
   highContrastBold: true,
@@ -90,11 +97,31 @@ export const DEFAULT_RECEIPT_PRINT_SETTINGS: ReceiptPrintSettings = {
   scale: '100',
   customWidth: '80',
   customHeight: '297',
-  pageSizeMode: 'measured',
+  // 2026-09-16 (owner report + two Chrome print-dialog photos): a saved
+  // settings blob with NO pageSizeMode field -- exactly the production
+  // shape at the time of the report -- now resolves to 'driver-forms', not
+  // 'measured'. A measured page a driver's own registered forms don't match
+  // is the root cause the owner photographed: Chrome cannot auto-select a
+  // form, forcing a manual pick and a scale-driven side margin.
+  pageSizeMode: 'driver-forms',
   fixedPageLengthMm: '100',
+  driverFormWidthMm: String(DEFAULT_DRIVER_FORM_WIDTH_MM),
+  driverFormHeightsMm: [...DEFAULT_DRIVER_FORM_HEIGHTS_MM],
 }
 
-const RECEIPT_PAGE_SIZE_MODES = new Set(['measured', 'fixed', 'driver', 'auto-longest'])
+const RECEIPT_PAGE_SIZE_MODES = new Set(['measured', 'fixed', 'driver', 'auto-longest', 'driver-forms'])
+
+/** Unique, positive, ascending mm heights; falls back to the owner's four
+ * registered forms when the input is empty, non-array or all-invalid. */
+export function normalizeDriverFormHeightsMm(value: unknown): number[] {
+  const list = Array.isArray(value) ? value : []
+  const normalized = Array.from(new Set(
+    list
+      .map((entry) => Number.parseFloat(String(entry)))
+      .filter((entry) => Number.isFinite(entry) && entry > 0),
+  )).sort((a, b) => a - b)
+  return normalized.length ? normalized : [...DEFAULT_DRIVER_FORM_HEIGHTS_MM]
+}
 
 function parseObject(value: unknown): Record<string, unknown> {
   if (!value) return {}
@@ -175,8 +202,12 @@ export function normalizeReceiptPrintSettings(value: unknown): ReceiptPrintSetti
     customWidth: String(parsed.customWidth || DEFAULT_RECEIPT_PRINT_SETTINGS.customWidth),
     customHeight: String(parsed.customHeight || DEFAULT_RECEIPT_PRINT_SETTINGS.customHeight),
     // A record saved before this field existed (or any unrecognized value)
-    // must resolve to 'measured' -- today's own in-document remeasure -- so
-    // an old saved settings blob keeps printing exactly as it did before.
+    // resolves to DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode -- 'driver-forms'
+    // as of 2026-09-16 -- so an old saved settings blob with no explicit mode
+    // (the exact production shape the owner's report was filed against) now
+    // auto-fits the printer's own registered forms instead of repeating the
+    // measured/driver mismatch. A record that DID save an explicit mode keeps
+    // it untouched, same as before.
     pageSizeMode: RECEIPT_PAGE_SIZE_MODES.has(String(parsed.pageSizeMode))
       ? (String(parsed.pageSizeMode) as ReceiptPrintSettings['pageSizeMode'])
       : DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode,
@@ -186,6 +217,13 @@ export function normalizeReceiptPrintSettings(value: unknown): ReceiptPrintSetti
         ? String(parsedLength)
         : DEFAULT_RECEIPT_PRINT_SETTINGS.fixedPageLengthMm
     })(),
+    driverFormWidthMm: (() => {
+      const parsedWidth = Number.parseFloat(String(parsed.driverFormWidthMm ?? ''))
+      return Number.isFinite(parsedWidth) && parsedWidth > 0
+        ? String(parsedWidth)
+        : DEFAULT_RECEIPT_PRINT_SETTINGS.driverFormWidthMm
+    })(),
+    driverFormHeightsMm: normalizeDriverFormHeightsMm(parsed.driverFormHeightsMm),
   }
 }
 
