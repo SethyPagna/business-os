@@ -41,7 +41,7 @@ import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
 import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation, resolvePortalStockStatus } from './portalCatalogDisplay.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
-import { collapsePortalProductGroups, mergePortalCatalogProducts } from './portalProductGrouping.ts'
+import { mergePortalCatalogProducts } from './portalProductGrouping.ts'
 import { normalizeGoogleMapsEmbed } from './portalEditorUtils.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { usePortalBucket, usePortalWishlist, formatPortalBucketText, downloadPortalBucketFile } from './portalBucket.ts'
@@ -319,20 +319,6 @@ function toNumber(value: unknown, fallback: unknown = 0): number {
 function normalizePriceDisplay(value: unknown): string {
   const raw = String(value || '').trim()
   return ['USD', 'KHR', 'BOTH'].includes(raw) ? raw : 'USD'
-}
-
-function normalizeHexColor(value: unknown, fallback: string): string {
-  const raw = String(value || '').trim()
-  return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : fallback
-}
-
-function hexToRgba(hex: unknown, alpha: unknown): string {
-  const safeHex = normalizeHexColor(hex, '#0f172a').replace('#', '')
-  const r = Number.parseInt(safeHex.slice(0, 2), 16)
-  const g = Number.parseInt(safeHex.slice(2, 4), 16)
-  const b = Number.parseInt(safeHex.slice(4, 6), 16)
-  const safeAlpha = Number.isFinite(Number(alpha)) ? Number(alpha) : 1
-  return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`
 }
 
 function normalizeExternalUrl(value: unknown): string {
@@ -644,7 +630,7 @@ export default function PublicCatalogPage() {
   // Default landing tab is About (user request): leangbeauty.com opens on the
   // store's About page. resolvePortalActiveTab falls back to the first visible
   // tab if About is turned off in config.
-  const [activeTab, setActiveTab] = useState(() => resolvePortalActiveTab({ ...DEFAULT_PUBLIC_CONFIG, ...(cachedPortal?.config || {}) }, (key, fallback = '') => fallback, 'about'))
+  const [activeTab, setActiveTab] = useState(() => resolvePortalActiveTab({ ...DEFAULT_PUBLIC_CONFIG, ...(cachedPortal?.config || {}) }, (_key, fallback = '') => fallback, 'about'))
   const [search, setSearch] = useState('')
   const deferredSearch = useMemo(() => search.trim(), [search])
   const [categoryFilter, setCategoryFilter] = useState<string[]>([])
