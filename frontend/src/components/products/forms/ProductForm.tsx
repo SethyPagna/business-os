@@ -1192,7 +1192,14 @@ export default function ProductForm({
     // automatically from the name only. No parent/group IDs are written.
     // 'new' keeps a different typed name where that is actually possible;
     // 'back' returns to editing.
-    if (isCreateMode && createVerdict.kind) {
+    //
+    // Sep 16 2026 owner ruling: an EXACT twin (same name + identity barcode,
+    // leading zeros folded) is never a dead-end prompt -- the server folds
+    // the create straight into the existing row (POST /products now returns
+    // 200 with `folded_into`, never 409). So this dialog no longer blocks
+    // that case at all; it still asks for the cases that genuinely differ
+    // (same name/different barcode, same barcode/different name).
+    if (isCreateMode && createVerdict.kind && createVerdict.kind !== 'exact_twin') {
       const ackKey = `${String(form.name || '').trim().toLowerCase()}|${String(form.barcode || '').trim()}`
       if (createMatchAckRef.current !== ackKey) {
         const choice = await askCreateVerdict()
@@ -1603,10 +1610,13 @@ export default function ProductForm({
                 </p>
               ) : isCreateMode && createVerdict.kind ? (
                 <p className={`mt-1 rounded-lg border px-2.5 py-1.5 text-xs ${createVerdict.kind === 'exact_twin'
-                  ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300'
                   : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300'}`}>
                   {createVerdict.kind === 'exact_twin'
-                    ? tr('create_match_twin_hint', 'This product already exists (same name and barcode; leading zeros are ignored) — it cannot be created twice.', 'ផលិតផលនេះមានរួចហើយ (ឈ្មោះ និងបាកូដដូចគ្នា; សូន្យនៅខាងដើមមិនរាប់បញ្ចូល) — មិនអាចបង្កើតម្តងទៀតបានទេ។')
+                    // Sep 16 2026 ruling: this is informative, not a block --
+                    // saving folds straight into the existing row (leading
+                    // zeros folded, never a new twin), no dead-end prompt.
+                    ? tr('create_match_twin_hint', 'This product already exists (same name and barcode; leading zeros are ignored) — saving will add to that existing product instead of creating a new one.', 'ផលិតផលនេះមានរួចហើយ (ឈ្មោះ និងបាកូដដូចគ្នា; សូន្យនៅខាងដើមមិនរាប់បញ្ចូល) — ការរក្សាទុកនឹងបន្ថែមទៅផលិតផលដែលមានរួចហើយ ជំនួសឲ្យការបង្កើតថ្មី។')
                     : createVerdict.kind === 'name_match'
                       ? tr('create_match_name_hint', 'This name already exists ({n} rows) — saving adds this as a new row of that group.', 'ឈ្មោះនេះមានរួចហើយ ({n} ជួរ) — ការរក្សាទុកនឹងបន្ថែមជាជួរថ្មីនៃក្រុមនោះ។').replace('{n}', String(createVerdict.groupRows.length))
                       : tr('create_match_barcode_hint', 'This barcode is already on "{name}".', 'បាកូដនេះមាននៅលើ "{name}" រួចហើយ។').replace('{name}', createVerdict.canonicalName)}
@@ -2152,28 +2162,26 @@ export default function ProductForm({
         />
       ) : null}
       {createVerdictOpen ? (
+        // Sep 16 2026: this dialog only ever opens for name_match/barcode_match
+        // now -- an exact_twin never reaches askCreateVerdict (see saveForm),
+        // so the old red "Product already exists / Go back" dead-end branch
+        // is gone rather than kept as unreachable code.
         <Modal
-          title={createVerdict.kind === 'exact_twin'
-            ? tr('create_match_twin_title', 'Product already exists', 'ផលិតផលមានរួចហើយ')
-            : createVerdict.kind === 'name_match'
-              ? tr('create_match_name_title', 'Name already exists', 'ឈ្មោះមានរួចហើយ')
-              : tr('create_match_barcode_title', 'Barcode already in use', 'បាកូដកំពុងប្រើរួចហើយ')}
+          title={createVerdict.kind === 'name_match'
+            ? tr('create_match_name_title', 'Name already exists', 'ឈ្មោះមានរួចហើយ')
+            : tr('create_match_barcode_title', 'Barcode already in use', 'បាកូដកំពុងប្រើរួចហើយ')}
           onClose={() => resolveCreateVerdict('back')}
           size="sm"
           layer={modalLayer}
           unsavedChanges="read-only">
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
-            <div className={`flex items-start gap-3 rounded-lg border p-3 ${createVerdict.kind === 'exact_twin'
-              ? 'border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/30'
-              : 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30'}`}>
-              <AlertTriangleIcon className={`mt-0.5 h-4 w-4 shrink-0 ${createVerdict.kind === 'exact_twin' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} />
-              <div className={`space-y-1 ${createVerdict.kind === 'exact_twin' ? 'text-red-800 dark:text-red-300' : 'text-amber-800 dark:text-amber-300'}`}>
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/30">
+              <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="space-y-1 text-amber-800 dark:text-amber-300">
                 <p>
-                  {createVerdict.kind === 'exact_twin'
-                    ? tr('create_match_twin_body', 'The same product already exists — same name and barcode (leading zeros are ignored; a different cost does not make a new row). Go back and adjust, or open the existing product instead.', 'ផលិតផលដូចគ្នានេះមានរួចហើយ — ឈ្មោះ និងបាកូដដូចគ្នា (សូន្យនៅខាងដើមមិនរាប់បញ្ចូល; ថ្លៃដើមខុសគ្នាមិនបង្កើតជួរថ្មីទេ)។ ត្រឡប់ក្រោយ ហើយកែសម្រួល ឬបើកផលិតផលដែលមានស្រាប់ជំនួសវិញ។')
-                    : createVerdict.kind === 'name_match'
-                      ? tr('create_match_name_body', 'A product with this exact name already exists. Saving adds another ordinary row under the same automatic group title.', 'ផលិតផលដែលមានឈ្មោះដូចគ្នាបេះបិទមានរួចហើយ។ ការរក្សាទុកនឹងបន្ថែមជួរផលិតផលធម្មតាមួយទៀតក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា។')
-                      : tr('create_match_barcode_body', 'This barcode already belongs to "{name}". Use that same name to wrap this row under the same automatic group title, or keep your different name as a separate product.', 'បាកូដនេះជារបស់ "{name}" រួចហើយ។ ប្រើឈ្មោះដូចគ្នា ដើម្បីឲ្យជួរនេះត្រូវបានរុំក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា ឬរក្សាឈ្មោះផ្សេងរបស់អ្នកជាផលិតផលដាច់ដោយឡែក។').replace('{name}', createVerdict.canonicalName)}
+                  {createVerdict.kind === 'name_match'
+                    ? tr('create_match_name_body', 'A product with this exact name already exists. Saving adds another ordinary row under the same automatic group title.', 'ផលិតផលដែលមានឈ្មោះដូចគ្នាបេះបិទមានរួចហើយ។ ការរក្សាទុកនឹងបន្ថែមជួរផលិតផលធម្មតាមួយទៀតក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា។')
+                    : tr('create_match_barcode_body', 'This barcode already belongs to "{name}". Use that same name to wrap this row under the same automatic group title, or keep your different name as a separate product.', 'បាកូដនេះជារបស់ "{name}" រួចហើយ។ ប្រើឈ្មោះដូចគ្នា ដើម្បីឲ្យជួរនេះត្រូវបានរុំក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា ឬរក្សាឈ្មោះផ្សេងរបស់អ្នកជាផលិតផលដាច់ដោយឡែក។').replace('{name}', createVerdict.canonicalName)}
                 </p>
                 {createVerdict.priceMatches ? (
                   <p className="text-xs">
@@ -2200,15 +2208,13 @@ export default function ProductForm({
               >
                 {tr('create_match_back', 'Go back', 'ត្រឡប់ក្រោយ')}
               </button>
-              {createVerdict.kind !== 'exact_twin' ? (
-                <button
-                  type="button"
-                  className="rounded-lg bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700"
-                  onClick={() => resolveCreateVerdict('group')}
-                >
-                  {tr('create_match_group_button', 'Use name "{name}" and group automatically', 'ប្រើឈ្មោះ "{name}" ហើយដាក់ជាក្រុមដោយស្វ័យប្រវត្តិ').replace('{name}', createVerdict.canonicalName)}
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700"
+                onClick={() => resolveCreateVerdict('group')}
+              >
+                {tr('create_match_group_button', 'Use name "{name}" and group automatically', 'ប្រើឈ្មោះ "{name}" ហើយដាក់ជាក្រុមដោយស្វ័យប្រវត្តិ').replace('{name}', createVerdict.canonicalName)}
+              </button>
               {createVerdict.allowProceedAsNew ? (
                 <button
                   type="button"
