@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
