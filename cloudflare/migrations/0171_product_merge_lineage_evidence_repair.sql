@@ -1,4 +1,4 @@
--- 0170: backfill product.merge undo_snapshots evidence for sale_items
+-- 0171: backfill product.merge undo_snapshots evidence for sale_items
 -- reparented by migrations 0165 (product_same_name_merge) and 0168
 -- (transfer_aware_merge).
 --
@@ -34,12 +34,12 @@
 -- and which no existing applied product.merge* undo_snapshots row already
 -- covers, insert one new undo_snapshots row of kind='product.merge',
 -- status='applied', payload {dupId:loser_id, keeperId:keeper_id,
--- reparentedSaleItemIds:[...], source:'repair-0170'}.
+-- reparentedSaleItemIds:[...], source:'repair-0171'}.
 --
 -- ============================== IDEMPOTENCE ===============================
 -- The temp table is rebuilt from a NOT EXISTS check against undo_snapshots
 -- itself, so a second run finds every row already covered by the first
--- run's repair-0170 evidence and inserts nothing further.
+-- run's repair-0171 evidence and inserts nothing further.
 --
 -- ============================== PRE-ASSERTION (run before applying) ======
 --   SELECT COUNT(*) FROM sale_items si
@@ -72,7 +72,7 @@
 --       SELECT 1 FROM undo_snapshots u
 --       WHERE u.kind = 'product.merge' AND u.status = 'applied'
 --         AND json_valid(u.payload_json) = 1
---         AND json_extract(u.payload_json, '$.source') = 'repair-0170'
+--         AND json_extract(u.payload_json, '$.source') = 'repair-0171'
 --         AND EXISTS (SELECT 1 FROM json_each(u.payload_json, '$.reparentedSaleItemIds') i WHERE i.value = si.id)
 --     );
 --   -- expect 0
@@ -81,15 +81,15 @@
 -- This migration only INSERTs new undo_snapshots rows; nothing existing is
 -- modified or deleted. To undo, delete the rows it added:
 --   DELETE FROM undo_snapshots WHERE kind='product.merge' AND status='applied'
---     AND json_valid(payload_json)=1 AND json_extract(payload_json,'$.source')='repair-0170';
+--     AND json_valid(payload_json)=1 AND json_extract(payload_json,'$.source')='repair-0171';
 
-CREATE TABLE IF NOT EXISTS product_merge_lineage_repair_0170 (
+CREATE TABLE IF NOT EXISTS product_merge_lineage_repair_0171 (
   sale_item_id INTEGER PRIMARY KEY,
   loser_id INTEGER NOT NULL,
   keeper_id INTEGER NOT NULL
 );
 
-INSERT OR IGNORE INTO product_merge_lineage_repair_0170 (sale_item_id, loser_id, keeper_id)
+INSERT OR IGNORE INTO product_merge_lineage_repair_0171 (sale_item_id, loser_id, keeper_id)
 SELECT si.id, pair.loser_id, pair.keeper_id
 FROM sale_items si
 JOIN (
@@ -127,10 +127,10 @@ SELECT
   json_object(
     'dupId', loser_id, 'keeperId', keeper_id,
     'reparentedSaleItemIds', json_group_array(sale_item_id),
-    'source', 'repair-0170'
+    'source', 'repair-0171'
   ),
-  NULL, 'repair-0170', CURRENT_TIMESTAMP
-FROM product_merge_lineage_repair_0170
+  NULL, 'repair-0171', CURRENT_TIMESTAMP
+FROM product_merge_lineage_repair_0171
 GROUP BY loser_id, keeper_id;
 
-DROP TABLE IF EXISTS product_merge_lineage_repair_0170;
+DROP TABLE IF EXISTS product_merge_lineage_repair_0171;

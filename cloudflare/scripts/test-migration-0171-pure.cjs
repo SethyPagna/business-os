@@ -1,12 +1,12 @@
-// Pins migration 0170 (product-merge lineage evidence repair) against a
+// Pins migration 0171 (product-merge lineage evidence repair) against a
 // small SYNTHETIC fixture built on the REAL migration chain (better-sqlite3,
 // no production data). See
-// migrations/0170_product_merge_lineage_evidence_repair.sql and
+// migrations/0171_product_merge_lineage_evidence_repair.sql and
 // lib/productMergeLineage.ts (Sentry BUSINESS-OS-1F: migrations 0165/0168
 // reparented sale_items.product_id via raw SQL without writing the
 // product.merge undo_snapshots evidence the lineage resolver requires).
 //
-// Run: node scripts/test-migration-0170-pure.cjs
+// Run: node scripts/test-migration-0171-pure.cjs
 const fs = require('fs')
 const path = require('path')
 const assert = require('assert')
@@ -14,7 +14,7 @@ const Database = require('better-sqlite3')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const migrationsDir = path.join(__dirname, '..', 'migrations')
-const sql0170 = fs.readFileSync(path.join(migrationsDir, '0170_product_merge_lineage_evidence_repair.sql'), 'utf8')
+const sql0171 = fs.readFileSync(path.join(migrationsDir, '0171_product_merge_lineage_evidence_repair.sql'), 'utf8')
 
 const db = new Database(':memory:')
 db.pragma('foreign_keys = OFF')
@@ -74,17 +74,17 @@ assert.strictEqual(evidenceCount(40611), 0, 'positive control: sale_item 40611 r
 assert.strictEqual(evidenceCount(9001), 1, 'sale_item 9001 already has its own (non-repair) evidence')
 
 // -- Run the repair --
-db.exec(sql0170)
+db.exec(sql0171)
 
-assert.strictEqual(evidenceCount(40587), 1, 'repair-0170 wrote evidence for sale_item 40587')
-assert.strictEqual(evidenceCount(40611), 1, 'repair-0170 wrote evidence for sale_item 40611')
+assert.strictEqual(evidenceCount(40587), 1, 'repair-0171 wrote evidence for sale_item 40587')
+assert.strictEqual(evidenceCount(40611), 1, 'repair-0171 wrote evidence for sale_item 40611')
 assert.strictEqual(evidenceCount(9001), 1, 'already-evidenced sale_item 9001 was not duplicated')
 
 const row = db.prepare(`SELECT * FROM undo_snapshots
   WHERE kind='product.merge' AND status='applied' AND json_valid(payload_json)=1
-    AND json_extract(payload_json,'$.source')='repair-0170'
+    AND json_extract(payload_json,'$.source')='repair-0171'
     AND EXISTS (SELECT 1 FROM json_each(payload_json,'$.reparentedSaleItemIds') i WHERE i.value=40587)`).get()
-assert.ok(row, 'a repair-0170 evidence row exists for sale_item 40587')
+assert.ok(row, 'a repair-0171 evidence row exists for sale_item 40587')
 const payload = JSON.parse(row.payload_json)
 assert.strictEqual(payload.dupId, 9091, 'evidence records the captured (loser) product id')
 assert.strictEqual(payload.keeperId, 4227, 'evidence records the live (keeper) product id')
@@ -92,17 +92,17 @@ assert.deepStrictEqual(payload.reparentedSaleItemIds, [40587], 'evidence names e
 
 // The temp working table must not survive the migration.
 assert.strictEqual(
-  db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='product_merge_lineage_repair_0170'").get().n,
+  db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='product_merge_lineage_repair_0171'").get().n,
   0,
   'the temporary repair table is dropped',
 )
 
 // -- Idempotence: a second run adds nothing further --
-const before = db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE json_extract(payload_json,'$.source')='repair-0170'").get().n
-db.exec(sql0170)
-const after = db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE json_extract(payload_json,'$.source')='repair-0170'").get().n
+const before = db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE json_extract(payload_json,'$.source')='repair-0171'").get().n
+db.exec(sql0171)
+const after = db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE json_extract(payload_json,'$.source')='repair-0171'").get().n
 assert.strictEqual(after, before, 'second run is a no-op')
 assert.strictEqual(evidenceCount(40587), 1, 'no duplicate evidence for 40587 after a second run')
 assert.strictEqual(evidenceCount(40611), 1, 'no duplicate evidence for 40611 after a second run')
 
-console.log('OK test-migration-0170-pure.cjs')
+console.log('OK test-migration-0171-pure.cjs')
