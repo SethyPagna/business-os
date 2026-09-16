@@ -6102,6 +6102,8 @@
   "cost_breakdown_excluded_zero": "មិនបានកត់ត្រាថ្លៃដើម",
   "cost_breakdown_excluded_duplicate": "ថ្លៃដើមដូចគ្នាត្រូវបានរាប់រួចហើយ",
   "cost_breakdown_excluded_inactive": "កាលបរិច្ឆេទទទួលដែលអសកម្ម",
+  "cost_breakdown_excluded_superseded": "ត្រូវបានជំនួសដោយការកែប្រែក្រោយ",
+  "cost_breakdown_manual_tag": "កែដោយដៃ",
   "cost_breakdown_outlier_note": "ថ្លៃដើមមួយខុសប្លែកពីផ្សេងទៀតច្រើនពេក (លើសពីទ្វេដង) ដូច្នេះថ្លៃដើមខ្ពស់បំផុតត្រូវបានប្រើជំនួសមធ្យមភាគ។",
   "cost_breakdown_result_label": "ថ្លៃដើមក្នុងកាតាឡុក",
   "cost_breakdown_khr_note": "ថ្លៃដើម KHR ដែលបានកត់ត្រា មិនមែនជាមធ្យមភាគពីថ្ងៃចូលទេ",
