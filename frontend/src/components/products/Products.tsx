@@ -30,6 +30,7 @@ import ProductsListSurface, { ROW_TEXT_GUTTER } from './surfaces/ProductsListSur
 import { TaggedStockActionModal, TaggedStockDesktopRow, TaggedStockMobileCard } from './TaggedStockRows.tsx'
 import type { TaggedStockAction, TaggedStockRow } from './TaggedStockRows.tsx'
 import { getTaggedLots } from '../../api/damagedLotsTransport.ts'
+import { describeTaggedLotsLoadFailure } from '../../utils/taggedLotsLoadFailure.ts'
 import StockInSessionsSection from './StockInSessionsSection.tsx'
 import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
 import type { MergeDuplicatesRecoveryNotice } from './MergeDuplicatesReviewModal'
@@ -3498,11 +3499,18 @@ function ProductsFullEditor() {
     let cancelled = false
     getTaggedLots(ids)
       .then((response) => { if (!cancelled) setTaggedLots(Array.isArray(response?.items) ? response.items : []) })
-      .catch(() => {
+      .catch((error: unknown) => {
         // A failed read must never render as "no held stock" -- that reads
         // as units that were quietly written off. Keep the last known rows
         // and say the read failed.
-        if (!cancelled) notify(tr('stock_tagged_load_failed', 'Failed to load tagged stock'), 'error')
+        //
+        // The catch-all used to swallow WHY: every failure -- a 403, a 5xx,
+        // a dropped connection -- rendered the exact same toast, so an
+        // owner report of "Failed to load tagged stock" carried no signal
+        // an operator (or a later session reading the report) could act on.
+        // Carry the real status/message the server actually sent.
+        if (cancelled) return
+        notify(describeTaggedLotsLoadFailure(error, tr), 'error')
       })
     return () => { cancelled = true }
   }, [notify, taggedReloadToken, tr, visibleIdsSignature])
