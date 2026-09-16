@@ -2,7 +2,6 @@
 // points outward/up (mirrors the Import icon's inward/down arrow -- see
 // the Import buttons across the app that use the down-pointing icon).
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
-import type { ReactNode } from 'react'
 import type { PortalMenuItem } from './PortalMenu'
 import { isBrokenLocalizedString, useApp } from '../../AppContext.tsx'
 import { useIntentLoadedPortalMenu } from './LazyPortalMenu.tsx'

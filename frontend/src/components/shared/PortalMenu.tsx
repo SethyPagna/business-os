@@ -211,7 +211,6 @@ export default function PortalMenu({
       if (!insideMenu && !insideTrigger && !insideNestedPortalMenu) setOpen(false)
     }
 
-    const closeMenu = () => setOpen(false)
     const scheduleReposition = () => {
       if (frameRef.current) window.cancelAnimationFrame(frameRef.current)
       frameRef.current = window.requestAnimationFrame(() => {

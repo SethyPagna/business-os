@@ -158,7 +158,7 @@ function summarizeOptions(options: FilterOption[]): string {
 // top-level FilterMenu sections.
 export function SectionOptionList({
   options,
-  searchable = false,
+  searchable: _searchable = false,
 }: {
   options: FilterOption[]
   searchable?: boolean
