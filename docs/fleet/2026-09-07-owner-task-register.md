@@ -462,3 +462,17 @@ Release code fc2c180c is live as Worker a18e26f5-454b-4494-8514-cf9e3aba4e9a (pa
 | P9-9 tagged-stock error, Reports render pass, debloat report items, POS ProductDetailSheet cost display | **Not yet** | Carried. |
 | P9-3/4/5/6 public items | **Not yet** | Paused until the owner's go. |
 | Physical print with the driver-forms default | **Owner-side** | Cannot be exercised from this workstation. |
+
+## September 17 program 10 checkpoint C LIVE
+
+Release code 2317a9ca is live as Worker 0ec11718-b47e-4cbd-b30d-744c9c6af3cb (paid); migration 0177 applied to production D1.
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| P10-10 manual cost edit recorded as an override baseline (cost becomes n, later lots average from n) | **Deployed and applied** | 0177 product_cost_entries; 42a11071, cbdce163, 7b23e9e2; pure breakdown test 13 checks, native manual-entry test 6 checks. |
+| P10-11 cost record rows show the lot, one compact row per entry, override rows dated with user | **Deployed** | 95f498e6, d9c8a665, f9061e36, 530c2ce0; costCalculationFloat test. |
+| POS ProductDetailSheet cost line opening the calculation | **Deployed** | 530c2ce0; gated on products or inventory access. |
+| Reports render pass | **Deployed** | 2306527b; reportsRenderPass.test.ts. |
+| Debloat dead locals / report items | **Done, not deployed** | p10/debloat-locals 9ef0a578; merge and re-gate at the next checkpoint. |
+| P9-9 tagged-stock error, P9-3/4/5/6 public items | **Not yet** | Carried; public items paused until the owner's go. |
+| Physical print with the driver-forms default | **Owner-side** | Cannot be exercised from this workstation. |

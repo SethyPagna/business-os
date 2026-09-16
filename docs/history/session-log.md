@@ -19545,3 +19545,17 @@ Deploy: branch pushed a8036506..4b20bd68 (80 sliced commits, main untouched); `n
 **Gates on the committed tip.** Frontend typecheck, verify:i18n 5880, verify:public-runtime, test:utils 455/455, build 266 chunks zero cycles; Worker tsc clean, sweep 448 files with sentinel. Six sweep reds: five pure tests loading catalogCostRecompute lacked the moneyPrecision stub the 790c68f9 import needs (51ea5238, fc2c180c), test-merge-identity-fk found the 0173/0175 repair work tables' product_id unclassified (registered as provenance, fc2c180c), record-orphans-native green standalone.
 
 **Exceptions to report.** Legacy Sep 2–3 deduction held, not applied. P9-9, Reports render pass, debloat report items, public items, POS ProductDetailSheet cost display, physical print still open.
+
+## Part 621 (Sep 17 2026, Claude Fable coordinator) — Program 10 checkpoint C: manual cost override record, lot rows in the cost record, POS sheet cost line, Reports render pass
+
+**Provenance.** Release code tip **2317a9ca** on `codex/precision-final-candidate-20260914` (descends from fc2c180c), pushed, deployed with the paid configuration as Worker **0ec11718-b47e-4cbd-b30d-744c9c6af3cb** (`/api/runtime/version` revision `2317a9ca515b`, sourceHash `606f50f2042498e1`, builtAt 2026-09-16T22:15:50Z, clean stamp — the three build-noise files were left untouched). Migration **0177** applied remotely; pre-assertion read immediately before (table absent, chain tail 0176) and post-assertion after (table and index present, 0 rows, chain tail 0177). Merged into `main`.
+
+**Owner messages.** G: a manual cost change must be recorded and the record must show the lot, compact one row per entry, then reports, debloat and POS for the next checkpoint. H: the edit is an override — before (n+n1+n2)/3, after just n; later stock-adds average from n forward; the override lives in edit → price → cost on the product page. I: weekly usage at 95–97 %, deploy before it is hit.
+
+**Design.** The first cut averaged the manual value with the old lots; the owner's correction turned it into a baseline: `product_cost_entries.baseline_batch_id` = the highest active lot id at the time of the edit, and the formula inputs are the latest entry's cost plus distinct non-zero active lots with a higher id. One SQL fragment (`LATEST_MANUAL_COST_ENTRY_BASELINE_SQL`) feeds the recompute, the bulk recompute statement and the breakdown so the three cannot drift. Breakdown rows carry source, lot code, batch number, received date, branch, user, recorded date and an exclusion tag (zero / duplicate / inactive / superseded / overridden); the float renders one row per entry.
+
+**Lanes (sonnet, one fix per commit).** p10/cost-record (77d5059f, 42a11071, cbdce163, 35063ea9, 7b23e9e2), p10/cost-float-rows (95f498e6, d9c8a665, f9061e36, 530c2ce0), p10/reports-render (2306527b), .gitattributes LF rule for held migration SQL (b10c974b). p10/debloat-locals (9ef0a578) is done but deferred to the next checkpoint on the owner's usage instruction.
+
+**Gates on the committed tip.** Frontend typecheck, verify:i18n 5883, verify:public-runtime, test:utils 456/456, build; Worker tsc clean, full sweep with sentinel. Three sweep reds (test-d1-pattern-limit-native, test-product-conflict-action-apply-native, test-sale-customer-safety-native) all exit 0 standalone; the safety test runs 57 s and had been cut off under the parallel sweep.
+
+**Exceptions to report.** Debloat lane not merged. P9-9, public items, physical print still open.
