@@ -45,6 +45,14 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRolePermiss
   manager: {},
   employee: {
     pos: true,
+    // Receipt/print settings (page menu + avatar dropdown, Sep 16 2026 owner
+    // request) is an operational tool for whoever actually prints receipts,
+    // not an admin-only setting -- an Employee needs to change print modes
+    // (paper size, contrast, footer) without needing the broader `settings`
+    // grant. See routes/settings.ts's settingsBucketPermissionFor() and
+    // permissionDefinitions.ts's own 'receipt_settings' row for the rest of
+    // this key's plumbing.
+    receipt_settings: true,
     sales: true,
     'sales:status': true,
     'sales:customer': true,
