@@ -3831,6 +3831,7 @@
   "product_expiry_alert_days": "Expiry alert days",
   "product_expiry_alerts": "Expiry alerts",
   "product_expiry_date": "Expiry date",
+  "product_folded_into_existing": "Added to existing product {name}",
   "product_form": "Product form",
   "product_group": "Product Group",
   "product_group_parent": "Treat this item as a group parent",

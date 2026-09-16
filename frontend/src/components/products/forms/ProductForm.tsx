@@ -39,20 +39,6 @@ import {
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES, MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
 import { effectivePermissions, isAdminControlUser } from '../../../utils/permissions.ts'
 
-// The server's "same name + same barcode (leading zeros folded) is the same
-// product -- merge into it instead of creating a twin" 409, unpacked into the
-// row it is pointing at. classifyCreateMatches asks this same question on the
-// client, so this 409 should now only be reachable on a genuine race.
-// Returns null for any other failure, so an unrelated error can never be
-// mistaken for an invitation to merge two products together.
-function duplicateCollisionFrom(error: unknown): { id: number; name: string | null } | null {
-  const err = error as { code?: unknown; duplicate?: { id?: unknown; name?: unknown } } | null
-  if (String(err?.code || '') !== 'duplicate_product') return null
-  const id = Number(err?.duplicate?.id)
-  if (!Number.isInteger(id) || id <= 0) return null
-  return { id, name: err?.duplicate?.name == null ? null : String(err.duplicate.name) }
-}
-
 const importBarcodeScannerModal = () => import('../scanning/BarcodeScannerModal')
 const BarcodeScannerModal = lazyRetry(importBarcodeScannerModal, 'product-form-barcode-scanner-modal')
 // The scanner opens its camera as soon as it mounts (one tap, no Start
@@ -213,7 +199,6 @@ interface ProductFormProps {
   groupCandidates?: GroupCandidate[]
   onSave: (payload?: ProductSavePayload) => unknown | Promise<unknown>
   onClose: () => void
-  onReviewIdentityCollision?: (productIds: readonly [number, number]) => void
   // Optional -- only supplied by callers that already have a delete flow
   // wired (Products.tsx routes this through its DeleteConfirmModal, same
   // as every other delete entry point on that page). Omitted entirely
@@ -388,14 +373,22 @@ export function useStableHydratedState<T>(initialState: T, hydrationKey: string)
   return [state, setState]
 }
 
+// Returns save()'s own resolved value instead of swallowing it: onSave's
+// caller (Products.tsx's handleSaveWithGallery) already reads its own
+// folded_into/merged_into off the API response it awaits internally to
+// toast+refresh the survivor, but a future caller that only has access to
+// what onSave resolves to (not its own inner request) needs this plumbed
+// through rather than discarded, same as every other write path in this
+// codebase (see extractHistoryResultId's callers).
 export async function clearAfterSuccessfulProductSave(
   save: () => unknown | Promise<unknown>,
   clear: () => void,
   close: () => void,
-): Promise<void> {
-  await Promise.resolve(save())
+): Promise<unknown> {
+  const result = await Promise.resolve(save())
   clear()
   close()
+  return result
 }
 
 function editableInitialForm(initialForm: ProductFormState): ProductFormState {
@@ -488,7 +481,6 @@ export default function ProductForm({
   onSave,
   onDelete,
   onClose,
-  onReviewIdentityCollision,
   onMinimize,
   createDefaults,
   draftScope,
@@ -885,10 +877,11 @@ export default function ProductForm({
   // Part 563: the final "confirm / double-check" gate the save flow awaits
   // before writing, using the shared ConfirmDialog. Same promise-based pattern
   // as askRenameChoice above -- saveForm opens it and blocks on the choice.
-  // Saving a rename/re-barcode into an existing twin is a merge decision, and
-  // it goes through the SAME flow (and the same stock question) the Conflicts
-  // review uses -- one answer to "the other row also has stock", everywhere.
-  const [identityCollision, setIdentityCollision] = useState<{ id: number; name: string | null } | null>(null)
+  // Sep 16 2026 owner ruling: saving a rename/re-barcode into an existing
+  // twin now folds straight into that row server-side (200 + merged_into,
+  // never a 409) instead of asking the operator to review it separately --
+  // see saveForm's catch block below, and Products.tsx's toast+refresh on
+  // the folded result.
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
   const saveConfirmResolveRef = useRef<((ok: boolean) => void) | null>(null)
   const askSaveConfirm = () => new Promise<boolean>((resolve) => {
@@ -1316,14 +1309,6 @@ export default function ProductForm({
         onClose,
       )
     } catch (error) {
-      // The rejected identity edit was never persisted. The ordinary exact-
-      // identity pair endpoint would therefore reject the original row again.
-      // Offer a reviewed identity resolution; retain this unsaved draft.
-      const collision = duplicateCollisionFrom(error)
-      if (collision && product?.id && onReviewIdentityCollision) {
-        setIdentityCollision(collision)
-        return
-      }
       alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
     } finally {
       saveInFlightRef.current = false
@@ -1382,7 +1367,7 @@ export default function ProductForm({
     })
   } : undefined
   const childSurfaceOpen = Boolean(
-    filePickerOpen || scannerField || renameRequest || identityCollision || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
+    filePickerOpen || scannerField || renameRequest || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
   )
   useEffect(() => {
     const dialog = productFormContentRef.current?.closest('[role="dialog"]')
@@ -2129,24 +2114,6 @@ export default function ProductForm({
           root-level dialog (create verdict). Locked by
           tests/productFormContract.test.ts. */}
       <RenameCascadeModal request={renameRequest} busy={saving} layer={modalLayer} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
-      {/* Saving into an existing twin offers the merge here; a twin that still
-          holds stock is asked merge-or-write-off before anything is written. */}
-      {identityCollision && product?.id && onReviewIdentityCollision ? (
-        <Modal title={t('product_collision_review_title') || 'Review product identity'} onClose={() => setIdentityCollision(null)} size="sm" layer={modalLayer} unsavedChanges="read-only">
-          <p className="text-sm">{t('product_collision_review_description') || 'This edit matches another saved product. Review both saved rows and choose the barcode to keep. Your unsaved edits are not applied by the review.'}</p>
-          <p className="mt-2 text-sm font-medium">{identityCollision.name || `#${identityCollision.id}`}</p>
-          <div className="mt-4 flex justify-end gap-2">
-            <button type="button" className="btn-secondary" onClick={() => setIdentityCollision(null)}>{t('cancel') || 'Cancel'}</button>
-            <button type="button" className="btn-primary" disabled={imageUploading || !preserveAndMinimize} onClick={() => {
-              if (imageUploading || imageUploadInFlightRef.current || !preserveAndMinimize) return
-              const productIds = [Number(product.id), identityCollision.id] as const
-              preserveAndMinimize()
-              setIdentityCollision(null)
-              onReviewIdentityCollision(productIds)
-            }}>{t('selected_conflict_group_review_action') || 'Review selected actions'}</button>
-          </div>
-        </Modal>
-      ) : null}
       {saveConfirmOpen ? (
         <ConfirmDialog
           t={t}
