@@ -539,10 +539,18 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
           under the status bar/notch on any device with a safe-area inset.
           pt-[env(...)] pushes the flex row down inside a taller box whose
           background still extends fully behind the notch; App.tsx's <main>
-          padding-top is matched to this same total height. */}
+          padding-top is matched to this same total height.
+
+          z-50, ABOVE #mobile-nav-layer's z-40: the layer is a later DOM
+          sibling of this header (not a child), so at equal z-index it paints
+          over the header and the avatar/account button inside it becomes
+          untappable while the page menu is open. The header must always
+          win that stack -- the avatar stays reachable to close the menu.
+          The bottom nav bar and its scrim keep their own z-40/z-30 order;
+          only the header-vs-layer relationship changes here. */}
       <header
         data-bos-mobile-header={inline ? 'inline' : 'sections'}
-        className={`bos-nav-chrome bos-nav-topbar fixed left-0 right-0 z-40 flex items-center justify-between transition-[transform,top] duration-300 ease-in-out md:hidden ${inline ? 'pl-[calc(0.25rem+env(safe-area-inset-left))] pr-[calc(0.25rem+env(safe-area-inset-right))]' : 'pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))]'} ${appUpdateVisible ? 'top-[calc(3rem+env(safe-area-inset-top))] h-16 pt-0' : 'top-0 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]'} ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'}`}
+        className={`bos-nav-chrome bos-nav-topbar fixed left-0 right-0 z-50 flex items-center justify-between transition-[transform,top] duration-300 ease-in-out md:hidden ${inline ? 'pl-[calc(0.25rem+env(safe-area-inset-left))] pr-[calc(0.25rem+env(safe-area-inset-right))]' : 'pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))]'} ${appUpdateVisible ? 'top-[calc(3rem+env(safe-area-inset-top))] h-16 pt-0' : 'top-0 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]'} ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'}`}
       >
         {inline ? (
           <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -687,12 +695,18 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               .safe-area-inset-bottom in main.css) instead of a flat
               bottom-16, so this drawer doesn't slide in underneath -- and get
               hidden behind -- the taller nav bar that
-              env(safe-area-inset-bottom) produces on notched iPhones. */}
+              env(safe-area-inset-bottom) produces on notched iPhones. It also
+              gets an explicit maxHeight capped at the header's own bottom
+              edge (the same navLayerTop measurement pages mode uses for
+              `top`): the sheet used to grow with its content up to a flat
+              70vh with no bound at its TOP, so on a short viewport it could
+              still reach up and under the header. min() keeps whichever cap
+              is tighter. */}
           <div
             id="mobile-nav-layer"
             data-bos-nav-layer={inline ? 'pages' : 'sheet'}
-            style={inline ? { top: navLayerTop } : undefined}
-            className={`fixed left-0 right-0 z-40 overflow-y-auto md:hidden ${inline ? 'bos-nav-chrome bos-nav-layer' : 'max-h-[calc(70*var(--app-vh))] rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900'} ${inline ? 'bottom-0 pb-[env(safe-area-inset-bottom)]' : 'bottom-[calc(3.55rem+env(safe-area-inset-bottom))]'}`}
+            style={inline ? { top: navLayerTop } : { maxHeight: `min(calc(70 * var(--app-vh)), calc(100dvh - ${navLayerTop}))` }}
+            className={`fixed left-0 right-0 z-40 overflow-y-auto md:hidden ${inline ? 'bos-nav-chrome bos-nav-layer' : 'rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900'} ${inline ? 'bottom-0 pb-[env(safe-area-inset-bottom)]' : 'bottom-[calc(3.55rem+env(safe-area-inset-bottom))]'}`}
           >
             {inline ? null : (
             <div className="sticky top-0 bg-white px-3 pb-1 pt-3 dark:bg-gray-900">

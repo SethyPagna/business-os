@@ -707,6 +707,35 @@ const ADD = (extra) => ({
     assert.equal(groups.reduce((sum, g) => sum + Number(g.quantity), 0), 151, 'no lot silently dropped by the chunking')
   })
 
+  // Owner report (phone, admin session, Sep 16 2026): "Failed to load
+  // tagged stock" (stock_tagged_load_failed) with an empty
+  // damaged_stock_lots table and migrations already at 0169 -- so neither
+  // the historical missing-column cause (0162, see
+  // test-tagged-stock-migration-columns-pure.cjs) nor a 403 (admin) apply.
+  // This drives the ROUTE (not just readTaggedLotGroups directly, unlike
+  // the 151-id check above) through app.request() with the id list encoded
+  // EXACTLY the way frontend/src/api/damagedLotsTransport.ts's
+  // getTaggedLots actually sends it -- `new URLSearchParams({ productIds:
+  // ids.join(',') })`, which percent-encodes the commas as %2C -- across
+  // the shapes the owner's report named: 0 ids, 1 id, and 150 ids (Products
+  // pages a server page of up to 100 plus pinned recently-edited rows).
+  await check('GET /tagged-lots survives the exact frontend request shape against an empty table (0/1/150 ids)', async () => {
+    rawDb.exec('DELETE FROM damaged_stock_lots')
+    const encodedQuery = (ids) => new URLSearchParams({ productIds: ids.join(',') }).toString()
+    const zero = await req('GET', `/tagged-lots?${encodedQuery([])}`)
+    assert.equal(zero.status, 200, JSON.stringify(zero))
+    assert.deepEqual(zero.json.items, [])
+
+    const one = await req('GET', `/tagged-lots?${encodedQuery([1])}`)
+    assert.equal(one.status, 200, JSON.stringify(one))
+    assert.deepEqual(one.json.items, [])
+
+    const manyIds = Array.from({ length: 150 }, (_, i) => i + 1)
+    const many = await req('GET', `/tagged-lots?${encodedQuery(manyIds)}`)
+    assert.equal(many.status, 200, JSON.stringify(many))
+    assert.deepEqual(many.json.items, [])
+  })
+
   await check('a held-row action still demands a reason, like every other stock change', async () => {
     for (const url of ['/tagged-lots/dispose', '/tagged-lots/restore']) {
       const res = await req('POST', url, { productId: 1, branchId: 1, conditionTag: 'expired', quantity: 1 })
