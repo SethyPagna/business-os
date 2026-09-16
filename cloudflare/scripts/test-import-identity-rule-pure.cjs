@@ -402,15 +402,29 @@ function seedCatalog(sqlite) {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'products', 'import', 'unifiedStockImport.ts'), 'utf8')
     // Sep 15 2026: the grouping key moved from the plain leading-zero fold to
     // the CLASS fold (identityBarcodeClassKey) -- a broken/short/word barcode
-    // now folds to '' (same bucket as empty), matching the wildcard ruling's
-    // "if both is empty merge into one empty" half on the client side too.
-    assert.match(src, /import \{ identityBarcodeClassKey \} from '\.\.\/\.\.\/\.\.\/utils\/productDetailRule\.ts'/,
-      'the sheet review must reach the fold through the rule module both packages carry verbatim')
-    assert.match(src, /\$\{identityBarcodeClassKey\(row\.barcode\)\}/,
-      'findUnifiedStockCostBatchConflicts must group on the CLASS-folded barcode')
+    // folded to '' (same bucket as empty), matching the wildcard ruling's
+    // "if both is empty merge into one empty" half.
+    //
+    // RULE CHANGED Sep 16 2026 (p8/tests lane): that class-key equality only
+    // ever merged two BROKEN rows into each other -- a sheet pairing one
+    // broken-barcode row ('N/A', key '') against a REAL-barcode row of the
+    // SAME product (key '748485110011', a DIFFERENT string) still landed in
+    // two separate groups, so the cost/batch confirm gate never fired for
+    // that exact pair even though matchProduct's server-side wildcard
+    // resolves them to one product. findUnifiedStockCostBatchConflicts now
+    // clusters each name group with clusterRowsByBarcodeIdentity -- the
+    // SAME wildcard-aware clustering productIdentity.ts's
+    // productsShareExactIdentity implements server-side -- so a broken row
+    // attaches to the group's one real barcode instead of staying an island.
+    // See frontend/tests/unifiedStockContract.test.ts's "broken vs real"
+    // case for the behavioral pin.
+    assert.match(src, /import \{ clusterRowsByBarcodeIdentity \} from '\.\.\/\.\.\/\.\.\/utils\/productDetailRule\.ts'/,
+      'the sheet review must reach the fold through the SAME wildcard clustering rule the server uses')
+    assert.match(src, /clusterRowsByBarcodeIdentity\(nameGroup\)/,
+      'findUnifiedStockCostBatchConflicts must cluster each name group with the full wildcard rule, not a plain class-key map')
     assert.doesNotMatch(src, /\$\{row\.barcode\.trim\(\)\.toLowerCase\(\)\}/,
       'the raw-barcode grouping key is the bug; it must be gone')
-    console.log('PASS N15 §12 the client sheet review groups on the same folded key')
+    console.log('PASS N15 §12 the client sheet review clusters barcodes with the same wildcard rule the server uses')
   }
 
   // ---- unifyTouchedProductGroups (D6b) ------------------------------------
