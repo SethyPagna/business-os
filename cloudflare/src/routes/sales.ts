@@ -65,6 +65,7 @@ import {
 // is the I/O around it. See scripts/test-sale-amendments-pure.cjs.
 import {
   AMENDMENT_WINDOW_SETTING_KEY,
+  AllocationShortfallError,
   amendmentEntryStatement,
   guardDeliveryAddition,
   guardDeliveryActualCostAmendment,
@@ -4287,7 +4288,7 @@ app.post('/:id/amendments', async (c) => {
       const workingLine={...line,applied_price_usd:Number(historical.row.applied_price_usd)}
       const quantityPlan=delta>0?planLineQuantityIncrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,addedQuantity:delta,
         lots:line.branch_id?(await readFifoLotAvailabilityForCart(db,[{productId:Number(line.product_id),branchId:line.branch_id}])).get(`${line.product_id}:${line.branch_id}`)||[]:[],
-        exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)})
+        exchangeRate,userId:user?.id??null,userName:actorSnapshot(user),existingAllocations:allocations})
         :planLineQuantityDecrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,removedQuantity:-delta,allocations,exchangeRate,
           reason:`Quantity changed on sale #${saleId}`,userId:user?.id??null,userName:actorSnapshot(user)})
       statements.push(...quantityPlan.statements);unitsMoved+=quantityPlan.unitsMoved
@@ -4361,7 +4362,7 @@ app.post('/:id/amendments', async (c) => {
         quantityPlan = planLineQuantityIncrease({
           moneyPrecisionVersion: 1,
           saleId, sale, line: workingLine, addedQuantity: quantityDelta, lots, exchangeRate,
-          userId: user?.id ?? null, userName: actorSnapshot(user),
+          userId: user?.id ?? null, userName: actorSnapshot(user), existingAllocations: allocations,
         })
       } else {
         const removed = Math.abs(quantityDelta)
@@ -4419,7 +4420,7 @@ app.post('/:id/amendments', async (c) => {
     const plan = planLineQuantityIncrease({
       moneyPrecisionVersion: 1,
       saleId, sale, line, addedQuantity: requested, lots, exchangeRate,
-      userId: user?.id ?? null, userName: actorSnapshot(user),
+      userId: user?.id ?? null, userName: actorSnapshot(user), existingAllocations: allocations,
     })
     statements.push(...plan.statements)
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
@@ -4723,7 +4724,7 @@ app.post('/:id/amendments', async (c) => {
   return c.json(await committedMutationResponse(db,mutationOperationId))
   } catch (error) {
     if (error instanceof SaleHeaderQuoteError || error instanceof HistoricalSalePricingError) return c.json({error:error.message,code:error.code},400)
-    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError) return c.json({ error: error.message, code: error.code },409)
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError || error instanceof AllocationShortfallError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }
 })

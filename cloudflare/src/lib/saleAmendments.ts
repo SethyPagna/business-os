@@ -378,6 +378,35 @@ export type AmendmentPlan = {
   takes: FifoLotTake[]
 }
 
+/**
+ * Thrown by planLineQuantityIncrease when the line already carries SOME
+ * sale_item_batch_allocations rows (it has been batch-tracked since it was
+ * created or last amended) and the FIFO lots at this branch cannot cover the
+ * whole increase. Production evidence (sale 16980, sale_item 40441): letting
+ * that increase through moved branch_stock and inventory_movements for the
+ * FULL new quantity while leaving the existing allocation row's quantity
+ * untouched, because the uncovered units never got a row of their own. A
+ * later cancel/return/complete transition (saleTransitions.ts) walks
+ * ONLY sale_item_batch_allocations to decide how many units to give back to
+ * branch_batch_stock, so it silently under-restored the lot ledger by
+ * exactly the uncovered amount while branch_stock and the sale's own
+ * inventory_movements rows kept the correct total -- the two ledgers
+ * (aggregate vs. lot-level) went out of sync.
+ *
+ * A line that has NEVER been batch-tracked (zero existing allocation rows)
+ * is unaffected: exactly like `allocateNewSaleLines`/`planUnlottedSaleLineGuards`
+ * do for a brand-new checkout line, its uncovered units simply ride
+ * branch_stock with no allocation row, because there is no lot ledger for
+ * this line to fall out of sync with in the first place.
+ */
+export class AllocationShortfallError extends Error {
+  readonly code = 'sale_amendment_allocation_shortfall'
+  constructor(public readonly productName: string | null, public readonly uncovered: number) {
+    super(`Not enough tracked lot stock to cover ${uncovered} more of "${productName || 'this product'}". Receive more stock on a lot, or adjust the quantity.`)
+    this.name = 'AllocationShortfallError'
+  }
+}
+
 // ---------------------------------------------------------------------------
 // INCREASE: "1 and now 2".
 //
@@ -402,6 +431,14 @@ export function planLineQuantityIncrease(input: {
   exchangeRate: number
   userId: number | string | null
   userName: string | null
+  /**
+   * This line's EXISTING sale_item_batch_allocations rows, id ASC -- the
+   * same read the decrease path already needs. Optional and defaulted to
+   * empty ONLY so every caller that predates this field (and every existing
+   * pure test) keeps its prior behaviour; every live caller in routes/
+   * sales.ts passes the real rows it already fetched for the line.
+   */
+  existingAllocations?: LineAllocation[]
 }): AmendmentPlan {
   const added = Math.max(0, Number(input.addedQuantity) || 0)
   const line = input.line
@@ -418,6 +455,17 @@ export function planLineQuantityIncrease(input: {
   if (line.branch_id && added > 0) {
     const allocated = allocateAcrossLots(input.lots, added)
     takes = allocated.takes
+    // The line already carries SOME allocation rows -- it is batch-tracked --
+    // and the FIFO lots cannot cover the whole increase. Letting the
+    // uncovered remainder through with no allocation row would move
+    // branch_stock/inventory_movements for the full amount while leaving
+    // sum(sale_item_batch_allocations.quantity) short of sale_items.quantity,
+    // exactly the split ledger production hit on sale 16980. Refuse the
+    // whole increase rather than half-apply it, the same way an oversell
+    // aborts the batch: nothing half-applies.
+    if (allocated.uncovered > 0 && (input.existingAllocations || []).length > 0) {
+      throw new AllocationShortfallError(line.product_name, allocated.uncovered)
+    }
   }
 
   // The line row first, so a reader of `statements` sees the sale change and
@@ -455,7 +503,41 @@ export function planLineQuantityIncrease(input: {
   // matching POST /'s convention: released_quantity is 0 when the units are
   // out with the sale, and the full take when they are not, so the later
   // completing transition consumes them back down.
+  //
+  // A take that lands on a batch the line ALREADY has an allocation row for
+  // EXTENDS that row (quantity bumped in place) instead of appending a
+  // sibling row for the same (sale_item_id, batch_id) pair. Production
+  // evidence (sale 16980, sale_item 40441) is what this guards against: once
+  // a line's allocation is fragmented across N rows on one batch, every
+  // later reader that walks "the" allocation for a batch (a single lookup,
+  // not a SUM) sees only the row it happens to find. Extending keeps ONE row
+  // per (line, batch) so quantity totals stay unambiguous downstream. Only
+  // the LAST such row is extended when more than one already exists (a
+  // return/re-add can leave more than one) -- same "last drawn, first back"
+  // convention the decrease walk below uses.
+  const existingByBatch = new Map<number, LineAllocation>()
+  for (const existing of input.existingAllocations || []) {
+    const batchId = Number(existing.batch_id)
+    const prior = existingByBatch.get(batchId)
+    if (!prior || Number(existing.id) > Number(prior.id)) existingByBatch.set(batchId, existing)
+  }
   for (const take of takes) {
+    const existing = existingByBatch.get(take.batchId)
+    if (existing) {
+      statements.push(heldUnits > 0
+        ? {
+          sql: 'UPDATE sale_item_batch_allocations SET quantity = quantity + @added WHERE id = @id',
+          params: { id: existing.id, added: take.quantity },
+        }
+        : {
+          sql: `UPDATE sale_item_batch_allocations
+                SET quantity = quantity + @added, released_quantity = released_quantity + @added,
+                    released_at = COALESCE(released_at, @releasedAt)
+                WHERE id = @id`,
+          params: { id: existing.id, added: take.quantity, releasedAt: new Date().toISOString() },
+        })
+      continue
+    }
     statements.push({
       sql: `INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date, released_quantity, released_at)
             VALUES (@sale_item_id, @batch_id, @branch_id, @quantity, @lot_code, @expiry_date, @released_quantity, @released_at)`,
