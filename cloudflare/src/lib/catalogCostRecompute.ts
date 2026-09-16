@@ -9,6 +9,18 @@ import { meanMoney4, roundMoney4 } from './moneyPrecision'
 // drift apart. See recordManualCostEntry below for the writer.
 const LATEST_MANUAL_COST_ENTRY_ID_SQL = '(SELECT id FROM product_cost_entries WHERE product_id = @productId ORDER BY id DESC LIMIT 1)'
 
+// Owner correction (2026-09-17, verbatim): "edit can override cost so before
+// might be (n+n1+n2)/3, after override just becomes n. this means if future
+// add stock have different price it will take from this n then add the new
+// cost price / by that number of cost price". The latest manual entry's
+// baseline_batch_id is the highest product_batches.id that already existed
+// when it was recorded -- a lot only counts again once its id is HIGHER than
+// that baseline. NULL when this product has no manual entry at all (formula
+// falls back to every active lot, unchanged). Same fragment reused by
+// catalogCostRecomputeStatement's SQL and mirrored by the plain SELECT
+// recomputeCatalogCost/buildCatalogCostBreakdown run for the same row.
+const LATEST_MANUAL_COST_ENTRY_BASELINE_SQL = '(SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = @productId ORDER BY id DESC LIMIT 1)'
+
 export type CatalogCostRecomputeResult = {
   productId: number
   before: { usd: number; khr: number }
@@ -79,18 +91,20 @@ export async function recomputeCatalogCost(db: D1Compat, productId: number): Pro
     .get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
   if (!product) return null
 
-  const lots = await db.prepare(
-    'SELECT unit_cost_usd FROM product_batches WHERE variant_product_id = @id AND is_active = 1',
-  ).all<{ unit_cost_usd: number | null }>({ id: productId })
-
   // The latest manual cost-price entry (routes/products.ts PUT /:id, via
-  // recordManualCostEntry below) is one more candidate cost, same as an
-  // active lot -- older manual entries for this product are history only
-  // and never feed back into the formula (see product_cost_entries's own
-  // migration doc, 0177).
+  // recordManualCostEntry below) is an OVERRIDE BASELINE, not one more
+  // candidate cost: older manual entries for this product are history only
+  // and never feed back into the formula, and neither do lots received
+  // BEFORE it (see product_cost_entries's own migration doc, 0177, and
+  // LATEST_MANUAL_COST_ENTRY_BASELINE_SQL above).
   const latestManualEntry = await db.prepare(
-    'SELECT cost_usd FROM product_cost_entries WHERE product_id = @id ORDER BY id DESC LIMIT 1',
-  ).get<{ cost_usd: number | null }>({ id: productId })
+    'SELECT cost_usd, baseline_batch_id FROM product_cost_entries WHERE product_id = @id ORDER BY id DESC LIMIT 1',
+  ).get<{ cost_usd: number | null; baseline_batch_id: number | null }>({ id: productId })
+  const baseline = latestManualEntry ? Number(latestManualEntry.baseline_batch_id) || 0 : null
+
+  const lots = await db.prepare(
+    'SELECT unit_cost_usd FROM product_batches WHERE variant_product_id = @id AND is_active = 1 AND (@baseline IS NULL OR id > @baseline)',
+  ).all<{ unit_cost_usd: number | null }>({ id: productId, baseline })
 
   const before = { usd: Number(product.cost_price_usd) || 0, khr: Number(product.cost_price_khr) || 0 }
   const candidates = lots.map((lot) => ({ cost_price_usd: lot.unit_cost_usd }))
@@ -133,14 +147,17 @@ export async function recomputeCatalogCost(db: D1Compat, productId: number): Pro
  * batch, ahead of the postimage capture, not a follow-up async call.
  *
  * Same averaging/outlier rule as resolveMergedCostDetail (distinct non-zero
- * `product_batches.unit_cost_usd` values for this product's active lots,
- * UNIONed with the latest `product_cost_entries` row for this product (a
- * manual cost-price edit, see recordManualCostEntry) if it carries a real
- * cost -- older manual entries never rejoin the set, same JS/SQL selection
- * as recomputeCatalogCost above; >COST_OUTLIER_RATIO apart keeps the
- * dearest; otherwise the mean rounded to 4 decimals), and the same "no real
- * lot cost yet" guard: if every active lot (and the latest manual entry) is
- * 0/NULL, the CASE falls through to the column's own current value, i.e. no
+ * `product_batches.unit_cost_usd` values for this product's active lots
+ * received AFTER the latest manual entry's baseline (see
+ * LATEST_MANUAL_COST_ENTRY_BASELINE_SQL -- a lot before that baseline no
+ * longer counts, an OVERRIDE, not one more input to average in), UNIONed
+ * with the latest `product_cost_entries` row for this product (a manual
+ * cost-price edit, see recordManualCostEntry) if it carries a real cost --
+ * older manual entries never rejoin the set, same JS/SQL selection as
+ * recomputeCatalogCost above; >COST_OUTLIER_RATIO apart keeps the dearest;
+ * otherwise the mean rounded to 4 decimals), and the same "no real lot cost
+ * yet" guard: if every active lot (and the latest manual entry) is 0/NULL,
+ * the CASE falls through to the column's own current value, i.e. no
  * zeroing. Mirrors purchase_price_usd exactly like the JS twin.
  */
 export function catalogCostRecomputeStatement(productId: number): { sql: string; params: Record<string, unknown> } {
@@ -151,6 +168,7 @@ export function catalogCostRecomputeStatement(productId: number): { sql: string;
     END FROM (SELECT DISTINCT unit_cost_usd AS cost FROM product_batches
       WHERE variant_product_id = @productId AND is_active = 1
         AND unit_cost_usd IS NOT NULL AND unit_cost_usd <> 0
+        AND (id > ${LATEST_MANUAL_COST_ENTRY_BASELINE_SQL} OR ${LATEST_MANUAL_COST_ENTRY_BASELINE_SQL} IS NULL)
       UNION
       SELECT cost_usd AS cost FROM product_cost_entries
       WHERE id = ${LATEST_MANUAL_COST_ENTRY_ID_SQL}
@@ -190,6 +208,8 @@ export type CostBreakdownManualInput = {
   cost_khr: number | null
   user_name: string | null
   created_at: string | null
+  /** The product_batches.id this entry overrode as of the edit -- see recordManualCostEntry/migration 0177. */
+  baseline_batch_id: number | null
 }
 
 export type CostBreakdownInputRow = {
@@ -204,7 +224,7 @@ export type CostBreakdownInputRow = {
   recorded_at: string | null
   cost_usd: number | null
   cost_khr: number | null
-  excluded: 'zero' | 'duplicate' | 'inactive' | 'superseded' | null
+  excluded: 'zero' | 'duplicate' | 'inactive' | 'superseded' | 'overridden' | null
 }
 
 export type CatalogCostBreakdown = {
@@ -243,8 +263,11 @@ function costBreakdownManualLabel(entry: CostBreakdownManualInput): string {
  *
  * `manualEntries` is EVERY manual cost-price edit for the product (oldest
  * first), shown for the record -- but only the LATEST one participates in
- * the formula, same selection as recomputeCatalogCost/catalogCostRecomputeStatement.
- * Older manual entries are always reported `excluded: 'superseded'`.
+ * the formula, same selection as recomputeCatalogCost/catalogCostRecomputeStatement,
+ * and as an OVERRIDE BASELINE, not one more input: only active lots received
+ * AFTER it (`id > latestManualEntry.baseline_batch_id`) join it in the mean.
+ * Older manual entries are always reported `excluded: 'superseded'`; lots
+ * from before the override are `excluded: 'overridden'`.
  */
 export function buildCatalogCostBreakdown(
   productId: number,
@@ -256,7 +279,10 @@ export function buildCatalogCostBreakdown(
   const latestManualEntry = manualEntries.length
     ? manualEntries.reduce((latest, entry) => (entry.id > latest.id ? entry : latest))
     : null
-  const candidates = activeLots.map((lot) => ({ cost_price_usd: lot.unit_cost_usd }))
+  const baseline = latestManualEntry ? Number(latestManualEntry.baseline_batch_id) || 0 : null
+  const candidates = activeLots
+    .filter((lot) => baseline === null || lot.id > baseline)
+    .map((lot) => ({ cost_price_usd: lot.unit_cost_usd }))
   if (latestManualEntry) candidates.push({ cost_price_usd: latestManualEntry.cost_usd })
   const { merged, outliers } = resolveMergedCostDetail(candidates)
 
@@ -282,6 +308,7 @@ export function buildCatalogCostBreakdown(
         user_name: null, recorded_at: null,
       }
       if (!lot.is_active) return { ...base, excluded: 'inactive' }
+      if (baseline !== null && lot.id <= baseline) return { ...base, excluded: 'overridden' }
       if (cost === null || cost <= 0) return { ...base, excluded: 'zero' }
       if (seenDistinct.has(cost)) return { ...base, excluded: 'duplicate' }
       seenDistinct.add(cost)
@@ -335,7 +362,7 @@ export async function getCatalogCostBreakdown(db: D1Compat, productId: number): 
   `).all<CostBreakdownLotInput>({ id: productId })
 
   const manualEntries = await db.prepare(`
-    SELECT id, cost_usd, cost_khr, user_name, created_at
+    SELECT id, cost_usd, cost_khr, user_name, created_at, baseline_batch_id
     FROM product_cost_entries
     WHERE product_id = @id
     ORDER BY id ASC
@@ -360,6 +387,18 @@ export async function getCatalogCostBreakdown(db: D1Compat, productId: number): 
  * cost_price_khr still records the unmoved cost_price_usd as `cost_usd`,
  * which is NOT NULL on this table).
  *
+ * Owner correction (2026-09-17, verbatim): "edit can override cost so before
+ * might be (n+n1+n2)/3, after override just becomes n. this means if future
+ * add stock have different price it will take from this n then add the new
+ * cost price / by that number of cost price". So this write also captures
+ * `baseline_batch_id` -- the highest `product_batches.id` that already
+ * exists for this product right now, i.e. the boundary below which every
+ * existing lot is superseded by this override and above which a future
+ * receipt joins this figure in the mean again (see
+ * LATEST_MANUAL_COST_ENTRY_BASELINE_SQL above and the formula in
+ * recomputeCatalogCost/catalogCostRecomputeStatement/buildCatalogCostBreakdown).
+ * 0 when the product has no lots yet.
+ *
  * Returns the inserted row's id, or null when nothing changed (no entry
  * written). Callers are expected to follow a successful insert with
  * {@link recomputeCatalogCost} so the new manual figure immediately joins
@@ -383,10 +422,15 @@ export async function recordManualCostEntry(
   const changed = (hasUsd && afterUsd !== beforeUsd) || (hasKhr && afterKhr !== beforeKhr)
   if (!changed) return null
 
+  const maxLot = await db.prepare(
+    'SELECT COALESCE(MAX(id), 0) AS maxId FROM product_batches WHERE variant_product_id = @productId',
+  ).get<{ maxId: number }>({ productId })
+  const baselineBatchId = Number(maxLot?.maxId) || 0
+
   const result = await db.prepare(`
-    INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, source, user_id, user_name)
-    VALUES (@productId, @costUsd, @costKhr, 'manual', @userId, @userName)
-  `).run({ productId, costUsd: afterUsd, costKhr: hasKhr ? afterKhr : null, userId: actor.id, userName: actor.name })
+    INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, source, user_id, user_name, baseline_batch_id)
+    VALUES (@productId, @costUsd, @costKhr, 'manual', @userId, @userName, @baselineBatchId)
+  `).run({ productId, costUsd: afterUsd, costKhr: hasKhr ? afterKhr : null, userId: actor.id, userName: actor.name, baselineBatchId })
 
   const insertedId = Number(result?.lastInsertRowid ?? NaN)
   return Number.isFinite(insertedId) && insertedId > 0 ? insertedId : null

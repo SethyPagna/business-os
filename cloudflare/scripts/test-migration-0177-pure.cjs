@@ -33,16 +33,26 @@ function indexExists(db, name) {
 // A row can actually be written and read back with the columns the writer needs.
 {
   const db = fresh()
-  db.prepare(`INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, source, user_id, user_name)
-    VALUES (5, 9, 36000, 'manual', 7, 'sethy')`).run()
-  const row = db.prepare('SELECT product_id, cost_usd, cost_khr, source, user_id, user_name, created_at FROM product_cost_entries WHERE product_id = 5').get()
+  db.prepare(`INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, source, user_id, user_name, baseline_batch_id)
+    VALUES (5, 9, 36000, 'manual', 7, 'sethy', 42)`).run()
+  const row = db.prepare('SELECT product_id, cost_usd, cost_khr, source, user_id, user_name, baseline_batch_id, created_at FROM product_cost_entries WHERE product_id = 5').get()
   assert.strictEqual(row.product_id, 5)
   assert.strictEqual(row.cost_usd, 9)
   assert.strictEqual(row.cost_khr, 36000)
   assert.strictEqual(row.source, 'manual')
   assert.strictEqual(row.user_id, 7)
   assert.strictEqual(row.user_name, 'sethy')
+  assert.strictEqual(row.baseline_batch_id, 42)
   assert.ok(row.created_at, 'created_at defaults')
+  db.close()
+}
+
+// baseline_batch_id defaults to 0 (no lots yet) when the writer omits it.
+{
+  const db = fresh()
+  db.prepare(`INSERT INTO product_cost_entries (product_id, cost_usd, source) VALUES (6, 3, 'manual')`).run()
+  const row = db.prepare('SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = 6').get()
+  assert.strictEqual(row.baseline_batch_id, 0, 'DEFAULT 0 -- a product with no lots yet overrides against nothing')
   db.close()
 }
 
