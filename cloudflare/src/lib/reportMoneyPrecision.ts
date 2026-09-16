@@ -1,6 +1,20 @@
 import { MAX_MONEY_ABS, MONEY_PRECISION_POLICY_VERSION, type DecimalInput } from './moneyPrecision'
 
-export const REPORT_MONEY_PAGE_SIZE = 500
+// P9-perf (Sep 16 2026): Reports/Dashboard read this table set through
+// readSalesReportSnapshot's keyset pager TWICE per request (an intentional
+// concurrent-write guard -- see readSalesReportSnapshot's header comment,
+// not something this change touches). Each page is one D1 round trip; on
+// the Free plan's per-invocation D1 query budget (~50, see planTier.ts's
+// d1QueriesPerInvocation) a 500-row page turned a summer's-worth business
+// summary into ~80 queries, doubled to ~160 by the twice-read guard --
+// already over budget before any other route query. Measured against the
+// full migrated schema with 5,000 sales / 12,500 sale_items (see
+// scripts/test-report-money-page-size-pure.cjs): 500 needs 5 pages for
+// 12,500 sale_items; 2,000 needs 1. Raised 4x to 2,000 rows/page. A sales
+// row is ~25 narrow columns (numbers + short strings), so a full page stays
+// well under D1's 1MB per-query response ceiling even at this size -- this
+// only cuts round trips, the row-by-row validation logic is unchanged.
+export const REPORT_MONEY_PAGE_SIZE = 2000
 export const REPORT_MONEY_MAX_ROWS = 100_000
 const MAX_ABS = BigInt(MAX_MONEY_ABS)
 type Fraction = { n: bigint; d: bigint }
