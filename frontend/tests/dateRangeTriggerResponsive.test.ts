@@ -37,6 +37,7 @@ function runTest(name: string, fn: () => void): void {
 
 const pickerSource = readFrontend('src/components/shared/DateTimeRangePicker.tsx')
 const rowSource = readFrontend('src/components/shared/StatsRangeRow.tsx')
+const reportsCss = readFrontend('src/components/sales/reports/reports-surface.css')
 
 const start = pickerSource.indexOf('const triggerEndpoint = (date: string, time: string) => (')
 assert.notEqual(start, -1, 'triggerEndpoint helper must exist')
@@ -80,6 +81,33 @@ runTest('StatsRangeRow lets its action buttons wrap under the picker instead of 
 
 runTest('StatsRangeRow gives the picker a real minimum width so it is never squeezed unreadably narrow', () => {
   assert.match(rowSource, /className="min-w-\[\d/, 'the picker wrapper must carry a concrete min-width floor')
+})
+
+// P9 follow-up (Sep 16 2026): the Reports compact/mobile control row had its
+// own CSS override on top of the shared component -- `.reports-mobile-range
+// > span { white-space: normal; overflow-wrap: anywhere; overflow: visible }`
+// let `dd/mm/yyyy HH:MM` break mid-string and paint outside the trigger,
+// which is the exact "too small and out of bounds" report AND a violation of
+// the one-row-per-endpoint rule (Sep 15). That block is now removed rather
+// than layered over; Reports relies on the shared component's own
+// `whitespace-nowrap` + `overflow-hidden`, and stacks Start above End as two
+// full-width lines below 400px instead of letting either endpoint wrap.
+runTest('the Reports mobile range CSS no longer forces the endpoint text to wrap/break mid-string', () => {
+  assert.doesNotMatch(reportsCss, /overflow-wrap:\s*anywhere/, 'no rule may let dd/mm/yyyy or HH:MM break mid-string')
+  assert.doesNotMatch(reportsCss, /\.reports-mobile-range\s*>\s*span\s*\{[^}]*white-space:\s*normal/s, 'no rule may force the range endpoint span to wrap')
+})
+
+runTest('the Reports mobile range picker takes the full row width instead of a shared/shrinkable basis', () => {
+  assert.doesNotMatch(reportsCss, /flex:\s*1\s+1\s+10rem/, 'the old shared 10rem basis must be gone')
+  assert.match(reportsCss, /\.reports-mobile-primary\s*>\s*\*\s*\{[^}]*flex:\s*1\s+1\s+100%/s, 'the picker (the only child of .reports-mobile-primary) must claim the full row width')
+})
+
+runTest('the Reports mobile trigger stacks Start above End (not a mid-string wrap) below 400px', () => {
+  const mediaMatch = reportsCss.match(/@media \(max-width: 400px\) \{[\s\S]*?\n\}/)
+  assert.ok(mediaMatch, 'a narrow-width stacking rule for the reports range trigger must exist')
+  const mediaBody = mediaMatch![0]
+  assert.match(mediaBody, /reports-mobile-range.*data-date-range-trigger-values/, 'the stacking rule must target the picker\'s own endpoint track')
+  assert.match(mediaBody, /grid-template-columns:\s*minmax\(0,\s*1fr\)/, 'stacked mode collapses to a single column (two rows), not a shrinking multi-column row')
 })
 
 if (failed > 0) {

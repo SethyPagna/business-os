@@ -24,6 +24,7 @@ const fixtureSource = String.raw`
   import DateTimeRangePicker from '/src/components/shared/DateTimeRangePicker.tsx'
   import StatsRangeRow from '/src/components/shared/StatsRangeRow.tsx'
   import '/src/styles/main.css'
+  import '/src/components/sales/reports/reports-surface.css'
 
   const words = {
     date_time_range: 'ជួរកាលបរិច្ឆេទ និងម៉ោង', range_start: 'ចាប់ផ្តើម', range_end: 'បញ្ចប់',
@@ -52,6 +53,18 @@ const fixtureSource = String.raw`
         <DateTimeRangePicker value={range} onChange={setRange} t={t} showTime={false}
           triggerClassName="flex w-full min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-2" />
       </div>
+      {/* Mirrors ReportsHub.tsx's compact JSX exactly (section.reports-mobile-
+          controls > div.reports-mobile-primary > the picker, triggerClassName
+          'reports-mobile-range ...') so this regression covers the actual
+          reports-surface.css rules a real ReportsHub mount would apply,
+          without pulling in the whole hub (permissions, API calls, view
+          model). */}
+      <section className="reports-mobile-controls" style={{ marginTop: 8 }} data-reports-fixture>
+        <div className="reports-mobile-primary">
+          <DateTimeRangePicker value={range} onChange={setRange} t={t} showTime continuous showQuickRanges={false}
+            triggerClassName="reports-mobile-range flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-2" />
+        </div>
+      </section>
     </main>
   }
   createRoot(document.getElementById('root')).render(<Harness />)
@@ -188,6 +201,29 @@ try {
     assert.equal(geometry.body, geometry.viewport, `${width}px page has no horizontal overflow`)
     assert.ok(geometry.buttonScroll <= geometry.buttonClient + 1, `${width}px action-heavy range trigger keeps all content inside its box`)
     for (const value of ['01/02/2028', '00:00', '29/02/2028', '23:59']) assert.ok(geometry.values.includes(value), `${width}px trigger keeps ${value} visible`)
+
+    // P9 follow-up (Sep 16 2026): the Reports compact control row (real
+    // reports-surface.css rules applied, not just the shared component) must
+    // keep the same no-overflow / full-value contract, and below 400px stack
+    // Start above End as two lines rather than breaking either date/time
+    // string mid-word.
+    const reportsGeometry = await evaluate<{ body: number; viewport: number; buttonClient: number; buttonScroll: number; values: string; startTop: number; endTop: number }>(`(() => {
+      const button = document.querySelector('[data-reports-fixture] [aria-label="ជួរកាលបរិច្ឆេទ និងម៉ោង"]')
+      const track = button.querySelector('[data-date-range-trigger-values]')
+      const spans = track.querySelectorAll(':scope > span')
+      return {
+        body: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth,
+        buttonClient: button.clientWidth, buttonScroll: button.scrollWidth, values: track.textContent,
+        startTop: spans[0].getBoundingClientRect().top, endTop: spans[1].getBoundingClientRect().top,
+      }
+    })()`)
+    assert.equal(reportsGeometry.body, reportsGeometry.viewport, `${width}px reports control row has no horizontal overflow`)
+    assert.ok(reportsGeometry.buttonScroll <= reportsGeometry.buttonClient + 1, `${width}px reports range trigger keeps all content inside its box`)
+    for (const value of ['01/02/2028', '00:00', '29/02/2028', '23:59']) assert.ok(reportsGeometry.values.includes(value), `${width}px reports trigger keeps ${value} visible, never broken mid-string`)
+    // Below 400px the CSS stacks Start above End (two distinct row tops);
+    // at/above it they stay side by side (same row top).
+    if (width < 400) assert.ok(reportsGeometry.endTop > reportsGeometry.startTop, `${width}px reports trigger stacks Start above End`)
+    else assert.equal(reportsGeometry.endTop, reportsGeometry.startTop, `${width}px reports trigger keeps Start and End side by side`)
   }
 
   await setViewport(320, 480)
