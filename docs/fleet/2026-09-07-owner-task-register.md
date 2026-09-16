@@ -522,6 +522,18 @@ Release code 06df3e75 is live as Worker d893f9dd-5cf8-4bd8-ac38-2edea0dc871e (pa
 | Debloat remainder, responsive/compact pass | **Open, go given, not started** | Next in queue. |
 | P9-9 tagged-stock error | **Open, go given, not started** | After debloat. |
 | P10-12 … P10-22 | **Open, need a go** | Registered under message K. |
+
+## September 17 program 10 checkpoint F LIVE — debloat batch 2
+
+Release code 467ecf9b is live as Worker 93976b00-ff08-46d5-b123-612ca0f70b4e (paid); no migration.
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| Debloat batch 2: nine unread locals removed, budget 48 → 40 | **Deployed** | 467ecf9b; unusedLocalsBudget, actionStability, performanceLoadingUx, productImportPlanner green; FE gate green. |
+| Modulepreload deferral list pinned by a test but never applied | **Open, feature gap** | vite.config.ts shouldDeferModulePreload has no caller. |
+| Debloat remainder (40 diagnostics), responsive/compact pass | **Open, go given** | Next in queue. |
+| P9-9 tagged-stock error | **Open, go given, not started** | After debloat. |
+| P10-12 … P10-22 | **Open, need a go** | Registered under message K. |
 ---
 
 ## Archived main-branch entries (Sep 4–9 2026 Codex status commits, merged into main on 2026-09-16; kept verbatim so nothing is lost — the sections above are authoritative)

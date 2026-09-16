@@ -265,7 +265,6 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   // again from the handle, and stays open until the next Show.
   const [controlsFolded, setControlsFolded] = useState(false)
   const optionsAnchor = useRef<HTMLElement | null>(null)
-  const branchId = branchFilter || undefined
 
   const searchInput = supportsSearch ? (
     <div className="relative min-w-0">

@@ -15,6 +15,14 @@
 //    - frontend/src/components/sales/reports/** (OverviewReport.tsx)
 //    - frontend/src/components/pos/ProductDetailSheet.tsx
 //
+//    - checkpoint E batch: ReportsHub branchId, OverviewReport prevReturns,
+//      Products/ProductDetailModal catMap+brandColorMap, InventoryMovementsSurface
+//      three unread props removed (48 -> 40). Still pinned by tests:
+//      BulkImportModal Undo2 import (tests/productImportPlanner.test.ts) and
+//      vite.config.ts shouldDeferModulePreload + deferredModulePreloadPrefixes
+//      (tests/performanceLoadingUx.test.ts pins the list although nothing calls
+//      the function -- the deferral itself is an OPEN feature gap).
+//
 // 2. Code that LOOKS dead by this flag but is pinned by another test's exact
 //    source-regex assertion (removing it would turn that test red):
 //    - src/AppContext.tsx LoadingScreen (tests/iosLayoutGuards.test.ts pins
@@ -95,7 +103,7 @@ const EXCLUDED_SIBLING_FILES = [
   'frontend/tests/costCalculationFloat.test.ts',
 ].join(', ')
 
-const BUDGET = 48
+const BUDGET = 40
 
 const result = spawnSync(
   process.execPath,

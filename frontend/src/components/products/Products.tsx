@@ -1036,7 +1036,7 @@ const ProductDesktopRow = memo(ProductDesktopRowComponent)
 
 function ProductMobileCardComponent({ product: p, indented = false, ctx }: { product: ProductRecord; indented?: boolean; ctx: ProductRowCtx }) {
   const {
-    branchFilter, catMap, copy, exchangeRate, fmtUSD,
+    branchFilter, copy, exchangeRate, fmtUSD,
     getBranchQty, getBrandColor, getLongPressState,
     isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox,
     promotionRules, lowStockConfig, renderUnitChip, selectionModeActive,
