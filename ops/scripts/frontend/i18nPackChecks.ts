@@ -51,6 +51,53 @@ export type PackPair = { en: Record<string, string>; km: Record<string, string> 
 export type SourceFile = { file: string; text: string }
 
 /**
+ * Prefix families for keys that are only ever assembled at runtime through a
+ * template literal, e.g. `` tr(`status_${value}`, fallback) ``. A key inside
+ * one of these families can be entirely absent from the source as a literal
+ * string and still be live, so the orphan scan below must not flag it.
+ *
+ * Enumerated by hand (P8 debloat) from every live
+ * `` (t|T|tr|safeT|translate)(`prefix_${...`` call site in frontend/src at
+ * the time this list was written; grep the same shapes again before trusting
+ * it after the source has moved on.
+ */
+export const DYNAMIC_KEY_PREFIX_FAMILIES = [
+  'status_', // ReturnsListSurface, ReturnsBulkActionModal, ActionHistoryBar: tr(`status_${status}`, ...)
+  'settlement_', // ReturnsBulkActionModal: tr(`settlement_${value}`, ...)
+  'return_type_', // ReturnsBulkActionModal: tr(`return_type_${value}`, ...)
+  'export_field_group_', // ExportFieldsModal: tr(`export_field_group_${key}`, ...)
+  'import_hub_ledger_', // ImportHub: T(`import_hub_ledger_${ledger}`, ...) and the _why sibling
+  'selected_conflict_', // ProductDuplicatesTab, SelectedConflictMergeReviewModal: t(`selected_conflict_${code}`), tr(`selected_conflict_basis_${basis}`, ...)
+  'cancel_reason_', // BulkSaleCancelModal: translate(`cancel_reason_${reason}`, ...)
+] as const
+
+/**
+ * Keys present in both packs that no source file references as a literal
+ * quoted string and that fall outside every known dynamic-prefix family.
+ *
+ * This is deliberately permissive: "referenced" means the key text appears
+ * anywhere inside a quote (single, double or backtick) in ANY .ts/.tsx file,
+ * not just inside a recognised `t(...)` call shape. The app grew many local
+ * wrapper functions around the base translator (translateOr, a per-component
+ * `translate`, tKey/reviewTKey table columns, ...) that a fixed call-shape
+ * regex cannot enumerate without becoming its own maintenance burden; a bare
+ * substring match has false negatives only when a key is built from pieces
+ * (covered by the prefix families above) and essentially no false positives,
+ * so it will never suggest deleting a key that is actually still read.
+ *
+ * The result is a CANDIDATE list, not a proof of death -- verify-i18n prints
+ * it as a warning while the count stays large rather than failing the gate,
+ * per the instruction to keep this check honest instead of a rubber stamp.
+ */
+export function orphanPackKeys(packKeys: string[], sources: SourceFile[]): string[] {
+  const blob = sources.map((s) => s.text).join('\n')
+  return packKeys
+    .filter((key) => !DYNAMIC_KEY_PREFIX_FAMILIES.some((prefix) => key.startsWith(prefix)))
+    .filter((key) => !blob.includes(`'${key}'`) && !blob.includes(`"${key}"`) && !blob.includes('`' + key))
+    .sort()
+}
+
+/**
  * Pack values that DROP a placeholder their own call site substitutes.
  *
  * The existing en-vs-km slot check compares the two packs against each other,

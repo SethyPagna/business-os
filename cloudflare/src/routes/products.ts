@@ -2037,8 +2037,7 @@ app.put('/:id', async (c) => {
     if (normalizedBrands !== undefined) body.brands = normalizedBrands
   }
 
-  let changes: number
-  try { changes = await updateRow(c.env, 'products', id, body) } catch (error) {
+  try { await updateRow(c.env, 'products', id, body) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
@@ -5018,11 +5017,6 @@ type SelectedConflictSkippedCase = {
   code: string
   message: string
 }
-
-const selectedConflictMoneyColumns = [
-  ...MERGE_COST_FIELDS,
-  ...MERGE_PRICE_FIELDS,
-] as const
 
 function selectedConflictClusterPredicateSql(clusterType: ProductConflictPreviewCase['cluster_type']): string {
   if (clusterType === 'leadingzero') {

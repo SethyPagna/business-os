@@ -14,9 +14,6 @@
 // whether tax applies. Changing one of the two without the other is the bug
 // this pairing exists to prevent.
 
-export const TAX_ENABLED_SETTING_KEY = 'tax_enabled'
-export const TAX_RATE_SETTING_KEY = 'tax_rate'
-
 /** The stored rate as a MULTIPLIER (settings hold a percent: "10" -> 0.1). */
 export function resolveTaxRate(rawRate: unknown): number {
   const percent = Number(String(rawRate ?? '').trim())

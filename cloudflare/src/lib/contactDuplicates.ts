@@ -261,7 +261,6 @@ export function classifyContactDuplicates(
   subject: { name: string; phones: string[] },
   candidates: ContactDuplicateCandidateRow[],
   mode: ContactOptionMode = 'address',
-  table: ContactDuplicateTable = 'customers',
 ): ContactDuplicateMatch[] {
   const subjectName = normalizeContactName(subject.name)
   const subjectPhones = new Set(subject.phones.filter(Boolean))
@@ -335,7 +334,7 @@ export async function findContactDuplicateState(
     : []
   const rows = [...new Map([...phoneRows, ...nameRows].map((row) => [Number(row.id), row])).values()]
 
-  const classified = classifyContactDuplicates({ name: subject.name, phones }, rows, mode, table)
+  const classified = classifyContactDuplicates({ name: subject.name, phones }, rows, mode)
   const rowsById = new Map(rows.map((row) => [Number(row.id), row]))
   const snapshots = classified
     .map((match) => rowsById.get(Number(match.id)))

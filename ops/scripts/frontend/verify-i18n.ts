@@ -36,7 +36,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { duplicateTopLevelKeys, fallbackSlotRegressions } from './i18nPackChecks.ts'
+import { duplicateTopLevelKeys, fallbackSlotRegressions, orphanPackKeys } from './i18nPackChecks.ts'
 
 const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'frontend')
 
@@ -157,6 +157,23 @@ for (const problem of fallbackSlotRegressions(
   files.map((file) => ({ file: path.relative(FRONTEND, file).replace(/\\/g, '/'), text: fs.readFileSync(file, 'utf8') })),
   { en, km },
 )) failures.push(problem)
+
+// 6. Orphan-key candidates -- keys in the packs with no literal call site and
+// no live dynamic-prefix family (see orphanPackKeys doc). WARN-only while the
+// candidate list stays large: 979 hits at the time this check was added, most
+// of them behind wrapper functions (translateOr, per-component `translate`,
+// tKey/reviewTKey table columns, ...) that a fixed regex cannot enumerate, so
+// treating this list as ground truth for deletion would be its own bloat.
+// Once the list is driven down (either genuine deletions or by widening
+// DYNAMIC_KEY_PREFIX_FAMILIES / the reference scan), drop the threshold so a
+// NEW orphan fails the gate instead of hiding in a warning.
+const ORPHAN_WARN_THRESHOLD = 100
+const orphans = orphanPackKeys([...enTop], files.map((file) => ({ file: path.relative(FRONTEND, file).replace(/\\/g, '/'), text: fs.readFileSync(file, 'utf8') })))
+if (orphans.length > ORPHAN_WARN_THRESHOLD) {
+  console.warn(`verify:i18n WARN — ${orphans.length} pack key(s) look unreferenced (no literal call site, no dynamic-prefix family); candidates, not proof -- see orphanPackKeys doc`)
+} else if (orphans.length) {
+  for (const key of orphans) failures.push(`orphan pack key '${key}' has no literal call site and matches no dynamic-prefix family — remove from en.json AND km.json, or widen DYNAMIC_KEY_PREFIX_FAMILIES if it is real`)
+}
 
 if (failures.length) {
   console.error(`verify:i18n FAILED — ${failures.length} problem(s):`)

@@ -984,7 +984,6 @@ function manualChunks(id: string): string | undefined {
   if (/[\\/]node_modules[\\/]dexie[\\/]/.test(id)) return 'vendor-dexie'
   if (/[\\/]node_modules[\\/]@zxing[\\/]/.test(id)) return 'vendor-zxing'
   if (/[\\/]node_modules[\\/]lucide-react[\\/]/.test(id)) return undefined
-  if (/[\\/]node_modules[\\/]@capacitor[\\/]/.test(id)) return 'vendor-capacitor'
   // P9-perf (Sep 16 2026): xlsx (SheetJS) was falling into the generic
   // catch-all 'vendor' bucket alongside qrcode and html2canvas. All three
   // are dynamic-import()-only, but manualChunks groups by PHYSICAL file, not
