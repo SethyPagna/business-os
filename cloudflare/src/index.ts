@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 import settingsRoute from './routes/settings'
 import productsRoute from './routes/products'
+import productCostRoute from './routes/productCost'
 import portalRoute from './routes/portal'
 import salesRoute from './routes/sales'
 import authRoute from './routes/auth'
@@ -443,6 +444,7 @@ app.get('/uploads/*', async (c) => {
 
 app.route('/api/settings', settingsRoute)
 app.route('/api/products', productsRoute)
+app.route('/api/products', productCostRoute)
 app.route('/api/portal', portalRoute)
 app.route('/api/sales', salesRoute)
 app.route('/api/auth', authRoute)
