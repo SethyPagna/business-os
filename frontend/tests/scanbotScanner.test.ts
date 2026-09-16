@@ -10,10 +10,6 @@ type TestNavigator = {
   mediaDevices?: { getUserMedia: () => Promise<unknown> }
   permissions?: { query: () => Promise<{ state: string; addEventListener?: (type: 'change', listener: () => void) => void; removeEventListener?: (type: 'change', listener: () => void) => void }> }
 }
-type TestDocument = {
-  permissionsPolicy?: { allowsFeature: (feature: string) => boolean }
-}
-
 const testGlobals = globalThis as unknown as { window: Window; document: Document }
 
 function setNavigator(value: TestNavigator) {

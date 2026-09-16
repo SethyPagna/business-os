@@ -6,7 +6,6 @@ const productFilterHelpers = readFileSync(new URL('../src/components/products/he
 const productMenuHelpers = readFileSync(new URL('../src/components/products/helpers/productMenuHelpers.ts', import.meta.url), 'utf8')
 const productsSurface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
 const posPage = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
-const posFilterPanel = readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
 const availabilityFilterOptions = readFileSync(new URL('../src/components/shared/AvailabilityFilterOptions.tsx', import.meta.url), 'utf8')
 const posQuickAddModals = readFileSync(new URL('../src/components/pos/POSQuickAddModals.tsx', import.meta.url), 'utf8')
 const apiMethods = readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')

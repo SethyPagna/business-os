@@ -53,7 +53,7 @@ const original = pending.bodyJson
 assert.throws(() => api.loadPendingReturnCreateV1(8), /return_v1_session_changed/, 'other actor cannot recover this request')
 await assert.rejects(api.prepareReturnCreateV1(7, payload, quote), /return_v1_pending/)
 let release!: (value: unknown) => void
-network = async (_method, url, body) => url.endsWith('/capabilities') ? capability : new Promise(resolve => { release = resolve })
+network = async (_method, url, _body) => url.endsWith('/capabilities') ? capability : new Promise(resolve => { release = resolve })
 const first = api.submitReturnCreateV1(7, pending)
 await new Promise(resolve => setTimeout(resolve, 0))
 await assert.rejects(api.submitReturnCreateV1(7, pending), /return_v1_pending/)
