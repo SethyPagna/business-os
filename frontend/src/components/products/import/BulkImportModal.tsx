@@ -3,7 +3,6 @@ import type { ComponentType } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
-import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import UploadCloud from 'lucide-react/dist/esm/icons/upload-cloud.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
@@ -219,15 +218,6 @@ type ImportResult = {
 type ImportProgress = {
   progress: number
   label: string
-}
-type ReviewUndoSnapshot = {
-  label: string
-  decisions: Record<RowIndex, ImportDecision>
-  imageDecisions: Record<RowIndex, string>
-  identifierDecisions: Record<RowIndex, string>
-  identifierOverrides: Record<RowIndex, Partial<ProductImportRow>>
-  rowOverrides: Record<RowIndex, Partial<ProductImportRow>>
-  fieldRules: Record<string, string>
 }
 type FileAsset = {
   original_name?: string
@@ -658,10 +648,6 @@ function findImageReferenceForRow(row: ProductImportRow = {}, imageFiles: ImageF
   return ''
 }
 
-function getDecisionLabel(value: unknown): string {
-  return IMPORT_DECISION_OPTIONS.find((item) => item.value === value)?.label || String(value || 'Action')
-}
-
 function getFamilyKeyForRow(row: ProductImportRow = {}): string {
   return normalizeImportProductName(row?.name) || `row:${Number(row?._import_row_index ?? row?._rowNumber ?? 0)}`
 }
@@ -671,11 +657,6 @@ function summarizeRowNumbers(rowNumbers: unknown[] = []): string {
   if (!unique.length) return '-'
   if (unique.length <= 4) return unique.join(', ')
   return `${unique.slice(0, 3).join(', ')} +${unique.length - 3}`
-}
-
-function summarizeSubgroup(subgroup: ProductImportSubgroup = {}, index = 0): string {
-  const label = getDecisionLabel(subgroup.suggestedAction || 'new')
-  return `Case ${index + 1}: ${label} - rows ${summarizeRowNumbers(subgroup.rowNumbers)}`
 }
 
 function getImportActionTargetSummary(entry: ProductImportConflict = { index: 0 }, decisionValue = '', editedRow: ProductImportRow = {}): string {
@@ -1151,7 +1132,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   const [cleanRows, setCleanRows] = useState<ProductImportRow[]>([])
   const [importRows, setImportRows] = useState<ProductImportRow[]>([])
   const [reviewGroups, setReviewGroups] = useState<ProductImportGroup[]>([])
-  const [analysisSummary, setAnalysisSummary] = useState<ProductImportSummary | null>(null)
   // Header-level, non-blocking issues found while parsing the file itself
   // (e.g. duplicate/near-duplicate column headers) -- separate from
   // `conflicts`/row `errors`, which are about the data, not the header row.
@@ -1184,9 +1164,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   const [conflictFilter, setConflictFilter] = useState('all')
   const [conflictQuery, setConflictQuery] = useState('')
   const [selectedConflictIds, setSelectedConflictIds] = useState<Set<RowIndex>>(() => new Set())
-  const [collapsedFamilyKeys, setCollapsedFamilyKeys] = useState<Set<string>>(() => new Set())
   const [expandedDetailRows, setExpandedDetailRows] = useState<Set<RowIndex>>(() => new Set())
-  const [reviewUndoStack, setReviewUndoStack] = useState<ReviewUndoSnapshot[]>([])
   const [fieldRules, setFieldRules] = useState<Record<string, string>>({})
   // 'merge' (default): add/update into the existing catalog, same identity
   // matching classifyProducts always does. 'replace_columns': matched rows
@@ -1382,36 +1360,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     setStep(3)
   }
 
-  const createReviewSnapshot = (label: string): ReviewUndoSnapshot => ({
-    label,
-    decisions,
-    imageDecisions,
-    identifierDecisions,
-    identifierOverrides,
-    rowOverrides,
-    fieldRules,
-  })
-
-  const pushReviewUndoSnapshot = (label: string): void => {
-    setReviewUndoStack((stack) => [...stack.slice(-19), createReviewSnapshot(label)])
-  }
-
-  const undoLastReviewChange = (): void => {
-    setReviewUndoStack((stack) => {
-      const snapshot = stack[stack.length - 1]
-      if (!snapshot) return stack
-      setDecisions(snapshot.decisions || {})
-      setImageDecisions(snapshot.imageDecisions || {})
-      setIdentifierDecisions(snapshot.identifierDecisions || {})
-      setIdentifierOverrides(snapshot.identifierOverrides || {})
-      setRowOverrides(snapshot.rowOverrides || {})
-      setFieldRules(snapshot.fieldRules || {})
-      editSessionRef.current = new Set()
-      return stack.slice(0, -1)
-    })
-  }
-
-  const beginInlineEdit = (rowIndex: RowIndex, field: string, label = 'Edited row details'): void => {
+  const beginInlineEdit = (rowIndex: RowIndex, field: string): void => {
     const key = `${rowIndex}:${field}`
     setExpandedDetailRows((current) => {
       if (current.has(rowIndex)) return current
@@ -1421,7 +1370,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     })
     if (editSessionRef.current.has(key)) return
     editSessionRef.current.add(key)
-    pushReviewUndoSnapshot(label)
   }
 
   const resetCsvState = () => {
@@ -1430,7 +1378,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     setCleanRows([])
     setImportRows([])
     setReviewGroups([])
-    setAnalysisSummary(null)
     setAnalysisProgress(null)
     setDecisions({})
     setImageDecisions({})
@@ -1440,9 +1387,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     setConflictFilter('all')
     setConflictQuery('')
     setSelectedConflictIds(new Set())
-    setCollapsedFamilyKeys(new Set())
     setExpandedDetailRows(new Set())
-    setReviewUndoStack([])
     setFieldRules({})
     setZipFile(null)
     setCurrentJob(null)
@@ -1793,7 +1738,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     setCleanRows(analysis.cleanRows || [])
     setImportRows(analysis.rows || [])
     setReviewGroups(analysis.groups || [])
-    setAnalysisSummary(analysis.summary || null)
     setAnalysisWarnings(analysis.warnings || [])
     setDatedReconciliationSignal(datedSignal.likelyDatedReconciliation ? datedSignal : null)
     setDismissedDatedSignal(false)
@@ -1802,9 +1746,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     setIdentifierDecisions(nextIdentifierDecisions)
     setIdentifierOverrides(nextIdentifierOverrides)
     setSelectedConflictIds(new Set(nextConflicts.map((entry) => entry.index)))
-    setCollapsedFamilyKeys(new Set())
     setExpandedDetailRows(new Set())
-    setReviewUndoStack([])
     editSessionRef.current = new Set()
     // This pass only validates/normalizes the selected file. The second
     // screen opens after the server has persisted its authoritative review.
@@ -1976,7 +1918,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     }
   }
 
-  const pendingAsk = useMemo(() => conflicts.filter((item) => decisions[item.index] === 'ask'), [conflicts, decisions])
   const blockingIssueEntries = useMemo(() => conflicts.map((entry) => {
     const index = Number(entry.index ?? entry.row?._import_row_index ?? 0)
     const editedRow = {
@@ -2011,10 +1952,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     }
   }).filter((entry) => entry.details.length), [conflicts, identifierOverrides, rowOverrides])
   const reviewIssueIndexSet = useMemo(() => new Set(reviewIssueRows.map((entry) => Number(entry.index))), [reviewIssueRows])
-  const reviewIssueSummary = reviewIssueRows.slice(0, 8)
-  const allDecided = pendingAsk.length === 0 && blockingIssueCount === 0
   const totalCount = importRows.length || cleanRows.length + conflicts.length
-  const selectedConflictCount = selectedConflictIds.size
   const importRowsByIndex = useMemo(() => {
     const rowsByIndex = new Map()
     ;(importRows || []).forEach((row, index) => {
@@ -2142,16 +2080,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   }, [conflictsByIndex, importRowsByIndex, reviewGroups, rowOverrides, visibleConflicts])
 
   const visibleReviewRows = useMemo(() => visibleConflictSections.flatMap((section) => section.rows || []), [visibleConflictSections])
-  const visibleReviewRowCount = visibleReviewRows.length
-
-  const toggleFamilyCollapse = (familyKey: string) => {
-    setCollapsedFamilyKeys((current) => {
-      const next = new Set(current)
-      if (next.has(familyKey)) next.delete(familyKey)
-      else next.add(familyKey)
-      return next
-    })
-  }
 
   const toggleInlineDetails = (rowIndex: RowIndex) => {
     setExpandedDetailRows((current) => {
@@ -2181,7 +2109,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
 
   const applyDecisionToSelection = (value: string) => {
     if (!selectedConflictIds.size) return
-    pushReviewUndoSnapshot('Changed selected import actions')
     setDecisions((current) => {
       const next = { ...current }
       selectedConflictIds.forEach((index) => { next[index] = value })
@@ -2191,7 +2118,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
 
   const applyImageDecisionToSelection = (value: string) => {
     if (!selectedConflictIds.size) return
-    pushReviewUndoSnapshot('Changed selected image actions')
     setImageDecisions((current) => {
       const next = { ...current }
       selectedConflictIds.forEach((index) => {
@@ -2208,7 +2134,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
 
   const applyIdentifierDecisionToSelection = (value: string) => {
     if (!selectedConflictIds.size) return
-    pushReviewUndoSnapshot('Changed selected identifier actions')
     setIdentifierDecisions((current) => {
       const next = { ...current }
       conflicts.forEach((entry) => {
@@ -2219,7 +2144,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   }
 
   const applyFieldRulePreset = (preset: FieldRulePreset) => {
-    pushReviewUndoSnapshot('Changed detail merge rule')
     const fields = [
       'category', 'brand', 'unit', 'supplier', 'description', 'low_stock_threshold',
     ]
@@ -2318,7 +2242,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           <AppSelect
             value={decisionValue}
             onChange={(nextValue) => {
-              pushReviewUndoSnapshot(`Changed row ${editedRow._rowNumber || index + 2} action`)
               setDecisions((state) => ({ ...state, [index]: nextValue }))
             }}
             ariaLabel="Import decision"
@@ -2353,7 +2276,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
                   value={identifierDecision}
                   onChange={(nextValue) => {
                     const value = nextValue
-                    pushReviewUndoSnapshot(`Changed row ${editedRow._rowNumber || index + 2} identifier choice`)
                     setIdentifierDecisions((state) => ({ ...state, [index]: value }))
                     if (value === 'allow_duplicate') {
                       setIdentifierOverrides((state) => ({ ...state, [index]: { sku: row.sku || '', barcode: row.barcode || '' } }))
@@ -2374,7 +2296,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
                 <AppSelect
                   value={imageDecision}
                   onChange={(nextValue) => {
-                    pushReviewUndoSnapshot(`Changed row ${editedRow._rowNumber || index + 2} image action`)
                     setImageDecisions((state) => ({ ...state, [index]: nextValue }))
                   }}
                   ariaLabel="Image conflict decision"
@@ -2390,7 +2311,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           <InlineImportDetailGrid
             row={editedRow}
             compareTo={existing}
-            onBeginEdit={(field) => beginInlineEdit(index, field, `Edited row ${editedRow._rowNumber || index + 2}`)}
+            onBeginEdit={(field) => beginInlineEdit(index, field)}
             onChange={updateEditedRow}
             T={T}
           />
