@@ -6,8 +6,6 @@ import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAp
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { useMemo } from 'react'
 import { useRef } from 'react'
-import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
-import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import StatsStrip, { statsPresetRange, type StatCardDef, type StatsPresetKey } from '../shared/StatsStrip.tsx'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers'
@@ -48,14 +46,7 @@ type InventoryStockFocus = 'all' | 'low' | 'out'
 // not one long scroll of every card. lg+ ignores this and renders every group
 // as the normal grid (see the `lg:block` on each group section).
 type DashboardMobileSection = 'overview' | 'performers' | 'inventory'
-type DashboardMetricValue = string | number | boolean | null | undefined
 type DashboardMetricMap = Record<string, number | undefined>
-type DashboardExportItem = 'divider' | {
-  label: ReactNode
-  onClick?: () => void
-  color?: string
-  disabled?: boolean
-}
 
 interface AppUser {
   id?: EntityId
