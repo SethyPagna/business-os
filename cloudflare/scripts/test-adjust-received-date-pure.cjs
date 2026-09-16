@@ -221,6 +221,13 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
     findIdentityMatch: async () => null,
     identityBarcodeKey: productDetailRule.identityBarcodeKey,
   },
+  // P10-4: REAL, not stubbed -- the receipt wire re-derives products.cost_price_*
+  // from the DISTINCT non-zero active-lot costs after every add, over this
+  // same db, so a stub here would hide any regression in that recompute.
+  '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
+    './db': { getDb: () => db },
+    './productDetailRule': productDetailRule,
+  }),
   // routes/products.ts + inventory.ts now build their search tail from the
   // one shared implementation (lib/productSearchQuery.ts). These tests
   // exercise write paths, not search, so an inert builder keeps the WHERE
@@ -282,6 +289,11 @@ const batchesRoute = loadReal('routes/batches.ts', {
   // these tests exercise receive/adjust, so an empty stub is honest.
   '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
   '../lib/conflictControl': conflictControl,
+  // P10-4: REAL, not stubbed -- see routes/inventory.ts's own override above.
+  '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
+    './db': { getDb: () => db },
+    './productDetailRule': productDetailRule,
+  }),
 })
 const batchesApp = batchesRoute.default
 
@@ -680,7 +692,13 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM products').get().n, 1, 'no twin row on the same barcode')
     const row = rawDb.prepare('SELECT name, cost_price_usd, stock_quantity FROM products WHERE id = ?').get([json.productId])
     assert.strictEqual(row.name, 'Widget')
-    assert.strictEqual(row.cost_price_usd, 1, 'the receipt cost belongs to the lot, not the catalog row')
+    // P10-4 (owner ruling 2026-09-16): products.cost_price_* is now
+    // RE-DERIVED from the product's own active lots after every receipt --
+    // this product's only active lot is the fresh one at 2.5, so the
+    // catalog cost follows it rather than staying pinned at the old
+    // manually-set 1. (Was: "the receipt cost belongs to the lot, not the
+    // catalog row" -- that was the pre-P10-4 behaviour this fix replaces.)
+    assert.strictEqual(row.cost_price_usd, 2.5, 'catalog cost re-derived from the single active lot')
     assert.strictEqual(row.stock_quantity, 7)
     const batch = rawDb.prepare('SELECT expiry_date, unit_cost_usd, supplier_name FROM product_batches WHERE variant_product_id = ?').get([json.productId])
     assert.strictEqual(batch.expiry_date, '2027-08-20')

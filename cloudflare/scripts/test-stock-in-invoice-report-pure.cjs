@@ -49,6 +49,7 @@ const saleCreationSnapshot = compile('saleCreationSnapshot.ts', {
   './actorSnapshot': actorSnapshot,
   './saleMoneyPrecision': saleMoneyPrecision,
 })
+const productDetailRule = compile('productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const stockActionCommit = compile('stockActionCommit.ts', {
   './db': {},
   './batchCode': batchCode,
@@ -57,6 +58,10 @@ const stockActionCommit = compile('stockActionCommit.ts', {
   './branchRoleGuards': branchRoleGuards,
   './saleCreationSnapshot': saleCreationSnapshot,
   './moneyPrecision': moneyPrecision,
+  // P10-4: REAL, not stubbed -- db is passed as a runtime argument to
+  // applyUnifiedStockAdd, not resolved through './db', so the '{}' stub is
+  // never actually read.
+  './catalogCostRecompute': compile('catalogCostRecompute.ts', { './db': {}, './productDetailRule': productDetailRule }),
 })
 
 const migrationsDir = path.join(__dirname, '..', 'migrations')

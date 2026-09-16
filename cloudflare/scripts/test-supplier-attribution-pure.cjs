@@ -193,6 +193,12 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/productIdentity': { findIdentityMatch: async () => null },
+  // P10-4: REAL, not stubbed -- see routes/inventory.ts's own comment above
+  // recomputeCatalogCost's call site.
+  '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
+    './db': { getDb: () => db },
+    './productDetailRule': loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision }),
+  }),
   // routes/products.ts + inventory.ts now build their search tail from the
   // one shared implementation (lib/productSearchQuery.ts). These tests
   // exercise write paths, not search, so an inert builder keeps the WHERE
@@ -245,6 +251,12 @@ const batchesRoute = loadReal('routes/batches.ts', {
   // these tests exercise receive/adjust, so an empty stub is honest.
   '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
   '../lib/conflictControl': conflictControl,
+  // P10-4: REAL, not stubbed -- see routes/inventory.ts's own comment above
+  // recomputeCatalogCost's call site.
+  '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
+    './db': { getDb: () => db },
+    './productDetailRule': loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision }),
+  }),
 })
 const batchesApp = batchesRoute.default
 
