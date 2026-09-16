@@ -180,12 +180,22 @@ test('exact-identity twin surfaces use the shared stock choice flow', () => {
   }
 })
 
-test('saving a product into an existing twin offers the merge instead of dead-ending', () => {
-  assert.match(productForm, /duplicateCollisionFrom\(error\)/)
-  assert.match(productForm, /'duplicate_product'/, 'the 409 the server sends is what opens the merge')
-  assert.match(productForm, /setIdentityCollision\(collision\)/)
-  assert.match(productForm, /onReviewIdentityCollision\(productIds\)/)
-  assert.doesNotMatch(productForm, /mergeWithChoice\(/, 'a refused edit must not send the unchanged identity to the exact-pair endpoint')
+test('saving a product into an existing twin folds server-side instead of dead-ending on a 409', () => {
+  // Sep 16 2026 owner ruling: a same-name product whose barcode only
+  // differs by a leading zero (or is empty/broken) is the SAME product --
+  // POST/PUT /products now fold that save straight into the existing row
+  // and answer 200 with folded_into/merged_into, never a 409. There is
+  // nothing left for the form to "review": the old dead-end alert/modal
+  // and its 409-triggered review path are gone from ProductForm.tsx, and
+  // Products.tsx tells the operator with a toast and opens the survivor
+  // using the id the fold response already returns.
+  assert.doesNotMatch(productForm, /duplicateCollisionFrom/, 'the 409-collision reviewer is gone -- the server folds instead of refusing')
+  assert.doesNotMatch(productForm, /onReviewIdentityCollision/, 'ProductForm no longer needs a caller-supplied review escape hatch')
+  assert.doesNotMatch(productForm, /setIdentityCollision\(/)
+  assert.doesNotMatch(productForm, /mergeWithChoice\(/, 'a folded save must not send the unchanged identity to the exact-pair endpoint')
+  assert.match(productsPage, /folded_into/, 'Products.tsx reads the create fold response')
+  assert.match(productsPage, /merged_into/, 'Products.tsx reads the edit fold response')
+  assert.match(productsPage, /product_folded_into_existing/, 'the fold is announced with a toast, not silently')
 })
 
 test('the transport carries the answer and the server refusal keeps its breakdown', () => {

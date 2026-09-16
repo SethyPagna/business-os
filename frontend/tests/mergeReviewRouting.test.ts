@@ -45,57 +45,18 @@ function callback(source: string, marker: string, bindings: Record<string, unkno
 }
 const formSource = readFileSync(new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url), 'utf8')
 const host = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
-const events: string[] = []
-let savedDraft: unknown
-const edited = { name: 'Item', barcode: '12345', cost_price_usd: 7.5 }
-const product = { id: 7, name: 'Item', barcode: '' }
-let parked: any
-let seeded: unknown
-const park = callback(host, 'key: `edit-product-${productId}`', {
-  modalProduct: product, minimizeWork: (entry: unknown) => { parked = entry; events.push('park') },
-  setModal: () => {}, setSelected: () => {}, setFormInitialTab: () => {}, notify: () => {}, tr: (_key: string, value: string) => value,
-})
-const preserve = callback(formSource, 'const typedName = String(form.name', {
-  imageUploading: false, imageUploadInFlightRef: { current: false }, draftKey: 'actor-product-7', form: edited, product,
-  isEditMode: true, tr: (_key: string, value: string) => value, onMinimize: park,
-  flushPendingWorkDraft: () => { savedDraft = { form: { ...edited } }; events.push('flush') },
-})
-const route = callback(host, 'setIdentityReviewProductIds(productIds)', {
-  setIdentityReviewProductIds: (ids: unknown) => { seeded = ids; events.push('seed') }, setActiveProductSection: () => {},
-})
-const reviewClick = callback(formSource, 'onReviewIdentityCollision(productIds)', {
-  imageUploading: false, imageUploadInFlightRef: { current: false }, preserveAndMinimize: preserve,
-  product, identityCollision: { id: 8 }, setIdentityCollision: () => {}, onReviewIdentityCollision: route,
-})
-callback(formSource, 'setIdentityCollision(null)', { setIdentityCollision: () => events.push('cancel') })()
-assert.deepEqual(events, ['cancel'], 'cancel does not park, change identity or start review')
-events.length = 0
-reviewClick()
-assert.deepEqual(events, ['flush', 'park', 'seed'], 'draft persistence and parking precede routing')
-assert.equal(parked.draftKey, 'actor-product-7')
-assert.deepEqual(parked.payload, { productId: 7 })
-assert.deepEqual(seeded, [7, 8])
-let restoredProduct: unknown
-let restoredModal: unknown
-await callback(host, 'const current = (await fetchProductsByIds([productId]))[0]', {
-  disposed: false, can: () => true, canRestoreMinimizedWork: () => true,
-  fetchProductsByIds: async (ids: number[]) => { assert.deepEqual(ids, [7]); return [product] },
-  setSelected: (value: unknown) => { restoredProduct = value }, setFormInitialTab: () => {},
-  setModal: (value: unknown) => { restoredModal = value }, markRestoreHandled: () => {},
-  reparkDeniedRestore: () => { throw new Error('valid parked edit must restore') }, notify: () => {}, tr: () => '',
-})(parked)
-assert.equal(restoredProduct, product)
-assert.equal(restoredModal, 'form', 'Back through the parked chip reopens the original edit')
-let restoredForm: Record<string, unknown> = { ...product }
-callback(formSource, 'const serverEditedAt', {
-  product, draftKey: parked.draftKey, legacyDraftKey: null, form: product, dirtyWorkKey: 'edit7',
-  formDirtyRef: { current: false }, restoredLegacyDraftKeyRef: { current: null },
-  readWorkDraft: (key: string) => { assert.equal(key, parked.draftKey); return { data: savedDraft } },
-  normalizeProductFormDraft: (data: unknown) => data, setForm: (update: any) => { restoredForm = update(restoredForm) },
-  canManageImages: false, registerDirtyWork: () => () => {}, clearCurrentProductDraft: () => { throw new Error('must not discard') }, t: () => '',
-})()
-assert.equal(restoredForm.barcode, edited.barcode, 'returning from review restores the unsaved correction')
-assert.equal(restoredForm.cost_price_usd, 7.5)
+// Sep 16 2026 owner ruling / P10-5: saving into an existing twin used to
+// 409 and park the draft into a separate "review this collision" routing
+// (minimize -> seed identityReviewProductIds -> open the Duplicates tab)
+// pinned by this file until now. The server folds instead of refusing, so
+// that whole park/route/restore detour is gone from both files -- pin its
+// absence rather than its shape, so a regression that reintroduces the
+// dead-end (instead of the toast+survivor-refresh in Products.tsx's
+// handleSaveWithGallery, pinned by tests/mergeStockChoice.test.ts) is caught.
+assert.doesNotMatch(formSource, /onReviewIdentityCollision/, 'ProductForm must not regain the 409-collision review escape hatch')
+assert.doesNotMatch(formSource, /identityCollision/, 'ProductForm must not regain identity-collision review state')
+assert.doesNotMatch(host, /setIdentityReviewProductIds/, 'Products.tsx must not regain the collision-routing seed')
+assert.doesNotMatch(host, /onReviewIdentityCollision/, 'Products.tsx must not pass a collision-review callback into ProductForm')
 
 const evidenceBindings = {
   loaded: true, loading: false, bulkBusy: false, groupReviewPages: [], consumedCollisionRef: { current: null },
@@ -137,4 +98,4 @@ await callback(tab, 'const totalWork = Number(finalized.counts.merge_folds', {
 })(body)
 assert.equal(applyCalls, 13, 'continuation proceeds beyond twelve calls until the reviewed work finishes')
 assert.equal(applyError, null)
-console.log('PASS executed cancel, draft park/restore, host routing, stale evidence refusal, sibling exclusion and 13-call continuation')
+console.log('PASS no dead-end collision routing survives, stale evidence refusal, sibling exclusion and 13-call continuation')
