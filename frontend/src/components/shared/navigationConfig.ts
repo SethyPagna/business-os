@@ -12,6 +12,7 @@ export type NavigationPermission =
   | 'pos'
   | 'products'
   | 'promotions'
+  | 'receipt_settings'
   | 'returns'
   | 'review'
   | 'sales'
@@ -63,12 +64,17 @@ export const NAV_ITEMS: NavigationItem[] = [
   // that item's own note on why the review page needs its own explicit
   // grant rather than falling back to any section's own tier).
   { id: 'review', key: 'review', permission: 'review' },
-  // 'settings': matches AppContext.tsx's PAGE_PERMISSIONS guard for this
-  // page, loosened from 'all' -- the inline receipt fields on the main
-  // Settings page (tax_rate, footer) were already reachable by any
-  // 'settings' user, so gating the standalone page behind super-admin-only
-  // 'all' was an inconsistency rather than an intentional restriction.
-  { id: 'receipt_settings', key: 'receipt_settings', permission: 'settings' },
+  // Own permission key (Sep 16 2026 owner request: "Receipt settings should
+  // also show for employees as well" / "should be in page menu as well").
+  // Used to gate on the blanket 'settings' grant (itself loosened from
+  // 'all'), which meant an Employee -- who prints receipts all day and needs
+  // to change paper/contrast modes -- could never reach this page without
+  // also being handed the whole admin Settings section. Its own key lets the
+  // default Employee role carry it (coreDataInvariants.ts) while an admin
+  // can still turn it off per role in the Permission Editor (settings
+  // section, 'receipt_settings' row). Matches AppContext.tsx's
+  // PAGE_PERMISSIONS guard and routes/settings.ts's settingsBucketPermissionFor.
+  { id: 'receipt_settings', key: 'receipt_settings', permission: 'receipt_settings' },
   { id: 'settings', key: 'settings', permission: 'settings' },
   // Library is now view-by-default for any authenticated user (this
   // session's explicit ask) -- browsing/previewing needs no permission at
@@ -93,7 +99,13 @@ export const DEFAULT_MOBILE_PINNED = ['dashboard', 'pos', 'products', 'sales']
 // sidebar nav rows -- they live under the footer account expander instead
 // (Sidebar.tsx). The Settings nav-order/pinning editor excludes them too, so
 // it can't offer to reorder or pin a row that the nav no longer shows.
-export const ACCOUNT_NAV_IDS = new Set(['settings', 'receipt_settings'])
+// 'receipt_settings' was removed from this set (Sep 16 2026 owner request:
+// "Receipt settings should be in page menu as well") -- it is now a normal
+// page-menu entry (desktop sidebar row, mobile home tile, mobile drawer)
+// on top of ALSO staying in the account expander/avatar dropdown
+// (Sidebar.tsx's accountActions lists it explicitly, independent of this
+// set), giving it two deliberate entry points rather than carving one out.
+export const ACCOUNT_NAV_IDS = new Set(['settings'])
 
 export function parseNavSetting(value: unknown, fallback: string[] = []): string[] {
   try {

@@ -581,7 +581,13 @@ const PAGE_PERMISSIONS: Record<string, string | null> = {
   review:           'review',  // Review/Approval queue page -- Full Access only, own explicit key (see navigationConfig.ts's own note)
   settings:         'settings',
   files:            null,        // Library view is unconditional for any authenticated user (this session) -- matches navigationConfig.ts's own null gate; upload/download/rename/delete still self-gate inside FilesPage.tsx/files.ts on real Full Access to `library`
-  receipt_settings: 'settings',  // was 'all' (super-admin only); Settings.tsx already exposes the core receipt fields (tax_rate, footer) to any 'settings' user inline, so gating the fuller standalone page behind 'all' was an inconsistency, not a deliberate restriction -- aligned with its sibling settings sub-pages (files/server)
+  // Own key (Sep 16 2026 owner request), not the blanket 'settings' grant --
+  // was 'all' (super-admin only), then loosened to 'settings', but an
+  // Employee who actually prints receipts all day never carried 'settings'
+  // and still couldn't reach the page to change print/paper modes. See
+  // coreDataInvariants.ts's default Employee role (carries this key) and
+  // routes/settings.ts's settingsBucketPermissionFor (enforces it on write).
+  receipt_settings: 'receipt_settings',
   // returns/fees page rows removed (E2): both PAGE ids retired into the
   // Sales hub. Their PERMISSION keys live on unchanged -- the split noted
   // here previously ("returns was 'sales' -- own key so they can be granted
@@ -2280,19 +2286,21 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // an inventory-only grant still opens the Branches page, whose chips
     // self-gate ('branches' for the branch list, 'inventory' for the rest).
     if (pageId === 'branches' && can('inventory', 'view')) return true
-    // 'settings'/'receipt_settings' page (this session, alongside
-    // routes/settings.ts's new per-field business_identity/sales_policy
-    // gating): a user granted only one of the narrower settings
-    // sub-permissions (business_identity, sales_policy, drive_credentials)
-    // -- with no plain `settings` grant at all -- still needs into the
-    // Settings page to actually use that grant. Without this, the backend
-    // fix that lets a business_identity-only user save their own fields
-    // would be unreachable: they'd be turned away at the page gate before
-    // ever getting to try. Settings.tsx's own section-visibility (the
+    // 'settings' page (alongside routes/settings.ts's per-field
+    // business_identity/sales_policy gating): a user granted only one of the
+    // narrower settings sub-permissions (business_identity, sales_policy,
+    // drive_credentials) -- with no plain `settings` grant at all -- still
+    // needs into the Settings page to actually use that grant. Without this,
+    // the backend fix that lets a business_identity-only user save their own
+    // fields would be unreachable: they'd be turned away at the page gate
+    // before ever getting to try. Settings.tsx's own section-visibility (the
     // `isAdmin`/`showSettingsSection` checks that hide non-owned fields)
     // still applies once inside -- this only controls whether the page
     // itself opens, same as the tier-aware check just above.
-    if ((pageId === 'settings' || pageId === 'receipt_settings') &&
+    // 'receipt_settings' does NOT need this fallback -- it carries its own
+    // key now (see PAGE_PERMISSIONS above), already covered by the
+    // tier-aware `can(required, 'view')` check at the top of this function.
+    if (pageId === 'settings' &&
       ['business_identity', 'sales_policy', 'drive_credentials'].some((key) => can(key, 'view'))) {
       return true
     }

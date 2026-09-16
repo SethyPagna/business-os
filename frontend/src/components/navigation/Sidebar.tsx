@@ -264,10 +264,13 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   }
   const [profileOpen, setProfileOpen] = useState(false)
   // The footer account row is a full-width toggle that expands into an account
-  // panel -- Profile / Settings / Receipt Settings / Update / Exit -- so those
-  // stop being separate sidebar nav rows and live under the account instead
-  // (user request). The same panel opens as a dropdown from the mobile header
-  // avatar.
+  // panel -- Profile / Settings / Receipt Settings / Update / Exit -- so
+  // Settings stops being a separate sidebar nav row and lives under the
+  // account instead (user request). The same panel opens as a dropdown from
+  // the mobile header avatar. Receipt Settings is listed here too (Sep 16
+  // 2026: "Receipt settings should be in page menu as well") AND now also
+  // renders as its own normal page-menu entry via visibleItems below --
+  // deliberately two entry points, not ACCOUNT_NAV_IDS-only like Settings.
   const [accountOpen, setAccountOpen] = useState(false)
   const runAppUpdate = () => {
     void restartIntoLatestApp({
@@ -380,9 +383,12 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   const navLayerTop = mobileChromeViewportOffset({ headerVisible: mobileHeaderVisible, appUpdateVisible })
 
   // Account panel actions -- rendered inside the desktop footer expander and
-  // the mobile header dropdown. Settings / Receipt Settings are gated the same
-  // way their old nav rows were; Profile / Update / Exit are always available
-  // to a logged-in user. Update is blue, Exit red, matching the old ☰ menu.
+  // the mobile header dropdown. Settings / Receipt Settings are both gated by
+  // canAccessPage(), same as any normal nav row; Receipt Settings ALSO renders
+  // as its own page-menu tile/row (visibleItems below no longer excludes it --
+  // see navigationConfig.ts's ACCOUNT_NAV_IDS), so it has two entry points on
+  // purpose. Profile / Update / Exit are always available to a logged-in
+  // user. Update is blue, Exit red, matching the old ☰ menu.
   type AccountAction = { id: string; label: string; icon: LucideIcon; onClick: () => void; tone?: 'blue' | 'red' }
   const accountActions: AccountAction[] = [
     { id: 'profile', label: t('profile') || 'Profile', icon: User, onClick: () => setProfileOpen(true) },
