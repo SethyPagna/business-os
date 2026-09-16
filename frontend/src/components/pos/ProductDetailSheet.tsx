@@ -18,6 +18,7 @@ import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { buildVariantOptionLabels, computeExpiryStatus, sortBatchesForPicker } from './posCore.ts'
 import { branchStockQuantity, deriveProductSheetState, type SheetIntent, type SheetProductLike } from './productSheetState.ts'
 import ProductImage from './ProductImage'
+import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 
 type ProductGroupMeta = {
   groupKind?: string
@@ -283,7 +284,11 @@ export default function ProductDetailSheet({
   // Settings > Stock Alerts -- the same number the POS grid behind this sheet
   // colours by, so the sheet and the card can never disagree about a product.
   const lowStockConfig = useLowStockConfig()
-  const { user, authReady } = useApp() as { user: { id?: string | number } | null; authReady: boolean }
+  const { user, authReady, getPermissionTier } = useApp() as {
+    user: { id?: string | number } | null
+    authReady: boolean
+    getPermissionTier: (key: string) => string
+  }
   // A new authenticated-user snapshot includes reauthentication as well as
   // actor/permission changes. Never reuse another session's selectable proof.
   const actorGeneration = useRef({ user, epoch: 0 })
@@ -291,6 +296,13 @@ export default function ProductDetailSheet({
     actorGeneration.current = { user, epoch: actorGeneration.current.epoch + 1 }
   }
   const actorScope = `${authReady}:${user?.id ?? 'anonymous'}:${actorGeneration.current.epoch}`
+  // The cost price is only ever shown to a user who can read products or
+  // inventory -- the same OR gate GET /api/products/:id/cost-breakdown
+  // enforces server-side (productCost.ts's canReadCost), so a cashier with
+  // neither grant never sees it even though this sheet itself is reachable
+  // by every POS role.
+  const canReadCost = getPermissionTier('products') !== 'none' || getPermissionTier('inventory') !== 'none'
+  const [costFloatTarget, setCostFloatTarget] = useState<{ id: number | string; name: string } | null>(null)
   const variants = getVariantChoices(product)
   const groupProduct = hasVariantChoices(product)
   const groupMeta = product.__groupMeta || null
@@ -767,6 +779,7 @@ export default function ProductDetailSheet({
   }, [portal, onClose])
 
   const sheet = (
+    <>
     <div className={`fixed inset-0 bg-black/50 ${portal ? 'z-[1080]' : 'z-50'} flex items-end sm:items-center justify-center p-0 sm:p-4`} onClick={onClose}>
       <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-modal-80 flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
@@ -809,6 +822,23 @@ export default function ProductDetailSheet({
               <span><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</span>
               {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
                 <span><span className="text-xs text-gray-400 mr-1">{t('wholesale_price') || 'Wholesale price'}</span><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</span>
+              ) : null}
+              {/* P10-11 (owner ruling, 2026-09-17): the POS sheet never showed
+                  cost at all -- gated to the same products-OR-inventory view
+                  grant the breakdown route itself enforces, so a cashier with
+                  neither never sees it. Opens the one shared cost float,
+                  exactly like the Inventory/product detail surfaces. */}
+              {canReadCost ? (
+                <button
+                  type="button"
+                  className="text-left"
+                  title={t('cost_breakdown_title') || 'Calculated cost price'}
+                  onClick={() => setCostFloatTarget({ id: product.id as number | string, name: String(displayName) })}
+                >
+                  <span className="text-xs text-gray-400 mr-1">{t('cost_price') || 'Cost price'}</span>
+                  <span className="font-bold text-red-700 decoration-dotted underline-offset-2 hover:underline dark:text-red-400">{fmtUSD(asNumber(product.cost_price_usd || 0))}</span>
+                  {asNumber(product.cost_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.cost_price_khr || 0))}</span> : null}
+                </button>
               ) : null}
             </div>
           </div>
@@ -921,6 +951,21 @@ export default function ProductDetailSheet({
                       {effectiveVariantExpiry?.status === 'expired' ? ` (${t('expired') || 'Expired'})` : null}
                       {effectiveVariantExpiry?.status === 'expiring' ? ` (${t('expiring_soon') || 'Expiring soon'})` : null}
                     </div>
+                  ) : null}
+                  {/* P10-11: the variant's own cost, same read gate and
+                      float as the product-level row above -- a grouped
+                      product's variants can carry different costs. */}
+                  {canReadCost ? (
+                    <button
+                      type="button"
+                      className="mb-2 block text-left"
+                      title={t('cost_breakdown_title') || 'Calculated cost price'}
+                      onClick={() => setCostFloatTarget({ id: effectiveVariant.id as number | string, name: String(effectiveVariant.__displayName || effectiveVariant.name || '') })}
+                    >
+                      <span className="text-xs text-gray-400 mr-1">{t('cost_price') || 'Cost price'}</span>
+                      <span className="text-xs font-bold text-red-700 decoration-dotted underline-offset-2 hover:underline dark:text-red-400">{fmtUSD(asNumber(effectiveVariant.cost_price_usd || 0))}</span>
+                      {asNumber(effectiveVariant.cost_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(effectiveVariant.cost_price_khr || 0))}</span> : null}
+                    </button>
                   ) : null}
                   {/* Step 3 (group flow): same lot/batch picker as the flat flow, now
                       keyed off resolvedProduct/resolvedBranchId so it re-fetches
@@ -1137,6 +1182,17 @@ export default function ProductDetailSheet({
         ) : null}
       </div>
     </div>
+    {costFloatTarget ? (
+      <CostCalculationFloat
+        productId={costFloatTarget.id}
+        productName={costFloatTarget.name}
+        onClose={() => setCostFloatTarget(null)}
+        fmtUSD={fmtUSD}
+        fmtKHR={fmtKHR}
+        t={(key, fallback) => t(key) || fallback}
+      />
+    ) : null}
+    </>
   )
   return portal && typeof document !== 'undefined' ? createPortal(sheet, document.body) : sheet
 }
