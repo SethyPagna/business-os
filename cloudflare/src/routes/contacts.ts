@@ -1061,11 +1061,6 @@ function registerContactRoutes(config: ContactConfig) {
     // "Show kept" -- those come back flagged `dismissed:true` so a wrongly-kept
     // conflict can be reopened and resolved. Default stays open-conflicts-only.
     const includeDismissed = ['1', 'true', 'yes'].includes(String(c.req.query('includeDismissed') || '').toLowerCase())
-  const pageSize = clampInt(c.req.query('pageSize'), 50, 1, 100)
-  const mismatchPage = clampInt(c.req.query('mismatchPage'), 1, 1, 100000)
-  const missingPage = clampInt(c.req.query('missingPage'), 1, 1, 100000)
-  const mismatchOffset = (mismatchPage - 1) * pageSize
-  const missingOffset = (missingPage - 1) * pageSize
     const clusters = await findDuplicateContactClusters(db, config.table, config.optionMode, { includeDismissed })
     const excludedIds = config.table === 'customers'
       ? await anonymousCustomerIds(db, clusters.flatMap((cluster) => cluster.contacts.map((contact) => contact.id)))
