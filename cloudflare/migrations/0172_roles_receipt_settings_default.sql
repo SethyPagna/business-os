@@ -1,0 +1,71 @@
+-- Backfill permissions.receipt_settings = true onto the built-in Employee
+-- and Manager roles (p9/receipt-access, Sep 16 2026 owner request: "Receipt
+-- settings should be in page menu as well" / "should also show for
+-- employees as well").
+--
+-- Commits 873d2eea/7634d4cd on this lane taught the app a dedicated
+-- 'receipt_settings' permission key (was the blanket 'settings' grant) and
+-- seeded it into coreDataInvariants.ts's DEFAULT_ROLE_PERMISSIONS.employee --
+-- but coreDataInvariants.ts's ensureCoreDataInvariants() only force-rewrites
+-- the ADMIN role's permissions on every boot (see that file's own header
+-- comment: "the loop below only force-rewrites the *admin* role's
+-- permissions back to this default on every ensure call; Manager/Employee
+-- are only inserted once ... and are otherwise left alone as editable by
+-- the org"). Every production Employee/Manager row was inserted long before
+-- this key existed and keeps its OLD stored JSON forever -- the code-only
+-- fix never reaches an already-provisioned organization. getPermissionTier()
+-- treats a missing key as 'none', so those employees would still get a 403
+-- on save and no page-menu entry despite the app-code change already being
+-- live. This migration is the one-time backfill that actually reaches them.
+--
+-- Admin is DELIBERATELY NOT touched here: it already carries {"all":true}
+-- (isAdminControlUser() short-circuits every permission check), and
+-- coreDataInvariants.ts keeps rewriting it to that same shape every boot
+-- regardless. A custom, non-system role an owner adds later is NOT
+-- backfilled by this migration either -- it gets 'receipt_settings' from
+-- the Permission Editor's own default the moment it is created (see
+-- frontend/src/components/users/permissionDefinitions.ts's new row), same
+-- as every other permission key a brand-new role starts without.
+--
+-- ============================== SCOPE ======================================
+-- Only code='employee' or code='manager' rows whose permissions JSON is
+-- valid AND does not already have an explicit (possibly false/null)
+-- receipt_settings key are touched. A row that already reads
+-- receipt_settings:false (an owner who deliberately turned it off through
+-- the Permission Editor before this migration ran) is left exactly as-is --
+-- json_extract(...) IS NULL is false for an explicit false, so the WHERE
+-- clause already excludes it; this migration only fills a genuinely ABSENT
+-- key, it never overwrites an owner's own choice.
+--
+-- ============================== IDEMPOTENCE =================================
+-- After the first run, every touched row's receipt_settings key is
+-- present (true), so json_extract(...) IS NULL is false on a second run and
+-- the UPDATE's WHERE clause matches none of those rows again. Untouched rows
+-- (already had the key, or code not in ('employee','manager'), or invalid
+-- JSON) were never eligible and remain so. Safe to re-run.
+--
+-- ============================== RECOVERY =====================================
+-- No column is dropped and no row is deleted; a role's other permission keys
+-- are untouched by json_set's single-path write. To revert a specific role
+-- back to "key absent" (rather than an explicit false):
+--   UPDATE roles SET permissions = json_remove(permissions, '$.receipt_settings')
+--   WHERE code IN ('employee','manager');
+--
+-- ============================== PRE-ASSERTION (run before applying) =========
+--   SELECT id, code, json_extract(permissions,'$.receipt_settings') AS rs
+--   FROM roles WHERE code IN ('employee','manager');
+--   -- expect rs IS NULL for every row this migration is meant to reach
+--
+-- ============================== POST-ASSERTION ===============================
+--   SELECT id, code, json_extract(permissions,'$.receipt_settings') AS rs
+--   FROM roles WHERE code IN ('employee','manager');
+--   -- expect rs = 1 (true) for every row that was NULL before, unchanged for
+--   -- any row that already had an explicit value
+--   -- second run touches 0 rows (re-run the file; changed row count is 0)
+
+UPDATE roles
+SET permissions = json_set(permissions, '$.receipt_settings', json('true')),
+    updated_at = CURRENT_TIMESTAMP
+WHERE code IN ('employee', 'manager')
+  AND json_valid(permissions)
+  AND json_extract(permissions, '$.receipt_settings') IS NULL;
