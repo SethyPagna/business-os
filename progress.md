@@ -1,3 +1,7 @@
+## P9-9 root cause found — September 17
+
+Sentry BUSINESS-OS-1E/1D: GET /api/batches/damaged-lots failed with "no such column: condition_tag" on 2026-09-15 01:37–04:06 UTC (22 events), i.e. the Worker build referencing the P3-L6 column reached production before migration 0162 was applied. The column exists now, no event since; verify the tagged-stock view on the live page at the next logged-in check, then close P9-9. Still-active Sentry issues needing a lane: D1 CPU time limit (BUSINESS-OS-X, 58 events), expression tree too large (BUSINESS-OS-6), product identity requires review (BUSINESS-OS-1F). Session ended at the Fable usage cap; everything committed and pushed, main in sync.
+
 ## Program 10 checkpoint F LIVE — debloat batch 2 (48 → 40 diagnostics) — September 17
 
 Release code commit **467ecf9b** on `codex/precision-final-candidate-20260914` (pushed; descends from c9f64afd; merged into `main` at this checkpoint) is live as Worker version **93976b00-ff08-46d5-b123-612ca0f70b4e** (`/api/runtime/version` revision `467ecf9bfce5`, sourceHash `62d31366e88e1a95`, tier paid, clean stamp). No migration (chain tail 0177).

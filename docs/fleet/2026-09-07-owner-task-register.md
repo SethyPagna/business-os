@@ -534,3 +534,10 @@ Release code 467ecf9b is live as Worker 93976b00-ff08-46d5-b123-612ca0f70b4e (pa
 | Debloat remainder (40 diagnostics), responsive/compact pass | **Open, go given** | Next in queue. |
 | P9-9 tagged-stock error | **Open, go given, not started** | After debloat. |
 | P10-12 … P10-22 | **Open, need a go** | Registered under message K. |
+
+## September 17 P9-9 root cause found (Sentry)
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| P9-9 "err can't show tagged stock" | **Root cause found, no recurrence; verify on the live page at the next logged-in check** | Sentry BUSINESS-OS-1E/1D: GET /api/batches/damaged-lots failed with D1_ERROR no such column condition_tag (16 + 6 events, 2026-09-15 01:37–04:06 UTC) — the Worker referencing condition_tag on damaged_stock_lots was deployed before migration 0162 was applied; production now has the column and no event since. Process fix: apply a lane's migration in the same checkpoint as its Worker code, never after. |
+| Sentry, still active | **Open, needs a lane** | BUSINESS-OS-X D1 CPU time limit (58 events, last 7 h ago), BUSINESS-OS-6 expression tree too large depth 100 (7 events, 8 h ago), BUSINESS-OS-1F recorded product identity requires review (68 events). |
