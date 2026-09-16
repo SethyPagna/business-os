@@ -19587,3 +19587,13 @@ Deploy: branch pushed a8036506..4b20bd68 (80 sliced commits, main untouched); `n
 **Gates.** Frontend typecheck, verify:i18n, verify:public-runtime, test:utils, build on the committed tip; Worker unchanged since the checkpoint C sweep.
 
 **Open.** Debloat remainder and responsive pass, P9-9, P10-12 … P10-22 (need a go).
+
+## Part 624 (Sep 17 2026, Claude Fable coordinator) — Program 10 checkpoint F: debloat batch 2
+
+**Provenance.** Release code tip **467ecf9b** on `codex/precision-final-candidate-20260914`, pushed, deployed with the paid configuration as Worker **93976b00-ff08-46d5-b123-612ca0f70b4e** (`/api/runtime/version` revision `467ecf9bfce5`, sourceHash `62d31366e88e1a95`, clean stamp). No migration. Merged into `main`.
+
+**Work.** Under the owner's "commit part of the task when reaching the limit" instruction, the remaining 48 unused-local diagnostics were triaged: nine that need no call-site change were removed (467ecf9b) and the budget lowered to 40. Two attempted removals were reverted because tests pin them: the `Undo2` import in BulkImportModal (productImportPlanner) and the vite modulepreload prefix list (performanceLoadingUx). The second exposed a gap: the list is asserted as the reason bootstrap/auth chunks are not eagerly modulepreloaded, yet `shouldDeferModulePreload` has no caller — recorded open.
+
+**Gates.** Frontend typecheck, verify:i18n, verify:public-runtime, test:utils, build on the committed tip; Worker unchanged since checkpoint C.
+
+**Open.** Debloat remainder (40), responsive/compact pass, modulepreload gap, P9-9, P10-12 … P10-22 (need a go).

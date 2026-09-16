@@ -1,5 +1,7 @@
 # Business OS — Claude takeover checkpoint
 
+> **Status update, September 17 (program 10 checkpoint F deployed, no migration).** Code commit 467ecf9b is live as Worker 93976b00-ff08-46d5-b123-612ca0f70b4e (paid configuration); `main` matches the release branch; D1 chain tail 0177. Live: debloat batch 2 (unused-locals budget 48 → 40). Open: debloat remainder, responsive pass, the vite modulepreload deferral gap, P9-9, P10-12 … P10-22 (need a go).
+
 > **Status update, September 17 (program 10 checkpoint E deployed, no migration).** Code commit 06df3e75 is live as Worker d893f9dd-5cf8-4bd8-ac38-2edea0dc871e (paid configuration); `main` matches the release branch; D1 chain tail 0177. Live: the stale-shell guard (a hashed-asset 404 after a deploy refreshes the cached shell and requests the new worker before the app's recovery reload). Open: debloat remainder and responsive pass, P9-9, P10-12 … P10-22 (need a go).
 
 > **Status update, September 17 (program 10 checkpoint D deployed, no migration).** Code commit c5af514a is live as Worker cb711dfa-d756-405f-8316-2b54279d106e (paid configuration); `main` matches the release branch; D1 chain tail 0177. Live: the debloat lane (dead locals removed, budget guards) and the CatalogPage zombie scroll state removal. Open, not done: debloat remainder (48 diagnostics), a storefront console 404 of unknown origin, P9-9, public P9-3/4/5/6, physical print. Handover-ready for Codex: start from `main`, both gates green on c5af514a.

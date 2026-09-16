@@ -1,3 +1,11 @@
+## Program 10 checkpoint F LIVE — debloat batch 2 (48 → 40 diagnostics) — September 17
+
+Release code commit **467ecf9b** on `codex/precision-final-candidate-20260914` (pushed; descends from c9f64afd; merged into `main` at this checkpoint) is live as Worker version **93976b00-ff08-46d5-b123-612ca0f70b4e** (`/api/runtime/version` revision `467ecf9bfce5`, sourceHash `62d31366e88e1a95`, tier paid, clean stamp). No migration (chain tail 0177).
+
+- **Debloat batch 2** — DEPLOYED. Nine unread locals removed with no call-site change (ReportsHub branchId, OverviewReport prevReturns, catMap/brandColorMap destructures in Products and ProductDetailModal, three unread props in InventoryMovementsSurface); unused-locals budget lowered 48 → 40 (467ecf9b).
+- **Finding, OPEN (feature gap):** `vite.config.ts` keeps `deferredModulePreloadPrefixes` + `shouldDeferModulePreload`, and `tests/performanceLoadingUx.test.ts` pins the list as "bootstrap and auth chunks should not be eagerly modulepreloaded" — but nothing calls the function, so that deferral is not enforced at build time. Needs either wiring into the modulepreload output or removal of the dead list and the test claim.
+- **Debloat remainder** — OPEN: 40 diagnostics (BulkImportModal's dead review-conflict UI ×17 pinned by productImportPlanner, Settings image-upload helpers ×2, PublicCatalogPage translate-apply state ×2, productMenuHelpers/productFilterHelpers unread params ×7, and the test-pinned cases listed in the budget test). Responsive/compact pass not started. P9-9 not started. P10-12 … P10-22 need a go.
+
 ## Program 10 checkpoint E LIVE — stale-shell guard after deploy — September 17
 
 Release code commit **06df3e75** on `codex/precision-final-candidate-20260914` (pushed; descends from 398d9f8c; merged into `main` at this checkpoint) is live as Worker version **d893f9dd-5cf8-4bd8-ac38-2edea0dc871e** (`/api/runtime/version` revision `06df3e752eae`, sourceHash `38634f4fa1dfa7de`, tier paid, clean stamp). No migration (chain tail 0177).
