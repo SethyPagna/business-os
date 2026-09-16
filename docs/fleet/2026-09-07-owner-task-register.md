@@ -511,3 +511,14 @@ Owner message K (Sep 17, after checkpoint D): keep going on debloat and responsi
 | Storefront console 404 | **Open, in queue (go given)** | "then storefront console" |
 | P9-9 tagged-stock error | **Open, in queue (go given)** | "p9-9 tagged" |
 | Storefront console 404 (follow-up) | **Checked, not reproducible** | Fresh load after deploy: 325 requests all 200, single host, sw precache and icons 200; the first-load message came from the previous service worker fetching a stale chunk. Retest at the next checkpoint. |
+
+## September 17 program 10 checkpoint E LIVE — stale-shell guard
+
+Release code 06df3e75 is live as Worker d893f9dd-5cf8-4bd8-ac38-2edea0dc871e (paid); no migration.
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| Stale-shell guard: a hashed-asset 404 after a deploy refreshes the cached shell, requests the new worker, broadcasts BUSINESS_OS_STALE_ASSET | **Deployed** | 06df3e75; swNavigationStrategy.test.ts pins source and sw.js; FE gate green. |
+| Debloat remainder, responsive/compact pass | **Open, go given, not started** | Next in queue. |
+| P9-9 tagged-stock error | **Open, go given, not started** | After debloat. |
+| P10-12 … P10-22 | **Open, need a go** | Registered under message K. |

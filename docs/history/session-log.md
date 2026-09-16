@@ -19573,3 +19573,17 @@ Deploy: branch pushed a8036506..4b20bd68 (80 sliced commits, main untouched); `n
 **Live check.** leangbeauty.com renders on desktop and at 375 px from the new build; assets, portal bootstrap/auth/search and uploads all 200; one console 404 for a resource not in the app's request list — open. Admin root not exercised (managed challenge).
 
 **Open for the next owner (Codex or Claude).** Debloat remainder (48 diagnostics, unreferenced-key candidates), the storefront 404, P9-9, public P9-3/4/5/6, physical print. Lane worktrees under the session scratchpad can be removed; `main` and the release branch are in sync.
+
+## Part 623 (Sep 17 2026, Claude Fable coordinator) — Program 10 checkpoint E: stale-shell guard
+
+**Provenance.** Release code tip **06df3e75** on `codex/precision-final-candidate-20260914`, pushed, deployed with the paid configuration as Worker **d893f9dd-5cf8-4bd8-ac38-2edea0dc871e** (`/api/runtime/version` revision `06df3e752eae`, sourceHash `38634f4fa1dfa7de`, clean stamp). No migration. Merged into `main`.
+
+**Owner message L.** Make guards for the stale (the post-deploy console 404); do it now; commit part of the task when reaching the usage limit; update status.
+
+**Finding.** The 404 seen right after checkpoint D's deploy was not reproducible on a fresh load (every request 200). Its mechanism: the service worker's navigation handler answers a cache hit with the previous build's index.html and only revalidates in the background, so the page requests hashed chunks the new deploy no longer serves; the app's chunk-recovery reload then depended on the background revalidation having finished.
+
+**Fix (06df3e75).** In `cacheFirstStatic`, a network miss on `/assets/` that returns 404 now awaits `recoverStaleShell`: fetch `/index.html` with `cache: 'no-store'`, store it in the app-shell cache when it is a real same-origin 200, call `self.registration.update()`, broadcast `BUSINESS_OS_STALE_ASSET`. Unhashed icons and manifests are excluded. The P4-4b cache-first navigation is unchanged. Regenerated `public/sw.js` committed with the source (verify:public-runtime green). Test pin added to `tests/swNavigationStrategy.test.ts` for source and shipped worker.
+
+**Gates.** Frontend typecheck, verify:i18n, verify:public-runtime, test:utils, build on the committed tip; Worker unchanged since the checkpoint C sweep.
+
+**Open.** Debloat remainder and responsive pass, P9-9, P10-12 … P10-22 (need a go).

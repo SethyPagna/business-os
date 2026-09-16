@@ -1,3 +1,12 @@
+## Program 10 checkpoint E LIVE — stale-shell guard after deploy — September 17
+
+Release code commit **06df3e75** on `codex/precision-final-candidate-20260914` (pushed; descends from 398d9f8c; merged into `main` at this checkpoint) is live as Worker version **d893f9dd-5cf8-4bd8-ac38-2edea0dc871e** (`/api/runtime/version` revision `06df3e752eae`, sourceHash `38634f4fa1dfa7de`, tier paid, clean stamp). No migration (chain tail 0177).
+
+Owner message L (Sep 17): "make guards for the stale" (the post-deploy console 404), do it now, commit part of the task when reaching the usage limit, update status.
+
+- **Stale-shell guard** — DEPLOYED. Root cause of the post-deploy 404: `appShellFallback` serves the cached index.html first and revalidates in the background (a deliberate P4-4b decision pinned by `swNavigationStrategy.test.ts`), so the first load after a deploy references chunks the server no longer has. Guard (06df3e75): a 404 on a hashed `/assets/` chunk now refreshes the cached shell before the response returns, calls `registration.update()` and broadcasts `BUSINESS_OS_STALE_ASSET`, so the app's existing one-shot chunk recovery reload lands on the current build. Pinned for both the source and the shipped `sw.js`; sibling tests chunkReloadGuard, iosPrintAndServiceWorker, swOfflineSaleReplay, chunkBoundaryPolicy green.
+- **Queue after this checkpoint (go given, not started):** debloat remainder and responsive/compact pass, P9-9 tagged-stock error. **Need a go:** P10-12 … P10-22 (see the owner task register, September 17 message K).
+
 ## Owner message K registered — September 17 (after checkpoint D)
 
 Queue with a go: debloat remainder and a responsive/compact pass, the storefront console 404, P9-9 tagged stock. New items P10-12 … P10-22 (old membership ids, points not zeroed, "unspecified" customers, supplier Excel-style table on large screens, Purchases double scroll / remaining column 0 / supplier payment null / Not Yet Paid date field, remove rows-per-page options, customer purchases without default dates with one-row stats and the sale rows) are registered in the owner task register as OPEN, need a go. Cost override rule restated by the owner: DEPLOYED since checkpoint C (P10-10), re-verify on the live product page at the next logged-in check. Usage at 96 % / 98 % weekly; Codex may take over from `main`.
