@@ -55,6 +55,17 @@ assert.equal(chunkFor('/fixture/src/utils/lazyImport.ts'), 'lazy-import-utils')
 assert.equal(chunkFor('\0vite/preload-helper.js'), 'app-routing')
 assert.equal(chunkFor('/fixture/node_modules/@fontsource/noto-sans-khmer/400.css'), undefined)
 assert.equal(chunkFor('/fixture/node_modules/qrcode/lib/browser.js'), 'vendor')
+// P9-perf (Sep 16 2026): xlsx (SheetJS, ~420 kB) must NOT share a physical
+// chunk with qrcode/html2canvas. All three are dynamic-import()-only, but
+// manualChunks groups by file, not call site -- printing a receipt
+// (utils/printReceipt.ts's html2canvas fallback) or rendering its QR code
+// (components/receipt/ReceiptQrCodes.tsx) happens on nearly every sale, while
+// "Export to Excel" (the only xlsx caller) is rare. Sharing one bucket meant
+// every receipt print/QR paid for xlsx it never used. Positive control: this
+// asserts the split landed, not merely that xlsx resolves to SOME chunk.
+assert.equal(chunkFor('/fixture/node_modules/xlsx/xlsx.mjs'), 'vendor-xlsx')
+assert.notEqual(chunkFor('/fixture/node_modules/xlsx/xlsx.mjs'), chunkFor('/fixture/node_modules/qrcode/lib/browser.js'))
+assert.notEqual(chunkFor('/fixture/node_modules/xlsx/xlsx.mjs'), chunkFor('/fixture/node_modules/html2canvas/dist/html2canvas.js'))
 
 function staticImports(file: string): string[] {
   const ast = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)
