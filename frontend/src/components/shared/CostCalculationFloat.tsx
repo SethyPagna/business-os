@@ -83,7 +83,7 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
                 const formattedDate = isManual
                   ? (input.recorded_at ? fmtDate(input.recorded_at) : null)
                   : (input.received_at ? fmtDate(input.received_at) : null)
-                const primaryText = isManual ? tr('cost_breakdown_manual_tag', 'Manual') : costRowPrimaryText(input, formattedDate)
+                const primaryText = isManual ? tr('cost_breakdown_manual_tag', 'Override') : costRowPrimaryText(input, formattedDate)
                 const meta = costRowMeta(input, formattedDate)
                 return (
                   // ONE compact row per entry (P10-11 ruling): the lot

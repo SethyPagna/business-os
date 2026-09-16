@@ -12,8 +12,14 @@
 // these fields alongside the legacy `label` (still present for older
 // payloads/tests); normalize defensively so a payload missing the new
 // fields still renders using `label`.
+//
+// P10-11 correction (owner, same day): a manual override REPLACES the cost
+// going forward -- lots received before the latest override stop counting
+// ('overridden'), while an earlier manual entry a later one replaced stays
+// 'superseded'. Both are just another excluded reason to this module; the
+// float dims and tags the row the same way for every reason.
 
-export type CostBreakdownExclusionReason = 'zero' | 'duplicate' | 'inactive' | 'superseded' | null
+export type CostBreakdownExclusionReason = 'zero' | 'duplicate' | 'inactive' | 'superseded' | 'overridden' | null
 
 export type CostBreakdownInput = {
   source: 'lot' | 'manual' | 'catalog'
@@ -62,6 +68,7 @@ export function costExclusionLabelKey(excluded: CostBreakdownExclusionReason): s
   if (excluded === 'duplicate') return 'cost_breakdown_excluded_duplicate'
   if (excluded === 'inactive') return 'cost_breakdown_excluded_inactive'
   if (excluded === 'superseded') return 'cost_breakdown_excluded_superseded'
+  if (excluded === 'overridden') return 'cost_breakdown_excluded_overridden'
   return null
 }
 
@@ -71,7 +78,7 @@ export function costExclusionLabelKey(excluded: CostBreakdownExclusionReason): s
  * received date, then its batch number, so an older/thinner payload still
  * reads as something concrete rather than the bare "1 · Shop" sequence
  * label. Never called for a 'manual' row -- that row's primary text is
- * always the translated "Manual" tag, rendered directly by the caller.
+ * always the translated "Override" tag, rendered directly by the caller.
  */
 export function costRowPrimaryText(input: CostBreakdownInput, formattedReceivedDate: string | null): string {
   if (input.lot_code) return input.lot_code
@@ -115,7 +122,7 @@ export function normalizeCostBreakdown(value: unknown): CostBreakdown | null {
     recorded_at: entry.recorded_at == null ? null : String(entry.recorded_at),
     cost_usd: entry.cost_usd == null ? null : Number(entry.cost_usd),
     cost_khr: entry.cost_khr == null ? null : Number(entry.cost_khr),
-    excluded: (entry.excluded === 'zero' || entry.excluded === 'duplicate' || entry.excluded === 'inactive' || entry.excluded === 'superseded') ? entry.excluded : null,
+    excluded: (entry.excluded === 'zero' || entry.excluded === 'duplicate' || entry.excluded === 'inactive' || entry.excluded === 'superseded' || entry.excluded === 'overridden') ? entry.excluded : null,
   }))
   return {
     product_id: Number(raw.product_id) || 0,
