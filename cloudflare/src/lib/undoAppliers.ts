@@ -345,6 +345,10 @@ export type MergeStockDisposition = 'merge' | 'write_off'
 //   stock_row_moves, import_auto_merges, legacy_* -- these record what a PAST
 //     operation did to a specific product id; repointing them would rewrite
 //     provenance rather than move a live link.
+//   sale_not_paid_repair_0173, catalog_cost_recompute_0175 -- repair receipts of
+//     a data migration (before-values and applied flags per product id); the
+//     same provenance rule as stock_row_moves: they say what was repaired, they
+//     are not a live link.
 //   sale_amendments.product_id -- a SNAPSHOT, not a link. 0115:73 says so in
 //     the schema itself ("product_id/product_name are snapshotted here and not
 //     looked up"), so the amendment must keep naming the row the amendment was

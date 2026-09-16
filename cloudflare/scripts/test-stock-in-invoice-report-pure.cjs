@@ -61,7 +61,7 @@ const stockActionCommit = compile('stockActionCommit.ts', {
   // P10-4: REAL, not stubbed -- db is passed as a runtime argument to
   // applyUnifiedStockAdd, not resolved through './db', so the '{}' stub is
   // never actually read.
-  './catalogCostRecompute': compile('catalogCostRecompute.ts', { './db': {}, './productDetailRule': productDetailRule }),
+  './catalogCostRecompute': compile('catalogCostRecompute.ts', { './db': {}, './moneyPrecision': moneyPrecision, './productDetailRule': productDetailRule }),
 })
 
 const migrationsDir = path.join(__dirname, '..', 'migrations')

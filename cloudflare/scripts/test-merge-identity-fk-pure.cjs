@@ -178,6 +178,8 @@ const EXCLUDED = new Map([
   ['import_auto_merges.product_id', 'provenance: records which id an import folded'],
   ['import_auto_merges.merged_into_product_id', 'provenance: records which id an import folded into'],
   ['sale_amendments.product_id', 'SNAPSHOT, declared as such in migration 0115'],
+  ['sale_not_paid_repair_0173.product_id', 'provenance: repair receipt of migration 0173 (before-values per line)'],
+  ['catalog_cost_recompute_0175.product_id', 'provenance: repair receipt of migration 0175 (cost before/after per product)'],
   // OWNER DECISION, open. The ask said the merge moves EVERY linked record,
   // stock_session_members included. It is excluded instead, and refused rather
   // than reparented, because the column is the replay DRIVER and not a link:
