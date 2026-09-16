@@ -1282,7 +1282,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [portalProductRefreshing, setPortalProductRefreshing] = useState(false)
   const [portalConfigReady, setPortalConfigReady] = useState(() => !!cachedPortal?.config || !publicView)
   const [publicSecondaryTabsPrimed, setPublicSecondaryTabsPrimed] = useState(false)
-  const [, setPublicChromeVisible] = useState(true)
   const [publicScrollButtonsVisible, setPublicScrollButtonsVisible] = useState(false)
   const [publicPortalNavPinned, setPublicPortalNavPinned] = useState(false)
   const [publicPortalNavMetrics, setPublicPortalNavMetrics] = useState({ left: 0, width: 0, height: 0 })
@@ -1358,7 +1357,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const portalBootstrapRequestRef = useRef(0)
   const portalProductsRequestRef = useRef(0)
   const skipNextBootstrappedProductSearchRef = useRef(false)
-  const publicScrollAnchorRef = useRef(0)
   const publicPortalNavRef = useRef<HTMLElement | null>(null)
   const mediaUploadControllersRef = useRef(new Map<string, AbortController>())
   const mediaUploadInFlightTargetsRef = useRef(new Set<string>())
@@ -2091,13 +2089,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const updateVisibility = () => {
       frameRequested = false
       const scrollTop = Math.max(window.scrollY || 0, document.documentElement?.scrollTop || 0, document.body?.scrollTop || 0)
-      const delta = scrollTop - publicScrollAnchorRef.current
       setPublicScrollButtonsVisible(scrollTop > 220)
-      if (scrollTop <= 24) {
-        setPublicChromeVisible(true)
-      } else if (Math.abs(delta) >= 12) {
-        setPublicChromeVisible(delta < 0)
-      }
       if (publicPortalNavRef.current) {
         const rect = publicPortalNavRef.current.getBoundingClientRect()
         const shouldPin = rect.top <= topOffset
@@ -2115,7 +2107,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           ) ? current : next
         })
       }
-      publicScrollAnchorRef.current = scrollTop
     }
 
     const handleScroll = () => {
