@@ -200,7 +200,11 @@ assert.ok(preFixEdit(13, { name: 'Fork Cost', barcode: '778899', cost_price_usd:
   'control: the old rule 409d the cost-forked sibling, deadlocking it against the merge tool')
 assert.ok(preFixEdit(11, { cost_price_usd: 4 }), 'control: the old rule even queried on a cost-only body')
 
-// ---- 2. Wiring: both routes, guard before the review queue, no override ----
+// ---- 2. Wiring: both routes FOLD on an identity match, never 409 -- Sep 16
+// 2026 owner ruling ("barcodes leading zero... remove the zero, etc... same
+// product, fold, never a prompt"). This file used to pin a 409
+// 'duplicate_product' refusal here; that assertion is retired on purpose --
+// see git log for this file at this revision for the reason.
 const createAt = source.indexOf("app.post('/', async (c) => {")
 const createGuardAt = source.indexOf('findSameProductIdentityProduct(', createAt)
 const createQueueAt = source.indexOf("actionType: 'create'", createAt)
@@ -219,7 +223,22 @@ const editLookupAt = source.indexOf('findSameProductIdentityProduct(c.env, nextN
 assert.match(source.slice(editGuardAt, editLookupAt), /if \(changesIdentity\) \{/,
   'edit: the lookup runs ONLY when the edit moves the row onto a different identity')
 assert.match(source, /return pickSameIdentityRow\(rows, barcode\)/, 'the guard compares through the shared fold, not a local one')
-assert.match(source, /code: 'duplicate_product'/, 'refusal carries a machine-readable code')
+// DISCRIMINATING (Sep 16 2026, N-P10-5): an identity match on create now
+// folds into the existing row (foldCreateIntoExisting) and returns 200 --
+// it must NOT hit the merge-duplicates 409 refusal any more.
+assert.match(source, /foldCreateIntoExisting\(c\.env, user, duplicate, name, body\)/,
+  'create: an identity match folds into the existing row instead of refusing')
+const createFoldAt = source.indexOf('async function foldCreateIntoExisting(')
+assert.ok(createFoldAt > 0, 'create: the fold helper exists')
+assert.ok(!/return c\.json\(\{[\s\S]{0,400}code: 'duplicate_product'/.test(source.slice(createAt, createQueueAt)),
+  'create: the identity branch no longer returns a duplicate_product refusal')
+// DISCRIMINATING: the edit path folds THIS row into the other identity via
+// foldDuplicateProductInto (the one merge path, transfer-aware and
+// undo-evidenced) instead of refusing with 409 duplicate_product.
+assert.match(source.slice(editGuardAt, editGuardAt + 4000), /foldDuplicateProductInto\(/,
+  'edit: an identity move folds this row into the target via the shared merge path')
+assert.ok(!/error: `"\$\{duplicate\.name\}" already exists with this barcode — same name \+ barcode is the same product \(a leading zero is not a different barcode\)\. Merge into it instead of creating a twin\.`/.test(source),
+  'edit: the old 409 refusal text is gone')
 assert.ok(!/confirm_duplicate/.test(source), 'no override flag: the identity rule is absolute on this path')
 
 console.log('test-product-identity-guard-pure: all checks passed')

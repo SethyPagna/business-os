@@ -20,8 +20,8 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit } from '../lib/audit'
-import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
-import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
+import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
@@ -166,7 +166,7 @@ import {
   normalizeMultiValue, validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError,
 } from '../lib/productWrites'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { prepareProductMoneyWrite, readProductMoneyPlan, ProductMoneyWriteError } from '../lib/productWrites'
+import { prepareProductMoneyWrite, readProductMoneyPlan, ProductMoneyWriteError, PRODUCT_MONEY_PLAN, PRODUCT_MONEY_VERSION } from '../lib/productWrites'
 export {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
   cleanPayload, insertRow, updateRow, syncProductImageGallery, defaultBranchId,
@@ -1666,6 +1666,65 @@ async function findSameProductIdentityProduct(
   return pickSameIdentityRow(rows, barcode)
 }
 
+// The Sep 16 2026 create-fold: a create request that identifies as the SAME
+// product as an existing active row (findSameProductIdentityProduct) never
+// mints a twin and never 409s -- it folds straight into the existing row.
+// Keeps the existing row's id (every reference to it -- branch_stock, lots,
+// sales -- stays valid), cleans the stored barcode to the real zero-stripped
+// code when the incoming one is real and the stored one was padded or a
+// wildcard, and merges in a non-zero incoming cost through the same
+// distinct-cost averaging every other fold uses (resolveMergedCostDetail).
+// Returns 200, never 409 -- the whole point of the ruling is that this is
+// not an error the operator has to resolve.
+async function foldCreateIntoExisting(
+  env: Env,
+  user: SessionUser | null,
+  duplicate: { id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number },
+  name: string,
+  body: Record<string, unknown>,
+): Promise<{ item: unknown; product: unknown; id: number; folded_into: number; success: true }> {
+  const db = getDb(env)
+  const updates: Record<string, unknown> = {}
+  const incomingBarcodeRaw = body.barcode
+  if (isRealBarcode(incomingBarcodeRaw)) {
+    const cleanedIncoming = normalizeLeadingZeroBarcodeForCleanup(String(incomingBarcodeRaw).trim().toLowerCase())
+    const existingReal = isRealBarcode(duplicate.barcode)
+    const existingStored = String(duplicate.barcode ?? '').trim()
+    // Only rewrite the stored barcode when it is padded (its own clean form
+    // differs) or it was a wildcard/broken value being replaced by a real
+    // one -- never overwrite an already-clean real code with a different
+    // spelling of the same identity.
+    if (!existingReal || (existingStored.toLowerCase() !== cleanedIncoming
+      && normalizeLeadingZeroBarcodeForCleanup(existingStored.toLowerCase()) === cleanedIncoming)) {
+      updates.barcode = cleanedIncoming
+    }
+  }
+  const incomingCostUsd = Number(body.cost_price_usd) || 0
+  const incomingCostKhr = Number(body.cost_price_khr) || 0
+  let costOutliers: MergedCostOutlier[] = []
+  if (incomingCostUsd > 0 || incomingCostKhr > 0) {
+    const { merged, outliers } = resolveMergedCostDetail([
+      { cost_price_usd: duplicate.cost_price_usd, cost_price_khr: duplicate.cost_price_khr },
+      { cost_price_usd: incomingCostUsd, cost_price_khr: incomingCostKhr },
+    ])
+    costOutliers = outliers
+    if (merged.cost_price_usd !== undefined) updates.cost_price_usd = merged.cost_price_usd
+    if (merged.cost_price_khr !== undefined) updates.cost_price_khr = merged.cost_price_khr
+  }
+  if (Object.keys(updates).length) {
+    const setSql = Object.keys(updates).map((key) => `${key} = @${key}`).join(', ')
+    await db.prepare(`UPDATE products SET ${setSql}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
+      .run({ ...updates, id: duplicate.id })
+  }
+  await audit(env, user?.id ?? null, actorSnapshot(user), 'fold', 'product', duplicate.id, {
+    reason: 'create_identity_fold', requestedName: name, incomingBarcode: body.barcode, updates, costOutliers,
+  })
+  const item = await db.prepare('SELECT * FROM products WHERE id = @id').get({ id: duplicate.id })
+  await bumpVersion(env, 'products')
+  await broadcast(env, 'products', { action: 'update', id: duplicate.id }).catch(() => {})
+  return { item, product: item, id: duplicate.id, folded_into: duplicate.id, success: true }
+}
+
 app.post('/', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'add') === 'none') {
@@ -1684,19 +1743,15 @@ app.post('/', async (c) => {
   }
 
   // The ONE product identity rule, enforced on the MANUAL path too (Aug 28:
-  // "identity rules applied fully across all codepaths"): same name + same
-  // barcode IS the same product — the import merges such rows, so manual
-  // create must not mint a silent twin the import path would never allow.
-  // Same name with a DIFFERENT (or no) barcode stays a legitimate child row
-  // and passes through untouched. Checked before the review queue so a
-  // reviewer is never asked to approve a duplicate either.
+  // "identity rules applied fully across all codepaths"; Sep 16 2026 owner
+  // ruling: leading-zero/broken-barcode twins FOLD, never a prompt/409):
+  // same name + same identity barcode IS the same product — the import
+  // merges such rows, so manual create must not mint a silent twin the
+  // import path would never allow. Same name with a DIFFERENT REAL barcode
+  // stays a legitimate child row and passes through untouched.
   const duplicate = await findSameProductIdentityProduct(c.env, name, body.barcode, null)
   if (duplicate) {
-    return c.json({
-      error: `"${duplicate.name}" already exists with this barcode — same name + barcode is the same product (a leading zero is not a different barcode). Edit it or add stock to it instead of creating a duplicate.`,
-      code: 'duplicate_product',
-      duplicate,
-    }, 409)
+    return c.json(await foldCreateIntoExisting(c.env, user, duplicate, name, body))
   }
 
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body)
@@ -1969,11 +2024,76 @@ app.put('/:id', async (c) => {
     if (changesIdentity) {
       const duplicate = await findSameProductIdentityProduct(c.env, nextName, nextBarcode, Number(id))
       if (duplicate) {
-        return c.json({
-          error: `"${duplicate.name}" already exists with this barcode — same name + barcode is the same product (a leading zero is not a different barcode). Merge into it instead of creating a twin.`,
-          code: 'duplicate_product',
-          duplicate,
-        }, 409)
+        // Sep 16 2026 ruling: this row's edit now identifies it as the SAME
+        // product as `duplicate` -- fold this row INTO it (foldDuplicateProductInto,
+        // the one merge path, transfer-aware and undo-evidenced) rather than
+        // refusing. Any other field this edit also carries (price/cost/image)
+        // is applied on top of the survivor afterwards, same as an ordinary edit.
+        const db = getDb(c.env)
+        const dupRow = await db.prepare('SELECT id, name, image_path, COALESCE(is_group, 0) AS is_group FROM products WHERE id = @id')
+          .get<{ id: number; name: string | null; image_path: string | null; is_group: number }>({ id: Number(id) })
+        if (!dupRow) return c.json({ error: 'Product not found' }, 404)
+        if (dupRow.is_group) return c.json({ error: 'Group rows cannot be merged — merge the variant products instead' }, 400)
+        // foldDuplicateProductInto's own guard (productsShareExactIdentity)
+        // requires the two rows to ALREADY carry the same identity in the
+        // DB -- true for the admin merge tools (both rows are pre-existing
+        // duplicates) but NOT yet true here: this row's stored name/barcode
+        // is what the operator is CHANGING, and `duplicate` is where that
+        // change lands. Write the edited identity onto this row first so it
+        // genuinely matches before the fold reads it back.
+        await db.prepare('UPDATE products SET name = @name, barcode = @barcode, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
+          .run({ name: nextName, barcode: nextBarcode, id: Number(id) })
+        const blockingSession = await mergeBlockedByReversibleStockSession(db, [duplicate.id, Number(id)])
+        if (blockingSession) {
+          return c.json({
+            success: false,
+            code: 'stock_session_reversible',
+            error: mergeStockSessionBlockedMessage(blockingSession.operationId),
+            operationId: blockingSession.operationId,
+          }, 409)
+        }
+        if (getActionTier(user, 'products', 'image') !== 'full' && await productMergeChangesImages(
+          db, [{ keeper: { id: duplicate.id, image_path: null }, discarded: dupRow }],
+        )) {
+          return c.json({ error: 'You do not have permission to perform this action' }, 403)
+        }
+        let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
+        try {
+          const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
+          const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
+          foldResult = await foldDuplicateProductInto(
+            c.env, db, user,
+            { id: duplicate.id, name: duplicate.name },
+            { id: dupRow.id, name: dupRow.name, image_path: dupRow.image_path },
+            branchNameById,
+            'edit identity fold', 'merge', undefined, { operationId: crypto.randomUUID() },
+          )
+        } catch (error) {
+          if (/merge_state_conflict|merge_identity_conflict/.test(String(error))) {
+            return c.json({ success: false, code: 'merge_state_conflict', error: 'One of these products changed while the edit was being applied. Refresh and try again.' }, 409)
+          }
+          throw error
+        }
+        // Apply the remaining fields this edit carried (price/cost/image/etc,
+        // everything but identity/rename bookkeeping) onto the survivor.
+        const rest: Record<string, unknown> = { ...body }
+        delete rest.name
+        delete rest.barcode
+        delete rest.__rename_scope
+        delete rest.expected_updated_at
+        // The money-write plan (if any) was computed by prepareProductMoneyWrite
+        // above against THIS row's id and its before-image -- it is invalid
+        // once the write is redirected onto the survivor's row. A plain field
+        // update (not a locked-price plan write) applies fine without it.
+        delete rest[PRODUCT_MONEY_PLAN]
+        delete rest[PRODUCT_MONEY_VERSION]
+        if (Object.keys(rest).length) {
+          await updateRow(c.env, 'products', duplicate.id, rest)
+        }
+        const item = await db.prepare('SELECT * FROM products WHERE id = @id').get({ id: duplicate.id })
+        c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+        c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: duplicate.id }))
+        return c.json({ item, product: item, id: duplicate.id, merged_into: duplicate.id, success: true, foldResult: { quantityMoved: foldResult.quantityMoved, batchesMoved: foldResult.batchesMoved } })
       }
     }
     // D6 / 9.1 ("rename does not regroup"): when the operator chose to
