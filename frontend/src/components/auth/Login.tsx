@@ -143,11 +143,6 @@ interface StartOauthResult extends PasswordResetResult {
   url?: string
 }
 
-interface DeviceContext {
-  deviceTz?: string | null
-  deviceName?: string | null
-}
-
 interface AuthApi {
   getVerificationCapabilities?: () => Promise<VerificationCapabilities>
   getOrganizationBootstrap?: () => Promise<OrganizationBootstrap>
@@ -670,8 +665,6 @@ export default function Login() {
     run()
     return () => { invalidateTrackedRequest(oauthCallbackRequestRef) }
   }, [authApi, persistAuthenticatedUser, sessionDuration, t])
-
-  const getDeviceContext = (): DeviceContext => getClientDeviceInfo()
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
