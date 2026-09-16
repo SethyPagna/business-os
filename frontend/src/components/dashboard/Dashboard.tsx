@@ -11,6 +11,10 @@ import { fmtTime } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers'
 import { buildEquation, revenueTerms, profitTerms } from '../../utils/statsFormulas'
 import Download from 'lucide-react/dist/esm/icons/download.js'
+// Pinned by tests/performanceLoadingUx.test.ts: this component must keep a
+// direct lucide-react/dist/esm/icons/layout-dashboard.js module import
+// (not the app-wide barrel) even though the icon itself isn't rendered here.
+import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { useIsPageActive } from '../shared/pageActivity'
