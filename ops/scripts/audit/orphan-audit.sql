@@ -18,6 +18,8 @@
 --   customer_merge_map_0166.loser_id -- the merged customer is deleted by 0166; the map keeps its id as provenance
 --   product_merge_map_0168.loser_id -- the merged product is deleted by 0168; the map keeps its id as provenance
 --   product_merge_pairs_0168.loser_id -- the seed pair names a product 0168 goes on to delete; kept for provenance/idempotence
+--   product_merge_map_0174.loser_id -- the merged product is deleted by 0174; the map keeps its id as provenance
+--   product_merge_pairs_0174.loser_id -- the seed pair names a product 0174 goes on to delete; kept for provenance/idempotence
 --
 -- Every statement is a SELECT. There are no writes and no PRAGMA here.
 -- A healthy database answers 0 for every relation. A nonzero count on a
@@ -34,6 +36,7 @@ SELECT 'branch_batch_stock.branch_id->branches' AS relation, COUNT(*) AS orphan_
 SELECT 'branch_stock.branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM branch_stock c LEFT JOIN branches p ON p.id = c.branch_id WHERE c.branch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'branch_stock.product_id->products' AS relation, COUNT(*) AS orphan_count FROM branch_stock c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
 SELECT 'bulk_delete_jobs.created_by_id->users' AS relation, COUNT(*) AS orphan_count FROM bulk_delete_jobs c LEFT JOIN users p ON p.id = c.created_by_id WHERE c.created_by_id IS NOT NULL AND p.id IS NULL;
+SELECT 'catalog_cost_recompute_0175.product_id->products' AS relation, COUNT(*) AS orphan_count FROM catalog_cost_recompute_0175 c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
 SELECT 'contact_duplicate_dismissals.dismissed_by_id->users' AS relation, COUNT(*) AS orphan_count FROM contact_duplicate_dismissals c LEFT JOIN users p ON p.id = c.dismissed_by_id WHERE c.dismissed_by_id IS NOT NULL AND p.id IS NULL;
 SELECT 'customer_merge_map_0166.keeper_id->customers' AS relation, COUNT(*) AS orphan_count FROM customer_merge_map_0166 c LEFT JOIN customers p ON p.id = c.keeper_id WHERE c.keeper_id IS NOT NULL AND p.id IS NULL;
 SELECT 'customer_receivables.customer_id->customers' AS relation, COUNT(*) AS orphan_count FROM customer_receivables c LEFT JOIN customers p ON p.id = c.customer_id WHERE c.customer_id IS NOT NULL AND p.id IS NULL;
@@ -95,7 +98,9 @@ SELECT 'product_duplicate_dismissals.dismissed_by_id->users' AS relation, COUNT(
 SELECT 'product_images.product_id->products' AS relation, COUNT(*) AS orphan_count FROM product_images c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_merge_map_0165.keeper_id->products' AS relation, COUNT(*) AS orphan_count FROM product_merge_map_0165 c LEFT JOIN products p ON p.id = c.keeper_id WHERE c.keeper_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_merge_map_0168.keeper_id->products' AS relation, COUNT(*) AS orphan_count FROM product_merge_map_0168 c LEFT JOIN products p ON p.id = c.keeper_id WHERE c.keeper_id IS NOT NULL AND p.id IS NULL;
+SELECT 'product_merge_map_0174.keeper_id->products' AS relation, COUNT(*) AS orphan_count FROM product_merge_map_0174 c LEFT JOIN products p ON p.id = c.keeper_id WHERE c.keeper_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_merge_pairs_0168.keeper_id->products' AS relation, COUNT(*) AS orphan_count FROM product_merge_pairs_0168 c LEFT JOIN products p ON p.id = c.keeper_id WHERE c.keeper_id IS NOT NULL AND p.id IS NULL;
+SELECT 'product_merge_pairs_0174.keeper_id->products' AS relation, COUNT(*) AS orphan_count FROM product_merge_pairs_0174 c LEFT JOIN products p ON p.id = c.keeper_id WHERE c.keeper_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_remove_operations.action_history_id->action_history' AS relation, COUNT(*) AS orphan_count FROM product_remove_operations c LEFT JOIN action_history p ON p.id = c.action_history_id WHERE c.action_history_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_remove_operations.actor_id->users' AS relation, COUNT(*) AS orphan_count FROM product_remove_operations c LEFT JOIN users p ON p.id = c.actor_id WHERE c.actor_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_remove_operations.pending_action_id->pending_actions' AS relation, COUNT(*) AS orphan_count FROM product_remove_operations c LEFT JOIN pending_actions p ON p.id = c.pending_action_id WHERE c.pending_action_id IS NOT NULL AND p.id IS NULL;
@@ -172,6 +177,13 @@ SELECT 'sale_mutation_members.operation_id->sale_mutation_receipts' AS relation,
 SELECT 'sale_mutation_receipts.actor_id->users' AS relation, COUNT(*) AS orphan_count FROM sale_mutation_receipts c LEFT JOIN users p ON p.id = c.actor_id WHERE c.actor_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sale_mutation_receipts.history_id->action_history' AS relation, COUNT(*) AS orphan_count FROM sale_mutation_receipts c LEFT JOIN action_history p ON p.id = c.history_id WHERE c.history_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sale_mutation_receipts.sale_id->sales' AS relation, COUNT(*) AS orphan_count FROM sale_mutation_receipts c LEFT JOIN sales p ON p.id = c.sale_id WHERE c.sale_id IS NOT NULL AND p.id IS NULL;
+SELECT 'sale_not_paid_repair_0173.allocation_batch_id->product_batches' AS relation, COUNT(*) AS orphan_count FROM sale_not_paid_repair_0173 c LEFT JOIN product_batches p ON p.id = c.allocation_batch_id WHERE c.allocation_batch_id IS NOT NULL AND p.id IS NULL;
+SELECT 'sale_not_paid_repair_0173.allocation_id->sale_item_batch_allocations' AS relation, COUNT(*) AS orphan_count FROM sale_not_paid_repair_0173 c LEFT JOIN sale_item_batch_allocations p ON p.id = c.allocation_id WHERE c.allocation_id IS NOT NULL AND p.id IS NULL;
+SELECT 'sale_not_paid_repair_0173.branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM sale_not_paid_repair_0173 c LEFT JOIN branches p ON p.id = c.branch_id WHERE c.branch_id IS NOT NULL AND p.id IS NULL;
+SELECT 'sale_not_paid_repair_0173.deduct_batch_id->product_batches' AS relation, COUNT(*) AS orphan_count FROM sale_not_paid_repair_0173 c LEFT JOIN product_batches p ON p.id = c.deduct_batch_id WHERE c.deduct_batch_id IS NOT NULL AND p.id IS NULL;
+SELECT 'sale_not_paid_repair_0173.product_id->products' AS relation, COUNT(*) AS orphan_count FROM sale_not_paid_repair_0173 c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
+SELECT 'sale_not_paid_repair_0173.sale_id->sales' AS relation, COUNT(*) AS orphan_count FROM sale_not_paid_repair_0173 c LEFT JOIN sales p ON p.id = c.sale_id WHERE c.sale_id IS NOT NULL AND p.id IS NULL;
+SELECT 'sale_not_paid_repair_0173.sale_item_id->sale_items' AS relation, COUNT(*) AS orphan_count FROM sale_not_paid_repair_0173 c LEFT JOIN sale_items p ON p.id = c.sale_item_id WHERE c.sale_item_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sale_not_paid_stock_recovery_members.history_id->action_history' AS relation, COUNT(*) AS orphan_count FROM sale_not_paid_stock_recovery_members c LEFT JOIN action_history p ON p.id = c.history_id WHERE c.history_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sale_not_paid_stock_recovery_members.operation_id->sale_not_paid_stock_recovery_receipts' AS relation, COUNT(*) AS orphan_count FROM sale_not_paid_stock_recovery_members c LEFT JOIN sale_not_paid_stock_recovery_receipts p ON p.id = c.operation_id WHERE c.operation_id IS NOT NULL AND p.id IS NULL;
 SELECT 'sale_not_paid_stock_recovery_members.sale_id->sales' AS relation, COUNT(*) AS orphan_count FROM sale_not_paid_stock_recovery_members c LEFT JOIN sales p ON p.id = c.sale_id WHERE c.sale_id IS NOT NULL AND p.id IS NULL;
