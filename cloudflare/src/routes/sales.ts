@@ -3163,9 +3163,6 @@ app.post('/:id/items', async (c) => {
   // discounts and the tender stay frozen; TAX follows the lines when the sale
   // was taxed at the rate `settings.tax_rate` holds today (S4-30 DECISION 4a).
   // See lib/saleLineAddition.ts and lib/saleAmendments.ts. ----
-  const existingSubtotalRow = await db
-    .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
-    .get<{ subtotal: number }>([saleId])
   const subtotalBeforeUsd = Number(sale.money_precision_version)===0?Number(sale.subtotal_usd):sumMoney4(precisionBasket.lines.map(line => Number(line.total_usd)))
   const subtotalAfterUsd = sumMoney4([subtotalBeforeUsd,plan.addedSubtotalUsd])
   const taxPlan = planAmendedTax({
@@ -3843,9 +3840,6 @@ app.post('/:id/amendments', async (c) => {
   }else precisionBasket=await capturePrecisionBasket(db,sale as Record<string,unknown>)
   const stockSkipped = saleSkipsStock(sale)
   const note = String(body.notes || '').trim().slice(0, 500) || null
-  const subtotalRow = await db
-    .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
-    .get<{ subtotal: number }>([saleId])
   const subtotalBeforeUsd = Number((sale as Record<string,unknown>).money_precision_version)===0?Number((sale as Record<string,unknown>).subtotal_usd):precisionBasket ? sumMoney4(precisionBasket.lines.map(line => Number(line.total_usd))) : Number((sale as unknown as Record<string, unknown>).subtotal_usd)
   const totalBeforeUsd = Number(sale.total_usd) || 0
   const lineMoneyRowsBefore = await db.prepare(`
@@ -5504,7 +5498,6 @@ app.get('/stats', async (c) => {
   if (!canReadSales(user)) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const db = getDb(c.env)
 
   const where: string[] = ['1=1']
   const params: Record<string, unknown> = {}
