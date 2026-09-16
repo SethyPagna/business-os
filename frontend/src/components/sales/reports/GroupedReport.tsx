@@ -248,7 +248,14 @@ export default function GroupedReport(p: ReportViewProps) {
     const totalQty = productRows.reduce((s, r) => s + r.qty, 0)
     const allProfit = productRows.length > 0 && productRows.every((r) => typeof r.profit_usd === 'number')
     const totalProfit = allProfit ? round2(productRows.reduce((s, r) => s + num(r.profit_usd), 0)) : null
-    const columns: Array<ReportColumn<ProductRow>> = [
+    // Memoized like every other view's column list (PeriodReport,
+    // SalesListReport): an unmemoized array here defeated ReportTable's own
+    // memoization of columnDefs/visibleColumns/sortedRows downstream, so an
+    // unrelated re-render (opening a row's fold, an unrelated ReportsHub
+    // state change) re-sorted every row for nothing. `by` is fixed for the
+    // lifetime of this mounted instance (ReportsHub keys GroupedReport by
+    // view.id), so this conditional branch always runs the same hooks.
+    const columns = useMemo<Array<ReportColumn<ProductRow>>>(() => [
       { key: 'product_name', label: tr('rpt_product', 'Product'), primary: true, value: (r) => r.product_name || '—' },
       { key: 'sale_count', label: tr('sales', 'Sales'), kind: 'int', value: (r) => r.sale_count },
       { key: 'qty', label: tr('quantity', 'Quantity'), kind: 'qty', value: (r) => r.qty },
@@ -261,7 +268,7 @@ export default function GroupedReport(p: ReportViewProps) {
           ]
         : []),
       { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.line_sales_usd, totalLine), defaultVisible: false },
-    ]
+    ], [tr, allProfit, totalLine]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance (see comment above)
     const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), productRows)
     const open = productRows.find((r) => String(r.product_id ?? r.product_name) === openKey) || null
     return (
@@ -324,7 +331,8 @@ export default function GroupedReport(p: ReportViewProps) {
   }
 
   if (by === 'courier') {
-    const columns: Array<ReportColumn<CourierRow>> = [
+    // Memoized for the same reason as the products branch above.
+    const columns = useMemo<Array<ReportColumn<CourierRow>>>(() => [
       { key: 'name', label: tr('rpt_courier', 'Courier'), primary: true, value: (r) => r.delivery_contact_name || tr('unknown', 'Unknown') },
       { key: 'deliveries', label: tr('rpt_deliveries', 'Deliveries'), kind: 'int', value: (r) => r.deliveries },
       { key: 'charged_fee_usd', label: tr('rpt_delivery_charged', 'Delivery fee charged'), kind: 'money', value: (r) => r.charged_fee_usd },
@@ -333,7 +341,7 @@ export default function GroupedReport(p: ReportViewProps) {
       { key: 'actual_cost_count', label: tr('rpt_costed_deliveries', 'Costed deliveries'), kind: 'int', value: (r) => r.actual_cost_count, defaultVisible: false },
       { key: 'margin_usd', label: tr('rpt_delivery_margin', 'Delivery profit'), kind: 'money', value: (r) => r.margin_usd, emphasis: true },
       { key: 'last_delivery_at', label: tr('rpt_last_delivery', 'Last delivery'), kind: 'datetime', value: (r) => r.last_delivery_at, defaultVisible: false },
-    ]
+    ], [tr]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance
     const sum = (k: keyof CourierRow) => round2(courierRows.reduce((s, r) => s + num(r[k]), 0))
     const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), courierRows)
     return (
@@ -369,7 +377,8 @@ export default function GroupedReport(p: ReportViewProps) {
   const totals = sumTotals(groupRows)
   const showProfit = groupRows.length > 0 && groupRows.every((r) => hasProfit(r))
   const totalBasis = basisValue(totals, options.basis)
-  const columns: Array<ReportColumn<GroupRow>> = [
+  // Memoized for the same reason as the products/couriers branches above.
+  const columns = useMemo<Array<ReportColumn<GroupRow>>>(() => [
     { key: 'label', label: tr(view.labelKey, view.fallback), primary: true, value: (r) => groupRowLabel(by, r, tr), sortDir: 'asc' },
     { key: 'tx_count', label: tr('sales', 'Sales'), kind: 'int', value: (r) => r.tx_count },
     { key: 'gross_sales_usd', label: tr('rpt_total_sales', 'Total sales'), kind: 'money', value: (r) => r.gross_sales_usd + r.item_discount_usd, defaultVisible: options.basis === 'gross', emphasis: options.basis === 'gross' },
@@ -387,7 +396,7 @@ export default function GroupedReport(p: ReportViewProps) {
           { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r: GroupRow) => pct(num(r.profit_usd), basisValue(r, options.basis)) } as ReportColumn<GroupRow>,
         ]
       : []),
-  ]
+  ], [tr, view.labelKey, view.fallback, by, options.basis, totalBasis, showProfit]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance
   const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), groupRows)
   const open = groupRows.find((r) => r.key === openKey) || null
   const drill = open ? groupDrill(by, open) : null
