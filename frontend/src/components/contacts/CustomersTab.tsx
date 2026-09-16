@@ -2,7 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { consumeLongPressClick, createLongPressHandlers } from '../../utils/longPress.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
-import type { ComponentProps, ReactNode } from 'react'
+import type { ComponentProps } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
@@ -34,9 +34,7 @@ import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/histor
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import {
-  CONTACT_OPTION_LIMIT,
   buildContactOptionSummary,
-  createContactOption,
   getPrimaryContactOption,
   parseStoredContactOptions,
   serializeContactOptions as serializeStoredContactOptions,

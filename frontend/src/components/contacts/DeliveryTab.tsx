@@ -1,5 +1,5 @@
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { consumeLongPressClick, createLongPressHandlers } from '../../utils/longPress.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
@@ -466,34 +466,6 @@ function DeliveryForm({ contact, onSave, onUseExisting, onClose, t }: DeliveryFo
         />
       ) : null}
     </Modal>
-  )
-}
-
-// ?€?€ OptionsDisplay (detail view) ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-function OptionsDisplay({ raw }: { raw: unknown }) {
-  const opts = parseDeliveryOptions(raw)
-  if (!opts.length) return <span className="text-gray-400">-</span>
-  return (
-    <div className="space-y-1.5">
-      {opts.map((o, i) => (
-        <div key={i} className="text-xs bg-gray-50 dark:bg-zinc-800 rounded-lg p-2 space-y-0.5">
-          {o.label && <div className="font-semibold text-gray-700 dark:text-gray-200">{o.label}</div>}
-          {o.name  && <div className="text-gray-600 dark:text-gray-300">Name: {o.name}</div>}
-          {o.phone && <div className="text-gray-500">Phone: {o.phone}</div>}
-          {o.area  && <div className="text-gray-500">Zone: {o.area}</div>}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function OptionsBadge({ raw }: { raw: unknown }) {
-  const count = parseDeliveryOptions(raw).length
-  if (!count) return null
-  return (
-    <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-      {count}
-    </span>
   )
 }
 
