@@ -122,11 +122,6 @@ export const DEFAULT_COMPRESS_OPTIONS: Required<Pick<CompressImageOptions, 'maxD
   targetBytes: 820 * 1024,
 }
 
-/** Hard ceiling for any stored image, in bytes. Nothing may exceed this. */
-export const IMAGE_SIZE_CEILING_BYTES = DEFAULT_COMPRESS_OPTIONS.maxBytes
-/** Desired floor. Landing below this is acceptable ONLY when the source cannot produce more. */
-export const IMAGE_SIZE_FLOOR_BYTES = DEFAULT_COMPRESS_OPTIONS.targetBytes
-
 const COMPRESSIBLE_MIME = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/avif', 'image/heic', 'image/heif'])
 
 function supportsCanvasCompression(): boolean {
