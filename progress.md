@@ -12828,3 +12828,2214 @@ gates, i18n **5,711 keys / 589 source files**, the 1,123-module production
 build, full 151-migration local chain, trigger-body LF checks, native Wrangler
 atomic rollback/ledger scenarios, exact-commit independent verification, and
 the authenticated production POS smoke above.
+
+---
+
+## Archived main-branch entries (Sep 4–9 2026 Codex status commits, merged into main on 2026-09-16; kept verbatim so nothing is lost — the sections above are authoritative)
+
+## Canonical sale-item currency snapshots fix LIVE — September 9
+
+Commit **46b49b6ebb18** is live at 100% in Worker version **7297259f-2bde-4e89-b526-a80f8fd0129f**, deployed from the clean pushed release branch `codex/sale-create-trigger-release-20260909` at approximately 2026-09-09T14:50Z. This fix closes the active negative-KHR-discount path: POS discounts rebase KHR from the USD base and exchange rate, while POST `/sales` canonicalizes applied/base/manual USD+KHR snapshots at the server boundary and preserves a KHR-only fallback for legacy lines. A stale line with $21 base, $18 applied, zero client KHR and a 4,000 rate now persists 84,000 base KHR, 72,000 applied KHR and 12,000 manual KHR.
+
+Verification passed from five independent angles: POS regression (stale/empty KHR and clear-discount), real Hono/D1 atomic sale creation, settlement/amendment/add-line parity, import/financial non-negative suites, and frontend typecheck/i18n/build plus the complete **346/346** utility chain. No production data was modified. Historical negative-profit/discount rows remain an evidence-ledger issue under F52 and were not clamped or rewritten.
+
+## Returns/Expenses Shift row follow-up LIVE — September 9
+
+Commit **a0d505e880d7** is live at 100% in Worker version **e34ed89d-0d32-4388-9399-2b1448998f43**, deployment **c4d29853-4a55-451c-9dda-68623b22f4f9**, created 2026-09-09T14:13:15.172134Z. This clean, pushed fix follows the report-title checkpoint and is recorded in `outputs/takeover-20260909/returns-expenses-shift-deploy.log`.
+
+Returns and Expenses now use the same compact Shift launcher as Sales inside the shared stats/action row. Expenses no longer renders a separate current-shift block; Shift, Export, history/labels and the primary action share the responsive row. Focused StatsStrip and shift-management tests, frontend typecheck, bilingual verification, production build and Worker typecheck pass.
+
+## Report title picker, filter controls and anonymous customer UI checkpoint LIVE — September 9
+
+Commit **26111791dae8ea5f729a0bb20f62f15bbb39d0f6** is live at 100% in Worker version **e8129c9e-0cfe-4036-bfba-ea4a69b33c7e**, deployment **c16bb4b5-bd98-4890-834c-572f4730f13b**, created 2026-09-09T13:54:59.183176Z. It was deployed from the clean, pushed release branch `codex/sale-create-trigger-release-20260909`; provenance is recorded in `outputs/takeover-20260909/report-title-customer-ui-deploy.log`.
+
+The active report view picker now sits beside the report title (for example, `Overview (all)`), so changing the title control switches the report itself. Branch, status and payment filters remain in the single Filters menu; report filter controls and the desktop filter trigger use the consistent 40px treatment. Returns and Expenses keep their export action in the stats/action row rather than a separate top row. Sales status changes no longer show the redundant “Choose destination status” heading.
+
+Sale customer editing now searches the permission-scoped picker by phone or name. Marked anonymous General/Walk-in customers render as Walk-in without leaking a legacy General name or membership into Sales, detail or receipt views. Focused tests and the complete frontend utility gate passed: **346/346**; frontend typecheck, bilingual verification, production build and Worker typecheck also pass.
+
+Physical iOS/PWA and desktop device-toolbar validation, broader compact date/button layout, public/customer-portal polish, historical-sales evidence, duplicate execution, and uncertain-network transfer retry remain open in the ledger. Offline work remains paused by owner request.
+
+## Transfer retry-durability checkpoint LIVE — September 9
+
+Commit **be7bdaedc6c609ee339e33b9717771265bcf20f0** is live at 100% in Worker version **4eda51e2-52c6-4157-ad86-1efa8d5f1af1**, deployed from a clean release tree at approximately 2026-09-09T13:03Z. D1 migration **0148_transfer_operation_receipts.sql** is applied remotely as migration row **144** (verified at 2026-09-09 12:58:47 UTC). The deployment log and migration query are recorded in `outputs/takeover-20260909/transfer-idempotency-deploy.log` and `outputs/takeover-20260909/transfer-idempotency-migration.log`.
+
+Transfer requests now require a stable client request ID, bind it to a canonical request digest, and return the original receipt on a retry without moving stock twice. Reusing an ID with different transfer data returns a conflict. Single, bulk, and inventory transfer routes write the receipt and a typed transfer-intent audit in the same atomic batch before branch stock, lot stock, movements, and transfer history. The browser transport supplies the ID for online and queued branch transfers. Focused route tests pass: canonical branch route **12**, inventory transfer **8**; Worker typecheck, frontend typecheck, i18n verification and production build pass. Shop ↔ Warehouse canonical guards, lot identity and Warehouse sale prohibition remain enforced.
+
+The remaining transfer check is physical/uncertain-network verification from a real iOS PWA session; no stock mutation was run for this checkpoint. Broad compact UI, public storefront/customer portal, historical-sales evidence and duplicate cleanup remain tracked below. Offline work remains paused by owner request.
+
+## Owner correction: Not Paid must deduct stock — September 9 (superseded by the deployed correction below)
+
+The owner explicitly confirmed that awaiting_payment/Not Paid deducts stock. This was the pre-apply investigation state; it is superseded by the deployed correction recorded in “Not Paid stock rule correction and timeout release deployed — September 9” below. Do not treat the old 4aba954f census as current production state.
+
+Backend canonical status behavior and guarded historical correction are under separate read-only investigations before implementation. Settings12s timeout/error translation remains active; root transport WIP is preserved in outputs/takeover-20260909/write-timeout-transport-root-wip.patch and not deployed. Edit Customer alignment added as F79; timeout/i18n F78. All earlier tasks retained; no new production writes yet.
+
+## Sales recovery Records checkpoint live — September 9
+
+Commit 4aba954f53d52cdff762b6a9b8413735139c547c is live at 100%; Worker 175c9438-c783-45d9-b92e-e9962ca61580, deployment 5bddcc0a-af46-40a8-b2dc-966f4114e769 at 08:07:58 UTC. Independent Records review passed, affected tests/types/i18n/build and clean dry-run/deploy passed. Fix-scoped commits pushed; no migration.
+
+Normal Admin UI refreshed to the new version. Saved receipt 16954 shows its SK-II product. Records now displays the recovery event, product lines 0 to 1, and released allocation/no stock deduction in both English and Khmer. Variant confirmation input IDs are unique. All four incident receipts are repaired; all-history header-only product-snapshot census is zero. No subsequent real checkout was observed, so actual phone checkout remains unverified. All 108 owner tasks remain in the current register; full transfer durability, cleanup and later UI/public work remain open, offline paused.
+
+## All four incident receipts recovered — September 9
+
+Fourth recovery operation bfaebe1d-4435-4d5e-820d-b6ed439dc475 applied at 07:55:37 UTC after backup. Receipt 16954 now has its SK-II product, quantity 1, total 185 and proven cost 170; released allocation, no stock movement, product/Shop/batch stock remains 7/5/5. Normal Sales list and saved detail both show the product. Previous three repairs remain intact. Four recovery histories and audits exist; guard is empty. All-history census finds zero remaining header-only sales with nonempty product snapshots.
+
+Live remains 92ddfc6d; Records display checkpoint is under independent review. No new real checkout since the hotfix was observed, so phone checkout is not claimed validated. All 108 tasks remain tracked; broader transfer durability and deferred UI/public work remain open; offline is paused.
+
+## Fourth-receipt recovery checkpoint live — September 9
+
+Commit 92ddfc6d0e39978f5410fa79fae1bace59ae8842 is live at 100%; Worker e0e58fc7-4035-4e08-a5b9-03976df1a4a2, deployment ffb756a5-802a-445c-a4c6-4422d1758375 at 07:34:33 UTC. Independent review and affected package gates passed. No additional migration.
+
+Receipt 16954 fresh preview confirmed one missing line, total 185 unchanged, released allocation without stock deduction. Exact digest 3b5a3504bace192ba3d5968f89e860fced6e2f00e89a16c29e112ba7103990fe was submitted once through normal Admin UI; backup/apply is pending. First three repairs remain verified. Records recovery labels are under independent review. All 108 tasks retained; UI/public work deferred and offline paused.
+
+## Three incident receipts recovered and verified — September 9
+
+Normal AdminUI operationc2620a5d-84d8-4eca-a117-94a7368acef8 applied07:19:33UTC fromfreshdigestb828c09a8ef1ef0288a93e0ba9aade8676c635f21d49f6e74ce4c183bb550278 afterbackup. D1postread:16951oneitem36units342, product4208stock252/Shop60/batch60, exactlyone-36movement;16952oneitem299bothdeliveryfields2.7;16953twoitems40. Threehistories/threeaudits, guardempty. UIlistand16951detailsnowshowproductsandquantities.
+
+16954stillunrepaired, v2candidate9c343f75underreview withpre-salecost170/0proved. NewrecoveryauditcurrentlyrendersgenericEarlier sale change/Historical details unavailable; underlyingauditcomplete, projectorfixqueued. Livefbdunchanged, all108tasksretained.
+
+## V1 recovery checkpoint LIVE; reviewed operation submitted — September 9
+
+Livefbd48c7c446deff6982d1244c38496602e31c87e at100%, Workera0a92169-f3d4-4507-91e9-165cb0f783f6, deploymentd1081b35-f183-4cb1-b2b1-96ed76c104f1 at2026-09-09T07:12:45.179367Z. Independentbackendreview, focusedbackend/UItests, types/i18n/build, clean dryrun/deploypassed; fix-scopedcommitspushed. Migration145appliedandrecorded07:11:24; all businesscounts/sumsunchanged,3newrecoverytablesempty. Pre-migrationbookmark00001463-00000062-000050e1-7f7e44292617d873a224be2d0df92cea retained.
+
+Normal AdminUI freshpreview3receiptsreviewedand exactdigest b828c09a8ef1ef0288a93e0ba9aade8676c635f21d49f6e74ce4c183bb550278 submittedonce. Backup/applyinflight; do notclaimreceipt repair complete yet. Fourth16954cost170/0provenfromprivatelypreserved00:00backup, separatev2underimplementation. All108tasksretained; no offline/UI/publicscopeexpansion.
+
+## Transfer stock-limit checkpoint LIVE — September 9
+
+Commitc758ce821502efae48cbb3169ed865336e6614dc live100%; Worker2fc4d161-c58e-43a2-9ade-ad4e75f7df2e; deployment9d127f28-548f-42f9-88cb-b67110d87624 at2026-09-09T07:05:14.669227Z. Independent final review PASS, focused transfer/role/reason tests, frontend types/i18n/build, clean dry-run/deploy; pushedfix-scopedcommits. No migration. Cap respects selectedlot andaggregate; nonfinite inputfailsclosed. AdminUI sourceShop/destinationWarehouse selectable, inspectedwithoutstockmutation.
+
+Fourreceipt recovery stillpending. V1three-proven-receipt helper/UI integrated for releasegates;145notapplied. Fourthcost nowproven170/0 frompreserved midnightbackup and image-update revisionevidence; v2separateimplementation. All108tasksretained; UI/public/iconslater,offlinepaused.
+
+## Incident census widened to four pre-hotfix receipts — September 9
+
+Fresh all-history query found exactly4 header-only sales with nonempty product snapshots:16951,16952,16953,16954. The fourth receipt20260909-130228 was created06:02:29UTC before the06:23 hotfix; awaiting payment185, product5370qty1. No new sales observed sincehotfix during this read. Fixed-target recovery expanded toall4, not yet applied. e408 remainslive.
+
+## Atomic sale creation checkpoint LIVE — September 9
+
+Commit e408f31f18744f2de578719de06e97adb1ccd032 is live at100%; Worker e84cc3f1-748e-4123-bca9-0ccf4f7c326a, deployment87599618-10b9-451e-9463-b568db574b5f at2026-09-09T06:36:04.593034Z. Exact tree matches independently reviewed4285586e. Native D1/atomic failure injection, customer, lot and damaged-stock suites, Worker typecheck, clean frontend build, dry-run/deploy and pushed fix-scoped commits all verified. No migration.
+
+Header, items, allocations, stock, movements and creation audit now commit together; recovered saves also invalidate caches. Historical16951/16952/16953 remain unrepaired.16952 amendments prove fee edit caused itemless total299→0; preserve newer actual/fee2.7 during repair. Fixed-target receipt-backed recovery helper/migration0145 being prepared, not applied.
+
+Transfer diagnosis: canonical branches healthy; Admin has30 successful Shop→Warehouse transfers. Employee inventory/branches absent, consistent with existing scope. Eight products show lot availability above aggregate; a bounded UI max fix is assigned. All108 owner requests retained. UI/public/portal/icons later; offline paused; duplicate execution held.
+
+## Urgent checkout hotfix LIVE — September 9
+
+Commit38d27e0371244888530c29568436d564cb81263e is live at100%. Worker2838266c-c0a2-43f8-83e0-441817ed121a; deployment17fabcb5-43fa-4f5d-ae5a-ea0511e7a294 at2026-09-09T06:23:43.4937Z. Independent review, native Miniflare D1 regression4/4, customer guard regression, Worker typecheck, final clean frontend build and clean dry-run/deploy passed. Branch pushed; no migration.
+
+Confirmed cause: sale INSERT trigger makes D1 report2 changed rows; old exact-one check persisted header then rejected before items/stock. New saves accept successful trigger-inclusive metadata; incomplete idempotency replay now returns409 rather than false success. Printed receipt snapshot can contain products while saved preview lacks lines. Both General and named customers were affected.
+
+Atomic header/items/stock/audit phase f5b2adc7 is under independent review. Existing affected sales16951/16952/16953 are not yet repaired; cost evidence and16952 subsequent edits require reconciliation. All108 owner tasks retained. Priority: urgent sales/POS and transfer. UI/mobile icons/public/customer portal deferred to later checkpoint; offline paused and duplicate execution held.
+
+## Urgent zero-item sale incident; owner priorities updated — September 9
+
+Live remains 882136b7. New F77: receipt 20260909-101913 (sale16951) has header342 but0 persisted items and no matching sale movements/audit; creation snapshot proves36 units of product4208 at9.50. Two more September9 headers16952/16953 also have0items; preserve subsequent edits (16952 total is now0). Atomic creation/idempotency prevention assigned; no recovery mutation performed. Product merges are held.
+
+Video IMG_2870.MP4 and screenshots show iOS clipping and viewport/input zoom issues. Mobile fit review and transfer recovery run independently. Owner now prioritizes sale integrity, transfer, mobile UI/icons and compact public/customer portal. Offline F55 paused explicitly. All108 requests and9 review observations retained.
+
+Ledger correction: production branch IDs are1 Warehouse and2 Shop. Earlier cleanup stock totals were conserved but their prose labels were reversed:11962 was Warehouse,12418 Shop. No stock or branch mapping was changed by this correction.
+
+## Merge performance checkpoint LIVE — September 9
+
+Live commit 882136b7d85177851b413e151a5baef6eefdff4f is independently verified at 100% traffic. Worker c222f571-ba39-4a18-bfd2-7204b9db229e; deployment 44843e46-db32-476d-849c-958d82e91799 at 2026-09-09T03:25:24.619084Z. Clean dry run and deployment exited 0; all triggers succeeded. Fix-scoped commits pushed. No migration.
+
+The merge now uses IDs returned by its atomic database batch, removing two serial discovery reads while retaining the legacy fallback, fingerprint checks, audit and Undo. Backend certification: 319 unchanged suites passed in the full sweep, then both corrected test contracts passed at the final head; focused partial/Undo and Worker typecheck passed. Frontend runtime is unchanged from the 341-test checkpoint; final-head build and independent security review passed.
+
+Three checkpoints deployed this continuation: General repair, interrupted-merge recovery and the database-read optimization. General 24969 is repaired; real customer 22305 is unchanged. 174 product merges are recorded in total, with 166 new merges verified this run. Last fresh preview: 1,774 eligible remaining and 19 quarantined groups. No new product merge is in flight. Physical phone/PWA validation and remaining cleanup are not complete.
+
+All 107 owner requests plus 9 nonblocking review observations remain tracked in Current-status.md and task-status.json. Financial census is complete; cause analysis and guarded correction remain open. Next: cleanup, transfer, UI, public site, offline.
+
+## Merge recovery checkpoint LIVE — September 9
+
+LIVEf4a10cb2710586dbe1cd8ad2244752b17d335e73 at100%; Workerb9ce0c89-8f50-4d54-826b-e458b0d95922, deployment93fee51e-7b60-4b65-8e8f-213977d6372b at2026-09-09T02:35:40.241998Z. Clean dry-run/deploy exit0;341 frontend tests/types/i18n/build and independent finalhead review PASS. No migration; fix-scoped commits pushed.
+
+Interrupted merges now retain bilingual recovery, invalidate stale previews and require a validated fresh scan before retry. Live preview verified1793groups/1812candidates,19quarantined,1774eligible; no further merge started.174total recorded merges includes166 verified thisrun. Batchmetadata speed fix is underimplementation; fullcatalogcursor optimization deferred.
+
+General24969 repair remains applied; real22305 protected. Freshcontactcensus confirms2name-only supplierclusters (10/6members), customertriple withmembershipconflicts and2stalephonekeys; no blindmerge. Financialcensus found30negativeKHRdiscountcells needing paired-snapshot review; signedchange may bevalid,100productlossgroups needcauseevidence withoutclamping. All107requests retained. Cleanup continues, then transfer, UI, public site, offline.
+
+## General cleanup checkpoint LIVE and repair applied — September 9
+
+LIVE522a780d76b54917cc84db9949e67a49d42ee1da at100%; Worker ef096149-20c5-4de1-ab95-ea0c91828959, deployment38e8108a-3070-4576-93f6-fbbed48bcac9 at2026-09-09T01:29:57.100127Z. Clean build/dry-run/deploy exit0, independent review PASS, frontend340/340 and backend321/321 passing evidence. No migration. Fix-scoped commits pushed.
+
+Normal Admin UI backed up and marked confirmed General24969 at2026-09-09 01:52:30. Its5 sales/1 return retained; real22305 remainsmarker0 with152 sales and unchanged version. History535 and audit4466; UI reports verified completion.
+
+Product cleanup saved166 additional merges (174 including8 earlier). All166 new histories undoable,166 snapshots applied with0 pending fingerprints,166 audits; Shop11962/Warehouse12418 stock unchanged. The run stopped; exact network cause unknown. Stale preview/transient error bug confirmed and recovery fix under review; remaining cleanup not complete. All107 requests retained. Next: cleanup, transfer, UI, public site, offline. Employee phone smoke, wide Records0143 and transfer0139 remain open.
+
+## Cleanup resumed after verified Employee checkpoint — September 9
+
+Production remains1791eaf7 at100%; Employee role rollout is verified. Cleanup is now active. Recovered the clean General repair helper at124eb57a (commits21d98ffe and124eb57a), its eight prior SQLite groups and saved handoff. Independent helper review and the current protected admin route/UI plan are running before implementation. Stale helper claims released after preserving the checkpoint; no source discarded.
+
+A separate read-only agent is mapping the remaining product/contact/supplier duplicate cleanup evidence. Only eight earlier production product merges are recorded as completed. General24969 remains unmarked,22305 remainsnormal; no cleanup mutation has occurred. All107 requests and the two review observations remain tracked. Transfer, UI, public-site and offline work follow cleanup.
+
+## Employee/return checkpoint LIVE — September 9
+
+LIVE 1791eaf701d767da7109012b3ecd7e89f514c2f1, Worker 936417e0-911a-472e-b666-f7bf6321d7e5, deployment fc7eae67-ecdb-4464-9b76-d25762a4434b, independently verified at 100% traffic on 2026-09-08T23:17:48.005495Z. CLI exit 0; all domains, cron and queue triggers succeeded. Frontend339/339 and backend319/319 have passing evidence; types, translations, build, clean dry-run and independent final-head review pass. Migration0142 applied; recorded business totals unchanged and new receipt/guard tables empty before rollout.
+
+Existing Employee role3 saved through the Admin UI at 2026-09-08T23:45:07.129Z, audit4299: all11 original keys preserved and exactly five false Sales/Returns bulk/import/export keys added. Both user overrides unchanged. Production-role data and deployed permission-kernel checks pass; an already-open Employee phone session was not tested.
+
+All107 owner requests plus two deferred P3 review observations remain tracked. Next priority is cleanup, including the confirmed General24969 repair; it is still unmarked. Transfers, UI, public-site and offline follow in that order.0139 and0143 are not deployed. Wide Records cascades and all preserved WIP remain open.
+
+## Employee/return candidate independently verified — September 9
+
+Clean candidate 9719e6b6 has independent review PASS, 339/339 frontend tests, both typechecks, translation check, production build and Worker dry-run PASS. The broad backend sweep is still running. Production remains 21d22fc; migration 0142 and the existing Employee role update have not been applied.
+
+All 107 owner requests are retained. Two nonblocking P3 review observations are also tracked: unsafe-method request-origin enforcement and early return-body size admission. They do not replace or delay the owner’s priority order: employee/return, cleanup, transfer, UI, public site, offline.
+
+## Employee role-save guard verified — September 9
+
+Employee/return remains the first priority. Atomic role-save commit 99910afb passed independent review and all seven concurrency/audit tests. It awaits integration with the Returns/Contacts bulk-action repairs and final release gates. No production role permissions have been changed.
+
+Production remains 21d22fc. All 107 tasks remain tracked. General customer repair is queued under cleanup; transfer, UI, public-site and offline work follow in the owner’s requested order. The next checkpoint includes only the verified employee/return scope and migration 0142.
+
+## Employee rollout scope review — September 9
+
+Priority1 remains Employee/return. Read-only production role preflight: exactEmployeeid3, codeemployee, is_system0, two assignedusers, existingSales/POS/Returnstrue andContactsreview. No role edit saved. Rootauthorizes exactexistingrole despitecustomflag, preservingunrelatedvalues/useroverrides.
+
+Expanded review found Returns bulk/export inherited fromreturns:true and Contacts long-press/import controls stillvisible. F75 is therefore not release-complete: explicitReturnsbulk/export andContactsselection gates/defaults are underrepair. Existingfinancial-history gates remainverified. RolePUT atomicversion/auditfix assignedseparately. Live21d22fc unchanged; all107tasks retained andlaterpriorityworkpaused.
+
+## Owner execution priority — September 9
+
+Execute in this explicit order: 1. Employee/return changes. 2. Cleanup. 3. Transfer. 4. UI. 5. Public-site work. 6. Offline. Keep all107 tasks; later work must not delay priority1. Current live21d22fc unchanged. Next release owner preparing certified F75/F76 plus0142 fromc8d onto live21d; role rollout remains separately guarded.
+
+Transfer F73 WIP and wide Records0143 are paused with durable handoffs and claims released. General24969 helper belongs cleanup and is paused at a safe checkpoint. No work is discarded and no paused candidate is deployable.
+
+## Core Records and compact Sales checkpoint LIVE — September 9
+
+LIVE21d22fcdefb5eb52c679dfbdec455f45b0fe1fb8, Worker429f6982-7c3a-4407-8b52-4e0ca192e3f0, deployment962caa59-4686-45c7-b466-e59ad1801a16, independently100% at2026-09-08T20:57:00.318305Z. CLIexit0 with all domain/cron/queue triggers.334 frontend tests; all315 backend scripts have passing evidence including bundled-Node reruns of two native process crashes. Independent exact-head review, types/i18n/build/dry-run pass.0140/0141 applied; sales/products/customers/stock/lot/history/audit counts unchanged. General24969 and22305 remain marker0; no production identity repair performed.
+
+U21/U22/U23 and expanded core Records are live. Following foundationc8d combines verified F75/F76 and0142 return-create but remains undeployed; existing Employee role rollout pending. General repair helper, wide Records0143 and transfer reliability0139 are in progress. Remaining offline/cleanup/census/UI/portal tasks retained. Current-status.md and task-status.json cover all107 requests.
+
+## All-task status and final frontend gates — September 9
+
+All107 requests retained. Production4495bccf remains independently verified100%. Next candidate21d22fc contains core expanded Records, General marker code and U21/U22/U23. Independent runtime review passed; backend313/315 sweep plus both bundled-Node native reruns pass; two frontend stale assertions repaired after332/334 run, final full rerun/package gates active. No new deployment.
+
+F75/F76e6a80e16 and return-createbc114757 are independently certified and in separate future integration. Employee role data rollout, General24969 cache-aware repair, wide reference cascades, offline recovery, transfer receipts, production cleanup, historical census and remaining UI/portal items remain open. Current-status.md and task-status.json now reflect these states, corrected stale browser blockers, old F46-pending text and deployment metadata.
+
+## All-task status refresh — September 9
+
+All107 requests retained. Production4495bccf remains independently verified100%. Next candidate21d22fc contains core expanded Records, General marker code and U21/U22/U23. Independent runtime review passed; backend313/315 sweep plus both bundled-Node native reruns pass; two frontend stale assertions repaired after332/334 run, final full rerun/package gates active. No new deployment.
+
+F75/F76e6a80e16 and return-createbc114757 are independently certified and in separate future integration. Employee role data rollout, General24969 cache-aware repair, wide reference cascades, offline recovery, transfer receipts, production cleanup, historical census and remaining UI/portal items remain open. Current-status.md and task-status.json now reflect these states, corrected stale browser blockers, old F46-pending text and deployment metadata.
+
+## Compact Sales metadata and Paid method labels — September 9
+
+Added U22: compact mobile sale ID/time/branch/cashier metadata and inline customer phone/delivery without Driver label. U23: show methods beside Paid and remove redundant receipt payment-method row, retaining split-payment and numeric semantics. Implementation assigned with list/detail ownership coordination. U21 invoice presentation af735110 implemented and independently reviewing, not live. F74/F72 reconciled candidate ba66e521 is entering focused/package gates; return-create and wide cascades remain explicitly incomplete. Employee permissions/Contacts privacy implementation continues separately. Live4495bccf unchanged; all107 requests retained.
+
+## Verified F65 merge/remove checkpoint — September 9
+
+LIVE 4495bccfb097a55f034976795f2030bfc3628152 (runtime source a5702d49), Worker623d8cbe-6b8f-42b7-8205-b0769ff00aee, deploymentfad40d57-39b6-4291-8375-75725b288722, independently verified100% at2026-09-08T18:43:16.626919Z. CLIexit0, all domains/cron/queues succeeded.0138 applied; product/stock/lot/history/audit pre/post counts identical, new receipt tables empty. Recovery bookmark saved.330 frontend tests and all309 backend scripts have passing evidence; two accumulated Windows native process crashes passed isolated reruns. Independent exact-source review and real Worker/browser passed.
+
+No production duplicate merge/removal was executed. F75 employee individual permissions and F76 Contacts privacy are under implementation, not live. U21 invoice design implementation active. F74 stable frontend932293ba independentlyPASS; detailed Records release and remaining return-create/cascade coverage still open. All105 tasks retained.
+
+## Employee single-record access and invoice design — September 9
+
+Added F75: employee individual Sales/POS actions including cancellation/status changes, paired with complete audit capture; multi-select/bulk/import/export disabled by default. F76: restrict employee Contacts invoice/purchase detail visibility, especially suppliers, while retaining Sales customer search. U21: align invoice layout with Sales report presentation without changing calculations. Read-only security and design traces assigned before permission edits; retain owner/admin access and explicit restrictions. All 105 tasks retained. Detailed Records is still under verification, so expanded permissions must not precede verified capture.
+
+## Owner confirmed shared General identity — September 9
+
+Owner confirmed customer 24969 is the shared walk-in/General customer. Mark only this identity through a guarded repair after paired anonymous-marker code is verified and deployed. Preserve its transaction history and historical membership value while disabling membership use. Customer 22305 remains unmarked. No production identity mutation has occurred. Unknown-phone inline creation remains a separate unanswered question.
+
+Live remains 2767fbf4. F65 frontend 330/330 passes at ab08474f; backend harness repairs/full rerun and final-head review remain before deployment. All 102 tasks retained.
+
+## Active release gates and identity clarification — September 9
+
+Live2767fbf4 remains verified100%;102 tasks retained. F65 combined global merge/remove UI and backend are reconciled; delete-permission gate0318fbae passes, missing0138 durable backup/reset integration under repair before real-backend browser/finalrelease gates. F74 reader/typedENKM UI/settlement/bulk and directreturneditbd0ab24e independentlyPASS. Stablefrontend request lifecycle/history/revision repairs still active; return-create event race reverted, directcustomer and contacts/settings rewrite coverage notyetcomplete.0140unapplied.
+
+F72 legacyGeneral uses explicitmarker0141 (schemaonly) rather than name guessing. Rootcurrentproduction read shows22305 hasphoneandaddress, so preserveitunmarked;24969 noPhone/address/noportalaccount awaitsuseridentityclarification before marking. No historicalcustomer data changed. General inlinecreation path alsoawaitsdecision. Current-status.md/task-status.json remainfullregister; previousheadingshistorical.
+
+## Live General-customer follow-through — September 9
+
+F72 is not fully complete: read-only live smoke after2767fbf4 found receipt20260908-162823 (sale16947) linked to legacy contact24969, namegeneral/emptyphone/membershipLC-04971. Edit treats it as a real customer because it has a positive ID. UI and rootD1 read agree; no writes performed. Canonical anonymous-identity trace and bounded repair assigned before claiming General rule satisfied. Existing-null-General and regular actualcontact tests passed but did not cover this legacyplaceholder. All102tasks retained; live remains2767fbf4.
+
+## Latest verified customer Edit deployment — September 8,15:30 UTC
+
+LIVE **2767fbf43559771b94ba00246c3381cd8c509196**, Worker c2fb44d7-2d69-472d-afca-c9bc756efead, deployment 12f8b894-e9e2-4b80-acfd-4c172e836a7a, independently verified100% at2026-09-08T15:30:57.912313Z. Eight fix-scoped F72 commits: single Edit action, anonymous General, phone-first existing contact assignment, exact sale+linked-return attribution, fresh server-version guarded profile edits. Unknown-phone inline creation remains pending; current fallback directs to Contacts. Frontend328/328, focusedF72/mobile/backendbulk, both typechecks/i18n/build/dry-run passed. CLIexit0 with all customdomains/cron/queues; no migration. PreviousF46/F57/F71 and0136/0137 retained.
+
+All102 tasks retained. F74 typedfrontend/reader/schema and receipt-backed settlement/sale bulk/returnbulk writers independently verified; directstatus/returnedit stableID pairing, all-action coverage and final integration remain. NoF74 deployed. F65 backendgroupmerge/directremove conditionalPASS; globalv2 conflict UI/transport underimplementation,0138notdeployed. PeerstorefrontP08 remains separatelyverified/notintegrated. Signed-in browser loaded priorcheckpoint and LibraryKiko search returned two matching files; no production records were changed by this smoke check. Earlierstatuses arehistorical.
+
+## Latest verified merge and Library deployment — September 8,14:31 UTC
+
+LIVE **bfd16f0db4c51dbad2a3de483dd77bb3452842ac**, Worker c04650e8-5549-44fc-acf1-3891eec56158, deployment d7938cd4-00d4-4098-8b05-43cab5feba71, independently verified100% at2026-09-08T14:31:14.412835Z. F46 retry/finalizer/Undo availability and F57/F71 Library usage protection/indexed queries/debounced abortable search are live. Frontend327/327, backend299/299, both typechecks, i18n, production build and dry-run passed. Migrations0136/0137 applied; product/stock/lot/history/audit pre/post assertions identical. Recovery bookmark saved privately; full SQL export unsupported with FTS5.
+
+Wrangler reported a malformed custom-domain trigger response after deployment. Independent API confirms both domains still enabled on business-os production and expected cron; version is100%. Do not report CLI exit0 or HTTP smoke pass: shellrequests403 and browser runtime endpoint blocked.
+
+All102 tasks retained. F72 Edit-only1ee95554 independently verified, next release preparation. F74 full Records remains active: frontend Khmer/formatting and schema/backup review repairs precede writer rollout. F65 grouped phase2c86fa1a0 independently passes stock/lot/RFID races and UndoRedoResume; Direct Remove phase3 remains in progress. Coordinated storefront P08 is verified in peer task, not yet integrated. Earlier statuses are historical.
+
+## Independent customer/Records review and merge-Library release gates — September 8
+
+All102 tasks retained, including coordinated storefront P08. F72 Edit-only candidate1ee95554 independently passes fresh server-version concurrency protection and one-sale linking; unknown-phone creation decision remains pending. F74 detailed Records is active: independent review found missing creation caller inputs and unsafe time-based event deduplication; repairs and durable event lifecycle plan are required before release. F65 grouped apply review found keeper-stock and RFID race data loss; d111a124 repair awaits re-review, Direct Remove approval/persistence remains in progress.
+
+F46/F57/F71 release candidate bfd16f0d passes327 frontend suites,299 backend scripts, both typechecks and i18n. Build/deployment preparation continues; only migrations0136/0137 pending remotely. Current verified production remains6dbb8a8e at100%; no new checkpoint has been deployed in this update. Peer storefront candidate is separately verified, not yet integrated. Earlier status sections are historical.
+
+## Owner customer Edit scope and detailed Sales Records — September 8
+
+F72 latest scope supersedes prior replacement menu: one Edit customer entry only; remove separate New/Replace/Remove actions. General remains anonymous with no phone/membership profile; assigning a real contact uses phone first, name secondary. Phone-not-found creation path clarification pending; dependent create work withheld. Existing617135b7 candidate must be revised before release. No production customer data changed.
+
+F74 added: action-specific Records capture and complete English/Khmer labels for driver, actual delivery cost/fee, product add/remove/replace/quantity, General/customer/membership, status and payment changes. Show changed relevant information with expandable before/after. Avoid raw variable fallback and vague Not recorded; do not fabricate unavailable historical snapshots. All101 requests retained. F71 final mounted re-review passed atc4d8295e and remains undeployed. Live stays6dbb8a8e.
+
+## Latest verified deployment — September 8, 12:18 UTC
+
+LIVE **6dbb8a8e3029e220cbec650051a4d7c37a6da2c9**, Worker da46fd62-a109-463a-92bd-f23452502dda, deployment 584770c0-6b58-4e21-91e5-68339f7b81c0, independently verified100% at 2026-09-08T12:18:10.815529Z. Nine fix-scoped commits deploy U16–U19: compact Reports filters/view/default USD/tabs/summary removal and persistent Reset; plain Sales badges and compact print column; Branch product action menu replacing column; TRF-only references. Frontend325/325 at321542b7 plus focused Reset regression/types/final build at6dbb8a8e, i18n, dry-run and independent reviews passed. No backend source or migration changes; previous F69/F70 remain live. Browser-emulated Reports320/375/390/1280 and keyboard passed; no physical-iOS guarantee.
+
+All100 tasks preserved. F71 final sync correction c4d8295e awaits independent mounted re-review. F72 is assigned to Sol repair after independent type/permission/i18n/retry findings; not live. F73 transfer receipt plan active. F46/F57 local gates/native reversal proof passed, migrations0136/0137 remain local. F65 apply/history work continues; direct Remove unfinished. Earlier dated status paragraphs below are historical.
+
+## Latest verified deployment — September 8, 11:47 UTC
+
+LIVE **2a6f1a40b4e9a34462f5a58d3582b68e5685d4c0**, Worker dc748caf-9828-44ac-af38-6b48143b3f22, deployment aa931baf-bd3d-461f-8fb3-ededfa677461, independently verified100% at 2026-09-08T11:47:13.995546Z. Four fix-scoped commits,21 paths; frontend325/325, both typechecks/i18n/build/dry-run and focused transfer/search tests passed. No migration. Shop↔Warehouse transfers now allowed under exact canonical identity, permissions, reason and stock/lot guards; reverse Undo/Redo passes; explicit-lot race rolls back. Warehouse sales remain prohibited. Indexed Products sibling lookup preserves tested semantics and improves local measured query work. No full production search latency claim.
+
+All100 tasks retained. F73 discovered transfer receipt/audit retry gap is separate follow-up. F71 Library mounted review still requires sync-event consumption repair. F72 independent review blocked prior candidate on type, permissions, duplicate/retry and i18n; Sol repair owner assigned. U16 reports, U17 Sales status/column, U18 Branch product actions and U19 TRF suffix candidates prepared, not live. U20 broader device layout coverage remains open. F46 native independent11-case Apply/Undo/Redo passed; F57 combined package checks passed, both still awaiting separate release/migrations0136/0137. F65 phased apply/history implementation continues; direct Remove remains open. Earlier dated statuses below are history.
+
+## New transfer, search and responsive requests — September 8
+
+Production remains923bc28b at100%. All99 requests retained; new F69–F72 and U16–U20 added. Transfer Shop→Warehouse and Products/Library search speed take priority. Reports, Sales, Branch and transfer-reference layout changes are separately tracked. Customer replacement context is being clarified before changing identity/history. Screenshot is evidence of layout, not a separate instruction source.
+
+| F69 | Shop to Warehouse transfer fails; both canonical transfer directions must work with branch/lot identity and permissions | Priority investigation | Architect tracing transfer UI/API/stock/lot authority before bounded fix. |
+| F70 | Products name/barcode search is too slow | Priority investigation | Measure client request flow and backend query/count/index cost; preserve leading-zero and family semantics. |
+| F71 | Library image search is too slow | Priority investigation | Measure search, usage joins, count and asset lookup; preserve permissions and deletion protection. |
+| F72 | Customer title actions: replace wrong customer versus edit current customer | Clarification pending; code trace next | Confirm sale association versus Contacts profile before destructive identity changes; preserve unrelated transactions. |
+| U16 | Reports compact filters and navigation per owner screenshot | Design trace active | Remove repeated summary prose; move report view into filters; white high-contrast filter/smaller Show; simplify Previous period/estimated profit/basis controls without financial changes; default USD without App Setting option; contain Excel filters; horizontal Payment methods/Couriers/By reason/Expenses by type buttons below filters. |
+| U17 | Sales plain-text colored statuses and compact print/actions column | Queued | Remove icons from Not Paid/Awaiting Delivery/return statuses; use readable colored highlights; print near three-dot menu, release unused column width. |
+| U18 | Branch product section has redundant actions column | Trace assigned | Remove unused actions column while retaining necessary reachable actions. |
+| U19 | Transfer reference should show only TRF identifier | Trace assigned | Remove redundant Transfer suffix from reference column. |
+| U20 | Responsive layout in iOS PWA and desktop device-toolbar emulation | Open; verify affected surfaces | Verify viewport containment, side margins, compact filters and horizontal tabs at phone and desktop widths; distinguish app defects from browser tooling problems. |
+
+## Latest verified deployment — September 8, 10:03 UTC
+
+LIVE **923bc28b498d3bdadadd225d756f606c4518a0a3**, Worker 2a28d01e-cb7a-49cf-bdcd-641cdc8aaf64, deployment 4a7bb7bb-439d-4b40-a920-7337a5f4ccd6, independently verified 100% at 2026-09-08T10:03:56.287246Z. Eight fix-scoped commits, 26 paths, frontend 325/325, both typechecks, i18n, affected lot/permission/atomic tests, build and dry run passed. No migration. F66 per-product close/minimize/draft lifecycle, F67 Add/Remove/Set quantity wording and signed review, F61 inactive-positive-lot coverage are deployed. Original branch-picker screenshot follow-through remains open.
+
+All 90 requests retained. Integration a28868b0 includes current live patches plus independently reviewed F46 native finalizer and F57 query fixes; combined gates running, migrations 0136/0137 still local. F65 preview-only stage is not complete: initial security review disagreed with functional certification on expiry/retention and detail fanout. Owner repair 1f371c03 awaits exact re-review. Corrected phase2 design conditionally approved for implementation with atomic per-member receipts, original-group economics, bounded responses and reversible partial history. Direct Remove remains required. All other historical evidence, production merge, offline, camera, UI and external-fact tasks remain in the full register.
+
+## Latest verified deployment — September 8, 09:02 UTC
+
+LIVE **a5a4162ff8312114c6137fb354c759fde2b5b9d7**, Worker 67453e45-af2b-40f1-819f-737abe88e8e4, deployment eb5c2f2e-35af-4735-974d-81aa86a171a2, independently verified 100% at 2026-09-08T09:02:12.05078Z. Fifteen fix-scoped commits, 28 approved paths, frontend 323/323 and backend 293/293, types/i18n/build and 303-asset dry run passed. No migration. Includes explicit edited Khmer, F61 atomic Shop remainder guards, F62 clean save/close lifecycle, F63 atomic revoked-device reset and approval cap, F64 existing-product scanner, first F66 Fast Stock X/minus fix and F68 confirmation containment. This supersedes earlier candidate/live statements below.
+
+All 90 requests remain tracked in outputs/khmer-review-20260908/Current-status.md and task-status.json. Next: verified per-product F66/F67 through caeaa314; F61 inactive-known-lot coverage 02d9e786 under review; F46 native finalizer 0410c7f5 now completes 11-case Resume but independent Undo/Redo remains; F57 native query repair verified, not deployed; migrations 0136/0137 remain local. F65 backend/frontend N-member review lanes active, apply/direct Remove still required. F55 runtime, remaining production duplicate merge beyond 8 cases, historical/contact evidence gaps, hardware camera validation, broader PWA/UI coverage, financial census and external business/image exceptions remain open. Telegram rotation is owner-reported; do not repeat it merely from an old pending note.
+
+## Checkpoint candidate and stock follow-ups — September 8, 08:30 UTC
+
+Live remains73fd7dc1 at100%. Candidate b21c2e7a in bos-release-owner-functional-20260908 includes only explicit owner Khmer edits, F61 guarded Shop remainder, F62 save-clean-before-close, F63 atomic device reset/cap, F64 existing-product scanner, first F66 FastStock X/minus separation and F68 shared confirmation containment. No migrations. Focused tests and independent security/browser reviews passed; full package gates/build running. F61 inactive-positive-lot display overstatement is safe-server-rejected and has a follow-up. F46 preview is repaired but actual apply remains history_pending after case0, so release is held. F57 native query fix independently verified; F65 multi-row merge/remove contract refinement and F55 offline implementation remain separate.
+
+All90 tasks are retained in Current-status.md/task-status.json. New owner wording overrides prior X/minimize exceptions.
+
+| ID | Request | Current state | Next step |
+| --- | --- | --- | --- |
+| F66 | Stock actions: X closes with Discard / Back / Minimize; minus preserves directly | Fast Stock fix in checkpoint; per-product candidate under review | First fix23bc009e replayed01f41313; second136c8464 under independent review. |
+| F67 | Add/Remove/Set quantity labels, signed delta, before/after and reason | Implementation pending in stock UI lane | Add+n; Remove-n; Set target total with before/after and signed difference. |
+| F68 | iOS PWA responsive containment with left/right margins across pages/dialogs | Shared confirmation repair in checkpoint; wider sweep open | 562d6608 verified actual browser320/375/390/1280 and nested dialogs. |
+
+## Owner follow-ups — September 8, returned workbook and urgent functional fixes
+
+Live remains 73fd7dc1 at 100%. Returned workbook compared by key: 15 edited review entries, 11 source updates and four already-equal no-ops; four whitespace-only fragment edits retain required separators. Source commit5832b05 integrated48acb624, not deployed. Full untouched Proposed Khmer column approval question remains pending; explicit edits proceed.
+
+P07: owner reports Telegram bot token already rotated. Independent dated rotation evidence was not located; do not re-rotate solely because the old ledger says pending. P05: owner reports most images are first-party photography; remaining provenance review concerns exceptions, not a blanket claim that shop photographs lack rights.
+
+F57 native D1 independently reproduced a compound-SELECT failure in the indexed candidate. Root owns bounded native-query repair. F55 corrected plan completed, runtime implementation remains pending. F46 native fingerprint repair continues separately.
+
+| ID | Request | Current state | Next step |
+| --- | --- | --- | --- |
+| F61 | Stock-positive POS product blocked by received-date picker; branch choices missing | Candidate under independent review | Verify legitimate Shop unlotted remainder, recorded lot identity, atomic quantity guards and explicit branch choices. |
+| F62 | Save still leads to Back/Discard prompt | Implementing | Clean-before-close lifecycle across product hosts and completed sessions; retain unsaved outer session after item queueing. |
+| F63 | Reset revoked device history so it can request approval again | Candidate awaiting security review | Admin reset must return unknown; next sign-in requires normal approval and cannot restore sessions. |
+| F64 | Existing-product add/create session needs barcode scanner | Candidate awaiting integrated checks | Reuse scanner, leading-zero search and same-session duplicate guard. |
+| F65 | Conflict Merge/Remove actions and owner-defined field rules | Contract review; implementation pending | Direct Remove independent of barcode match; Merge transfers stock, distinct nonzero mean cost, max prices, explicit barcode/category/brand/unit choices, supplier/date history retained. |
+
+## Khmer review workbook completed — September 8
+
+F60 is complete as a review deliverable: outputs/khmer-review-20260908/Business-OS-Khmer-review.xlsx contains 259 effective-string proposals, all 6145 source entries (5573 effective keys; 572 overridden copies), and all 82 task statuses. Rendered Khmer was visually checked; exported XLSX ZIP/XML, row counts, tables, frozen headers, decision validation, placeholder parity and exactly two Owner approved decisions passed. The remaining 257 proposals are not applied. F59 exact terms are already live in 73fd7dc1 at 100%, with no migration. Current-status.md provides the full readable status snapshot. F46 real D1 repair, F57 independent indexed-query review and F55 corrected offline plan remain open; no new release is claimed here.
+
+
+## Latest verified deployment — September 8, 06:10 UTC
+
+**LIVE73fd7dc15801b3f1bc6eb5c40cd115a6b76edf1f**, Worker a38779e9-32c9-4a12-8aab-e9b8e380cf05, deployment942bfcae-e9f5-4ea7-9426-12c713494295, independently confirmed100% at2026-09-08T06:10:49.221845Z. Five fix-scoped commits deploy compact mobile Sales U13–U15, F56 expense version/zero-row guards, F58 frontend loading boundaries, and F59 exact Khmer labels ថ្លៃដឹកដើម / ថ្លៃដឹកដើមថ្មី. Frontend322/322, types/i18n, expense races6/6 and fees10/10, build, emitted chunk checks and303-asset dry-run passed. No schema migration; F46/F57/0136/0137 are excluded.
+
+Open: F46 actual D1 preview compound-SELECT repair plus repeated real browser/combined gates; F57 indexed promotion-image lookup final independent review; F55 offline recovery plan correction/implementation; production duplicate merge after8cases (browser access pending); ambiguous historical/contact evidence; phone-camera validation; financial census; browser warning attribution; remaining U01–U12 UI/minimize work; legal/business/image-rights facts and bot token rotation. F60 Excel review of6145 source entries,5573 effective keys and572 overridden copies is in final formatting/validation. Broader Khmer proposals have not been applied.
+
+
+## Active checkpoint and Khmer review — September 8, 06:04 UTC
+
+Production remains4e576eaa at100%. Small checkpoint73fd7dc1 is in final build/dry-run verification after322/322 frontend files passed. It contains ONLY compact mobile Sales U13–U15, F56 expense concurrency/zero-row handling, F58 loading boundaries and F59 the two approved Khmer labels (ថ្លៃដឹកដើម; ថ្លៃដឹកដើមថ្មី). No schema migration. Five fix-scoped commits preserve provenance.
+
+F46 is held: actual local Worker/browser preview of11 cases failed with D1 compound-SELECT limit before writes. Expense_version_guard owns a bounded query repair; the repeated real D1/browser check remains required. Broader integration gate initially288/294 backend and319/324frontend; five stale backend harnesses and three frontend source contracts repaired, native subtotal rerun3/3passed, two new received-date labels corrected to existing dictated vocabulary. This is not a passing combined release claim. Migration0136 remains local only.
+
+F57 canonical promotion-image references and Library display have a final indexed-query candidate513b57f1, migration0137 local only, independent review pending. F55 offline recovery plan requires signed server scope, safe generation/version separation, correct reset boundaries and legacy reconciliation before implementation. No created_at heuristic or blind replay is approved.
+
+F60 Excel wording review covers6145 source leaf strings:5573 effective UI keys and572 overridden source copies. Four original batches plus705 nested entries are being consolidated. Broader wording is proposal-only; only the two F59 terms are approved for code changes. The workbook will include all82 task entries and current states. Full review/status artifacts are in outputs/khmer-review-20260908.
+
+
+## Latest verified deployment — September 8, 04:57 UTC
+
+**LIVE: 4e576eaad290d158f4a388ef1652729bb103e720**, Worker c7b6a310-efb9-4106-b8cc-f0a56edf03ae, deployment4adb0e4d-6423-4abb-9d1f-a78f66115362, independently confirmed100% at2026-09-08T04:57:24.418726Z. F53 permission-refresh coalescing/session generation, F54 shared HTTP cache ownership/server precedence, and U05 positive profit headline colors are deployed. Frontend320/320, both types, i18n5384/566sources,1103-module build and300-asset dry-run passed. Backend source/migrations exactly match previous livec2eb; no migration. Nine individual commits preserve author/date/messages; source cutoff599f2b70 differs only by the eight approved private evidence exclusions.
+
+Still active: F46 backend budget verification and combined browser/gates/migration0136 release; U13–U15 mobile Sales independent review; F55 offline quarantine/fencing plan review; F56 expense optimistic-write guard; F57 promotion image-reference protection with frontend usage display; F58 isolated loading-boundary candidate integration. Production duplicate merge remains eight completed cases and browser access pending. Legacy evidence cleanup, hardware camera validation, financial census, warning attribution, remaining UI/minimize, legal/business/image-rights facts and token rotation remain open as detailed below. Earlier deployment/current paragraphs are historical; this entry supersedes them.
+
+
+## Current continuation — September 8, 04:46 UTC
+
+Live remains c2eb9d57 / Worker3931ea55 at100%. The next small release from source599f2b70 includes F53 permission refresh, F54 HTTP cache ownership and U05 positive profit styling. Final frontend320/320, types, i18n, build and local dry-run passed; release provenance/parity is being finalized before deployment. Backend source and migrations are unchanged from live.
+
+F46 remains separate: backend d7775ee8 is frozen for independent heavy-manifest budget verification; migration0136 and backup/reset integration are locally reviewed only. Frontend ed7f7ff9 has one reproduced remaining blocker: changing a visible stock choice after confirmation can disagree with the frozen Resume request. Sales is fixing and Media independently reviewing it. U13–U15 mobile Sales candidate cf3d4d23 is in independent review.
+
+F55 read-only reproduction and plan are complete: origin-scoped offline quarantine, server generation fencing, privacy-filtered recovery and foreground/service-worker replay ownership need implementation. No production loss or backend authorization bypass was demonstrated. Do not erase or blindly replay pending work across accounts/runtime generations.
+
+New source-confirmed candidates from the separately authorized overhaul review: F56 expense edit checks updated_at before an UPDATE that does not include that version in its predicate; F57 library image-usage/delete guard omits promotions.image_path. Neither is claimed repaired or observed in production. F58 isolated frontend chunk-policy candidate57854fd6 reduces measured asset loading and removes static cycles; exact independent certification/integration remains pending, excluded from the small release.
+
+Other open work remains in the owner register: remaining production duplicate merge (eight completed cases; browser access pending), legacy identity and ambiguous historical evidence cleanup, actual phone-camera testing, F52 historical financial census, browser warning attribution, remaining UI/minimize items, business/market/image-rights facts and Telegram token rotation. Existing completed releases and data-repair evidence are preserved.
+
+
+## Freshness follow-up candidate — September 8
+
+Production remains c2eb9d57/Worker3931ea55,100%. Next isolated release includes F53 permission-refresh coalescing and session-generation isolation (independent review PASS); F54 HTTP invalidation/in-flight ownership and authoritative server-cache precedence (69 focused checks plus512 independent timing schedules); U05 selected positive profit headline stays green in both themes. Source b2299a2b is integrated, not deployed. Existing callbacks that write persistent queryCache/IndexedDB and already-started caller results are outside F54's proven shared-HTTP-cache boundary. No backend source or migration changes in this follow-up.
+
+F46 is NOT in this candidate. Schema/backup/reset are independently approved locally; backend/UI parity still active. Required corrections: actionable-only manifest with blocked cases shown separately, exact same-request manual resume, changed-value markers after re-preview, complete image counts/primary indication. No incomplete F46 runtime or migration0136 is deployed. U13–U15 mobile Sales layouts are active separately.
+
+> **Latest deployed release: c2eb9d57** — independently confirmed Worker 3931ea55-3f66-459e-823d-3339979bd441,100% at 2026-09-08T03:37:12.286363Z. Explicit contact/POS duplicate decisions, disabled Warehouse/stale-lot picker safeguards, canonical branch CRUD/review/undo/reset/transfer guards, general/dated stock-import authority, corrected export breakdowns, bilingual branch setup guidance and matching resolved-error cleanup are live. Backend291/291, frontend319/319, both types, i18n, build and dry-run passed; real local browser and independent reviews passed. No migration. GitHub preserves31 individual commits.
+> **Remaining active:** F46 combined selected-conflict workflow (backend/frontend/backup/reset, migration0136 local only); F53 permission event coalescing; remaining production duplicate merge beyond eight cases (browser access pending); unresolved historical/contact identity evidence and deferred UI. Earlier status paragraphs below are history, not current deployment claims.
+
+
+## Functional follow-through — September 8, next checkpoint active
+
+Production remains dfb8932e (Worker6abf6ffa,100%). Approved canonical branch administration/reset/transfers, guarded general/dated imports and export breakdown corrections are integrated through2766eb52. The provisional public candidate is dbdb24b7, pending final follow-ups; it is NOT deployed.
+
+Exact-c09 Contacts/POS browser passed explicit duplicate decisions, blocked shared-phone/membership creation and disabled Warehouse. It found a stale resolved-error banner; fix1f9dd5a4 is in independent review and exact-browser validation. Full combined frontend317/318 passed; sole stale export-source assertion fixed and focused rerun passed. Frozen combined backend285/291 effective pass; six known stale test/fixture/loader failures, receipt already fixed and remaining five under correction. Do not label the combined gate green until these checks pass.
+
+F46 runtime implementation is now ACTIVE (supersedes earlier not-started notes): dedicated backend owner conflict_batch_impl, frontend owner sales_impl, backup/reset owner media_stock_impl, isolated from this checkpoint. Migration0136 is reserved locally for durable selected-conflict run/case receipts; it has NOT been applied to production. Combined preview/one confirmation, scoped per-pair stock choices, atomic audit/undo and truthful continuation remain acceptance requirements.
+
+Production product merge remains eight cases and browser access pending. Functional fixes still precede deferred UI. Original dirty workspace and historical evidence remain preserved.
+
+> **Latest deployed release: dfb8932e** — 100% traffic at 2026-09-07T23:41:06.03494Z, independently confirmed as Worker 6abf6ffa-5909-4651-8580-c17764d68d6d. Contact-import explicit targets, atomic new-customer signup, checkout and sales-import product/branch/lot guards are live. Backend 285/285, frontend 316/316, types, i18n, build and dry-run passed. No migration. Earlier releases remain included. Older dated notes below are history, not current production status.
+> **Active:** F47A explicit Contacts/POS choices and Warehouse/stale-lot picker guards integrated at c09c707a, final gates/browser pending. Canonical branch administration/reset/transfer and other stock-import boundaries remain under repair/review. Export breakdown edge cases remain under repair. F46 combined conflict workflow is now active in isolated backend/frontend/backup lanes; deferred UI remains queued. Production duplicate merge remains eight completed cases; browser connector access is pending.
+
+> **Latest deployed release: 4afe9825** — 100% traffic at 2026-09-07T22:50:59.969774Z, independently confirmed as Worker 4671e0fd-7fc7-40ca-bf58-a576e7802b04. This adds the requested Telegram shift arrangement, Closing cash wording, truthful per-currency differences, four Sales form-label fixes, and removal of hidden supplier creation. No migration. The earlier Contacts/merge release and completed historical branch repair remain included.
+> **Still active:** explicit contact choices and import ambiguity; canonical branch and lot checks across every writer; production duplicate merge (eight cases completed, browser follow-through blocked by connector timeout); remaining UI queue and evidence-dependent cleanup. The owner task register below lists every request and state.
+
+> **LATEST RELEASE LIVE: da5c8b02**, Worker **a49ba8c2-1192-4700-b626-564a72e54938**, 100% at **2026-09-07T20:27:13.051562Z**, independently confirmed by Cloudflare. Migration0135 added only two indexes; all59 undo snapshots,233 action rows and existing schema objects preserved. Contacts canonical guards/phone formatting/membership/atomic merge and bounded product merge corrections deployed. Final frozen browser20-case continuation+undo passed. Live browser follow-through/production merge pending because connector timed out.
+> **Intentional rules:** exactly Shop/Warehouse; only Shop sells; Warehouse stays visible disabled in sale pickers; product+branch+lot identity is mandatory; Not Paid counts in canonical revenue; daily shift prompt and report-only cash registration remain. New F51 enforcement gaps are assigned, not claimed fixed. Negative revenue is guarded; genuine negative profit remains auditable rather than concealed.
+
+> **Current status — September 8, 02:40 local:** Application production remains **560bfbcb**. Historical Shop metadata repair is complete (4,255 fees, 22 sales, 56 sale lines; 44 groups, 46 audits, zero violations). Next Contacts/merge release candidate **da5c8b02** has independent correctness approval; migration 0135 and final rollout remain. Backend full sweep 283/283 passed; frontend 313/314 initially, remaining moved-code assertion corrected and focused rerun passed.
+> **New owner requests tracked:** F47 cross-contact duplicate prompts/guards; F48 Closing cash / សាច់ប្រាក់បិទវេន, Not Paid wording and missing difference across Telegram/reports/history; F49 deprecated browser API attribution; F50 unassociated form labels. Parallel agents assigned. These do not delay the already-reviewed release.
+
+> **Historical branch repair COMPLETE September 7, 17:39 UTC:** 4,255 expense rows, 22 sales and 56 sale lines corrected to Shop. Independent full postcheck: 44 applied groups, 46 exact audits, zero violations. Ambiguous driver/sale-link facts remain unresolved. Current app remains560bfbcb; next Contacts/merge release active.
+
+> **Stability release LIVE September 7, 15:36 UTC:** 560bfbcb, Worker03aa25a5-d482-45e9-9459-727b92ccf06c at100%. F41 polling/retry, F44 Not Paid wording and F45 WebSocket reconnect/auth cleanup shipped. Live EN/KM Sales and matching assets verified. Contacts, deeper merge and historical data correction remain active.
+
+> **Contacts additions F42–F46 and mobile U13–U15 recorded:** supplier/customer duplicates, phone formatting, membership lineage, Not Paid / ប្រាក់ជំពាក់ wording override, WebSocket attribution and bulk conflict review. Functional work continues; current states are in the owner register.
+
+> **Third functional release LIVE September 7, 13:14:39 UTC:** 02eecbe3833b,
+> Worker c3a21a40-544b-4678-bacd-bc50441df8a1 at 100%. F33/F36/F37/F38 shipped.
+> Migration 0134 preserved all 15,106 Sales rows and prior schema objects.
+> Live smoke/duplicate merge follow. Historical correction has not committed;
+> both failed attempts left all 4,333 target rows unchanged with zero audit rows.
+
+> **Delivery addition deployed September7 11:10:18 UTC:** c475e637d197,
+> Worker d5aeeb82-cb0d-4047-8abf-8e96ba17f602 at100%. Migration0133 preserved
+> all prior amendments. Live Sales/Records verified after network recovery.
+> F33 creation snapshots, F36 retry visibility and F37 large duplicate preview
+> remain active; historical metadata repair and production merge remain pending.
+
+> **September 7 first functional release deployed:** 821efc94ce7a,
+> Worker 498efadb-f833-471d-a8b7-b4326950bd26 at 100%, 09:54:13 UTC.
+> Migrations 0128–0132 applied and preservation checks pass. 306 frontend files,
+> 274 backend suites, types/i18n/build and frozen browser smoke pass.
+> Live Sales bootstrap timeout is being diagnosed (F36); delivery addition F32
+> follows separately. Historical correction/duplicate merge remain pending.
+> Current task register below supersedes older undeployed takeover statements.
+
+
+---
+
+> **Current owner task register:** [all requests, additions, owners and release states](docs/fleet/2026-09-07-owner-task-register.md).
+> September 7 latest addition F32: allow driver, delivery fee and actual cost to
+> be added to an existing sale that originally had no delivery. Sales owns the
+> fix with independent review. Functional deployment first; UI remains queued.
+
+> **September 7 owner additions:** next verified checkpoint deployment is now
+> requested; new GitHub commits must each describe an individual fix. Added
+> same-session duplicate warnings, sale-row eye removal, branch versus total
+> stock-alert refresh/parity, draft-preserving minimize controls, permissions,
+> and consistent chart/stat revenue definitions. Sol implementation lanes and a
+> Terra scope review are assigned in the isolated takeover ledger. The existing
+> API-token wrapper now authenticates successfully; final certification remains
+> pending. No production mutation or deployment has occurred in this takeover.
+
+> **Active September 7 Codex takeover:** The user requested completion and
+> reconciliation of all Claude lanes plus sales, stock, products, reports,
+> mobile UI and public-portal policies. Work is isolated in sibling
+> `bos-codex-takeover-20260907`, branch `codex/takeover-20260907`, based on
+> `ea9f0d1b` (contains previous Codex integration and Claude checkpoint 2).
+> Original dirty main and every Claude worktree remain preserved. Initial
+> audits are in `outputs/takeover-20260907/`; the active implementation ledger
+> is the sibling's `docs/fleet/2026-09-07-codex-takeover.md`. Seven bounded
+> implementation lanes are running; no combined candidate is certified yet.
+> Cloudflare API confirms Worker `6c3f9a35-9b38-4f00-bc7d-bae28bb0ef76` at
+> 100% traffic. Read-only production census covered 15,096 sales and 36,340
+> lines; exact anomalies are preserved for evidence-based correction. No
+> deployment, remote migration or production mutation by this takeover.
+
+> **Active Sep 7 wave — camera scanner + public portal:** Read-only swarm evidence
+> is reconciled for the latest request. N55 owns camera permission lifecycle and
+> scanner completion: the browser/OS permission cannot be forced to “Always allow”,
+> but the app must request only from an explicit action, avoid retry loops when
+> permission is denied, stop every track/decoder, and close after any successful
+> camera/ZXing/photo/manual detection. N56 owns the attached public pager visual;
+> the image is ambiguous about removing versus moving the `50` selector, so the
+> provisional implementation keeps the bounded selector and places it before
+> Back, then page indicator, then Next; owner clarification remains recorded.
+> N57 owns public scroll ownership: the public route must set/clear its document
+> marker, use the document as the only vertical page scroller, and retain only
+> intentional horizontal rails and modal/filter scroll areas. Live-site checks
+> confirmed current production can scroll the document on About, Products, FAQ,
+> and Beauty Assistant, but source/deployment lineage differs. The scanner, pager,
+> and public scroll fixes are now integrated and locally certified; no production
+> action, commit/push, or deployment has been authorized.
+
+> **Sep 7 wave status:** COMPLETE locally. Scanner completion is guarded against
+> duplicate and stale callbacks, all successful detection paths close the modal,
+> and denied permission does not retry. The public pager is provisionally ordered
+> `[page size] [Back] [page / total] [Next]` on both public catalog paths, and
+> standalone/legacy public routes now establish and restore the document-scroll
+> marker. The attached image still needs one owner decision: keep the `50`
+> selector moved before Back, or remove that selector entirely. Focused tests,
+> the full frontend utility chain, frontend typecheck/i18n/build, Cloudflare
+> typecheck, 162 Cloudflare script tests, and local/live browser probes passed.
+
+> **Active Codex continuation — September 5:** Production-usability work is in
+> sibling `business-os-v1-integration`, tracked in
+> `docs/fleet/2026-09-05-production-usability.md`. Bounded Sol lanes own product
+> draft reliability, shift lifecycle/ownership and floating UI, compact navigation,
+> date presets and sale-picker layering. Main coordinates/verifies; do not deploy
+> dirty main. This new round is not deployed. September 4 shift 1 remains open;
+> exact historical closing time is unresolved. Existing expenses already total
+> 150000 KHR; do not duplicate them or reapply historical sales settlement.
+
+> **Codex release checkpoint — September 5, 2026:** Production is verified at
+> `0ffc4bfcc4fd`, Worker `be276770-359d-4002-9d26-560fa5656d33`, 100% traffic,
+> from the deployed-lineage integration, not this dirty main checkout. Membership
+> defaults/authenticated lookup/eight-character new IDs, grouped bulk history/undo,
+> and bounded security/restore fixes are deployed. Migrations 0120–0122 applied.
+> Historical settlement: 89 sales fully paid/Completed, 100 receivables settled,
+> two source lines restored; zero unexplained settlement stock residual. The
+> earlier nine-unit stock incident remains unchanged, per the no-stock instruction.
+> All 200 frontend files, full chain, 209 backend suites and builds/typechecks pass.
+> Control-plane release is confirmed; Cloudflare browser challenges blocked final
+> live API/build probes. Authenticated flows and Telegram receipt remain uncertified.
+> Full provenance/recovery and Part 607 are in sibling `business-os-v1-integration`:
+> `docs/fleet/2026-09-05-membership-bulk-release.md` and
+> `docs/fleet/2026-09-05-settlement-result.md`.
+> This checkpoint was added without staging or rewriting existing shared changes.
+
+
+---
+
+---
+
+## 📌 PICK-UP HERE — fleet handoff, Sep 4 2026 ~12:10 UTC (session `business-os-v1-ee`)
+
+*Written for the ~14 live sessions. Everything below is **reference to re-verify**, not fact. The one-line
+version: **production is live and healthy from a branch that is not `main`, one real reporting fix is stranded
+and unshipped, two items can only be closed by the owner, and the docs are forked in two places.***
+
+### LIVE RIGHT NOW
+
+| | |
+|---|---|
+| wrangler version | **`798d9e19-76d0-4909-8db3-6a7a4ad43ad7`** *(a wrangler version UUID, **not** a git sha)* |
+| commit | **`c7ef7264`** |
+| branch | **`rc/ee-integrate-2026-09-04`** — **NOT `main`** |
+| migrations | **`0117_membership_points_reset.sql` applied 11:37:39 UTC**; highest `d1_migrations` row id **116** |
+| pre-migration D1 bookmark | `00001284-00000006-000050dc-0b6029c1fc8415749dafe6e6a03422be` (11:36:20 UTC) |
+| previous live version | `a164d260-49ae-4bec-b372-eb73bce58850`, then `8480241e-…` (ledger #6) |
+
+**Never write a wrangler version as eight hex characters.** A truncated version UUID and a short git sha have
+the identical surface form, `git cat-file` fails the same way on both, and the failure *looks* like a missing
+commit. Three sessions ran `cat-file` on `8480241e` today and read the failure as a bad reference. Write the
+full UUID or prefix it with `version`. (Diagnosis: `business-os-v1-ba`.)
+
+**`main` DOES NOT CONTAIN THE DEPLOYED CODE.** `git merge-base --is-ancestor c7ef7264 origin/main` → **no**.
+Deploying `main` rolls back the entire S4 batch. Verified from four sessions independently.
+
+**Nothing was rolled back by this deploy.** `e83ee73f` (the 07:57 deploy, ledger #6) **is** contained in
+`c7ef7264` — confirmed independently by `ee`, `7c`, `ba`, `4a`, `db`. The 07:57 block earlier in this section is
+a correct historical record; it is not competing with this one. Ledger row **#7** below is this deploy.
+
+⚠️ The live probes in the table above were run at deploy time and **could not be re-run when this block was
+written** — `curl` to both hosts returned `000` (no connection) from this session. Treat `/health` as unconfirmed
+since 11:40 UTC and re-probe before relying on it.
+
+### ⛔ ONLY THE OWNER CAN CLOSE THESE TWO — details in the `s4/pay-notes-points-delivery-88` block below
+
+1. **Membership points are ON with every balance at zero, and accrual has already resumed.**
+2. **The authenticated balance read was never done** — safe subjects `19718`, `19719`, `19735`, expect `0`.
+   Do the toggle **first**, then the read.
+
+**Sharpening from `business-os-v1-db`, and it changes how item 1 can be closed:** the switch is on *by default
+when the settings row is absent* — `portal.ts:329` `normalizeBoolean(settings.loyalty_points_enabled, true)` and
+`LoyaltyPointsPage.tsx:385` `String(settings.loyalty_points_enabled ?? 'true')`. So the UI toggle renders
+identically for *unset* and for *explicitly true*, and **the item cannot be closed by looking at the toggle** —
+it needs a direct read of whether the `loyalty_points_enabled` row **exists**. If nobody ever wrote that row,
+the switch has never been off for a moment, including while `0117` ran. The owner asked for two things — zero
+the balances, and a switch — and only they can say whether accrual continuing from zero was the intent.
+
+### 🔴 THE BIGGEST OPEN ITEM: a real reporting fix is stranded and NOT live
+
+**In production today, the in-app Reports "Discounts" figure excludes every line-level discount, and the
+Telegram day report includes them. The two surfaces disagree with each other right now.**
+
+Verified at `c7ef7264` by `ee`, `88` and `7c` independently:
+
+- `getItemDiscountUsd` is defined at `salesAnalytics.ts:670` and its **only** caller anywhere is
+  `telegram.ts:567` (imported at `telegram.ts:9`). Nothing in the reports path reaches it.
+- `sales.ts:2944` verbatim: `total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0)`
+  — invoice-level only.
+- On `main` the helper **does not exist at all** (`7c`). The gap is real on both lines, differently.
+
+**Magnitude — the fix commit's own measurement, NOT independently re-derived.** August 2026 recognized sales:
+store `$5.50`, membership `$0.00`, product **`$2,338.85`** unreported ≈ **425×**. `7c` flagged that this is the
+number that will justify the work, so **re-measure it before it reaches the owner.**
+
+**The fix already exists, committed:** `1d67e895` on `rc/deploy-2026-09-04` (S4R5-3) — adds `item_discount_usd`
+and `total_discount_usd` to `SalesTotals`, summed inside the existing COGS query so it reads no extra rows.
+
+**`rc/deploy-2026-09-04` has DIVERGED — 1 ahead / 25 behind `c7ef7264`.** Not "behind"; the wording matters
+(`ba`, `db`). **Merge it forward. Never deploy from it, and never write it off** — that one commit ahead is this
+fix, and abandoning the branch abandons the fix.
+
+**Two hazards for whoever takes it — both make a *green* merge wrong:**
+
+- **The 4th positional slot already means something else.**
+  `c7ef7264`: `deriveTotals(level, costUsd, returnedCostUsd = 0, pending: PendingCostInput = {})` at `:691`.
+  `1d67e895`: `deriveTotals(level, costUsd, returnedCostUsd = 0, itemDiscountUsd = 0)` at `:628`.
+  `pending` arrived in the 25 commits the fix branch is behind, so this is **not a textual conflict a merge tool
+  resolves** — the signature has to be redesigned. Production has **four** 4-arg call sites, all passing object
+  literals: `:781`, `:833`, `:1364`, `:1498`. **Use an options object, not a fifth positional.** (Found by `88`;
+  the four-call-site count added by `ee`.)
+- **CORRECTED (`7c` measured it): the merge fails LOUD at all eight sites, and that is the danger.** `88`'s
+  quiet-read-zero mechanism is sound in principle but **has no instance today** — there are four 4-arg call sites
+  on each side and **no 3-arg site anywhere** in `cloudflare/src` (`c7ef7264`: `:781 :833 :1364 :1498`, all passing
+  `{ costUsd: … }`; `1d67e895`: `:706 :759 :1297 :1433`, all passing a number). So under either surviving signature
+  the other side's four calls are type errors. **The typechecker forces a decision at all eight sites but not the
+  RIGHT decision:** a resolver faced with four red call sites will naturally rewrite the arguments to match
+  whichever signature won — which compiles, goes green, and silently drops the other feature's data. *Loud errors
+  that invite a lossy mechanical fix are more dangerous than they look, because the green build afterwards reads as
+  proof.* (A future 3-arg call site would reintroduce `88`'s quiet instance.)
+- **And the plumbing differs, not just the 4th argument (`7c`).** The live side reads `cost.cost_usd` /
+  `pending_cost_usd`; the fix branch reads `cost.costUsd` / `cost.itemDiscountUsd` — two different cost-input
+  shapes. **The correct resolution is one options object carrying BOTH (`{ costUsd?, itemDiscountUsd? }`), with all
+  eight sites updated deliberately** — not picking a signature and repairing the losers. "Make it compile" and
+  "make it correct" diverge here, and only the first is enforced.
+- **Scoping correction (`7c`): this is a port, not a cherry-pick.** At `1d67e895` the helper has **no caller** —
+  `telegram.ts` does not import it on that commit. So the fix branch wires the helper into `SalesTotals` while
+  the deployed line independently wired the *same helper* into Telegram. **Two divergent wirings of one helper,
+  neither aware of the other.** A cherry-pick will not conflict and will not obviously fail — it lands a second
+  consumer while the first stays, and whether the totals double-count or complement **depends on how
+  `SalesTotals` aggregates. Read that before the lift, not after.**
+
+**Status: UNCLAIMED.** `ee` and `88` both declined it deliberately — it spans `salesAnalytics.ts`, `telegram.ts`,
+`reportModel.ts`, `GroupedReport.tsx`, `PeriodReport.tsx`, both language packs and three pure tests, all
+rewritten underneath it by the S4 lanes. **It needs its own lane with the owner's report surfaces in front of
+it**, not a merge squeezed in after a deploy.
+
+### 🔵 FOUR LIVE DATA GAPS — shipped code whose data half never landed (`21`, measured on production)
+
+- **S4-2 skip-stock is fully live and has NEVER been used.** `SELECT COUNT(*) FROM sales WHERE stock_skipped = 1`
+  → **0**. The whole path is in `c7ef7264` (`routes/sales.ts` `skip_stock` + the `isAdminControlUser` gate at
+  `:1150`, `planSaleStockTransition`, `saleAmendments`, `saleLineAddition`, `SaleStatusConfirmModal`, `Sales.tsx`
+  single **and** bulk, both lang packs) and migration `0114` applied 05:03:43. **The feature the owner asked for on
+  Sep 3 shipped; the 82 legacy `awaiting_payment` rows it was built for are still sitting there unmigrated.**
+- **`customer_receivables` has NO app-side settle path.** On `c7ef7264` the only writers are `contacts.ts`, and
+  only for rename/merge repointing — **nothing marks a receivable Paid**. Live AR: 13,204 Paid + **100 non-Paid**
+  (98 Unpaid, 2 Outstanding). So even after the app completes those sales, **the AR ledger stays unpaid unless
+  something writes it.** Unclaimed.
+- **18 receivables worth $1,818 are unpaid against sales that are ALREADY `completed` (`21`).** Of the 100 non-Paid
+  rows, `21`'s legacy flip covers 82 (**80 Unpaid + 2 Outstanding — the 2 Outstanding are INSIDE the 82, not
+  outside**, correcting the earlier reading here). The **remaining 18 join to sales whose `sale_status` is already
+  `'completed'`** — so the flip neither creates nor leaves this undone; it is a **pre-existing split between the two
+  ledgers**. After the flip settles **$9,805.10**, **AR still shows $1,818 outstanding against finished sales.** Same
+  shape as the other three: one half landed, the other never did.
+  **If you re-derive this, the join is `legacy_receipt_number = invoice_no || '@' || date(invoice_date)`.** Joining
+  on `invoice_no` alone returns NULL for **every** row — including ones that certainly have sales — because
+  `invoice_no` is not a key in that table and **80% of rows share one**. `21` nearly published "18 receivables with
+  no sale behind them" off the bare join; **a control set of rows known to have sales is what caught it.**
+  *(A separate figure to handle with care if anyone records it: `8b`'s $98,742.52 overpayment across the Paid set
+  is real but concentrated in **367 rows**, not spread across all 13,204 — 12,837 are exact. A "legacy encoding
+  convention" reading of it is therefore unlikely.)*
+- **⚠️ Any hand-written status flip that does not mention `stock_skipped` has a hole — whenever it was written.**
+  **The test is textual, not temporal (`21`).** If a flip sets `sale_status='completed'` and the string
+  `stock_skipped` does not appear in it, it has the hole. Time discriminates badly in both directions: a flip
+  written before `0114` may be fine, and one written today by someone who never heard of `0114` has the hole
+  anyway. The failure: held(completed) becomes a lie, and a later cancel computes `delta = 0 - qty` and **ADDS
+  units that were never taken**. `0114` (applied **05:03:43**) is why the column exists — it is not a cutoff.
+  `21` has patched theirs (still 6 statements, still idempotent). **If you hold one, grep it.**
+
+**FLIP FIGURES CORRECTED TWICE, and the second correction is the transferable one (`21`, `8b`).** Billed
+**$9,849.60** · already received **$44.50** · **settles $9,805.10** · recognized revenue **$9,797.00**. `8b` caught
+that the earlier $9,798.60 was what the 82 invoices were *billed*, so quoting it as settled double-counts money
+already banked. Then `21`, checking that, found their own file repaired the two dropped lines on the **sales** side
+(54→79, 105→131) while the **receivables** rows carried the same truncated totals — **settling them un-repaired
+would have created a permanent $51 split between the two ledgers, caused by the fix itself.** Now repaired on both
+sides before the settle reads them. Cross-check that it is right: post-repair sales total **$9,849.60** equals AR
+billed **$9,849.60** — the two ledgers agree exactly, which they do not today.
+
+> **The lesson, not the arithmetic: repairing one ledger without checking whether its counterpart carries the same
+> defect creates a divergence that did not exist before.** The dropped lines were a *known* defect on the sales
+> side; nobody had asked whether the receivables import inherited it from the same source rows. It had. Same shape
+> as the four gaps above — a fix that lands on one half — except here the fix was still unapplied when it was
+> caught.
+
+**Method note beside the join key (`21`, measured):** all **13,304** receivable rows keep
+`taxable_amount_usd = total_amount_usd` with zero VAT, so **a repair that moves the total must move `taxable` with
+it** or it breaks the invariant on exactly the rows it touches.
+
+### 🧪 TWO MEASUREMENT TRAPS CONFIRMED BY EXPERIMENT — both produced plausible wrong numbers
+
+**1. `grep -c $'\r' <file>` SILENTLY RETURNS THE FILE'S LINE COUNT.** In this Bash tool the `$'\r'` ANSI-C quote
+does not survive; the pattern reaches `grep` **empty**, and `grep -c ''` matches every line. Demonstrated on the
+same file: `grep -c $'\r' sw.js` → **637**, `grep -c '' sw.js` → **637**, `tr -cd '\r' < sw.js | wc -c` → **0**.
+It never errors. **It is worse than a wrong answer, because on a genuinely CRLF file the line count and the CR
+count are THE SAME NUMBER** — the method looks correct in exactly the case you would use it to confirm, and only
+diverges on an LF file, where it reports a large number that reads as "definitely CRLF". **Use `tr -cd '\r' | wc
+-c`, `file(1)`, or `git diff --ignore-cr-at-eol`.** (Diagnosed by `7c` against its own measurement; this also
+retracts `7c`'s earlier "637/118/219 confirms your numbers to the byte" — it was measuring a different quantity
+that coincided, so one of today's four confirmations confirmed nothing.)
+
+**⚠️ TRAP 1 ABOVE IS UNDERSTATED, AND THE UNDERSTATEMENT IS THE DANGEROUS PART (`8b` asked for this beside the
+self-checks; `ee` characterised it).** The board says `grep -c $'\r'` "silently returns the line count." **It does
+that sometimes.** It also returns **zero on a genuinely CRLF file**, and it also returns the right answer — the
+same command, on the same file, from one session. Measured on a purpose-built control, `printf 'a\r\nb\r\nc\r\n'`,
+**3 lines and 3 CRs, confirmed by `tr` and by `file(1)`**:
+
+| how it was invoked | `grep -c $'\r'` returned | truth |
+|---|---|---|
+| plain, direct | **0** | 3 |
+| inside a `for` loop | **0** | 3 |
+| piped from `cat` | **0** | 3 |
+| captured as `n=$(grep -c $'\r' f)` | **3** | 3 |
+| `grep -c "$(printf '\r')"` | **0** | 3 |
+| `8b` and `7c`, earlier today, other files | **the line count** | 0 |
+
+The pattern is not the problem — `printf '%s' $'\r' \| od -c` shows a genuine `\r` reaching the command. **Three
+different wrong answers from one idiom, and nothing in the output distinguishes them.** *No mechanism is offered
+here: four invocation forms disagree and this session did not establish why. Recorded as measurement only —
+inventing the cause is the mistake made twice already today.*
+
+**Why "sometimes 0" is worse than "always the line count":** a zero reads as *clean*. Anyone re-deriving the CRLF
+findings on this board will reach for `grep`, get `0` on a file that is fully CRLF, and conclude the claims here
+are wrong — with a plausible number and no error. The false-clean direction has no natural challenger, because
+nobody re-checks good news.
+
+**USE THESE INSTEAD — they cannot degrade, and both were correct in every form tested:**
+
+```
+tr -cd '\r' < <file> | wc -c                                  # CRs on disk
+git cat-file blob <ref>:<path> | tr -cd '\r' | wc -c          # CRs in the object (8b)
+file <path>                                                   # says "with CRLF line terminators"
+git checkout-index --prefix=<scratch>/ -- <paths>             # what a real checkout produces (7c)
+```
+
+**Two side hazards worth knowing (`8b`):** `grep -c` **exits 1 when the count is zero** — verified — so an `&&`
+chain aborts precisely when the answer is "clean". And **an instrument reporting a defect everywhere is more
+likely broken than the tree is uniformly bad**: `8b` measured "2,241 CR-bearing lines at every ref including the
+deployed one", which would have contradicted this whole section, and caught it only because `tr` disagreed. **Run
+any sweep against a case whose answer you already know before trusting it on one you do not** — the guard for
+this, for the degenerate predicate `21` and `8b` hit, and for the truncated-window class generally.
+
+**⚠️ AND THE TABLE ABOVE IS NOT PORTABLE — `8b` ran the SAME control and got the INVERSE (both withdrawn as
+mechanisms; the results stand as results).** `8b` built the identical control — `printf 'a\r\nb\r\nc\r\n'`, 9
+bytes, 3 CRs, `od -c` confirmed — and every form that returned 0 here returned **3** there:
+
+| form | `ee` | `8b` | truth |
+|---|---|---|---|
+| plain, direct | **0** | **3** | 3 |
+| inside a `for` loop | **0** | **3** | 3 |
+| piped from `cat` | **0** | **3** | 3 |
+| `n=$(grep -c $'\r' f)` | **3** | **3** | 3 |
+| `grep -c "$(printf '\r')" f` | **0** | **0** | 3 |
+| `tr -cd '\r' \| wc -c` | **3** | **3** | 3 |
+
+**Same machine, same shell family, opposite outcomes, and only two cells agree across both sessions** — `tr` is
+right for both, and the `printf`-substituted form is wrong for both. `8b` has withdrawn their "it becomes a line
+counter" mechanism; this session's per-form results were re-run twice and are **stable within the session**, so
+the divergence is between sessions, not noise.
+
+**Two direct observations that are evidence rather than inference, and one that contradicts them.** In this
+session `grep -c 'b.$'` returns **0** on a file whose lines are `b\r` — so grep is not seeing any character
+between `b` and end-of-line. `db` independently: `grep 'END' <file> | cat -A` prints `END;$` with **no `^M`** on a
+file carrying 142 CRs, while `od -c` shows the truth. Both say this grep strips CR from its input. **Yet
+`n=$(grep -c $'\r' f)` returns 3 in the same session, which that cannot explain. Recorded as unexplained. No
+mechanism is offered — three sessions have now published one and withdrawn it.**
+
+**The durable conclusion is stronger than either table: `grep` cannot be used to count CRs here at all**, because
+its answer depends on something that varies between sessions on one machine, and nothing in the output reveals
+which behaviour you got. **Do not port either row of that table anywhere.** Use `tr -cd '\r' | wc -c`,
+`git cat-file blob <ref>:<path> | tr -cd '\r' | wc -c`, `od -c`, or `file(1)`.
+
+*Cheap next step for anyone who cares to close it: report `which grep` and `grep --version` alongside the result.
+This session is `/usr/bin/grep`, GNU grep 3.0. That turns an unexplained divergence into a checkable one without
+anybody inventing a cause.*
+
+**2. `verify:public-runtime` is NOT checkout-state-dependent — the premise that it fails on a pristine tree is
+DISPROVEN at `c7ef7264`.** `7c` predicted the check would pass in the shared tree and fail in a fresh one. Tested
+all three states, single fresh worktree, in order:
+
+| State | `frontend/public/sw.js` | `--check` |
+|---|---|---|
+| fresh worktree at `c7ef7264`, 0 dirty | CR=**637** (CRLF) | **PASS** |
+| after running `build:public-runtime` (3 files now dirty) | CR=**0** (LF) | **PASS** |
+| shared checkout, trio clean | CR=**0** (LF) | **PASS** |
+
+**So a lane certifying in the shared tree and a lane certifying in a fresh worktree get the SAME answer**, which is
+the opposite of what both `7c` and I expected. **✅ RESOLVED — and my earlier "unexplained" note here was wrong,
+because I named no tree — see the two corrections below.** **AT `c7ef7264` ONLY**, the comparison is not at
+`:83` and is not a raw byte compare: `ops/scripts/frontend/build-public-runtime-scripts.ts:24` defines
+`normalizeEol(text) { return String(text).replace(/\r\n/g, '\n') }`, and **line 97** is
+`if (normalizeEol(current) !== normalizeEol(expected))`. Both sides are normalised, so CRLF-on-disk vs LF-emitted
+compares equal — which is exactly why it passes before *and* after the builder runs. **On `main` it is exactly
+what `7c` said it was, and a lane there really does see a pristine tree called stale.** My original `:83`
+citation and the reason I first gave for it are both corrected two blocks down — I got the diagnosis of my
+own error wrong in the same way as the error itself. **Name the ref when you cite a line here** — the same
+line number means different code on `main` and on the deployed commit.
+
+**The in-code comment states the intent, and it is the same argument this board made independently:** *"Compare
+CONTENT, not bytes … a raw byte comparison therefore called a pristine checkout stale forever -- and since this is
+step 2 of the `test:utils` chain, and that chain stops at the first red, it could stop a lane before a single one
+of its 170 test files ever ran."*
+
+**⚠️ `1755bd6b` (`fx/public-runtime-eol`) IS THE FIX, AND IT IS ALREADY IN THE DEPLOYED COMMIT** —
+`git merge-base --is-ancestor 1755bd6b c7ef7264` → **exit 0**. So there is no live exposure at `c7ef7264` and **no
+urgency**: the check does not depend on somebody having happened to run a build in the shared tree. Two
+consequences for whoever picks this up:
+
+- **It is NOT on `main`** — `git merge-base --is-ancestor 1755bd6b origin/main` → **exit 1**. Anyone certifying
+  from `origin/main`, or from a worktree branched off it, still gets the byte compare and can still see a pristine
+  tree reported stale, with the chain stopping before any test runs. **That is the real remaining exposure, and it
+  closes with a merge, not with a fix.**
+- The older entry further down (`TWO TOOLING DEFECTS FIXED`) still carries the pre-fix workaround — *"leave those
+  three files dirty, never stage them."* At `c7ef7264` that is unnecessary; it applies only while working off
+  `main`. Left in place deliberately rather than rewritten, because it is a correct record of the defect.
+
+**Negative control, so the PASS is not vacuous:** appending one byte to `frontend/public/sw.js` in the pristine
+worktree makes `--check` exit **1** with the staleness message. It detects real staleness and ignores line endings
+— which is the behaviour you want, and the reason a green here can be trusted.
+
+**⚠️ CORRECTION TO THE CORRECTION ABOVE — I diagnosed my own error the same way I made it (`7c` measured it).**
+I wrote that my `:83` citation "came from a `sed` window that ended at line 90 and cut the comparison off." **That
+diagnosis is wrong, and it was a guess dressed as a measurement.** Line 83 of the shared checkout's copy is
+literally `if (current !== expected) {`. My citation was **exactly right for the tree I was standing in** — the
+shared checkout, which is on `main`. The error was never a truncated window; it was reporting a property of `main`
+as a property of `c7ef7264`. Third instance of the same class in one day, and the most instructive one, because I
+committed it *while explaining* the first two.
+
+**`7c`'s measurement, which is the fact to carry — `git show <ref>:ops/scripts/frontend/build-public-runtime-scripts.ts | grep -c normalizeEol`:**
+
+| ref | `normalizeEol` | the compare |
+|---|---|---|
+| `HEAD` / `origin/main` | **0** | `:83` — raw `current !== expected` |
+| `c7ef7264` (deployed) · `2c497564` | **3** | `:97` — `normalizeEol(current) !== normalizeEol(expected)` |
+
+**So `7c` and I were each accurate about the tree we read, and neither of us named it.** There was never a
+conflict. `7c`'s "it MUST throw on a pristine tree" is **true of `main`** and false of the deployed line; my "it
+passes on pristine, non-vacuously" is **true of `c7ef7264`** and false of `main`. **Two correct measurements, two
+unnamed subjects, one hour lost.** When a claim is about a checkout, the ref is part of the claim.
+
+**ONE-COMMAND SELF-CHECK, and it is better than "don't certify from `main`" (`8b`).** The exposure splits on
+**base**, not on lane — anything branched from the `rc/deploy` family already carries both fixes; only main-based
+work is exposed. So the question a session should ask is about *the tree it is actually standing in*:
+
+```
+git merge-base --is-ancestor 1755bd6b HEAD   # exit 0 = your verify:public-runtime normalises. exit 1 = it does not.
+git ls-tree HEAD -- .gitattributes           # empty = your migrations check out CRLF.
+```
+
+`8b` also reports this retroactively validates a result they had asserted on weaker grounds: their 5 red pure
+scripts at `e83ee73f` are **genuine** reds in files that actually ran, because `e83ee73f` carries `1755bd6b`. The
+same comparison run from a main-based tree would have produced a red that proves nothing, **with nothing in the
+output to say so.**
+
+**WHO IS ACTUALLY EXPOSED TO THE MIGRATION TRAP — it is the DEPLOYER, not the AUTHOR (`ee`, measured; refines
+`ba`'s warning).** `ba` warned that `.gitattributes` cannot clean a blob already committed with CRLF, so the check
+belongs on the blob rather than the working file. The check is right and worth keeping. **But the scenario is not
+live here, and the measurement says why:**
+
+- **Zero migration blobs carry a single CR on any live ref** — `origin/main` 0/105, `c7ef7264` 0/116,
+  `rc/ee-integrate` 0/116, `rc/deploy` 0/116. Measured by piping each blob through `tr -cd '\r' | wc -c`.
+- **`core.autocrlf=true` normalises CRLF → LF on COMMIT**, so a migration authored in any checkout on this machine
+  is stored LF *even with no `.gitattributes`*. Proof on disk right now:
+  `cloudflare/migrations/0105_fee_delivery_contacts.sql` is **8 lines, 8 CRs on disk, 0 CRs in the blob, and `git
+  status` clean.** Fully CRLF in the working tree, fully LF in the object, and git considers them identical.
+
+**So the authoring half was never the hole. The hole is the checkout half**, which `autocrlf` expands back to CRLF
+— and `wrangler` reads the working file, not the blob. **A deploy worktree checked out from a ref without
+`.gitattributes` gets CRLF migrations on disk no matter how clean the blobs are.** That is precisely the `0115`
+incident, and it means the exposed party is **whoever deploys from `main`**, not whoever writes the SQL. `ba`'s
+blob check stays as the forward guard for the one path `autocrlf` does not cover — a file authored through the
+GitHub web/API surface, where no `autocrlf` runs at all.
+
+**AND DO NOT READ THIS AS "WE REJECTED `.gitattributes`" (`7c`).** `7c` proposed a `.gitattributes` for the
+`frontend/public` trio this morning and withdrew it, correctly — there the compare was the defect and the compare
+is ours to fix. The deployed line simultaneously *uses* `.gitattributes` for migrations, also correctly. **Same
+tool, opposite verdicts, and the discriminator is whether the consumer of the bytes is code we control.** Wrangler's
+statement splitter is not; `verify:public-runtime` is.
+
+**Claim status: both merges UNCLAIMED.** `7c` wants both and is putting them to the owner rather than
+self-assigning, recommending the migration one first; `21` verified and declined (holds no `cloudflare/` files);
+`8b` and `ba` verified and declined. **If you are picking up work and hold no conflicting files, take them — do
+not hold them for `7c`.** `21`'s framing is the right one for the owner: *this is the one item on today's board
+whose next occurrence writes to production.*
+
+**NOTHING IS PRIMED TO FAIL RIGHT NOW, AND THAT IS THE HONEST SHAPE OF THE URGENCY (`db` swept it, `ee`
+re-derived).** Of the migrations on disk, **exactly one is CRLF** — `0105_fee_delivery_contacts.sql`, 8 CRs — and
+it contains **zero** `CREATE TRIGGER`, so it cannot reach the splitter bug. `0106_return_replacement_sales.sql`
+(untracked, someone's in-flight file — untouched) is LF, 0 CR, no triggers. **9 migrations do contain
+`CREATE TRIGGER`; none of them is CRLF on disk.** So: the protection is genuinely absent here, and nothing is
+currently armed **in this working tree — which, see the correction immediately below, is the one tree nobody
+deploys from.** Superseded on the temper, not on the sweep.
+
+**⚠️ AND MIND THE MIRROR-IMAGE SCOPE ERROR IN MY OWN RETRACTIONS (`db` caught it).** Read flat, "the staleness
+check does no normalisation — retracted" tells a lane on `main` that the check normalises. **It does not: on `main`
+the string `normalizeEol` does not occur in that file at all.** Likewise `.gitattributes` is absent from
+`origin/main` **and absent from this shared checkout's disk right now**, so `eol=lf` is **not active in the tree
+eleven sessions are working in**. Both retractions above have been re-scoped for this; if you quote either of them
+onward, carry the ref with it or you hand on the error in the opposite direction.
+
+**⚠️ CORRECTION TO "NOTHING IS PRIMED" ABOVE — that was a property of THIS TREE, and the deploy path is the
+armed one (`7c` found it, `ee` reproduced and extended it).** The disk sweep was right and the conclusion drawn
+from it was not. This working tree is LF for reasons that predate the current filter; **a fresh checkout arms
+everything.** `7c` materialised migrations through git's own smudge filter with
+`git checkout-index --prefix=<scratch>/ --` — which is what a checkout actually does — and got CRLF. Re-run here
+across **all nine** trigger-bearing migrations, not the two `7c` sampled:
+
+| migration | CR after smudge | `END`-anchored lines |
+|---|---|---|
+| `0010_product_name_grouping` | 121 | 3 |
+| `0018_products_fts` | 65 | 3 |
+| `0019_products_fts_code` | 60 | 3 |
+| `0020_contacts_fts` | 188 | 18 |
+| `0021_products_fts_name_trigram` | 73 | 3 |
+| `0088_legacy_finance_and_audit_ledgers` | 155 | 1 |
+| `0090_legacy_inventory_effect_stock_guard` | 28 | 1 |
+| `0092_legacy_inventory_effect_guard_idempotency` | 29 | 1 |
+| `0101_legacy_inventory_effect_historical_cost` | 46 | 1 |
+
+**9 of 9 armed** — every one fully CRLF (CR count equals LF count) and every one carrying the `END;` the splitter
+mishandles. **And the tree nobody deploys from is the safe one, while the tree every deploy uses is the armed one:**
+deploys run from fresh isolated worktrees with a real `npm ci` (`bos-dep` on Sep 3; my own deploy worktree the same
+way, created and removed). So the calm reading came from measuring the one tree that is not on the path.
+
+**Independently reproduced by a third method, and broader (`21`).** `GIT_INDEX_FILE=<scratch> git read-tree main
+&& git checkout-index -a --prefix=<scratch>/` over **all 105 migrations on `main`**: every one comes out CRLF, CR
+count equal to LF count — **105 of 105**, with the nine trigger files matching the table above to the byte
+(121 · 65 · 60 · 188 · 73 · 155 · 28 · 29 · 46). Three sessions, three techniques — `checkout-index` on paths, a
+scratch-index full checkout, and the disk sweep that started it — and the disagreement between them was the entire
+finding. **`21` reached the opposite conclusion first from the same disk sweep this session did**, and has gone
+back to the owner to correct it.
+
+**WHAT KEEPS IT FROM BEING ON FIRE, stated as carefully as the risk (`7c`).** All nine are `0010`–`0101` and long
+since applied to production, and `wrangler d1 migrations apply` runs only **unapplied** files — so a routine deploy
+off `main` does not re-run them. Two real exposures remain:
+
+- **(a) Any NEW trigger-bearing migration authored from here on.** Exactly the `0115` shape. This is the live one.
+- **(b) A from-scratch D1 bootstrap.** Restoring or standing up a fresh database from `main` runs the chain from
+  `0001` and dies at the **first** trigger file with earlier migrations already committed. **That file is `0010`,
+  not `0018`** (correcting `7c`'s number): `0010_product_name_grouping.sql` has **4** `CREATE TRIGGER`s and **9**
+  migrations ahead of it. Disaster-recovery-shaped — the worst possible moment to be debugging line endings.
+  *Untested and to stay untested: nobody runs a bootstrap against a real database to confirm this. It is reasoned
+  from the mechanism, and it is labelled as such.*
+
+**A detail that says this is a repeat, not a first (`ee`).** `0010` carries its own comment block about the same
+wrangler splitter — a *different* trigger of it, a lowercase `begin` in the trigger body, wrangler issue #10998 —
+ending "it works fine locally". So this codebase has now been bitten by that one splitter in two distinct ways,
+and both times the local run passed. **Treat `wrangler`'s statement splitter as a known-hostile parser and the
+local `--file` path as blind to it.**
+
+**So keep "calm, not alarm" for the schedule and drop it for the rationale (`7c`'s wording, and it is better than
+the original).** It is not urgent because something is about to break; it is urgent because the case where it
+breaks is the case where you least want to be debugging line endings.
+
+**✅ THE ASSUMPTION UNDER "NOTHING IS ARMED" IS NOW A FINDING — read from wrangler's source (`db` flagged it as an
+unverified assumption; `ee` verified it).** `db` was right to refuse to bank it: the whole all-clear rested on
+*"`wrangler d1 migrations apply` parses only unapplied files"*, which nobody had checked, and if it were wrong the
+conclusion inverted from "none armed" to "79 armed". Read at
+`cloudflare/node_modules/wrangler/wrangler-dist/cli.js`, **wrangler 4.116.0**:
+
+- `getUnappliedMigrationNames(migrations, appliedMigrations)` filters **on names only** — it compares directory
+  entries against the names in `d1_migrations` and never opens a file.
+- The apply handler loops `for (const migration of unappliedMigrations)` and calls `buildMigrationQuery` per item.
+- `buildMigrationQuery` does `fs.readFileSync(path.join(migrationsPath, migrationName), 'utf8')` — **the one named
+  file**, then appends its own `INSERT INTO <migrations table>`.
+
+**So an applied migration's file is never read, and its line endings cannot matter.** The all-clear holds for the
+reason `db` assumed, and it is no longer an assumption.
+
+**⚠️ Scope it, because that is the lesson of the whole day:** `cloudflare/package.json` pins wrangler as
+**`^4.112.0`**, a caret range. A deploy worktree running a real `npm ci` can install a newer wrangler than the one
+read here. **This finding is scoped to 4.116.0 and to nothing else** — re-read it if a deploy pulls a new minor.
+
+**The caret caveat is real but VACUOUS TODAY, which is a checkable condition rather than a standing doubt (`db`,
+re-derived by `ee`).** Every deploy-capable tree is on the version that was read:
+
+```
+business-os-v1  4.116.0   bos-dlv  4.116.0   ee-integrate  4.116.0   bos-cert-ee  4.116.0
+```
+
+**The trigger for a re-read is a deploy tree's `npm ci` resolving a new minor. Today none has.** `db` also
+confirmed the source independently by line number rather than by the quotes above — `getUnappliedMigrationNames`
+at `cli.js:285671` (nine lines, pure name comparison, no `fs` call in the body) and `buildMigrationQuery` at
+`:285764`.
+
+**RULE, and it is the general form of what saved this thread twice (`db`'s wording).** *No sweep result without at
+least one case the instrument reports the other way.* A sweep returning 79 dirty and 0 clean is indistinguishable
+from a broken instrument; `db`'s three clean deploy trees are what make the 79 a measurement rather than a fault
+report. Had `8b`'s CR counter been run against a known-LF file first it would have failed loudly instead of nearly
+publishing "2,241 CR-bearing lines at every ref". Same rule, stated the other way, is the negative control that
+made `verify:public-runtime`'s PASS meaningful. **Attach the control to the sweep, not to the write-up.**
+
+**⚠️ THE SHIPPED `.gitattributes` COMMENT STATES A MECHANISM WRANGLER'S SOURCE REFUTES — the pin is still right,
+the stated reason is not (`7c` found it; `db` and `ee` each verified independently).** The comment block in
+`cloudflare/.gitattributes` at `c7ef7264` says `wrangler d1 migrations apply --remote` "splits a file into
+statements" and decides a trigger body closed with `/\sEND[;\s]$/`. **That regex never runs on the remote path.**
+In the bundled 4.116.0 at `cloudflare/node_modules/wrangler/wrangler-dist/cli.js`:
+
+- `splitSqlQuery` has **exactly two call sites**: `:283608`, inside `executeLocally` (miniflare `db.batch`), and
+  `:420674`, the **local dev-server** migration applier (also a miniflare binding, with `debugLog`/`workerName`).
+  **Neither is remote.**
+- `executeRemotely` (`:283642`) gates every file branch on `if (input.file)`. Migrations pass
+  **`command: query, file: void 0`**, so they take the `else`:
+  `d1ApiPost(config, accountId, db, "query", { sql: input.command })` — **the whole string, one field, unsplit.**
+
+**So "incomplete input: SQLITE_ERROR" came from D1's server-side parser, not wrangler's.** The failure is observed
+fact; the parser is not readable from here, so the CRLF→END-detection story is **unverifiable rather than
+confirmed**. And the comment has it exactly backwards on the local/remote axis: `d1 execute --local --file` *does*
+split, and the remote migration path does not.
+
+**KEEP THE PIN. FIX THE COMMENT.** `eol=lf` plus `test-migration-line-endings-pure.cjs` stay — CRLF remains a
+plausible server-side cause and the precaution is cheap. But the comment currently reads as a *diagnosis*, so the
+next person who greps `cli.js` finds it falsified and may pull the pin on that basis. `7c`'s wording is the right
+shape: **correlated failure, server-side parser, mechanism unverified, `eol=lf` as a precaution with a backstop
+test.**
+
+**`db` can name the bytes, which is the strongest form the suspicion can take from here.** `bos-s4-date` holds
+`0115` CRLF on disk; `od -c` shows both trigger terminators as `END;\r\n`, and the file ends `END;\r\n`
+immediately before wrangler's appended `INSERT INTO d1_migrations`. **The POSTed string therefore contains
+`END;\r\n\nINSERT INTO …` at exactly the boundary where a trigger-body detector must decide the body closed.**
+Same defect class, relocated to the server, with a concrete payload.
+
+**Attribution, because misattribution is this board's running defect:** this session did **not** write that comment
+block. It came from `2c497564`, whose git author is the shared user identity — as every session's commits are — so
+authorship cannot be settled from the commit itself; Part 597 places that work in **`c3`'s** lane. **Nobody should
+edit `cloudflare/.gitattributes` without talking to `c3` first**, and this session has not touched it.
+
+**`7c` RETRACTS THEIR OWN CLEARANCE — do not let it travel.** `7c` ran the exported `unstable_splitSqlQuery` over
+LF and CRLF copies of all nine trigger migrations, got identical splits, and briefly read it as "fixed upstream".
+**That export is the LOCAL splitter.** It clears the local path and says nothing about remote.
+
+**THE VERSION CAVEAT CLOSES COMPLETELY (`7c`, `db`).** `cloudflare/package-lock.json` resolves wrangler to
+**4.116.0 exactly**, so an `npm ci` tree cannot float past the `^4.112.0` caret at all — only a deliberate
+`npm install`/`npm update` can. Stronger than "vacuous today": the caret is not a live risk, and the trigger for a
+re-read is a deliberate dependency bump.
+
+**And `0115` is not on `main`** — added by `70bb49dc`, present on **44** branches. So the file that actually failed
+is not in the tree the pin most urgently needs to reach.
+
+**THE EXPOSED-TREE SWEEP, and it is 79 trees, not a handful (`db`).** Across ~82 worktrees on this machine, checked
+against the 10 trigger-bearing migrations (`0010`, `0018`–`0021`, `0088`, `0090`, `0092`, `0101`, `0115`):
+
+- **79 carry CRLF trigger files, and every one of them is pin-less.** Most carry 9, through `0101`.
+- **`bos-s4-date` carries 10 — including `0115_sale_amendments.sql` itself**, the file that actually failed,
+  CRLF on disk right now. (`0115` carries **2** triggers.)
+- **The three deploy-capable trees are clean** — `bos-dlv`, `ee-integrate`, `bos-cert-ee`: pin present, 116
+  migrations LF, 0 CRs in trigger files. **The pin works where it exists**, which is the positive control this
+  finding otherwise lacked.
+
+**AND THE MERGE IS NECESSARY, NOT SUFFICIENT — for whoever lands it (`db`).** Git applies filters when it checks
+out a path, so **landing `.gitattributes` on `main` fixes only NEW checkouts.** The 79 existing worktrees keep
+their CRLF afterwards. Whoever takes the merge should plan a re-checkout or normalisation pass for live worktrees
+as part of it, not assume the commit closes the exposure. Same shape as the deploy-target correction earlier
+today, and the same shape as the necessary/sufficient rule already on this board.
+
+### 🟡 THE DOCS ARE FORKED IN TWO PLACES — union, never pick a side
+
+| | `main` (`4b58e9a1`) | `rc/ee-integrate-2026-09-04` (`2bd6675e`) |
+|---|---|---|
+| session-log Parts | has **598, 599**, missing **600** | has **600**, missing **598, 599** |
+| board | has `88`'s lane block | has `ee`'s deploy block + the demotion of the 07:57 block |
+
+**Neither tree has the complete log.** Whoever merges must union both. **Next free Part number is `601`** — taken
+by this entry. Grep every `^## Part` header across *both* refs at the moment you write, not the tail of one.
+
+### BRANCH MAP — what is live and what is not
+
+**Already in production** (ancestors of `c7ef7264`) — all `s4/*` round-1..3 lanes, every `fx/*` from Sep 3–4
+including `fx/add-stock-barcode-identity` (`4741a921`), `rc/s4-2026-09-04`, `ship/2026-09-03`,
+`reconcile/2026-09-03`, all `hf/*`, `lane-a`, `lane-b`. ~70 branches. If your lane's tip is an ancestor of
+`c7ef7264`, **your work is live** — check with `git merge-base --is-ancestor <tip> c7ef7264` before re-doing it.
+
+> ⚠️ **CORRECTION (`8b`) — ancestry proves your CODE shipped, NOT that your lane is done.** "Code is deployed" is a
+> *necessary* condition for a lane being finished and nowhere near a *sufficient* one. **Check whether your item
+> also had a data, migration or backfill half, because that half did NOT ship with the code.** `8b`'s own lane is
+> the counterexample: `4741a921` is live, and the defect the owner reported this morning is **still fully present
+> for them** — the forward fix stops new forks while **28 already-stranded units** sit untouched, needing a
+> production write that has not happened. **Any lane that touched existing rows is in this category.**
+
+**NOT in production, still open:**
+
+| Branch | Tip | Ahead | What is stranded there |
+|---|---|---|---|
+| `rc/deploy-2026-09-04` | `1d67e895` | 1 | **The discount fix above. Rescue it.** |
+| `rc/sec-10-reports` | `e2497aa0` | 155 | Long-lived, diverged. **Needs an owner to say whether it is alive.** |
+| `fx/reports-redesign` | `9b444788` | 4 | Touches the same report surfaces as the discount fix — coordinate. |
+| `hf/merge` | `65459d6e` | 8 | Unreviewed. |
+| `lane-c/app-update-prompt` | `8580c92a` | 1 | Relates to the restart-bar requirement. |
+| `docs/bulk-actions-spec-4f` | `ebde8430` | 4 | Spec only. |
+| `rc/p2-*`, `rc/coordinated-2026-09-02`, `rc/sec-11-ios-pwa` | — | 146–155 | Pre-Sep-3. **Probably dead — confirm before deleting.** |
+
+### WHAT ANY SESSION CAN PICK UP RIGHT NOW
+
+1. **Union the forked docs** (`main` ∪ `rc/ee-integrate-2026-09-04`) and get `c7ef7264` onto a line `main` can
+   reach. Highest value, no owner needed. **Coordinate with `c3`.**
+2. **The discount fix lane** — the whole item above. Biggest business impact. Read the two hazards first.
+3. **Re-measure the `$2,338.85` / `$5.50` August figures** against production (read-only) so the owner gets a
+   verified number, not a commit comment. Small, self-contained, unblocks item 2's justification.
+4. **Triage the dead `rc/*` branches** — read-only, then propose deletions. Nobody is doing it.
+5. **Escalated, never fixed** (all unclaimed): membership discount missing from the Telegram sale message
+   (`telegram.ts`); Khmer mojibake in `printReceipt.ts` → `buildTextOnlyPdf`; `recordDetailRowRhythm.test.ts`
+   locks a rhythm that blocks refund-position parity between the receipt and the sale detail.
+6. **The shared checkout has 53 tracked-dirty files** (+12 untracked; `git status --porcelain` counts 65 because it includes untracked — `git diff --name-only` is the tracked count, and the two get confused) and a clean index. Several are junk at the repo root
+   (`CHECKPOINT*.txt/patch/md`, `run-log.txt`, `tmp/`, `outputs/`, and three files with **mangled names**
+   containing a literal newline or `\357\200\242`). Someone should identify owners and clean up — **ask before
+   deleting anything; a peer's in-flight lines are never yours to remove.**
+
+### TRAPS CONFIRMED TODAY — read these before you trust a green
+
+- **Line-survival is not composition.** After a 3-lane merge, verifying every added line survived passed — and
+  the build was still broken (a duplicate `saleTotals` binding, and a new file missing a stub key). Each lane
+  was green alone; the defect existed only in the union. **After any multi-lane merge, run every test file
+  individually** — `test:utils` chains with `&&` and stops at the first red, hiding the rest.
+- **A silent-red harness hole existed and may exist elsewhere.** `fastStockIn.test.ts` had
+  `if (failed > 0) process.exitCode = 1` **mid-file** with three tests after it — they printed FAIL and exited 0.
+  Fixed there. **Grep for the same shape in other test files.**
+- **A residual always closes.** A figure derived by subtraction foots the page regardless of what it names.
+  Footing assertions prove nothing; value assertions do.
+- **Same-instant assertions.** An equality against a live system is traffic-immune only when *both* sides are
+  read at the same instant. Capturing at runtime does not fix a *wrong* instant.
+- **`d1 migrations list` lies from the wrong tree** — it compares the *local* `migrations/` folder against the
+  DB. The main checkout stops at 0106 and reported "nothing to apply" against a DB with 0117 pending. Query
+  `d1_migrations` directly.
+- **Migration id ≠ filename number.** `d1_migrations` ids are row counters. File `0117` is row id **116**. This
+  was misread as an off-by-one twice today.
+- **Identifiers read as the wrong kind of thing** was the day's dominant failure — three distinct instances:
+  version-UUID vs sha, migration row-id vs filename, and settings *unset* vs *explicitly true*.
+
+*Sessions consulted before writing this block, all of whom released the files and several of whom corrected it:
+`c3`, `88`, `21`, `8b`, `7c`, `40`, `ba`, `63`, `4a`, `db`, `7e`, `02`×2. Corrections from `21`, `ba`, `7c`,
+`88`, `4a` and `db` are incorporated and attributed above.*
+
+---
+
+**🟢 DEPLOYED TO PRODUCTION Sep 4 2026 07:57 UTC — wrangler version id
+`8480241e-8867-442c-8643-93c8e5f8175e`, built from `rc/deploy-2026-09-04` @ `e83ee73f` (pushed to origin).
+**NOT FROM `main`** — `main` still does not contain the deployed code, and deploying `main` would roll back the
+whole S4 batch plus this checkpoint. Driver: session `business-os-v1-c3`. Reference to re-verify.**
+
+**Production can now state its own provenance.** `GET /api/runtime/version` returns
+`{"revision":"e83ee73f45dc","sourceHash":"eab4c662a6686667","builtAt":"2026-09-04T07:57:12.501Z"}` — a CLEAN
+revision with no `-dirty` suffix, so for the first time the live build names a commit that fully describes it.
+Check that endpoint before trusting anything written here.
+
+**The previous live build was stamped `2c497564b1ee-dirty`, and that was investigated BEFORE shipping, not after.**
+A `-dirty` stamp means production was built from a tree carrying uncommitted tracked edits — code that no commit
+describes, and exactly what a pristine-commit deploy silently deletes (the Sep-3 incident). Traced to source: the
+build worktree `Downloads/bos-rc-s4` @ `2c497564` holds precisely three dirty tracked files, the self-rewriting
+`frontend/public/{sw.js,runtime-noise-guard.js,theme-bootstrap.js}` trio, and `git diff --ignore-cr-at-eol` over
+them is **empty** — line-ending churn, zero content change. So no uncommitted code was ever live, and this deploy
+deleted nothing. The suffix was real but immaterial: `deploy.cjs` discounts that trio only when it is UNTRACKED,
+and here it is tracked.
+
+Migrations: production applied **exactly one**, `0116_shift_sessions.sql`. Verified two ways before shipping —
+production’s highest applied was `0115_sale_amendments.sql` (`d1_migrations` id 114), and a filename-by-filename
+comparison of all 115 chain files against the 114 applied names found **zero renames** (every applied filename
+present verbatim). The **0113 filename gap is real and expected**: id 112 → `0112_…`, id 113 → `0114_…`. 0116 is
+purely additive (`CREATE TABLE/INDEX IF NOT EXISTS`; no ALTER/UPDATE/DELETE) so it cannot touch existing rows.
+Verified live after: `shift_sessions` + 4 indexes exist, and `idx_shift_sessions_user_day` carries
+`COALESCE(branch_id, -1)` — the NULL-branch uniqueness fix is live, so "register once a day" is actually true for
+single-branch tills. **Next free migration number is 0117**, already claimed by lane `s4/pay-notes-points-delivery-88`.
+
+`secrets:sync` was **NOT** run: no secret changed, and the delta adds no new `env.*` reference (checked against the
+diff). Running it would have rewritten live secrets from a worktree copy for no reason.
+
+Built in an isolated detached worktree `Downloads/bos-deploy` at committed `e83ee73f` with a real `npm ci` in both
+packages — never in this shared checkout, whose `node_modules` other sessions depend on. Note `bos-dlv`’s
+`node_modules` are **junctions** into this checkout, so an `npm ci` there would have deleted every peer’s
+dependencies; that is why a separate worktree was cut. Removed after, which also cleared the copied
+`.wrangler-auth.local` / `.dev.vars`.
+
+Gates at `e83ee73f`: cloudflare `tsc` clean · **187/187** pure test scripts green · frontend `test:utils` chain
+green (incl. `shiftGate` 19 checks) · `verify:i18n` **4758** keys at parity in both packs · real `vite build` clean.
+Post-deploy live: `/health` **200** both hosts · `/api/products` unauthenticated **401** · `/ws` GET **426** ·
+storefront **200** with Leang branding · admin **200** · `d1 migrations list --remote` → nothing pending.
+
+**Three pre-existing REDs were root-caused, not silenced:**
+
+1. `test-compat-dashboard-daterange-pure.cjs` — already red on `fx/sargable-date-fix` BEFORE any merge (verified by
+   re-running it on the lane’s own branch), so not a merge regression. Guard re-pinned to the retention delete’s
+   new sargable + batched intent; `compat.ts` restored byte-identical. 39 checks, proven non-vacuous.
+2. `test-legacy-barcode-key-pure.cjs` — a genuine cross-lane conflict invisible to both lanes:
+   `import-sep02-legacy-reports.mjs` exists on neither `fx/legacy-barcode-key-ee` nor the rc, so the guard never saw
+   it until they were merged. That lane moved the digits-only rule INTO `barcodeKey()`, which made the importer’s
+   local `isNumericCode()` a second implementation of one rule. Collapsed to a direct call; behaviour proven
+   identical over 25 code shapes, and `"Libre10ml"` / `"CompletelyClean45g"` still resolve to empty rather than the
+   literal barcodes `"10"` / `"45"` that 44 live products carry.
+3. `test-sargable-date-filters-pure.cjs` — shipped **deliberately RED** by `fx/sargable-date-lock-ee` (its header
+   said so). Merging resolved all three of its offenders, so the intentional red became indistinguishable from a
+   real one — the state most likely to make a future session wave off a genuine regression. `contacts.ts` and
+   `compat.ts` were fixed at the call sites by their lanes; `sales.ts` got an ALLOWLIST entry, **not** a code
+   change, because its `datetime()` wrap is required for CORRECTNESS: `sales.created_at` carries two shapes on the
+   same calendar day (live `YYYY-MM-DD HH:MM:SS` vs legacy-import ISO) and a raw compare misorders them, `T`
+   sorting after the space at position 10 — while the call site already hand-writes a bare
+   `s.created_at >= @afterCreatedAtFloor` that preserves the index seek. This is the exact false positive the
+   file’s own LIMITATIONS section predicts and prescribes an allowlist entry for. Header and FAIL message now state
+   the baseline is GREEN, so a future red is a real finding.
+
+**🚀 LANE `s4/pay-notes-points-delivery-88` (session `business-os-v1-88`) — DEPLOYED TO PRODUCTION Sep 4 2026.**
+Reference state, to re-verify rather than trust: wrangler version **`798d9e19-76d0-4909-8db3-6a7a4ad43ad7`**,
+commit **`c7ef7264`** (contains this lane's `64aa0a51`), migration **`0117` applied 11:37:39**, highest applied
+is now 0117 (`d1_migrations` row id 116 — the id is a row counter, not the filename number). Deployed by
+session `ee` from an isolated worktree; this session held no deploy role. Post-deploy probes all
+expected-vs-actual exact: `/health` ok on both hosts, storefront 200, admin 200, `/api/products` 401, `/ws` 426.
+
+**⛔ TWO OPEN ITEMS THAT ONLY THE OWNER CAN CLOSE — the deploy is not the end of this lane.**
+
+1. **Membership points are LIVE and ON, with every balance at zero.** The switch defaults to enabled and `0117`
+   writes no settings row, so the programme is running against zeroed balances and **accrual has already
+   resumed** — the AFTER output reported `new_accruing_since_before = 1`, i.e. a sale accrued during the deploy
+   window itself. This state decays every minute the till is open. Closing it is a toggle-and-save on the
+   Loyalty Points page, not a D1 write.
+2. **The balance read was never completed.** It is the only check that observes what was actually approved.
+   Session `ee` correctly declined to authenticate as the owner and handed it over rather than marking it
+   passed. Three customers were verified as SAFE to check — **19718, 19719, 19735** — each having zero sales
+   with an id above `max(sales_reset_ids)`, so their balances are composed only of captured sales and a `0`
+   reading is instant-independent. **That safety decays the moment any of them buys something.**
+
+**Do them in this order: toggle OFF first, then read the balance.** Flipping first stops new accrual and makes
+the read instant-independent by construction rather than by careful customer selection. A non-zero reading has
+two causes and, while the till is open, the innocent one (a new sale accruing) is likelier than the bug it was
+written to catch — so a non-zero result is a *diagnosis*, never a reason to roll back `0117`. Rolling back would
+restore 34 customers' points while the owner believed them cleared.
+
+Branch on origin at `64aa0a51`, cut from production’s `2c497564`. Five user items: payment-method write-back,
+the sale-detail notes box, the membership-points switch + historical reset (migration **`0117`**), the `Edit`
+column alignment, and the compact driver/delivery split. Narrative and the expected-vs-actual ledger: **Part 599**.
+Verified layers 1, 4 and 5 — both packages green, and driven in a real browser against an **isolated** local
+Worker (8899) and a **private copy** of the D1 state with all 115 migrations applied. Ready for a coordinator to
+fold into the next Stage-2 candidate; this session did not deploy and holds no deploy role.
+
+**CITATIONS IN THIS BLOCK ARE AT `64aa0a51` — verify by the quoted text, not the number.** Session `ee`
+re-checked them at the merged candidate `6a27d738` and two had drifted: the `sales.ts` "Absent = on" comment
+is at **:501** there (not :498) and the `LoyaltyPointsPage.tsx` settings write at **:516** (not :497).
+Substance identical both times — which is the whole argument for quoting the line's text: a number silently
+points at whatever now occupies it, text fails loudly or not at all.
+
+**`0117` MEASURED ON PRODUCTION before it runs (read-only, by session `ee`, Sep 4).** Part 599 was written
+before these numbers existed, so they live here:
+
+| Probe | Value |
+|---|---|
+| `COUNT(*) FROM sales` | 15053 |
+| still accruing — `COALESCE(loyalty_accrual,1)=1` | **45** |
+| of those, walk-ins with no `customer_id` | 13 |
+| **distinct customers holding a real balance** | **31** |
+| sales value behind them | $3,490 |
+| `LENGTH(sales_reset_ids)` the log will capture | 269 bytes *(at 45 rows; larger at 48 — see below)* |
+| `loyalty_point_adjustments` / `customer_share_submissions` | 0 / 0 |
+
+**⚠️ THE FIGURES ABOVE ARE WHAT THE OWNER APPROVED WITH. THE MIGRATION RAN AGAINST DIFFERENT ONES.** The shop
+rang up 6 more sales during deploy preparation. Measured by session `ee` at **2026-09-04T11:26:57Z**,
+immediately before `migrate:remote`:
+
+| | at approval | at migration |
+|---|---|---|
+| `total_sales` | 15,053 | **15,059** |
+| accruing rows | 45 | **48** |
+| **affected customers** | **31** | **34** |
+
+The 31 is kept above deliberately as the honest record of what the owner actually agreed to; **34 is what the
+migration touched.** The owner was told the number moved and why, rather than letting 34 quietly replace 31 in
+a report — they approved a specific number and 3 more customers is the same decision, but not the same figure.
+**34 is still a pre-read**: the authoritative count is the reset log's own account — distinct `customer_id`
+behind the ids in `sales_reset_ids` — and if the two disagree, the log wins.
+
+The lesson generalises: **a baseline for a live system must be captured, never frozen.** Session `ee`'s verifier hardcoded these pre-counts and went red on the live traffic;
+the dangerous version is the one that would have passed, zeroing 48 sales while asserting 45.
+
+The other 15,008 sales are already explicitly `loyalty_accrual = 0` — the old-system import wrote them that
+way deliberately (`routes/portal.ts:1011` names migration 0061 and the historical-import / POS-opt-out cases;
+`:1014` is the gate). So the migration is far narrower than "zero all the membership points" sounds, **but it
+is not a no-op**: 31 named customers lose real balances. The unit for any approval of this is **31 customers,
+not 45 sales** — the same decision, but not the same disclosure. The owner confirmed with the corrected figure.
+
+**Which half actually answers the ask.** The durable answer is the *switch* (`loyalty_points_enabled`,
+resolved server-side and AND-ed over the request body); `0117` is the one-time clean-up of the 31. The two
+must ship together — zeroing balances without the switch would have the till re-accruing on the next sale,
+which is worse than doing neither. Verified closed on the deploy candidate: `rc/deploy-2026-09-04` contains
+`64aa0a51`, carries `0117_membership_points_reset.sql`, and carries `loyalty_points_enabled` at four Worker
+routes plus 9 occurrences in `LoyaltyPointsPage.tsx` (the switch is on the Loyalty Points page, **not**
+`Settings.tsx` — an empty grep there is a wrong path, not missing code).
+
+**Recovering WHO was affected, if the undo is ever needed.** Written down before it runs, rather than after
+someone needs it. `undo_sql` in `loyalty_points_reset_log` restores the flag; the *identities* come from the
+log by join, because `sales_reset_ids` holds the exact sale ids and `sales` carries `customer_id`:
+
+```sql
+SELECT DISTINCT s.customer_id
+FROM loyalty_points_reset_log l,
+     json_each('["' || replace(l.sales_reset_ids, ',', '","') || '"]') j
+JOIN sales s ON s.id = CAST(j.value AS INTEGER)
+WHERE s.customer_id IS NOT NULL;
+```
+
+**The post-deploy assertion that actually observes what was approved.** Counts over `sales` and
+`loyalty_points_reset_log` only re-ask the predicate the migration's own `WHERE` clause answered — they pass
+whether or not a customer's balance reads zero. The independent check is to pick one of the 31 and do an
+authenticated **read-only** GET on the contacts surface, expecting exactly `0`; that exercises
+`contacts.ts computeCustomerPointsMap`, the single ledger gateway. It is airtight rather than probable:
+balance is `Math.max(0, earned - deducted - redeemed + rewarded + manuallyAwarded)` (`portal.ts:1028`), and
+after `0117` `earned` -> 0 by the flag, `rewarded` and `manuallyAwarded` -> 0 by the void filters
+(`contacts.ts:348`/`:350`, `sales.ts:543`/`:552`, `notifications.ts:376`), while `deducted`/`redeemed` only
+subtract. **So a non-zero reading there is not rounding — it is a missing void filter at some site.**
+
+**⚠️ THE DEPLOY DOES NOT LEAVE POINTS OFF — one owner action is required after it.** The switch **defaults to
+ON** and `0117` does not write the settings row (it names `loyalty_points_enabled` only in a comment; the blob
+was re-read to confirm). Both server sites treat absent as enabled: `routes/sales.ts:498` says in terms
+*"Absent = on, matching buildPortalConfig's default"*, and `routes/portal.ts:329` is
+`normalizeBoolean(settings.loyalty_points_enabled, true)`. That default is deliberate and should stay — a
+switch shipping OFF would silently kill a live feature on every deployment that had never heard of it. But it
+means that **after the deploy, membership points are ON with every balance at zero, and the next sale accrues
+again.** The owner asked to "make the membership points on off in settings"; the deploy delivers the switch and
+the reset, not the flipped state.
+
+The step is an **owner action, not a D1 write**: toggle off and save on the Loyalty Points page, which writes
+`loyalty_points_enabled: 'false'` (`LoyaltyPointsPage.tsx:497`). Reversible, audited through the normal
+settings path, no SQL. Nobody should set that row directly on production — the owner flipping it *is* the
+switch working.
+
+Consequence for any post-deploy verifier: **`accruing_rows -> 0` is not a stable assertion.** It holds only if
+no sale is made between `migrate:remote` and the switch being turned off, and a sale in that window makes it
+read 1 — reporting a failed migration when the migration worked. Scope the zero-check to the ids in
+`sales_reset_ids` instead (the claim the migration actually makes, immune to traffic), and report a new
+accruing sale as its own line rather than a red.
+
+**Three things this lane found and deliberately did NOT fix — each is its own item:**
+
+1. **`buildLoyaltySection` (`routes/notifications.ts`) omits the manual-adjustment term.** It computes
+   `earned - deducted - redeemed + rewarded`; the other three balance-computing sites (`portal.ts`
+   `summarizePoints`, `contacts.ts` `computeCustomerPointsMap`, the `sales.ts` checkout re-validation) include
+   `+ adjusted`. So the loyalty notification already disagrees with every other surface for any customer who has
+   ever had a hand-issued adjustment. Pre-existing. **Urgency is in the timing, not the size: `0117` will HIDE
+   it** — with every term zeroed all four sites agree, and the disagreement only reappears the first time someone
+   issues a new adjustment, by which point nothing connects it back to the reset. Pinned by an assertion in
+   `test-loyalty-accrual-pure.cjs` that documents the current (drifted) state; invert that assertion when fixing.
+
+2. **The POS membership panel is unreachable on the shipped system.** `POS.tsx` resolves a membership number
+   through `lookupPortalMembership` → `GET /api/portal/membership/:n`, and `routes/portal.ts` returns 403
+   `feature_disabled` **unconditionally** (“Membership lookup is DISABLED (§2, user request)”). `setMembershipInfo`
+   has no other non-null source, so `membershipInfo` is always `null` and the whole membership-discount block is
+   dead code. Confirmed from source and from a live authenticated request. **Not fixed here on purpose:**
+   re-enabling an endpoint the user disabled for privacy is a decision, not a side effect. Consequence to know:
+   the POS-side points UI is inert, so the membership-points switch is enforced by the server (accrual write +
+   redemption refusal, both verified live), not by the till.
+
+3. **The actual courier cost is still not printed on the receipt** — open question back to the user. It appeared
+   in the original wording of the ask, but the clarification redirected that item to `Edit` alignment and the
+   delivery answer says “delivery only needs phone and driver name”. `routes/sales.ts` also carries the recorded
+   decision “P6: staff-entered actual courier cost — never printed on receipts”, and reversing that is the
+   user’s call.
+
+**⚠️ NOT IN THIS CHECKPOINT — five lanes existed only in local git at deploy time, with NO branch on origin.**
+Not lost, but one `git branch -D` from lost, and not live:
+
+| Lane | Tip | Shipped files | Owner |
+|---|---|---|---|
+| `s4/modal-chrome-ee` | `8dae6da1` | 74 (frontend modals) | ee |
+| ~~`s4/pay-notes-points-delivery-88`~~ | `64aa0a51` | 15, incl. migration `0117_membership_points_reset.sql` | 88 — **DEPLOYED Sep 4 in `c7ef7264`, wrangler `798d9e19`. Two owner actions still open — see the lane block.** |
+| `s4/awaiting-payment-hold-ee` | `c2f13396` | 7 (sale status / holds) | ee |
+| `s4/shifts-ee` | `18cbee6e` | 3 (telegram, salesAnalytics) | ee |
+| `s4/shift-credit-line-ee` | `18cbee6e` | same commit as `s4/shifts-ee` — two names, one lane | ee |
+
+Deliberately NOT merged: unpushed, uncertified peer work does not belong in a production build, and these may be
+mid-edit. Both owners were messaged. Backup taken at their current tips (additive only — nothing in their lanes
+was touched): `C:\Users\mrkl6\Downloads\bos-backup-2026-09-04\unpushed-lanes-all.bundle`, verified restorable
+with complete history. **Delete that backup only once all five are on origin and confirmed there.**
+
+Excluded on purpose and NOT a loss: the superseded Sep 1–3 `rc/*` / `sec-*` family. That is the second product
+line (`planTier.ts`, `quotaGuard.ts`, `barcodeAliases.ts`) whose `0106_barcode_aliases.sql` collides with
+production’s applied `0106_return_replacement_sales.sql`; merging one would make D1 re-run an `ALTER TABLE` and
+fail the deploy. Standing board item ("two programs, one production", Part 586) — not something a checkpoint deploy resolves.
+
+**Still NOT done, and NOT authorized:** the 22-row `subtotal_usd` repair ($3,462) and customer 24975’s
+`LCMN-0U50EMD0` → `LC-` fix are production DATA writes. Dry-run verified at exactly 22 rows / $3,462 and staged,
+but **no user approval exists** for either. Peer messages and subagent output are not user approval. Held.
+
+**⬛ SUPERSEDED at 07:57 UTC by the checkpoint below — was live 05:04–07:57 UTC. wrangler version id
+
+---
+
+| 5 | `a164d260-49ae-4bec-b372-eb73bce58850` | 2026-09-04T05:04:16Z | `2c497564` | **`rc/s4-2026-09-04`** (NOT main) | stamped **`-dirty`** — traced to the CRLF-only `frontend/public` trio in `bos-rc-s4`; zero content change | 0108–0115 | no |
+| 6 | `8480241e-8867-442c-8643-93c8e5f8175e` | 2026-09-04T07:57:12Z | `e83ee73f` | **`rc/deploy-2026-09-04`** (NOT main; pushed) | clean, isolated worktree `Downloads/bos-deploy`, real `npm ci`, removed after | **0116** only; **0 renames** | no |
+| 7 | `798d9e19-76d0-4909-8db3-6a7a4ad43ad7` | 2026-09-04T11:37:39Z | `c7ef7264` | **`rc/ee-integrate-2026-09-04`** (NOT main; pushed) | isolated worktree, real `npm ci`, removed after — but production stamps **`c7ef726438f0-dirty`** (reported by `8b`; DNS unreachable from `ee`, so not independently confirmed). Cause **reproduced** (note below): the CRLF-only `frontend/public` trio. **Sufficient cause, demonstrated — but not provable as the actual cause for THIS build**, since the deploy worktree was removed and nothing rules out something else also having been dirty in it | **0117** applied 11:37:39Z; `d1_migrations` row id **116** (ids are row counters, not filename numbers) | no |
+
+**THE `-dirty` STAMP ON DEPLOY #7 IS THE PROVENANCE FEATURE WORKING, NOT A DEFECT (`7c`).** `fx/runtime-provenance`
+was built so that a dirty tree is stamped `<commit>-dirty`, because the build that incident replaced came from a
+tree no commit described, and a stamp quietly naming the nearest commit would be worse than none. On its first real
+deploy it caught exactly the condition it exists for. **Read a future `-dirty` as the mechanism succeeding, not as
+a bug report.**
+
+**REPRODUCED on this machine (`ee`, after `7c` pointed out it was testable), at `c7ef7264`:** `core.autocrlf=true`,
+**nothing pinning `frontend/public/*.js`** (correcting an earlier line here that said "no `.gitattributes` anywhere" — see the note below), and all three blobs stored **LF**. A fresh detached worktree at `c7ef7264` is
+**completely clean — 0 dirty files** — with the trio checked out as **CRLF**. Running `build:public-runtime`, which
+every real deploy runs, rewrites all three back to **LF**, leaving **exactly those three files dirty with 0 content
+**RETRACTED — the corroboration was measured in the WRONG TREE (`7c` caught it).** I wrote that the shared
+checkout's same three files were "dirty since 15:56", corroborating the mechanism. Re-measured: in the **shared
+checkout** the trio is **CLEAN** (`git status --porcelain -- frontend/public/` → 0 lines), **LF on disk**
+(CR=0; 637/118/219 are LINE counts, not CR counts), and its mtime is **Sep 3 15:56** — an *mtime*, which I read as
+a *dirty-since*. The trio is dirty in **`bos-rc-workers/ee-integrate`**, a different tree, and that is where my
+read ran. **The reproduction above stands entirely on its own and needs no corroboration** — fresh worktree clean,
+builder run, exactly those three files, 0 content rows. Two separate errors in one sentence: the wrong tree, and an
+mtime read as a status.
+
+**CORRECTION to the line above, and it matters more than the wording (`ee`, self-caught).** I wrote "no
+`.gitattributes` anywhere". **One exists at `c7ef7264`** — added by `2c497564`, *"pin migration SQL to LF, because
+CRLF makes a trigger unshippable"* — and I measured the shared checkout's disk, where there is none, then
+attributed the result to the commit. The file is scoped to a single line, `cloudflare/migrations/*.sql text
+eol=lf`, which is why it does not touch the `frontend/public` trio and why the mechanism above still holds.
+
+**⚠️ AND IT IS NOT ON `main` EITHER** — `git ls-tree origin/main` finds no `.gitattributes`, and the shared
+checkout has none on disk. This is the **second** shipping-critical CRLF fix that is live in production and absent
+from `main`, alongside `1755bd6b`. The consequence is concrete and worse than the runtime-checker one: on a tree
+without it, `wrangler d1 migrations apply --remote` splits a `CREATE TRIGGER` on the regex `/\sEND[;\s]$/`, the
+`\r` sits past the `$` anchor, and D1 answers **"incomplete input: SQLITE_ERROR"** — after the migrations ahead of
+it have already applied. **`0115_sale_amendments.sql` failed exactly that way against production on Sep 4.** It
+passes `wrangler d1 execute --local --file`, which hands the whole file to SQLite and never splits, **so running
+the migration locally cannot catch it.** Anyone authoring a migration from `main` today is exposed.
+
+**FIX FOR EVERY FUTURE DEPLOY (`7c`) — UNCLAIMED, one line in the deploy-record template:** capture
+`git status --porcelain` **and** `git rev-parse HEAD` into the deploy record **at build time**. Today a `-dirty`
+stamp says *that* the tree was dirty and nothing about *what*, and the answer exists only in the seconds before the
+worktree is removed. With the file list attached this can never become unanswerable again — which is the whole
+failure mode the provenance work exists to close.
+
+---
+
+### Sep-6 task wave — shift cash, compact inputs, and historical stock correction
+
+These items were registered on 2026-09-06 from the owner's latest notes. They
+are deliberately separate from the older S4 queues and from already-shipped or
+candidate-only work. The director owns reconciliation: each implementation lane
+must return a durable evidence envelope (base/head/dirty state, files, focused
+tests, risks, and not-done scope), then an independent verifier must challenge
+it before it can move to DONE.
+
+**[~] N43 · Shift open/close cash semantics and layout.** Audit the current
+shift kernel, route, summary, close flow, reports, expenses, offline behavior,
+permissions, and both currency paths. The UI contract to validate is:
+`Available Amount for shift open: <KHR> Riel + <USD> USD` with the numeric inputs
+immediately before their currency labels; at close show `Final Amount (Closed):
+<KHR> Riel + <USD> USD` and `Additional used: <KHR> Riel + <USD> USD`. A counted
+close of zero must be valid; opening-register insufficiency must not silently
+disable closing or invent a sale/expense. Determine and document the exact
+sign/meaning of “Additional used” before editing: it must reconcile the
+operator's cash explanation without changing the report-only rule for register
+breakdown. Preserve registered opening USD/KHR and final USD/KHR in shift
+reports. Keep actual business calculations based on sales, COGS, profit,
+expenses, delivery, and credit rules; do not make a visual registration
+breakdown a second accounting ledger. Add focused backend parity tests and UI
+tests, including blank/zero, KHR-only, USD-only, insufficient opening cash,
+additional-used, duplicate-submit, permissions, and report serialization.
+
+**[~] N44 · Smart, field-specific compact input sizing.** Inventory every
+shared input/control and the product, stock-in, POS, sales, returns, branches,
+contacts, reports, and shift surfaces. Define one field policy from observed
+data: barcodes must remain fully readable with leading zeroes and many digits;
+names, brands, categories, suppliers, and notes must not truncate or wrap
+destructively; phone inputs should fit the normal roughly-ten-digit value; USD
+prices should fit values like `nnn.nn`; USD cash should fit the normal `nnnn`
+range; KHR amounts must fit the larger observed range such as
+`nnnnnnnn.nn`. Separate CSS width/scroll behavior from validation maxLength so
+visual compactness never discards data. Verify keyboard, paste, scanner,
+Khmer/i18n, 375px/768px/desktop, iOS PWA and Android PWA behavior. Add a
+focused contract test for widths, input modes, and preservation of long values.
+
+**[~] N45 · Sep-3–Sep-6 historical warehouse-sale audit and correction.**
+Read-only first: identify the exact business-date window using the canonical
+business timezone, sales and sale lines, statuses/returns/cancellations,
+inventory movements, branch/warehouse identifiers, and current Shop/Warehouse
+quantities. Determine whether any sale consumed Warehouse stock when the rule
+requires Shop stock. For each affected line, design an idempotent correction
+that restores Warehouse where it was wrongly decremented, transfers only the
+needed quantity to Shop before the sale is treated as Shop stock, avoids double
+counting existing movements, and records every stock movement in the Stock
+Change surface with actor/reason/reference. Do not rewrite history or run
+remote D1 writes until the exact target set, pre/post invariants, rollback or
+compensation path, and production authorization are explicitly reviewed. The
+future guard must enforce Shop-only selling and the transfer-first prompt.
+Existing expenses/settlements must not be duplicated.
+
+**[ ] N46 · Reconcile the 2026-09-06 expense note before any data mutation.**
+The listed expenses are 55,000 + 28,300 + 6,000 + 5,000 + 5,000 = **99,300
+KHR**, while the note says `993000៛`; and `64,700 + 34,600 = 99,300`. Preserve
+both the literal note and this arithmetic finding. Status is **needs owner
+confirmation** for whether `993000` is a typo for `99300`; no expense or shift
+record may be created or changed from this note alone.
+
+**[~] N47 · Coordination and certification ledger.** Track all active,
+inactive, uncommitted, committed, candidate-only, deployed, blocked, and
+owner-gated lanes from the current repository ledger and the Claude/Fable
+handoff notes. Do not claim recovery of conversations that are not present in
+the repository. Reuse agents only when ownership is disjoint and relevant;
+never overlap write paths. Every completed lane gets a second-pass adversarial
+review, then the main agent performs the final reconciliation and full affected
+gates. Production deployment, remote migration, and historical D1 correction
+remain explicitly gated actions.
+
+**[~] N48 · Canonical accounting convergence across every consumer.** The
+second independent accounting review confirmed that current `main` still has
+dashboard/compatibility, Telegram, payment-method, customer, product,
+inventory, and export surfaces using `total_usd` or line totals while the
+analytics kernel uses a different recognized/net formula. Build one explicit
+status/discount/refund/delivery authority and make every consumer use it. First
+lock the Credit rule: the owner's ruling says Credit is positive in revenue and
+profit and is labeled `Credit`, while current main/tests still exclude
+`awaiting_payment`. Reconcile item-level discounts in dashboard/export fields,
+linked versus unlinked courier cost, sale-date versus return-date reporting,
+Telegram, receipts, imports, offline replay, and public redaction. Add seeded
+mixed-status parity fixtures; do not accept source-shape tests alone.
+
+**[~] N49 · Real browser/PWA certification and accessibility foundation.** The
+independent UX lanes confirmed no Playwright configuration/dependency and no
+reachable local smoke server, so source-contract tests are not browser proof.
+Provide a safe local authenticated fixture or explicitly document the approved
+manual/browser harness, then test 320/360/375/390/768/1024/1280px, iOS/Android
+PWA metadata, offline/update flows, Khmer rendering, listbox keyboard semantics,
+44px touch targets, long-name/barcode visibility, phone/price input modes, and
+loading/error/success states. Remove or track the `user-scalable=no` decision;
+do not weaken data preservation to achieve compactness.
+
+**[~] N50 · Product identity merge contract — exact name plus barcode identity.**
+Refine and replace conflicting S4-17/S4-17b/S4-29 wording with one executable
+contract. A merge is allowed only when the product name is exactly the same
+(no fuzzy, case-folded, or trimmed-name expansion unless explicitly proven as
+the existing identity rule) and either the barcode is exactly the same or the
+only barcode difference is leading zeroes. Normalize the surviving barcode by
+removing only those leading zeroes, with an explicit all-zero/empty-barcode
+rule. If the normalized barcodes are genuinely different, keep separate child
+rows under the exact-name group; do not merge them merely because the names
+match. Merge all per-branch quantities additively while preserving batch/lot
+ownership and all historical links. Resolve USD and KHR independently: zero is
+missing when another value exists; selling and wholesale use the highest
+recorded nonzero value; cost uses the mean of distinct recorded nonzero costs,
+or the sole nonzero value when zero is the only alternative, and remains zero
+when every value is zero. Pin precision/rounding and duplicate-cost behavior
+with tests before implementation. No product, sale, return, movement,
+supplier, received-date, category, brand, unit, barcode, batch, or alias link
+may be dropped.
+
+**[~] N51 · Existing product-group survey and correction manifest.** Survey
+all exact-name groups for exact and leading-zero-normalized barcode matches,
+including parent/child rows, inactive rows, duplicate costs, zero prices,
+branch/batch stock, sales, returns, transfers, supplier and received-date
+links. Produce a dry-run manifest with survivor, normalized barcode, merged
+quantity, price/cost decisions, linked-record counts, and quarantine reasons.
+Production writes are gated: do not merge or delete rows until the exact
+manifest is reviewed and approved. Every applied group needs a unique case key,
+append-only reversal snapshot, pre/post stock/link invariants, and visible
+Stock Change/audit history.
+
+**[~] N52 · Product-merge link propagation and child-row parity.** Verify the
+merge path and every consumer after identity consolidation: POS/search/scanner,
+stock-in and imports, branches/products, transfers, returns/replacements,
+sales/sale-items, inventory movements, batches, supplier/received dates,
+category/brand/unit, reports/exports, offline replay, audit, and undo. Same
+name plus normalized barcode must resolve to one product identity; same name
+plus genuinely different barcode must remain independently selectable as child
+rows. Conflicts must prompt with a reversible “keep/link/merge” decision rather
+than silently overwriting fields. Add backend enforcement and focused parity
+tests for all link classes.
+
+**[ ] N53 · Product merge numeric-resolution and precision contract.** Pin the
+executable USD/KHR resolver before implementation: zero/missing versus an
+explicit zero, malformed and whitespace-only values, negative values, duplicate
+costs, distinct-cost averaging, sub-cent precision, and deterministic rounding.
+Selling and wholesale must independently select the highest valid recorded value;
+cost must exclude zero when a nonzero value exists, average distinct nonzero costs
+exactly as specified, and remain zero only when every usable value is zero. Add
+adversarial pure tests for one-zero/one-nonzero, duplicate costs, 4/5, 4/4/4/5,
+high-precision decimals, malformed input, negative-only input, both currencies,
+and all-zero input. No numeric coercion may silently turn malformed data into a
+valid business value.
+
+**[ ] N54 · Product merge safety kernel, complete links, and concurrency.** Make
+every server-side merge path enforce the same exact-name plus exact/leading-zero
+barcode rule; an arbitrary pair of active product IDs must not be mergeable just
+because the IDs exist. Reparent or explicitly quarantine every product-linked
+table and batch allocation (including returns, transfers, damaged/replacement,
+stock-row moves, RFID, promotions, and sale/return batch allocations), carry
+wholesale and all resolved fields, and make the operation atomic, idempotent, and
+compare-and-set safe under concurrent merge/undo. Preserve an append-only
+reversal snapshot and Stock Change/audit record; prove rollback on injected
+failure and prove no double stock movement or partial bulk merge. Add backend
+parity tests and a read-only link inventory before any production correction.
+
+#### Sep-7 identity swarm — independent lanes (reconciled)
+
+| Agent | Role | Scope | Status |
+|---|---|---|---|
+| Euler | feature planner | Owner-rule reconciliation and acceptance contract | **[x] complete; contract confirmed, boundary decisions remain** |
+| Zeno | business OS architect | Backend merge/link architecture | **[x] partial; unsafe arbitrary merge and missing links confirmed** |
+| Peirce | verifier | Price/cost/zero/rounding mathematics | **[x] complete; candidate math passes, edge cases remain** |
+| Ramanujan | verifier | UI grouping and child-row behavior | **[x] partial; candidate not integrated, import parity gap** |
+| Popper | security reviewer | Merge integrity, permissions, idempotency, undo | **[x] complete; P1 integrity blockers confirmed** |
+| Franklin | business OS architect | Import/offline/export/backup parity | **[x] partial; identity is not system-wide** |
+| Hilbert | reconciler | Commit, branch, and deployed-provenance reconciliation | **[x] partial; candidate/deploy lineage discrepancy** |
+| McClintock | security reviewer | Production dry-run survey and invariant plan | **[x] complete; manifest and mutation gates defined** |
+
+All are read-only and may not operate on production data. The main agent will
+reconcile their pairwise findings before allocating any writer. Their evidence
+was reconciled on 2026-09-07: the identity rule is not certified on current
+`main`, no candidate is approved for integration, and N53/N54 are required
+before an implementation lane can be considered safe.
+
+#### Sep-7 identity swarm — evidence reconciliation
+
+| Agreement | Refuted assumption / unresolved point | Disposition |
+|---|---|---|
+| All eight lanes agree the owner intent is exact name, exact or leading-zero-equivalent barcode, additive stock, highest selling/wholesale, and distinct nonzero cost averaging. | Current `main` still includes cost in the product-detail identity and S4-17/S4-29 plus A2 hardening are on separate refs or candidate lineages. | N50 remains implementation-pending; candidate ancestry must be proven before integration. |
+| Backend and security lanes independently found the possible-duplicates merge accepts arbitrary active non-group IDs. | Existence, active state, and permissions are not identity compatibility. | N54 P1: enforce identity/cluster validation server-side and test unauthorized pairings. |
+| Backend and security lanes independently found the merge fold updates only part of the product graph. | Returns, transfers, damaged/replacement, stock-row moves, RFID, promotions, and batch allocations can remain attached to the inactive row; wholesale is not fully carried/undone. | N54 P1: inventory the schema and reparent or fail closed; add rollback/link invariants. |
+| Math lanes agree on zero exclusion, maximum selling/wholesale, and cost averaging as the intended direction. | Precision order, negative-only values, malformed/whitespace values, all-zero barcodes, and leading-zero survivor threshold are not pinned; one candidate rounds values before averaging. | N53: pin fixtures and reject silent coercion before code integration. |
+| UI/parity lanes found the candidate covers many surfaces. | Candidate import planning still uses raw barcode detail keys; frontend merged rows can retain a non-canonical displayed barcode; backup/restore and offline replay do not enforce identity. | N52 remains open; add importer/export/restore/offline and displayed-barcode parity tests. |
+| Provenance lane reconciled refs and worktrees. | Current dirty `main` is not the same as the documented deployed/candidate lines; no production state was read. | No deployment or production correction claim; preserve dirty main and use isolated integration worktrees. |
+
+No source files, tests, migrations, production data, deployment, or remote state
+were changed by this swarm. The only changes in this checkpoint are the durable
+task/status records in this file and the session log.
+
+#### Sep-7 identity swarm — adversarial second pass (completed with evidence gap)
+
+The same eight agents were re-tasked to falsify their first conclusions rather
+than repeat them. Euler is rechecking the literal contract and boundary choices;
+Zeno and Popper are red-teaming the complete FK graph, authorization, atomicity,
+idempotency, CAS, and undo; Peirce is recomputing hostile numeric vectors;
+Ramanujan is tracing displayed-barcode and UI/import parity; Franklin is tracing
+backup/offline/export/report consumers; Hilbert is rechecking ancestry and
+deployment provenance; and McClintock is red-teaming the production manifest and
+invariants. This pass was read-only. One additional math envelope was visible and
+reconfirmed the candidate-only precision, negative-value, and current-main
+lineage exceptions. The other seven task turns completed without a surfaced final
+envelope, so their second-pass assertions are deliberately not counted as new
+evidence; their first-pass envelopes remain the recorded basis. A silent task
+completion is not a verification pass.
+
+| Lane | Second-pass disposition |
+|---|---|
+| Euler | Completed, final envelope not surfaced; no new claim admitted |
+| Zeno | Completed, final envelope not surfaced; no new claim admitted |
+| Peirce | Completed, visible envelope reconfirms candidate-only math with precision/negative exceptions |
+| Ramanujan | Completed, final envelope not surfaced; no new claim admitted |
+| Popper | Completed, final envelope not surfaced; no new claim admitted |
+| Franklin | Completed, final envelope not surfaced; no new claim admitted |
+| Hilbert | Completed, final envelope not surfaced; no new claim admitted |
+| McClintock | Completed, final envelope not surfaced; no new claim admitted |
+
+#### N43–N47 evidence checkpoint 1 (2026-09-06)
+
+| Agent | Lane | Status | Evidence disposition |
+|---|---|---|---|
+| Dalton | Shift cash architecture | **[x] Investigation complete** | Read-only audit; found two semantic blockers (Available Amount ceiling vs snapshot; Additional used derived outflow vs manual other-cash event); no edits or production action. |
+| Feynman | Input sizing and responsive UX | **[x] Investigation complete** | Read-only inventory; confirmed responsive and input-mode defects; no edits, browser run, deployment, or remote write. |
+| Dirac | Historical warehouse-sale correction | **[x] Investigation complete** | Read-only security audit; no production counts or mutation; exact target set and invariant-gated correction still required. |
+| Herschel | Requirements refutation and provenance | **[x] Investigation complete** | Confirmed A2 shift/credit changes are not ancestors of current `main`; registered cash is report-only; no edits or production action. |
+| Codex/main | Reconciliation | **[~] Active** | Registered task wave, recomputed note arithmetic, published durable handoffs; implementation and final gates remain open. |
+
+The completed investigation lanes are not implementation approvals. The next
+write lanes must use disjoint ownership, work in isolated worktrees, preserve
+the dirty main checkout, and return base/head/dirty evidence plus focused tests.
+
+#### Swarm wave 2 — independent refutation lanes (2026-09-06)
+
+Eight read-only agents are active. Duplicate subject coverage is intentional:
+each pair has an independent brief and must report disagreements rather than
+converging by assumption. No agent may edit, stage, deploy, migrate, or touch
+production data in this wave.
+
+| Agent | Role | Scope | Status |
+|---|---|---|---|
+| Dewey | business OS architect | Shift-A architecture and lineage | **[x] partial; blockers recorded** |
+| Carver | verifier | Shift-B adversarial counterexamples | **[x] partial; candidate-only, no cash-addition coverage** |
+| Laplace | business OS architect | Accounting-A cross-surface formula authority | **[x] partial; Credit/discount/fee conflicts recorded** |
+| Boyle | verifier | Accounting-B revenue/profit/delivery refutation | **[x] partial; multiple sibling formula inconsistencies confirmed** |
+| Locke | security reviewer | Stock-A correction safety and invariants | **[x] complete; production evidence still absent** |
+| Leibniz | reconciler | Stock-B correction design and provenance | **[x] partial; movement-first design, no live candidates** |
+| Singer | product designer | UX-A field sizing, i18n, PWA | **[x] partial; source defects confirmed, browser not run** |
+| Russell | Playwright tester | UX-B browser/PWA verification feasibility | **[x] partial; no harness/local smoke unavailable** |
+
+Completion requires a valid evidence envelope, not a green assertion. After
+the wave returns, Codex/main will reconcile each pair, assign only non-overlapping
+write paths, require an implementation verifier, and rerun the affected package
+gates. A lane that times out or lacks evidence stays open/blocked.
+
+#### Swarm wave 2 reconciliation result
+
+| Pair | Agreement | Refutation / unresolved point | Disposition |
+|---|---|---|---|
+| Shift | Current `main` lacks the shift implementation; A2 supports per-currency, zero-valid, mismatch-nonblocking close. | Blank is nullable at the Worker but can become zero in UI; cash additions and Additional used have no canonical model; needs-review figures can still display. | N43 remains implementation-pending and owner-semantics-gated. |
+| Accounting | Multiple consumers diverge from the kernel; A2 Credit behavior is positive while main excludes `awaiting_payment`. | A2 comments/tests contradict executable behavior; item discounts and linked/unlinked courier authority are not fully converged. | N48 opened; no merge or accounting claim made. |
+| Stock | Date window and item-level movement-first classification agree; bare branch rewrites are unsafe. | Existing transfers lack correction-grade idempotency/reference and live IDs/balances are unavailable. | N45 remains blocked on read-only production manifest and correction design. |
+| UX/PWA | Preserve full values, avoid arbitrary maxLength, use explicit keyboard modes, and make long values readable. | Source contracts are not device proof; no Playwright/local smoke harness; listbox/touch/PWA issues remain. | N49 opened; browser certification not done. |
+
+### DEPLOY BLOCKER — main is ten migrations behind production (measured Sep 4 2026, business-os-v1-c3)
+
+The owner asked for a deploy. **Do not deploy from `main`.** Measured, not inferred:
+
+| source | highest migration |
+|---|---|
+| production D1 (`d1_migrations`, applied) | `0115_sale_amendments.sql` |
+| `origin/rc/s4-2026-09-04` | `0115_sale_amendments.sql` ← matches |
+| `origin/s4/delivery-scope` | `0115_sale_amendments.sql` |
+| `origin/ship/2026-09-03` | `0107_receipt_numbers_business_format.sql` |
+| **`origin/main`** | **`0105_fee_delivery_contacts.sql`** |
+
+Production has applied through 0115; `origin/main` tops out at 0105. A deploy
+from `main` would ship a Worker that has never seen the schema behind
+0107–0115 and would roll the live build back by everything those ten migrations
+belong to — the same failure as the Sep-3 incident the `deploy-provenance` skill
+was written for, and it would again pass every check.
+
+**`origin/rc/s4-2026-09-04` is the deploy source**, on the strongest evidence
+available: its highest migration equals production's highest applied one exactly.
+Migrations are numbered, ordered and irreversible, which is why that match counts
+for more than commit ancestry — and ancestry cannot see a build that was never
+made from a commit on this branch.
+
+Consequences for everyone:
+
+- **A new migration takes 0116 or later**, never 0107. Filenames applied in
+  production are frozen: renumbering an applied migration makes D1 re-run its
+  `ALTER TABLE` and fails the deploy.
+- Any lane branched from `main` (this session's `fx/legacy-import-subtotal`
+  among them) is behind the live schema and must be merged into the rc before it
+  can ship.
+- The rc→main merge still needs a coordinated moment. Until it happens, `main`
+  is **not** a superset of production and must not be treated as one.
+
+### Sep-4 round 6 — two items (user, Sep 4 2026; recorded by business-os-v1-c3)
+
+Sent mid-turn, minutes after round 5. Recorded before the work, same standing
+instruction.
+
+**[ ] S4R6-1 · Expenses belong beside the stats on Sales, per day and per
+shift.** Two halves, and the first is a correctness claim, not a layout one:
+*"make sure it is expenses and data shown correctly"* — so the figures get an
+expected-vs-actual check before anything is moved. Then the placement: expenses
+shown **in Sales**, **next to the stats**, broken down **by day**, and for the
+**shift** window (the shift kernel from S4-7 already exists —
+`salesAnalytics.ts` can be asked for a shift, not just a day, so the window
+clause is there to reuse). Ties to S4R5-3: a discount or fee that is wrong in a
+report is wrong here too.
+
+**[ ] S4R6-2 · Sales lists show ALL rows for today by default; "per page"
+becomes a custom Show-all.** Sales, Returns and Expenses each list **everything
+for the current day** on open. The page-size control gains a custom / **Show
+all** option and that is the default. A date range the operator sets overrides
+the current-day default — the "unless" in *"show all for current day... unless
+change in date range"* is the whole rule: once a range is chosen it wins, and
+the list is not silently re-clamped back to today.
+
+Two things to watch when building it, neither of which the ask has to say:
+
+- **Show-all is unbounded by definition**, and this database has ~15,000 sales.
+  Today's rows are a safe set; a widened date range with Show-all still on is
+  not. Whatever ships has to stay inside D1's CPU limit for the widest range a
+  person can actually pick, so the keyset cursor in `routes/sales.ts` stays the
+  transport even when the UI says "all".
+- The current-day default must use the **business day** (+7), the same offset
+  every report uses, or the till and the report disagree about what "today" is
+  for the first and last hours of it.
+
+### Sep-4 round 5 — four items (user, Sep 4 2026; recorded by business-os-v1-c3)
+
+Sent mid-turn during the lane reconciliation, with a photograph of a real
+printed receipt attached. Recorded before any of it was worked, per the owner's
+standing instruction: *"if i add throughout the conversation as you fix giving
+new tasks as you work, you don't forget...always note in progress.md."*
+
+**[x] S4R5-1 · The receipt's item table is FOUR columns, and the price column
+shows the discount, not the discounted price.** The owner's photo is the
+reference. Reading it column by column: `ទំនិញ` (Item) · `ចំនួន` (Qty) ·
+`តម្លៃ` (Price) · `សរុប` (Total). One line reads
+
+```
+1. Mac Matte Lipstick        1 ដើម     28.00 (-7.00)     21.00
+   648
+```
+
+so the **price** column carries the undiscounted selling price with the
+discount beside it in parentheses, and the **total** column carries the net.
+Under the table: `សរុបចំនួនទំនិញ / Total Qty: 1` and
+`សរុបបញ្ចុះលើទំនិញ / Item Discount: 7.00`. Both an **item discount** and a
+**total discount** line are wanted. This is the same rule the owner already
+gave once — *"the products show selling price and minus the discounts in total
+show selling price (-discount), not discounted price(-discount)"* — now with a
+picture, so treat the photo as the spec and check the live template against it
+line by line rather than assuming the earlier fix covered it.
+
+DONE `1dd19bd0` (rc/deploy-2026-09-04, pushed; NOT yet deployed). The photo is
+the layout now: price column = selling unit price with the per-unit cut beside
+it, total column = the net line, plus named **Total Qty**, **Item Discount** and
+**Total Discount** rows. Subtotal reverts to the stored `subtotal_usd` (the
+lines are net, so they sum to it) and Discount reverts to the order-level cut
+alone — the per-line cut is no longer folded into those two, it has a row with
+its own name. The money is unchanged either way:
+`(subtotal + savings) − (discount + savings) = subtotal − discount`, and the
+test asserts both readings against real production sales 16433 and 16815.
+
+Three defects the fourth column exposed, all fixed in the same commit:
+
+- `printReceipt`’s print/PDF path **replaced** the captured grid with three
+  tracks unconditionally, so the fourth cell would have wrapped onto its own
+  row *on paper* while looking right on screen. It counts the cells now.
+- the canvas fallback (iOS / tainted foreignObject) understood exactly three
+  tab-separated fields and folded the rest into the right-hand slot — price and
+  total would have printed jammed together.
+- `chargedUnitKhr` had no exchange-rate fallback, so a line with no stored riel
+  would have lost its riel subline when the Total column started reading the
+  charged side.
+
+`show_item_unit_price` was the toggle behind the deleted `qty × unit` subline.
+Rather than leave a dead switch in Receipt Settings it now gates the price
+**column**: off gives item / qty / total, and the setting still means what it
+says.
+
+**[ ] S4R5-2 · One shift per system per day, not one per user.** Start/End Shift
+is done by **one account** for the whole system. It must be settable: either
+per-user (non-admin users each register), or **once in total per day** for the
+business. **Admin never does this.** Today `0116_shift_sessions.sql` enforces
+`UNIQUE(user_id, COALESCE(branch_id,-1), business_date)` — per user, with no
+mode switch and no admin exemption — so the shipped shape is one of the two
+modes hard-wired. Needs: a setting, the second uniqueness shape, and the admin
+exemption in `ShiftGate`. Note the deployed index is already applied to
+production, so the second mode is a NEW migration, not a rename of 0116.
+
+**[x] S4R5-3 · Reports must actually carry store discount, product discount,
+total discount and the actual delivery fee.** Stated as a verification ask —
+*"make sure it is actually done"* — so the deliverable is expected-vs-actual per
+figure, not a code reading. `getItemDiscountUsd` (S4-7, merged from
+`s4/shift-credit-line-ee`) supplies the item-level term; the two invoice-level
+discounts are columns on the sales row. Prove each one reaches a rendered
+report, and say which do not.
+
+DONE `1d67e895` (rc/deploy-2026-09-04, pushed; NOT yet deployed). Answered by
+measurement, not by reading the code. **August 2026, recognized sales:**
+
+| figure | actual in D1 | what the app reported |
+| --- | --- | --- |
+| Store discount | $5.50 | $5.50 — correct |
+| Membership discount | $0.00 | $0.00 — correct |
+| **Product discount** | **$2,338.85** (636 of 888 lines) | **nothing — no field existed** |
+| **Total discount** | $2,344.35 | **$5.50** — understated 425× |
+| Delivery charged | $249.50 | $249.50 — correct |
+| Delivery absorbed by shop | $0.00 | $0.00 — correct |
+
+So two of the four were right and two were not. The product discount leaves no
+trace on the sales header at all — `sales.subtotal_usd` is the sum of LINE
+totals and a line total is already net of its own discount — so no report
+*could* have shown it. `getItemDiscountUsd` had existed since S4-7 but was
+wired only into the Telegram shift report.
+
+Fixed: `SalesTotals` now carries `item_discount_usd` and `total_discount_usd`
+on every path (headline, period series, grouped, business-summary days), summed
+inside the **existing** COGS query — same join, same rows, same recognized-only
+basis, one extra `SUM`, zero extra rows read. `discount_usd` deliberately keeps
+meaning store + membership. The income statement now opens at *Goods at list
+price* and subtracts *Product discounts* in the open; the period and grouped
+tables show the true total plus a Product discounts column. Telegram drops its
+second full scan and reads the figure off the totals.
+
+#### The delivery answer is different from what it looks like at first
+
+Reading only `sales.delivery_actual_cost_usd`: **14 of 15,052 sales, $22.86 all
+time**, against 4,414 sales carrying a delivery fee. That reads as "nobody
+records what the courier is paid".
+
+It is not what is happening. The `fees` table carries **2,542 rows of
+`fee_type = 'delivery'` totalling ៛51,197,200 (≈ $12,487 at 4,100)** — and only
+2 rows in USD, $3.50. **The courier payments are recorded, in riel, as
+standalone fee rows.** Every one of them has `sale_id NULL`, so
+`deliveryActualCostExpr`’s `EXISTS (... fees.sale_id = s.id ...)` never matches
+and the kernel falls back to the near-empty sale column.
+
+Consequences, stated precisely:
+
+- **Gross profit and the net result are NOT wrong.** The fees aggregate applies
+  no `fee_type` filter, so those ≈$12.5K are already inside Expenses, and
+  `delivery_net_usd` subtracts ≈$0 rather than subtracting them a second time.
+  Nothing is double-counted and no money is missing.
+- **The delivery view IS wrong.** "Actual cost" reads $0.00 and "Delivery
+  margin" reads the whole fee charged — a 100% margin on a service the shop is
+  paying roughly $12.5K a year for.
+- `SaleDetailModal` declares `delivery_actual_cost_usd` and never renders it, so
+  a cost not typed at the till can neither be seen nor added afterwards. The
+  amendment machinery already has a `delivery_fee_changed` kind, which is the
+  natural place for a `delivery_actual_cost_changed` sibling.
+
+Carried as **S4R5-3b** below rather than bolted onto this commit, because it is
+a decision about which of two records is authoritative, not a bug fix.
+
+**[ ] S4R5-3b · Make the delivery reports read the courier payments that are
+actually recorded.** Two halves. (1) Decide and implement the authority rule:
+unlinked `fee_type='delivery'` rows are the real courier cost for the period,
+so the delivery aggregate should read them (converted at the business rate)
+rather than only `sales.delivery_actual_cost_usd` — with the existing
+`EXISTS`-guard extended so a LINKED fee row is still not counted twice. (2) Give
+`SaleDetailModal` the field: show the recorded cost, and allow adding one after
+the fact through a new `delivery_actual_cost_changed` amendment kind, so the
+per-sale record can be completed without reopening the till.
+
+**[ ] S4R5-4 · Re-derive gross profit and revenue against the corrected receipt,
+and restyle the Telegram reports.** Follows S4R5-1: if the receipt's discount
+presentation changes, every figure computed from those terms has to be
+re-checked end to end — revenue, COGS, gross profit, delivery paid by shop vs by
+customer vs actual — not just the printed line. Telegram report styling is part
+of the same item.
+
+### Sep-4 round 4 — ten items (user, Sep 4 2026; recorded by business-os-v1-c3)
+
+Recorded before any of it is built, per the owner's standing instruction: *"Make
+sure you keep track of changes in progress.md do checkpoints and commits, push,
+and deploy."*
+
+**Four of these land on lanes that already exist and are unmerged.** Nobody
+should take one of those without claiming it against the branch owner first —
+`fx/sale-detail-rows`, `lane-a/fast-stock-in`, `lane-b/transfer`,
+`fx/reports-redesign`, `s4/reports`. Collisions are flagged per item below.
+
+**[ ] S4R4-1 · Sales detail shows per-branch stock; POS options show Shop only.**
+New selling rule. In the sale-detail sheet a product shows its stock **by
+branch** — "Shop: n, Warehouse: n" — as *information*. The selectable **options**
+list only Shop rows (with selling price, received date, barcode). Everything else
+about identity is unchanged: the same-name grouping and child-row model still
+stand ([[product-child-row-model]]). This is a change to what POS offers for
+sale, not to what a product is. *Collides with `fx/sale-detail-rows`.*
+
+**[ ] S4R4-2 · Sale detail renders raw JSON at the delivery contact.** Observed
+by the owner, verbatim:
+
+```
+Delivery ta
+Address [{"label":"Default","name":"ta","phone":"","email":"","address":"","area":""}]
+```
+
+A contact's address column holds a JSON array of labelled addresses and the sheet
+prints it. Parse it, pick the right entry, render label/phone/area as fields, and
+fall back to the plain string for rows that are not JSON — both shapes are live.
+*Collides with `fx/sale-detail-rows`.*
+
+**[ ] S4R4-3 · Sale detail must be compact and clean.** Same sheet: merge rows,
+two columns where it reads better, no wall of single-value lines.
+*Collides with `fx/sale-detail-rows`.*
+
+**[ ] S4R4-4 · Stock change (add/minus) shows branch on small screens and in the
+detail view**, and the same compaction — merge rows, two columns.
+
+**[x] S4R4-5 · Shift cash register — DONE, both halves, on `s4/shift-register`
+(worktree `bos-dlv`). Not yet merged to the rc; not yet deployed.** First POS use
+of each day prompts the employee to register the shift's cash/change float, and
+**keeps prompting until it is registered**; once registered that day, never
+again. End of shift is **manual**, and can only be ended **once**.
+
+Three of the four promises are enforced by the SCHEMA, not by route code, because
+a check-then-write in a route is something two POS tabs pass simultaneously on the
+same morning:
+
+| Promise | Where it is enforced |
+|---|---|
+| "only need registered once" | `UNIQUE(user_id, COALESCE(branch_id, -1), business_date)` |
+| "end only once" | the close is `UPDATE ... WHERE id = ? AND closed_at IS NULL` |
+| "prompt until registered" | the ABSENCE of today's row is the prompt condition |
+| end of shift is manual | no trigger or default ever sets `closed_at` |
+
+**The `COALESCE(branch_id, -1)` is the whole reason the guard test exists.** In
+SQLite every NULL is DISTINCT from every other NULL for uniqueness purposes, so a
+plain `UNIQUE(user_id, branch_id, business_date)` constrains nothing at all when
+`branch_id` is NULL — which is exactly a single-branch till, the most common shop
+in this system. The index would have looked correct and "register once a day"
+would have been silently false for almost everyone.
+`test-shift-sessions-pure.cjs` caught it by registering the same NULL-branch till
+twice and requiring the second to be refused.
+
+**Certified and pushed. Commits `9d1a8f82` (backend) and `82bd0f50` (frontend)
+on `s4/shift-register`.** Frontend gate: `test:utils` exit 0 (189 files, the
+chain now ends on `shiftGate`), `verify:i18n` exit 0 (4758 keys, both packs),
+`vite build` exit 0. Worker gate: `tsc --noEmit` clean and every
+`scripts/test-*.cjs` green, `test-shift-sessions-pure.cjs` at 22 checks.
+
+**Ready to integrate, deliberately NOT merged.** `git merge-tree` against
+`origin/rc/s4-2026-09-04` is clean — zero conflicts — so the merge itself is a
+formality. It is being left to the deploy driver on purpose: merging it puts
+**migration 0116 into the branch the next deploy builds from**, and applying a
+migration is irreversible. Whoever merges it is choosing to ship 0116 on their
+next deploy, and should say so out loud first. The rc is at 0115 and production
+is at 0115, so today a deploy applies zero migrations; after this merge it
+applies exactly one.
+
+Files — backend `9d1a8f82`: `cloudflare/migrations/0116_shift_sessions.sql`,
+`src/routes/shifts.ts`, `src/index.ts` (2 mount lines),
+`scripts/test-shift-sessions-pure.cjs` (22 checks).
+Frontend: `src/api/shiftTransport.ts`, `src/components/pos/ShiftGate.tsx`,
+`src/components/pos/POS.tsx`, `tests/shiftGate.test.ts` (19 checks),
+`package.json` (one invocation at the TAIL of `test:utils` — union it on merge),
+`src/lang/{en,km}.json` (+16 `shift_*` keys each, appended — union both packs).
+
+Two frontend decisions worth not re-litigating: the prompt is **non-dismissible**
+(a closable prompt is one the till never registers), and the transport passes
+`null` as route()'s local fallback — **no offline mirror**, because a queued
+offline registration would let two devices each open the same morning and
+reconcile into exactly the duplicate the UNIQUE index exists to prevent.
+
+Uses the `S-YYYYMMDD-HHMM` session-id convention already on the board, built from
+the same +7 business offset as every report. Ties into S4-30/S4R3-8 (who did what,
+when). — `business-os-v1-c3`
+
+**[ ] S4R4-6 · Stats and reports count every non-cancelled status.** Total sales
+$ **including unpaid**; transaction count; and stats for paid, unpaid, profit and
+COGS. Well designed and compact. This is the same defect as S4R3-5 and the second
+half of S4R3-2's root cause — fix the scope once in the kernel and let every
+surface read it. *Collides with `fx/reports-redesign`, `s4/reports`.*
+
+**[ ] S4R4-7 · Product names are truncated in the search results** for transfers
+and for every stock-change action (fast in, add stock, remove, set). The owner
+cannot identify a product from what is shown and does not remember barcodes. The
+name must be legible in the result row, not clipped.
+*Collides with `lane-a/fast-stock-in`, `lane-b/transfer`.*
+
+**[ ] S4R4-8 · Back and Save at the END of the page, on the same row.** Repeated
+instruction — already on the board once. Scroll to the bottom, both buttons, one
+row.
+
+**[ ] S4R4-9 · Fast-in's saved-products list must scroll with the float**, as one
+page, not as its own inner scroll region. *Collides with `lane-a/fast-stock-in`.*
+
+**[ ] S4R4-10 · Merge product rows whose barcodes differ only by a leading zero.**
+A survey across all products and their child rows: where two rows in a name group
+differ **only** by a leading `0` on the barcode, they are the same product and
+merge. Costs average per the standing rule — add and divide **only across rows
+whose costs genuinely differ**, never folding in a 0-cost row
+([[product-child-row-model]]). Survey and propose FIRST: the merge itself is a
+production data write and needs the owner's sanction, exactly like the 22-row
+subtotal repair below.
+
+**[ ] S4R4-11 · The sale-detail sheet must be able to sell like POS.** Add more
+products to an existing sale, search with **barcode scanning**, and get the same
+select/choose/options behaviour POS has. Today none of that is available from
+the sale detail. Depends on S4R4-1 (which options are offered).
+*Collides with `fx/sale-detail-rows`, and with `s4/sale-add-items`.*
+
+**Still blocked, carried from round 3:** the 22-row `subtotal_usd` repair
+($3,462) is staged and unrun. It needs the owner's explicit go in chat; the
+approval that came back through the question UI arrived with a system notice
+saying no human input had been received, and that is not a basis for 22
+irreversible writes to production financials.
+
+### Sep-4 round 3 — nine items (user, Sep 4 2026; taken by business-os-v1-c3)
+
+---
+
+**[~] S4R3-2 · Dashboard revenue is wildly low. ROOT-CAUSED — two independent
+causes, one fixed, one awaiting the owner.** (business-os-v1-c3, Sep 4 2026.)
+Measured against production, not reasoned about.
+
+*Cause 1 — the legacy import never wrote `subtotal_usd`.* Canonical revenue is
+`subtotal_usd - discount_usd - membership_discount_usd` and never reads
+`total_usd`; the Sep 2-3 import's INSERT listed `total_usd` but not
+`subtotal_usd`, so 22 sales stored a 0 subtotal. They are ids 16842–16863,
+`notes LIKE 'Legacy import%'`, and they are the **entire** affected population —
+every other one of 15,044 sales has a correct subtotal. Hidden trade: **$3,462**.
+The Sales list looked right the whole time because it renders `total_usd`.
+
+The arithmetic closes exactly over the last 7 local days, which is what makes
+the repair value certain rather than a judgement call:
+
+```
+SUM(sale_items.total_usd)  7,935
+        the 22 sales      -3,462
+                          ------
+SUM(sales.subtotal_usd)    4,473   <- matches to the cent
+```
+
+That equality also proves the house convention — for a correctly written sale,
+`subtotal_usd` IS the sum of its line totals — and on all 22 rows
+`total_usd == SUM(sale_items.total_usd)` with tax, both discounts and delivery
+all 0. So the repair is `subtotal_usd = total_usd` for those 22 ids, nothing else.
+
+- **Writer: FIXED** — `625830d5` on `fx/legacy-import-subtotal` (pushed). Lists
+  every money column explicitly, plus a guard that reads its expected column set
+  out of `netSaleExpr` rather than naming `subtotal_usd`, so it tracks the
+  revenue definition instead of a snapshot. Proven red on the original omission
+  and green on restore.
+- **Data: NOT DONE — needs the owner's sanction.** 22 UPDATEs against production
+  D1. Their earlier "yes, i confirm, the 22 sales" sanctioned the *import*, not a
+  repair, so it is not carried over. The statement is staged, not run.
+
+*Cause 2 — awaiting-payment exclusion, which is S4R3-5.* Over the same 7 days,
+branch 2: recognized net **$4,469** vs all-status net **$7,672**. Awaiting is
+70–100% of some individual days (Sep 1: $2,184 of $2,734; Aug 28: 100%). The two
+causes compound, which is why the gap read as an order of magnitude.
+
+Related drift found while measuring, not yet fixed: `cloudflare/src/routes/compat.ts`
+~390/400/434/444 still hold un-apportioned `- COALESCE(rf.refund_usd, 0)` copies,
+and `attributedLineRevenue` at ~345. The Dashboard's summary tiles (~255) use
+`SUM(total_usd)` over non-cancelled — a *third* revenue definition, which is why
+the tiles and the Analytics panel disagree with each other on the same screen.
+
+---
+
+**[x] Fixed by business-os-v1-63, Sep 4 2026 — sargable-date regression,
+pushed unmerged.** `fx/sargable-date-fix` off `2c497564` in its own worktree
+(`bos-rc-workers/sargable-fix`), 4 commits, pushed to origin. Real line
+numbers (ee's sweep numbers had drifted; grepped the actual SQL patterns
+before editing):
+
+- `contacts.ts:1681-1684` AP/AR `date(si.invoice_date,'+7h')` /
+  `date(cr.invoice_date,'+7h')` vs `idx_supplier_invoices_date` /
+  `idx_customer_receivables_date` → swapped in the existing
+  `localDateAtOrAfter`/`localDateAtOrBefore` helpers. `invoice_date` is a
+  single consistent shape on both tables, so this is a direct, safe swap.
+- `compat.ts:684-685` legacy-deleted-sales `date(d.deleted_at,'+7h')` vs
+  `idx_legacy_deleted_items_deleted_at` → same helper swap; `deleted_at` is
+  written only by `isoNow()`, single shape, safe.
+- `compat.ts:636-643` audit-logs retention `DELETE` → batched by id
+  (5,000/statement, looped), mirroring `lib/audit.ts:143-147`'s already-batched
+  scheduled retention. `audit_logs.created_at` has **no index at all**
+  (confirmed by ee's own scanner), so this was never a sargability defect —
+  it's a statement-size fix, sibling parity only, and correctly does not move
+  ee's lock either way.
+  **Resolved (was a known conflict):** `test-compat-dashboard-daterange-pure.cjs`
+  used to assert this site keeps its exact unbatched `date(created_at)` form
+  ("no index — ±7h immaterial") — an over-specified lock that pinned statement
+  *shape*, not the sargability intent its own comment named. I flagged it to
+  ee rather than editing it myself (the file and its adjacent assertions were
+  mid-edit by another lane in the shared tree at the time). Fixed properly on
+  `rc/deploy-2026-09-04` by `6f60d119` — "pin the retention delete's new
+  intent, not the shape it used to have" — which now accepts both the old and
+  the batched form. Nothing further needed from Part-77 here.
+- `sales.ts:3197-3230` `/export` keyset cursor + ORDER BY vs
+  `idx_sales_created_pg` — **deliberately partial, not an oversight.**
+  `sales.created_at` genuinely mixes two shapes in production: space-separated
+  (live `CURRENT_TIMESTAMP` + offline-replay via `sanitizeClientCreatedAt`) vs
+  ISO (legacy-import via `bangkokToUtc`/`legacyToUtc`'s `.toISOString()`), both
+  eras on the same calendar days. A raw comparison misorders at byte position
+  10 ('T' sorts after ' '), so stripping `datetime()` from the tie-break
+  comparison or ORDER BY would trade sargability for a real same-day
+  misordering bug in a financial export. Added a redundant
+  `s.created_at >= @afterCreatedAtFloor` sargable floor on just the
+  first-10-chars date portion (safe raw in both shapes) instead; left the
+  exact-order `datetime()` comparisons in place with a comment explaining why.
+  Verified against ee's landed lock (`fx/sargable-date-lock-ee`,
+  `test-sargable-date-filters-pure.cjs`): contacts.ts/compat.ts no longer
+  appear in its CONFIRMED offender list; sales.ts:3218/3251 still do, which is
+  this documented tradeoff, not an unfixed site.
+- `inventory.ts:532-650` `/summary` branch_stock_json correlated subquery
+  (10,271 re-runs on the unfiltered path) → pre-aggregated `LEFT JOIN`
+  (`GROUP BY product_id`, still one row per product, no fan-out), matching the
+  si/ret joins already in the same queries. Both branchId-scoped and
+  no-branchId paths fixed; response shape unchanged. Left a third, already-
+  paginated occurrence in `searchProductsPayload` (~line 380) untouched —
+  bounded per-page cost, out of scope.
+- `contacts.ts:472-605` `/customers` "unpaged, ~251 statements" —
+  **investigated, not a bug, no fix made.** Traced the mechanism: the
+  `!hasPaging` fallback runs the already-correctly-chunked
+  `computeCustomerPointsMap`/`computePortalAccountMap` over the full table
+  instead of one page (~5,000 customers ÷ ~100/chunk × 5 queries/chunk ≈ 250).
+  But `POS.tsx:497` and `offlineSnapshotTransport.ts:111` both call
+  `getCustomers()` with zero params on purpose — POS's local customer search
+  and the offline-snapshot builder both need the complete roster client-side,
+  same shape as `/inventory/summary`'s supplier-return-picker dependency
+  above. Forcing pagination here would break both. Left as-is; the "~251
+  statements" cost is real but is the cost of a legitimate full-roster read,
+  not an unpaged-by-mistake defect.
+
+Not touched (deliberate, correct, per ee's scan): `salesAnalytics.ts:737`
+(day-scoped + LIMIT 1000, load-bearing), `auth.ts:232` (no index),
+`promotionRulesSql.ts:40-41` (no index, cross-file-alias unresolvable),
+`compat.ts` `products.expiry_date` sites. File boundary held with ee:
+`cloudflare/scripts/test-sargable-date-filters-pure.cjs` is ee's, every route
+file above is mine. Verified: `npx tsc --noEmit` clean (after `npm install` in
+the worktree — it had no `node_modules`); targeted pure tests green
+(`test-sargable-date-filters-pure.cjs` copy, `test-sales-export-import-
+roundtrip-pure.cjs`, `test-inventory-adjust-set-pure.cjs`,
+`test-stock-in-invoice-report-pure.cjs`, `test-contacts-fts-pure.cjs`,
+`test-group-search-siblings-repro.cjs`); full `scripts/test-*.cjs` loop run
+from `cloudflare/` (per ee's cwd correction) — only pre-existing reds
+(`test-image-normalize-pure.cjs` and siblings, missing
+`frontend/node_modules`, per ee) plus the one documented audit-log-retention
+conflict above. Not merged/deployed — reconciler's call.
+
+
+---
+
+  **[x] Fixed by business-os-v1-63, Sep 4 2026.** No shared numeric-input
+
+---
+
+  confirmed by ee's read-only sweep) — fix is a single synchronous,
+  capture-phase, passive `wheel` listener (`frontend/src/runtime/numberInputWheelGuard.ts`,
+  wired in `frontend/src/index.tsx` before the CSS-injection guard, ahead of
+  `ReactDOM.createRoot`) that blurs the focused element when it is a number
+  input — blur, not preventDefault, so the underlying panel keeps scrolling.
+  Registered synchronously per 4a (not the idle-deferred pattern
+  `installFormFieldAccessibility` uses — no exposure window on a busy till
+  tab). Built on `rc/s4-2026-09-04` @ `2c497564` in its own worktree
+  (`bos-wheel-guard`), not the shared tree (`App.tsx` was dirty there).
+  Cleared with 4a (S4-21/modal-chrome stale, no collision) and ee (sweep
+  owner) before touching files.
+  Verified: `tests/numberInputWheelGuard.test.ts` (5 assertions, exercises
+  the real exported guard functions, not an attribute check) PASS; layer-1
+  loop-form gate (typecheck, check:source, every `tests/*.test.ts` run
+  individually) all green; real `vite build` clean; live-browser control-vs-fixed
+  proof (trusted wheel event, DPR-real coordinates) — unguarded: value
+  $20→$19, panel scrollTop 300; guarded: value stays $20, panel scrollTop
+  still 300 (scroll not blocked), focus moved off the input to `<body>`.
+  Commit `e273e127` on branch `fx/wheel-guard-number-inputs`, pushed to
+  origin; not yet merged to `main` or included in a deploy — pending the
+  fleet's normal reconciliation/staged-deploy cycle.
+  **Known side effect (4a, follow-up `68d1601d`):** blur fires the field's
+  own `onBlur`. `FeeForm.tsx`'s `amount_usd`/`amount_khr` inputs use
+  `onBlur` to mark the form touched for validation display — the only
+  `type="number"`+`onBlur` pairing in the app (POS's payment field has
+  none) — so scrolling past a focused fee-amount field now marks it
+  touched too and can surface a validation message nobody typed into.
+  Accepted trade-off, not designed around: restoring focus after blur
+  would re-arm the money bug for that window.
+
+---
+
+
+## F53 — permission-refresh event coalescing (next checkpoint)
+
+New reproduced frontend freshness bug from the separately authorized architecture review: an own-user update followed by an unrelated-user update within the debounce loses the required bootstrap; payloadless role refresh also misses bootstrap. Pinned e24fc25e actual-handler experiment has positive controls. No backend authorization bypass demonstrated. Identity owns isolated AppContext/helper/test correction from9654562d; independent review pending. It is excluded from the frozen branch/contact checkpoint. Evidence: C:/Users/mrkl6/Downloads/architecture-review-20260908/permission-event-experiment.cjs and .results.json. Do not change the review artifacts.
+
+## F54 — stale in-flight read/cache ownership (next checkpoint)
+
+Separate authorized efficiency review reproduced invalidation while a read is pending: the next read reused stale in-flight work and old response repopulated shared cache. Isolated fix538d65ee (http.ts/apiHttp.test.ts) has focused tests and independent bounded review; not integrated/deployed here. Reviewer also reproduced a late local fallback replacing fresher server cache without invalidation; follow-up retained with the same external owner. Preserve resolved-error occurrence IDs fromc2eb. Callback-side persistent cache/IndexedDB effects remain outside the proven scope. Root will require exact independent evidence before integration. Active writer: efficiency-cache-worker in C:/Users/mrkl6/.codex/worktrees/bos-efficiency-20260908/business-os-v1; no overlapping HTTP edits.
+
+## F55 — protect pending offline work across hard runtime changes
+
+New read-only overhaul finding (not observed production loss): hard storageVersion/dataRootKey/organization changes can call resetLocalMirrorDb and erase pending queue/outbox/vault/chunks. Old queued work also lacks explicit actor/runtime origin binding. Identity is preparing a bounded plan/reproduction against1befb1d8, no implementation yet. Required design is origin-scoped quarantine and compatible reauthorization/reconciliation; never blindly preserve-and-replay across users/organizations or expose prior private data. Original probe/report: C:/Users/mrkl6/Downloads/overhaul-review-20260908/freshness-recovery.probe.cjs and freshness-recovery.md. Excluded from both deployedc2eb and frozen freshness checkpoint. Backend auth bypass is not demonstrated.
+## Not Paid stock rule correction and timeout release deployed — September 9
+
+- Owner correction is now applied live: `awaiting_payment` / Not Paid sales deduct stock exactly once, just like completed sales; cancellation restores it through the existing guarded path.
+- The signed-in Admin recovery panel applied target `sale-not-paid-stock-recovery-20260909-v1` once after backup. It corrected four quantity-one lines across sales 16952, 16953 and 16954, created four `sale` inventory movements, restored all four unreleased allocations, and left sale 16951's existing 36-unit deduction unchanged. Header totals and delivery data were not changed.
+- Postflight: 16952 has 1 item/revision 10, 16953 has 2 items/revision 7, 16954 has 1 item/revision 4; product stock is 859=0, 409=8, 3490=2, 5370=6. Recovery receipt is backed up and the exact operation has three members with no repeat guard.
+- Release branch `codex/sale-create-trigger-release-20260909` is at `3b98fc1a`; Worker deployment `8bfacf42-bd8b-4e62-9d61-1c4f2c7ddf51` / version `fb2aa5c4-22ec-4de5-ab32-806de9fce7dd` is at 100%. The release includes 45-second mutation timeout handling with unknown-outcome preservation, Khmer write-error presentation, exact recovery-digest hardening, and the Edit Customer heading-row fix.
+- Focused backend/frontend tests, both typechecks, i18n verification and frontend production build passed. No blind retry was used. Transfer durability, duplicate cleanup, broader UI/public portal, and offline work remain open; offline is paused.
+## Shift additional cash, transfer timeout and iOS viewport checkpoint — September 9
+
+Release `be7bdaedc6c609ee339e33b9717771265bcf20f0` is live at 100% on Worker version `4eda51e2-52c6-4157-ad86-1efa8d5f1af1` (deployed 2026-09-09 around 13:03 UTC) from the clean pushed branch `codex/sale-create-trigger-release-20260909`. The release also retains the earlier Not Paid/`awaiting_payment` stock correction and write-outcome hardening through its ancestry (`aea2b6aa`, `ee1127d7`, `6ed60cb5`, `3b98fc1a`). Fix-scoped commits are preserved: `b059237a` records post-opening additional USD/KHR cash and includes it in expected cash/difference, shift figures, exports and Telegram; `b312c331` extends Shop↔Warehouse transfer mutation windows to 45s/90s with lot-aware caps; `e093b5c5` caps iOS browser zoom and removes page-level pinch zoom while retaining explicit image-lightbox zoom; `be7bdaed` adds transfer receipts, request-digest conflict checks, replay protection and audit-before-stock ordering. Migrations `0147_shift_additional_cash.sql` and `0148_transfer_operation_receipts.sql` are applied remotely as D1 migration rows 143 and 144.
+
+Focused shift reconciliation/report, transfer branch/lot/identity, Worker typecheck, frontend typecheck/i18n/build and mobile viewport regression tests pass. The full frontend utility gate is green at 346/346 after the transfer/shift/mobile contract updates. Returns remain in shift figures rather than cash-breakdown rows, and close/amend writes do not overwrite opening register values. Deployment logs and provenance are in `outputs/takeover-20260909/`.
+
+The next open items are the remaining historical-sales evidence and cleanup, physical iOS PWA/device-toolbar and uncertain-network transfer verification (U20/F73), then the broader compact UI/public storefront/customer-portal pass. Public policy/footer/consent surfaces already exist and are documented in `outputs/takeover-20260909/transfer-ui-public-review.md`; that review separates the remaining visual work from production data fixes. Offline work remains paused by owner.
