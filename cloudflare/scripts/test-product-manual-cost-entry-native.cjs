@@ -94,8 +94,26 @@ function seedProduct(name) {
   return Number(raw.prepare(`INSERT INTO products(name, cost_price_usd, cost_price_khr, is_active, updated_at) VALUES (?, 7, 0, 1, NULL)`).run(name).lastInsertRowid)
 }
 function seedLot(productId, unitCostUsd) {
-  raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd) VALUES (?, ?, 1, ?)`)
-    .run(productId, `k${Math.random()}`, unitCostUsd)
+  return Number(raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd) VALUES (?, ?, 1, ?)`)
+    .run(productId, `k${Math.random()}`, unitCostUsd).lastInsertRowid)
+}
+// A D1Compat-shaped wrapper (get/all/run, named @params) for lib functions
+// called directly (recomputeCatalogCost, catalogCostRecomputeStatement,
+// getCatalogCostBreakdown) rather than through the Hono route.
+function makeDb() {
+  return {
+    prepare(sql) {
+      return {
+        async get(params) { const { translated, values } = bindNamed(sql, params); return raw.prepare(translated).get(...values) },
+        async all(params) { const { translated, values } = bindNamed(sql, params); return raw.prepare(translated).all(...values) },
+        async run(params) {
+          const { translated, values } = bindNamed(sql, params)
+          const result = raw.prepare(translated).run(...values)
+          return { changes: Number(result.changes), lastInsertRowid: Number(result.lastInsertRowid) }
+        },
+      }
+    },
+  }
 }
 
 let checks = 0
@@ -105,29 +123,48 @@ async function check(name, fn) {
 }
 
 async function main() {
-  await check('a manual cost edit records one entry (source manual, user name) and folds into the mean with the lots', async () => {
+  await check('a manual cost edit records a baseline (MAX lot id at edit time) and OVERRIDES -- result is the entry cost, not the mean with the existing lots', async () => {
     const id = seedProduct('Serum')
     seedLot(id, 3)
-    seedLot(id, 5)
-    const result = await request('PUT', `/${id}`, { cost_price_usd: 4 })
+    const lot2 = seedLot(id, 5)
+    const result = await request('PUT', `/${id}`, { cost_price_usd: 10 })
     assert.equal(result.status, 200, JSON.stringify(result))
     const entries = costEntries(id)
     assert.equal(entries.length, 1)
     assert.equal(entries[0].source, 'manual')
-    assert.equal(entries[0].cost_usd, 4)
+    assert.equal(entries[0].cost_usd, 10)
     assert.equal(entries[0].user_name, 'sethy')
     assert.equal(entries[0].user_id, 9)
-    // mean(3, 4, 5) = 4
-    assert.equal(row(id).cost_price_usd, 4)
+    assert.equal(entries[0].baseline_batch_id, lot2, 'baseline is the highest lot id that already existed for this product')
+    // Owner correction (2026-09-17): "before might be (n+n1+n2)/3, after
+    // override just becomes n" -- NOT mean(3, 5, 10).
+    assert.equal(row(id).cost_price_usd, 10)
   })
 
-  await check('a manual entry more than 2x the cheapest lot is an outlier -- the writer stores the HIGHEST, same guard as a lot receipt', async () => {
-    const id = seedProduct('OutlierManual')
+  await check("owner's override sequence, driven end to end through the real route: 3,5 -> override 10 -> add lot 12 -> override 4 -> add lot 6", async () => {
+    const id = seedProduct('OverrideSequence')
     seedLot(id, 3)
-    const result = await request('PUT', `/${id}`, { cost_price_usd: 9 })
-    assert.equal(result.status, 200, JSON.stringify(result))
-    // 9 > 3 * COST_OUTLIER_RATIO(2) -- refused as a mean; highest kept instead.
-    assert.equal(row(id).cost_price_usd, 9)
+    seedLot(id, 5)
+    const firstOverride = await request('PUT', `/${id}`, { cost_price_usd: 10 })
+    assert.equal(firstOverride.status, 200, JSON.stringify(firstOverride))
+    assert.equal(row(id).cost_price_usd, 10, 'override replaces the mean, not one more input to it')
+
+    // Add-stock lot AFTER the override baseline: writers call recomputeCatalogCost
+    // themselves (routes/inventory.ts etc), simulated here the same way.
+    const db = makeDb()
+    seedLot(id, 12)
+    const { recomputeCatalogCost } = load('lib/catalogCostRecompute.ts')
+    await recomputeCatalogCost(db, id)
+    assert.equal(row(id).cost_price_usd, 11, '(10+12)/2 = 11')
+
+    const secondOverride = await request('PUT', `/${id}`, { cost_price_usd: 4 })
+    assert.equal(secondOverride.status, 200, JSON.stringify(secondOverride))
+    assert.equal(row(id).cost_price_usd, 4, 'the second override again replaces the mean, not (10+12+4)/3')
+    assert.equal(costEntries(id).length, 2, 'both overrides are kept for the record')
+
+    seedLot(id, 6)
+    await recomputeCatalogCost(db, id)
+    assert.equal(row(id).cost_price_usd, 5, '(4+6)/2 = 5 -- only the lot received after the SECOND override counts')
   })
 
   await check('resaving the SAME cost writes no second entry', async () => {
@@ -148,45 +185,58 @@ async function main() {
     assert.equal(costEntries(id).length, 0)
   })
 
-  await check('the breakdown lists the lot rows with lot_code and the manual row', async () => {
+  await check('the breakdown lists lots before an override as excluded: overridden, and the override row as included', async () => {
     const id = seedProduct('Breakdown')
     raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd, lot_code, received_at) VALUES (?, 'lotA', 1, 3, 'LOTA', '2026-01-01')`).run(id)
     raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd, lot_code, received_at) VALUES (?, 'lotB', 1, 5, 'LOTB', '2026-01-02')`).run(id)
     const edit = await request('PUT', `/${id}`, { cost_price_usd: 10 })
     assert.equal(edit.status, 200, JSON.stringify(edit))
     const { getCatalogCostBreakdown } = load('lib/catalogCostRecompute.ts')
-    const breakdown = await getCatalogCostBreakdown({
-      prepare(sql) {
-        return {
-          async get(params) { const { values, translated } = bindNamed(sql, params); return raw.prepare(translated).get(...values) },
-          async all(params) { const { values, translated } = bindNamed(sql, params); return raw.prepare(translated).all(...values) },
-        }
-      },
-    }, id)
+    const breakdown = await getCatalogCostBreakdown(makeDb(), id)
     const lotRows = breakdown.inputs.filter((row) => row.source === 'lot')
     const manualRows = breakdown.inputs.filter((row) => row.source === 'manual')
     assert.equal(lotRows.length, 2)
     assert.ok(lotRows.every((row) => row.lot_code))
+    assert.ok(lotRows.every((row) => row.excluded === 'overridden'), 'both lots existed before the override baseline')
     assert.equal(manualRows.length, 1)
     assert.equal(manualRows[0].user_name, 'sethy')
-    assert.equal(manualRows[0].excluded, null)
+    assert.equal(manualRows[0].excluded, null, 'the (only, latest) override itself counts')
+    assert.equal(breakdown.result_usd, 10)
   })
 
-  await check('the SQL twin (catalogCostRecomputeStatement, used by stockSession.ts) agrees with the JS path: latest manual entry only', async () => {
+  await check("the SQL twin (catalogCostRecomputeStatement, used by stockSession.ts) agrees with the JS/route path on the FULL override sequence", async () => {
     const id = seedProduct('SqlTwin')
-    seedLot(id, 3)
-    seedLot(id, 5)
-    // Two manual entries -- only the later (id 20) should be selected.
-    raw.prepare(`INSERT INTO product_cost_entries(id, product_id, cost_usd, source) VALUES (10, ?, 100, 'manual')`).run(id)
-    raw.prepare(`INSERT INTO product_cost_entries(id, product_id, cost_usd, source) VALUES (20, ?, 4, 'manual')`).run(id)
+    const db = makeDb()
     const { catalogCostRecomputeStatement } = load('lib/catalogCostRecompute.ts')
-    const { sql, params } = catalogCostRecomputeStatement(id)
-    const { translated, values } = bindNamed(sql, { ...params, productId: id, id })
-    raw.prepare(translated).run(...values)
-    // mean(3, 4, 5) = 4 -- the superseded manual entry (100, an outlier that
-    // would have fired the guard) never enters the SQL twin's derivation,
-    // same selection as recomputeCatalogCost (JS) above.
-    assert.equal(row(id).cost_price_usd, 4)
+    const applyTwin = async () => {
+      const { sql, params } = catalogCostRecomputeStatement(id)
+      const { translated, values } = bindNamed(sql, params)
+      raw.prepare(translated).run(...values)
+    }
+
+    seedLot(id, 3)
+    const lot2 = seedLot(id, 5)
+    // Override to 10 (recordManualCostEntry, via the real route -- the SQL
+    // twin never writes product_cost_entries itself, only recomputes from it).
+    const first = await request('PUT', `/${id}`, { cost_price_usd: 10 })
+    assert.equal(first.status, 200, JSON.stringify(first))
+    assert.equal(costEntries(id)[0].baseline_batch_id, lot2)
+    await applyTwin()
+    assert.equal(row(id).cost_price_usd, 10, 'the SQL twin also overrides, not mean(3,5,10)')
+
+    const lot3 = seedLot(id, 12)
+    await applyTwin()
+    assert.equal(row(id).cost_price_usd, 11, '(10+12)/2 = 11, lot3 is after the baseline')
+
+    const second = await request('PUT', `/${id}`, { cost_price_usd: 4 })
+    assert.equal(second.status, 200, JSON.stringify(second))
+    assert.equal(costEntries(id)[1].baseline_batch_id, lot3)
+    await applyTwin()
+    assert.equal(row(id).cost_price_usd, 4, 'the SQL twin also re-overrides on the second entry')
+
+    seedLot(id, 6)
+    await applyTwin()
+    assert.equal(row(id).cost_price_usd, 5, '(4+6)/2 = 5')
   })
 
   console.log(`\n${checks} checks passed`)
