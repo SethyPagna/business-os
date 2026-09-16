@@ -22,19 +22,32 @@ export default function StatsRangeRow({
   const active = activeStatsPreset(range)
   return (
     <div className={`min-w-0 ${className}`}>
-      <div className="flex min-w-0 flex-nowrap items-center gap-1" data-stats-range-controls>
+      {/* P9 (Sep 16 2026), owner verbatim on the live app/small screens: "the
+          date start and date end are not responsive in the button row. too
+          small and out of bounds." `flex-nowrap` used to force the picker to
+          shrink to whatever sliver was left once `leading` (Stats chip) and
+          `actions` (History/Export/etc, shrink-0) claimed their space -- on a
+          360-400px phone that could be under 100px, and the trigger's own
+          vw-based font clamp does not know its box got that narrow, so the
+          text overflowed the row. `flex-wrap` + a real min-width on the
+          picker fixes the root cause: the picker keeps a legible minimum
+          width and, when the row is too narrow for everything, the ACTIONS
+          wrap to their own line below it (ml-auto then re-centers them on
+          that new line) -- the dates never shrink below readable, and never
+          spill outside the row. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-1" data-stats-range-controls>
         {leading}
         <DateTimeRangePicker
           value={range} onChange={onRangeChange} t={t} showTime={showTime}
           showCalendarIcon={false}
           compactTriggerLabels={compactRange}
           showQuickRanges={!showPresets}
-          className="min-w-0 flex-1"
+          className="min-w-[10.5rem] flex-1"
           triggerClassName={compactRange
             ? 'flex h-10 !min-h-10 min-w-0 w-full items-center justify-center gap-1 rounded-md px-1 py-0 text-[11px]'
             : 'flex h-10 !min-h-10 min-w-0 w-full items-center justify-center gap-1 rounded-md px-1 py-0 sm:gap-2 sm:px-3'}
         />
-        {actions ? <div className="ml-auto flex shrink-0 flex-nowrap items-center gap-1">{actions}</div> : null}
+        {actions ? <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1">{actions}</div> : null}
       </div>
       {showPresets ? (
         <div className="stats-date-presets mt-1 flex min-w-0 flex-nowrap gap-1 overflow-x-auto overscroll-x-contain pb-1" data-date-presets>

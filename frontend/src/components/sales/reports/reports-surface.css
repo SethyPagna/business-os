@@ -455,8 +455,18 @@
   gap: 8px;
 }
 
-.reports-mobile-primary > * { min-width: 0; max-width: 100%; flex: 1 1 10rem; }
-.reports-mobile-primary > :last-child { flex: 2 1 20rem; }
+/* P9 (Sep 16 2026), owner verbatim: "the date start and date end are not
+   responsive in the button row. too small and out of bounds." This row used
+   to give the picker only a 10rem flex-basis (160px) next to whatever else
+   shared the row, and the block below it forced the endpoint text onto a
+   normal/anywhere word-wrap, which let "dd/mm/yyyy HH:MM" break mid-string
+   and paint outside the trigger -- both the opposite of the shared
+   DateTimeRangePicker's one-row-per-endpoint rule (Sep 15) and the overflow
+   guard it now carries. The picker is the ONLY child `.reports-mobile-primary`
+   ever renders (search lives on its own row above, in `.reports-mobile-
+   controls`; see ReportsHub.tsx), so it takes the row's FULL width rather
+   than a shared/shrinkable basis. */
+.reports-mobile-primary > * { min-width: 0; max-width: 100%; flex: 1 1 100%; }
 .reports-mobile-primary input,
 .reports-mobile-primary button { min-height: 44px; height: auto; }
 .reports-mobile-controls input[type='search'] { min-height: 44px; }
@@ -471,12 +481,26 @@
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   min-height: 44px;
 }
-.reports-mobile-range > span {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  line-height: 1.5;
+
+/* Below 400px, "dd/mm/yyyy HH:MM" for both Start and End with the arrow
+   between them cannot stay legible on one row without shrinking under the
+   11px floor -- so Start and End stack as two full-width compact LINES
+   (grid rows) instead. Each endpoint still reads as one unbroken line (the
+   shared component's own `whitespace-nowrap`/`overflow-hidden` on
+   `triggerEndpoint` still applies); only the Start/End relationship moves
+   from side-by-side to stacked. The arrow, which reads left-to-right, is
+   redundant once the two dates are already stacked top-to-bottom, so it is
+   hidden rather than reflowed. */
+@media (max-width: 400px) {
+  .reports-mobile-range [data-date-range-trigger-values] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-flow: row;
+    row-gap: 2px;
+    justify-items: center;
+  }
+  .reports-mobile-range [data-date-range-trigger-values] > svg {
+    display: none;
+  }
 }
 
 .reports-mobile-presets {
