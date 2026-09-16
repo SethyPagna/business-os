@@ -1,3 +1,21 @@
+## Program 10 checkpoint B LIVE — Not Paid stock repair, leading-zero twins folded, catalog cost backfilled, replacement-line lot rows, cost float, barcode fold on every writer — September 17
+
+Release code commit **fc2c180c** on `codex/precision-final-candidate-20260914` (pushed; descends from a8a21c75; merged into `main` at this checkpoint) is live as Worker version **a18e26f5-454b-4494-8514-cf9e3aba4e9a** (`/api/runtime/version` revision `fc2c180c8e58`, sourceHash `8dfa7c763eb3b8dc`, tier paid). Migrations **0173, 0174, 0175, 0176 applied** to production D1 with pre-assertions re-read immediately before and post-assertions after (all matched; `d1_migrations` tail 0176).
+
+Owner message F (Sep 16): fix the previous data for these issues, check Not Paid sales whose stock was never deducted, be thorough; then "check from 1–3 September as well" / "might be a mix" of legacy and system sales. Owner rulings (Sep 17): "if it is legacy it is fine, but if it is through the system, it needs to match correctly, check all aspects"; "apply all fix … product 4276 has no lot at the shop for its Not Paid unit, so 0173 takes the unit from lot 61114 for product 6796 only … 75 product group same barcode different name is fine … can finish deploy with the fixes."
+
+- **P10-9 Not Paid sales completed without a stock deduction** — DEPLOYED and APPLIED. Root cause: before S4-3 a Not Paid sale released its allocations at creation, so completing it after S4-3 moved no stock. 0173 deducted 21 lines / 26 units on 10 sales (movements, allocations re-held, action_history per sale, ledgers agree for every touched product); product 4276 kept as ruled (no shop lot), allocation 264 synced to its line quantity 2. Two completed replacement lines written before 4a2ce71b lacked their lot row: 0176 adds them (2 rows, 2 audit). Quantity-increase amendments now extend the allocation rows and refuse with 409 `sale_amendment_allocation_shortfall` when the lot cannot cover it (a9d825e6). System-sale audit since Sep 4: all three stock ledgers agree (0 mismatches), every operation-member line carries its rows.
+- **Sep 1–3 legacy-import sales** — HELD, NOT APPLIED by owner ruling. `ops/scripts/migration/held/legacy_sep2_3_import_stock_deduction.sql` (38 lines / 107 units, 8 non-deductible lines listed in its header) stays outside the migration chain with its pure test; legacy sales are left as recorded.
+- **P10-8 Leading-zero barcode twins** — DEPLOYED and APPLIED. 0174 folded 9709→5205, 7117→1560, 9609→5063, 3470→8660 (merge map 4, losers gone, keeper barcodes without the leading zero, batch 55156 and 5 units on 5063, 4 undo snapshots). The 75 same-barcode / different-name groups stay untouched per the owner (testers etc.).
+- **P10-7 Catalog cost recompute backfill** — DEPLOYED and APPLIED. 0175 recomputed every active product from its lots with the P10-4 rule (max when a lot costs more than twice the cheapest, otherwise mean of distinct non-zero costs) and mirrored purchase price: 5,915 rows, 1,089 cost changes (561 up, 528 down, 4 from zero; largest YSL Lipstick Set 54.8 → 280 by the max rule), 0 products still differing.
+- **P10-5 Leading-zero / broken-barcode fold on create, edit, fast stock-in create** — DEPLOYED. Product create/edit and Fast Stock-In create-while-receiving fold into the existing product instead of a 409 or a dead-end question; the fold is reported by a toast and a refresh (85e82674, faf68c01, aa2f0555, 95e58c9e); batches.ts pinned as having no product-identity surface.
+- **P10-6 Cost price click opens the calculation** — DEPLOYED (790c68f9 `GET /api/products/:id/cost-breakdown`, 6237aafd `CostCalculationFloat` on every clickable cost price).
+- **P9-3/4/5/6 public items** — NOT YET (paused until the owner's go).
+
+Gates on the release tip (fresh worktree, committed HEAD): frontend typecheck, `verify:i18n` (5880 keys), `verify:public-runtime`, `test:utils` 455/455, build (266 chunks, zero cycles); Worker `tsc --noEmit` clean, sweep 448 files with sentinel; the six sweep reds were two loader-map union defects (fixed 51ea5238, fc2c180c), the repair-table FK registration (fc2c180c) and contention reds green standalone.
+
+Open after this checkpoint: P9-9 root cause, Reports render pass, debloat report items, public items, physical print with the new default mode, POS ProductDetailSheet cost display.
+
 ## Program 10 checkpoint A LIVE — receipt auto-fit to printer forms, numbered receipt items, catalog cost recomputed on every stock-add writer, shared picker cache — September 16
 
 Release code commit **a8a21c75** on `codex/precision-final-candidate-20260914` (pushed; descends from 2f67b78f) is live as Worker version **b846aa95-e7ff-4b42-89a5-7da5ed6f511a** (`/api/runtime/version` revision `a8a21c75e3c3`, hash `8221f3e0485bb96d`, builtAt 2026-09-16T15:10:15Z, `tier: paid`). No migrations. Owner messages D (print dialog + printed receipt photos: has to choose 72×400 or 72×210 by hand, wants numbered products and an "n items" header, side margins) and E (cost = mean of distinct non-zero costs on every add/edit/remove/set/session writer, leading-zero barcode fold missing on some writers, cost price click shows the calculation).
@@ -1145,7 +1163,7 @@ Ask: "check bos-rc and bos-rc-worker… know what is in progress, committed, don
 
 **A. The RC worktrees were moved and are now restored.** The user had moved `bos-rc/` and `bos-rc-workers/` INTO
 `business-os-v1/`, which broke all 41 registered worktrees (`git worktree list` read `prunable` for every one) and left
-41 full copies of the codebase untracked inside the repo. Both were moved back to `C:\Users\mrkl6\Downloads\`.
+41 full copies of the codebase untracked inside the repo. Both were moved back to `C:\Users\mrkl6\Downloads`.
 `git worktree list` now reports **0 prunable**. No branch or commit was lost — the worktree dirs are checkouts, the work
 lives in the refs. **One remnant:** `hf-adjust-fail` is split across `business-os-v1/bos-rc-workers/hf-adjust-fail/`
 (≈1,145 files) and `Downloads/bos-rc-workers/hf-adjust-fail/` (133 files); a Windows file lock (`…/frontend`) blocked the

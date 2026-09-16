@@ -444,3 +444,21 @@ F46 is NOT in this candidate. Schema/backup/reset are independently approved loc
 | Admin catalog preview sharing the shopper page-size key; zero-result pager hidden; PageSizeSelect arrow keys | **Owner ruling needed** | Flagged by the frontend adversarial lane; pre-existing except the shared key. |
 | Sale-id/return-id collision false 409 on return create; sub-cent middle-return cancellation refused; misleading lineage code on null-snapshot lines | **Not yet** (documented) | Orphan gate and Fable lane findings; all fail closed. |
 | Physical iOS/PWA, camera, printer smoke | **Not certified** | Cannot be exercised from this workstation. |
+
+## September 17 program 10 checkpoint B LIVE
+
+Release code fc2c180c is live as Worker a18e26f5-454b-4494-8514-cf9e3aba4e9a (paid); migrations 0173–0176 applied to production D1.
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| P10-9 Not Paid sales completed without a stock deduction (21 lines / 26 units, 10 sales) | **Deployed and applied** | 0173: movements 21 (sum −26), allocations re-held, action_history 10, ledgers agree; product 4276 kept (no shop lot); allocation 264 = 2. |
+| P10-9 replacement lines without a lot row (sales 16972, 16927) | **Deployed and applied** | 0176: 2 rows, 2 audit; native test pins the write path. |
+| Quantity-increase amendment allocation sync | **Deployed** | a9d825e6; 409 sale_amendment_allocation_shortfall when the lot cannot cover it. |
+| Sep 1–3 legacy-import sales deduction (38 lines / 107 units) | **Held, not applied** (owner: legacy is fine) | ops/scripts/migration/held/legacy_sep2_3_import_stock_deduction.sql + pure test. |
+| P10-8 leading-zero barcode twins (4 pairs) | **Deployed and applied** | 0174: losers gone, keepers carry the real barcode, stock and batches moved, 4 undo snapshots. 75 same-barcode/different-name groups untouched per owner. |
+| P10-7 catalog cost backfill from lots | **Deployed and applied** | 0175: 5,915 rows, 1,089 changes, 0 products differ, purchase price mirrored. |
+| P10-5 barcode fold on create / edit / fast stock-in create | **Deployed** | 85e82674, faf68c01, aa2f0555, 95e58c9e, 4cac543f; toast + refresh instead of 409. |
+| P10-6 cost price click opens the calculation | **Deployed** | 790c68f9, 6237aafd. |
+| P9-9 tagged-stock error, Reports render pass, debloat report items, POS ProductDetailSheet cost display | **Not yet** | Carried. |
+| P9-3/4/5/6 public items | **Not yet** | Paused until the owner's go. |
+| Physical print with the driver-forms default | **Owner-side** | Cannot be exercised from this workstation. |
