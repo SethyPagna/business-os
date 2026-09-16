@@ -17,6 +17,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
+import { catalogCostRecomputeStatement } from './catalogCostRecompute'
 
 export const STOCK_SESSION_KIND = 'stock.session'
 export const STOCK_SESSION_MAX_LINES = 25
@@ -883,6 +884,19 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id JOIN stock_session_operations o ON o.id=m.operation_id
       WHERE m.operation_id=@operationId AND m.line_id=@lineId`, params: { reason: line.reason || `Stock-in session ${operationId}`, actor: user.id, actorName: actorSnapshot(user), operationId, lineId: line.line_id, totalCostUsd: plan.params.receivedCostUsd } })
     statements.push({ sql: 'UPDATE stock_session_members SET movement_id=last_insert_rowid() WHERE operation_id=@operationId AND line_id=@lineId', params: { operationId, lineId: line.line_id } })
+  }
+  // P10-4 (owner ruling 2026-09-16): every 'receive' line just wrote/topped a
+  // lot cost -- re-derive products.cost_price_* per distinct product
+  // touched, same rule as the other receipt wires. NOT 'create_receive':
+  // that line's INSERT already set the new row's cost from the operator's
+  // own entry, which is the catalog-cost decision for a row that never had
+  // one before (same skip as routes/inventory.ts's created-sibling guard).
+  // Pushed as a SQL statement INSIDE this same batch, before the
+  // captureReplayState postimage capture below, not as a follow-up async
+  // call -- see catalogCostRecomputeStatement's doc comment for why a write
+  // after this batch commits would break undo/redo's "expected" comparison.
+  for (const productId of new Set(request.items.filter((line) => line.kind === 'receive' && line.quantity > 0).map((line) => line.product_id))) {
+    if (productId != null) statements.push(catalogCostRecomputeStatement(productId))
   }
   statements.push({ sql: `UPDATE stock_session_operations SET receipt_json=json_object(
       'success',json('true'),'operationId',id,'clientRequestId',request_id,'actionHistoryId',history_id,'snapshotId',snapshot_id,
