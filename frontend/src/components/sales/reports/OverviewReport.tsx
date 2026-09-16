@@ -84,7 +84,6 @@ export default function OverviewReport(p: ReportViewProps) {
   const sales = useMemo(() => normalizeTotals(data?.sales?.totals), [data])
   const prevSales = useMemo(() => (compare ? normalizeTotals(data?.sales?.previous) : null), [data, compare])
   const returns = data?.returns?.totals || null
-  const prevReturns = compare ? data?.returns?.previous || null : null
   const expenses = data?.expenses?.totals || null
   const prevExpenses = compare ? data?.expenses?.previous || null : null
 

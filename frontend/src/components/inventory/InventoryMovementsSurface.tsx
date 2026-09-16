@@ -224,11 +224,8 @@ export default function InventoryMovementsSurface({
   toggleMovementSectionCollapsed,
   toggleMovementSelection,
   tr,
-  actionHistory,
   collapsedMovementSections,
   visibleMovementGroups,
-  visibleMovementQuantity,
-  visibleMovementRecordCount,
 }: InventoryMovementsSurfaceProps) {
   // Every data column of the desktop table, for the day/action header rows
   // to span; +1 while the Select-mode checkbox column exists.
