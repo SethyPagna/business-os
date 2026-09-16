@@ -147,5 +147,72 @@ check('KHR is reported as the stored scalar, never averaged, even with several d
   assert.deepEqual(result.distinct_khr, [])
 })
 
+// ---------------------------------------------------------------------------
+// P10-10 (owner ruling, 2026-09-17): a manual cost-price edit is a recorded
+// input, not a silent overwrite -- it joins the formula as one more distinct
+// cost, and the row it produces carries the lot fields the owner asked for
+// (compact, one row each) plus who/when for the manual edit.
+// ---------------------------------------------------------------------------
+const manual = (id, costUsd, overrides = {}) => ({
+  id,
+  cost_usd: costUsd,
+  cost_khr: overrides.cost_khr ?? null,
+  user_name: overrides.user_name ?? 'sethy',
+  created_at: overrides.created_at ?? `2026-09-1${id}T00:00:00Z`,
+})
+
+check('a manual entry joins the lots as one more distinct cost in the mean', () => {
+  const lots = [lot(1, 3, { received_at: '2026-09-01' }), lot(2, 5, { received_at: '2026-09-02' })]
+  const entries = [manual(9, 4, { created_at: '2026-09-03T00:00:00Z' })]
+  const result = buildCatalogCostBreakdown(201, { cost_price_usd: 0, cost_price_khr: 0 }, lots, entries)
+  assert.deepEqual(result.distinct_usd, [3, 4, 5])
+  assert.equal(result.mean_usd, 4)
+  assert.equal(result.result_usd, 4)
+  assert.equal(result.outlier_guard.fired, false)
+  const manualRow = result.inputs.find((row) => row.source === 'manual')
+  assert.ok(manualRow, 'the manual entry is a row in the breakdown')
+  assert.equal(manualRow.excluded, null, 'the latest (only) manual entry counts, same as a lot')
+  assert.equal(manualRow.user_name, 'sethy')
+  assert.equal(manualRow.recorded_at, '2026-09-03T00:00:00Z')
+  assert.equal(manualRow.lot_code, null, 'a manual row never carries lot fields')
+  assert.equal(manualRow.label, 'Manual · sethy')
+})
+
+check('a manual entry more than 2x the cheapest lot is an outlier -- reported, kept as the highest, same guard as a lot', () => {
+  const lots = [lot(1, 3, { received_at: '2026-09-01' })]
+  const entries = [manual(9, 9, { created_at: '2026-09-05T00:00:00Z' })]
+  const result = buildCatalogCostBreakdown(202, { cost_price_usd: 0, cost_price_khr: 0 }, lots, entries)
+  assert.deepEqual(result.distinct_usd, [3, 9])
+  assert.equal(result.outlier_guard.fired, true)
+  assert.equal(result.outlier_guard.kept, 9)
+  assert.equal(result.result_usd, 9)
+})
+
+check('only the LATEST manual entry counts -- older manual entries are excluded: superseded, history only', () => {
+  const lots = [lot(1, 3, { received_at: '2026-09-01' })]
+  const entries = [
+    manual(9, 3, { created_at: '2026-09-02T00:00:00Z', user_name: 'dara' }),
+    manual(10, 5, { created_at: '2026-09-04T00:00:00Z', user_name: 'sethy' }),
+  ]
+  const result = buildCatalogCostBreakdown(203, { cost_price_usd: 0, cost_price_khr: 0 }, lots, entries)
+  const manualRows = result.inputs.filter((row) => row.source === 'manual')
+  assert.equal(manualRows.length, 2, 'every manual entry is reported, not just the latest')
+  assert.equal(manualRows[0].excluded, 'superseded', 'the older entry is history only')
+  assert.equal(manualRows[0].user_name, 'dara')
+  assert.equal(manualRows[1].excluded, null, 'the latest entry counts')
+  assert.equal(manualRows[1].user_name, 'sethy')
+  assert.deepEqual(result.distinct_usd, [3, 5], 'only the latest manual cost (5), not the superseded one (3, already distinct from the lot anyway)')
+  assert.equal(result.mean_usd, 4)
+  assert.equal(result.result_usd, 4)
+})
+
+check('lots and manual entries are interleaved chronologically in the record', () => {
+  const lots = [lot(1, 3, { received_at: '2026-09-01', batch_number: 'B1' })]
+  const entries = [manual(9, 4, { created_at: '2026-09-03T00:00:00Z' })]
+  const later = [lot(2, 6, { received_at: '2026-09-05', batch_number: 'B2' })]
+  const result = buildCatalogCostBreakdown(204, { cost_price_usd: 0, cost_price_khr: 0 }, [...lots, ...later], entries)
+  assert.deepEqual(result.inputs.map((row) => row.source), ['lot', 'manual', 'lot'], 'ordered by date, not grouped by kind')
+})
+
 console.log(`${checks} checks passed`)
 if (process.exitCode) process.exit(process.exitCode)

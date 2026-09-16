@@ -167,6 +167,9 @@ function makeDb() {
     CREATE TABLE import_job_source_rows (job_id TEXT, sequence INTEGER, row_number INTEGER, data_json TEXT);
     CREATE TABLE import_job_rows (job_id TEXT, phase TEXT, row_number INTEGER, group_index INTEGER,
       action TEXT, identifier TEXT, result_json TEXT, PRIMARY KEY(job_id, phase, row_number));
+    CREATE TABLE product_cost_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL,
+      cost_usd REAL NOT NULL, cost_khr REAL, source TEXT NOT NULL, user_id INTEGER, user_name TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
   `)
   sqlite.exec(fs.readFileSync(path.join(migrationsDir, '0056_import_stock_action_commits.sql'), 'utf8'))
   sqlite.exec(fs.readFileSync(path.join(migrationsDir, '0057_import_stock_action_guards.sql'), 'utf8'))

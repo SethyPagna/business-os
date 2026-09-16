@@ -67,6 +67,9 @@ function setup() {
       product_name TEXT, branch_id INTEGER, branch_name TEXT, movement_type TEXT, quantity REAL,
       unit_cost_usd REAL DEFAULT 0, total_cost_usd REAL DEFAULT 0,
       reason TEXT, reference_id INTEGER, created_at TEXT, batch_id INTEGER);
+    CREATE TABLE product_cost_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL,
+      cost_usd REAL NOT NULL, cost_khr REAL, source TEXT NOT NULL, user_id INTEGER, user_name TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
   `)
   sqlite.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0056_import_stock_action_commits.sql'), 'utf8'))
   sqlite.prepare(`INSERT INTO products(id, name) VALUES (10, 'Serum')`).run()
