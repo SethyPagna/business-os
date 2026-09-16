@@ -132,8 +132,10 @@ runTest('F1: ProductForm live-searches in create mode and gates submit on the ve
   // and cost is NOT fed in -- it is not part of identity, and passing it only
   // re-ran the classifier on every keystroke in a cost field
   assert.doesNotMatch(productFormSource, /classifyCreateMatches\(\{[\s\S]*?cost_price_usd[\s\S]*?\}, createMatches\)/)
-  // the submit gate asks BEFORE saving, and 'back' aborts the save
-  assert.match(productFormSource, /if \(isCreateMode && createVerdict\.kind\)/)
+  // the submit gate asks BEFORE saving, and 'back' aborts the save --
+  // Sep 16 2026 ruling: an exact_twin never asks (it folds server-side,
+  // 200 not 409), so the gate explicitly excludes that one verdict kind.
+  assert.match(productFormSource, /if \(isCreateMode && createVerdict\.kind && createVerdict\.kind !== 'exact_twin'\)/)
   assert.match(productFormSource, /const choice = await askCreateVerdict\(\)/)
   assert.match(productFormSource, /if \(choice === 'back'\) return/)
   // Grouping adopts the canonical spelling without storing a parent/child link.
@@ -143,6 +145,18 @@ runTest('F1: ProductForm live-searches in create mode and gates submit on the ve
   assert.match(productFormSource, /create_match_group_button/)
   // 'proceed as new' is withheld for an exact twin
   assert.match(productFormSource, /\{createVerdict\.allowProceedAsNew \? \(/)
+})
+
+runTest('Sep-16-2026 P10-5: an exact_twin create never opens the dead-end modal -- it submits and the server folds', () => {
+  // the modal only opens for the two verdicts that genuinely still ask
+  assert.match(productFormSource, /createVerdictOpen \? \(/)
+  assert.doesNotMatch(productFormSource, /createVerdict\.kind === 'exact_twin'\s*\n?\s*\?\s*tr\('create_match_twin_title'/)
+  // the retired dead-end copy keys are gone from the component too
+  assert.doesNotMatch(productFormSource, /create_match_twin_title/)
+  assert.doesNotMatch(productFormSource, /create_match_twin_body/)
+  // the inline pre-submit hint is informative (fold), not an alarm ("cannot
+  // be created twice" would now be a false claim -- it CAN, it folds)
+  assert.match(productFormSource, /create_match_twin_hint'.*saving will add to that existing product/)
 })
 
 runTest('P7-b: scientific-notation barcodes are refused on the manual form (client)', () => {

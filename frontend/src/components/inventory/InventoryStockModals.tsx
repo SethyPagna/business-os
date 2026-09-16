@@ -20,6 +20,7 @@ import UnsavedChangesPrompt, { type UnsavedChangesPromptItem } from '../shared/U
 import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { markRestoreHandled } from '../../utils/minimizedWork.ts'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
+import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 
 type MoneyFormatter = (value: number) => string
 
@@ -224,6 +225,8 @@ export default function InventoryStockModals({
   usdSymbol,
 }: InventoryStockModalsProps) {
   useEffect(() => { if (transferModal) markRestoreHandled('inventory_transfer') }, [transferModal?.id])
+  // P10-6: the calculated-cost float, opened from the "Catalog cost" line below.
+  const [costFloatOpen, setCostFloatOpen] = useState(false)
   const requestedSetTotal = Number(adjustForm.quantity)
   const setDifference = Number.isFinite(requestedSetTotal) ? requestedSetTotal - adjustCurrentQuantity : null
   const changeTransferSource = onTransferSourceChange || ((branchId: string) => {
@@ -396,6 +399,17 @@ export default function InventoryStockModals({
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('adjust_stock')}</h2>
                 <div className="mt-0.5 min-w-0 max-w-full text-xs font-medium text-gray-600 dark:text-gray-300" title={adjustModal.name}><ProductNameRail name={String(adjustModal.name ?? '')} /></div>
                 <div className="mt-0.5 text-[11px] tabular-nums text-gray-400">{t('current_stock') || 'Current stock'}: {adjustCurrentQuantity} {adjustModal.unit}</div>
+                {/* P10-6: the catalog cost price, clickable -- opens the
+                    calculated-cost float for the same row adjustCurrentQuantity/
+                    adjustCurrentPricing above resolve against. */}
+                <button
+                  type="button"
+                  className="mt-0.5 text-[11px] tabular-nums text-gray-400 decoration-dotted underline-offset-2 hover:underline"
+                  onClick={() => setCostFloatOpen(true)}
+                  title={t('cost_breakdown_title') || 'Calculated cost price'}
+                >
+                  {t('catalog_cost_price') || 'Catalog cost price'}: {fmtUSD(Number(adjustModal.cost_price_usd ?? adjustModal.purchase_price_usd) || 0)}
+                </button>
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {onMinimizeAdjust ? <MinimizeButton disabled={adjustSaving} tr={tr} onMinimize={onMinimizeAdjust} /> : null}
@@ -878,6 +892,16 @@ export default function InventoryStockModals({
         </div>
       ) : null}
 
+      {adjustModal && costFloatOpen ? (
+        <CostCalculationFloat
+          productId={adjustTargetId as number | string}
+          productName={adjustModal.name}
+          onClose={() => setCostFloatOpen(false)}
+          fmtUSD={fmtUSD}
+          fmtKHR={fmtKHR}
+          t={(key, fallback) => t(key) || fallback}
+        />
+      ) : null}
     </>
   )
 

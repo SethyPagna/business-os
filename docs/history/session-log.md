@@ -19532,6 +19532,19 @@ Deploy: branch pushed a8036506..4b20bd68 (80 sliced commits, main untouched); `n
 
 **Exceptions to report.** P10-5 in progress; P10-6 done but not deployed; Reports render pass not examined; physical print with the new default still owner-side.
 
+## Part 620 (Sep 17 2026, Claude Fable coordinator) — Program 10 checkpoint B: Not Paid stock repair, leading-zero twins, catalog cost backfill, replacement-line lot rows, barcode fold, cost float
+
+**Provenance.** Release code tip **fc2c180c** on `codex/precision-final-candidate-20260914` (descends from a8a21c75), pushed, deployed with the paid configuration as Worker **a18e26f5-454b-4494-8514-cf9e3aba4e9a** (`/api/runtime/version` revision `fc2c180c8e58`, sourceHash `8dfa7c763eb3b8dc`, builtAt 2026-09-16T19:06:19Z). A first deploy from the same commit carried a `-dirty` stamp (Worker 4f7c4027) because the three regenerated build-noise files were modified in the deploy worktree; they were restored and the deploy repeated clean. Migrations **0173–0176 applied** remotely with pre-assertions re-read immediately before (equal to the captured baseline) and post-assertions after (all matched; chain tail 0176). Merged into `main`.
+
+**Owner messages.** F (Sep 16): fix previous data for these issues; product quantities do not match; check Not Paid sales for missing deductions; be thorough. Follow-ups: check Sep 1–3 as well; the sales might be a mix of legacy import and system. Rulings (Sep 17): legacy sales stay as recorded, system-rung sales must reconcile on every ledger and every aspect; apply all fixes, product 4276 keeps its unit (no shop lot), 0173 takes lot 61114 for product 6796 only, the 75 same-barcode/different-name groups are fine, finish the deploy with the fixes.
+
+**Findings.** Not Paid sales created before S4-3 released their allocations at creation, so completion after S4-3 moved no stock: 21 lines / 26 units on 10 sales (0173). Two completed replacement lines written before 4a2ce71b had no allocation row (0176). Allocation 264 held 1 unit against a line of 2 (0173 syncs). Quantity-increase amendments never extended the allocation rows (a9d825e6). The Sep 2–3 legacy import (38 lines / 107 units, 8 lines with no lot to deduct from) is held per the ruling. System-sale audit since Sep 4 on production (read-only, hash-join form to stay under the D1 CPU limit): products vs branch_stock 0 mismatches, branch_stock vs active lots 0 mismatches, every operation-member line carries its rows, cancelled sales 16938/17009 correct. Four leading-zero barcode twins (0174). 5,918 active products whose catalog cost did not match the P10-4 rule (0175).
+
+**Lanes (sonnet, one fix per commit).** p10/barcode-fold (85e82674, faf68c01, aa2f0555, 02fa5842, 95e58c9e, 4cac543f); p10/amend-alloc (a9d825e6); p10/cost-float merged from checkpoint A's tail (790c68f9, 6237aafd). Data migrations written by the coordinator: 0173 ec686481, 0174 260906ed, 0175 2c75446f, 0176 ade09511, orphan classification 11b5bb9c, held legacy file 8486cdc2/8ae014db.
+
+**Gates on the committed tip.** Frontend typecheck, verify:i18n 5880, verify:public-runtime, test:utils 455/455, build 266 chunks zero cycles; Worker tsc clean, sweep 448 files with sentinel. Six sweep reds: five pure tests loading catalogCostRecompute lacked the moneyPrecision stub the 790c68f9 import needs (51ea5238, fc2c180c), test-merge-identity-fk found the 0173/0175 repair work tables' product_id unclassified (registered as provenance, fc2c180c), record-orphans-native green standalone.
+
+**Exceptions to report.** Legacy Sep 2–3 deduction held, not applied. P9-9, Reports render pass, debloat report items, public items, POS ProductDetailSheet cost display, physical print still open.
 ---
 
 ---

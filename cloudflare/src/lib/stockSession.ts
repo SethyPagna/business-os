@@ -3,7 +3,7 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier, isAdminControlUser } from './permissions'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
-import { identityBarcodeKey, barcodeIdentityMatches, normalizeProductGroupName } from './productDetailRule'
+import { identityBarcodeKey, barcodeIdentityMatches, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductGroupName } from './productDetailRule'
 import { identityBarcodeMatchSql } from './productIdentity'
 import { barcodeKeysMatch } from './searchMatch'
 import { planReceiveBatchStock, type StockWriteStatement } from './productBatches'
@@ -585,7 +585,56 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     return parseStoredReceipt(previous, true)
   }
 
+  // Sep 16 2026 owner ruling / P10-5 writer 4: a create_receive line whose
+  // name+barcode identifies as an EXISTING active product folds onto it
+  // (real barcode wins, stored barcode loses a leading zero; cost recomputes
+  // from lots same as any other receive, via the same
+  // catalogCostRecomputeStatement every other receive line already gets)
+  // instead of 409ing -- same rule as products.ts's foldCreateIntoExisting.
+  // Resolved here, before the receive/create id lists below, and a
+  // quantity>0 fold is converted straight into an ordinary 'receive' line
+  // targeting the survivor's id: that gets it every existing revision
+  // assertion, date-batch top-up and stock-lookup a normal receive already
+  // has, instead of re-deriving that machinery for a second code path. A
+  // quantity=0 fold (catalogue-only touch) has no lot to receive, so it
+  // stays a create_receive line and is handled specially further down.
+  const createFolds = new Map<string, { id: number; name: string; barcode: string; incomingBarcode: unknown; requestedName: unknown }>()
+  {
+    const createLinesForFold = request.items.filter((line) => line.kind === 'create_receive' && line.product)
+    if (createLinesForFold.length) {
+      const nameClause = buildInClause('name', [...new Set(createLinesForFold.map((line) => normalizeProductGroupName(line.product?.name)))])
+      const candidates = await db.prepare(`SELECT id,name,barcode FROM products WHERE is_active=1 AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' '))) IN (${nameClause.sql})`).all<Row>(nameClause.params)
+      for (const line of createLinesForFold) {
+        const product = line.product as CanonicalProduct
+        const duplicate = candidates.find((row) =>
+          normalizeProductGroupName(String(row.name)) === normalizeProductGroupName(String(product.name))
+          && barcodeIdentityMatches(row.barcode, product.barcode))
+        if (duplicate) createFolds.set(line.line_id, {
+          id: Number(duplicate.id), name: String(duplicate.name), barcode: String(duplicate.barcode ?? ''),
+          incomingBarcode: product.barcode, requestedName: product.name,
+        })
+      }
+    }
+    if (createFolds.size) {
+      request = {
+        ...request,
+        items: request.items.map((line) => {
+          const fold = createFolds.get(line.line_id)
+          if (!fold || line.kind !== 'create_receive' || line.quantity <= 0) return line
+          return { ...line, kind: 'receive', product_id: fold.id, product: null }
+        }),
+      }
+    }
+  }
+
+  // Quantity>0 folds already carry their survivor's id as product_id (the
+  // conversion above); a quantity=0 fold still doesn't (it stayed
+  // create_receive), so its survivor id is added explicitly here -- it
+  // still needs the SAME active-row check, revision-pair and product
+  // postimage coverage every other touched product gets, to guard the
+  // barcode-cleanup UPDATE queued for it further down.
   const receiveIds = request.items.flatMap((line) => line.product_id == null ? [] : [line.product_id])
+    .concat([...createFolds.values()].map((fold) => fold.id))
   const branchIds = request.items.map((line) => line.branch_id)
   const supplierIds = request.items.flatMap((line) => line.supplier_id == null ? [] : [line.supplier_id])
   const explicitBatchIds = request.items.flatMap((line) => line.batch_id == null ? [] : [line.batch_id])
@@ -693,6 +742,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   // tab reports the next morning.
   const identityKeys = new Set<string>()
   for (const line of createLines) {
+    if (createFolds.has(line.line_id)) continue
     const product = line.product as CanonicalProduct
     const key = `${normalizeProductGroupName(product.name)}${identityBarcodeKey(product.barcode)}`
     if (identityKeys.has(key)) fail('Two create_receive lines describe the same product identity.', 409, 'duplicate_product')
@@ -700,6 +750,11 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   }
   if (createLines.length) {
     for (const line of createLines) {
+      // Already resolved as a fold above (quantity=0: no lot to receive, so
+      // it stayed a create_receive line instead of converting to 'receive')
+      // -- a fresh 409 here would just refuse the very fold this line was
+      // already resolved to make.
+      if (createFolds.has(line.line_id)) continue
       const product = line.product as CanonicalProduct
       // The SQL above narrows to the name group; the barcode is compared
       // here through the full wildcard rule (barcodeIdentityMatches, Sep 15
@@ -724,7 +779,13 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     existingProductIds.length && branchIds.length
       ? db.prepare(`SELECT * FROM branch_stock WHERE product_id IN (${buildInClause('product', existingProductIds).sql}) AND branch_id IN (${buildInClause('branch', [...new Set(branchIds)]).sql})`)
         .all<Row>({ ...buildInClause('product', existingProductIds).params, ...buildInClause('branch', [...new Set(branchIds)]).params })
-        .then((rows) => rows.filter((row) => request.items.some((line) => line.product_id === row.product_id && line.branch_id === row.branch_id)))
+        .then((rows) => rows.filter((row) => request.items.some((line) =>
+          // A quantity=0 fold line never gets converted to kind 'receive' (no
+          // lot to open for it), so it still has product_id=null here -- fall
+          // back to the fold target so its own branch_stock row still lands
+          // in the before/after undo snapshot instead of looking unowned and
+          // getting deleted by undo's "not one of this session's rows" path.
+          (line.product_id ?? createFolds.get(line.line_id)?.id) === row.product_id && line.branch_id === row.branch_id)))
       : Promise.resolve([] as Row[]),
     existingBatchIds.length && branchIds.length
       ? db.prepare(`SELECT * FROM branch_batch_stock WHERE batch_id IN (${buildInClause('batch', existingBatchIds).sql}) AND branch_id IN (${buildInClause('branch', [...new Set(branchIds)]).sql})`)
@@ -804,6 +865,12 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     statements.push(revisionAssertion('product_catalog', 'all', '1=1', {}, rev('product_catalog', 'all')))
     if (stockCreateLines.length) statements.push(revisionAssertion('branch_catalog', 'all', '1=1', {}, rev('branch_catalog', 'all')))
     for (const line of createLines) {
+      // A fold line (createFolds above) is SUPPOSED to have an existing row
+      // sharing its identity -- that is the row it just folded into -- so
+      // the NOT EXISTS guard below would legitimately fail for it. Its
+      // concurrency guard is the ordinary product revisionAssertion pushed
+      // earlier for every id in receiveIds, which already includes it.
+      if (createFolds.has(line.line_id)) continue
       const product = line.product as CanonicalProduct
       // The commit-time race guard for the JS check above, and it has to ask
       // the SAME question or it lets through exactly what that check refuses.
@@ -823,6 +890,42 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       }))
     }
   }
+  // Fold: clean the survivor's stored barcode when the incoming REAL
+  // barcode differs from a padded/broken one (never overwrite an already
+  // clean real code with a different spelling of the same identity), and
+  // leave a 'fold' audit row for undo evidence -- guarded by the SAME
+  // product revisionAssertion pushed above (the fold target is in
+  // receiveIds/products either way, see the comment there). This has to run
+  // AFTER the product_catalog/branch_catalog revisionAssertion above (not
+  // before it, where it used to live): the UPDATE below fires the
+  // stock_revision_products_update trigger, which bumps product_catalog's
+  // revision -- if that ran before the assertion captured/compared it, the
+  // fold would trip its OWN concurrency guard as a false stale_state on
+  // every single request. Cost is NOT hand-merged here: a quantity>0 fold
+  // is now an ordinary 'receive' line (see the conversion above) and gets
+  // the same catalogCostRecomputeStatement every other receive line already
+  // gets, further down -- lot-weighted, not a single-field average, and
+  // strictly more correct than repeating that average here. A quantity=0
+  // fold has no lot, so there is nothing to recompute; the barcode is the
+  // only thing that can change for it.
+  for (const [lineId, fold] of createFolds) {
+    const line = request.items.find((item) => item.line_id === lineId)
+    const incomingBarcode = fold.incomingBarcode
+    if (isRealBarcode(incomingBarcode)) {
+      const cleanedIncoming = normalizeLeadingZeroBarcodeForCleanup(String(incomingBarcode).trim().toLowerCase())
+      const existingReal = isRealBarcode(fold.barcode)
+      const existingStored = fold.barcode.trim()
+      if (!existingReal || (existingStored.toLowerCase() !== cleanedIncoming
+        && normalizeLeadingZeroBarcodeForCleanup(existingStored.toLowerCase()) === cleanedIncoming)) {
+        statements.push({ sql: 'UPDATE products SET barcode=@barcode, updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { barcode: cleanedIncoming, id: fold.id } })
+      }
+    }
+    statements.push({ sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id)
+      VALUES(@actor,@name,'fold','product',@entityId,@details,'products',@recordId)`, params: {
+      actor: user.id, name: actorSnapshot(user), entityId: String(fold.id), recordId: fold.id,
+      details: JSON.stringify({ reason: 'stock_session_create_receive_fold', requestedName: fold.requestedName, incomingBarcode, operationId, quantity: line?.quantity ?? 0 }),
+    } })
+  }
   statements.push({ sql: 'INSERT INTO stock_session_operations(id,actor_id,request_id,mode,request_json) VALUES(@id,@actor,@request,\'stock_in\',@canonical)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical } })
   statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: STOCK_SESSION_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } })
   statements.push({ sql: 'UPDATE stock_session_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
@@ -832,8 +935,15 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   statements.push({ sql: 'UPDATE stock_session_operations SET history_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
 
   for (const line of request.items) {
-    const productRequestId = line.kind === 'create_receive' ? `stock-session:${operationId}:${line.line_id}` : null
-    if (line.kind === 'create_receive') {
+    // A quantity=0 fold (catalogue-only line whose identity turned out to
+    // already exist -- see createFolds above) has no product to insert and
+    // no lot to receive; it just records that this line landed on the
+    // survivor, product_created=0, by the real id directly (no
+    // client_request_id indirection -- that trick exists only to recover an
+    // id this same batch is about to INSERT, and the survivor already has one).
+    const fold = line.kind === 'create_receive' ? createFolds.get(line.line_id) : undefined
+    const productRequestId = line.kind === 'create_receive' && !fold ? `stock-session:${operationId}:${line.line_id}` : null
+    if (line.kind === 'create_receive' && !fold) {
       statements.push(planInsertRow('products', line.product as CanonicalProduct, productColumns, {
         name: line.product?.name, is_active: line.product?.is_active ?? 1, stock_quantity: 0, client_request_id: productRequestId,
       }))
@@ -845,9 +955,15 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       }
     }
     if (line.quantity === 0) {
-      statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,batch_id,movement_id,quantity,unit_cost_usd)
-        SELECT @operationId,@lineId,@kind,id,1,@branchId,NULL,NULL,0,@unitCostUsd FROM products WHERE client_request_id=@productRequestId`,
-      params: { operationId, lineId: line.line_id, kind: line.kind, branchId: line.branch_id, unitCostUsd: line.unit_cost_usd, productRequestId } })
+      if (fold) {
+        statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,batch_id,movement_id,quantity,unit_cost_usd)
+          VALUES(@operationId,@lineId,@kind,@productId,0,@branchId,NULL,NULL,0,@unitCostUsd)`,
+        params: { operationId, lineId: line.line_id, kind: line.kind, productId: fold.id, branchId: line.branch_id, unitCostUsd: line.unit_cost_usd } })
+      } else {
+        statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,batch_id,movement_id,quantity,unit_cost_usd)
+          SELECT @operationId,@lineId,@kind,id,1,@branchId,NULL,NULL,0,@unitCostUsd FROM products WHERE client_request_id=@productRequestId`,
+        params: { operationId, lineId: line.line_id, kind: line.kind, branchId: line.branch_id, unitCostUsd: line.unit_cost_usd, productRequestId } })
+      }
       continue
     }
     const plan = planReceiveBatchStock({
@@ -1087,8 +1203,17 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
       if (key === 'branchStock' && !created && !members.some(m => m.product_id === row.product_id && m.branch_id === row.branch_id)) continue
       if (key === 'branchBatchStock' && !members.some(m => m.batch_id === row.batch_id && m.branch_id === row.branch_id)) continue
       let target: Row | null = direction === 'redo' ? row : original || null
-      if (key === 'products') target = direction === 'redo' ? { stock_quantity: row.stock_quantity, is_active: row.is_active, updated_at: row.updated_at }
-        : original ? { stock_quantity: original.stock_quantity, updated_at: original.updated_at }
+      // barcode/cost_price_* are included alongside stock_quantity because a
+      // 'receive' line's catalogCostRecomputeStatement (P10-4) re-derives
+      // cost_price_* on the touched product, and a folded create_receive
+      // (P10-5, Sep 16 2026 owner ruling) cleans the survivor's barcode --
+      // both write products INSIDE this same operation, so both have to
+      // come back on undo/redo or the fold/cost-recompute becomes permanent
+      // even after the operator undoes the receipt that caused it. Harmless
+      // no-op for every plain receive line that never touched them.
+      if (key === 'products') target = direction === 'redo'
+        ? { stock_quantity: row.stock_quantity, is_active: row.is_active, updated_at: row.updated_at, barcode: row.barcode, cost_price_usd: row.cost_price_usd, cost_price_khr: row.cost_price_khr }
+        : original ? { stock_quantity: original.stock_quantity, updated_at: original.updated_at, barcode: original.barcode, cost_price_usd: original.cost_price_usd, cost_price_khr: original.cost_price_khr }
           : { stock_quantity: 0, is_active: 0 }
       if (key === 'batches' && !target) {
         // Retain the lot identity for immutable members/receipts and exact

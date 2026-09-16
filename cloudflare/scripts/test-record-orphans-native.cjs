@@ -101,6 +101,10 @@ const HISTORICAL_REFERENCE = {
   // dead product id by design). Pinned by test-migration-0168-pure.cjs.
   'product_merge_map_0168.loser_id': 'the merged product is deleted by 0168; the map keeps its id as provenance',
   'product_merge_pairs_0168.loser_id': 'the seed pair names a product 0168 goes on to delete; kept for provenance/idempotence',
+  // Migration 0174 (leading-zero twin merge) is the same shape again: the
+  // loser is deleted, the map/pairs keep its id. Pinned by test-migration-0174-pure.cjs.
+  'product_merge_map_0174.loser_id': 'the merged product is deleted by 0174; the map keeps its id as provenance',
+  'product_merge_pairs_0174.loser_id': 'the seed pair names a product 0174 goes on to delete; kept for provenance/idempotence',
 }
 /** Leading qualifiers that describe a ROLE, not a different kind of parent. */
 const QUALIFIER = new Set(['from', 'to', 'source', 'destination', 'expected', 'seen', 'last_seen', 'last',
@@ -122,6 +126,13 @@ const CHILD_SCOPED = {
   'customer_merge_map_0166.keeper_id': 'customers',
   'product_merge_map_0168.keeper_id': 'products',
   'product_merge_pairs_0168.keeper_id': 'products',
+  'product_merge_map_0174.keeper_id': 'products',
+  'product_merge_pairs_0174.keeper_id': 'products',
+  // 0173's repair work table: every id names a live row (allocation, its
+  // receipt-time lot, the lot actually deducted). Pinned by test-migration-0173-pure.cjs.
+  'sale_not_paid_repair_0173.allocation_id': 'sale_item_batch_allocations',
+  'sale_not_paid_repair_0173.allocation_batch_id': 'product_batches',
+  'sale_not_paid_repair_0173.deduct_batch_id': 'product_batches',
 }
 
 function resolveOwner(base, known) {

@@ -226,6 +226,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // same db, so a stub here would hide any regression in that recompute.
   '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
     './db': { getDb: () => db },
+    './moneyPrecision': moneyPrecision,
     './productDetailRule': productDetailRule,
   }),
   // routes/products.ts + inventory.ts now build their search tail from the
@@ -292,6 +293,7 @@ const batchesRoute = loadReal('routes/batches.ts', {
   // P10-4: REAL, not stubbed -- see routes/inventory.ts's own override above.
   '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
     './db': { getDb: () => db },
+    './moneyPrecision': moneyPrecision,
     './productDetailRule': productDetailRule,
   }),
 })

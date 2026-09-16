@@ -21,6 +21,8 @@ import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/Pagi
 import InfoHint from '../shared/InfoHint.tsx'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives.tsx'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
+import { useApp } from '../../AppContext'
 
 const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal.tsx'), 'stock-session-fast-stock-in')
 
@@ -113,6 +115,9 @@ function formatUsd(value: unknown): string {
 
 export default function StockInSessionsSection({ t, notify, branches, onChanged }: { t: T; notify: (message: string, kind?: string) => void; branches: Branch[]; onChanged: () => void }) {
   const tr = useCallback((key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }, [t])
+  const { fmtKHR } = useApp() as { fmtKHR: (value: unknown) => string }
+  // P10-6: the calculated-cost float, opened from the "Catalog cost price" value below.
+  const [costFloatOpen, setCostFloatOpen] = useState(false)
   const [sessions, setSessions] = useState<Session[]>([])
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -320,9 +325,19 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         {selectedLine ? <div className="relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-3 rounded-xl border border-blue-100 bg-blue-50/55 p-3 text-xs dark:border-blue-900/60 dark:bg-blue-950/20 sm:grid-cols-[4.5rem_minmax(0,1fr)]">
           {selectedLine.image_path ? <ProductImg src={selectedLine.image_path} alt={selectedLine.product_name} className="h-14 w-14 rounded-lg object-cover sm:h-[4.5rem] sm:w-[4.5rem]" /> : <ProductImagePlaceholder compact className="h-14 w-14 rounded-lg sm:h-[4.5rem] sm:w-[4.5rem]" />}
           <div className="min-w-0 pr-7"><div className="break-words font-semibold text-gray-900 dark:text-white">{selectedLine.product_name}</div><div className="mt-0.5 break-all dense-id text-gray-500">{selectedLine.barcode || tr('barcode_not_recorded', 'Barcode not recorded')}{selectedLine.sku ? ` · ${selectedLine.sku}` : ''}</div>
-            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4"><div><span className="block text-gray-400">{tr('quantity', 'Quantity')}</span><b className="text-emerald-600">+{Math.abs(Number(selectedLine.quantity) || 0)} {selectedLine.unit || ''}</b></div><div><span className="block text-gray-400">{tr('cost_price', 'Cost price')}</span><b>{formatUsd(selectedLine.unit_cost_usd ?? selectedLine.batch_unit_cost_usd ?? selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</b></div><div><span className="block text-gray-400">{tr('selling_price', 'Selling price')}</span><b>{formatUsd(selectedLine.selling_price_usd)}</b></div><div><span className="block text-gray-400">{tr('catalog_cost_price', 'Catalog cost price')}</span><b>{formatUsd(selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</b></div><div><span className="block text-gray-400">{tr('brand', 'Brand')}</span><b className="break-words">{selectedLine.brand || '—'}</b></div><div><span className="block text-gray-400">{tr('category', 'Category')}</span><b className="break-words">{selectedLine.category || '—'}</b></div><div><span className="block text-gray-400">{tr('received_date', 'Received date')}</span><b className="dense-id">{selectedLine.batch_id ? batchDisplayLabel({ id: selectedLine.batch_id, lot_code: selectedLine.batch_lot_code, received_at: selectedLine.batch_received_at }, tr('batch', 'Received date')) : '—'}</b></div><div><span className="block text-gray-400">{tr('expiry_date', 'Expiry')}</span><b>{selectedLine.batch_expiry_date ? fmtDate(selectedLine.batch_expiry_date) : '—'}</b></div><div><span className="block text-gray-400">{tr('supplier', 'Supplier')}</span><b className="truncate">{selectedLine.batch_supplier_name || '—'}</b></div><div><span className="block text-gray-400">{tr('payment', 'Payment')}</span><b>{selectedLine.batch_payment_status === 'credit' ? tr('on_credit', 'Not Yet Paid') : selectedLine.batch_payment_status === 'paid' ? tr('paid', 'Paid') : '—'}</b></div>{/* P3-L2: the reason, revealed on click -- the row shows it truncated. */}<div className="col-span-2 sm:col-span-4"><span className="block text-gray-400">{tr('reason', 'Reason')}</span><b className="break-words">{selectedLine.reason || '—'}</b></div></div>
+            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4"><div><span className="block text-gray-400">{tr('quantity', 'Quantity')}</span><b className="text-emerald-600">+{Math.abs(Number(selectedLine.quantity) || 0)} {selectedLine.unit || ''}</b></div><div><span className="block text-gray-400">{tr('cost_price', 'Cost price')}</span><b>{formatUsd(selectedLine.unit_cost_usd ?? selectedLine.batch_unit_cost_usd ?? selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</b></div><div><span className="block text-gray-400">{tr('selling_price', 'Selling price')}</span><b>{formatUsd(selectedLine.selling_price_usd)}</b></div><div><span className="block text-gray-400">{tr('catalog_cost_price', 'Catalog cost price')}</span><b><button type="button" className="decoration-dotted underline-offset-2 hover:underline" onClick={() => setCostFloatOpen(true)} title={tr('cost_breakdown_title', 'Calculated cost price')}>{formatUsd(selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</button></b></div><div><span className="block text-gray-400">{tr('brand', 'Brand')}</span><b className="break-words">{selectedLine.brand || '—'}</b></div><div><span className="block text-gray-400">{tr('category', 'Category')}</span><b className="break-words">{selectedLine.category || '—'}</b></div><div><span className="block text-gray-400">{tr('received_date', 'Received date')}</span><b className="dense-id">{selectedLine.batch_id ? batchDisplayLabel({ id: selectedLine.batch_id, lot_code: selectedLine.batch_lot_code, received_at: selectedLine.batch_received_at }, tr('batch', 'Received date')) : '—'}</b></div><div><span className="block text-gray-400">{tr('expiry_date', 'Expiry')}</span><b>{selectedLine.batch_expiry_date ? fmtDate(selectedLine.batch_expiry_date) : '—'}</b></div><div><span className="block text-gray-400">{tr('supplier', 'Supplier')}</span><b className="truncate">{selectedLine.batch_supplier_name || '—'}</b></div><div><span className="block text-gray-400">{tr('payment', 'Payment')}</span><b>{selectedLine.batch_payment_status === 'credit' ? tr('on_credit', 'Not Yet Paid') : selectedLine.batch_payment_status === 'paid' ? tr('paid', 'Paid') : '—'}</b></div>{/* P3-L2: the reason, revealed on click -- the row shows it truncated. */}<div className="col-span-2 sm:col-span-4"><span className="block text-gray-400">{tr('reason', 'Reason')}</span><b className="break-words">{selectedLine.reason || '—'}</b></div></div>
           </div><button type="button" className="absolute right-2 top-2 rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-white dark:hover:bg-gray-800" onClick={() => setSelectedLine(null)}>{tr('close', 'Close')}</button>
         </div> : null}
+        {selectedLine && costFloatOpen ? (
+          <CostCalculationFloat
+            productId={selectedLine.product_id}
+            productName={selectedLine.product_name}
+            onClose={() => setCostFloatOpen(false)}
+            fmtUSD={formatUsd}
+            fmtKHR={fmtKHR}
+            t={tr}
+          />
+        ) : null}
         <div className="desktop-dense-only dense-data-shell">
           {/* N26: the Product column takes every pixel the fixed columns do
               not need, and the name WRAPS inside it -- "did not show the

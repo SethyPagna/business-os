@@ -43,6 +43,7 @@ const subject = compile('stockActionCommit.ts', {
   // REAL, not stubbed, matching every other real gate/kernel in this list.
   './catalogCostRecompute': compile('catalogCostRecompute.ts', {
     './db': {},
+    './moneyPrecision': moneyPrecision,
     './productDetailRule': productDetailRule,
   }),
 })
