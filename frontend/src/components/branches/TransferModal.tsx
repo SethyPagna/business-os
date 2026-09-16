@@ -36,6 +36,12 @@ import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
+// Transfers can allocate and materialize many lot rows in one D1 batch. Keep
+// the request alive long enough for a real commit; a short client timeout
+// falsely reports failure after the server has moved stock, which was the
+// source of the Shop → Warehouse “could not transfer” reports.
+const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 45000
+const TRANSFER_STOCK_BULK_MUTATION_TIMEOUT_MS = 90000
 // Mirrors MAX_BULK_TRANSFER_ITEMS in the Worker's POST /transfer-bulk. A
 // whole-branch move can be thousands of rows, so it is split into requests
 // this size rather than raising the server cap -- the cap is what keeps one
@@ -241,13 +247,14 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [quantity, setQuantity] = useState('')
   // The transfer's documented cause. Required -- see requireTransferReason.
   const [reason, setReason] = useState(initialDraft?.reason || '')
-  const [saving] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [loadingMoreProducts, setLoadingMoreProducts] = useState(false)
   const [singleStockPage, setSingleStockPage] = useState(1)
   const [singleStockTotalPages, setSingleStockTotalPages] = useState(1)
   const stockRequestRef = useRef(0)
   const productsBranchRef = useRef('')
+  const transferInFlightRef = useRef(false)
   const aliveRef = useRef(true)
 
   /**
@@ -916,8 +923,117 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     : Math.min(selectedBatchAvailable, sourceBranchAvailable)
 
   /**
-   * 5.3 Bulk transfer action -- same validate-then-submit shape the old
-   * single-item handleTransfer used, but builds an `items` array from every checked row
+   * 5. Transfer Action
+   * 5.1 Validate all inputs.
+   * 5.2 Write transfer row via API.
+   */
+  const handleTransfer = async () => {
+    if (savedRun || retryStorageError || !canTransferStock) return
+    if (!fromBranch || !toBranch || !selectedProduct || !quantity) return
+
+    if (Number.parseInt(fromBranch, 10) === Number.parseInt(toBranch, 10)) {
+      notify(t('transfer_same_branch_error') || 'Source and destination cannot be the same', 'error')
+      return
+    }
+    if (!requireCanonicalTransferDirection()) return
+
+    const qty = Number(quantity)
+    if (!Number.isFinite(qty) || qty <= 0) {
+      notify(invalidQuantityText, 'error')
+      return
+    }
+
+    if (qty > transferAvailable) {
+      const message = (t('transfer_only_available') || 'Only {n} available').replace('{n}', String(transferAvailable))
+      notify(`${message} ${selectedProduct.unit || ''}`.trim(), 'error')
+      return
+    }
+
+    if (!requireTransferReason()) return
+
+    const fromName = branches.find((branch) => String(branch.id) === String(fromBranch))?.name || t('source_branch') || 'source branch'
+    const toName = branches.find((branch) => String(branch.id) === String(toBranch))?.name || t('destination_branch') || 'destination branch'
+    const lot = selectedBatch
+      ? ` ${t('transfer_selected_lot') || 'Selected received date'}: ${batchDisplayLabel({ id: selectedBatch.id, lot_code: (selectedBatch.lot_code as string) ?? null, received_at: (selectedBatch.received_at as string) ?? null, batch_number: (selectedBatch.batch_number as number) ?? null }, t('batch') || 'Received date')}.`
+      : ` ${t('transfer_fifo_lot_notice') || 'Available received dates will be allocated FIFO.'}`
+    if (!window.confirm((t('confirm_transfer_details') || 'Transfer {n} {unit} of "{name}" from {from} to {to}?')
+      .replace('{n}', String(qty))
+      .replace('{unit}', selectedProduct.unit || '')
+      .replace('{name}', selectedProduct.name || '')
+      .replace('{from}', fromName)
+      .replace('{to}', toName) + lot)) return
+
+    if (!beginSingleAction(transferInFlightRef, { blocked: saving })) return
+    setSaving(true)
+    try {
+      const run = prepareTransferRun(user?.id, [{ bulk: false, body: {
+        fromBranchId: Number.parseInt(fromBranch, 10),
+        toBranchId: Number.parseInt(toBranch, 10),
+        productId: selectedProduct.id,
+        productName: selectedProduct.name || '',
+        quantity: qty,
+        reason,
+        userId: user?.id,
+        userName: user?.name,
+        batchId: selectedBatchId,
+      } }])
+      saveTransferRun(user?.id, run)
+      setSavedRun(run)
+      let res: TransferResult = {}
+      await executeTransferRun(run, (next) => {
+        saveTransferRun(run.actorId, next)
+        if (aliveRef.current && transferAuthorityRef.current.actorId === run.actorId) setSavedRun(next)
+      }, async (request) => {
+        if (!transferAuthorityRef.current.allowed || transferAuthorityRef.current.actorId !== run.actorId) throw new Error(t('permission_denied'))
+        res = await transferStockRequest(request.body) as TransferResult
+        return res
+      })
+      saveTransferRun(run.actorId, null)
+      completeTransferDraft(run.actorId, draftKey)
+      draftFinishedRef.current = true
+      if (!aliveRef.current || transferAuthorityRef.current.actorId !== run.actorId) return
+      setSavedRun(null)
+
+      // The single-transfer endpoint returns the moved lot ({ destBatchId } or a
+      // merge summary) with NO `success` flag -- a real failure is thrown by
+      // apiFetch. Gating on `res?.success` treated every successful transfer as
+      // a failure ("Transfer failed" while the stock had actually moved). Treat
+      // a returned result as success unless the server explicitly says false --
+      // the same shape the create/update checks already use.
+      if (res?.success !== false) {
+        const message = (t('transfer_success') || 'Transferred {n} {unit} of "{name}"')
+          .replace('{n}', String(qty))
+          .replace('{unit}', selectedProduct.unit || '')
+          .replace('{name}', selectedProduct.name || '')
+        // The destination may have redirected to a different, already-
+        // existing identical product (see TransferResult.mergedIntoProductId's
+        // comment) -- surface that so the operator isn't left wondering why
+        // the product they selected doesn't show the new stock at the
+        // destination branch.
+        const finalMessage = res.mergedIntoProductName
+          ? `${message} ${(t('transfer_merged_note') || '(merged into existing product "{name}")').replace('{name}', res.mergedIntoProductName)}`
+          : message
+        notify(finalMessage)
+        onDone()
+        return
+      }
+
+      // The Worker's direction refusal is the same sentence the greyed
+      // branch select already shows, so it is read back out of the packs
+      // rather than surfacing as the English the server happened to send.
+      notify(localizeBranchRuleError(res?.error, t) || (t('transfer_failed') || 'Transfer failed'), 'error')
+    } catch (error) {
+      if (!aliveRef.current || transferAuthorityRef.current.actorId !== String(user?.id)) return
+      notify(localizeBranchRuleError(getErrorMessage(error, t('transfer_failed') || 'Transfer failed'), t), 'error')
+    } finally {
+      finishSingleAction(transferInFlightRef)
+      setSaving(false)
+    }
+  }
+
+  /**
+   * 5.3 Bulk transfer action -- same validate-then-submit shape as
+   * handleTransfer, but builds an `items` array from every checked row
    * instead of a single selectedProduct. Client-side quantity/availability
    * checks mirror the backend's (branches.ts's POST /transfer-bulk) so bad
    * input is caught before the request goes out, but the backend re-checks
