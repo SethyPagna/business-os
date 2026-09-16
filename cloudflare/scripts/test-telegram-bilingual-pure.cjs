@@ -258,8 +258,9 @@ assert.ok(saleLines.includes('Status / ស្ថានភាព: awaiting paymen
 assert.ok(saleLines.includes('Not Paid / ប្រាក់ជំពាក់: $0.80'), `the unsettled amount is one positive Not Paid line:\n${saleLines.join('\n')}`)
 assert.ok(!saleLines.some((line) => line.startsWith('Paid')), 'no Paid line survives on a wholly unpaid sale')
 assert.ok(!saleLines.join('\n').includes('មិនទាន់បង់'), 'and no "unpaid" marker either')
-assert.ok(saleLines.some((line) => line.startsWith('• Coca Cola 330ml')), 'the product name is left exactly as entered')
-assert.ok(!saleLines.some((line) => line.startsWith('• Coca Cola 330ml') && KHMER.test(line)), 'an item bullet must not be rewritten')
+// P10: numbered like the printed receipt ("1. name ...") instead of a bullet.
+assert.ok(saleLines.some((line) => line.startsWith('1. Coca Cola 330ml')), 'the product name is left exactly as entered')
+assert.ok(!saleLines.some((line) => line.startsWith('1. Coca Cola 330ml') && KHMER.test(line)), 'a numbered item line must not be rewritten')
 
 // The stock delta must NOT reuse "Change" -- the receipt summary already uses
 // that word for money handed back, and one English word cannot carry two
