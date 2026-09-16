@@ -698,7 +698,34 @@ async function cacheFirstStatic(request, event) {
     if (isValidStaticResponse(request, response)) {
         await cache.put(request, response.clone()).catch(() => { });
     }
+    else if (isStaleBuildAsset(request, response)) {
+        await recoverStaleShell(event);
+    }
     return response;
+}
+// A hashed /assets/ chunk the server no longer has means the shell that
+// referenced it came from an earlier build (appShellFallback serves the
+// cached shell first and only revalidates in the background). Refresh the
+// cached shell BEFORE the 404 reaches the page, so the app's one-shot chunk
+// recovery reload (utils/chunkReloadGuard.ts) lands on the current build
+// instead of the same stale shell, and ask the browser for the new worker.
+function isStaleBuildAsset(request, response) {
+    if (!response || response.status !== 404)
+        return false;
+    return new URL(request.url, self.location.origin).pathname.startsWith('/assets/');
+}
+async function recoverStaleShell(event) {
+    const refresh = (async () => {
+        const cache = await caches.open(APP_SHELL_CACHE);
+        const response = await fetch('/index.html', { cache: 'no-store' }).catch(() => null);
+        if (response && response.ok && response.type === 'basic' && !response.redirected) {
+            await cache.put('/index.html', response.clone()).catch(() => { });
+        }
+        await self.registration.update().catch(() => { });
+        await broadcastSyncEvent('BUSINESS_OS_STALE_ASSET', { build: BUILD_HASH });
+    })();
+    event.waitUntil(refresh);
+    await refresh;
 }
 self.addEventListener('fetch', (event) => {
     const { request } = event;
