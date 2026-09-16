@@ -2,11 +2,11 @@ import { Hono } from 'hono'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, hasAnyPermission, isActionBlocked } from '../lib/permissions'
+import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, PREFLIGHT_MAX_ROWS, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { readCentralDirectory, extractZipEntry, isRealFileEntry, ZipFormatError } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
 import { bumpVersion } from '../lib/cache'
@@ -15,6 +15,9 @@ import { canEditImportDecisions, canReplaceImportCsv, retryModeForImportStatus }
 import { importJobFullDeleteStatements, importJobStagingDeleteStatements } from '../lib/importRetention'
 import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere, buildUnresolvedProductReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
+import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
+import { dispatchImportWork } from '../lib/queueDispatch'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -83,10 +86,25 @@ async function requireImportPermission(c: any, job: Record<string, unknown> | un
   // A role with the full grant can still have this import type's
   // `section:import` action switched off in the permission editor.
   const overrideSection = importActionSection(type)
+  if (overrideSection === 'contacts' && isActionBlocked(user, 'contacts', 'bulk')) {
+    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'contacts:bulk' }, 403)
+  }
   if (overrideSection && isActionBlocked(user, overrideSection, 'import')) {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: `${overrideSection}:import` }, 403)
   }
   return null
+}
+
+function requireProductImageAction(c: any) {
+  if (getActionTier(c.get('user'), 'products', 'image') !== 'full') {
+    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products:image' }, 403)
+  }
+  return null
+}
+
+async function requireChangedProductImportImageAction(c: any, job: Record<string, unknown>) {
+  if (String(job.type || '') !== 'products' || getActionTier(c.get('user'), 'products', 'image') === 'full') return null
+  return (await productImportChangesImages(c.env, job as any)) ? requireProductImageAction(c) : null
 }
 
 function serializeJob(job: Record<string, unknown>) {
@@ -108,7 +126,7 @@ function safeJsonParse<T>(text: string | null | undefined, fallback: T): T {
 
 async function auditImportEvent(c: any, action: string, jobId: string, before: Record<string, unknown> | null, after: Record<string, unknown> | null, extra: Record<string, unknown> = {}) {
   const user = c.get('user')
-  await audit(c.env, user?.id ?? null, user?.name ?? null, action, 'import_job', jobId, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), action, 'import_job', jobId, {
     jobId,
     jobType: (after?.type || before?.type) ?? null,
     oldStatus: before?.status ?? null,
@@ -152,28 +170,51 @@ app.get('/queue/status', async (c) => {
 // the ~150-row chunk cadence, so this never fires on a job that's still
 // genuinely being worked) is auto-marked failed with a clear last_error,
 // which moves it out of ACTIVE_STATUSES on the very next poll without
-// anyone having to act on it. Runs as a narrow, self-limiting UPDATE (WHERE
-// status IN (...) AND updated_at older than the cutoff) ahead of every
-// list call -- once a row is reaped it no longer matches that WHERE clause,
-// so this is a no-op write on every poll after the first for a given job.
+// anyone having to act on it. A cheap read first checks whether either reap
+// class exists, so ordinary tracker polling does not open write transactions
+// when there is nothing to reap. The UPDATE predicates repeat the status and
+// cutoff checks and remain authoritative if a worker refreshes a candidate
+// after this read.
 const STALLED_IMPORT_JOB_REAP_MINUTES = 20
 
 export async function reapStalledImportJobs(env: Env): Promise<void> {
   const db = getDb(env)
-  await db.prepare(`
-    UPDATE import_jobs
-    SET status = 'failed', phase = 'failed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
-        last_error = 'Stalled: no progress update received for over ${STALLED_IMPORT_JOB_REAP_MINUTES} minutes (the background worker likely crashed or was reset mid-import). Safe to retry.'
-    WHERE status IN ('pending', 'queued', 'analyzing', 'running', 'applying', 'approved')
-      AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
-  `).run().catch(() => { /* best-effort housekeeping -- a failed reap shouldn't break the list endpoint */ })
-  await db.prepare(`
-    UPDATE import_jobs
-    SET status = 'cancelled', phase = 'cancelled', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
-        last_error = COALESCE(NULLIF(last_error, ''), 'Cancel never confirmed by the worker -- treated as cancelled after a long timeout.')
-    WHERE status = 'cancelling'
-      AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
-  `).run().catch(() => {})
+  const candidates = await db.prepare(`
+    SELECT
+      EXISTS(
+        SELECT 1 FROM import_jobs
+        WHERE status IN ('pending', 'queued', 'analyzing', 'running', 'applying', 'approved')
+          AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
+      ) AS active_stale,
+      EXISTS(
+        SELECT 1 FROM import_jobs
+        WHERE status = 'cancelling'
+          AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
+      ) AS cancelling_stale
+  `).get<{ active_stale: number; cancelling_stale: number }>().catch(() => undefined)
+
+  // Reaping is best-effort housekeeping. If this probe fails, let the list
+  // query run and report its own result/error instead of masking list data.
+  if (!candidates) return
+
+  if (Number(candidates.active_stale || 0) > 0) {
+    await db.prepare(`
+      UPDATE import_jobs
+      SET status = 'failed', phase = 'failed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+          last_error = 'Stalled: no progress update received for over ${STALLED_IMPORT_JOB_REAP_MINUTES} minutes (the background worker likely crashed or was reset mid-import). Safe to retry.'
+      WHERE status IN ('pending', 'queued', 'analyzing', 'running', 'applying', 'approved')
+        AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
+    `).run().catch(() => { /* best-effort housekeeping -- a failed reap shouldn't break the list endpoint */ })
+  }
+  if (Number(candidates.cancelling_stale || 0) > 0) {
+    await db.prepare(`
+      UPDATE import_jobs
+      SET status = 'cancelled', phase = 'cancelled', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+          last_error = COALESCE(NULLIF(last_error, ''), 'Cancel never confirmed by the worker -- treated as cancelled after a long timeout.')
+      WHERE status = 'cancelling'
+        AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
+    `).run().catch(() => {})
+  }
 }
 
 app.get('/', async (c) => {
@@ -246,7 +287,7 @@ app.post('/', async (c) => {
     id, type,
     policy_json: JSON.stringify(body?.policy || {}),
     created_by_id: user?.id ?? null,
-    created_by_name: user?.name ?? null,
+    created_by_name: actorSnapshot(user),
   })
   const job = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_create', id, null, job || null, { source: body?.source || 'api' })
@@ -450,7 +491,32 @@ app.patch('/:id/decisions', async (c) => {
   }
 
   const body = await c.req.json().catch(() => ({}))
-  const incoming = body?.decisions || body?.rows || {}
+  const rawIncoming = body?.decisions || body?.rows || {}
+  if (!rawIncoming || typeof rawIncoming !== 'object' || Array.isArray(rawIncoming)) {
+    return c.json({ success: false, error: 'Import decisions must be an object keyed by row number.' }, 400)
+  }
+  let incoming = rawIncoming as Record<string, any>
+  if (['customers', 'suppliers', 'delivery_contacts'].includes(String(job.type || ''))) {
+    const validated: Record<string, any> = {}
+    for (const [rowNumber, value] of Object.entries(incoming)) {
+      const numericRow = Number(rowNumber)
+      if (!Number.isSafeInteger(numericRow) || numericRow <= 0 || !value || typeof value !== 'object' || Array.isArray(value)) {
+        return c.json({ success: false, error: `Invalid contact import decision for row ${rowNumber}.` }, 400)
+      }
+      const decision = value as Record<string, unknown>
+      if (!['apply', 'skip', 'force_create'].includes(String(decision.action || ''))) {
+        return c.json({ success: false, error: `Invalid contact import action for row ${rowNumber}.` }, 400)
+      }
+      if (decision.target_existing_id != null) {
+        const targetId = decision.target_existing_id
+        if (decision.action !== 'apply' || typeof targetId !== 'number' || !Number.isSafeInteger(targetId) || targetId <= 0) {
+          return c.json({ success: false, error: `Invalid contact merge target for row ${rowNumber}.` }, 400)
+        }
+      }
+      validated[rowNumber] = decision
+    }
+    incoming = validated
+  }
   const db = getDb(c.env)
   const policy = safeJsonParse<Record<string, any>>(job.policy_json as string, {})
   const current = policy.decisionsByRowNumber && typeof policy.decisionsByRowNumber === 'object' ? policy.decisionsByRowNumber : {}
@@ -474,6 +540,8 @@ app.patch('/:id/images/assign', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  const imageDenied = requireProductImageAction(c as any)
+  if (imageDenied) return imageDenied
 
   const body = await c.req.json().catch(() => ({}))
   const fileId = Number(body?.file_id)
@@ -511,6 +579,8 @@ app.patch('/:id/images/assign-existing', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  const imageDenied = requireProductImageAction(c as any)
+  if (imageDenied) return imageDenied
 
   const body = await c.req.json().catch(() => ({}))
   const fileId = Number(body?.file_id)
@@ -590,7 +660,13 @@ app.post('/:id/preflight', async (c) => {
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
   try {
-    const loaded = await loadAndClassify(c.env, id, PREFLIGHT_MAX_ROWS)
+    // Tier-aware sample size. This classify pass runs SYNCHRONOUSLY inside
+    // one HTTP request with a browser waiting, so it is the one import step
+    // with no queue continuation to fall back on -- on Free it has to fit a
+    // 10 ms invocation. The module-level PREFLIGHT_MAX_ROWS export keeps its
+    // Paid value; see lib/planTier.ts's preflightMaxRows.
+    const preflightMaxRows = getPlanLimits(c.env).preflightMaxRows
+    const loaded = await loadAndClassify(c.env, id, preflightMaxRows)
     if (!loaded) return c.json({ success: false, error: 'Upload a CSV before previewing this import' }, 400)
     const counts = { create: 0, update: 0, skip: 0, error: 0 }
     for (const r of loaded.results) counts[r.action] += 1
@@ -608,8 +684,8 @@ app.post('/:id/preflight', async (c) => {
     // and `total` are left in the response too (harmless extra fields) in
     // case any other caller still reads them.
     //
-    // This only ever checks the first PREFLIGHT_MAX_ROWS rows (see that
-    // constant's comment in importEngine.ts) -- a synchronous HTTP request
+    // This only ever checks the first preflightMaxRows rows (see that
+    // limit's comment in lib/planTier.ts) -- a synchronous HTTP request
     // can't chunk itself across a person's browser the way the queued
     // analyze/apply phases now do. `partial`/`totalRowsInFile` let the
     // frontend say so rather than silently implying every row was checked.
@@ -669,7 +745,16 @@ app.post('/:id/preflight', async (c) => {
       // quick check never looked at (the real, complete check is the
       // queued analyze phase after POST /:id/start). Under the cap =>
       // this preflight covered the entire file.
-      partial: loaded.results.length >= PREFLIGHT_MAX_ROWS,
+      partial: loaded.results.length >= preflightMaxRows,
+      // Named so the UI can say "only the first 125 rows were checked"
+      // rather than leaving `partial` as a bare flag. Null when the whole
+      // file fit, so the presence of a code IS the condition.
+      partialCode: loaded.results.length >= preflightMaxRows ? 'import_preflight_partial' : null,
+      // The cap that actually applied, so "partial" is never a bare flag the
+      // UI has to explain with a hard-coded number that may not be this
+      // deployment's. On Free this is 125, not 500.
+      maxCheckedRows: preflightMaxRows,
+      planTier: resolvePlanTier(c.env),
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Failed to preflight import job' }, 400)
@@ -746,7 +831,7 @@ async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image',
       media_type: mediaType,
       byte_size: bytes.byteLength,
       created_by_id: user?.id ?? null,
-      created_by_name: user?.name ?? null,
+      created_by_name: actorSnapshot(user),
       optimization_status: mediaType === 'image' ? 'not_applicable_no_sharp' : 'not_applicable',
     })
     fileAssetId = Number(assetInsert.lastInsertRowid)
@@ -985,6 +1070,8 @@ app.post('/:id/images/wire', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  const imageDenied = requireProductImageAction(c as any)
+  if (imageDenied) return imageDenied
 
   // Refuse while a phase is mid-flight. Flipping this under a running job
   // would have some chunks wire images and earlier ones not, leaving a
@@ -1074,7 +1161,7 @@ app.post('/:id/start', async (c) => {
   if (!csvCount?.n) return c.json({ success: false, error: 'Upload a CSV before starting the import' }, 400)
 
   await db.prepare(`UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id })
-  await c.env.IMPORT_QUEUE.send({ jobId: id, kind: 'analyze' })
+  await dispatchImportWork(c.env, { jobId: id, kind: 'analyze' })
   const queued = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_start', id, job, queued || null, { source: 'api', mode: 'analyze' })
   return c.json({ success: true, job: serializeJob(queued || job) })
@@ -1093,6 +1180,8 @@ app.post('/:id/approve', async (c) => {
   if (status !== 'awaiting_review') {
     return c.json({ success: false, error: `Import cannot be approved while its status is ${status || 'unknown'}.` }, 409)
   }
+  const imageDenied = await requireChangedProductImportImageAction(c as any, job)
+  if (imageDenied) return imageDenied
 
   const body = await c.req.json().catch(() => ({}))
   const summary = safeJsonParse<Record<string, unknown>>(job.summary_json as string, {})
@@ -1149,6 +1238,8 @@ app.post('/:id/approve', async (c) => {
   }
 
   const db = getDb(c.env)
+  policy.apply_authorized_by_id = c.get('user')?.id ?? null
+  policy.apply_authorized_at = new Date().toISOString()
   if (job.type === 'stock_actions') {
     policy.stock_action_conflicts_confirmed = requiresStockConfirmation
     policy.stock_action_confirmed_by = c.get('user')?.id ?? null
@@ -1161,7 +1252,7 @@ app.post('/:id/approve', async (c) => {
   if (approval.changes !== 1) {
     return c.json({ success: false, error: 'Import status changed before approval. Refresh and review it again.' }, 409)
   }
-  await c.env.IMPORT_QUEUE.send({ jobId: id, kind: 'apply' })
+  await dispatchImportWork(c.env, { jobId: id, kind: 'apply' })
   const queued = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_approve', id, job, queued || null, { source: 'api', mode: 'apply' })
   return c.json({ success: true, job: serializeJob(queued || job) })
@@ -1281,12 +1372,20 @@ app.post('/:id/retry', async (c) => {
     return c.json({ success: false, error: 'This import is waiting for review. Use Confirm to apply it, or cancel it to start over.' }, 409)
   }
   const mode = retryMode
+  const policy = safeJsonParse<Record<string, any>>(job.policy_json as string, {})
+  if (mode === 'apply') {
+    const imageDenied = await requireChangedProductImportImageAction(c as any, job)
+    if (imageDenied) return imageDenied
+    policy.apply_authorized_by_id = c.get('user')?.id ?? null
+    policy.apply_authorized_at = new Date().toISOString()
+  }
   await db.prepare(`
     UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0,
-      processed_rows = 0, failed_rows = 0, last_error = NULL, updated_at = CURRENT_TIMESTAMP
+      processed_rows = 0, failed_rows = 0, last_error = NULL,
+      policy_json = COALESCE(@policy, policy_json), updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
-  `).run({ id })
-  await c.env.IMPORT_QUEUE.send({ jobId: id, kind: mode })
+  `).run({ id, policy: mode === 'apply' ? JSON.stringify(policy) : null })
+  await dispatchImportWork(c.env, { jobId: id, kind: mode })
   const queued = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_retry', id, job, queued || null, { source: 'api', mode })
   return c.json({ success: true, job: serializeJob(queued || job) })

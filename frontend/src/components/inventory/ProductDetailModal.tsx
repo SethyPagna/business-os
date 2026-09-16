@@ -1,3 +1,4 @@
+import ProductNameRail from '../shared/ProductNameRail'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import { createPortal } from 'react-dom'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -5,9 +6,13 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import Layers from 'lucide-react/dist/esm/icons/layers.js'
+import { useCopyFloat } from '../shared/CopyFloat.tsx'
 import { calculateProductDiscount } from '../../utils/pricing.ts'
 import { buildBatchPreview, getVisibleProductBatches } from '../../utils/productBatches.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { useLowStockConfig } from '../../AppContext'
+import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
+import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type MoneyFormatter = (value: number) => string
@@ -45,8 +50,9 @@ interface InventoryProduct {
   purchase_price_khr?: number
   selling_price_usd?: number
   selling_price_khr?: number
-  special_price_usd?: number
-  special_price_khr?: number
+  wholesale_price_usd?: number
+  wholesale_price_khr?: number
+  // No special_price_*: the "VIP" tier it backed was deleted on 2026-09-04.
   qty_sold?: number
   revenue_usd?: number
   cogs_usd?: number
@@ -77,19 +83,36 @@ function getBranchStockKey(branchStock: BranchStockEntry, index: number): string
 
 export default function ProductDetailModal({ product: p, onClose, onAdjust, onTransfer, onViewHistory, onManageBatches, fmtUSD, fmtKHR, t }: ProductDetailModalProps) {
   const T = (key: string, fallback: string): string => (typeof t === 'function' ? t(key) : fallback) || fallback
+  // Hooks run before the early return (Rules of Hooks): the lowstock lane
+  // added this component's first hook below `if (!p) return null`, which was
+  // unreachable from every current call site but a latent violation.
+  const lowStockConfig = useLowStockConfig()
+  // Same four copyable product fields as the Products-side detail modal
+  // (name, brand, supplier, barcode), same shared float. Declared with the
+  // other hooks, above the early return.
+  const copy = useCopyFloat(T)
   if (!p) return null
 
   const costPriceUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
   const costPriceKhr = Number(p.purchase_price_khr || 0)
   const sellingPriceUsd = Number(p.selling_price_usd || 0)
   const sellingPriceKhr = Number(p.selling_price_khr || 0)
-  const specialPriceUsd = Number(p.special_price_usd || 0)
-  const specialPriceKhr = Number(p.special_price_khr || 0)
-  const hasSpecialPrice = specialPriceUsd > 0 || specialPriceKhr > 0
-  const activePriceUsd = hasSpecialPrice ? (specialPriceUsd || sellingPriceUsd) : sellingPriceUsd
-  const activePriceKhr = hasSpecialPrice ? (specialPriceKhr || sellingPriceKhr) : sellingPriceKhr
+  const wholesalePriceUsd = Number(p.wholesale_price_usd || 0)
+  const wholesalePriceKhr = Number(p.wholesale_price_khr || 0)
+  // The special_price_* ("VIP") tier is deleted by the 2026-09-04 ruling, so
+  // there is no longer a second tier that can override the shelf price here.
+  // "Active price" is therefore simply the selling price: wholesale is a tier
+  // the cashier picks per line at the POS, never the default price of a
+  // product, so it must not silently replace the selling price on this panel
+  // the way the old special price did.
+  const activePriceUsd = sellingPriceUsd
+  const activePriceKhr = sellingPriceKhr
   const stockQuantity = Number(p.stock_quantity || 0)
-  const lowStockThreshold = Number(p.low_stock_threshold || 0)
+  // Settings > Stock Alerts. This read used to fall back to 0 where every
+  // other surface fell back to 10, so a product with no limit of its own was
+  // green here and amber on the list it was opened from; going through the
+  // shared rule removes the fork as well as honouring the owner's number.
+  const lowStockThreshold = effectiveLowStockThreshold(lowStockConfig, p.low_stock_threshold)
   const stockPct = lowStockThreshold > 0
     ? Math.min(100, (stockQuantity / lowStockThreshold) * 100)
     : 100
@@ -121,7 +144,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0 flex-1">
-            <div className="break-words font-bold text-gray-900 dark:text-white">{p.name}</div>
+            <div className="min-w-0 font-bold text-gray-900 dark:text-white" {...copy(p.name)}><ProductNameRail name={String(p.name ?? '')} /></div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
               {p.sku ? <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-400 dark:bg-gray-700">{p.sku}</span> : null}
               {p.category ? <span className="text-xs text-blue-600 dark:text-blue-400">{p.category}</span> : null}
@@ -130,11 +153,11 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                   same text-xs sizing as the rest of this line, so they reuse
                   this row's existing wrap space instead of costing a new
                   row's worth of vertical space every time. */}
-              {p.brand ? <span className="text-xs text-gray-400">&middot; {p.brand}</span> : null}
-              {p.barcode ? <span className="shrink-0 whitespace-nowrap font-mono text-xs text-gray-400">&middot; {p.barcode}</span> : null}
+              {p.brand ? <span className="text-xs text-gray-400" {...copy(p.brand)}>&middot; {p.brand}</span> : null}
+              {p.barcode ? <span className="shrink-0 whitespace-nowrap font-mono text-xs text-gray-400" {...copy(p.barcode)}>&middot; {p.barcode}</span> : null}
             </div>
           </div>
-          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={T('close', 'Close')}><X className="h-4 w-4" /></button>
+          <button type="button" onClick={onClose} className={toolbarIconButtonClassName} aria-label={T('close', 'Close')}><X className="h-4 w-4" /></button>
         </div>
 
         <div className="modal-scroll space-y-3 p-4">
@@ -152,7 +175,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             <div className="grid grid-cols-2 gap-2 pt-1 text-center">
               {[
                 { label: T('low_stock_threshold', 'Low stock threshold'), value: `${lowStockThreshold} ${p.unit || ''}` },
-                { label: T('batches', 'Batches'), value: String(batchCount || 0) },
+                { label: T('batches', 'Received dates'), value: String(batchCount || 0) },
               ].map((item) => (
                 <div key={item.label} className="rounded-lg bg-white/80 px-2 py-1.5 dark:bg-slate-800/60">
                   <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">{item.value}</div>
@@ -176,24 +199,33 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           </div>
 
           <div className="space-y-3">
-            <div className={`grid gap-2 sm:gap-3 ${hasSpecialPrice ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            {/* Fixed at two columns now that the third tile (the "Special
+                Price" / VIP tier) is deleted by the 2026-09-04 ruling -- the
+                grid used to widen to three whenever that tier had a value. */}
+            <div className="grid grid-cols-2 gap-2 sm:gap-3" data-detail-price-row="cost-wholesale">
               <div className="rounded-xl bg-red-50 p-3 dark:bg-red-900/20">
                 <div className="mb-1 text-xs font-semibold text-red-600 dark:text-red-400">{T('label_cost_purchase', 'Cost Price')}</div>
-                <div className="font-bold text-red-700 dark:text-red-300">{fmtUSD(costPriceUsd)}</div>
+                <div className="text-sm font-semibold tabular-nums text-red-700 dark:text-red-300">{fmtUSD(costPriceUsd)}</div>
                 {costPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(costPriceKhr)}</div> : null}
               </div>
+              <div className="rounded-xl bg-indigo-50 p-3 dark:bg-indigo-900/20">
+                <div className="mb-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400">{T('wholesale_price', 'Wholesale price')}</div>
+                <div className="text-sm font-semibold tabular-nums text-indigo-700 dark:text-indigo-300">{wholesalePriceUsd > 0 ? fmtUSD(wholesalePriceUsd) : '—'}</div>
+                {wholesalePriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(wholesalePriceKhr)}</div> : null}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:gap-3" data-detail-price-row="selling-margin">
               <div className="rounded-xl bg-green-50 p-3 dark:bg-green-900/20">
-                <div className="mb-1 text-xs font-semibold text-green-600 dark:text-green-400">{T('label_selling_price', 'Selling Price')}</div>
-                <div className="font-bold text-green-700 dark:text-green-300">{fmtUSD(sellingPriceUsd)}</div>
+                <div className="mb-1 text-xs font-semibold text-green-600 dark:text-green-400">{T('label_selling_price', 'Selling price')}</div>
+                <div className="text-sm font-semibold tabular-nums text-green-700 dark:text-green-300">{fmtUSD(sellingPriceUsd)}</div>
                 {sellingPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(sellingPriceKhr)}</div> : null}
               </div>
-              {hasSpecialPrice ? (
-                <div className="rounded-xl bg-blue-50 p-3 dark:bg-blue-900/20">
-                  <div className="mb-1 text-xs font-semibold text-blue-600 dark:text-blue-400">{T('special_price', 'Special Price')}</div>
-                  <div className="font-bold text-blue-700 dark:text-blue-300">{fmtUSD(specialPriceUsd || sellingPriceUsd)}</div>
-                  {(specialPriceKhr || sellingPriceKhr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(specialPriceKhr || sellingPriceKhr || 0)}</div> : null}
+              <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/20">
+                <div className="mb-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">{T('margin', 'Margin')}</div>
+                <div className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
+                  {fmtUSD(marginUsd)}{costPriceUsd > 0 ? <span className="ml-1 text-xs font-normal text-gray-400">{Math.round(marginPct)}%</span> : null}
                 </div>
-              ) : null}
+              </div>
             </div>
             <div className="grid grid-cols-4 gap-1.5 text-center sm:gap-2">
               {[
@@ -218,17 +250,19 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2 sm:gap-x-4">
-            {[
+            {([
               // Brand + barcode now live in the header row next to the
               // category/unit line -- kept out of this list to avoid
               // showing them twice.
-              [T('label_sku', 'SKU'), p.sku],
-              [T('label_supplier', 'Supplier'), p.supplier],
-              [T('label_description', 'Description'), p.description],
-            ].filter(([, value]) => value).map(([label, value]) => (
-              <div key={label} className="flex gap-2 text-sm">
-                <span className="w-20 flex-shrink-0 pt-0.5 text-[11px] text-gray-400">{label}</span>
-                <span className="break-all text-gray-700 dark:text-gray-300">{value}</span>
+              { label: T('label_sku', 'SKU'), value: p.sku },
+              // Supplier is the one row here that is a copyable product
+              // field; SKU is an identifier and description is prose.
+              { label: T('label_supplier', 'Supplier'), value: p.supplier, copyable: true },
+              { label: T('label_description', 'Description'), value: p.description },
+            ] as Array<{ label: string; value?: string; copyable?: boolean }>).filter((row) => row.value).map((row) => (
+              <div key={row.label} className="flex gap-2 text-sm">
+                <span className="w-20 flex-shrink-0 pt-0.5 text-[11px] text-gray-400">{row.label}</span>
+                <span className="break-all text-gray-700 dark:text-gray-300" {...(row.copyable ? copy(row.value) : {})}>{row.value}</span>
               </div>
             ))}
           </div>
@@ -253,17 +287,21 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           ) : null}
 
           {branchStock.length > 0 ? (
-            <div>
-              <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500">{T('branch_stock', 'Branch Stock')}</div>
-              <div className="space-y-1">
+            // Match the primary Products detail row: the label keeps a
+            // predictable narrow column while every complete branch value
+            // stays on one chip in a single horizontally scrollable lane.
+            // At 320px this prevents long English or Khmer names from
+            // wrapping away from their quantity or colliding with the label.
+            <div className="flex min-w-0 gap-2" data-detail-branch-row="true">
+              <span className="w-16 flex-shrink-0 whitespace-nowrap pt-0.5 text-xs text-gray-400 sm:w-20">{T('branch', 'Branch')}</span>
+              <div className="scroll-x-clean flex min-w-0 flex-1 flex-nowrap gap-1.5">
                 {branchStock.map((branchStock, index) => (
-                  <div
+                  <span
                     key={getBranchStockKey(branchStock, index)}
-                    className={`flex justify-between py-1 text-sm ${index < branchCount - 1 ? 'border-b border-gray-100 dark:border-gray-700' : ''}`}
+                    className="shrink-0 whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700 dark:bg-gray-700 dark:text-gray-300"
                   >
-                    <span className="text-gray-700 dark:text-gray-300">{branchStock.branch_name}</span>
-                    <span className="font-medium text-gray-900 dark:text-white">{branchStock?.quantity ?? 0} {p.unit}</span>
-                  </div>
+                    {branchStock.branch_name}: <span className="font-medium text-gray-900 dark:text-white">{branchStock?.quantity ?? 0} {p.unit}</span>
+                  </span>
                 ))}
               </div>
             </div>
@@ -271,12 +309,12 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
 
           {visibleBatches.length ? (
             <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{T('batches', 'Batches')}</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{T('batches', 'Received dates')}</div>
               <div className="space-y-2">
                 {batchPreview.items.map((batch, index) => (
                   <div key={String(batch.id || batch.batch_id || `batch-${index}`)} className="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel({ id: batch.id ?? batch.batch_id ?? `b-${index}`, lot_code: batch.lot_code ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, T('batch', 'Batch'))}</span>
+                      <span className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel({ id: batch.id ?? batch.batch_id ?? `b-${index}`, lot_code: batch.lot_code ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, T('batch', 'Received date'))}</span>
                       <span className="text-sm font-medium text-gray-900 dark:text-white">{batch.quantity} {p.unit}</span>
                     </div>
                     <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-300">{batch.expiry_date || T('no_expiry', 'No expiry')}</div>
@@ -306,7 +344,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             <button
               type="button"
               onClick={() => { onClose(); onAdjust(p) }}
-              className="btn-primary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
+              className={`btn-primary ${TOOLBAR_BUTTON_BASE} w-full truncate px-1 leading-tight`}
               aria-label={T('adjust_stock', 'Adjust Stock')}
               title={T('adjust_stock', 'Adjust Stock')}
             >
@@ -318,7 +356,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             <button
               type="button"
               onClick={() => { onClose(); onTransfer(p) }}
-              className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
+              className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-full truncate px-1 leading-tight`}
               aria-label={T('transfer', 'Transfer')}
               title={T('transfer', 'Transfer')}
             >
@@ -330,12 +368,12 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             <button
               type="button"
               onClick={() => { onClose(); onManageBatches(p) }}
-              className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
-              aria-label={T('manage_batches', 'Manage Batches')}
-              title={T('manage_batches', 'Manage Batches')}
+              className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-full truncate px-1 leading-tight`}
+              aria-label={T('manage_batches', 'Manage Received Dates')}
+              title={T('manage_batches', 'Manage Received Dates')}
             >
               <Layers className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="hidden truncate sm:inline">{T('manage_batches', 'Manage Batches')}</span>
+              <span className="hidden truncate sm:inline">{T('manage_batches', 'Manage Received Dates')}</span>
             </button>
           ) : null}
         </div>

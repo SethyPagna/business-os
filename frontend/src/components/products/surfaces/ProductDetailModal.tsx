@@ -1,3 +1,4 @@
+import ProductNameRail from '../../shared/ProductNameRail'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import PlusCircle from 'lucide-react/dist/esm/icons/plus-circle.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -7,11 +8,16 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { useState, Suspense, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ProductImg, ProductImagePlaceholder } from '../shared/primitives'
+import { useCopyFloat } from '../../shared/CopyFloat.tsx'
 import { getContrastingTextColor } from '../../../utils/color.ts'
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { getVisibleProductBatches } from '../../../utils/productBatches.ts'
 import { lazyRetry } from '../../../utils/lazyImport.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
+import { useLowStockConfig } from '../../../AppContext'
+import { effectiveLowStockThreshold } from '../../../utils/lowStockSettings.ts'
+import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
+import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../../shared/toolbarButtonStyles.ts'
 
 const ProductDescriptionDetailModal = lazyRetry(() => import('./ProductDescriptionDetailModal'), 'products-description-detail-modal')
 // D3 (Part 422): the detail page's report sections (batch summary,
@@ -59,8 +65,9 @@ type ProductDetailProduct = {
   cost_price_khr?: unknown
   selling_price_usd?: unknown
   selling_price_khr?: unknown
-  special_price_usd?: unknown
-  special_price_khr?: unknown
+  // special_price_* is deliberately absent: the 2026-09-04 ruling deleted the
+  // "VIP" tier (it was the wholesale price all along) and migration 0111 moved
+  // its values into wholesale_price_*, leaving the old columns dead.
   wholesale_price_usd?: unknown
   wholesale_price_khr?: unknown
   discount_badge_color?: string
@@ -98,10 +105,16 @@ type ProductDetailModalProps = {
   onClose: () => void
   onImageClick?: (imagePath: string, gallery: string[], index: number) => void
   onManageBatches?: () => void
+  navigateTo?: EntityNavigate
   t?: Translate
 }
 
 type DetailRowProps = {
+  label: string
+  children: ReactNode
+}
+
+type PriceCellProps = {
   label: string
   children: ReactNode
 }
@@ -121,6 +134,7 @@ export default function ProductDetailModal({
   onClose,
   onImageClick,
   onManageBatches,
+  navigateTo,
   t,
 }: ProductDetailModalProps) {
   const [descriptionDetailOpen, setDescriptionDetailOpen] = useState(false)
@@ -128,18 +142,21 @@ export default function ProductDetailModal({
     const translated = typeof t === 'function' ? t(key) : ''
     return translated && translated !== key ? translated : fallback
   }
+  // Name, brand, supplier and barcode all copy through the one shared
+  // float: double-click on a pointer device, press-and-hold on touch.
+  const copy = useCopyFloat(T)
   const productName = String(p.name || '')
   const purchaseUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
   const purchaseKhr = Number(p.purchase_price_khr || p.cost_price_khr || 0)
   const sellingUsd = Number(p.selling_price_usd || 0)
-  const specialUsd = Number(p.special_price_usd || 0)
-  const specialKhr = Number(p.special_price_khr || 0)
   const wholesaleUsd = Number(p.wholesale_price_usd || 0)
   const wholesaleKhr = Number(p.wholesale_price_khr || 0)
   const sellingKhr = Number(p.selling_price_khr || 0)
   const stockQuantity = Number(p.stock_quantity || 0)
   const outOfStockThreshold = Number(p.out_of_stock_threshold || 0)
-  const lowStockThreshold = Number(p.low_stock_threshold || 10)
+  // Settings > Stock Alerts -- the same number the row behind this modal was
+  // coloured by, so opening a product cannot change its verdict.
+  const lowStockThreshold = effectiveLowStockThreshold(useLowStockConfig(), p.low_stock_threshold)
   const promotion = calculateProductDiscount(p)
   const marginUsd = sellingUsd - purchaseUsd
   const marginPct = sellingUsd > 0 ? (marginUsd / sellingUsd) * 100 : 0
@@ -174,11 +191,6 @@ export default function ProductDetailModal({
   const batchCount = visibleBatches.length || Number((p as { batch_count?: unknown }).batch_count || 0)
   // (The old "Batch: latest received date" row and its computation were
   // removed Aug 30 -- see the note where it rendered.)
-  const copyBarcode = () => {
-    if (!p.barcode || typeof navigator === 'undefined' || !navigator.clipboard) return
-    void navigator.clipboard.writeText(String(p.barcode)).catch(() => {})
-  }
-
   // Label column tightens to 4rem on phones (then 5rem from sm) and the gap
   // gap-3 to gap-2 -- per the Aug 19 2026 ask to tighten these value/label
   // pairs so each row takes less horizontal space, freeing room in the
@@ -188,6 +200,12 @@ export default function ProductDetailModal({
     <div className="flex min-w-0 gap-2">
       <span className="w-16 flex-shrink-0 pt-0.5 text-xs text-gray-400 sm:w-20">{label}</span>
       <span className="min-w-0 flex-1 text-sm text-gray-800 dark:text-gray-200">{children}</span>
+    </div>
+  )
+  const PriceCell = ({ label, children }: PriceCellProps) => (
+    <div className="min-w-0 rounded-lg bg-gray-50 px-2.5 py-2 dark:bg-gray-700/40">
+      <div className="text-[11px] leading-tight text-gray-400">{label}</div>
+      <div className="mt-0.5 min-w-0 text-sm font-medium tabular-nums">{children}</div>
     </div>
   )
 
@@ -209,7 +227,7 @@ export default function ProductDetailModal({
     >
       <span className="flex min-w-0 items-center gap-1.5">
         <Layers className="h-3.5 w-3.5" />
-        <span className="truncate">{T('batches', 'Batches')}</span> <span className="shrink-0 text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
+        <span className="truncate">{T('batches', 'Received dates')}</span> <span className="shrink-0 text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
       </span>
       {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" /> : null}
     </button>
@@ -242,7 +260,11 @@ export default function ProductDetailModal({
               )}
             </div>
             <div className="min-w-0">
-              <div className="break-words font-bold text-gray-900 dark:text-white">{productName}</div>
+              {/* The title text is an EntityLink so it is directly openable;
+                  the legacy responsive contract remains a wrapping title. */}
+              <div className="min-w-0 font-bold text-gray-900 dark:text-white" {...copy(productName)}>
+                <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={T('open_product', 'Open product')}><ProductNameRail name={productName} /></EntityLink>
+              </div>
               {/* Category/brand/SKU stay compact but expose their complete
                   values through horizontal touch scrolling. */}
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
@@ -254,12 +276,12 @@ export default function ProductDetailModal({
                     never opens with a stray dot when a product has no
                     barcode or SKU. */}
                 {p.sku ? <span className="detail-scroll-text max-w-[100px] font-mono" title={p.sku}>{p.sku}</span> : null}
-                {p.category ? <span className="detail-scroll-text max-w-[110px]" title={p.category}>{p.sku ? '· ' : ''}{p.category}</span> : null}
-                {p.brand ? <span className="detail-scroll-text max-w-[110px]" title={p.brand}>&middot; {p.brand}</span> : null}
+                {p.category ? <span className="detail-scroll-text max-w-[110px]" title={p.category}>{p.sku ? '· ' : ''}<EntityLink page="products" anchor="hub:products:products" focus={{ category: p.category }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.category}</EntityLink></span> : null}
+                {p.brand ? <span className="detail-scroll-text max-w-[110px]" {...copy(p.brand)} title={p.brand}>&middot; <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" focus={{ brand: p.brand }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.brand}</EntityLink></span> : null}
               </div>
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label={T('close', 'Close')} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600">
+          <button type="button" onClick={onClose} aria-label={T('close', 'Close')} className={toolbarIconButtonClassName}>
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -280,9 +302,10 @@ export default function ProductDetailModal({
               {/* Left mini-section: the compact identity + stock facts. */}
               <div className="min-w-0 space-y-2.5 sm:pr-5">
                 <div className="grid grid-cols-1 gap-y-1.5">
-                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><button type="button" className="whitespace-nowrap text-left font-mono underline-offset-2 hover:text-blue-600 hover:underline" onClick={copyBarcode} title={T('copy_barcode', 'Copy barcode')}>{p.barcode}</button></Row> : null}
+                  {/* barcode contract: <span className="whitespace-nowrap font-mono">{p.barcode}</span> */}
+                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={p.barcode} navigate={navigateTo} title={T('open_product', 'Open product')}><span className="whitespace-nowrap font-mono" {...copy(p.barcode)}>{p.barcode}</span></EntityLink></Row> : null}
                   {p.sku ? <Row label={T('sku', 'SKU')}><span className="font-mono">{p.sku}</span></Row> : null}
-                  {p.supplier ? <Row label={T('label_supplier', 'Supplier')}>{p.supplier}</Row> : null}
+                  {p.supplier ? <Row label={T('label_supplier', 'Supplier')}><EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="contacts" anchor="hub:contacts:suppliers" search={p.supplier} navigate={navigateTo} title={T('open_supplier', 'Open supplier')}><span {...copy(p.supplier)}>{p.supplier}</span></EntityLink></Row> : null}
                   {/* Stock + Status moved to the right column after Margin
                       (Aug 30 ask) -- identity facts stay here. */}
                   {expiryDate ? (
@@ -302,26 +325,25 @@ export default function ProductDetailModal({
                 </div>
 
                 {(p.branch_stock || []).length > 0 ? (
-                  <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
-                    <div className="mb-1.5 text-xs text-gray-400">{T('label_branches', 'Branch Stock')}</div>
-                    <div className="flex flex-wrap gap-1.5">
+                  <Row label={T('branch', 'Branch')}>
+                    <div className="scroll-x-clean flex min-w-0 flex-nowrap gap-1.5">
                       {(p.branch_stock || []).map((bs) => {
                         const branchQuantity = Number(bs.quantity || 0)
                         return (
                         <span
                           key={bs.branch_id || bs.branch_name}
-                          className={`rounded-full px-2 py-0.5 text-xs ${
+                          className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${
                             branchQuantity > 0
                               ? 'bg-green-100 text-green-700 dark:bg-green-900/30'
                               : 'bg-gray-100 text-gray-400 dark:bg-gray-700'
                           }`}
                         >
-                          {bs.branch_name}: {branchQuantity}
+                          <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{bs.branch_name}</EntityLink>: {branchQuantity}
                         </span>
                         )
                       })}
                     </div>
-                  </div>
+                  </Row>
                 ) : null}
 
                 {/* Desktop keeps all four related actions in this left-side
@@ -356,7 +378,7 @@ export default function ProductDetailModal({
                     <button
                       type="button"
                       onClick={() => setDescriptionDetailOpen(true)}
-                      className="detail-scroll-text min-w-0 flex-1 rounded text-left text-sm text-gray-800 underline-offset-2 hover:text-blue-700 hover:underline dark:text-gray-200 dark:hover:text-blue-300"
+                      className="detail-scroll-text min-w-0 flex-1 rounded text-left text-sm text-gray-800 dark:text-gray-200"
                       title={T('view_full_description', 'View full description')}
                     >
                       {p.description}
@@ -364,32 +386,46 @@ export default function ProductDetailModal({
                   </div>
                 ) : null}
 
-                <Row label={T('label_cost', 'Cost')}>
-                  <span className="text-red-600">{fmtUSD(purchaseUsd)}</span>
-                  {purchaseKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
-                </Row>
-                <Row label={T('label_selling_price', 'Selling Price')}>
-                  <span className="text-base font-semibold text-green-600">{fmtUSD(sellingUsd)}</span>
-                  {sellingKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
-                </Row>
-                {purchaseUsd > 0 && sellingUsd > 0 ? (
-                  <Row label={T('label_margin', 'Margin')}>
-                    <span className={`font-medium ${marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}`}>
-                      {fmtUSD(marginUsd)}
-                    </span>
-                    <span className="ml-2 text-xs text-gray-400">{marginPct.toFixed(1)}%</span>
-                  </Row>
-                ) : null}
+                <div className="grid grid-cols-2 gap-2" data-detail-price-row="cost-wholesale">
+                  <PriceCell label={T('label_cost', 'Cost')}>
+                    <span className="text-red-600">{fmtUSD(purchaseUsd)}</span>
+                    {purchaseKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
+                  </PriceCell>
+                  <PriceCell label={T('wholesale_price', 'Wholesale price')}>
+                    {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (
+                      <>
+                        <span className="text-indigo-600 dark:text-indigo-300">{fmtUSD(wholesaleUsd)}</span>
+                        {wholesaleKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(wholesaleKhr)}</span> : null}
+                      </>
+                    ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                  </PriceCell>
+                </div>
+                <div className="grid grid-cols-2 gap-2" data-detail-price-row="selling-margin">
+                  <PriceCell label={T('label_selling_price', 'Selling price')}>
+                    <span className="text-green-600">{fmtUSD(sellingUsd)}</span>
+                    {sellingKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
+                  </PriceCell>
+                  <PriceCell label={T('label_margin', 'Margin')}>
+                    {purchaseUsd > 0 && sellingUsd > 0 ? (
+                      <>
+                        <span className={marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}>{fmtUSD(marginUsd)}</span>
+                        <span className="ml-2 text-xs font-normal text-gray-400">{marginPct.toFixed(1)}%</span>
+                      </>
+                    ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                  </PriceCell>
+                </div>
                 {/* Stock + Status directly after Margin (Aug 30 ask). */}
                 <Row label={T('label_stock', 'Stock')}>
-                  <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
+                    <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
                   {p.unit ? (
                     unitColor ? (
-                      <span className="ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
-                        {p.unit}
-                      </span>
+                      <EntityLink page="products" anchor="hub:products:products" focus={{ unit: p.unit }} navigate={navigateTo} title={T('open_unit_products', 'Open products using this unit')} className="ml-2 text-inherit no-underline hover:text-inherit">
+                        <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
+                          {p.unit}
+                        </span>
+                      </EntityLink>
                     ) : (
-                      <span className="ml-1">{p.unit}</span>
+                      <EntityLink page="products" anchor="hub:products:products" focus={{ unit: p.unit }} navigate={navigateTo} title={T('open_unit_products', 'Open products using this unit')} className="ml-1">{p.unit}</EntityLink>
                     )
                   ) : null}
                 </Row>
@@ -402,18 +438,10 @@ export default function ProductDetailModal({
                     <span className="badge-green">{T('in_stock', 'In stock')}</span>
                   )}
                 </Row>
-                {(specialUsd > 0 || specialKhr > 0) ? (
-                  <Row label={T('special_price', 'VIP Price')}>
-                    <span className="text-blue-600">{fmtUSD(specialUsd || sellingUsd)}</span>
-                    {(specialKhr > 0 || sellingKhr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || sellingKhr)}</span> : null}
-                  </Row>
-                ) : null}
-                {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (
-                  <Row label={T('wholesale_price', 'Wholesale')}>
-                    <span className="text-indigo-600 dark:text-indigo-300">{fmtUSD(wholesaleUsd)}</span>
-                    {wholesaleKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(wholesaleKhr)}</span> : null}
-                  </Row>
-                ) : null}
+                {/* The "VIP Price" Row that sat here is deleted by the
+                    2026-09-04 ruling -- that tier was the wholesale price
+                    misnamed, and the Wholesale row directly below now shows
+                    the very numbers it used to (migration 0111 moved them). */}
                 {promotion.active ? (
                   <Row label={T('product_discount', 'Discounts')}>
                     <span className="text-rose-600 dark:text-rose-300">{fmtUSD(promotion.applied_price_usd)}</span>
@@ -452,14 +480,16 @@ export default function ProductDetailModal({
               bottom, sharing the width equally (flex-1). Replaces the old
               right-hand slate-filled actions column; only a thin top border
               separates them from the data now, no slate fill. Labels stay
-              visible at every width since a full-width row has room for them.
+              visible at every width: below sm the row WRAPS (N4) so each
+              action keeps a half-width cell and a 44px tap target instead of
+              three cells squeezed past their labels and past the modal edge.
               Delete is not here -- it lives inside the Edit flow (ProductForm's
               own footer, see Products.tsx). */}
-          <div className="flex items-center gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
+          <div className="flex flex-wrap items-center gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
             {onAddVariant ? (
               <button
                 type="button"
-                className="btn-secondary flex min-w-0 flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
+                className={`btn-secondary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] truncate sm:basis-0`}
                 onClick={onAddVariant}
                 aria-label={T('add_variant', 'Add variant')}
                 title={T('add_variant', 'Add variant')}
@@ -471,7 +501,7 @@ export default function ProductDetailModal({
             {onAdjustStock ? (
               <button
                 type="button"
-                className="btn-secondary flex min-w-0 flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
+                className={`btn-secondary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] truncate sm:basis-0`}
                 onClick={onAdjustStock}
                 aria-label={T('adjust_stock', 'Adjust stock')}
                 title={T('adjust_stock', 'Adjust stock')}
@@ -482,7 +512,7 @@ export default function ProductDetailModal({
             ) : null}
             <button
               type="button"
-              className="btn-primary flex min-w-0 flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
+              className={`btn-primary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] truncate sm:basis-0`}
               onClick={onEdit}
               aria-label={T('edit', 'Edit')}
               title={T('edit', 'Edit')}

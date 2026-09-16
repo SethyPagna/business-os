@@ -1,5 +1,6 @@
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { isAdminControlUser } from '../../utils/permissions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -28,7 +29,12 @@ import {
   getAuditLogs as getAuditLogsRequest,
 } from '../../api/auditLogTransport.ts'
 import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
-import { fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { todayStr } from '../../utils/dateHelpers.ts'
+// N13: the Audit Log answers the same "who did this, and why" as the stock
+// ledgers, so it renders through the one shared history row model instead of
+// its own '--' placeholder.
+import { HISTORY_EMPTY, historyActor, historyExportField, historyField } from '../../utils/historyRowModel.ts'
 
 type SortDirection = 'asc' | 'desc'
 type AuditGroupMode = 'time' | 'time+action'
@@ -156,12 +162,12 @@ function toIso(raw: unknown): string | null {
 
 function formatDateTime(raw: unknown): string {
   const iso = toIso(raw)
-  if (!iso) return '--'
+  if (!iso) return HISTORY_EMPTY
   const fallback = String(raw)
   try {
     const date = new Date(iso)
     if (Number.isNaN(date.getTime())) return fallback
-    return date.toLocaleString('en-US', {
+    return fmtDayFirst(date, {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -177,11 +183,11 @@ function formatDateTime(raw: unknown): string {
 
 function formatCompactDateTime(raw: unknown): string {
   const iso = toIso(raw)
-  if (!iso) return '--'
+  if (!iso) return HISTORY_EMPTY
   try {
     const date = new Date(iso)
     if (Number.isNaN(date.getTime())) return String(raw)
-    return date.toLocaleString('en-US', {
+    return fmtDayFirst(date, {
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
@@ -189,7 +195,7 @@ function formatCompactDateTime(raw: unknown): string {
       hour12: false,
     })
   } catch {
-    return String(raw || '--')
+    return String(raw || HISTORY_EMPTY)
   }
 }
 
@@ -266,6 +272,21 @@ function formatEntityName(log: AuditLogRow): string {
   return raw.replace(/_/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase())
 }
 
+// N13: the reason the operator gave, pulled out of the recorded payload the
+// row already stores. audit_logs has no `reason` column of its own, so this
+// reads the same JSON that feeds readableSummary(); rows whose action takes
+// no reason simply have none.
+function auditReason(log: AuditLogRow): string | null {
+  for (const raw of [log.new_value, log.details]) {
+    const parsed = parseLogJson(raw)
+    if (isRecord(parsed)) {
+      const value = parsed.reason
+      if (typeof value === 'string' && value.trim()) return value.trim()
+    }
+  }
+  return null
+}
+
 function readableSummary(log: AuditLogRow): string | null {
   const parsed = parseLogJson(log.new_value)
   if (isRecord(parsed)) {
@@ -327,7 +348,7 @@ function DetailRow({ label, value, mono = false }: DetailRowProps) {
 }
 
 export default function AuditLog() {
-  const { t, user, hasPermission } = useApp()
+  const { t, user } = useApp()
   // E3: renders inside Review & Logs now -- lifecycle keys on that page.
   const isActive = useIsPageActive('review')
   const [logs, setLogs] = useState<AuditLogRow[]>([])
@@ -340,8 +361,9 @@ export default function AuditLog() {
   // the year/month period chips stay as the grouping period and as the
   // fallback date range when no explicit range is typed. Native date inputs
   // carry ISO yyyy-mm-dd, exactly the shape the server already accepts.
-  const [rangeStart, setRangeStart] = useState('')
-  const [rangeEnd, setRangeEnd] = useState('')
+  const initialToday = todayStr()
+  const [rangeStart, setRangeStart] = useState(initialToday)
+  const [rangeEnd, setRangeEnd] = useState(initialToday)
   const [actionFilter, setActionFilter] = useState('all')
   // I2: filter by the record's entity ("page"/area) -- entity or legacy
   // table_name server-side, comma-joined multi-select like action/user.
@@ -375,11 +397,7 @@ export default function AuditLog() {
   const loadWatchdogRef = useRef<number | null>(null)
   const selectAllRef = useRef<HTMLInputElement | null>(null)
   const aliveRef = useRef(true)
-  const isAdmin = useMemo(() => {
-    const roleCode = String(user?.role_code || '').toLowerCase()
-    const username = String(user?.username || '').toLowerCase()
-    return username === 'admin' || roleCode === 'admin' || hasPermission?.('all')
-  }, [hasPermission, user])
+  const isAdmin = isAdminControlUser(user)
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
 
   const actionLabels = useMemo<Record<string, string>>(() => ({
@@ -431,7 +449,7 @@ export default function AuditLog() {
   }, [auditFallbacks, isKhmer, t])
 
   const actionLabel = useCallback((action: unknown): string => {
-    if (!action) return '--'
+    if (!action) return HISTORY_EMPTY
     const key = String(action).toLowerCase()
     return actionLabels[key] || key.replace(/_/g, ' ')
   }, [actionLabels])
@@ -769,7 +787,7 @@ export default function AuditLog() {
         entry: sessionEntryLabel(log),
         time: formatLogTime(log),
         entity: formatEntityName(log),
-        user: log.user_name || '',
+        user: historyExportField(log.user_name),
         action: actionLabel(log.action),
         device: auditDeviceLabel(log),
         timezone: auditTimezoneLabel(log),
@@ -930,7 +948,7 @@ export default function AuditLog() {
           logs are now cleared on a schedule (default 21 days, configurable
           from the Settings page) instead of requiring an admin to remember
           to click something. */}
-      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
         <div
           className="flex flex-wrap items-center gap-2 pt-1 sm:flex-nowrap"
           title={t('audit_log_desc') || 'Default columns: Record, Device, User, Action. Click a row to see full details and data changes.'}
@@ -984,8 +1002,8 @@ export default function AuditLog() {
 
         {selectedLogs.length > 0 ? (
           <div className="bulk-toolbar flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm shadow-sm">
-            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedLogs.length} selected</span>
-            <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => exportRows(selectedLogs, 'audit-log-selected')}>Export selected</button>
+            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedLogs.length} {copy('selected', 'Selected', 'បានជ្រើស')}</span>
+            <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => exportRows(selectedLogs, 'audit-log-selected')}>{copy('export_selected_logs', 'Export selected logs', 'នាំចេញកំណត់ហេតុដែលបានជ្រើស')}</button>
             <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
               {t('clear') || 'Clear'}
             </button>
@@ -1021,7 +1039,7 @@ export default function AuditLog() {
                     className="h-4 w-4 rounded"
                     checked={visibleIds.length > 0 && selectedIds.size === visibleIds.length}
                     onChange={(event) => toggleSelectAll(event.target.checked)}
-                    aria-label="Select all audit logs"
+                    aria-label={t('select_all') || 'Select all'}
                   />
                 </th>
                 <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{copy('entry', 'Entry', 'លំដាប់')}</th>
@@ -1114,7 +1132,7 @@ export default function AuditLog() {
                               {formatEntityName(log)}
                             </div>
                           </td>
-                          <td className="px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{log.user_name || '--'}</td>
+                          <td className="px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{historyActor(log.user_name)}</td>
                           <td className="px-3 py-2">
                             <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
                               {actionLabel(log.action)}
@@ -1268,7 +1286,7 @@ export default function AuditLog() {
                             onClick={(event) => event.stopPropagation()}
                             aria-label={`Select ${sessionEntryLabel(log)}`}
                           />
-                          <span className="truncate font-semibold text-gray-700 dark:text-gray-200">{log.user_name || '--'}</span>
+                          <span className="truncate font-semibold text-gray-700 dark:text-gray-200">{historyActor(log.user_name)}</span>
                           <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
                             {actionLabel(log.action)}
                           </span>
@@ -1353,11 +1371,12 @@ export default function AuditLog() {
                 <div className="flex items-start gap-2">
                   <User2 className="mt-0.5 h-4 w-4 text-blue-500" />
                   <div className="space-y-2">
-                    <DetailRow label={t('user') || 'User'} value={detailLog.user_name || '--'} />
+                    <DetailRow label={t('user') || 'User'} value={historyActor(detailLog.user_name)} />
                     <DetailRow label={t('action') || 'Action'} value={actionLabel(detailLog.action)} />
                     <DetailRow label={t('table') || 'Entity'} value={formatEntityName(detailLog)} />
                     <DetailRow label={copy('entry', 'Entry', 'លំដាប់')} value={sessionEntryLabel(detailLog)} />
-                    <DetailRow label={t('summary') || 'Summary'} value={readableSummary(detailLog) || '--'} />
+                    <DetailRow label={t('reason') || 'Reason'} value={historyField(auditReason(detailLog))} />
+                    <DetailRow label={t('summary') || 'Summary'} value={historyField(readableSummary(detailLog))} />
                   </div>
                 </div>
               </div>

@@ -1,7 +1,7 @@
 import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { fuzzyTextMatches, matchesSearchTermGroups } from '../../utils/searchMatch.ts'
+import { fuzzyTextMatches, matchesSearchTermGroups, sortBySearchRelevance } from '../../utils/searchMatch.ts'
 import { fmtTime } from '../../utils/formatters.ts'
 import { deriveTelegramLink } from '../../utils/socialLinks.ts'
 import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
@@ -28,7 +28,8 @@ import {
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { SectionShell } from './catalogUi'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
-import { CATALOG_DEFAULT_PAGE_SIZE } from './catalogPagination'
+import PortalFooter from './legal/LegalPages.tsx'
+import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
 import {
   createAboutBlock,
   createPromoItem,
@@ -62,6 +63,7 @@ import {
   stringifyPortalTranslations,
 } from './portalTranslationData.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
+import { FAQ_STARTER_TEXT, AI_FAQ_STARTER_TEXT } from './faqStarterText.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 
 const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')
@@ -134,6 +136,8 @@ type PortalConfig = LegacyCatalogRecord & {
   aiProviderId?: string | number | null
   addressLink?: string
   businessAddress?: string
+  businessLegalName?: string
+  businessRegistrationNumber?: string
   businessCover?: string
   businessEmail?: string
   businessFavicon?: string
@@ -483,37 +487,6 @@ function normalizeFaqItems(input: unknown): FaqItem[] {
     .filter((item) => item.question && item.answer)
 }
 
-const FAQ_STARTER_TEXT = [
-  ['1', 'How do I choose products for my skin type?', 'Tell us your skin type, concerns, and what kind of routine you want. We can recommend suitable skincare, cosmetics, hair, or body products from our available stock.'],
-  ['2', 'Are the products shown here available in store?', 'The portal reads from our current Business OS catalog. Stock can still change during busy periods, so please contact the store if you need a final confirmation before visiting.'],
-  ['3', 'How do I check my membership points?', 'Sign in and open your account. Your membership ID and current account details are shown there securely.'],
-  ['4', 'How does Share & Reward work?', 'Share our store on social media, upload your screenshot in the portal, and our staff will review it. Approved submissions can receive reward points in your membership account.'],
-  ['5', 'How can I contact Leang Beauty for more accurate advice?', 'Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.'],
-  ['6', 'Do you have products for sensitive skin?', 'Yes. Ask our team or use the AI assistant with your skin type and concerns so we can narrow options that are gentler and easier to compare from current stock.'],
-  ['7', 'Can I ask whether a product is original or from a specific brand line?', 'Yes. Contact the store directly if you want brand confirmation, latest packaging details, or a more exact stock check before buying.'],
-  ['8', 'Do you sell skincare, makeup, hair care, and body care together?', 'Yes. Leang Beauty carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.'],
-  ['9', 'Can the store help me build a full routine?', 'Yes. Share your budget, skin type, concerns, and whether you need morning, night, or event-based products. We can help match a more complete routine from available products.'],
-  ['10', 'What should I do if an item is out of stock?', 'If an item is unavailable, message the store through Facebook, Instagram, Telegram, or phone so the team can suggest alternatives or confirm when stock changes.'],
-  ['11', 'Can I ask for products within a specific budget?', 'Yes. Tell us your budget and what category you want, and we can narrow options from the current catalog.'],
-  ['12', 'Do you have gift-friendly items or bundles?', 'Yes. Ask the store team or use the assistant to explore perfumes, makeup, skincare, and beauty gifts that fit the occasion.'],
-  ['13', 'Can I ask for alternatives if my preferred brand is unavailable?', 'Yes. We can suggest similar products from other brands in stock based on category, concern, and price range.'],
-  ['14', 'Can I check whether a product is suitable for oily, dry, or combination skin?', 'Yes. Use the assistant or contact the store with your skin type and concern so recommendations stay closer to your needs.'],
-  ['15', 'Do you also carry hair, body, and fragrance products?', 'Yes. The store carries more than just skincare and makeup, so you can also browse hair, body, perfume, and related beauty items when available.'],
-  ['21', 'Do you offer delivery, or is it pickup only?', 'We support delivery in select areas along with in-store pickup. Message the store on Facebook, Instagram, or Telegram with your location so we can confirm delivery options and timing.'],
-  ['22', 'What payment methods do you accept?', 'We accept cash and common mobile payment options in store. For delivery or online orders, contact us directly to confirm which payment method works best for your order.'],
-  ['23', 'What are your store hours?', 'Store hours can vary by branch and public holidays. Please check the branch details on this page or contact us directly for the most current opening hours.'],
-  ['24', 'Do you guarantee that products sold here are 100% authentic?', 'Yes. Leang Beauty only sells authentic products sourced through official channels. If you ever have a concern about a specific item, contact the store directly and we can confirm sourcing details.'],
-  ['25', 'Where can I see current promotions and discounts?', 'Check the Promotions section on this page for current offers. New discounts and bundles are added there as they become available, so it is worth checking back regularly.'],
-]
-
-const AI_FAQ_STARTER_TEXT = [
-  ['16', 'What details help the AI recommend better products?', 'Add your skin type, concerns, brand preferences, and what you want the product to do. The assistant uses that together with our current catalog to narrow better matches.'],
-  ['17', 'Does the AI only recommend products available at Leang Beauty?', 'Yes. The assistant is designed to prioritize products from our current Business OS catalog, then explain why those items fit your question.'],
-  ['18', 'Should I trust the AI as medical or skin-treatment advice?', 'No. AI answers are for reference only. For sensitive skin issues, allergies, pregnancy-safe guidance, or stronger treatment advice, please contact our team directly first.'],
-  ['19', 'Why does the assistant sometimes suggest several options instead of one product?', 'The assistant compares your question against the live store catalog, so it may show a short list when several products fit your needs or when stock can change by branch.'],
-  ['20', 'Can the assistant explain why a product was recommended?', 'Yes. Open a suggested product to see the reason, use case, and any extra online reference notes the provider returned for that answer.'],
-]
-
 const FAQ_TRANSLATION_LOOKUP = new Map(
   [...FAQ_STARTER_TEXT, ...AI_FAQ_STARTER_TEXT].flatMap(([index, question, answer]) => [
     [question.trim().toLowerCase(), `starterFaq.${index}.question`],
@@ -574,8 +547,13 @@ function hexToRgba(hex: unknown, alpha: unknown): string {
 /** Read cached portal payload to reduce visible loading delays on hard reload. */
 function readPortalCache(): LegacyCatalogRecord | null {
   if (typeof window === 'undefined') return null
-  const stores = [window.sessionStorage, window.localStorage].filter(Boolean)
   try {
+    // Inside the guard, not above it: merely touching window.localStorage /
+    // sessionStorage throws where site data is blocked (Safari private mode,
+    // Chrome's "block all cookies"), and this runs in a useRef initializer
+    // during the first render. Same fix and same reasoning as
+    // PublicCatalogPage.tsx's copy of this reader.
+    const stores = [window.sessionStorage, window.localStorage].filter(Boolean)
     let raw = ''
     let sourceStore: Storage | null = null
     for (const store of stores) {
@@ -665,6 +643,8 @@ function buildDraft(config: PortalConfig): PortalDraft {
     business_phone: config.businessPhone || '',
     business_email: config.businessEmail || '',
     business_address: config.businessAddress || '',
+    business_legal_name: config.businessLegalName || '',
+    business_registration_number: config.businessRegistrationNumber || '',
     customer_portal_address_link: config.addressLink || '',
     customer_portal_business_tagline: config.businessTagline || '',
     customer_portal_google_maps_embed: config.googleMapsEmbed || '',
@@ -801,6 +781,8 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     businessPhone: draft.business_phone || '',
     businessEmail: draft.business_email || '',
     businessAddress: draft.business_address || '',
+    businessLegalName: draft.business_legal_name || '',
+    businessRegistrationNumber: draft.business_registration_number || '',
     addressLink: normalizeExternalUrl(draft.customer_portal_address_link || ''),
     businessTagline: draft.customer_portal_business_tagline || '',
     googleMapsEmbed: normalizeGoogleMapsEmbed(draft.customer_portal_google_maps_embed || config.googleMapsEmbed || ''),
@@ -984,9 +966,11 @@ function formatDateTime(value: unknown): string {
   if (!value) return '-'
   const raw = String(value)
   const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-  // mm/dd/yyyy + 24-hour in Phnom Penh business time. A bare toLocaleString()
-  // rendered the VIEWER's locale + timezone (dd/mm, 12-hour) -- the app pins
-  // one numeric format everywhere via fmtTime; this was one of the few strays.
+  // dd/mm/yyyy + 24-hour in Phnom Penh business time (day-first since Sep 4
+  // 2026). A bare toLocaleString() rendered the VIEWER's locale and timezone,
+  // which is the actual defect regardless of which order the app has chosen:
+  // a wrong locale swaps day and month without failing. The app pins one
+  // numeric format everywhere via fmtTime; this was one of the few strays.
   return Number.isNaN(date.getTime()) ? String(value) : fmtTime(raw)
 }
 
@@ -1147,6 +1131,8 @@ const DEFAULT_CONFIG = {
   businessPhone: '',
   businessEmail: '',
   businessAddress: '',
+  businessLegalName: '',
+  businessRegistrationNumber: '',
   addressLink: '',
   businessTagline: '',
   googleMapsEmbed: '',
@@ -1287,11 +1273,35 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   ))
   const [editorDirty, setEditorDirty] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
-  const [products, setProducts] = useState<CatalogProduct[]>(() => Array.isArray(cachedPortal?.products) ? cachedPortal.products : [])
+  // Same viewer-owned page size as the standalone storefront
+  // (PublicCatalogPage.tsx): the in-app public route and the editor preview
+  // mount the same pager, so the 20/50/100 choice has to behave identically on
+  // both -- including outranking the server's own page size, which is fixed at
+  // 50 for every bootstrap payload.
+  const viewerPageSizeRef = useRef(readStoredCatalogPageSize())
+  // Whether the cached payload IS the page this viewer's size asks for; see
+  // PublicCatalogPage.tsx for the full reasoning. Short version: that payload
+  // is 50 product families ordered promoted/brand/name, the grid renders a
+  // browse payload A-Z by name, so no prefix of it is page 1 at another size.
+  // Seeding it anyway showed 50 cards under a pager that read "1 / total-over-
+  // 20", so the grid waits on the corrective search instead.
+  const seedMatchesViewerPageSize = !cachedPortal
+    || bootstrapPageSizeMatchesViewer(cachedPortal.catalog?.pageSize, viewerPageSizeRef.current)
+  const [products, setProducts] = useState<CatalogProduct[]>(() => (
+    seedMatchesViewerPageSize && Array.isArray(cachedPortal?.products) ? cachedPortal.products : []
+  ))
+  // Cleared by the first product payload cut at the viewer's size -- or by its
+  // failure, so an error is never hidden behind skeletons that never stop.
+  const [awaitingViewerSizedProducts, setAwaitingViewerSizedProducts] = useState(() => !seedMatchesViewerPageSize)
   const [portalProductTotal, setPortalProductTotal] = useState(() => Number(cachedPortal?.catalog?.total || cachedPortal?.products?.length || 0))
   const [portalProductPage, setPortalProductPage] = useState(() => Number(cachedPortal?.catalog?.page || 1) || 1)
-  const [portalProductPageSize, setPortalProductPageSize] = useState(() => Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
+  const [portalProductPageSize, setPortalProductPageSize] = useState(() => (
+    viewerPageSizeRef.current || Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE
+  ))
   const [portalProductInitial, setPortalProductInitial] = useState('all')
+  // Same promo facet as PublicCatalogPage.tsx ('' | 'promoted' | 'rule:<id>')
+  // so the preview's "only deals" toggle and campaign chips behave like the shop.
+  const [promoFacet, setPromoFacet] = useState('')
   const [portalProductInitials, setPortalProductInitials] = useState<PortalInitialOption[]>(() => normalizePortalInitialOptions(cachedPortal?.catalog?.initials))
   const [portalProductRefreshing, setPortalProductRefreshing] = useState(false)
   const [portalConfigReady, setPortalConfigReady] = useState(() => !!cachedPortal?.config || !publicView)
@@ -1792,17 +1802,25 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       }
       const nextProducts = Array.isArray(portalProducts) ? portalProducts : []
 
-      skipNextBootstrappedProductSearchRef.current = true
+      skipNextBootstrappedProductSearchRef.current = bootstrapPageSizeMatchesViewer(catalogPage?.pageSize, viewerPageSizeRef.current)
+      // The very same question decides the grid seed: this payload is only the
+      // grid's page when it was cut at the size the viewer actually browses at,
+      // which is exactly when the follow-up search is skipped.
+      const bootstrapMatchesViewer = skipNextBootstrappedProductSearchRef.current
       setConfig(nextConfig)
       setPortalConfigReady(true)
       setCategories(nextMeta.categories)
       setBrands(nextMeta.brands)
       setBranches(nextMeta.branches)
-      setProducts(nextProducts)
+      if (bootstrapMatchesViewer) setProducts(nextProducts)
+      // Only ever LOWERS the wait: this response and the corrective search
+      // race each other, and a slow bootstrap must not drop skeletons back
+      // over a grid the search has already filled at the viewer's size.
+      setAwaitingViewerSizedProducts((waiting) => waiting && !bootstrapMatchesViewer)
       if (catalogPage && typeof catalogPage === 'object') {
         setPortalProductTotal(Number(catalogPage.total || nextProducts.length || 0))
         setPortalProductPage(Number(catalogPage.page || 1) || 1)
-        setPortalProductPageSize(Number(catalogPage.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
+        if (!viewerPageSizeRef.current) setPortalProductPageSize(Number(catalogPage.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
         setPortalProductInitials(normalizePortalInitialOptions(catalogPage.initials))
       }
       setActiveTab((current) => resolveVisibleTab(current, nextConfig))
@@ -1837,17 +1855,21 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     }
     const nextProducts = Array.isArray(portalProducts) ? portalProducts : []
 
+    // The editor preview mounts the same viewer-sized pager, so its grid is
+    // seeded on the same rule (the search below always refills it).
+    const bootstrapMatchesViewer = bootstrapPageSizeMatchesViewer(catalogPage?.pageSize, viewerPageSizeRef.current)
     setConfig(nextConfig)
     setPortalConfigReady(true)
     if (!editorDirty) setEditorDraft(buildDraft(nextConfig))
     setCategories(nextMeta.categories)
     setBrands(nextMeta.brands)
     setBranches(nextMeta.branches)
-    setProducts(nextProducts)
+    if (bootstrapMatchesViewer) setProducts(nextProducts)
+    setAwaitingViewerSizedProducts((waiting) => waiting && !bootstrapMatchesViewer)
     if (catalogPage && typeof catalogPage === 'object') {
       setPortalProductTotal(Number(catalogPage.total || nextProducts.length || 0))
       setPortalProductPage(Number(catalogPage.page || 1) || 1)
-      setPortalProductPageSize(Number(catalogPage.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
+      if (!viewerPageSizeRef.current) setPortalProductPageSize(Number(catalogPage.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
       setPortalProductInitials(normalizePortalInitialOptions(catalogPage.initials))
     }
     setActiveTab((current) => resolveVisibleTab(current, nextConfig))
@@ -1905,7 +1927,18 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   useEffect(() => {
     setPortalProductPage(1)
-  }, [brandFilter, branchFilter, categoryFilter, portalProductInitial, portalSearchQuery, stockFilter])
+  }, [brandFilter, branchFilter, categoryFilter, portalProductInitial, portalSearchQuery, promoFacet, stockFilter])
+
+  // The viewer's 20/50/100 choice from the pager -- identical to the
+  // standalone storefront's handler, including the page-1 reset and the
+  // per-browser persistence, so both public paths behave the same way.
+  const changePortalProductPageSize = (nextSize: number) => {
+    const size = normalizeCatalogPageSize(nextSize)
+    viewerPageSizeRef.current = size
+    writeStoredCatalogPageSize(size)
+    setPortalProductPageSize(size)
+    setPortalProductPage(1)
+  }
 
   useEffect(() => {
     if (!isPageActive || !previewConfig.showCatalog || (publicView && !portalConfigReady)) return undefined
@@ -1927,6 +1960,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       // buildPortalProductFilters), but dropping it here as well keeps a
       // stale selection from ever being sent in the first place.
       stockState: previewConfig.showStockStatus === false ? '' : stockFilter.join(','),
+      promo: promoFacet,
       initial: portalProductInitial,
     }
 
@@ -1952,6 +1986,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         }
         setPortalError('')
         setProducts(nextItems)
+        setAwaitingViewerSizedProducts(false)
         setPortalProductTotal(nextTotal)
         setPortalProductPage(responsePage)
         setPortalProductPageSize(responsePageSize)
@@ -1980,6 +2015,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       })
       .catch((error) => {
         if (!aliveRef.current || !isTrackedRequestCurrent(portalProductsRequestRef, requestId)) return
+        setAwaitingViewerSizedProducts(false)
         setPortalError(getCatalogErrorMessage(error, 'Portal product search failed'))
       })
       .finally(() => {
@@ -2022,18 +2058,29 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     mediaUploadOriginalValuesRef.current.clear()
   }, [])
 
+  // Same save/restore shape as PublicCatalogPage's copy of this effect: the
+  // cleanup used to REMOVE the marker unconditionally, so an admin mount of
+  // this page (publicView false) stripped an attribute it never set, and a
+  // StrictMode remount ran remove-after-set on a shell that may still need it.
+  // Restoring the captured value makes both directions idempotent.
   useEffect(() => {
     if (typeof document === 'undefined') return undefined
+    const html = document.documentElement
+    const body = document.body
+    const previousHtmlMarker = html.getAttribute('data-public-portal')
+    const previousBodyMarker = body.getAttribute('data-public-portal')
     if (publicView) {
-      document.body.setAttribute('data-public-portal', 'true')
-      document.documentElement.setAttribute('data-public-portal', 'true')
+      body.setAttribute('data-public-portal', 'true')
+      html.setAttribute('data-public-portal', 'true')
     } else {
-      document.body.removeAttribute('data-public-portal')
-      document.documentElement.removeAttribute('data-public-portal')
+      body.removeAttribute('data-public-portal')
+      html.removeAttribute('data-public-portal')
     }
     return () => {
-      document.body.removeAttribute('data-public-portal')
-      document.documentElement.removeAttribute('data-public-portal')
+      if (previousHtmlMarker === null) html.removeAttribute('data-public-portal')
+      else html.setAttribute('data-public-portal', previousHtmlMarker)
+      if (previousBodyMarker === null) body.removeAttribute('data-public-portal')
+      else body.setAttribute('data-public-portal', previousBodyMarker)
     }
   }, [publicView])
 
@@ -2285,6 +2332,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setBrandFilter([])
     setBranchFilter([])
     setStockFilter([])
+    setPromoFacet('')
     setPortalProductInitial('all')
   }
 
@@ -2710,6 +2758,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         business_phone: editorDraft.business_phone || '',
         business_email: editorDraft.business_email || '',
         business_address: editorDraft.business_address || '',
+        business_legal_name: editorDraft.business_legal_name || '',
+        business_registration_number: editorDraft.business_registration_number || '',
         customer_portal_address_link: normalizeExternalUrl(editorDraft.customer_portal_address_link || ''),
         customer_portal_business_tagline: editorDraft.customer_portal_business_tagline || '',
         customer_portal_google_maps_embed: sanitizedGoogleMapEmbed,
@@ -3091,7 +3141,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   const promotionsSection = activeTab === 'products' ? (
     <Suspense fallback={null}>
-      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} />
+      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} onOpenProduct={openProductById} />
     </Suspense>
   ) : null
 
@@ -3108,7 +3158,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const compactTwoColumnMobile = mobileGridColumns === 2
   const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(desktopGridColumns)}`
   const compactCatalogCards = desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
-  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (previewConfig.showStockStatus === false ? 0 : stockFilter.length) + (portalProductInitial === 'all' ? 0 : 1)
+  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (previewConfig.showStockStatus === false ? 0 : stockFilter.length) + (portalProductInitial === 'all' ? 0 : 1) + (promoFacet ? 1 : 0)
   const selectedStockBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
   const recommendedProductById = useMemo(() => {
     const map = new Map<number, CatalogProduct>()
@@ -3127,9 +3177,20 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const recommendedProductOptions = useMemo(() => {
     const term = recommendedProductSearchTerm.trim()
     if (term.length < 2) return []
-    return (products || [])
-      .filter((product) => productMatchesRecommendedSearch(product, term))
-      .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'km'))
+    // A-Z stays the WITHIN-tier order, but it can no longer decide which
+    // 30 rows survive: this list was sliced to 30 straight off the
+    // alphabet, so a scanned or exactly-named product sitting past the
+    // 30th match was not merely ranked low, it was cut from the picker
+    // entirely. Ranking first (exact barcode, exact name, name prefix,
+    // then the A-Z tail -- the same contract the server search applies)
+    // and slicing after means the closest match is always in the list and
+    // always at the top.
+    return sortBySearchRelevance(
+      (products || [])
+        .filter((product) => productMatchesRecommendedSearch(product, term))
+        .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'km')),
+      term,
+    )
       .slice(0, 30)
       .map(buildRecommendedProductOption)
       .filter((product) => product.id > 0)
@@ -3144,6 +3205,39 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices })
   }
   const closeProductDetailView = () => setProductDetailView((prev) => ({ ...prev, open: false }))
+  // Preview twin of PublicCatalogPage.tsx's openProductById, and the SAME
+  // three steps: the loaded page, then the by-id search, then a name search.
+  // `products` is one server page (the search effect above replaces it on
+  // every page/filter change), not the whole catalog -- so a promo card
+  // pointing at a product on any other page used to fall straight through to
+  // a name search while a visitor got the flyout. What the owner sees while
+  // editing has to be what a visitor gets.
+  //
+  // A function declaration because the promotions banner above renders before
+  // this point in the component body.
+  function openProductById(productId: number, productName: string) {
+    const loaded = products.find((product) => Number(product.id) === productId)
+    if (loaded) {
+      openProductDetail(loaded)
+      return
+    }
+    withLoaderTimeout(
+      () => getCatalogApi().searchPortalCatalogProducts({ productId, pageSize: 1 }),
+      'Portal product lookup',
+      CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS,
+    )
+      .then((result) => {
+        if (!aliveRef.current) return
+        // Same shaping as this preview's own product search above: the items
+        // array as the endpoint returned it, no second grouping pass.
+        const [product] = Array.isArray(result?.items) ? result.items as CatalogProduct[] : []
+        if (product) openProductDetail(product)
+        else setSearch(productName)
+      })
+      .catch(() => {
+        if (aliveRef.current) setSearch(productName)
+      })
+  }
 
   const catalogTabProps = {
     copy,
@@ -3153,12 +3247,12 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     productPage: portalProductPage,
     productPageSize: portalProductPageSize,
     setProductPage: setPortalProductPage,
-    setProductPageSize: setPortalProductPageSize,
+    setProductPageSize: changePortalProductPageSize,
     initialOptions: portalProductInitials,
     initialFilter: portalProductInitial,
     setInitialFilter: setPortalProductInitial,
     refreshingProducts: portalProductRefreshing,
-    loadingProducts: loading && publicView && !products.length,
+    loadingProducts: (loading && publicView && !products.length) || awaitingViewerSizedProducts,
     categories,
     brands,
     branches,
@@ -3177,6 +3271,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setBranchFilter,
     stockFilter,
     setStockFilter,
+    promoFacet,
+    setPromoFacet,
     toggleFilterValue,
     toggleFilterValues,
     previewConfig: displayConfig,
@@ -3191,6 +3287,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     normalizeProductGallery,
     openProductGallery,
     openProductDetail,
+    openProductById,
     openPortalImage,
     formatPortalPrice,
     replaceVars,
@@ -3434,9 +3531,15 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     return (
     <div
       data-portal-root="true"
+      // publicView: the DOCUMENT owns vertical scroll on the public route
+      // (full reasoning in CatalogPreviewSurface.tsx). `overflow-visible` on
+      // the class beside an inline `overflowY: 'auto'` is the contradiction
+      // CSS resolves against us -- the visible axis computes to `auto` and
+      // this shell becomes a two-axis scrollport that can never scroll.
+      // !publicView is untouched: the admin editor keeps `.page-scroll`.
       className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
       style={{
-        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+        ...(publicView ? { touchAction: 'pan-y' } : {}),
         background: portalBackground,
       }}
     >
@@ -3468,10 +3571,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           data-portal-root="true"
           // Same fix as CatalogPreviewSurface: this fallback is nested inside the
           // page's own .page-scroll wrapper (see the !publicView return below), so it
-          // must not declare a second scroll container.
+          // must not declare a second scroll container -- and on publicView the
+          // document is the scroll owner, so it must not declare one there either.
           className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'w-full'}`}
           style={{
-            ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+            ...(publicView ? { touchAction: 'pan-y' } : {}),
             background: portalBackground,
           }}
         >
@@ -3505,6 +3609,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         catalogSection={renderCatalogSection()}
         secondaryTabSection={renderSecondaryTabSection()}
         promotionsSection={promotionsSection}
+        footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} />}
         productDetailView={productDetailView}
         closeProductDetailView={closeProductDetailView}
         productDetailShopName={displayConfig.businessName || displayConfig.title || ''}

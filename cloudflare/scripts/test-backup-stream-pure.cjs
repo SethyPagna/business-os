@@ -215,21 +215,26 @@ check('the top-level shape restore reads is unchanged', () => {
 
 check('no single buffered part approaches the Worker memory ceiling', () => {
   // The point of the rewrite: peak memory is one part, not the database.
-  const MIN_PART = 6 * 1024 * 1024
+  // Mirrors R2StreamWriter: parts of exactly PART_BYTES, only the trailing
+  // part shorter (the exact-size rule itself is pinned against the real
+  // class in test-backup-r2-parts-pure.cjs).
+  const PART_BYTES = 8 * 1024 * 1024
   const parts = []
-  let buf = []
   let bytes = 0
   const encoder = new TextEncoder()
-  // Re-run the writer, flushing the way R2StreamWriter does.
   for (const piece of [streamed]) {
     for (let i = 0; i < piece.length; i += 4096) {
-      const slice = piece.slice(i, i + 4096)
-      buf.push(slice)
-      bytes += encoder.encode(slice).byteLength
-      if (bytes >= MIN_PART) { parts.push(bytes); buf = []; bytes = 0 }
+      let remaining = encoder.encode(piece.slice(i, i + 4096)).byteLength
+      while (remaining > 0) {
+        const take = Math.min(PART_BYTES - bytes, remaining)
+        bytes += take
+        remaining -= take
+        if (bytes === PART_BYTES) { parts.push(bytes); bytes = 0 }
+      }
     }
   }
   const peak = Math.max(...parts, bytes)
+  assert.ok(peak <= PART_BYTES, `peak buffered bytes ${peak} must never exceed one part`)
   assert.ok(peak < 16 * 1024 * 1024, `peak buffered bytes ${peak} must stay far below the 128MB Worker limit`)
 })
 

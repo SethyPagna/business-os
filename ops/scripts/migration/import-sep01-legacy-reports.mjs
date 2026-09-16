@@ -20,6 +20,7 @@ import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import {
+  barcodeKey,
   buildSep1CorrectionManifest,
   canonicalLegacyPhone,
   officialNameFillGuardSql,
@@ -50,8 +51,8 @@ const files = {
 for (const [label, file] of Object.entries(files)) if (!fs.existsSync(file)) throw new Error(`Missing ${label}: ${file}`)
 
 const norm = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
-const digits = (value) => String(value ?? '').replace(/\D/g, '')
-const barcodeKey = (value) => digits(value).replace(/^0+(?=\d)/, '')
+// barcodeKey is imported, never re-declared: this file used to carry its own
+// digit-stripping copy, which is the bug -- one rule, one implementation.
 const phoneKey = (value) => canonicalLegacyPhone(value) || ''
 const number = (value) => { const n = Number(String(value ?? '').replaceAll(',', '').trim()); return Number.isFinite(n) ? n : 0 }
 const money = (value) => Number(number(value).toFixed(6))
@@ -288,10 +289,20 @@ for (const row of rows(files.transfers)) {
     continue
   }
   if (!activeTransfer || !first) continue
-  const barcodeMatches = byBarcode.get(barcodeKey(first)) || []
+  // This path has NO name fallback -- barcode is the only route to a product,
+  // so a code that is not a barcode must be reported and skipped, never
+  // resolved by a digit-extracted lookalike. Reported under its own type so a
+  // reader can tell "never was a barcode" from "collided with another product".
+  const transferKey = barcodeKey(first)
+  const barcodeMatches = transferKey ? (byBarcode.get(transferKey) || []) : []
   const resolved = resolveUniqueBarcode(first, barcodeMatches)
   if (resolved.status !== 'resolved') {
-    failures.push({ type: 'quarantined_transfer_barcode', transfer: activeTransfer.number, code: first, candidates: resolved.candidateIds || [] })
+    failures.push({
+      type: resolved.status === 'missing_barcode' ? 'non_barcode_transfer_code' : 'quarantined_transfer_barcode',
+      transfer: activeTransfer.number,
+      code: first,
+      candidates: resolved.candidateIds || [],
+    })
     continue
   }
   const quantity = number(row.Qty)

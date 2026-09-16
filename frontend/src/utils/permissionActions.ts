@@ -143,15 +143,14 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
   // cloudflare/src/routes/branches.ts
   branches: [
     { key: 'view', tKey: 'perm_act_branches_view', label: 'View and search', review: 'allow' },
-    { key: 'add', tKey: 'perm_act_branches_add', label: 'Add branch', review: 'queue' },
     { key: 'edit', tKey: 'perm_act_branches_edit', label: 'Edit branch', review: 'queue' },
-    // Queues, and the applier re-checks "not default" / "no stock left"
-    // at approval time rather than trusting the request-time check.
-    { key: 'delete', tKey: 'perm_act_branches_delete', label: 'Delete branch', review: 'queue' },
     // POST /transfer, /transfer-bulk -> 403 for review (branches.ts ~281, ~443)
     { key: 'transfer', tKey: 'perm_act_branches_transfer', label: 'Transfer stock between branches', review: 'block' },
     // POST /stock-integrity/repair -> 403 for review (branches.ts ~164)
     { key: 'repair_stock', tKey: 'perm_act_branches_repair_stock', label: 'Repair misplaced stock', review: 'block' },
+    // Client-side export preserves the existing Full/Review behavior while
+    // giving an administrator a real one-way switch to narrow it.
+    { key: 'export', tKey: 'export', label: 'Export', review: 'allow' },
   ],
 
   // cloudflare/src/routes/returns.ts
@@ -163,11 +162,18 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // PATCH /:id -> 403 for review (returns.ts ~781): editing reverses and
     // re-applies batch restocking against live state.
     { key: 'edit', tKey: 'perm_act_returns_edit', label: 'Edit return', review: 'block' },
-    // Inside POST /: an uneven replacement exchange settled as a price
-    // difference -- getActionTier(user, 'returns', 'settle_difference')
-    // must be 'full' (returns.ts ~662), the "Non-default price adjustment
-    // requires full access" locked note.
-    { key: 'settle_difference', tKey: 'perm_act_returns_settle_difference', label: 'Settle a replacement price difference', review: 'block' },
+    // Multi-return field/status updates and their grouped Undo/Redo share
+    // one explicit capability. Individual create/edit remain independent.
+    { key: 'bulk', tKey: 'perm_act_returns_bulk', label: 'Change multiple returns at once', review: 'block' },
+    // Client-side export uses rows already visible to the caller. The action
+    // still controls whether the export UI can package those rows.
+    { key: 'export', tKey: 'perm_act_returns_export', label: 'Export returns', review: 'block' },
+    // There is no returns import action. The retired action gated settling a
+    // price difference on an uneven replacement exchange; a return no longer
+    // nets against its replacement, so there is no difference to settle and
+    // nothing to gate. Removed rather than left unreachable -- a permission
+    // nobody can exercise is a permission that lies to whoever reads the role
+    // screen. (tests/returnOptions.test.ts pins that its key stays gone.)
   ],
 
   // cloudflare/src/routes/fees.ts
@@ -178,6 +184,9 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // DELETE /:id -> maybeQueueForReview (fees.ts ~263). The only Fees
     // action that does not apply directly.
     { key: 'delete', tKey: 'perm_act_fees_delete', label: 'Delete fee', review: 'queue' },
+    // Export packages rows the caller may already read. Keep that historical
+    // Full/Review default and allow an explicit false override to narrow it.
+    { key: 'export', tKey: 'export', label: 'Export', review: 'allow' },
   ],
 
   // cloudflare/src/routes/contacts.ts (all three tabs share this key),
@@ -190,6 +199,10 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'edit', tKey: 'perm_act_contacts_edit', label: 'Edit contact (name only)', review: 'limited' },
     // DELETE -> 403 for review (contacts.ts ~710)
     { key: 'delete', tKey: 'perm_act_contacts_delete', label: 'Delete contact', review: 'block' },
+    // Selection mode, multi-row mutations, merge/import workflows, and their
+    // replay entry points require this umbrella capability in addition to
+    // any narrower action switch below.
+    { key: 'bulk', tKey: 'perm_act_contacts_bulk', label: 'Select and change multiple contacts', review: 'block' },
     // POST /bulk-delete-jobs -> 403 for review (contacts.ts ~748)
     { key: 'bulk_delete', tKey: 'perm_act_contacts_bulk_delete', label: 'Bulk delete', review: 'block' },
     // POST /merge -> 403 for review (contacts.ts ~492)
@@ -211,6 +224,10 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // confidentiality boundary. Modeled here so it is no longer the one
     // contact-tab control absent from the permission editor.
     { key: 'export', tKey: 'perm_act_contacts_export', label: 'Export', review: 'block' },
+    // Customer invoices, purchase history, and delivery-contact reports reveal
+    // financial activity. Keep this independent from the directory/search
+    // grant so a cashier can find a customer without opening their history.
+    { key: 'financial_history', tKey: 'perm_act_contacts_financial_history', label: 'View contact invoices and purchase history', review: 'block' },
   ],
 
   // View-tier sections also need action rows: the middle tier is still
@@ -221,6 +238,26 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'import', tKey: 'perm_act_sales_import', label: 'Import sales', review: 'block' },
     { key: 'status', tKey: 'perm_act_sales_status', label: 'Change or cancel sale status', review: 'block' },
     { key: 'customer', tKey: 'perm_act_sales_customer', label: 'Change linked customer', review: 'block' },
+    { key: 'customer_reassign', tKey: 'perm_act_sales_customer_reassign', label: 'Reassign customer (off: sale name only)', review: 'block' },
+    // S4-24b: POST /:id/items -> 403 unless FULL (sales.ts). Adding goods to
+    // a recorded sale moves stock and raises what the customer owes, so it
+    // gets its own switch rather than riding the coarse 'sales' grant or
+    // being folded into `status`, and it can never be queued for review --
+    // the stock movement is immediate.
+    { key: 'add_items', tKey: 'perm_act_sales_add_items', label: 'Add items to a recorded sale', review: 'block' },
+    // S4-30: POST /:id/amendments -> 403 unless FULL (sales.ts). Amending
+    // changes a recorded sale's contents, customer fee, or actual courier cost
+    // and may move stock in either direction
+    // BOTH directions, and changes what the customer owes. It is deliberately
+    // separate from `add_items`: a shop may well want a senior cashier who can
+    // add a forgotten item but cannot take one back off a paid sale. Like
+    // add_items it can never be queued for review -- the stock movement is
+    // immediate.
+    { key: 'amend', tKey: 'perm_act_sales_amend', label: 'Amend a recorded sale (change quantities, remove or replace lines, correct delivery fee or actual delivery cost)', review: 'block' },
+    // Multi-sale status/field updates and their grouped Undo/Redo share this
+    // explicit capability. Individual actions above remain independently
+    // grantable to front-line staff.
+    { key: 'bulk', tKey: 'perm_act_sales_bulk', label: 'Change multiple sales at once', review: 'block' },
   ],
 
   promotions: [

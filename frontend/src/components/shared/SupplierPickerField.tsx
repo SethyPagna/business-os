@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import InfoHint from './InfoHint.tsx'
+import { captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent, invalidateActorReadChannel, type ActorReadScope } from '../../api/actorReadScope.ts'
+import SuggestionTextInput, { type SuggestionOption } from './SuggestionTextInput.tsx'
 
 // D5a: the one supplier picker every manual add-stock/receive surface
-// shares (ReceiveBatchModal, InventoryStockModals, BranchStockAdjuster,
-// BulkAddStockModal) -- the same cross-surface rule as the D4b batch
+// shares (ReceiveBatchModal, InventoryStockModals, BulkAddStockModal) --
+// the same cross-surface rule as the D4b batch
 // picker: no surface gets a weaker version of the field than its siblings.
 //
 // Semantics mirror the batch writer's first-attribution-sticks rule
@@ -30,14 +32,44 @@ export type SupplierChoice = {
   supplierName: string
 }
 
-type SupplierNameRow = { id: number; name: string }
+export type SupplierNameRow = { id: number; name: string }
 
-let supplierNamesCache: { rows: SupplierNameRow[]; at: number } | null = null
+/** Case- and whitespace-insensitive supplier-name key. */
+function supplierNameKey(name: unknown): string {
+  return String(name ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/**
+ * P3-9. The loaded supplier whose name the operator just typed, matched
+ * ignoring case and whitespace -- or null when nothing matches, or when the
+ * name is ambiguous.
+ *
+ * Why this exists: typing an existing supplier's name exactly and pressing
+ * Enter (or just tabbing away) without clicking the suggestion used to drop
+ * the id and record a name-only attribution, so the same supplier ended up
+ * attributed two different ways depending on whether the operator reached for
+ * the mouse. The id is still never invented -- it is only ever an id that is
+ * already in the loaded list.
+ *
+ * Ambiguity returns null on purpose: while duplicate supplier rows share a
+ * name (the ten-row "j secrat" cluster in production), there is no single
+ * right id, and guessing one would pick a duplicate at random. Name-only is
+ * the honest answer until the cluster is merged.
+ */
+export function resolveSupplierByExactName(rows: SupplierNameRow[], typed: string): SupplierNameRow | null {
+  const key = supplierNameKey(typed)
+  if (!key) return null
+  const matches = (rows || []).filter((row) => supplierNameKey(row.name) === key)
+  return matches.length === 1 ? matches[0] : null
+}
+
+let supplierNamesCache: { rows: SupplierNameRow[]; at: number; scope: ActorReadScope } | null = null
 const SUPPLIER_NAMES_TTL_MS = 60_000
 let supplierSyncListenerInstalled = false
 
 export function invalidateSupplierNamesCache(): void {
   supplierNamesCache = null
+  invalidateActorReadChannel('suppliers')
 }
 
 function ensureSupplierSyncCacheListener(): void {
@@ -54,17 +86,20 @@ function ensureSupplierSyncCacheListener(): void {
 // re-fetching or re-implementing it.
 export async function loadSupplierNames(): Promise<SupplierNameRow[]> {
   ensureSupplierSyncCacheListener()
-  if (supplierNamesCache && Date.now() - supplierNamesCache.at < SUPPLIER_NAMES_TTL_MS) {
+  const scope = captureActorReadScope('suppliers')
+  if (supplierNamesCache && isActorReadScopeCurrent(supplierNamesCache.scope) && Date.now() - supplierNamesCache.at < SUPPLIER_NAMES_TTL_MS) {
     return supplierNamesCache.rows
   }
   const mod = await import('../../api/contactsTransport.ts')
+  assertActorReadScope(scope)
   const data = await mod.getSuppliers({ fields: 'names' })
+  assertActorReadScope(scope)
   const rows = Array.isArray(data)
     ? (data as Array<Record<string, unknown>>)
         .map((row) => ({ id: Number(row.id), name: String(row.name || '').trim() }))
         .filter((row) => Number.isFinite(row.id) && row.id > 0 && row.name !== '')
     : []
-  supplierNamesCache = { rows, at: Date.now() }
+  supplierNamesCache = { rows, at: Date.now(), scope }
   return rows
 }
 
@@ -96,8 +131,8 @@ export default function SupplierPickerField({
   disabled,
   idPrefix,
 }: SupplierPickerFieldProps) {
-  const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<SupplierNameRow[]>([])
+  const rowsScope = useRef<ActorReadScope | null>(null)
   const [loading, setLoading] = useState(false)
   const aliveRef = useRef(true)
   useEffect(() => {
@@ -119,12 +154,14 @@ export default function SupplierPickerField({
   }, [])
 
   const ensureLoaded = () => {
-    if (rows.length || loading) return
+    if (rowsScope.current && isActorReadScopeCurrent(rowsScope.current) && (rows.length || loading)) return
+    const scope = captureActorReadScope('suppliers')
+    rowsScope.current = scope
     setLoading(true)
     loadSupplierNames()
-      .then((loaded) => { if (aliveRef.current) setRows(loaded) })
+      .then((loaded) => { if (aliveRef.current && isActorReadScopeCurrent(scope)) setRows(loaded) })
       .catch(() => { /* suggestions unavailable -- free text still works */ })
-      .finally(() => { if (aliveRef.current) setLoading(false) })
+      .finally(() => { if (aliveRef.current && rowsScope.current === scope) setLoading(false) })
   }
 
   const label = tr('supplier', 'Supplier')
@@ -137,64 +174,66 @@ export default function SupplierPickerField({
           {lockedName}
         </div>
         <span className="mt-1 block text-[11px] text-gray-400">
-          {tr('supplier_first_attribution', "Recorded on this lot's first receipt — later receipts never change it.")}
+          {tr('supplier_first_attribution', "Recorded on this received date's first receipt — later receipts never change it.")}
         </span>
       </div>
     )
   }
 
-  const query = value.supplierName.trim().toLowerCase()
-  const matches = (query === '' ? rows : rows.filter((row) => row.name.toLowerCase().includes(query))).slice(0, 8)
-
-  const pick = (row: SupplierNameRow) => {
-    onChange({ supplierId: row.id, supplierName: row.name })
-    setOpen(false)
-  }
+  // The input + floating list is the ONE shared SuggestionTextInput -- the
+  // same control ProductForm's Category/Brand/Unit/Supplier and the
+  // create-products header's Brand render. This field adds only what is
+  // supplier-specific: the contact id a pick carries, and the locked variant
+  // above. Before this, four supplier surfaces and the product form each had
+  // their own copy of "input plus a dropdown", and they disagreed (the
+  // product form's showed nothing until something was typed).
+  const suggestionOptions = useMemo<SuggestionOption[]>(
+    () => rows.map((row) => ({
+      value: row.name,
+      key: `supplier-${row.id}`,
+      selected: value.supplierId === row.id,
+      payload: row.id,
+    })),
+    [rows, value.supplierId],
+  )
 
   return (
-    <div className="relative block">
+    <div className="block">
       <span className="mb-1 flex items-center gap-1 text-[11px] font-medium text-gray-600 dark:text-gray-400">
         <label htmlFor={`${idPrefix}-supplier`}>{label}</label>
         {hint && hintDisplay === 'tooltip' ? <InfoHint text={hint} label={label} /> : null}
       </span>
-      <input
+      <SuggestionTextInput
         id={`${idPrefix}-supplier`}
-        className="input w-full text-sm"
         value={value.supplierName}
+        options={rowsScope.current && isActorReadScopeCurrent(rowsScope.current) ? suggestionOptions : []}
+        limit={8}
         disabled={disabled}
-        onFocus={() => { setOpen(true); ensureLoaded() }}
-        onChange={(event) => {
-          // Typing breaks any contact link -- the id only ever comes from an
-          // explicit pick, so a edited name can't ride on a stale id.
-          onChange({ supplierId: null, supplierName: event.target.value })
-          setOpen(true)
-          ensureLoaded()
+        loading={loading}
+        loadingLabel={tr('loading', 'Loading...')}
+        onRequestOptions={ensureLoaded}
+        ariaLabel={label}
+        inputClassName="input min-h-11 w-full text-sm"
+        placeholder={tr('supplier_optional_placeholder', 'Who this received date was bought from')}
+        onChange={(next, option) => {
+          // A pick carries the contact id outright. Typing does NOT carry a
+          // stale id forward -- it is re-resolved from the typed text every
+          // keystroke, so an edited name can never ride on the previous pick's
+          // id. P3-9: typing an existing supplier's name exactly now resolves
+          // to that contact instead of falling through to a name-only
+          // attribution, which is what made the same supplier get recorded two
+          // different ways depending on whether the suggestion was clicked.
+          if (option) {
+            onChange({ supplierId: Number(option.payload), supplierName: option.value })
+            return
+          }
+          // Same scope guard the suggestion list uses: rows captured for a
+          // different actor never resolve an id here either.
+          const resolvable = rowsScope.current && isActorReadScopeCurrent(rowsScope.current) ? rows : []
+          const resolved = resolveSupplierByExactName(resolvable, next)
+          onChange({ supplierId: resolved ? resolved.id : null, supplierName: next })
         }}
-        onBlur={() => setOpen(false)}
-        onKeyDown={(event) => { if (event.key === 'Escape') setOpen(false) }}
-        placeholder={tr('supplier_optional_placeholder', 'Who this lot was bought from')}
-        autoComplete="off"
       />
-      {open && (loading || matches.length > 0) ? (
-        <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-40 overflow-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-zinc-600 dark:bg-zinc-800">
-          {loading && !matches.length ? (
-            <div className="px-3 py-2 text-[11px] text-gray-400">{tr('loading', 'Loading...')}</div>
-          ) : null}
-          {matches.map((row) => (
-            <button
-              key={row.id}
-              type="button"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20"
-              // Mousedown so the pick lands before the input's blur closes
-              // the menu (click would fire after blur and be lost).
-              onMouseDown={(event) => { event.preventDefault(); pick(row) }}
-            >
-              <span className="font-medium text-gray-800 dark:text-gray-200">{row.name}</span>
-              {value.supplierId === row.id ? <span className="text-xs text-blue-500">✓</span> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
       {hint && hintDisplay === 'inline' ? <span className="mt-1 block text-[11px] text-gray-400">{hint}</span> : null}
       {value.supplierName.trim() !== '' ? (
         <span className="mt-1 block text-[11px] text-gray-400">

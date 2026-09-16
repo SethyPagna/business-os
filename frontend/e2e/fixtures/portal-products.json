@@ -1,0 +1,4523 @@
+[
+  {
+    "id": 1000,
+    "name": "E2E Product 001 Aurelia",
+    "category": "Skincare",
+    "brand": "Aurelia",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 1. Not a real product.",
+    "selling_price_usd": 21.92,
+    "selling_price_khr": 89900,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1001,
+    "name": "E2E Product 002 Belle Roux",
+    "category": "Makeup",
+    "brand": "Belle Roux",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 2. Not a real product.",
+    "selling_price_usd": 24.81,
+    "selling_price_khr": 101700,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1002,
+    "name": "E2E Product 003 Céleste",
+    "category": "Haircare",
+    "brand": "Céleste",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 3. Not a real product.",
+    "selling_price_usd": 14.3,
+    "selling_price_khr": 58600,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1003,
+    "name": "E2E Product 004 Dermalux",
+    "category": "Fragrance",
+    "brand": "Dermalux",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 4. Not a real product.",
+    "selling_price_usd": 6.49,
+    "selling_price_khr": 26600,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1004,
+    "name": "E2E Product 005 Eunoia",
+    "category": "Body care",
+    "brand": "Eunoia",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 5. Not a real product.",
+    "selling_price_usd": 46.08,
+    "selling_price_khr": 188900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1005,
+    "name": "E2E Product 006 Fleurine",
+    "category": "Skincare",
+    "brand": "Fleurine",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 6. Not a real product.",
+    "selling_price_usd": 12.25,
+    "selling_price_khr": 50200,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1006,
+    "name": "E2E Product 007 Glowary",
+    "category": "Makeup",
+    "brand": "Glowary",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 7. Not a real product.",
+    "selling_price_usd": 30.52,
+    "selling_price_khr": 125100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1007,
+    "name": "E2E Product 008 Havenlys",
+    "category": "Haircare",
+    "brand": "Havenlys",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 8. Not a real product.",
+    "selling_price_usd": 3.45,
+    "selling_price_khr": 14100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1008,
+    "name": "E2E Product 009 Iridine",
+    "category": "Fragrance",
+    "brand": "Iridine",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 9. Not a real product.",
+    "selling_price_usd": 6.59,
+    "selling_price_khr": 27000,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1009,
+    "name": "E2E Product 010 Aurelia",
+    "category": "Body care",
+    "brand": "Aurelia",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 10. Not a real product.",
+    "selling_price_usd": 29.74,
+    "selling_price_khr": 121900,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1010,
+    "name": "E2E Product 011 Belle Roux",
+    "category": "Skincare",
+    "brand": "Belle Roux",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 11. Not a real product.",
+    "selling_price_usd": 9.46,
+    "selling_price_khr": 38800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1011,
+    "name": "E2E Product 012 Céleste",
+    "category": "Makeup",
+    "brand": "Céleste",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 12. Not a real product.",
+    "selling_price_usd": 13.11,
+    "selling_price_khr": 53800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1012,
+    "name": "E2E Product 013 Dermalux",
+    "category": "Haircare",
+    "brand": "Dermalux",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 13. Not a real product.",
+    "selling_price_usd": 9.69,
+    "selling_price_khr": 39700,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1013,
+    "name": "E2E Product 014 Eunoia",
+    "category": "Fragrance",
+    "brand": "Eunoia",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 14. Not a real product.",
+    "selling_price_usd": 44.41,
+    "selling_price_khr": 182100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1014,
+    "name": "E2E Product 015 Fleurine",
+    "category": "Body care",
+    "brand": "Fleurine",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 15. Not a real product.",
+    "selling_price_usd": 13.47,
+    "selling_price_khr": 55200,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1015,
+    "name": "E2E Product 016 Glowary",
+    "category": "Skincare",
+    "brand": "Glowary",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 16. Not a real product.",
+    "selling_price_usd": 39.15,
+    "selling_price_khr": 160500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1016,
+    "name": "E2E Product 017 Havenlys",
+    "category": "Makeup",
+    "brand": "Havenlys",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 17. Not a real product.",
+    "selling_price_usd": 4.48,
+    "selling_price_khr": 18400,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1017,
+    "name": "E2E Product 018 Iridine",
+    "category": "Haircare",
+    "brand": "Iridine",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 18. Not a real product.",
+    "selling_price_usd": 27.29,
+    "selling_price_khr": 111900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1018,
+    "name": "E2E Product 019 Aurelia",
+    "category": "Fragrance",
+    "brand": "Aurelia",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 19. Not a real product.",
+    "selling_price_usd": 23.72,
+    "selling_price_khr": 97300,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1019,
+    "name": "E2E Product 020 Belle Roux",
+    "category": "Body care",
+    "brand": "Belle Roux",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 20. Not a real product.",
+    "selling_price_usd": 36.34,
+    "selling_price_khr": 149000,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1020,
+    "name": "E2E Product 021 Céleste",
+    "category": "Skincare",
+    "brand": "Céleste",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 21. Not a real product.",
+    "selling_price_usd": 25.74,
+    "selling_price_khr": 105500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1021,
+    "name": "E2E Product 022 Dermalux",
+    "category": "Makeup",
+    "brand": "Dermalux",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 22. Not a real product.",
+    "selling_price_usd": 12.82,
+    "selling_price_khr": 52600,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1022,
+    "name": "E2E Product 023 Eunoia",
+    "category": "Haircare",
+    "brand": "Eunoia",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 23. Not a real product.",
+    "selling_price_usd": 18.68,
+    "selling_price_khr": 76600,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1023,
+    "name": "E2E Product 024 Fleurine",
+    "category": "Fragrance",
+    "brand": "Fleurine",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 24. Not a real product.",
+    "selling_price_usd": 30.2,
+    "selling_price_khr": 123800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1024,
+    "name": "E2E Product 025 Glowary",
+    "category": "Body care",
+    "brand": "Glowary",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 25. Not a real product.",
+    "selling_price_usd": 9.8,
+    "selling_price_khr": 40200,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1025,
+    "name": "E2E Product 026 Havenlys",
+    "category": "Skincare",
+    "brand": "Havenlys",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 26. Not a real product.",
+    "selling_price_usd": 35.91,
+    "selling_price_khr": 147200,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1026,
+    "name": "E2E Product 027 Iridine",
+    "category": "Makeup",
+    "brand": "Iridine",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 27. Not a real product.",
+    "selling_price_usd": 35.71,
+    "selling_price_khr": 146400,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1027,
+    "name": "E2E Product 028 Aurelia",
+    "category": "Haircare",
+    "brand": "Aurelia",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 28. Not a real product.",
+    "selling_price_usd": 41.32,
+    "selling_price_khr": 169400,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1028,
+    "name": "E2E Product 029 Belle Roux",
+    "category": "Fragrance",
+    "brand": "Belle Roux",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 29. Not a real product.",
+    "selling_price_usd": 6.65,
+    "selling_price_khr": 27300,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1029,
+    "name": "E2E Product 030 Céleste",
+    "category": "Body care",
+    "brand": "Céleste",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 30. Not a real product.",
+    "selling_price_usd": 26.66,
+    "selling_price_khr": 109300,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1030,
+    "name": "E2E Product 031 Dermalux",
+    "category": "Skincare",
+    "brand": "Dermalux",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 31. Not a real product.",
+    "selling_price_usd": 34.48,
+    "selling_price_khr": 141400,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1031,
+    "name": "E2E Product 032 Eunoia",
+    "category": "Makeup",
+    "brand": "Eunoia",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 32. Not a real product.",
+    "selling_price_usd": 40.96,
+    "selling_price_khr": 167900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1032,
+    "name": "E2E Product 033 Fleurine",
+    "category": "Haircare",
+    "brand": "Fleurine",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 33. Not a real product.",
+    "selling_price_usd": 25.26,
+    "selling_price_khr": 103600,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1033,
+    "name": "E2E Product 034 Glowary",
+    "category": "Fragrance",
+    "brand": "Glowary",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 34. Not a real product.",
+    "selling_price_usd": 36.45,
+    "selling_price_khr": 149400,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1034,
+    "name": "E2E Product 035 Havenlys",
+    "category": "Body care",
+    "brand": "Havenlys",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 35. Not a real product.",
+    "selling_price_usd": 3.46,
+    "selling_price_khr": 14200,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1035,
+    "name": "E2E Product 036 Iridine",
+    "category": "Skincare",
+    "brand": "Iridine",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 36. Not a real product.",
+    "selling_price_usd": 35.87,
+    "selling_price_khr": 147100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1036,
+    "name": "E2E Product 037 Aurelia",
+    "category": "Makeup",
+    "brand": "Aurelia",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 37. Not a real product.",
+    "selling_price_usd": 29.85,
+    "selling_price_khr": 122400,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1037,
+    "name": "E2E Product 038 Belle Roux",
+    "category": "Haircare",
+    "brand": "Belle Roux",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 38. Not a real product.",
+    "selling_price_usd": 6.11,
+    "selling_price_khr": 25100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1038,
+    "name": "E2E Product 039 Céleste",
+    "category": "Fragrance",
+    "brand": "Céleste",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 39. Not a real product.",
+    "selling_price_usd": 10.69,
+    "selling_price_khr": 43800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1039,
+    "name": "E2E Product 040 Dermalux",
+    "category": "Body care",
+    "brand": "Dermalux",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 40. Not a real product.",
+    "selling_price_usd": 15.62,
+    "selling_price_khr": 64000,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1040,
+    "name": "E2E Product 041 Eunoia",
+    "category": "Skincare",
+    "brand": "Eunoia",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 41. Not a real product.",
+    "selling_price_usd": 5.65,
+    "selling_price_khr": 23200,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1041,
+    "name": "E2E Product 042 Fleurine",
+    "category": "Makeup",
+    "brand": "Fleurine",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 42. Not a real product.",
+    "selling_price_usd": 37.23,
+    "selling_price_khr": 152600,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1042,
+    "name": "E2E Product 043 Glowary",
+    "category": "Haircare",
+    "brand": "Glowary",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 43. Not a real product.",
+    "selling_price_usd": 5.57,
+    "selling_price_khr": 22800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1043,
+    "name": "E2E Product 044 Havenlys",
+    "category": "Fragrance",
+    "brand": "Havenlys",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 44. Not a real product.",
+    "selling_price_usd": 24.6,
+    "selling_price_khr": 100900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1044,
+    "name": "E2E Product 045 Iridine",
+    "category": "Body care",
+    "brand": "Iridine",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 45. Not a real product.",
+    "selling_price_usd": 24.28,
+    "selling_price_khr": 99500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1045,
+    "name": "E2E Product 046 Aurelia",
+    "category": "Skincare",
+    "brand": "Aurelia",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 46. Not a real product.",
+    "selling_price_usd": 24.96,
+    "selling_price_khr": 102300,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1046,
+    "name": "E2E Product 047 Belle Roux",
+    "category": "Makeup",
+    "brand": "Belle Roux",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 47. Not a real product.",
+    "selling_price_usd": 36.45,
+    "selling_price_khr": 149400,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1047,
+    "name": "E2E Product 048 Céleste",
+    "category": "Haircare",
+    "brand": "Céleste",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 48. Not a real product.",
+    "selling_price_usd": 21.72,
+    "selling_price_khr": 89100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1048,
+    "name": "E2E Product 049 Dermalux",
+    "category": "Fragrance",
+    "brand": "Dermalux",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 49. Not a real product.",
+    "selling_price_usd": 15.82,
+    "selling_price_khr": 64900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1049,
+    "name": "E2E Product 050 Eunoia",
+    "category": "Body care",
+    "brand": "Eunoia",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 50. Not a real product.",
+    "selling_price_usd": 12.78,
+    "selling_price_khr": 52400,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1050,
+    "name": "E2E Product 051 Fleurine",
+    "category": "Skincare",
+    "brand": "Fleurine",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 51. Not a real product.",
+    "selling_price_usd": 9.19,
+    "selling_price_khr": 37700,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1051,
+    "name": "E2E Product 052 Glowary",
+    "category": "Makeup",
+    "brand": "Glowary",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 52. Not a real product.",
+    "selling_price_usd": 48.33,
+    "selling_price_khr": 198200,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1052,
+    "name": "E2E Product 053 Havenlys",
+    "category": "Haircare",
+    "brand": "Havenlys",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 53. Not a real product.",
+    "selling_price_usd": 47.3,
+    "selling_price_khr": 193900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1053,
+    "name": "E2E Product 054 Iridine",
+    "category": "Fragrance",
+    "brand": "Iridine",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 54. Not a real product.",
+    "selling_price_usd": 10.02,
+    "selling_price_khr": 41100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1054,
+    "name": "E2E Product 055 Aurelia",
+    "category": "Body care",
+    "brand": "Aurelia",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 55. Not a real product.",
+    "selling_price_usd": 3.94,
+    "selling_price_khr": 16200,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1055,
+    "name": "E2E Product 056 Belle Roux",
+    "category": "Skincare",
+    "brand": "Belle Roux",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 56. Not a real product.",
+    "selling_price_usd": 14.91,
+    "selling_price_khr": 61100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1056,
+    "name": "E2E Product 057 Céleste",
+    "category": "Makeup",
+    "brand": "Céleste",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 57. Not a real product.",
+    "selling_price_usd": 39.04,
+    "selling_price_khr": 160100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1057,
+    "name": "E2E Product 058 Dermalux",
+    "category": "Haircare",
+    "brand": "Dermalux",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 58. Not a real product.",
+    "selling_price_usd": 45.33,
+    "selling_price_khr": 185900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1058,
+    "name": "E2E Product 059 Eunoia",
+    "category": "Fragrance",
+    "brand": "Eunoia",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 59. Not a real product.",
+    "selling_price_usd": 16.97,
+    "selling_price_khr": 69600,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1059,
+    "name": "E2E Product 060 Fleurine",
+    "category": "Body care",
+    "brand": "Fleurine",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 60. Not a real product.",
+    "selling_price_usd": 26.66,
+    "selling_price_khr": 109300,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1060,
+    "name": "E2E Product 061 Glowary",
+    "category": "Skincare",
+    "brand": "Glowary",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 61. Not a real product.",
+    "selling_price_usd": 24.12,
+    "selling_price_khr": 98900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1061,
+    "name": "E2E Product 062 Havenlys",
+    "category": "Makeup",
+    "brand": "Havenlys",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 62. Not a real product.",
+    "selling_price_usd": 19.15,
+    "selling_price_khr": 78500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1062,
+    "name": "E2E Product 063 Iridine",
+    "category": "Haircare",
+    "brand": "Iridine",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 63. Not a real product.",
+    "selling_price_usd": 27.08,
+    "selling_price_khr": 111000,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1063,
+    "name": "E2E Product 064 Aurelia",
+    "category": "Fragrance",
+    "brand": "Aurelia",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 64. Not a real product.",
+    "selling_price_usd": 17.85,
+    "selling_price_khr": 73200,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1064,
+    "name": "E2E Product 065 Belle Roux",
+    "category": "Body care",
+    "brand": "Belle Roux",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 65. Not a real product.",
+    "selling_price_usd": 46.94,
+    "selling_price_khr": 192500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1065,
+    "name": "E2E Product 066 Céleste",
+    "category": "Skincare",
+    "brand": "Céleste",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 66. Not a real product.",
+    "selling_price_usd": 10.96,
+    "selling_price_khr": 44900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1066,
+    "name": "E2E Product 067 Dermalux",
+    "category": "Makeup",
+    "brand": "Dermalux",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 67. Not a real product.",
+    "selling_price_usd": 29.04,
+    "selling_price_khr": 119100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1067,
+    "name": "E2E Product 068 Eunoia",
+    "category": "Haircare",
+    "brand": "Eunoia",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 68. Not a real product.",
+    "selling_price_usd": 14.72,
+    "selling_price_khr": 60400,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1068,
+    "name": "E2E Product 069 Fleurine",
+    "category": "Fragrance",
+    "brand": "Fleurine",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 69. Not a real product.",
+    "selling_price_usd": 30.62,
+    "selling_price_khr": 125500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1069,
+    "name": "E2E Product 070 Glowary",
+    "category": "Body care",
+    "brand": "Glowary",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 70. Not a real product.",
+    "selling_price_usd": 16.99,
+    "selling_price_khr": 69700,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1070,
+    "name": "E2E Product 071 Havenlys",
+    "category": "Skincare",
+    "brand": "Havenlys",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 71. Not a real product.",
+    "selling_price_usd": 17.15,
+    "selling_price_khr": 70300,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1071,
+    "name": "E2E Product 072 Iridine",
+    "category": "Makeup",
+    "brand": "Iridine",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 72. Not a real product.",
+    "selling_price_usd": 8.28,
+    "selling_price_khr": 33900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1072,
+    "name": "E2E Product 073 Aurelia",
+    "category": "Haircare",
+    "brand": "Aurelia",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 73. Not a real product.",
+    "selling_price_usd": 48.75,
+    "selling_price_khr": 199900,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1073,
+    "name": "E2E Product 074 Belle Roux",
+    "category": "Fragrance",
+    "brand": "Belle Roux",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 74. Not a real product.",
+    "selling_price_usd": 32.42,
+    "selling_price_khr": 132900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1074,
+    "name": "E2E Product 075 Céleste",
+    "category": "Body care",
+    "brand": "Céleste",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 75. Not a real product.",
+    "selling_price_usd": 7.77,
+    "selling_price_khr": 31900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1075,
+    "name": "E2E Product 076 Dermalux",
+    "category": "Skincare",
+    "brand": "Dermalux",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 76. Not a real product.",
+    "selling_price_usd": 28.12,
+    "selling_price_khr": 115300,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1076,
+    "name": "E2E Product 077 Eunoia",
+    "category": "Makeup",
+    "brand": "Eunoia",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 77. Not a real product.",
+    "selling_price_usd": 38.61,
+    "selling_price_khr": 158300,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1077,
+    "name": "E2E Product 078 Fleurine",
+    "category": "Haircare",
+    "brand": "Fleurine",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 78. Not a real product.",
+    "selling_price_usd": 41.42,
+    "selling_price_khr": 169800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1078,
+    "name": "E2E Product 079 Glowary",
+    "category": "Fragrance",
+    "brand": "Glowary",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 79. Not a real product.",
+    "selling_price_usd": 13.36,
+    "selling_price_khr": 54800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1079,
+    "name": "E2E Product 080 Havenlys",
+    "category": "Body care",
+    "brand": "Havenlys",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 80. Not a real product.",
+    "selling_price_usd": 33.33,
+    "selling_price_khr": 136700,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1080,
+    "name": "E2E Product 081 Iridine",
+    "category": "Skincare",
+    "brand": "Iridine",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 81. Not a real product.",
+    "selling_price_usd": 26.05,
+    "selling_price_khr": 106800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1081,
+    "name": "E2E Product 082 Aurelia",
+    "category": "Makeup",
+    "brand": "Aurelia",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 82. Not a real product.",
+    "selling_price_usd": 6.63,
+    "selling_price_khr": 27200,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1082,
+    "name": "E2E Product 083 Belle Roux",
+    "category": "Haircare",
+    "brand": "Belle Roux",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 83. Not a real product.",
+    "selling_price_usd": 33.59,
+    "selling_price_khr": 137700,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1083,
+    "name": "E2E Product 084 Céleste",
+    "category": "Fragrance",
+    "brand": "Céleste",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 84. Not a real product.",
+    "selling_price_usd": 47.05,
+    "selling_price_khr": 192900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1084,
+    "name": "E2E Product 085 Dermalux",
+    "category": "Body care",
+    "brand": "Dermalux",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 85. Not a real product.",
+    "selling_price_usd": 16.52,
+    "selling_price_khr": 67700,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1085,
+    "name": "E2E Product 086 Eunoia",
+    "category": "Skincare",
+    "brand": "Eunoia",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 86. Not a real product.",
+    "selling_price_usd": 8.65,
+    "selling_price_khr": 35500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1086,
+    "name": "E2E Product 087 Fleurine",
+    "category": "Makeup",
+    "brand": "Fleurine",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 87. Not a real product.",
+    "selling_price_usd": 46.33,
+    "selling_price_khr": 190000,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1087,
+    "name": "E2E Product 088 Glowary",
+    "category": "Haircare",
+    "brand": "Glowary",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 88. Not a real product.",
+    "selling_price_usd": 33.03,
+    "selling_price_khr": 135400,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1088,
+    "name": "E2E Product 089 Havenlys",
+    "category": "Fragrance",
+    "brand": "Havenlys",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 89. Not a real product.",
+    "selling_price_usd": 34.95,
+    "selling_price_khr": 143300,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1089,
+    "name": "E2E Product 090 Iridine",
+    "category": "Body care",
+    "brand": "Iridine",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 90. Not a real product.",
+    "selling_price_usd": 39.95,
+    "selling_price_khr": 163800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1090,
+    "name": "E2E Product 091 Aurelia",
+    "category": "Skincare",
+    "brand": "Aurelia",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 91. Not a real product.",
+    "selling_price_usd": 40.71,
+    "selling_price_khr": 166900,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1091,
+    "name": "E2E Product 092 Belle Roux",
+    "category": "Makeup",
+    "brand": "Belle Roux",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 92. Not a real product.",
+    "selling_price_usd": 11.64,
+    "selling_price_khr": 47700,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1092,
+    "name": "E2E Product 093 Céleste",
+    "category": "Haircare",
+    "brand": "Céleste",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 93. Not a real product.",
+    "selling_price_usd": 9.55,
+    "selling_price_khr": 39200,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1093,
+    "name": "E2E Product 094 Dermalux",
+    "category": "Fragrance",
+    "brand": "Dermalux",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 94. Not a real product.",
+    "selling_price_usd": 3.04,
+    "selling_price_khr": 12500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1094,
+    "name": "E2E Product 095 Eunoia",
+    "category": "Body care",
+    "brand": "Eunoia",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 95. Not a real product.",
+    "selling_price_usd": 4.55,
+    "selling_price_khr": 18700,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1095,
+    "name": "E2E Product 096 Fleurine",
+    "category": "Skincare",
+    "brand": "Fleurine",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 96. Not a real product.",
+    "selling_price_usd": 30.89,
+    "selling_price_khr": 126600,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1096,
+    "name": "E2E Product 097 Glowary",
+    "category": "Makeup",
+    "brand": "Glowary",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 97. Not a real product.",
+    "selling_price_usd": 5.67,
+    "selling_price_khr": 23200,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1097,
+    "name": "E2E Product 098 Havenlys",
+    "category": "Haircare",
+    "brand": "Havenlys",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 98. Not a real product.",
+    "selling_price_usd": 5,
+    "selling_price_khr": 20500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1098,
+    "name": "E2E Product 099 Iridine",
+    "category": "Fragrance",
+    "brand": "Iridine",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 99. Not a real product.",
+    "selling_price_usd": 25.76,
+    "selling_price_khr": 105600,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1099,
+    "name": "E2E Product 100 Aurelia",
+    "category": "Body care",
+    "brand": "Aurelia",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 100. Not a real product.",
+    "selling_price_usd": 43.45,
+    "selling_price_khr": 178100,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1100,
+    "name": "E2E Product 101 Belle Roux",
+    "category": "Skincare",
+    "brand": "Belle Roux",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 101. Not a real product.",
+    "selling_price_usd": 11.26,
+    "selling_price_khr": 46200,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1101,
+    "name": "E2E Product 102 Céleste",
+    "category": "Makeup",
+    "brand": "Céleste",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 102. Not a real product.",
+    "selling_price_usd": 17.57,
+    "selling_price_khr": 72000,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1102,
+    "name": "E2E Product 103 Dermalux",
+    "category": "Haircare",
+    "brand": "Dermalux",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 103. Not a real product.",
+    "selling_price_usd": 20.71,
+    "selling_price_khr": 84900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1103,
+    "name": "E2E Product 104 Eunoia",
+    "category": "Fragrance",
+    "brand": "Eunoia",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 104. Not a real product.",
+    "selling_price_usd": 33.83,
+    "selling_price_khr": 138700,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1104,
+    "name": "E2E Product 105 Fleurine",
+    "category": "Body care",
+    "brand": "Fleurine",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 105. Not a real product.",
+    "selling_price_usd": 38.62,
+    "selling_price_khr": 158300,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1105,
+    "name": "E2E Product 106 Glowary",
+    "category": "Skincare",
+    "brand": "Glowary",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 106. Not a real product.",
+    "selling_price_usd": 5.33,
+    "selling_price_khr": 21900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1106,
+    "name": "E2E Product 107 Havenlys",
+    "category": "Makeup",
+    "brand": "Havenlys",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 107. Not a real product.",
+    "selling_price_usd": 24.39,
+    "selling_price_khr": 100000,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1107,
+    "name": "E2E Product 108 Iridine",
+    "category": "Haircare",
+    "brand": "Iridine",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 108. Not a real product.",
+    "selling_price_usd": 47.15,
+    "selling_price_khr": 193300,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1108,
+    "name": "E2E Product 109 Aurelia",
+    "category": "Fragrance",
+    "brand": "Aurelia",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 109. Not a real product.",
+    "selling_price_usd": 49.53,
+    "selling_price_khr": 203100,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1109,
+    "name": "E2E Product 110 Belle Roux",
+    "category": "Body care",
+    "brand": "Belle Roux",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 110. Not a real product.",
+    "selling_price_usd": 38.02,
+    "selling_price_khr": 155900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1110,
+    "name": "E2E Product 111 Céleste",
+    "category": "Skincare",
+    "brand": "Céleste",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 111. Not a real product.",
+    "selling_price_usd": 15.08,
+    "selling_price_khr": 61800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1111,
+    "name": "E2E Product 112 Dermalux",
+    "category": "Makeup",
+    "brand": "Dermalux",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 112. Not a real product.",
+    "selling_price_usd": 17.16,
+    "selling_price_khr": 70400,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1112,
+    "name": "E2E Product 113 Eunoia",
+    "category": "Haircare",
+    "brand": "Eunoia",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 113. Not a real product.",
+    "selling_price_usd": 21.84,
+    "selling_price_khr": 89500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1113,
+    "name": "E2E Product 114 Fleurine",
+    "category": "Fragrance",
+    "brand": "Fleurine",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 114. Not a real product.",
+    "selling_price_usd": 8.6,
+    "selling_price_khr": 35300,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1114,
+    "name": "E2E Product 115 Glowary",
+    "category": "Body care",
+    "brand": "Glowary",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 115. Not a real product.",
+    "selling_price_usd": 43.79,
+    "selling_price_khr": 179500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1115,
+    "name": "E2E Product 116 Havenlys",
+    "category": "Skincare",
+    "brand": "Havenlys",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 116. Not a real product.",
+    "selling_price_usd": 8.42,
+    "selling_price_khr": 34500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1116,
+    "name": "E2E Product 117 Iridine",
+    "category": "Makeup",
+    "brand": "Iridine",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 117. Not a real product.",
+    "selling_price_usd": 17.09,
+    "selling_price_khr": 70100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1117,
+    "name": "E2E Product 118 Aurelia",
+    "category": "Haircare",
+    "brand": "Aurelia",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 118. Not a real product.",
+    "selling_price_usd": 47.85,
+    "selling_price_khr": 196200,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1118,
+    "name": "E2E Product 119 Belle Roux",
+    "category": "Fragrance",
+    "brand": "Belle Roux",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 119. Not a real product.",
+    "selling_price_usd": 40.67,
+    "selling_price_khr": 166700,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1119,
+    "name": "E2E Product 120 Céleste",
+    "category": "Body care",
+    "brand": "Céleste",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 120. Not a real product.",
+    "selling_price_usd": 41.85,
+    "selling_price_khr": 171600,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1120,
+    "name": "E2E Product 121 Dermalux",
+    "category": "Skincare",
+    "brand": "Dermalux",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 121. Not a real product.",
+    "selling_price_usd": 26.96,
+    "selling_price_khr": 110500,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1121,
+    "name": "E2E Product 122 Eunoia",
+    "category": "Makeup",
+    "brand": "Eunoia",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 122. Not a real product.",
+    "selling_price_usd": 11.61,
+    "selling_price_khr": 47600,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1122,
+    "name": "E2E Product 123 Fleurine",
+    "category": "Haircare",
+    "brand": "Fleurine",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 123. Not a real product.",
+    "selling_price_usd": 45.15,
+    "selling_price_khr": 185100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1123,
+    "name": "E2E Product 124 Glowary",
+    "category": "Fragrance",
+    "brand": "Glowary",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 124. Not a real product.",
+    "selling_price_usd": 48.01,
+    "selling_price_khr": 196800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1124,
+    "name": "E2E Product 125 Havenlys",
+    "category": "Body care",
+    "brand": "Havenlys",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 125. Not a real product.",
+    "selling_price_usd": 45.35,
+    "selling_price_khr": 185900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1125,
+    "name": "E2E Product 126 Iridine",
+    "category": "Skincare",
+    "brand": "Iridine",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 126. Not a real product.",
+    "selling_price_usd": 47.78,
+    "selling_price_khr": 195900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1126,
+    "name": "E2E Product 127 Aurelia",
+    "category": "Makeup",
+    "brand": "Aurelia",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 127. Not a real product.",
+    "selling_price_usd": 20.5,
+    "selling_price_khr": 84100,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1127,
+    "name": "E2E Product 128 Belle Roux",
+    "category": "Haircare",
+    "brand": "Belle Roux",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 128. Not a real product.",
+    "selling_price_usd": 33.9,
+    "selling_price_khr": 139000,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1128,
+    "name": "E2E Product 129 Céleste",
+    "category": "Fragrance",
+    "brand": "Céleste",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Céleste\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 129. Not a real product.",
+    "selling_price_usd": 26.54,
+    "selling_price_khr": 108800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1129,
+    "name": "E2E Product 130 Dermalux",
+    "category": "Body care",
+    "brand": "Dermalux",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Dermalux\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 130. Not a real product.",
+    "selling_price_usd": 31.91,
+    "selling_price_khr": 130800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1130,
+    "name": "E2E Product 131 Eunoia",
+    "category": "Skincare",
+    "brand": "Eunoia",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Eunoia\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 131. Not a real product.",
+    "selling_price_usd": 23.11,
+    "selling_price_khr": 94800,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1131,
+    "name": "E2E Product 132 Fleurine",
+    "category": "Makeup",
+    "brand": "Fleurine",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Fleurine\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 132. Not a real product.",
+    "selling_price_usd": 44,
+    "selling_price_khr": 180400,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1132,
+    "name": "E2E Product 133 Glowary",
+    "category": "Haircare",
+    "brand": "Glowary",
+    "categories": "[\"Haircare\"]",
+    "brands": "[\"Glowary\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 133. Not a real product.",
+    "selling_price_usd": 11.74,
+    "selling_price_khr": 48100,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "out_of_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "out_of_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1133,
+    "name": "E2E Product 134 Havenlys",
+    "category": "Fragrance",
+    "brand": "Havenlys",
+    "categories": "[\"Fragrance\"]",
+    "brands": "[\"Havenlys\"]",
+    "unit": "box",
+    "description": "Deterministic e2e fixture row 134. Not a real product.",
+    "selling_price_usd": 42.93,
+    "selling_price_khr": 176000,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "low_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "low_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1134,
+    "name": "E2E Product 135 Iridine",
+    "category": "Body care",
+    "brand": "Iridine",
+    "categories": "[\"Body care\"]",
+    "brands": "[\"Iridine\"]",
+    "unit": "bottle",
+    "description": "Deterministic e2e fixture row 135. Not a real product.",
+    "selling_price_usd": 4.68,
+    "selling_price_khr": 19200,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  },
+  {
+    "id": 1135,
+    "name": "E2E Product 136 Aurelia",
+    "category": "Skincare",
+    "brand": "Aurelia",
+    "categories": "[\"Skincare\"]",
+    "brands": "[\"Aurelia\"]",
+    "unit": "tube",
+    "description": "Deterministic e2e fixture row 136. Not a real product.",
+    "selling_price_usd": 24.97,
+    "selling_price_khr": 102400,
+    "image_path": "",
+    "discount_enabled": 1,
+    "discount_type": "percent",
+    "discount_percent": 15,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": "Deal",
+    "discount_badge_color": "#b91c1c",
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "in_stock"
+      }
+    ]
+  },
+  {
+    "id": 1136,
+    "name": "E2E Product 137 Belle Roux",
+    "category": "Makeup",
+    "brand": "Belle Roux",
+    "categories": "[\"Makeup\"]",
+    "brands": "[\"Belle Roux\"]",
+    "unit": "pcs",
+    "description": "Deterministic e2e fixture row 137. Not a real product.",
+    "selling_price_usd": 13.87,
+    "selling_price_khr": 56900,
+    "image_path": "",
+    "discount_enabled": 0,
+    "discount_type": null,
+    "discount_percent": null,
+    "discount_amount_usd": null,
+    "discount_amount_khr": null,
+    "discount_label": null,
+    "discount_badge_color": null,
+    "discount_starts_at": null,
+    "discount_ends_at": null,
+    "stock_status": "in_stock",
+    "branch_availability": [
+      {
+        "branch_id": 1,
+        "status": "in_stock"
+      },
+      {
+        "branch_id": 2,
+        "status": "out_of_stock"
+      }
+    ]
+  }
+]

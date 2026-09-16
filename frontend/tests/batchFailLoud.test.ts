@@ -24,6 +24,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { needsPosTrackingSheet } from '../src/components/pos/posProductTracking.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -79,11 +80,28 @@ check('POS does not clear the tracked-id set when the lookup fails', () => {
 })
 
 check('POS tracks the failure explicitly and forces the detail sheet for every product', () => {
-  assert.ok(/setTrackedBatchLoadFailed\(true\)/.test(pos), 'POS should record that the lookup failed')
+  assert.ok(/setBatchTracking\(\{ scope, status: 'failed', ids: new Set\(\) \}\)/.test(pos), 'POS should record an explicit scoped failed state, never a ready empty set')
+  assert.ok(/const trackedBatchLoadFailed = batchTracking.scope === trackingScope && batchTracking.status === 'failed'/.test(pos), 'only the current scope failure should drive the warning')
   assert.ok(
-    /const isBatchTracked = trackedBatchLoadFailed \|\| trackedBatchProductIds\.has/.test(pos),
+    /const isBatchTracked = needsPosTrackingSheet\(batchTracking, trackingScope, Number\(product.id\)\)/.test(pos),
     'while tracking is unknown, every product must route through the detail sheet rather than one-tap add',
   )
+})
+
+check('POS passes the unavailable state into the sheet so the extra tap cannot bypass lot selection', () => {
+  assert.ok(
+    /trackedBatchLookupUnavailable=\{batchTracking.scope !== trackingScope \|\| batchTracking.status !== 'ready'\}/.test(pos),
+    'forcing the detail sheet is insufficient unless the sheet also knows tracking metadata is unavailable',
+  )
+})
+
+check('actual tracking readiness blocks failed, pending, and foreign-scope product adds', () => {
+  for (const status of ['loading', 'failed'] as const) {
+    assert.equal(needsPosTrackingSheet({ scope: 'current', status, ids: new Set() }, 'current', 7), true)
+  }
+  assert.equal(needsPosTrackingSheet({ scope: 'old', status: 'ready', ids: new Set() }, 'current', 7), true)
+  assert.equal(needsPosTrackingSheet({ scope: 'current', status: 'ready', ids: new Set([7]) }, 'current', 7), true)
+  assert.equal(needsPosTrackingSheet({ scope: 'current', status: 'ready', ids: new Set() }, 'current', 7), false)
 })
 
 check('POS surfaces the failure to the cashier instead of failing silently', () => {
@@ -123,11 +141,13 @@ check('the lot picker distinguishes a load failure from an empty result', () => 
     /\) : batchesError \? \(/.test(sheet),
     'the picker should render the error branch before the "No lots available" branch',
   )
-  // Count render SITES via the posCopy key (the English first argument).
-  // The old `/ 2` accounted for posCopy('X', 'X') duplicating the literal
-  // per site; the Khmer no-op fix made the second argument real Khmer, so
-  // the literal now appears exactly once per site.
-  const noLots = (sheet.match(/posCopy\('No lots available at this branch'/g) || []).length
+  // Count render SITES via the empty state's pack key. This counted the
+  // posCopy English literal until that bilingual pair became a pack key --
+  // the sheet now mounts outside the POS too, where posCopy was stubbed to
+  // an English identity, so the string had to come from the packs. One
+  // occurrence per site either way.
+  const noLots = (sheet.match(/t\('received_dates_none'\)/g) || []).length
+  assert.ok(noLots > 0, 'the empty state must still be rendered somewhere')
   const errorBranches = (sheet.match(/\) : batchesError \? \(/g) || []).length
   assert.equal(
     errorBranches, noLots,
@@ -138,7 +158,6 @@ check('the lot picker distinguishes a load failure from an empty result', () => 
 // ---- no call site may leave a rejection unhandled ----
 for (const [label, file] of [
   ['Inventory stock modal', ['components', 'inventory', 'InventoryStockModals.tsx']],
-  ['Branch stock adjuster', ['components', 'products', 'forms', 'BranchStockAdjuster.tsx']],
 ] as const) {
   check(`${label} handles a rejected getProductBatches (it no longer falls back internally)`, () => {
     const text = src(...file)

@@ -1,8 +1,9 @@
+import ProductNameRail from '../shared/ProductNameRail'
 // Products
 // Main Products page; all sub-modals are imported from sibling files.
 
-import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import type { ReactNode, MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from 'react'
+import { Suspense, memo, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -11,10 +12,13 @@ import MoreVertical from 'lucide-react/dist/esm/icons/more-vertical.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
 import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
-import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
+import { isBrokenLocalizedString, useApp, useLowStockConfig, useSync } from '../../AppContext'
+import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
+import { useLayeredSectionNav } from '../../utils/sectionNavPreference.ts'
 import Modal from '../shared/Modal'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import FilterMenu from '../shared/FilterMenu'
+import InfoHint from '../shared/InfoHint'
 import PortalMenu from '../shared/PortalMenu'
 import AppSelect from '../shared/AppSelect'
 import PageSizeSelect from '../shared/PageSizeSelect'
@@ -23,9 +27,15 @@ import ScanSearchButton from '../shared/ScanSearchButton'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import ProductsListSurface, { ROW_TEXT_GUTTER } from './surfaces/ProductsListSurface'
+import { TaggedStockActionModal, TaggedStockDesktopRow, TaggedStockMobileCard } from './TaggedStockRows.tsx'
+import type { TaggedStockAction, TaggedStockRow } from './TaggedStockRows.tsx'
+import { getTaggedLots } from '../../api/damagedLotsTransport.ts'
 import StockInSessionsSection from './StockInSessionsSection.tsx'
 import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
-import type { MergeDuplicatesPreviewGroup } from './MergeDuplicatesReviewModal'
+import type { MergeDuplicatesRecoveryNotice } from './MergeDuplicatesReviewModal'
+import { validateMergeDuplicatesPreviewResponse } from './mergeDuplicatesPreviewResponse.ts'
+import type { ValidatedLeadingZeroMergeManifest } from './mergeDuplicatesPreviewResponse.ts'
+import type { LeadingZeroMergeManifest } from '../../api/productWriteTransport.ts'
 import ZeroQuantityCleanupModal from './ZeroQuantityCleanupModal'
 import type { ZeroQuantityCandidate } from './ZeroQuantityCleanupModal'
 import WireImagesReviewModal from './WireImagesReviewModal'
@@ -33,6 +43,9 @@ import type { WireImageChange, WireImagesPreview } from './WireImagesReviewModal
 import DeleteConfirmModal from './DeleteConfirmModal'
 import { summarizeDeleteImpact } from '../../utils/deleteImpactSummary'
 import ProductsHeaderActions from './surfaces/HeaderActions'
+import { useCopyFloat } from '../shared/CopyFloat.tsx'
+import EntityLink from '../shared/EntityLink.tsx'
+import { COPY_SELECTOR, deferCopySurfaceAction } from '../shared/textAffordances.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { primaryToolbarButtonClassName } from '../shared/toolbarButtonStyles'
@@ -43,7 +56,7 @@ import {
   ProductDiscountBadge,
 } from './surfaces/ProductRowParts'
 import { useIsPageActive } from '../shared/pageActivity'
-import { buildProductCategorySections } from '../../utils/productGrouping.ts'
+import { buildProductCategorySections, hideZeroStockGroupedChildRows } from '../../utils/productGrouping.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './history/productHistoryHelpers.ts'
@@ -54,6 +67,8 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { createLongPressHandlers, createLongPressState, consumeLongPressClick } from '../../utils/longPress.ts'
 import type { LongPressState } from '../../utils/longPress.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
+import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
+import { mergeDuplicateChunkCanContinueAutomatically, mergeDuplicateChunkRequiresManualResume } from './mergeDuplicatesRun.ts'
 import { getKhmerTextProps, withKhmerTextClass } from '../../utils/scriptTypography.ts'
 import {
   beginTrackedRequest,
@@ -127,14 +142,21 @@ import { buildHierarchicalCategoryFilterOptions } from '../shared/CategoryFilter
 import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOptions.tsx'
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
 import { buildAutoMergedFilterSection } from './AutoMergedFilterOptions.tsx'
-import { RESTORE_WORK_EVENT, consumePendingRestore, markRestoreHandled, minimizeWork } from '../../utils/minimizedWork.ts'
+import { RESTORE_WORK_EVENT, canRestoreMinimizedWork, consumePendingRestore, markRestoreHandled, minimizeWork, peekPendingRestore, reparkDeniedRestore, type MinimizedWorkEntry, type MinimizedWorkKind } from '../../utils/minimizedWork.ts'
+import { clearWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { readStockAdjustDraft, STOCK_ADJUST_RESTORE_HOST } from '../../utils/stockAdjustDraft.ts'
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
+import type { LowStockConfig } from '../../utils/lowStockSettings.ts'
 import type { BulkDeleteJobStatus } from '../../api/productWriteTransport.ts'
-import { getPossiblySameProducts, mergePossiblySameProducts, dismissProductDuplicateCluster } from '../../api/productWriteTransport.ts'
+import { getPossiblySameProducts, dismissProductDuplicateCluster } from '../../api/productWriteTransport.ts'
+import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
+// The section chips below are the same chrome HubSectionNav renders, styled
+// from the same stylesheet (see the row's `bos-nav-chrome` class).
+import '../navigation/nav-chrome.css'
 
 const ManageCategoriesModal = lazyRetry(() => import('./lookups/ManageCategoriesModal'), 'products-manage-categories-modal')
 // Part 241: the restricted image-only view, split out so the wrapper
@@ -150,10 +172,16 @@ const BulkAddStockModal = lazyRetry(() => import('./forms/BulkAddStockModal'), '
 // The Add button's merged "Add Stock" flow (user, Aug 31: "the fast stockin
 // can also do one by one... can be merged into one Add stock function") --
 // the shipment receiver covers a whole delivery AND a single product.
-const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal'), 'products-fast-stock-in-modal')
 const VariantFormModal = lazyRetry(() => import('./forms/VariantFormModal'), 'products-variant-form-modal')
 const ProductForm = lazyRetry(() => import('./forms/ProductForm'), 'products-product-form')
+const CreateProductsSessionModal = lazyRetry(() => import('./CreateProductsSessionModal'), 'products-create-products-session-modal')
+type CreateProductsSessionMinimizeDetails = import('../../utils/createProductsSession.ts').CreateProductsSessionMinimizeDetails
 const StockAdjustModal = lazyRetry(() => import('./forms/StockAdjustModal'), 'products-stock-adjust-modal')
+
+function StockAdjustRestoreCommit({ onCommit }: { onCommit: () => void }) {
+  useEffect(() => { onCommit() }, [onCommit])
+  return null
+}
 const ProductDetailModal = lazyRetry(() => import('./surfaces/ProductDetailModal'), 'products-product-detail-modal')
 // Reused as-is from Inventory's own batches surface (see ManageBatchesModal.tsx)
 // rather than duplicated -- the "click to view/manage batches" affordance the
@@ -171,7 +199,11 @@ type NotificationTone = 'error' | 'info' | 'success' | 'warning' | string
 type SearchMode = 'AND' | 'OR'
 type ProductSortDirection = 'asc' | 'desc' | 'name_asc' | 'name_desc'
 type BulkEditMode = 'branch' | 'info' | 'pricing' | 'stock' | null
-type ProductModalMode = 'brands' | 'bulk' | 'cats' | 'form' | 'units' | null
+// 'create_session' is the header step (brand + supplier + branch, entered
+// once) that now fronts product creation -- see CreateProductsSessionModal.
+// 'form' remains the bare product form, still used for EDIT and for the
+// minimized add-product chip's restore.
+type ProductModalMode = 'brands' | 'bulk' | 'cats' | 'create_session' | 'form' | 'units' | null
 type ProductFormTab = 'basic' | 'pricing' | 'stock'
 
 interface BranchStockRow {
@@ -202,8 +234,12 @@ interface ProductRecord {
   cost_price_khr?: number | string | null
   selling_price_usd?: number | string | null
   selling_price_khr?: number | string | null
-  special_price_usd?: number | string | null
-  special_price_khr?: number | string | null
+  // The 2026-09-04 ruling: the tier this app called "VIP" (special_price_*) was
+  // always the WHOLESALE price. Migration 0111 copied those values into
+  // wholesale_price_* and zeroed special_price_*, so the old pair is dead and
+  // this record only knows about the surviving one.
+  wholesale_price_usd?: number | string | null
+  wholesale_price_khr?: number | string | null
   low_stock_threshold?: number | string | null
   out_of_stock_threshold?: number | string | null
   is_active?: boolean | number | null
@@ -265,8 +301,10 @@ type BulkEditForm = Record<string, string | number | boolean | undefined> & {
   qty?: string | number
   selling_price_khr?: string | number
   selling_price_usd?: string | number
-  special_price_khr?: string | number
-  special_price_usd?: string | number
+  // Renamed from special_price_khr/usd with the tier itself (2026-09-04
+  // ruling); the adjust_wholesale toggle below was adjust_special.
+  wholesale_price_khr?: string | number
+  wholesale_price_usd?: string | number
   supplier?: string
   unit?: string
   // Relative price adjustment (see runBulkProductPriceAdjustment).
@@ -274,7 +312,7 @@ type BulkEditForm = Record<string, string | number | boolean | undefined> & {
   adjust_amount?: string | number
   adjust_currency?: string
   adjust_selling?: boolean
-  adjust_special?: boolean
+  adjust_wholesale?: boolean
   adjust_cost?: boolean
   adjust_skip_zero?: boolean
 }
@@ -319,6 +357,33 @@ type ProductApiResponse = Record<string, unknown> & {
   success?: boolean
 }
 
+type MergeDuplicateRequestOptions = { requestId?: string; signal?: AbortSignal; manifest?: LeadingZeroMergeManifest }
+
+type MergeDuplicateProductsResult = ProductApiResponse & {
+  complete?: boolean
+  blockedOnly?: boolean
+  interrupted?: boolean
+  interruptionCode?: 'merge_budget_reached' | 'merge_infrastructure_interrupted' | null
+  stalled?: boolean
+  madeProgress?: boolean
+  mergedGroups?: number
+  mergedProducts?: number
+  undoPendingCount?: number
+  remainingProductsBefore?: number
+  remainingProducts?: number | null
+  maxAdditionalRequests?: number | null
+  processedCaseKeys?: string[]
+  mergeOperationIds?: string[]
+  undoPendingOperationIds?: string[]
+  refusals?: Array<{
+    caseKey?: string
+    mergedId?: number
+    mergedName?: string | null
+    code?: string
+    error?: string
+  }>
+}
+
 type ProductSearchResponse = {
   filters?: Partial<ProductFilterMeta>
   initials?: unknown[]
@@ -346,13 +411,14 @@ type ProductApi = {
   getProductFilters: (query?: Record<string, unknown>) => Promise<Partial<ProductFilterMeta> | undefined>
   getProductsByIds: (ids: number[], options?: Record<string, unknown>) => Promise<ProductRecord[]>
   getUnits: () => Promise<LookupRecord[]>
-  mergeDuplicates: () => Promise<ProductApiResponse | undefined>
-  previewMergeDuplicates: () => Promise<ProductApiResponse | undefined>
+  mergeDuplicates: (options?: MergeDuplicateRequestOptions) => Promise<ProductApiResponse | undefined>
+  previewMergeDuplicates: (options?: { signal?: AbortSignal; scope?: 'leading_zero' }) => Promise<ProductApiResponse | undefined>
   previewZeroQuantityCandidates: (thresholdDays?: number) => Promise<ProductApiResponse | undefined>
   deleteZeroQuantityProducts: (ids: number[]) => Promise<ProductApiResponse | undefined>
   previewWireImages: () => Promise<ProductApiResponse | undefined>
   wireImages: (changes: WireImageChange[]) => Promise<ProductApiResponse | undefined>
   unwireImages: (productIds: number[]) => Promise<ProductApiResponse | undefined>
+  invalidateProductReadCacheForReconciliation: () => Promise<void>
   searchProducts: (query: Record<string, unknown>) => Promise<ProductSearchResponse | ProductRecord[] | undefined>
   transferStock: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
   updateProduct: (id: EntityId, payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
@@ -367,8 +433,12 @@ type ProductsAppContext = {
   exchangeRate: number
   fmtKHR: (value: unknown) => string
   fmtUSD: (value: unknown) => string
+  getPermissionTier: (key: string) => string
   hasPermission: (key: string) => boolean
   khrSymbol: string
+  // Section switching commits through the app's guarded navigation, the
+  // same as every other hub page (see useHubSection below).
+  navigateTo: (page: string, anchor?: string) => void
   notify: (message: string, tone?: NotificationTone) => void
   settings: Record<string, unknown>
   t: (key: string) => string
@@ -465,13 +535,21 @@ const productApi: ProductApi = {
     return []
   },
   getUnits: async () => (await (await loadLookupModule()).getUnits()) as LookupRecord[],
-  mergeDuplicates: async () => toProductApiResponse(await (await loadProductWriteModule()).mergeDuplicateProducts()),
-  previewMergeDuplicates: async () => toProductApiResponse(await (await loadProductWriteModule()).previewMergeDuplicateProducts()),
+  mergeDuplicates: async (options) => {
+    const module = await loadProductWriteModule()
+    const merge = module.mergeDuplicateProducts as (request?: MergeDuplicateRequestOptions) => Promise<unknown>
+    return toProductApiResponse(await merge(options))
+  },
+  previewMergeDuplicates: async (options) => toProductApiResponse(await (await loadProductWriteModule()).previewMergeDuplicateProducts(options)),
   previewZeroQuantityCandidates: async (thresholdDays) => toProductApiResponse(await (await loadProductWriteModule()).previewZeroQuantityCandidates(thresholdDays)),
   deleteZeroQuantityProducts: async (ids) => toProductApiResponse(await (await loadProductWriteModule()).deleteZeroQuantityProducts(ids)),
   previewWireImages: async () => toProductApiResponse(await (await loadProductWriteModule()).previewWireProductImages()),
   wireImages: async (changes) => toProductApiResponse(await (await loadProductWriteModule()).wireProductImages(changes)),
   unwireImages: async (productIds) => toProductApiResponse(await (await loadProductWriteModule()).unwireProductImages(productIds)),
+  invalidateProductReadCacheForReconciliation: async () => {
+    const module = await loadProductReadModule()
+    module.invalidateProductReadCacheForReconciliation()
+  },
   searchProducts: async (query) => {
     const module = await loadProductReadModule()
     return (await module.searchProducts(query as Parameters<ProductReadModule['searchProducts']>[0])) as ProductSearchResponse | ProductRecord[]
@@ -588,15 +666,14 @@ function toLightboxState(value: ReturnType<typeof updateProductLightboxIndex>, f
 // shape/state); a completely separate lightweight view can't accidentally
 // break on a field this restricted role never receives.
 export default function Products() {
-  const { hasPermission } = useProductsApp()
+  const { getPermissionTier, can } = useProductsApp()
   // Mirrors AppContext.tsx's canAccessPage()/the backend's isImageOnlyUser()
   // shape: only the user whose ONE route into this page is
   // 'products_image_only' gets the restricted view. Anyone with real
   // `products` access renders the full editor exactly as before, even if
   // 'products_image_only' also happens to be set on their role --
-  // `hasPermission('products')` covers both the 'full' and 'review' tiers
-  // here (the tier value itself only matters once inside the full editor).
-  const isImageOnlyUser = !hasPermission('products') && hasPermission('products_image_only')
+  // Review users keep the full editor with its existing approval workflow.
+  const isImageOnlyUser = getPermissionTier('products') === 'none' && can('products_image_only', 'view')
   if (isImageOnlyUser) {
     return (
       <Suspense fallback={<div className="page-scroll flex flex-1 items-center justify-center p-8 text-gray-400">...</div>}>
@@ -604,11 +681,658 @@ export default function Products() {
       </Suspense>
     )
   }
-  return <ProductsFullEditor />
+  return can('products', 'view') ? <ProductsFullEditor /> : null
 }
 
+// ---------------------------------------------------------------------------
+// Product row / child row memo boundary (P4-4b item 3)
+// ---------------------------------------------------------------------------
+// renderDesktopProductRow/renderMobileProductCard below used to be plain
+// closures invoked directly inside ProductsListSurface's .map() for every
+// visible row, on every render of this ~5500-line component -- a totally
+// unrelated state change (a filter chip, a different section's toggle, an
+// in-flight duplicate merge elsewhere) still rebuilt every row's JSX from
+// scratch, because there was no component boundary for React to bail out
+// at. Two extracted, memoized components below give React exactly that
+// boundary (same fix POS.tsx's ProductCard got in
+// hotRowMemoBoundaries.test.ts): a row only re-renders when its own
+// `product`/`indented` or the shared `ctx` object actually changes.
+//
+// `ctx` bundles every value the row bodies read from Products.tsx's own
+// scope (previously plain closures over them) and is rebuilt via useMemo
+// with the same dependency list renderDesktopProductRow/
+// renderMobileProductCard already declared (see productRowCtx below) --
+// it only changes identity when one of those dependencies actually
+// changes. The row bodies themselves are unchanged from before: each
+// component destructures `ctx` back into the same local names the body
+// already used, so no line inside either JSX tree had to change.
+type ProductRowCtx = {
+  branchFilter: string
+  branchNameById: Map<string, unknown>
+  catMap: Record<string, LookupRecord>
+  copy: ReturnType<typeof useCopyFloat>
+  exchangeRate: number
+  fmtKHR: (value: unknown) => string
+  fmtUSD: (value: unknown) => string
+  getBranchQty: (product: Record<string, unknown>, branchId: unknown) => unknown
+  getBranchSummaryLabel: (product: Record<string, unknown>) => string
+  getBrandColor: (brandName: unknown) => string
+  getLongPressState: (rowId: number) => LongPressState
+  isSelectionScopeFullySelected: (ids: EntityId[]) => boolean
+  isSelectionScopePartiallySelected: (ids: EntityId[]) => boolean
+  openLightbox: (gallery: unknown, startIndex?: number, title?: string) => void
+  promotionRules: PromotionRule[]
+  lowStockConfig: LowStockConfig
+  renderMetaPill: (item: { className?: string; color?: string; key: string; label?: unknown } | null) => ReactNode
+  renderUnitChip: (unitName: string | undefined) => ReactNode
+  selectionModeActive: boolean
+  t: (key: string) => string
+  toggleSelectionScope: (ids: EntityId[], checked: boolean) => void
+  tr: (key: string, fallbackEn?: string, fallbackKm?: string) => string
+  exactDuplicateIndex: Map<number, ExactDuplicateInfo>
+  dupResolverBusyKey: string | null
+  canMergeDuplicates: boolean
+  handleDuplicateKeepThis: (keepId: number, info: ExactDuplicateInfo) => Promise<void>
+  handleDuplicateKeepBoth: (info: ExactDuplicateInfo) => Promise<void>
+  navigateTo: (page: string, anchor?: string) => void
+  setDetailProduct: (product: ProductRecord | null) => void
+}
+
+function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { product: ProductRecord; indented?: boolean; ctx: ProductRowCtx }) {
+  const {
+    branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD,
+    getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState,
+    isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox,
+    promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive,
+    t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
+    canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
+    setDetailProduct,
+  } = ctx
+    const productId = p.id ?? 0
+    const productName = String(p.name || '')
+    const sellingUsd = Number(p.selling_price_usd || 0)
+    const sellingKhr = Number(p.selling_price_khr || 0)
+    // Was specialUsd/specialKhr off special_price_*, rendered as "VIP". The
+    // 2026-09-04 ruling deleted that tier: it was the wholesale price all
+    // along, and migration 0111 moved the very same numbers into
+    // wholesale_price_*, so this row keeps showing the same figures under the
+    // name they should always have had.
+    const wholesaleUsd = Number(p.wholesale_price_usd || 0)
+    const wholesaleKhr = Number(p.wholesale_price_khr || 0)
+    const {
+      branchSummaryLabel,
+      compactMeta,
+      marginPct,
+      marginUsd,
+      promotion,
+      costKhr,
+      costUsd,
+      qty,
+      selectedBranchName,
+      stockStatusTextClass,
+    } = buildProductRowDisplayState(p, {
+      branchFilter,
+      branchNameById,
+      catMap,
+      exchangeRate,
+      getBranchQty,
+      getBranchSummaryLabel,
+      getBrandColor,
+      t,
+      promotionRules,
+      lowStock: lowStockConfig,
+    })
+    const thumbnailState = buildProductThumbnailState(p)
+    // A merged row (see mergeSameDetailRows) represents multiple real
+    // product ids -- selecting/checking it needs to act on all of them
+    // together, not just the lead id, or a bulk delete would silently
+    // leave the other branch-duplicate rows behind. Falls back to the
+    // single id for ordinary, unmerged rows.
+    const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
+    const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
+    // Exact duplicate (same real barcode + same name, per the server sweep)?
+    // If so, the row's normal click-to-detail "Manage/Product" flow is
+    // suppressed (user spec item #3) -- the inline resolver below is the only
+    // action until it's kept-one/kept-both.
+    const dupInfo = findRowDuplicateInfo(exactDuplicateIndex, productId, rowScopeIds)
+    // Long-press/click-hold enters select mode by selecting this row;
+    // once select mode is active (selectionModeActive, derived from
+    // selectedIds.size), the row's own onClick below toggles selection
+    // directly and these handlers are skipped entirely (disabled), so a
+    // plain click never has to wait out the hold once selecting is live.
+    // Not a hook -- see utils/longPress.ts -- this row's persistent
+    // timer slot comes from the shared Map keyed by product id.
+    const rowLongPressState = getLongPressState(Number(productId))
+    const longPress = createLongPressHandlers(rowLongPressState, {
+      disabled: selectionModeActive,
+      onLongPress: () => toggleSelectionScope(rowScopeIds, true),
+      onClick: (target) => {
+        if (dupInfo) return
+        const copyTarget = (target as Element | null)?.closest?.(COPY_SELECTOR)
+        if (copyTarget) {
+          deferCopySurfaceAction(copyTarget, () => setDetailProduct(p))
+          return
+        }
+        setDetailProduct(p)
+      },
+    })
+    // The native `click` that follows this same press-release still
+    // fires once selectionModeActive flips true and swaps this element's
+    // onClick out from under it -- consumeLongPressClick() eats exactly
+    // that one ghost click instead of letting it immediately toggle the
+    // row back off. See utils/longPress.ts's own comment on
+    // consumeLongPressClick for the full mechanism.
+    const handleRowClick = (event: ReactMouseEvent) => {
+      if (consumeLongPressClick(rowLongPressState)) return
+      const copyTarget = (event.target as Element | null)?.closest?.(COPY_SELECTOR)
+      if (copyTarget) {
+        deferCopySurfaceAction(copyTarget, () => toggleSelectionScope(rowScopeIds, !rowSelected))
+        return
+      }
+      toggleSelectionScope(rowScopeIds, !rowSelected)
+    }
+    return (
+      <tr
+        key={productId}
+        data-product-jump-id={productId}
+        // The row's own click IS the surface here: it opens the product, or
+        // toggles selection once select mode is live. `data-clickable` is how
+        // this app already declares that (the dense tables in Stock Changes,
+        // Stock-in Sessions, Returns and Fees all carry it), and the shared
+        // text-affordance controller reads it to decide whether a copyable
+        // value inside the row may take that click. It may not. Declaration
+        // only: the CSS keyed on this attribute is scoped to
+        // `.dense-data-table`, which this table is not.
+        data-clickable="true"
+        className={`table-row cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}
+        onClick={selectionModeActive ? handleRowClick : undefined}
+        {...(selectionModeActive ? {} : longPress)}
+      >
+        <td className={`${selectionModeActive ? 'px-2' : 'px-0'} py-2`} onClick={(e) => { e.stopPropagation(); if (selectionModeActive) toggleSelectionScope(rowScopeIds, !rowSelected) }}>
+          {selectionModeActive ? (
+            <input
+              type="checkbox"
+              className="rounded"
+              checked={rowSelected}
+              ref={(node) => {
+                if (node) node.indeterminate = !rowSelected && isSelectionScopePartiallySelected(rowScopeIds)
+              }}
+              onChange={(event) => toggleSelectionScope(rowScopeIds, event.target.checked)}
+            />
+          ) : null}
+        </td>
+        {/* A grouped CHILD row shows no image.
+            A name group is ONE product and carries ONE set of photos, drawn
+            once on the group header by renderGroupThumbnail -- repeating it
+            per child implies each row has its own, which is exactly the
+            model the group replaced.
+            renderMobileProductCard already did this; the desktop TABLE row
+            did not, which is why the duplicate thumbnails and the resulting
+            ragged left edge only appeared on large screens.
+            The cell itself still renders (a <td> has to exist for the column
+            to line up) -- it is the image inside that is dropped, so every
+            child row's name starts at exactly the same x as the group
+            title's. */}
+        <td className="px-2 py-2">
+          {indented ? null : (
+            <button
+                type="button"
+                className={`block rounded-lg ${thumbnailState.hasImage ? 'cursor-zoom-in' : 'cursor-default'}`}
+                aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
+                aria-disabled={!thumbnailState.hasImage}
+                onMouseDown={(event) => event.stopPropagation()}
+                onMouseUp={(event) => event.stopPropagation()}
+                onTouchStart={(event) => event.stopPropagation()}
+                onTouchEnd={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  if (thumbnailState.hasImage) openLightbox(thumbnailState.gallery, 0, productName)
+                }}
+              >
+                {thumbnailState.hasImage
+                  ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-12 w-12 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" />
+                  : <ProductImagePlaceholder className="h-12 w-12 rounded-lg" compact />}
+              </button>
+          )}
+        </td>
+        {/* Name rail (col 3): child rows align EXACTLY with the group
+            title -- no text indent. A child row leaves its image cell empty
+            (see the image <td> above), and that empty image column is what
+            visually sets the group title's thumbnail apart from its
+            children, so an extra text indent on top would double the
+            offset. The category band sits one column LEFT of this, on the
+            image rail (see ProductsListSurface's geometry note). */}
+        <td className={`${ROW_TEXT_GUTTER} py-2`}>
+          {/* Name cell previously forced align-top on the <td> itself, so
+              a row with no meta pills (the common case) sat pinned to the
+              top of the row instead of vertically centered like every
+              other cell (image, cost, selling, margin, stock all default-
+              center) -- reported as the name reading "much higher" than
+              the thumbnail next to it. Centering now happens on the whole
+              block (pills + name together, via this wrapping flex column)
+              instead of on the <td>, so a row WITH pills still stacks them
+              above the name correctly, it just centers as one unit
+              vertically within the row rather than pinning to the top. */}
+          <div className="flex min-h-10 flex-col justify-center">
+            {compactMeta.length ? (
+              <div className="mb-1 flex max-w-[18rem] flex-wrap gap-1 lg:max-w-none lg:flex-nowrap lg:overflow-hidden">
+                {compactMeta.map((item) => {
+                  const pill = renderMetaPill(item ? {
+                    key: String(item.key),
+                    label: String(item.label || ''),
+                    color: typeof item.color === 'string' ? item.color : undefined,
+                    className: typeof item.className === 'string' ? item.className : undefined,
+                  } : null)
+                  // Barcode and brand are two of the four copyable product
+                  // fields. renderMetaPill stringifies its label, so the
+                  // affordance cannot go inside the pill -- this is the same
+                  // wrapper ProductRowParts uses for the supplier pill: an
+                  // inline-flex span with no box of its own, so the meta line
+                  // lays out exactly as it did.
+                  const metaKey = String(item?.key || '')
+                  if (!pill || (metaKey !== 'barcode' && metaKey !== 'brand' && metaKey !== 'category')) return pill
+                  const focus = metaKey === 'brand'
+                    ? { brand: String(item?.label || '') }
+                    : metaKey === 'category'
+                      ? { category: String(item?.label || '') }
+                      : undefined
+                  return (
+                    <span key={`${metaKey}-copy`} className={`inline-flex min-w-0 ${metaKey === 'barcode' ? 'shrink-0' : 'max-w-full'}`} {...copy(item?.label)}>
+                      <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={metaKey === 'barcode' ? String(item?.label || '') : undefined} focus={focus} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+                        {pill}
+                      </EntityLink>
+                    </span>
+                  )
+                })}
+              </div>
+            ) : null}
+            <div className="flex min-w-0 items-center gap-1.5">
+              {/* Standalone rows (indented === false, i.e. not a child under
+                  an expanded group) now match the group header's own title
+                  weight (font-semibold) instead of font-medium, so a
+                  standalone product reads as the same visual tier as a group
+                  row rather than one step below it -- per the Aug 19 2026
+                  ask. Child rows under a group keep font-medium, same as
+                  before. */}
+              {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+              <div {...getKhmerTextProps(productName, `min-w-0 text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)} {...copy(productName)}>
+                <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+                  <ProductNameRail name={productName} />
+                </EntityLink>
+              </div>
+            </div>
+            {dupInfo ? (
+              <DuplicateResolverControl
+                tr={tr}
+                memberCount={dupInfo.members.length}
+                busy={dupResolverBusyKey === dupInfo.key}
+                disabled={!canMergeDuplicates}
+                onKeepThis={() => void handleDuplicateKeepThis(Number(productId), dupInfo)}
+                onKeepBoth={() => void handleDuplicateKeepBoth(dupInfo)}
+              />
+            ) : null}
+          </div>
+        </td>
+        {/* border-l here (freed-up space between the Name and Details
+            columns) instead of a whole new column -- per the Aug 19 2026
+            ask for a divider before the details column. */}
+        <td className="border-l border-gray-100 px-3 py-2 align-top dark:border-gray-700">
+          <ProductDetailsCell
+            product={p}
+            promotion={promotion}
+            branchLabel={String(branchSummaryLabel || '')}
+            selectedBranchName={selectedBranchName ? String(selectedBranchName) : ''}
+            selectedBranchId={branchFilter}
+            renderMetaPill={renderMetaPill}
+            tr={tr}
+            fmtUSD={fmtUSD}
+            navigateTo={navigateTo}
+          />
+        </td>
+        <td className="px-3 py-2 text-right col-highlight-red">
+          <div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</div>
+          {costKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(costKhr)}</div>}
+        </td>
+        <td className="px-3 py-2 text-right col-highlight-green">
+          <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>
+          {sellingKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(sellingKhr)}</div>}
+          {wholesaleUsd > 0 || wholesaleKhr > 0 ? (
+            <div className="mt-0.5 text-[10px] text-primary-600 dark:text-primary-400">
+              {fmtUSD(wholesaleUsd || sellingUsd)}
+              {wholesaleKhr > 0 ? ` / ${fmtKHR(wholesaleKhr)}` : ''}
+            </div>
+          ) : null}
+          {promotion.active ? (
+            <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
+              {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
+            </div>
+          ) : null}
+        </td>
+        <td className="px-3 py-2 text-right">
+          {costUsd > 0 && sellingUsd > 0
+            ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-blue-500/80 dark:text-blue-400/80">{marginPct.toFixed(1)}%</div></div>
+            : <span className="text-gray-300">N/A</span>}
+        </td>
+        <td className="px-3 py-2 text-right">
+          {/* Stock status convention (this session): the qty+unit value
+              itself is colored (red/yellow/green) instead of showing a
+              separate "In"/"Low"/"Out" badge underneath -- the badge is
+              still shown in the click-to-view-details panel (its own
+              "Status" row, see ProductDetailModal.tsx), just not
+              repeated here in the table. */}
+          {/* Was a plain inline-flex div -- the unit chip (whitespace-nowrap,
+              shrink-0) had nowhere to go but past the cell's right edge
+              once the qty number plus a longer/Khmer unit name didn't both
+              fit on one line ("stock qty overflowing its container" from
+              the Aug 19 2026 ask). flex-wrap lets the chip drop to its own
+              line inside the same right-aligned cell instead of spilling
+              out of it. */}
+          <div className={`flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 font-bold ${stockStatusTextClass}`}>
+            <span>{String(qty || 0)}</span>
+            {renderUnitChip(typeof p.unit === 'string' ? p.unit : undefined)}
+          </div>
+        </td>
+      </tr>
+    )
+}
+
+/** Memoized: see the file-level comment above ProductRowCtx. */
+const ProductDesktopRow = memo(ProductDesktopRowComponent)
+
+function ProductMobileCardComponent({ product: p, indented = false, ctx }: { product: ProductRecord; indented?: boolean; ctx: ProductRowCtx }) {
+  const {
+    branchFilter, catMap, copy, exchangeRate, fmtUSD,
+    getBranchQty, getBrandColor, getLongPressState,
+    isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox,
+    promotionRules, lowStockConfig, renderUnitChip, selectionModeActive,
+    t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
+    canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
+    setDetailProduct,
+  } = ctx
+    const productId = p.id ?? 0
+    const productName = String(p.name || '')
+    const brandName = String(p.brand || '')
+    const barcode = String(p.barcode || '')
+    const sellingUsd = Number(p.selling_price_usd || 0)
+    // Same re-point as the desktop row: the "VIP" tier is deleted (2026-09-04
+    // ruling) and wholesale_price_usd now carries the number it used to.
+    const wholesaleUsd = Number(p.wholesale_price_usd || 0)
+    const unitName = typeof p.unit === 'string' ? p.unit : undefined
+    const {
+      promotion,
+      costUsd,
+      qty,
+      stockStatusTextClass,
+    } = buildProductRowDisplayState(p, {
+      branchFilter,
+      exchangeRate,
+      getBranchQty,
+      t,
+      promotionRules,
+      lowStock: lowStockConfig,
+    })
+    const thumbnailState = buildProductThumbnailState(p)
+    const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
+    const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
+    // Exact duplicate? -> suppress click-to-detail, show the inline resolver
+    // (same rule as renderDesktopProductRow; user spec item #3).
+    const dupInfo = findRowDuplicateInfo(exactDuplicateIndex, productId, rowScopeIds)
+
+    // Grouped child rows (indented) share the group's single merged card
+    // (wrapper rendered by ProductsListSurface) instead of each getting its
+    // own boxed "card" -- a thin top divider separates rows within the
+    // group instead, matching Inventory's mobile grouped-row treatment
+    // (InventoryProductsSurface.tsx) for parity between the two pages.
+    // Ungrouped single products are untouched, still their own card.
+    const rowClassName = indented
+      ? `min-w-0 max-w-full cursor-pointer select-none border-t border-gray-100 px-3 py-2.5 dark:border-gray-800 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
+      : `card min-w-0 max-w-full cursor-pointer select-none px-3 py-2.5 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
+
+    // Same long-press/select-mode rules as renderDesktopProductRow -- see
+    // its comment for the full reasoning. Not a hook; shares the same
+    // per-row-id timer-slot Map (a row's product id is the same whether
+    // it's rendered on the desktop table or here).
+    const rowLongPressState = getLongPressState(Number(productId))
+    const longPress = createLongPressHandlers(rowLongPressState, {
+      disabled: selectionModeActive,
+      onLongPress: () => toggleSelectionScope(rowScopeIds, true),
+      onClick: (target) => {
+        if (dupInfo) return
+        const copyTarget = (target as Element | null)?.closest?.(COPY_SELECTOR)
+        if (copyTarget) {
+          deferCopySurfaceAction(copyTarget, () => setDetailProduct(p))
+          return
+        }
+        setDetailProduct(p)
+      },
+    })
+    // Same ghost-click guard as renderDesktopProductRow -- see its
+    // comment and utils/longPress.ts's consumeLongPressClick for why
+    // this is needed, not just belt-and-suspenders.
+    const handleRowClick = (event: ReactMouseEvent) => {
+      if (consumeLongPressClick(rowLongPressState)) return
+      const copyTarget = (event.target as Element | null)?.closest?.(COPY_SELECTOR)
+      if (copyTarget) {
+        deferCopySurfaceAction(copyTarget, () => toggleSelectionScope(rowScopeIds, !rowSelected))
+        return
+      }
+      toggleSelectionScope(rowScopeIds, !rowSelected)
+    }
+
+    return (
+      <div
+        key={productId}
+        data-product-jump-id={productId}
+        // Same declaration as renderDesktopProductRow -- see its comment.
+        data-clickable="true"
+        className={rowClassName}
+        onClick={selectionModeActive ? handleRowClick : undefined}
+        {...(selectionModeActive ? {} : longPress)}
+      >
+        {/* No indent wrapper here anymore -- grouped (indented) rows already
+            read as "part of the group" from the shared card/divider treatment
+            above (see rowClassName just above: a plain top border between
+            rows sharing one card, vs. a standalone product's own separate
+            `card`). An extra left-padding indent on top of that was
+            redundant, and it also meant a child row's text started to the
+            right of the group title above it instead of lining up with it. */}
+        <div className="flex min-w-0 items-start gap-3">
+          {selectionModeActive ? (
+            <input
+              type="checkbox"
+              className="rounded mt-1 flex-shrink-0 cursor-pointer"
+              checked={rowSelected}
+              ref={(node) => {
+                if (node) node.indeterminate = !rowSelected && isSelectionScopePartiallySelected(rowScopeIds)
+              }}
+              onChange={(e) => { e.stopPropagation(); toggleSelectionScope(rowScopeIds, e.target.checked) }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : null}
+          {/* Child rows under a group lose the image slot entirely now --
+              not just a shrunk spacer -- per explicit follow-up direction
+              on the Aug 19 2026 "Image 1" note (Part 208 had only shrunk
+              this to a slim w-3 spacer; that still reserved dead space for
+              an image that will never show here, since the group header's
+              renderGroupThumbnail already shows one unified image for the
+              whole name-group). Skipping the wrapper `<div>` outright
+              (rather than rendering it empty) lets the parent's gap-3
+              close the space up instead of leaving a gap-sized empty box. */}
+          {indented ? null : (
+            // A compact fixed square keeps every card's image footprint equal.
+            // The former self-stretch/min-h-[5rem] slot let image content set
+            // the card height, producing visibly uneven rows.
+            <button
+              type="button"
+              className="relative flex-shrink-0 self-stretch rounded-xl text-left"
+              aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
+              aria-disabled={!thumbnailState.hasImage}
+              onMouseDown={(event) => event.stopPropagation()}
+              onMouseUp={(event) => event.stopPropagation()}
+              onTouchStart={(event) => event.stopPropagation()}
+              onTouchEnd={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
+                if (thumbnailState.hasImage) openLightbox(thumbnailState.gallery, 0, productName)
+              }}
+            >
+              {thumbnailState.hasImage
+                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-12 w-12 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" />
+                : <ProductImagePlaceholder className="h-12 w-12 rounded-xl" />}
+              <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
+            </button>
+          )}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+                <div {...getKhmerTextProps(productName, 'min-w-0 text-sm font-semibold text-gray-900 dark:text-white')} {...copy(productName)}>
+                  <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+                    <ProductNameRail name={productName} />
+                  </EntityLink>
+                </div>
+              </div>
+              {/* Batch count rides the name row as a small YELLOW badge
+                  (user, Aug 30: "add number of batches yellow next to the
+                  standalone product rows and child rows"); the truncating
+                  name above can never touch it. */}
+              {Number((p as { batch_count?: number }).batch_count || 0) > 0 ? (
+                <span
+                  className="mt-0.5 inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                  title={`${Number((p as { batch_count?: number }).batch_count || 0)} ${t('batches') || 'received dates'}`}
+                >
+                  {Number((p as { batch_count?: number }).batch_count || 0)}
+                </span>
+              ) : null}
+            </div>
+            {/* min-h matches one chip's height (text-[10px] line ~15px +
+                py-0.5 = 19px) so a product with NO barcode/brand keeps the
+                price/qty line at the same vertical spot as its neighbours
+                instead of the row sliding up into the gap (user, Aug 30:
+                "instead of moving the price and quantity row just keep it
+                constant there"). */}
+            <div className="mt-0.5 flex min-h-[1.1875rem] flex-wrap gap-1">
+              {/* Small-screen default card shows the BARCODE here in place of
+                  the category (user, Aug 29: "hide the category inside the
+                  details ... replace the outside with barcode"). Category is
+                  one tap away in the detail view; a scannable code is more
+                  useful on the card face. Brand stays. */}
+              {barcode ? (
+                <span
+                  className="inline-flex shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-1 py-0.5 font-mono text-[10px] tracking-tight text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  {...copy(barcode)}
+                  title={barcode}
+                >
+                    <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={barcode} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{barcode}</EntityLink>
+                </span>
+              ) : null}
+              {brandName ? (
+                <span
+                  className={`inline-block max-w-[4.5rem] truncate rounded-full px-1 py-0.5 text-[10px] font-medium sm:max-w-[6rem] ${getBrandColor(brandName) ? '' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
+                  style={getBrandColor(brandName) ? {
+                    background: getBrandColor(brandName),
+                    color: getContrastingTextColor(getBrandColor(brandName)),
+                  } : undefined}
+                  {...copy(brandName)}
+                  title={brandName}
+                >
+                  <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={brandName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{brandName}</EntityLink>
+                </span>
+              ) : null}
+            </div>
+            {/* Price/stock lines moved in here, inside the same flex-1 column
+                as the name/category/brand above it, instead of living as a
+                sibling block with its own hand-tuned `pl-[5.35rem]` meant to
+                eyeball-match the image width + gap. That fixed value didn't
+                actually match the flex layout's real offset, so this line
+                sat further right than the category/brand row above it. Being
+                a normal child of the same column means it now lines up
+                exactly, with no hardcoded offset to keep in sync by hand.
+
+                ONE row, only one row (user, Aug 28 2026, with a screenshot
+                of the two-row card): every price AND the stock qty share a
+                single line. This SUPERSEDES the earlier "selling price
+                should get its own row" split from the Aug-25 backlog --
+                the user saw the split live and rejected it, so don't
+                re-split without a fresh ask. Selling (green) leads and
+                keeps its bigger weight so it still reads first; special/
+                discount figures ride beside it; then cost (red) and the
+                status-colored qty+unit, "|"-separated like before.
+
+                N36 (owner, Sep 6 2026): "the qty unit is being pushed to next
+                row if selling price, wholesale price, cost price is fully
+                there. 2 digits, if 3 even worse ... keep it visible compact
+                one line." flex-wrap WAS the overflow protection, and at 375px
+                with three full prices it is what fires -- see the width
+                arithmetic on `.price-strip` in styles/main.css. The row is
+                now nowrap and pays for it in divider blanks and one step of
+                digit size (tabular-nums, tighter tracking) rather than in a
+                second line; no value is dropped or hidden. */}
+            <div className="price-strip mt-1">
+              <span className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
+              {wholesaleUsd > 0 ? (
+                // The wholesale price (wholesale_price_usd). This used to read
+                // special_price_usd and be labelled "VIP"; the 2026-09-04
+                // ruling established that tier was never a VIP price and
+                // deleted it, so the card shows the same figure -- migration
+                // 0111 moved the values across -- as wholesale. On the
+                // small-screen default
+                // card it shows as JUST the number, colour-coded (primary/blue)
+                // with no text label -- the colour distinguishes it from selling
+                // (green) and cost (red) on this compact one-line price row
+                // (user, Aug 29 2026). A "|" separates it from the selling price
+                // beside it, matching the cost/qty dividers on this same row
+                // (user, Aug 31). The desktop table row keeps its own labelling.
+                <>
+                  <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
+                  <span className="font-medium text-primary-700 dark:text-primary-400">
+                    {fmtUSD(wholesaleUsd)}
+                  </span>
+                </>
+              ) : null}
+              {promotion.active ? (
+                <span className="font-medium text-rose-600 dark:text-rose-300">
+                  {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
+                </span>
+              ) : null}
+              <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
+              <span className="text-red-600">{fmtUSD(costUsd)}</span>
+              <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
+              {/* Colored by stock status (red/yellow/green) instead of the
+                  separate "In"/"Low"/"Out" badge this row used to show up
+                  in its header line -- see stockStatusTextClass above. */}
+              <span className={withKhmerTextClass(unitName, `price-strip-qty inline-flex items-center font-medium ${stockStatusTextClass}`)}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
+            </div>
+            <ProductBatchPreview product={p} branchId={branchFilter} tr={tr} compact />
+            {/* Description is intentionally NOT shown on the small-screen list
+                card (user, Sep 1 2026: "only hide in the default view, keep it
+                in click-to-view details") -- it stays available in the product
+                detail modal opened on tap (ProductDetailModal). */}
+            {dupInfo ? (
+              <DuplicateResolverControl
+                tr={tr}
+                memberCount={dupInfo.members.length}
+                busy={dupResolverBusyKey === dupInfo.key}
+                disabled={!canMergeDuplicates}
+                onKeepThis={() => void handleDuplicateKeepThis(Number(productId), dupInfo)}
+                onKeepBoth={() => void handleDuplicateKeepBoth(dupInfo)}
+              />
+            ) : null}
+          </div>
+        </div>
+      </div>
+    )
+}
+
+/** Memoized: see the file-level comment above ProductRowCtx. */
+const ProductMobileCard = memo(ProductMobileCardComponent)
+
 function ProductsFullEditor() {
-  const { can, t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useProductsApp()
+  const { can, t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate, getPermissionTier, hasPermission, navigateTo } = useProductsApp()
+  // Settings > Stock Alerts. One config for the badges on every row, the Low
+  // filter pill and the same-page re-filter -- so the pill and the badge can
+  // never disagree about which rows are low.
+  const lowStockConfig = useLowStockConfig()
   // Per-action gates for this page's toolbar. Resolved once here rather
   // than inline in the JSX so the header block below stays readable and
   // every control's rule is visible in one place. See
@@ -618,6 +1342,7 @@ function ProductsFullEditor() {
   const canExportProducts = can('products', 'export')
   const canManageLookups = can('products', 'manage_lookups')
   const canMergeDuplicates = can('products', 'merge_duplicates')
+  const canRemoveProduct = can('products', 'delete')
   const canZeroQuantityCleanup = can('products', 'zero_qty_cleanup')
   // Same action the per-product image uploader is gated on: wiring photos
   // in bulk is the same authority as attaching one by hand, just applied
@@ -664,43 +1389,85 @@ function ProductsFullEditor() {
   const [promoFilter, setPromoFilter] = useState('all')
   // 9.2: 'all' | 'auto' -- server-side facet over auto_merged_count.
   const [mergedFilter, setMergedFilter] = useState('all')
+  // OFF by default, and deliberately so. Collapsing a same-name group down to
+  // its rows that still have stock made a genuinely out-of-stock row
+  // impossible to find, open, edit or restock from this page whenever it
+  // shared a name group -- a data-visibility removal with no way to see what
+  // went. It is now an explicit choice inside the FilterMenu ("Rows" ->
+  // "Hide out-of-stock rows"), and every group it shortens says how many rows
+  // it hid.
+  const [hideZeroStockRows, setHideZeroStockRows] = useState(false)
   const [promotionRules, setPromotionRules] = useState<PromotionRule[]>([])
-  // The Products section has no date filter. Keep these empty compatibility
-  // values for the shared query/export helpers, so product results are never
-  // silently restricted to the current day.
-  const [createdDateFrom, setCreatedDateFrom] = useState('')
-  const [createdDateTo, setCreatedDateTo] = useState('')
   // Y15: the page is chip-sectioned like Promotions -- a switcher in the
   // header flips between the product listing and the Stock Changes ledger,
   // which used to be a folded card at the bottom of the same scroll.
-  const [activeProductSection, setActiveProductSection] = useState<'products' | 'stock_changes' | 'stock_in_sessions' | 'duplicates'>('products')
+  //
+  // N7: the section list now comes from getHubDestinations('products'), the
+  // same table the compact home sheet reads, so the sheet can never offer a
+  // section this page would refuse to render (and vice versa). The active
+  // section rides useHubSection like every other hub page: a tap commits
+  // through the guarded navigateTo, the URL anchor identifies the body, and
+  // a section chosen in the compact sheet lands here instead of dropping the
+  // page back on its default section.
+  const productSectionTabs = useMemo(
+    () => getHubDestinations('products', { getPermissionTier, hasPermission, can }),
+    [getPermissionTier, hasPermission, can],
+  )
+  const productSectionIds = useMemo(() => productSectionTabs.map((section) => section.id), [productSectionTabs])
+  const [activeProductSection, setActiveProductSection] = useHubSection<'products' | 'stock_changes' | 'stock_in_sessions' | 'duplicates'>('products', 'products', productSectionIds, navigateTo)
+  // The compact home sheet owns section switching in "pages" mode, so the
+  // page must not draw a second row there -- the same rule HubSectionNav
+  // applies for the six hubs that delegate their row to it.
+  const layeredSectionNav = useLayeredSectionNav(settings?.ui_mobile_section_nav)
   // Stock Changes section's header-row actions (Adjust menu + ledger export),
   // registered up by StockChangeSection so they render on THIS page's header
   // row beside info/History/Manage (user, Aug 31). null when that section is
   // not mounted, so the header controls disappear with it.
   const [ledgerActions, setLedgerActions] = useState<StockChangeHeaderActions | null>(null)
-  // The Add menu's merged Add Stock flow (the shipment receiver). Add New
-  // Product keeps the existing `modal === 'form'` path.
-  const [addStockOpen, setAddStockOpen] = useState(false)
+  // Both Add-menu choices now land in one session shell; the initiating
+  // choice only decides which mode is selected first.
+  const [createSessionInitialMode, setCreateSessionInitialMode] = useState<'new' | 'existing'>('new')
   // Dashboard stock-card drills land HERE now (the Branches hub's redundant
   // Products slice was removed, Aug 31): BranchesHubPage forwards the old
   // inventory-focus payload as this key, carrying the stock filter.
   useEffect(() => {
     if (!isActive || typeof window === 'undefined') return
-    const raw = window.sessionStorage.getItem('bos:dashboard:products-focus')
-    if (!raw) return
-    try {
-      const payload = JSON.parse(raw) as { stockFilter?: unknown }
-      const stockState = String(payload?.stockFilter || '')
-      if (stockState === 'low' || stockState === 'out' || stockState === 'in_stock') {
-        setStockFilter(stockState)
+    const consumeFocus = () => {
+      // Touching window.sessionStorage throws where site data is blocked
+      // (iOS Safari "Block All Cookies"), and this runs on every activation
+      // of the page. Guarded like the twin handoff in BranchesHubPage.tsx:
+      // no queued focus just leaves the current view state alone.
+      let raw: string | null = null
+      try { raw = window.sessionStorage.getItem('bos:dashboard:products-focus') } catch { return }
+      if (!raw) return
+      try {
+        const payload = JSON.parse(raw) as { stockFilter?: unknown; search?: unknown; unit?: unknown; brand?: unknown; category?: unknown }
+        const stockState = String(payload?.stockFilter || '')
+        if (stockState === 'low' || stockState === 'out' || stockState === 'in_stock') setStockFilter(stockState)
+        const focusSearch = String(payload?.search || '').trim()
+        if (focusSearch) setSearch(focusSearch)
+        const focusUnit = String(payload?.unit || '').trim()
+        if (focusUnit) setUnitFilter(focusUnit)
+        const focusBrand = String(payload?.brand || '').trim()
+        if (focusBrand) {
+          setBrandFilter(new Set([focusBrand]))
+          setSearch('')
+        }
+        const focusCategory = String(payload?.category || '').trim()
+        if (focusCategory) {
+          setCatFilter(new Set([focusCategory]))
+          setSearch('')
+        }
+        setActiveProductSection('products')
+      } catch {
+        // Malformed handoff -- keep the current view state.
+      } finally {
+        try { window.sessionStorage.removeItem('bos:dashboard:products-focus') } catch { /* nothing to clear if the store is unusable */ }
       }
-      setActiveProductSection('products')
-    } catch {
-      // Malformed handoff -- keep the current view state.
-    } finally {
-      window.sessionStorage.removeItem('bos:dashboard:products-focus')
     }
+    consumeFocus()
+    window.addEventListener('bos:entity-focus', consumeFocus)
+    return () => window.removeEventListener('bos:entity-focus', consumeFocus)
   }, [isActive])
   const [productSortDirection, setProductSortDirection] = useState<ProductSortDirection>('name_asc')
   const [search,       setSearch]       = useState('')
@@ -755,22 +1522,97 @@ function ProductsFullEditor() {
   // closed the modal without resetting it, and the next Add/Edit that
   // didn't pass a tab opened on the stale Stock section.
   const [formInitialTab, setFormInitialTab] = useState<ProductFormTab>('basic')
-  // F3 slice 2: a minimized add-product chip restores here -- create mode,
-  // slice 1's draft repopulates the form.
+  const [identityReviewProductIds, setIdentityReviewProductIds] = useState<readonly [number, number] | null>(null)
+  // Minimized create flows restore here. Each modal's scoped draft repopulates
+  // its own state, while this host rechecks the current action grant before it
+  // reopens a write surface.
   useEffect(() => {
-    const open = () => { setSelected(null); setFormInitialTab('basic'); setModal('form') }
-    if (consumePendingRestore('add_product')) open()
+    const open = (kind: MinimizedWorkKind, mode?: 'new' | 'existing') => {
+      setSelected(null)
+      setFormInitialTab('basic')
+      if (kind === 'create_products_session' && mode) setCreateSessionInitialMode(mode)
+      setModal(kind === 'create_products_session' ? 'create_session' : 'form')
+    }
+    const restore = (kind: 'add_product' | 'create_products_session', entry: MinimizedWorkEntry | null | undefined) => {
+      const payload = entry?.payload
+      const sessionMode = payload?.mode === 'new' || payload?.mode === 'existing' ? payload.mode : undefined
+      const rawSessionRequirements = Array.isArray(payload?.requiredPermissions) ? payload.requiredPermissions : []
+      const sessionRequirements = rawSessionRequirements.filter((required): required is { permissionKey: 'products' | 'inventory'; actionKey: 'add' | 'adjust' } => (
+        !!required && typeof required === 'object'
+        && ((required.permissionKey === 'products' && required.actionKey === 'add')
+          || (required.permissionKey === 'inventory' && required.actionKey === 'adjust'))
+      ))
+      const allowed = kind === 'add_product'
+        ? canAddProduct
+        : Boolean(entry && sessionMode && sessionRequirements.length === rawSessionRequirements.length && sessionRequirements.length
+          && sessionRequirements.every((required) => can(required.permissionKey, required.actionKey)))
+      if (!allowed || (entry && !canRestoreMinimizedWork(entry, can))) {
+        if (entry) reparkDeniedRestore(entry)
+        notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
+        return
+      }
+      open(kind, sessionMode)
+    }
+    for (const kind of ['add_product', 'create_products_session'] as const) {
+      const pending = consumePendingRestore(kind)
+      if (pending) restore(kind, pending)
+    }
     const onRestore = (event: Event) => {
-      if ((event as CustomEvent).detail?.kind !== 'add_product') return
-      markRestoreHandled('add_product')
-      open()
+      const detail = (event as CustomEvent).detail
+      const kind = detail?.kind
+      if (kind !== 'add_product' && kind !== 'create_products_session') return
+      markRestoreHandled(kind)
+      restore(kind, detail.entry as MinimizedWorkEntry | undefined)
     }
     window.addEventListener(RESTORE_WORK_EVENT, onRestore)
     return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [can, canAddProduct, notify])
   const [detailProduct,setDetailProduct]= useState<ProductRecord | null>(null)
   const [adjustStockProduct, setAdjustStockProduct] = useState<ProductRecord | null>(null)
+  const [restoreStockAdjustDraftKey, setRestoreStockAdjustDraftKey] = useState<string | null>(null)
+  const restoringStockAdjustRef = useRef<MinimizedWorkEntry | null>(null)
+  useEffect(() => {
+    const restore = (entry: MinimizedWorkEntry | null | undefined) => {
+      if (!entry) return
+      if (!canAdjustInventoryStock || !canRestoreMinimizedWork(entry, can)) {
+        reparkDeniedRestore(entry)
+        notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
+        return
+      }
+      const draftKey = entry.draftKey || null
+      if (!readStockAdjustDraft(draftKey)) {
+        if (draftKey) clearWorkDraft(draftKey)
+        markRestoreHandled('stock_adjust')
+        notify(tr('load_failed', 'This saved draft is no longer available.', 'សេចក្តីព្រាងដែលបានរក្សាទុកនេះលែងមានទៀតហើយ។'), 'error')
+        return
+      }
+      if (restoringStockAdjustRef.current?.key === entry.key) return
+      restoringStockAdjustRef.current = entry
+      setAdjustStockProduct(null)
+      setRestoreStockAdjustDraftKey(draftKey)
+    }
+    restore(peekPendingRestore('stock_adjust'))
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'stock_adjust') return
+      restore(detail.entry as MinimizedWorkEntry | undefined)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [can, canAdjustInventoryStock, notify])
+  const commitStockAdjustRestore = useCallback(() => {
+    const entry = restoringStockAdjustRef.current
+    if (!entry) return
+    if (!canAdjustInventoryStock || !canRestoreMinimizedWork(entry, can)) {
+      restoringStockAdjustRef.current = null
+      setRestoreStockAdjustDraftKey(null)
+      reparkDeniedRestore(entry)
+      notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
+      return
+    }
+    restoringStockAdjustRef.current = null
+    markRestoreHandled('stock_adjust')
+  }, [can, canAdjustInventoryStock, notify])
   // `toModalProduct(selected)` used to be called inline in the ProductForm
   // JSX below -- a plain function returning a new object literal on every
   // render of Products.tsx, not just when `selected` itself changes. That
@@ -790,6 +1632,26 @@ function ProductsFullEditor() {
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [mergeDuplicatesBusy, setMergeDuplicatesBusy] = useState(false)
   const [mergeDuplicatesReviewOpen, setMergeDuplicatesReviewOpen] = useState(false)
+  const [mergeDuplicatesScope, setMergeDuplicatesScope] = useState<'leading_zero' | null>(null)
+  const [mergeDuplicatesRecovery, setMergeDuplicatesRecovery] = useState<MergeDuplicatesRecoveryNotice | null>(null)
+  const mergeDuplicatesAbortRef = useRef<AbortController | null>(null)
+  const leadingZeroManifestRef = useRef<ValidatedLeadingZeroMergeManifest | null>(null)
+  const leadingZeroConfirmedGroupsRef = useRef<Map<number, string> | null>(null)
+  const leadingZeroWriteInFlightRef = useRef(false)
+  const leadingZeroRequestGenerationRef = useRef(0)
+  const leadingZeroPreviewGenerationRef = useRef(0)
+  const leadingZeroActorAuthority = captureActorReadScope('products:leading-zero-merge').authority
+  useEffect(() => {
+    leadingZeroRequestGenerationRef.current += 1
+    leadingZeroPreviewGenerationRef.current += 1
+    mergeDuplicatesAbortRef.current?.abort()
+    mergeDuplicatesAbortRef.current = null
+    leadingZeroWriteInFlightRef.current = false
+    setMergeDuplicatesBusy(false)
+    setMergeDuplicatesReviewOpen(false)
+    setMergeDuplicatesScope(null)
+    setMergeDuplicatesRecovery(null)
+  }, [leadingZeroActorAuthority])
   // Exact-duplicate (same real barcode + same name) flagging for the list
   // rows -- user spec item #3. Single source of truth is the server sweep
   // the Duplicates review tab already uses (see utils/exactDuplicateProducts).
@@ -797,6 +1659,9 @@ function ProductsFullEditor() {
   // dismissing so its row's buttons show a spinner without freezing the rest.
   const [duplicateClusters, setDuplicateClusters] = useState<unknown[]>([])
   const [dupResolverBusyKey, setDupResolverBusyKey] = useState<string | null>(null)
+  // The ONE keep-this / merge-that flow, shared with the Conflicts review: a
+  // discarded twin that still holds stock asks what happens to it first.
+  const { mergeWithChoice, mergeStockChoiceDialog } = useMergeStockChoice(t)
   const [zeroQuantityCleanupOpen, setZeroQuantityCleanupOpen] = useState(false)
   const [zeroQuantityCleanupBusy, setZeroQuantityCleanupBusy] = useState(false)
   const [wireImagesOpen, setWireImagesOpen] = useState(false)
@@ -940,16 +1805,6 @@ function ProductsFullEditor() {
           stockState: effectiveStockState === 'all' ? '' : effectiveStockState,
           groupState: groupFilter === 'all' ? '' : groupFilter,
           initial: initialFilter === 'all' ? '' : initialFilter,
-          // Real server-side "Created" filter -- scopes to products with at
-          // least one batch received in this range (product_batches.received_at
-          // via an EXISTS join, see buildSearchFilters in cloudflare/src/routes/
-          // products.ts), replacing the old client-only year/month pill picker
-          // that only re-filtered against product.created_at on the already-
-          // fetched page (never sent to the server, never affected total/
-          // pagination -- see progress.md's "Created section reworked to filter
-          // by batch date" item for the full history).
-          batchDateFrom: createdDateFrom || '',
-          batchDateTo: createdDateTo || '',
           // "Issues" quick filter -- see buildIssueStateClauses in
           // cloudflare/src/lib/searchMatch.ts. Multi-value, OR'd.
           issueState: issueFilter === 'all' ? '' : issueFilter,
@@ -1077,7 +1932,7 @@ function ProductsFullEditor() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [branchFilter, brandFilter, catFilter, cleanedSearchQuery, createdDateFrom, createdDateTo, effectiveStockState, groupFilter, initialFilter, issueFilter, mergedFilter, notify, productPage, productPageSize, productSortDirection, promoFilter, searchMode, supplierFilter, t, tr, unitFilter])
+  }, [branchFilter, brandFilter, catFilter, cleanedSearchQuery, effectiveStockState, groupFilter, initialFilter, issueFilter, mergedFilter, notify, productPage, productPageSize, productSortDirection, promoFilter, searchMode, supplierFilter, t, tr, unitFilter])
 
   useEffect(() => {
     latestLoadRef.current = load
@@ -1095,8 +1950,98 @@ function ProductsFullEditor() {
       'Products by id',
       PRODUCTS_BY_ID_TIMEOUT_MS,
     )
-    return Array.isArray(payload) ? payload : []
+    // Resolve by id, never by position. Consumers here take latestProducts[0]
+    // for a single-id refetch (post-save snapshot, undo/redo, created-row
+    // confirm); a response that is not exactly the requested row must yield
+    // nothing rather than bind those flows to a stranger. /api/products/search
+    // ignored `ids` outright until this lane fixed it, and answered with the
+    // catalog's first row by name instead.
+    const wanted = new Set(uniqueIds)
+    return Array.isArray(payload)
+      ? payload.filter((row) => wanted.has(Number((row as { id?: unknown })?.id)))
+      : []
   }, [])
+
+  // P4-4b fix 6: a single stock adjust used to call load(true) -- a full
+  // re-search of the current filtered/sorted/paginated page (every visible
+  // row, with branch_stock/images/batches joins) -- to reflect a change to
+  // ONE row. patchProductRow replaces that row in place; the page's own
+  // totals/badges (low-stock counts, stock-value sums, etc.) all derive from
+  // the `products` array itself via memoized selectors, so they recompute
+  // correctly from the same array with just the one row's data updated,
+  // without a network round trip for the other rows on the page.
+  const patchProductRow = useCallback((updated: ProductRecord | undefined | null): boolean => {
+    const id = Number(updated?.id || 0)
+    if (!id) return false
+    const exists = products.some((product) => Number(product?.id || 0) === id)
+    if (!exists) return false
+    setProducts((prev) => prev.map((product) => (
+      Number(product?.id || 0) === id ? { ...product, ...updated } : product
+    )))
+    return true
+  }, [products])
+
+  // StockAdjustModal.tsx (owned by another lane) only reports completion as
+  // onDone: () => void -- no adjust API response reaches Products.tsx, so
+  // "patch from the response" is not reachable here. The productId the
+  // adjustment targeted IS already known locally (it is the product the
+  // modal was opened for), so this refetches exactly that one product
+  // instead of the whole page, and only falls back to a full load(true) when
+  // the product id is unknown (the rare minimized-and-restored session,
+  // where the modal already clears its own draft before calling onDone) or
+  // the refetch comes back empty (the product no longer matches the active
+  // filter/page, e.g. an adjustment moved it out of a stock-state filter --
+  // only a full reload can reflect that correctly).
+  const refreshAdjustedProduct = useCallback(async (productId: EntityId | null | undefined): Promise<void> => {
+    const id = Number(productId || 0)
+    if (!id) {
+      await load(true)
+      return
+    }
+    try {
+      const [latest] = await fetchProductsByIds([id])
+      if (!latest || !patchProductRow(latest)) await load(true)
+    } catch {
+      await load(true)
+    }
+  }, [fetchProductsByIds, load, patchProductRow])
+
+  useEffect(() => {
+    let disposed = false
+    const restoreEdit = async (entry: MinimizedWorkEntry | null | undefined) => {
+      if (!entry || entry.kind !== 'edit_product') return
+      const productId = Number(entry.payload?.productId || 0)
+      if (!productId || !can('products', 'edit') || !canRestoreMinimizedWork(entry, can)) {
+        reparkDeniedRestore(entry)
+        notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
+        return
+      }
+      try {
+        const current = (await fetchProductsByIds([productId]))[0]
+        if (disposed || !current) throw new Error('Product is no longer available')
+        setSelected(current)
+        setFormInitialTab('basic')
+        setModal('form')
+        markRestoreHandled('edit_product')
+      } catch (error) {
+        reparkDeniedRestore(entry)
+        if (!disposed) notify(error instanceof Error ? error.message : String(error), 'error')
+      }
+    }
+
+    const pending = consumePendingRestore('edit_product')
+    if (pending) void restoreEdit(pending)
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'edit_product') return
+      void restoreEdit(detail.entry as MinimizedWorkEntry | undefined)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => {
+      disposed = true
+      window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+    }
+  }, [can, fetchProductsByIds, notify, tr])
 
   const loadAuxOptions = useCallback(async (label = 'Product auxiliary options') => {
     if (auxOptionsLoadedRef.current) return
@@ -1277,35 +2222,99 @@ function ProductsFullEditor() {
     }
   }
 
+  // P4-4b item 5: images used to upload one-at-a-time (a `for...of` + `await`
+  // loop), so a 5-image gallery paid for 5 sequential round trips even though
+  // each upload is independent. A small worker pool now runs up to
+  // GALLERY_UPLOAD_CONCURRENCY uploads at once while writing each result into
+  // its ORIGINAL index of a pre-sized array, so final gallery order is still
+  // exactly the order the person picked/cropped the images in, regardless of
+  // which upload happens to finish first. Error behaviour is unchanged: any
+  // failed upload still fails the whole save (uploadGalleryImages still
+  // throws), it just now reports the first failure encountered rather than
+  // necessarily the first entry in gallery order, since later entries may
+  // already be in flight by the time an earlier one fails.
+  const GALLERY_UPLOAD_CONCURRENCY = 3
+
   const uploadGalleryImages = async (productId: EntityId | null | undefined, gallery: unknown[] = []): Promise<string[]> => {
-    const next: string[] = []
-    for (const entry of normalizeProductGallery(gallery)) {
-      if (!entry.startsWith('data:image/')) {
-        next.push(entry)
-        continue
+    const entries = normalizeProductGallery(gallery)
+    const results: string[] = new Array(entries.length)
+    let firstError: Error | null = null
+    let cursor = 0
+    const runWorker = async () => {
+      while (cursor < entries.length) {
+        const index = cursor
+        cursor += 1
+        const entry = entries[index]
+        if (!entry.startsWith('data:image/')) {
+          results[index] = entry
+          continue
+        }
+        const ext = entry.startsWith('data:image/png')
+          ? '.png'
+          : entry.startsWith('data:image/webp')
+            ? '.webp'
+            : entry.startsWith('data:image/gif')
+              ? '.gif'
+              : '.jpg'
+        const fileName = `product_${productId || 'new'}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`
+        try {
+          const uploaded = await runProductWriteMutation(
+            () => productApi.uploadProductImage({ productId, filePath: entry, fileName }),
+            'Upload product image',
+            PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS,
+          )
+          if (!uploaded?.path) throw new Error(uploaded?.error || 'Image upload failed')
+          results[index] = uploaded.path
+        } catch (e) {
+          if (!firstError) firstError = e instanceof Error ? e : new Error(String(e))
+        }
       }
-      const ext = entry.startsWith('data:image/png')
-        ? '.png'
-        : entry.startsWith('data:image/webp')
-          ? '.webp'
-          : entry.startsWith('data:image/gif')
-            ? '.gif'
-            : '.jpg'
-      const fileName = `product_${productId || 'new'}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`
-      const uploaded = await runProductWriteMutation(
-        () => productApi.uploadProductImage({ productId, filePath: entry, fileName }),
-        'Upload product image',
-        PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS,
-      )
-      if (!uploaded?.path) throw new Error(uploaded?.error || 'Image upload failed')
-      next.push(uploaded.path)
     }
-    return normalizeProductGallery(next)
+    const workerCount = Math.max(1, Math.min(GALLERY_UPLOAD_CONCURRENCY, entries.length))
+    await Promise.all(Array.from({ length: workerCount }, runWorker))
+    if (firstError) throw firstError
+    return normalizeProductGallery(results)
+  }
+
+  // S4-12: one product, written for the create-products session. Deliberately
+  // the SAME image-upload + create path handleSaveWithGallery uses below --
+  // the session modal owns the header/session model, never a second product
+  // write route. Resolves the new id; throws so the item form can report the
+  // failure and keep the typed product on screen to be corrected.
+  const prepareProductForSession = async (payload: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const form = payload as unknown as ProductRecord
+    if (!String(form.name || '').trim()) throw new Error(t('name') + ' required')
+    const galleryInput = normalizeProductGallery(form.image_gallery, form.image_path || null)
+    const uploadedGallery = await uploadGalleryImages(null, galleryInput)
+    return {
+      ...form,
+      image_gallery: uploadedGallery,
+      image_path: uploadedGallery[0] || null,
+    }
+  }
+
+  const createProductForSession = async (payload: Record<string, unknown>): Promise<number | string> => {
+    const prepared = await prepareProductForSession(payload)
+    const res = await runProductWriteMutation(() => productApi.createProduct({
+      ...prepared,
+      client_request_id: `product_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      userId: user?.id,
+      userName: user?.name,
+    }), 'Create product')
+    if (!res?.success) throw new Error(res?.error || 'Failed to create product')
+    // A Review-Required account queues the create instead of applying it, so
+    // there is no product to hang this session's opening stock on yet.
+    if ((res as { pending?: boolean })?.pending) {
+      throw new Error(t('product_creation_pending_review') || 'Product creation is pending review and cannot be added to this session yet.')
+    }
+    const createdId = extractHistoryResultId(res)
+    if (!createdId) throw new Error('Created product could not be loaded')
+    return createdId
   }
 
   const handleSaveWithGallery = async (form: ProductRecord) => {
-    if (!form.name?.trim()) return notify(t('name') + ' required', 'error')
-    if (!beginSingleAction(productSaveInFlightRef)) return
+    if (!form.name?.trim()) throw new Error(t('name') + ' required')
+    if (!beginSingleAction(productSaveInFlightRef)) throw new Error(t('saving_label') || 'Saving…')
     try {
       const previousSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const galleryInput = normalizeProductGallery(form.image_gallery, form.image_path || null)
@@ -1325,15 +2334,16 @@ function ProductsFullEditor() {
 
       if (!selected) {
         const res = await runProductWriteMutation(() => productApi.createProduct(payload), 'Create product')
-        if (!res?.success) return notify(res?.error || 'Failed to create product', 'error')
+        if (!res?.success) throw new Error(res?.error || 'Failed to create product')
         createdProductId = extractHistoryResultId(res)
       } else {
         const res = await runProductWriteMutation(() => productApi.updateProduct(selected.id || 0, payload), 'Update product')
-        if (res?.success === false) return notify(res.error || 'Failed to update product', 'error')
+        if (res?.success === false) throw new Error(res.error || 'Failed to update product')
       }
 
       // The write itself is now confirmed done -- tell the person right
-      // away and close the form. Everything below this point (re-fetching
+      // away and let ProductForm clear its dirty latch/draft before it closes.
+      // Everything below this point (re-fetching
       // the canonical row for the undo/redo snapshot, pinning it in the
       // current view, refreshing the background list) is best-effort
       // enrichment, not part of whether the save succeeded. It used to sit
@@ -1345,51 +2355,53 @@ function ProductsFullEditor() {
       // happen again.
       const targetProductId = selected ? Number(selected.id || 0) : createdProductId
       notify(selected ? t('product_updated') || 'Product updated' : t('product_created') || 'Product created')
-      setModal(null)
-      setSelected(null)
-      setDetailProduct(null)
 
-      try {
-        const latestProducts = await fetchProductsByIds([targetProductId])
-        const latestProductsById = buildProductIdMap(latestProducts || [])
-        const latestProductSnapshot = selected
-          ? cloneHistorySnapshot(
-              latestProductsById.get(targetProductId)
-              || { ...payload, id: targetProductId },
-            )
-          : resolveCreatedHistorySnapshot({
-              result: { id: createdProductId },
-              latestItems: latestProducts,
-              clientRequestId: createClientRequestId,
-              fallbackSnapshot: { ...payload, id: createdProductId },
-            }).snapshot
+      // Do not keep ProductForm mounted behind best-effort enrichment, but do
+      // not close it here either: resolving onSave hands that ordered close to
+      // ProductForm after it has synchronously marked itself clean.
+      void (async () => {
+        try {
+          const latestProducts = await fetchProductsByIds([targetProductId])
+          const latestProductsById = buildProductIdMap(latestProducts || [])
+          const latestProductSnapshot = selected
+            ? cloneHistorySnapshot(
+                latestProductsById.get(targetProductId)
+                || { ...payload, id: targetProductId },
+              )
+            : resolveCreatedHistorySnapshot({
+                result: { id: createdProductId },
+                latestItems: latestProducts,
+                clientRequestId: createClientRequestId,
+                fallbackSnapshot: { ...payload, id: createdProductId },
+              }).snapshot
 
-        if (previousSnapshot && targetProductId) {
-          actionHistory.pushAction({
-            label: `Edit product ${previousSnapshot.name || latestProductSnapshot.name || ''}`.trim(),
-            undo: () => restoreProductSnapshots([previousSnapshot], 'Undo product edit'),
-            redo: () => restoreProductSnapshots([latestProductSnapshot], 'Redo product edit'),
-          })
-        } else if (latestProductSnapshot?.id) {
-          pushCreatedProductHistory(latestProductSnapshot, `Add product ${latestProductSnapshot.name || ''}`.trim())
+          if (previousSnapshot && targetProductId) {
+            actionHistory.pushAction({
+              label: `Edit product ${previousSnapshot.name || latestProductSnapshot.name || ''}`.trim(),
+              undo: () => restoreProductSnapshots([previousSnapshot], 'Undo product edit'),
+              redo: () => restoreProductSnapshots([latestProductSnapshot], 'Redo product edit'),
+            })
+          } else if (latestProductSnapshot?.id) {
+            pushCreatedProductHistory(latestProductSnapshot, `Add product ${latestProductSnapshot.name || ''}`.trim())
+          }
+
+          if (targetProductId && latestProductSnapshot) {
+            pinnedEditedProductsRef.current.set(Number(targetProductId), latestProductSnapshot as ProductRecord)
+          }
+
+          await load(true)
+        } catch (enrichErr) {
+          // Save already succeeded and the person's already been told so --
+          // this is just the undo/redo snapshot and/or background refresh
+          // not completing (commonly a superseded-search abort, which is
+          // expected and harmless). Log it for debugging, don't alarm the
+          // person about a save that went through fine.
+          console.warn('[handleSaveWithGallery] post-save refresh/snapshot skipped:', enrichErr)
         }
-
-        if (targetProductId && latestProductSnapshot) {
-          pinnedEditedProductsRef.current.set(Number(targetProductId), latestProductSnapshot as ProductRecord)
-        }
-
-        await load(true)
-      } catch (enrichErr) {
-        // Save already succeeded and the person's already been told so --
-        // this is just the undo/redo snapshot and/or background refresh
-        // not completing (commonly a superseded-search abort, which is
-        // expected and harmless). Log it for debugging, don't alarm the
-        // person about a save that went through fine.
-        console.warn('[handleSaveWithGallery] post-save refresh/snapshot skipped:', enrichErr)
-      }
+      })()
     } catch (e) {
       console.error('[handleSaveWithGallery] error:', e)
-      notify(getErrorMessage(e, 'Failed to save product'), 'error')
+      throw e instanceof Error ? e : new Error(getErrorMessage(e, 'Failed to save product'))
     } finally {
       finishSingleAction(productSaveInFlightRef)
     }
@@ -1470,19 +2482,31 @@ function ProductsFullEditor() {
     setBulkActionBusy(true)
     setDeleteConfirmBusy(true)
     try {
-      const deletionRun = await runConcurrentTasks<EntityId, number>(ids, async (id: EntityId) => {
+      const deletionRun = await runConcurrentTasks<EntityId, ProductApiResponse>(ids, async (id: EntityId) => {
         const result = await runProductDeleteMutation(() => productApi.deleteProduct(id, reason), 'Delete product')
         if (result?.success === false) throw new Error(result.error || 'Failed to delete product')
-        return Number(id)
+        return result || {}
       })
-      const { done, failed, failedIds } = summarizeProductRun(deletionRun)
-      setSelectedIds(new Set(failedIds))
+      const { failed, failedIds } = summarizeProductRun(deletionRun)
+      const pendingIds = deletionRun.successes
+        .filter((entry) => entry.value?.pending === true)
+        .map((entry) => Number(entry.item))
+      const deletedIds = deletionRun.successes
+        .filter((entry) => entry.value?.pending !== true)
+        .map((entry) => Number(entry.item))
+      const serverReceiptIds = deletionRun.successes
+        .filter((entry) => entry.value?.pending !== true && Number(entry.value?.action_history_id || 0) > 0)
+        .map((entry) => Number(entry.item))
+      const legacyDeletedIds = deletedIds.filter((id) => !serverReceiptIds.includes(id))
+      const done = deletedIds.length
+      setSelectedIds(new Set([...failedIds, ...pendingIds]))
       await load(true)
-      const deletedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
-      if (done > 0 && deletedSnapshots.length) {
+      if (serverReceiptIds.length) await actionHistory.refreshServerItems()
+      const deletedSnapshots = snapshots.filter((snapshot) => legacyDeletedIds.includes(Number(snapshot?.id || 0)))
+      if (deletedSnapshots.length) {
         let restoredEntries: RestoredProductEntry[] = []
         actionHistory.pushAction({
-          label: `Delete ${done} product${done === 1 ? '' : 's'}`,
+          label: `Delete ${deletedSnapshots.length} product${deletedSnapshots.length === 1 ? '' : 's'}`,
           undo: async () => {
             restoredEntries = await restoreDeletedProducts(deletedSnapshots, 'Undo product delete')
           },
@@ -1499,8 +2523,9 @@ function ProductsFullEditor() {
           },
         })
       }
-      if (failed) notify(`Deleted ${done}, ${failed} failed`, 'warning')
-      else notify(`${done} product${done > 1 ? 's' : ''} deleted`)
+      if (pendingIds.length || failed) {
+        notify(`Deleted ${done}, ${pendingIds.length} pending review, ${failed} failed`, 'warning')
+      } else notify(`${done} product${done > 1 ? 's' : ''} deleted`)
     } catch (e) {
       // Matches runSingleDeleteConfirmed's catch/notify pattern (see above).
       // Before this fix, an error outside the per-id runConcurrentTasks loop
@@ -1628,8 +2653,19 @@ function ProductsFullEditor() {
     setDeleteConfirmBusy(true)
     try {
       const snapshot = cloneHistorySnapshot(p)
-      await runProductDeleteMutation(() => productApi.deleteProduct(p.id || 0, reason), 'Delete product')
+      const result = await runProductDeleteMutation(() => productApi.deleteProduct(p.id || 0, reason), 'Delete product')
+      if (result?.success === false) throw new Error(result.error || 'Failed to delete product')
+      if (result?.pending === true) {
+        notify('Product removal submitted for review')
+        return
+      }
       await load(true)
+      if (Number(result?.action_history_id || 0) > 0) {
+        await actionHistory.refreshServerItems()
+        notify('Product deleted')
+        setDetailProduct(null)
+        return
+      }
       let restoredEntries: RestoredProductEntry[] = []
       actionHistory.pushAction({
         label: `Delete product ${snapshot.name || ''}`.trim(),
@@ -1681,6 +2717,18 @@ function ProductsFullEditor() {
   // a live preview of which products will merge yet.
   const openMergeDuplicatesReview = () => {
     if (mergeDuplicatesBusy) return
+    setMergeDuplicatesScope(null)
+    setMergeDuplicatesReviewOpen(true)
+  }
+
+  const openLeadingZeroMergeReview = () => {
+    if (mergeDuplicatesBusy) return
+    leadingZeroRequestGenerationRef.current += 1
+    leadingZeroPreviewGenerationRef.current += 1
+    leadingZeroManifestRef.current = null
+    leadingZeroConfirmedGroupsRef.current = null
+    setMergeDuplicatesRecovery(null)
+    setMergeDuplicatesScope('leading_zero')
     setMergeDuplicatesReviewOpen(true)
   }
 
@@ -1692,44 +2740,275 @@ function ProductsFullEditor() {
   // other product mutation on this page going through `productApi` so
   // there's one place (the ProductApi type above) that has to know the
   // transport layer exists.
-  const loadMergeDuplicatesPreview = async () => {
-    const result = await productApi.previewMergeDuplicates() as {
-      success?: boolean
-      error?: string
-      groupCount?: number
-      duplicateProductCount?: number
-      groups?: MergeDuplicatesPreviewGroup[]
-    } | undefined
-    if (result?.success === false) throw new Error(result.error || 'Failed to load merge preview')
-    return {
-      groupCount: Number(result?.groupCount || 0),
-      duplicateProductCount: Number(result?.duplicateProductCount || 0),
-      groups: Array.isArray(result?.groups) ? result.groups : [],
+  const loadMergeDuplicatesPreview = async (signal: AbortSignal) => {
+    const actorScope = captureActorReadScope('products:leading-zero-merge')
+    const previewGeneration = ++leadingZeroPreviewGenerationRef.current
+    const preview = validateMergeDuplicatesPreviewResponse(
+      await productApi.previewMergeDuplicates({ signal, ...(mergeDuplicatesScope ? { scope: mergeDuplicatesScope } : {}) }),
+    )
+    if (!isActorReadScopeCurrent(actorScope, false) || previewGeneration !== leadingZeroPreviewGenerationRef.current) {
+      throw Object.assign(new Error('Preview belongs to an earlier account or request.'), { name: 'AbortError', code: 'stale_read_scope' })
+    }
+    if (mergeDuplicatesScope === 'leading_zero') {
+      leadingZeroManifestRef.current = preview.applyManifest || null
+      if (!leadingZeroConfirmedGroupsRef.current) {
+        leadingZeroConfirmedGroupsRef.current = new Map(preview.groups
+          .filter((group) => group.mergeable)
+          .map((group) => [group.canonicalId, [group.canonicalId, ...group.duplicates.map((duplicate) => duplicate.id)].sort((a, b) => a - b).join(',')]))
+      }
+    }
+    return preview
+  }
+
+  const handleLeadingZeroMerge = async () => {
+    if (mergeDuplicatesBusy || leadingZeroWriteInFlightRef.current || mergeDuplicatesScope !== 'leading_zero') return
+    const initialAllowed = leadingZeroConfirmedGroupsRef.current
+    let manifest = leadingZeroManifestRef.current
+    if (!initialAllowed || !manifest?.groups.length) return
+    const controller = new AbortController()
+    mergeDuplicatesAbortRef.current = controller
+    const actorScope = captureActorReadScope('products:leading-zero-merge')
+    const requestGeneration = ++leadingZeroRequestGenerationRef.current
+    const requestIsCurrent = () => (
+      requestGeneration === leadingZeroRequestGenerationRef.current
+      && mergeDuplicatesAbortRef.current === controller
+      && isActorReadScopeCurrent(actorScope, false)
+    )
+    const requestId = `product-leading-zero-merge_${globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`
+    let mergedGroups = 0
+    let mergedProducts = 0
+    leadingZeroWriteInFlightRef.current = true
+    setMergeDuplicatesBusy(true)
+    const manifestWasConfirmed = (candidate: ValidatedLeadingZeroMergeManifest): boolean => candidate.groups.every((group) =>
+      initialAllowed.get(group.keeper_id) === [...group.member_ids].sort((a, b) => a - b).join(','))
+    try {
+      let calls = 0
+      while (manifest.groups.length) {
+        calls += 1
+        if (calls > initialAllowed.size || !manifestWasConfirmed(manifest)) {
+          throw new Error(t('merge_leading_zero_scope_changed') || 'The leading-zero candidate set changed. Review it again before continuing.')
+        }
+        const result = await productApi.mergeDuplicates({ requestId, signal: controller.signal, manifest }) as MergeDuplicateProductsResult | undefined
+        if (!requestIsCurrent()) return
+        if (result?.success === false) throw new Error(result.error || 'Failed to merge leading-zero barcode duplicates')
+        mergedGroups += Math.max(0, Number(result?.mergedGroups || 0))
+        mergedProducts += Math.max(0, Number(result?.mergedProducts || 0))
+        if (result?.interrupted || Number(result?.undoPendingCount || 0) > 0 || (result?.refusals?.length || 0) > 0) {
+          notify(result?.error || result?.refusals?.[0]?.error
+            || 'The safe merge stopped. Review the refreshed candidates before continuing.', 'error')
+          await load(true)
+          if (!requestIsCurrent()) return
+          setMergeDuplicatesReviewOpen(false)
+          setMergeDuplicatesScope(null)
+          return
+        }
+        const refreshed = validateMergeDuplicatesPreviewResponse(
+          await productApi.previewMergeDuplicates({ signal: controller.signal, scope: 'leading_zero' }),
+        )
+        if (!requestIsCurrent()) return
+        if (refreshed.scope !== 'leading_zero' || !refreshed.applyManifest) {
+          throw new Error('The server did not return a scoped leading-zero preview.')
+        }
+        manifest = refreshed.applyManifest
+        leadingZeroManifestRef.current = manifest
+      }
+      notify(
+        (t('merged_duplicate_products_summary') || 'Merged {products} duplicate product(s) into {groups} row(s)')
+          .replace('{products}', String(mergedProducts))
+          .replace('{groups}', String(mergedGroups)),
+      )
+      await load(true)
+      if (!requestIsCurrent()) return
+      setMergeDuplicatesReviewOpen(false)
+      setMergeDuplicatesScope(null)
+    } catch (error) {
+      if (!requestIsCurrent()) return
+      const detail = getErrorMessage(error, 'The leading-zero merge stopped')
+      if (!controller.signal.aborted) notify(detail, 'error')
+      await productApi.invalidateProductReadCacheForReconciliation().catch(() => undefined)
+      if (!requestIsCurrent()) return
+      await load(true).catch(() => undefined)
+      if (!requestIsCurrent()) return
+      setMergeDuplicatesRecovery({ requestId, mergedGroups, mergedProducts, detail })
+      setMergeDuplicatesReviewOpen(false)
+      setMergeDuplicatesScope(null)
+    } finally {
+      if (!requestIsCurrent()) return
+      leadingZeroWriteInFlightRef.current = false
+      if (mergeDuplicatesAbortRef.current === controller) mergeDuplicatesAbortRef.current = null
+      setMergeDuplicatesBusy(false)
     }
   }
 
   const handleMergeDuplicates = async () => {
     if (mergeDuplicatesBusy) return
+    const controller = new AbortController()
+    mergeDuplicatesAbortRef.current = controller
+    const requestId = `product-merge_${globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`
     setMergeDuplicatesBusy(true)
+    let calls = 0
+    let callCeiling = 1
+    let mergedGroups = 0
+    let mergedProducts = 0
+    let undoPendingCount = 0
+    const processedCaseKeys = new Set<string>()
+    const refusalsByCase = new Map<string, NonNullable<MergeDuplicateProductsResult['refusals']>[number]>()
+    let completed = false
     try {
-      const result = await productApi.mergeDuplicates() as { success?: boolean; mergedGroups?: number; mergedProducts?: number; error?: string } | undefined
-      if (result?.success === false) throw new Error(result.error || 'Failed to merge duplicate products')
-      const mergedGroups = Number(result?.mergedGroups || 0)
-      const mergedProducts = Number(result?.mergedProducts || 0)
+      while (calls < callCeiling) {
+        // Count the attempt before awaiting it. apiFetch owns an internal
+        // timeout controller, so a timed-out write does not necessarily mark
+        // this caller's controller aborted even though the server may already
+        // have committed complete atomic cases. Every started POST therefore
+        // takes the authoritative reload path on an unknown outcome.
+        calls += 1
+        const result = await productApi.mergeDuplicates({ requestId, signal: controller.signal }) as MergeDuplicateProductsResult | undefined
+        if (result?.success === false) throw new Error(result.error || 'Failed to merge duplicate products')
+        mergedGroups += Number(result?.mergedGroups || 0)
+        mergedProducts += Number(result?.mergedProducts || 0)
+        undoPendingCount += Math.max(0, Number(result?.undoPendingCount || 0))
+        for (const key of Array.isArray(result?.processedCaseKeys) ? result.processedCaseKeys : []) {
+          if (key) processedCaseKeys.add(String(key))
+        }
+        for (const refusal of Array.isArray(result?.refusals) ? result.refusals : []) {
+          const key = String(refusal?.caseKey || `${refusal?.mergedId || 'unknown'}:${refusal?.code || refusal?.error || 'refused'}`)
+          refusalsByCase.set(key, refusal)
+        }
+        if (mergeDuplicateChunkRequiresManualResume(result)) {
+          const savedSummary = (t('merge_duplicates_partial_saved') || 'Saved {products} duplicate product(s) in {groups} completed group(s).')
+            .replace('{products}', String(mergedProducts))
+            .replace('{groups}', String(mergedGroups))
+          const resumeMessage = result.interruptionCode === 'merge_infrastructure_interrupted'
+            ? (t('merge_duplicates_partial_busy') || 'The database became busy after completed groups were saved. Review the refreshed preview and choose Merge again to continue.')
+            : (t('merge_duplicates_partial_resume') || 'Processing stopped safely before another group started. Review the refreshed preview and choose Merge again to continue.')
+          const undoWarning = undoPendingCount > 0
+            ? (t('merge_duplicates_undo_unavailable') || 'Merges were committed, but Undo is unavailable for {count} case(s) because their recovery records did not finish saving.')
+              .replace('{count}', String(undoPendingCount))
+            : ''
+          notify([savedSummary, resumeMessage, undoWarning].filter(Boolean).join(' '),
+            result.interruptionCode === 'merge_infrastructure_interrupted' ? 'error' : 'info')
+          await load(true)
+          setMergeDuplicatesRecovery(null)
+          setMergeDuplicatesReviewOpen(false)
+          return
+        }
+        if (result?.interruptionCode === 'merge_budget_reached') {
+          if (!mergeDuplicateChunkCanContinueAutomatically(result)) {
+            throw new Error(result?.error || 'Duplicate merge stopped before the remaining products were processed. Retry to continue safely.')
+          }
+          callCeiling = Math.max(callCeiling, calls + result.maxAdditionalRequests)
+          continue
+        }
+        if (result?.complete) {
+          completed = true
+          break
+        }
+        if (result?.blockedOnly) {
+          // The confirmed scan evaluated everything it could, but explicitly
+          // refused cases still exist. Finish this run so their concrete
+          // reasons reach the summary without claiming the catalog is clean.
+          completed = true
+          break
+        }
+
+        const remainingBefore = Number(result?.remainingProductsBefore)
+        const remaining = Number(result?.remainingProducts)
+        const madeProgress = result?.madeProgress === true
+        if (result?.stalled || !madeProgress || !Number.isFinite(remainingBefore)
+          || !Number.isFinite(remaining) || remaining >= remainingBefore) {
+          throw new Error(result?.error || 'Duplicate merge stopped because the catalog did not make progress. Review the remaining products and retry.')
+        }
+        const additional = Math.max(0, Math.floor(Number(result?.maxAdditionalRequests || 0)))
+        callCeiling = calls + additional
+        if (additional === 0) {
+          throw new Error('Duplicate merge stopped before the remaining products were processed. Retry to continue safely.')
+        }
+      }
+      if (!completed) throw new Error('Duplicate merge reached its safe request limit. Retry to continue with the remaining products.')
+
+      // What the run deliberately did NOT do. A refusal is a DECISION -- two
+      // costs too far apart to be one cost, or a stock-in session that can
+      // still be undone -- and reporting plain success over it tells the
+      // operator the catalog is clean when pairs are still waiting for them.
+      // Same shape the Conflicts tab's bulk merge already reports: the count,
+      // plus the first refusal's own sentence, which is the half that says
+      // what to do about it.
+      const refusals = Array.from(refusalsByCase.values())
+      const firstRefusal = refusals.find((r) => r?.error)?.error || ''
+      const refusalNote = refusals.length
+        ? [
+          (t('merge_duplicates_refused_count') || '{count} pair(s) were left alone')
+            .replace('{count}', String(refusals.length)),
+          firstRefusal,
+        ].filter(Boolean).join('. ')
+        : ''
+      const undoWarning = undoPendingCount > 0
+        ? (t('merge_duplicates_undo_unavailable') || 'Merges were committed, but Undo is unavailable for {count} case(s) because their recovery records did not finish saving.')
+          .replace('{count}', String(undoPendingCount))
+        : ''
       if (!mergedGroups) {
-        notify(t('no_duplicate_products_found') || 'No duplicate products found')
+        notify([refusalNote || t('no_duplicate_products_found') || 'No duplicate products found', undoWarning].filter(Boolean).join('. '),
+          refusals.length || undoPendingCount ? 'info' : undefined)
       } else {
         notify(
-          (t('merged_duplicate_products_summary') || 'Merged {products} duplicate product(s) into {groups} row(s)')
-            .replace('{products}', String(mergedProducts))
-            .replace('{groups}', String(mergedGroups)),
+          [
+            (t('merged_duplicate_products_summary') || 'Merged {products} duplicate product(s) into {groups} row(s)')
+              .replace('{products}', String(mergedProducts))
+              .replace('{groups}', String(mergedGroups)),
+            refusalNote,
+            undoWarning,
+          ].filter(Boolean).join('. '),
+          refusals.length || undoPendingCount ? 'info' : undefined,
         )
-        await load(true)
       }
-    } catch (e) {
-      notify(getErrorMessage(e, 'Failed'), 'error')
-    } finally {
+      await load(true)
+      setMergeDuplicatesRecovery(null)
       setMergeDuplicatesReviewOpen(false)
+    } catch (e) {
+      // A request can commit its atomic cases before a timeout or cancellation
+      // reaches the client. Clear the old confirmed preview before any
+      // reconciliation await so it cannot become confirmable again when the
+      // busy flag drops. This records only responses the browser actually
+      // received; it never guesses how much the failed request committed.
+      const startedRun = calls > 0 || controller.signal.aborted
+      const requestError = getErrorMessage(e, 'The duplicate merge request failed')
+      if (startedRun) {
+        setMergeDuplicatesRecovery({
+          requestId,
+          mergedGroups,
+          mergedProducts,
+          detail: requestError,
+        })
+        try {
+          await productApi.invalidateProductReadCacheForReconciliation()
+          await load(true)
+        } catch (reconciliationError) {
+          const reloadError = getErrorMessage(reconciliationError, 'The current products could not be reloaded')
+          setMergeDuplicatesRecovery((current) => current?.requestId === requestId
+            ? { ...current, detail: `${requestError}. ${reloadError}` }
+            : current)
+        }
+      }
+      const undoWarning = undoPendingCount > 0
+        ? (t('merge_duplicates_undo_unavailable') || 'Merges were committed, but Undo is unavailable for {count} case(s) because their recovery records did not finish saving.')
+          .replace('{count}', String(undoPendingCount))
+        : ''
+      if (!controller.signal.aborted) {
+        const partialSummary = mergedGroups > 0
+          ? (t('merged_duplicate_products_summary') || 'Merged {products} duplicate product(s) into {groups} row(s)')
+            .replace('{products}', String(mergedProducts))
+            .replace('{groups}', String(mergedGroups))
+          : ''
+        notify([
+          partialSummary,
+          undoWarning,
+          requestError,
+        ].filter(Boolean).join('. '), 'error')
+      } else if (undoWarning) {
+        notify(undoWarning, 'info')
+      }
+    } finally {
+      if (mergeDuplicatesAbortRef.current === controller) mergeDuplicatesAbortRef.current = null
       setMergeDuplicatesBusy(false)
     }
   }
@@ -1778,16 +3057,24 @@ function ProductsFullEditor() {
   // "Keep this": fold the OTHER members of this exact-duplicate group into the
   // chosen record (one pair per call, stopping on first failure so nothing
   // half-merges silently), then reload and re-sweep.
+  // A twin that still holds stock asks what happens to it before anything is
+  // written -- the SAME dialog and the same server call the Conflicts review
+  // uses, so this list shortcut cannot be the quiet way round the question.
   const handleDuplicateKeepThis = useCallback(async (keepId: number, info: ExactDuplicateInfo) => {
     if (dupResolverBusyKey) return
     const others = info.members.filter((m) => Number(m.id) !== Number(keepId))
     if (!others.length) return
+    const keeper = info.members.find((m) => Number(m.id) === Number(keepId)) || { id: keepId, name: null }
     setDupResolverBusyKey(info.key)
     try {
+      let merged = 0
       for (const other of others) {
-        await mergePossiblySameProducts(keepId, other.id)
+        const outcome = await mergeWithChoice(keeper, other)
+        if (outcome === 'cancelled') break
+        merged += 1
       }
-      notify(t('product_duplicate_merged') || 'Merged — stock, lots and images were carried onto the kept product')
+      if (!merged) return
+      notify(t('product_duplicate_merged') || 'Merged — stock, received-date records and images were carried onto the kept product')
       await load(true)
       await refreshDuplicateClusters()
     } catch (e) {
@@ -1795,7 +3082,7 @@ function ProductsFullEditor() {
     } finally {
       setDupResolverBusyKey(null)
     }
-  }, [dupResolverBusyKey, load, notify, refreshDuplicateClusters, t])
+  }, [dupResolverBusyKey, load, mergeWithChoice, notify, refreshDuplicateClusters, t])
 
   // "Keep both": dismiss the barcode cluster (these are genuinely different
   // items), so the sweep stops flagging it -- the false-positive escape hatch.
@@ -2014,6 +3301,13 @@ function ProductsFullEditor() {
     (product: Record<string, unknown>): string => buildProductBranchSummaryLabel(product, branchNameById),
     [branchNameById],
   )
+  // Copy affordance for the product NAME, BRAND, SUPPLIER and BARCODE.
+  // Called once here, not per row: the rows are drawn by a callback inside
+  // ProductsListSurface's .map(), where a hook call would be a Rules-of-
+  // Hooks violation (the same reason utils/longPress.ts is not a hook).
+  // What it hands back is a plain attribute spread, so it can be applied
+  // to a value that is already inside a laid-out row without wrapping it.
+  const copy = useCopyFloat(tr)
   const renderMetaPill = useCallback((item: { className?: string; color?: string; key: string; label?: unknown } | null) => {
     if (!item?.label) return null
     const label = String(item.label)
@@ -2021,9 +3315,12 @@ function ProductsFullEditor() {
     // A code is the one identifier that must be readable on one line. Keep
     // the secondary brand/category tags compact so barcode values get the
     // space first, instead of wrapping or losing their final digits.
+    const fullDetailKeys = new Set(['branch', 'branches', 'sku', 'supplier'])
     const widthClass = item.key === 'barcode'
       ? 'shrink-0 whitespace-nowrap'
-      : 'max-w-[5rem] truncate'
+      : fullDetailKeys.has(item.key)
+        ? 'max-w-full whitespace-normal break-words'
+        : 'max-w-[5rem] truncate'
     if (item.color) {
       return (
         <span
@@ -2046,32 +3343,28 @@ function ProductsFullEditor() {
       </span>
     )
   }, [])
-  const renderUnitChip = (unitName: string | undefined) => {
+  // Both of these used to be plain functions redeclared on every render of
+  // this whole (5000+ line) component -- and both were already listed in
+  // renderDesktopProductRow/renderMobileProductCard's own useCallback deps
+  // below, so a fresh renderUnitChip/openLightbox identity forced BOTH row
+  // renderers to rebuild every render regardless of anything else, silently
+  // defeating any row-level memoization. useCallback with real deps is what
+  // makes the ProductDesktopRow/ProductMobileCard memo boundaries below
+  // actually hold.
+  const renderUnitChip = useCallback((unitName: string | undefined) => {
     if (!unitName) return null
     const color = unitMap[unitName]?.color
-    if (!color) return <span {...getKhmerTextProps(unitName, 'ml-1 shrink-0 whitespace-nowrap text-xs font-normal text-gray-400')}>{unitName}</span>
+    if (!color) return <EntityLink page="products" anchor="hub:products:products" focus={{ unit: unitName }} navigate={navigateTo} title={tr('open_unit_products', 'Open products using this unit', 'បើកផលិតផលដែលប្រើឯកតានេះ')} className="ml-1 text-inherit no-underline hover:text-inherit"><span {...getKhmerTextProps(unitName, 'shrink-0 whitespace-nowrap text-xs font-normal text-gray-400')}>{unitName}</span></EntityLink>
     return (
-      <span
-        {...getKhmerTextProps(unitName, 'ml-1 inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold')}
-        style={{ background: color, color: getContrastingTextColor(color) }}
-      >
-        {unitName}
-      </span>
+      <EntityLink page="products" anchor="hub:products:products" focus={{ unit: unitName }} navigate={navigateTo} title={tr('open_unit_products', 'Open products using this unit', 'បើកផលិតផលដែលប្រើឯកតានេះ')} className="ml-1 text-inherit no-underline hover:text-inherit">
+        <span {...getKhmerTextProps(unitName, 'inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold')} style={{ background: color, color: getContrastingTextColor(color) }}>{unitName}</span>
+      </EntityLink>
     )
-  }
+  }, [navigateTo, tr, unitMap])
 
-  const openLightbox = (gallery: unknown, startIndex = 0, title = '') => {
+  const openLightbox = useCallback((gallery: unknown, startIndex = 0, title = '') => {
     const nextLightbox = buildProductLightboxState(gallery, startIndex, title)
     if (nextLightbox) setLightbox(nextLightbox)
-  }
-
-  const scrollProductSectionsWithWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
-    const element = event.currentTarget
-    if (element.scrollWidth <= element.clientWidth) return
-    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
-    if (!delta) return
-    event.preventDefault()
-    element.scrollLeft += delta
   }, [])
 
   const getBranchQty = useCallback((product: Record<string, unknown>, branchId: unknown) => getProductBranchQuantity(product, branchId), [])
@@ -2102,7 +3395,8 @@ function ProductsFullEditor() {
     searchTerms,
     stockFilter: effectiveStockState,
     supplierFilter,
-  }), [brandFilter, branchFilter, catFilter, effectiveStockState, groupFilter, issueFilter, parentProductIds, products, searchMode, searchTerms, supplierFilter])
+    lowStock: lowStockConfig,
+  }), [brandFilter, branchFilter, catFilter, effectiveStockState, groupFilter, issueFilter, lowStockConfig, parentProductIds, products, searchMode, searchTerms, supplierFilter])
 
   // Name kept as "...Csv" for now (it's an internal identifier, not shown
   // to users -- see productMenuHelpers.ts's menu item labels, none of which
@@ -2147,12 +3441,26 @@ function ProductsFullEditor() {
   // on Inventory.tsx. POS.tsx's own AlphaIndexRail is untouched -- that one
   // was never part of this ask, it stays name-initial.
   const productSections = useMemo<ProductSectionLike[]>(
-    () => buildProductCategorySections(filtered, {
-      productsById,
-      sortDirection: productSortDirection,
-      uncategorizedLabel: t('uncategorized') || 'Uncategorized',
-    }) as unknown as ProductSectionLike[],
-    [filtered, productSortDirection, productsById, t],
+    () => {
+      const sections = buildProductCategorySections(filtered, {
+        productsById,
+        sortDirection: productSortDirection,
+        uncategorizedLabel: t('uncategorized') || 'Uncategorized',
+        // With a term typed or scanned, `filtered` is the server's
+        // relevance-ranked page passed through a pure .filter(), so its
+        // order IS the ranking (exact barcode, then exact/prefix name,
+        // then bm25 -- see cloudflare/src/lib/productSearchQuery.ts).
+        // Re-sectioning it category-A-Z threw that away and put the best
+        // match wherever the alphabet happened to land it. Browsing with
+        // no term keeps the decided category-A-Z layering.
+        preserveInputOrder: searchTerms.length > 0,
+      })
+      // Only when the operator asked for it in the FilterMenu -- see
+      // hideZeroStockRows' declaration. By default every row that survived
+      // the filters above is reachable here.
+      return (hideZeroStockRows ? hideZeroStockGroupedChildRows(sections) : sections) as unknown as ProductSectionLike[]
+    },
+    [filtered, hideZeroStockRows, productSortDirection, productsById, searchTerms, t],
   )
 
   const allVisibleProducts = useMemo<ProductRecord[]>(
@@ -2162,7 +3470,7 @@ function ProductsFullEditor() {
 
   useEffect(() => {
     setProductPage(1)
-  }, [brandFilter, branchFilter, catFilter, createdDateFrom, createdDateTo, groupFilter, initialFilter, issueFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
+  }, [brandFilter, branchFilter, catFilter, groupFilter, hideZeroStockRows, initialFilter, issueFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
 
   const visibleProducts = useMemo<ProductRecord[]>(
     () => allVisibleProducts,
@@ -2172,6 +3480,42 @@ function ProductsFullEditor() {
   const visibleIds = useMemo(() => buildVisibleProductIds(visibleProducts), [visibleProducts])
   const visibleIdsSignature = useMemo(() => visibleIds.join(','), [visibleIds])
   const visibleIdSet = useMemo(() => new Set(visibleIds), [visibleIdsSignature])
+  // ---------------------------------------------------------------- P3-L6
+  // TAGGED stock: units the operator chose to KEEP inside a product group
+  // under an English condition tag (broken/damaged/expired/opened/other)
+  // instead of destroying them. They live in damaged_stock_lots, never in
+  // branch_stock or products.stock_quantity, so they are absent from the
+  // product records this page is built from -- and therefore from every
+  // group total, summary chip, selection scope, export column and product
+  // picker, including POS. That exclusion is structural, not a filter, and
+  // this separate read is the ONLY thing on the page that can see them.
+  const [taggedLots, setTaggedLots] = useState<TaggedStockRow[]>([])
+  const [taggedAction, setTaggedAction] = useState<TaggedStockAction | null>(null)
+  const [taggedReloadToken, setTaggedReloadToken] = useState(0)
+  useEffect(() => {
+    const ids = visibleIdsSignature ? visibleIdsSignature.split(',').filter(Boolean) : []
+    if (!ids.length) { setTaggedLots([]); return }
+    let cancelled = false
+    getTaggedLots(ids)
+      .then((response) => { if (!cancelled) setTaggedLots(Array.isArray(response?.items) ? response.items : []) })
+      .catch(() => {
+        // A failed read must never render as "no held stock" -- that reads
+        // as units that were quietly written off. Keep the last known rows
+        // and say the read failed.
+        if (!cancelled) notify(tr('stock_tagged_load_failed', 'Failed to load tagged stock'), 'error')
+      })
+    return () => { cancelled = true }
+  }, [notify, taggedReloadToken, tr, visibleIdsSignature])
+  const taggedLotsByProduct = useMemo(() => {
+    const map = new Map<string, TaggedStockRow[]>()
+    for (const row of taggedLots) {
+      const key = String(row.product_id)
+      const list = map.get(key)
+      if (list) list.push(row)
+      else map.set(key, [row])
+    }
+    return map
+  }, [taggedLots])
   const selectedVisibleIds = useMemo(
     () => buildSelectedVisibleIds(selectedIds, visibleIds).map((id) => Number(id)).filter((id) => Number.isFinite(id)),
     [selectedIds, visibleIds],
@@ -2321,15 +3665,13 @@ function ProductsFullEditor() {
     brandFilter,
     branchFilter,
     catFilter,
-    createdDateFrom,
-    createdDateTo,
     filtered,
     products,
     selectedProducts,
     stockFilter,
     supplierFilter,
     tr,
-  }), [brandFilter, branchFilter, catFilter, createdDateFrom, createdDateTo, filtered, products, selectedProducts, stockFilter, supplierFilter, tr])
+  }), [brandFilter, branchFilter, catFilter, filtered, products, selectedProducts, stockFilter, supplierFilter, tr])
 
   const suppliers = useMemo(
     () => buildProductSupplierOptions(productFilterMeta.suppliers),
@@ -2340,15 +3682,17 @@ function ProductsFullEditor() {
     brandFilter,
     branchFilter,
     catFilter,
-    createdDateFrom,
-    createdDateTo,
     groupFilter,
     initialFilter,
     issueFilter,
     productSortDirection,
     stockFilter,
     supplierFilter,
-  }) + (searchMode === 'OR' ? 1 : 0)
+    // Counted here rather than inside countActiveProductFilters because that
+    // helper also drives the export menu's "filtered results" labelling, and
+    // this option changes only which GROUPED ROWS render -- `filtered` (what
+    // the export walks) is untouched by it.
+  }) + (searchMode === 'OR' ? 1 : 0) + (hideZeroStockRows ? 1 : 0)
 
   const clearAllFilters = useCallback(() => {
     setCatFilter(new Set())
@@ -2363,14 +3707,13 @@ function ProductsFullEditor() {
     setMergedFilter('all')
     // setInitialFilter('all') removed -- no setter exists anymore, and
     // initialFilter is permanently 'all' already (see its declaration).
-    setCreatedDateFrom('')
-    setCreatedDateTo('')
     // Name A-Z is the actual default sort for this page (see the initial
     // useState below) -- this previously reset to 'desc' (Newest first)
     // instead, so "clear filters" silently changed the sort order rather
     // than restoring the real default.
     setProductSortDirection('name_asc')
     setSearchMode('AND')
+    setHideZeroStockRows(false)
   }, [])
 
   const handleSearchInputChange = useCallback((value: string) => {
@@ -2468,6 +3811,11 @@ function ProductsFullEditor() {
           quantity,
           branchId,
           reason,
+          // N14-D: a restore puts a branch back to the figure the snapshot
+          // recorded. It is not a new receipt -- there is no supplier and no
+          // cost to state -- so it declares itself a correction instead of
+          // being handed an invented one.
+          attribution: 'correction',
           user: { id: user?.id, name: user?.name },
         })),
         'Restore product branch stock',
@@ -2634,6 +3982,11 @@ function ProductsFullEditor() {
           quantity: amount,
           branchId: Number.isFinite(numericBranchId) && numericBranchId > 0 ? numericBranchId : null,
           reason,
+          // N14-D: this helper only ever REDOES a bulk add that BulkAddStockModal
+          // already put through the gate with its own supplier and cost. It
+          // cannot restate them (they are not in the redo entry), and it must
+          // not invent them, so it restores the figure as a correction.
+          attribution: 'correction',
           user: { id: user?.id, name: user?.name },
         })),
         'Bulk add product stock',
@@ -2802,7 +4155,9 @@ function ProductsFullEditor() {
     const currency = bulkEditForm.adjust_currency === 'khr' ? 'khr' : 'usd'
     const fields: string[] = []
     if (bulkEditForm.adjust_selling !== false) fields.push(`selling_price_${currency}`)
-    if (bulkEditForm.adjust_special) fields.push(`special_price_${currency}`)
+    // Was `special_price_${currency}`: re-pointed at wholesale by the
+    // 2026-09-04 ruling, which deleted the "VIP" tier those columns backed.
+    if (bulkEditForm.adjust_wholesale) fields.push(`wholesale_price_${currency}`)
     if (bulkEditForm.adjust_cost) fields.push(`cost_price_${currency}`)
     if (!fields.length) {
       notify(tr('bulk_price_no_change', 'Nothing to change with those settings'), 'warning')
@@ -2844,8 +4199,10 @@ function ProductsFullEditor() {
     if (bulkEditForm.adjust_selling !== false) {
       fields.push(bulkEditForm.adjust_currency === 'khr' ? 'selling_price_khr' : 'selling_price_usd')
     }
-    if (bulkEditForm.adjust_special) {
-      fields.push(bulkEditForm.adjust_currency === 'khr' ? 'special_price_khr' : 'special_price_usd')
+    // Re-pointed from special_price_* to wholesale_price_* (2026-09-04 ruling)
+    // -- same as the catalog-wide adjuster above.
+    if (bulkEditForm.adjust_wholesale) {
+      fields.push(bulkEditForm.adjust_currency === 'khr' ? 'wholesale_price_khr' : 'wholesale_price_usd')
     }
     if (bulkEditForm.adjust_cost) {
       fields.push(bulkEditForm.adjust_currency === 'khr' ? 'purchase_price_khr' : 'purchase_price_usd')
@@ -2955,10 +4312,6 @@ function ProductsFullEditor() {
       branchFilter,
       setBranchFilter,
     }),
-    // Y13: the "Created" date filter is no longer a menu section -- it moved
-    // to its own row directly below the search row (see the render below).
-    // buildProductFilterSections treats createdSection as optional, so
-    // omitting it here simply drops it from the menu.
     issuesSection: buildIssuesFilterSection({
       t,
       issueFilter,
@@ -2988,15 +4341,15 @@ function ProductsFullEditor() {
       brandFilter,
       branchFilter,
       catFilter,
-      createdDateFrom,
-      createdDateTo,
       groupFilter,
+      hideZeroStockRows,
       issueFilter,
       productSortDirection,
       stockFilter,
       supplierFilter,
     },
     isOpen: isProductFilterMenuOpen,
+    setHideZeroStockRows,
     setBrandFilter,
     setBranchFilter,
     setCatFilter,
@@ -3008,483 +4361,31 @@ function ProductsFullEditor() {
     setSupplierFilter,
     suppliers,
     t,
-  }), [branches, brandFilter, branchFilter, brandOptions, catFilter, categoryFilterOptions, createdDateFrom, createdDateTo, groupFilter, hierarchicalCategoryOptions, isProductFilterMenuOpen, issueFilter, productSortDirection, searchMode, setSearchMode, stockFilter, supplierFilter, suppliers, t])
+  }), [branches, brandFilter, branchFilter, brandOptions, catFilter, categoryFilterOptions, groupFilter, hideZeroStockRows, hierarchicalCategoryOptions, isProductFilterMenuOpen, issueFilter, mergedFilter, productSortDirection, promoFilter, searchMode, setSearchMode, stockFilter, supplierFilter, suppliers, t])
 
-  const renderDesktopProductRow = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
-    const productId = p.id ?? 0
-    const productName = String(p.name || '')
-    const sellingUsd = Number(p.selling_price_usd || 0)
-    const sellingKhr = Number(p.selling_price_khr || 0)
-    const specialUsd = Number(p.special_price_usd || 0)
-    const specialKhr = Number(p.special_price_khr || 0)
-    const {
-      branchSummaryLabel,
-      compactMeta,
-      marginPct,
-      marginUsd,
-      promotion,
-      costKhr,
-      costUsd,
-      qty,
-      selectedBranchName,
-      stockStatusTextClass,
-    } = buildProductRowDisplayState(p, {
-      branchFilter,
-      branchNameById,
-      catMap,
-      exchangeRate,
-      getBranchQty,
-      getBranchSummaryLabel,
-      getBrandColor,
-      t,
-      promotionRules,
-    })
-    const thumbnailState = buildProductThumbnailState(p)
-    // A merged row (see mergeSameDetailRows) represents multiple real
-    // product ids -- selecting/checking it needs to act on all of them
-    // together, not just the lead id, or a bulk delete would silently
-    // leave the other branch-duplicate rows behind. Falls back to the
-    // single id for ordinary, unmerged rows.
-    const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
-    const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
-    // Exact duplicate (same real barcode + same name, per the server sweep)?
-    // If so, the row's normal click-to-detail "Manage/Product" flow is
-    // suppressed (user spec item #3) -- the inline resolver below is the only
-    // action until it's kept-one/kept-both.
-    const dupInfo = findRowDuplicateInfo(exactDuplicateIndex, productId, rowScopeIds)
-    // Long-press/click-hold enters select mode by selecting this row;
-    // once select mode is active (selectionModeActive, derived from
-    // selectedIds.size), the row's own onClick below toggles selection
-    // directly and these handlers are skipped entirely (disabled), so a
-    // plain click never has to wait out the hold once selecting is live.
-    // Not a hook -- see utils/longPress.ts -- this row's persistent
-    // timer slot comes from the shared Map keyed by product id.
-    const rowLongPressState = getLongPressState(Number(productId))
-    const longPress = createLongPressHandlers(rowLongPressState, {
-      disabled: selectionModeActive,
-      onLongPress: () => toggleSelectionScope(rowScopeIds, true),
-      onClick: () => { if (!dupInfo) setDetailProduct(p) },
-    })
-    // The native `click` that follows this same press-release still
-    // fires once selectionModeActive flips true and swaps this element's
-    // onClick out from under it -- consumeLongPressClick() eats exactly
-    // that one ghost click instead of letting it immediately toggle the
-    // row back off. See utils/longPress.ts's own comment on
-    // consumeLongPressClick for the full mechanism.
-    const handleRowClick = () => {
-      if (consumeLongPressClick(rowLongPressState)) return
-      toggleSelectionScope(rowScopeIds, !rowSelected)
-    }
-    return (
-      <tr
-        key={productId}
-        data-product-jump-id={productId}
-        className={`table-row cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}
-        onClick={selectionModeActive ? handleRowClick : undefined}
-        {...(selectionModeActive ? {} : longPress)}
-      >
-        <td className={`${selectionModeActive ? 'px-2' : 'px-0'} py-2`} onClick={(e) => { e.stopPropagation(); if (selectionModeActive) toggleSelectionScope(rowScopeIds, !rowSelected) }}>
-          {selectionModeActive ? (
-            <input
-              type="checkbox"
-              className="rounded"
-              checked={rowSelected}
-              ref={(node) => {
-                if (node) node.indeterminate = !rowSelected && isSelectionScopePartiallySelected(rowScopeIds)
-              }}
-              onChange={(event) => toggleSelectionScope(rowScopeIds, event.target.checked)}
-            />
-          ) : null}
-        </td>
-        {/* A grouped CHILD row shows no image.
-            A name group is ONE product and carries ONE set of photos, drawn
-            once on the group header by renderGroupThumbnail -- repeating it
-            per child implies each row has its own, which is exactly the
-            model the group replaced.
-            renderMobileProductCard already did this; the desktop TABLE row
-            did not, which is why the duplicate thumbnails and the resulting
-            ragged left edge only appeared on large screens.
-            The cell itself still renders (a <td> has to exist for the column
-            to line up) -- it is the image inside that is dropped, so every
-            child row's name starts at exactly the same x as the group
-            title's. */}
-        <td className="px-2 py-2">
-          {indented ? null : (
-            <button
-                type="button"
-                className={`block rounded-lg ${thumbnailState.hasImage ? 'cursor-zoom-in' : 'cursor-default'}`}
-                aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
-                aria-disabled={!thumbnailState.hasImage}
-                onMouseDown={(event) => event.stopPropagation()}
-                onTouchStart={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  if (thumbnailState.hasImage) openLightbox(thumbnailState.gallery, 0, productName)
-                }}
-              >
-                {thumbnailState.hasImage
-                  ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-16 w-16 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" />
-                  : <ProductImagePlaceholder className="h-16 w-16 rounded-lg" compact />}
-              </button>
-          )}
-        </td>
-        {/* Name rail (col 3): child rows align EXACTLY with the group
-            title -- no text indent. A child row leaves its image cell empty
-            (see the image <td> above), and that empty image column is what
-            visually sets the group title's thumbnail apart from its
-            children, so an extra text indent on top would double the
-            offset. The category band sits one column LEFT of this, on the
-            image rail (see ProductsListSurface's geometry note). */}
-        <td className={`${ROW_TEXT_GUTTER} py-2`}>
-          {/* Name cell previously forced align-top on the <td> itself, so
-              a row with no meta pills (the common case) sat pinned to the
-              top of the row instead of vertically centered like every
-              other cell (image, cost, selling, margin, stock all default-
-              center) -- reported as the name reading "much higher" than
-              the thumbnail next to it. Centering now happens on the whole
-              block (pills + name together, via this wrapping flex column)
-              instead of on the <td>, so a row WITH pills still stacks them
-              above the name correctly, it just centers as one unit
-              vertically within the row rather than pinning to the top. */}
-          <div className="flex min-h-10 flex-col justify-center">
-            {compactMeta.length ? (
-              <div className="mb-1 flex max-w-[18rem] flex-wrap gap-1 lg:max-w-none lg:flex-nowrap lg:overflow-hidden">
-                {compactMeta.map((item) => renderMetaPill(item ? {
-                  key: String(item.key),
-                  label: String(item.label || ''),
-                  color: typeof item.color === 'string' ? item.color : undefined,
-                  className: typeof item.className === 'string' ? item.className : undefined,
-                } : null))}
-              </div>
-            ) : null}
-            <div className="flex min-w-0 items-center gap-1.5">
-              {/* Standalone rows (indented === false, i.e. not a child under
-                  an expanded group) now match the group header's own title
-                  weight (font-semibold) instead of font-medium, so a
-                  standalone product reads as the same visual tier as a group
-                  row rather than one step below it -- per the Aug 19 2026
-                  ask. Child rows under a group keep font-medium, same as
-                  before. */}
-              <div {...getKhmerTextProps(productName, `min-w-0 break-words text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)}>{productName}</div>
-            </div>
-            {dupInfo ? (
-              <DuplicateResolverControl
-                tr={tr}
-                memberCount={dupInfo.members.length}
-                busy={dupResolverBusyKey === dupInfo.key}
-                disabled={!canMergeDuplicates}
-                onKeepThis={() => void handleDuplicateKeepThis(Number(productId), dupInfo)}
-                onKeepBoth={() => void handleDuplicateKeepBoth(dupInfo)}
-              />
-            ) : null}
-          </div>
-        </td>
-        {/* border-l here (freed-up space between the Name and Details
-            columns) instead of a whole new column -- per the Aug 19 2026
-            ask for a divider before the details column. */}
-        <td className="hidden border-l border-gray-100 px-3 py-2 align-top dark:border-gray-700 md:table-cell">
-          <ProductDetailsCell
-            product={p}
-            promotion={promotion}
-            branchLabel={String(branchSummaryLabel || '')}
-            selectedBranchName={selectedBranchName ? String(selectedBranchName) : ''}
-            selectedBranchId={branchFilter}
-            renderMetaPill={renderMetaPill}
-            tr={tr}
-            fmtUSD={fmtUSD}
-          />
-        </td>
-        <td className="px-3 py-2 text-right col-highlight-red">
-          <div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</div>
-          {costKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(costKhr)}</div>}
-        </td>
-        <td className="px-3 py-2 text-right col-highlight-green">
-          <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>
-          {sellingKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(sellingKhr)}</div>}
-          {specialUsd > 0 || specialKhr > 0 ? (
-            <div className="mt-0.5 text-[10px] text-primary-600 dark:text-primary-400">
-              VIP {fmtUSD(specialUsd || sellingUsd)}
-              {specialKhr > 0 ? ` / ${fmtKHR(specialKhr)}` : ''}
-            </div>
-          ) : null}
-          {promotion.active ? (
-            <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
-              {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
-            </div>
-          ) : null}
-        </td>
-        <td className="px-3 py-2 text-right hidden lg:table-cell">
-          {costUsd > 0 && sellingUsd > 0
-            ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-blue-500/80 dark:text-blue-400/80">{marginPct.toFixed(1)}%</div></div>
-            : <span className="text-gray-300">N/A</span>}
-        </td>
-        <td className="px-3 py-2 text-right">
-          {/* Stock status convention (this session): the qty+unit value
-              itself is colored (red/yellow/green) instead of showing a
-              separate "In"/"Low"/"Out" badge underneath -- the badge is
-              still shown in the click-to-view-details panel (its own
-              "Status" row, see ProductDetailModal.tsx), just not
-              repeated here in the table. */}
-          {/* Was a plain inline-flex div -- the unit chip (whitespace-nowrap,
-              shrink-0) had nowhere to go but past the cell's right edge
-              once the qty number plus a longer/Khmer unit name didn't both
-              fit on one line ("stock qty overflowing its container" from
-              the Aug 19 2026 ask). flex-wrap lets the chip drop to its own
-              line inside the same right-aligned cell instead of spilling
-              out of it. */}
-          <div className={`flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 font-bold ${stockStatusTextClass}`}>
-            <span>{String(qty || 0)}</span>
-            {renderUnitChip(typeof p.unit === 'string' ? p.unit : undefined)}
-          </div>
-        </td>
-      </tr>
-    )
-  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
+  // Single shared ctx for both row shapes -- union of the two original
+  // useCallback dependency lists (desktop's + mobile's), so it only
+  // recomputes when a dependency either row actually used changes. Fixed
+  // above to include lowStockConfig (previously closed over without being
+  // declared as a dependency of either useCallback -- a latent staleness
+  // risk now that the row body only sees it through this memo).
+  const productRowCtx = useMemo<ProductRowCtx>(() => ({
+    branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD,
+    getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState,
+    isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox,
+    promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive,
+    t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
+    canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
+    setDetailProduct,
+  }), [branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo, setDetailProduct])
 
-  const renderMobileProductCard = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
-    const productId = p.id ?? 0
-    const productName = String(p.name || '')
-    const brandName = String(p.brand || '')
-    const barcode = String(p.barcode || '')
-    const sellingUsd = Number(p.selling_price_usd || 0)
-    const specialUsd = Number(p.special_price_usd || 0)
-    const unitName = typeof p.unit === 'string' ? p.unit : undefined
-    const {
-      promotion,
-      costUsd,
-      qty,
-      stockStatusTextClass,
-    } = buildProductRowDisplayState(p, {
-      branchFilter,
-      exchangeRate,
-      getBranchQty,
-      t,
-      promotionRules,
-    })
-    const thumbnailState = buildProductThumbnailState(p)
-    const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
-    const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
-    // Exact duplicate? -> suppress click-to-detail, show the inline resolver
-    // (same rule as renderDesktopProductRow; user spec item #3).
-    const dupInfo = findRowDuplicateInfo(exactDuplicateIndex, productId, rowScopeIds)
+  const renderDesktopProductRow = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => (
+    <ProductDesktopRow key={p.id} product={p} indented={indented} ctx={productRowCtx} />
+  ), [productRowCtx])
 
-    // Grouped child rows (indented) share the group's single merged card
-    // (wrapper rendered by ProductsListSurface) instead of each getting its
-    // own boxed "card" -- a thin top divider separates rows within the
-    // group instead, matching Inventory's mobile grouped-row treatment
-    // (InventoryProductsSurface.tsx) for parity between the two pages.
-    // Ungrouped single products are untouched, still their own card.
-    const rowClassName = indented
-      ? `cursor-pointer select-none border-t border-gray-100 px-3 py-2.5 dark:border-gray-800 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
-      : `card cursor-pointer select-none px-3 py-2.5 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
-
-    // Same long-press/select-mode rules as renderDesktopProductRow -- see
-    // its comment for the full reasoning. Not a hook; shares the same
-    // per-row-id timer-slot Map (a row's product id is the same whether
-    // it's rendered on the desktop table or here).
-    const rowLongPressState = getLongPressState(Number(productId))
-    const longPress = createLongPressHandlers(rowLongPressState, {
-      disabled: selectionModeActive,
-      onLongPress: () => toggleSelectionScope(rowScopeIds, true),
-      onClick: () => { if (!dupInfo) setDetailProduct(p) },
-    })
-    // Same ghost-click guard as renderDesktopProductRow -- see its
-    // comment and utils/longPress.ts's consumeLongPressClick for why
-    // this is needed, not just belt-and-suspenders.
-    const handleRowClick = () => {
-      if (consumeLongPressClick(rowLongPressState)) return
-      toggleSelectionScope(rowScopeIds, !rowSelected)
-    }
-
-    return (
-      <div
-        key={productId}
-        data-product-jump-id={productId}
-        className={rowClassName}
-        onClick={selectionModeActive ? handleRowClick : undefined}
-        {...(selectionModeActive ? {} : longPress)}
-      >
-        {/* No indent wrapper here anymore -- grouped (indented) rows already
-            read as "part of the group" from the shared card/divider treatment
-            above (see rowClassName just above: a plain top border between
-            rows sharing one card, vs. a standalone product's own separate
-            `card`). An extra left-padding indent on top of that was
-            redundant, and it also meant a child row's text started to the
-            right of the group title above it instead of lining up with it. */}
-        <div className="flex items-start gap-3">
-          {selectionModeActive ? (
-            <input
-              type="checkbox"
-              className="rounded mt-1 flex-shrink-0 cursor-pointer"
-              checked={rowSelected}
-              ref={(node) => {
-                if (node) node.indeterminate = !rowSelected && isSelectionScopePartiallySelected(rowScopeIds)
-              }}
-              onChange={(e) => { e.stopPropagation(); toggleSelectionScope(rowScopeIds, e.target.checked) }}
-              onClick={(e) => e.stopPropagation()}
-            />
-          ) : null}
-          {/* Child rows under a group lose the image slot entirely now --
-              not just a shrunk spacer -- per explicit follow-up direction
-              on the Aug 19 2026 "Image 1" note (Part 208 had only shrunk
-              this to a slim w-3 spacer; that still reserved dead space for
-              an image that will never show here, since the group header's
-              renderGroupThumbnail already shows one unified image for the
-              whole name-group). Skipping the wrapper `<div>` outright
-              (rather than rendering it empty) lets the parent's gap-3
-              close the space up instead of leaving a gap-sized empty box. */}
-          {indented ? null : (
-            // The thumbnail fills the card's VERTICAL space at a fixed NARROW
-            // width (user, Aug 31: "take advantage of space = up/down, not the
-            // empty right side" -- a wide square ate the room barcode/brand/
-            // price need). self-stretch grows it to the card's height; w-16
-            // keeps it narrow so the text column keeps its width.
-            <button
-              type="button"
-              className="relative flex-shrink-0 self-stretch rounded-xl text-left"
-              aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
-              aria-disabled={!thumbnailState.hasImage}
-              onMouseDown={(event) => event.stopPropagation()}
-              onTouchStart={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation()
-                if (thumbnailState.hasImage) openLightbox(thumbnailState.gallery, 0, productName)
-              }}
-            >
-              {thumbnailState.hasImage
-                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-full min-h-[5rem] w-16 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" />
-                : <ProductImagePlaceholder className="h-full min-h-[5rem] w-16 rounded-xl" />}
-              <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
-            </button>
-          )}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                {/* Product names are content, not a label: let them use a
-                    second (or later) row on small cards instead of clipping
-                    them or requiring a horizontal drag to read them. */}
-                <div {...getKhmerTextProps(productName, 'break-words text-sm font-semibold text-gray-900 dark:text-white')}>
-                  {productName}
-                </div>
-              </div>
-              {/* Batch count rides the name row as a small YELLOW badge
-                  (user, Aug 30: "add number of batches yellow next to the
-                  standalone product rows and child rows"); the truncating
-                  name above can never touch it. */}
-              {Number((p as { batch_count?: number }).batch_count || 0) > 0 ? (
-                <span
-                  className="mt-0.5 inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                  title={`${Number((p as { batch_count?: number }).batch_count || 0)} ${t('batches') || 'batches'}`}
-                >
-                  {Number((p as { batch_count?: number }).batch_count || 0)}
-                </span>
-              ) : null}
-            </div>
-            {/* min-h matches one chip's height (text-[10px] line ~15px +
-                py-0.5 = 19px) so a product with NO barcode/brand keeps the
-                price/qty line at the same vertical spot as its neighbours
-                instead of the row sliding up into the gap (user, Aug 30:
-                "instead of moving the price and quantity row just keep it
-                constant there"). */}
-            <div className="mt-0.5 flex min-h-[1.1875rem] flex-wrap gap-1">
-              {/* Small-screen default card shows the BARCODE here in place of
-                  the category (user, Aug 29: "hide the category inside the
-                  details ... replace the outside with barcode"). Category is
-                  one tap away in the detail view; a scannable code is more
-                  useful on the card face. Brand stays. */}
-              {barcode ? (
-                <span
-                  className="inline-flex shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-1 py-0.5 font-mono text-[10px] tracking-tight text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                  title={barcode}
-                >
-                  {barcode}
-                </span>
-              ) : null}
-              {brandName ? (
-                <span
-                  className={`inline-block max-w-[4.5rem] truncate rounded-full px-1 py-0.5 text-[10px] font-medium sm:max-w-[6rem] ${getBrandColor(brandName) ? '' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
-                  style={getBrandColor(brandName) ? {
-                    background: getBrandColor(brandName),
-                    color: getContrastingTextColor(getBrandColor(brandName)),
-                  } : undefined}
-                  title={brandName}
-                >
-                  {brandName}
-                </span>
-              ) : null}
-            </div>
-            {/* Price/stock lines moved in here, inside the same flex-1 column
-                as the name/category/brand above it, instead of living as a
-                sibling block with its own hand-tuned `pl-[5.35rem]` meant to
-                eyeball-match the image width + gap. That fixed value didn't
-                actually match the flex layout's real offset, so this line
-                sat further right than the category/brand row above it. Being
-                a normal child of the same column means it now lines up
-                exactly, with no hardcoded offset to keep in sync by hand.
-
-                ONE row, only one row (user, Aug 28 2026, with a screenshot
-                of the two-row card): every price AND the stock qty share a
-                single line. This SUPERSEDES the earlier "selling price
-                should get its own row" split from the Aug-25 backlog --
-                the user saw the split live and rejected it, so don't
-                re-split without a fresh ask. Selling (green) leads and
-                keeps its bigger weight so it still reads first; special/
-                discount figures ride beside it; then cost (red) and the
-                status-colored qty+unit, "|"-separated like before.
-                flex-wrap stays purely as overflow protection for genuinely
-                too-narrow cards -- the default render is one line. */}
-            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
-              <span className="whitespace-nowrap font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
-              {specialUsd > 0 ? (
-                // The VIP price (the special_price_* field -- labelled "VIP
-                // Price" elsewhere, e.g. ProductDetailModal; the old hardcoded
-                // "Special" here was a mislabel). On the small-screen default
-                // card it shows as JUST the number, colour-coded (primary/blue)
-                // with no text label -- the colour distinguishes it from selling
-                // (green) and cost (red) on this compact one-line price row
-                // (user, Aug 29 2026). A "|" separates it from the selling price
-                // beside it, matching the cost/qty dividers on this same row
-                // (user, Aug 31). The desktop table row keeps its own labelling.
-                <>
-                  <span className="text-gray-300 dark:text-gray-600">|</span>
-                  <span className="whitespace-nowrap font-medium text-primary-700 dark:text-primary-400">
-                    {fmtUSD(specialUsd)}
-                  </span>
-                </>
-              ) : null}
-              {promotion.active ? (
-                <span className="whitespace-nowrap font-medium text-rose-600 dark:text-rose-300">
-                  {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
-                </span>
-              ) : null}
-              <span className="text-gray-300 dark:text-gray-600">|</span>
-              <span className="whitespace-nowrap text-red-600">{fmtUSD(costUsd)}</span>
-              <span className="text-gray-300 dark:text-gray-600">|</span>
-              {/* Colored by stock status (red/yellow/green) instead of the
-                  separate "In"/"Low"/"Out" badge this row used to show up
-                  in its header line -- see stockStatusTextClass above. */}
-              <span className={withKhmerTextClass(unitName, `inline-flex min-w-0 max-w-full items-center whitespace-nowrap font-medium ${stockStatusTextClass}`)}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
-            </div>
-            <ProductBatchPreview product={p} branchId={branchFilter} tr={tr} compact />
-            {/* Description is intentionally NOT shown on the small-screen list
-                card (user, Sep 1 2026: "only hide in the default view, keep it
-                in click-to-view details") -- it stays available in the product
-                detail modal opened on tap (ProductDetailModal). */}
-            {dupInfo ? (
-              <DuplicateResolverControl
-                tr={tr}
-                memberCount={dupInfo.members.length}
-                busy={dupResolverBusyKey === dupInfo.key}
-                disabled={!canMergeDuplicates}
-                onKeepThis={() => void handleDuplicateKeepThis(Number(productId), dupInfo)}
-                onKeepBoth={() => void handleDuplicateKeepBoth(dupInfo)}
-              />
-            ) : null}
-          </div>
-        </div>
-      </div>
-    )
-  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
+  const renderMobileProductCard = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => (
+    <ProductMobileCard key={p.id} product={p} indented={indented} ctx={productRowCtx} />
+  ), [productRowCtx])
 
   // One unified thumbnail for a whole name-group (see the `indented`
   // branches just above, which omit each row's own image once a group
@@ -3496,14 +4397,9 @@ function ProductsFullEditor() {
   // showed up was liable to change just from reordering/adding variants.
   // Uploading is still done from the lead product's own edit form -- this
   // only changes which image the collapsed header reflects.
-  // Mobile-first sizing (h-20 w-20, matching a standalone card's own
-  // image -- see renderMobileProductCard; enlarged from h-16 on Aug 31 to
-  // use the card's spare vertical space) that adjusts at the
-  // `sm:` breakpoint where the desktop table takes over (its row image is
-  // the larger h-14 w-14, and this header sits inline next to the group
-  // title/chevron rather than as its own block, so it stays a touch smaller
-  // there at sm:h-12 sm:w-12 -- both enlarged from the previous tiny w-10/w-8
-  // per user request that desktop thumbnails were too small).
+  // One compact 48px square on every viewport, matching standalone rows.
+  // Keeping group and standalone footprints identical prevents either shape
+  // from stretching its row/card or shifting the shared title rail.
   const renderGroupThumbnail = useCallback((group: { rows?: ProductRecord[]; leadProduct?: ProductRecord }) => {
     const state = buildGroupThumbnailState(group.rows, group.leadProduct)
     const title = String(group.leadProduct?.name || group.rows?.[0]?.name || '')
@@ -3513,12 +4409,14 @@ function ProductsFullEditor() {
           className="block rounded-xl text-left sm:rounded-lg"
           aria-label={`${tr('view_image', 'View image')}: ${title}`}
           onMouseDown={(event) => event.stopPropagation()}
+          onMouseUp={(event) => event.stopPropagation()}
           onTouchStart={(event) => event.stopPropagation()}
+          onTouchEnd={(event) => event.stopPropagation()}
           onClick={(event) => { event.stopPropagation(); openLightbox(state.gallery, 0, title) }}
         >
-          <ProductImg src={state.thumbnail} alt={title} className="h-20 w-16 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:h-12 sm:w-12 sm:rounded-lg dark:bg-slate-800" />
+          <ProductImg src={state.thumbnail} alt={title} className="h-12 w-12 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:rounded-lg dark:bg-slate-800" />
         </button>
-      : <ProductImagePlaceholder className="h-20 w-16 rounded-xl sm:h-12 sm:w-12 sm:rounded-lg" compact />
+      : <ProductImagePlaceholder className="h-12 w-12 rounded-xl sm:rounded-lg" compact />
   }, [openLightbox, tr])
 
   // Group-title three-dot menu: "Add child row" (opens the variant modal,
@@ -3553,10 +4451,26 @@ function ProductsFullEditor() {
     return { ...handlers, ...guard }
   }, [getLongPressState, selectionModeActive, toggleSelectionScope])
 
-  const renderGroupActions = useCallback((group: { key: string; leadProduct?: ProductRecord }) => {
+  const renderGroupActions = useCallback((group: { key: string; leadProduct?: ProductRecord; hiddenZeroStockRowCount?: number }) => {
     const lead = group.leadProduct
     if (!lead) return null
+    // "N hidden" -- only when the FilterMenu's "Hide out-of-stock rows"
+    // option actually removed rows from THIS group. A shortened group must
+    // never look like the whole group; the hint says what went and how to
+    // get it back, and lives in a hint rather than inline prose.
+    const hiddenRows = Number(group.hiddenZeroStockRowCount || 0)
+    const hiddenBadge = hiddenRows > 0 ? (
+      <span className="flex shrink-0 items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+        {`${hiddenRows} ${tr('hidden', 'hidden')}`}
+        <InfoHint
+          label={tr('hide_out_of_stock_rows', 'Hide out-of-stock rows')}
+          text={`${tr('hidden_out_of_stock_rows_hint', 'Rows in this group that are out of stock at every branch are hidden. Turn off "Hide out-of-stock rows" in Filters to see them.')}`}
+        />
+      </span>
+    ) : null
     return (
+      <>
+      {hiddenBadge}
       <PortalMenu
         align="right"
         compact
@@ -3567,8 +4481,57 @@ function ProductsFullEditor() {
           { label: tr('add_image', 'Add image'), icon: <ImagePlus className="h-3.5 w-3.5" />, onClick: () => openProductFormTab(lead, 'basic') },
         ]}
       />
+      </>
     )
   }, [openProductFormTab, tr])
+
+  // P3-L6. Held rows are keyed off the group's FULL id list, not its display
+  // rows: mergeSameDetailRows collapses branch-only duplicates into one
+  // visible row, and the merged-away product may be the one carrying the
+  // held units. Keying off the display rows would hide them.
+  const groupTaggedRows = useCallback((group: { ids?: Array<string | number> }): TaggedStockRow[] => {
+    if (!taggedLotsByProduct.size) return []
+    const seen = new Set<string>()
+    const rows: TaggedStockRow[] = []
+    for (const id of group.ids || []) {
+      const key = String(id)
+      if (seen.has(key)) continue
+      seen.add(key)
+      for (const row of taggedLotsByProduct.get(key) || []) rows.push(row)
+    }
+    return rows
+  }, [taggedLotsByProduct])
+
+  const taggedRowKey = (row: TaggedStockRow) => `tagged-${row.product_id}-${row.branch_id ?? 'none'}-${row.condition_tag}`
+
+  const renderGroupTaggedRows = useCallback((group: { ids?: Array<string | number> }) => {
+    const rows = groupTaggedRows(group)
+    if (!rows.length) return null
+    return rows.map((row) => (
+      <TaggedStockDesktopRow
+        key={taggedRowKey(row)}
+        row={row}
+        tr={tr}
+        canWrite={canAdjustInventoryStock}
+        onAction={setTaggedAction}
+        selectionModeActive={selectionModeActive}
+      />
+    ))
+  }, [canAdjustInventoryStock, groupTaggedRows, selectionModeActive, tr])
+
+  const renderGroupTaggedCards = useCallback((group: { ids?: Array<string | number> }) => {
+    const rows = groupTaggedRows(group)
+    if (!rows.length) return null
+    return rows.map((row) => (
+      <TaggedStockMobileCard
+        key={taggedRowKey(row)}
+        row={row}
+        tr={tr}
+        canWrite={canAdjustInventoryStock}
+        onAction={setTaggedAction}
+      />
+    ))
+  }, [canAdjustInventoryStock, groupTaggedRows, tr])
 
   if (loadError && !loading && !products.length && !categories.length && !units.length && !branches.length) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
@@ -3599,58 +4562,35 @@ function ProductsFullEditor() {
             heading repeating "Products" was redundant on EVERY screen, not just
             phones (user, Aug 31: "product page still use title page in addition
             to the section ... remove that"). */}
-        {/* Y15: section switcher (Products | Stock Changes), same pill
-            pattern as the Promotions page. Stock Changes stops being a
-            folded card at the bottom of the listing and becomes its own
-            section reached from here. */}
-        <div
-          className="w-full min-w-0 max-w-full overflow-x-auto pb-1 [scrollbar-width:thin] sm:w-auto sm:flex-1 sm:pb-0"
-          role="group"
-          aria-label={tr('product_sections', 'Product sections')}
-          onWheel={scrollProductSectionsWithWheel}
-        >
-          <div className="inline-flex w-max rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
-          <button
-            type="button"
-            onClick={() => setActiveProductSection('products')}
-            aria-pressed={activeProductSection === 'products'}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'products' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-          >
-            {t('products') || 'Products'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveProductSection('stock_changes')}
-            aria-pressed={activeProductSection === 'stock_changes'}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'stock_changes' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-          >
-            {tr('stock_change_ledger', 'Stock Changes', 'ការផ្លាស់ប្តូរស្តុក')}
-          </button>
-          {canAdjustInventoryStock ? (
-            <button
-              type="button"
-              onClick={() => setActiveProductSection('stock_in_sessions')}
-              aria-pressed={activeProductSection === 'stock_in_sessions'}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'stock_in_sessions' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-            >
-              {tr('stock_in_sessions', 'Stock-in Sessions', 'វគ្គបញ្ចូលស្តុក')}
-            </button>
-          ) : null}
-          {/* Duplicates review (possibly-same residue) -- same section-chip
-              pattern, gated by the same permission as the merge tool since
-              its actions are the same kind of merge. */}
-          {canMergeDuplicates ? (
-            <button
-              type="button"
-              onClick={() => setActiveProductSection('duplicates')}
-              aria-pressed={activeProductSection === 'duplicates'}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'duplicates' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-            >
-              {tr('product_duplicates_section', 'Duplicates', 'ស្ទួន')}
-            </button>
-          ) : null}
+        {/* Y15: section switcher (Products | Stock Changes | Stock-in
+            Sessions | Duplicates), now the shared hub pill row. It WRAPS
+            instead of scrolling sideways -- the four labels are ~440px wide
+            against 296px (320) / 351px (375) of usable width, so half of
+            them used to sit off-screen behind a horizontal swipe (N7) -- and
+            it steps aside in compact "pages" mode, where the home sheet owns
+            section switching for every hub page. The list itself comes from
+            getHubDestinations('products'), so this row and that sheet can
+            never offer different sections. */}
+        {layeredSectionNav || productSectionTabs.length <= 1 ? null : (
+          <div className="w-full min-w-0 max-w-full sm:w-auto sm:flex-1" role="group" aria-label={tr('product_sections', 'Product sections')}>
+            <div className="bos-nav-chrome hub-section-pills flex max-w-full flex-wrap gap-1 rounded-xl p-1 md:inline-flex">
+              {productSectionTabs.map((section) => {
+                const isActive = activeProductSection === section.id
+                return (
+                  <button
+                    key={section.id}
+                    type="button"
+                    onClick={() => setActiveProductSection(section.id as typeof activeProductSection)}
+                    aria-pressed={isActive}
+                    className="hub-section-pill inline-flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center break-words rounded-lg px-2.5 py-2 text-center text-[13px] font-semibold leading-snug transition-colors md:h-8 md:min-h-0 md:flex-none md:basis-auto md:whitespace-nowrap md:py-0"
+                  >
+                    {tr(section.key, section.label)}
+                  </button>
+                )
+              })}
+            </div>
           </div>
-        </div>
+        )}
         <div className="w-full min-w-0 overflow-x-auto pb-1 sm:ml-auto sm:w-auto sm:flex-shrink-0 sm:pb-0">
           {/* Each handler is passed only when this role's tier actually
               permits the action -- HeaderActions drops any control whose
@@ -3691,10 +4631,11 @@ function ProductsFullEditor() {
             /* Stock Changes section replaces the catalog "Add Product" button
                with its own "Adjust" menu (user, Aug 31) -> drop onAdd there;
                HeaderActions hides any undefined-handler control. */
-            onAdd={canAddProduct && activeProductSection !== 'stock_changes' && activeProductSection !== 'stock_in_sessions' ? ()=>{setSelected(null);setFormInitialTab('basic');setModal('form')} : undefined}
+            /* S4-12: Add now opens the header step first -- brand, supplier
+               and branch once, then the same product form for each item. */
+            onAdd={(canAddProduct || canAdjustInventoryStock) && activeProductSection !== 'stock_changes' && activeProductSection !== 'stock_in_sessions' ? ()=>{setSelected(null);setFormInitialTab('basic');setCreateSessionInitialMode(canAddProduct ? 'new' : 'existing');setModal('create_session')} : undefined}
             // The merged Add Stock flow rides the same Add menu. Hidden on
             // the Stock Changes section, which carries its own Adjust menu.
-            onAddStock={canAdjustInventoryStock && activeProductSection !== 'stock_changes' ? () => setAddStockOpen(true) : undefined}
             onMergeDuplicates={canMergeDuplicates ? openMergeDuplicatesReview : undefined}
             onZeroQuantityCleanup={canZeroQuantityCleanup ? openZeroQuantityCleanup : undefined}
             onWireImages={canWireImages ? openWireImages : undefined}
@@ -3728,11 +4669,11 @@ function ProductsFullEditor() {
                     </button>
                   )}
                   items={[
-                    { label: tr('add_stock', 'Add Stock'), onClick: () => ledgerActions?.openAdjust('add'), color: 'blue', icon: <Boxes className="h-4 w-4 shrink-0" /> },
-                    { label: tr('remove_stock', 'Remove Stock'), onClick: () => ledgerActions?.openAdjust('remove') },
-                    { label: tr('adjust_quantity', 'Adjust Quantity'), onClick: () => ledgerActions?.openAdjust('set') },
-                    'divider',
-                    { label: tr('fast_stockin_title', 'Fast stock-in'), onClick: () => ledgerActions?.openFastStockIn(), color: 'blue' },
+                    // N27: one way to change stock -- the fast flow, opened in
+                    // the chosen mode (add / remove / set).
+                    { label: tr('add_stock', 'Add Stock'), onClick: () => ledgerActions?.openFastStockIn('add'), color: 'blue', icon: <Boxes className="h-4 w-4 shrink-0" /> },
+                    { label: tr('remove_stock', 'Remove Stock'), onClick: () => ledgerActions?.openFastStockIn('remove') },
+                    { label: tr('adjust_quantity', 'Adjust Quantity'), onClick: () => ledgerActions?.openFastStockIn('set') },
                   ] as PortalMenuItem[]}
                 />
               ) : null
@@ -3772,7 +4713,7 @@ function ProductsFullEditor() {
           bg-gray-50/dark:bg-gray-900 matches #app-root's background (the
           page-scroll itself is transparent) so list rows scrolling
           underneath don't show through while this is stuck. */}
-      <div className="sticky top-0 z-30 -mx-1 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-0 z-30 -mx-1 bg-gray-50 pb-2 pt-2 dark:bg-gray-900 sm:mx-0">
         {/* Y13: a plain page-level search row (the folding "Search &
             Filters" SectionCard wrapper was removed). SearchInput's own
             `min-w-0 flex-1` default handles narrow-screen shrink; every
@@ -3916,18 +4857,21 @@ function ProductsFullEditor() {
           previously a border-t continuation of the sticky card above it). */}
       {hasSelected && bulkEditMode === 'info' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">Update basic info for <strong>{selectedVisibleCount}</strong> products</p>
+          <p className="text-xs text-gray-500 mb-2">{(() => {
+            const [pre, post] = tr('bulk_edit_update_info_for_count', 'Update basic info for {count} products').split('{count}')
+            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
+          })()}</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <div><label className="text-xs text-gray-500 block mb-1">Category</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('category', 'Category')}</label>
               <AppSelect
                 value={bulkEditForm.category || ''}
                 onChange={(nextValue) => setBulkEditForm(f => ({ ...f, category: nextValue }))}
-                ariaLabel="Category"
+                ariaLabel={tr('category', 'Category')}
                 className="w-full"
                 buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
                 optionClassName="text-xs"
                 options={[
-                  { value: '', label: 'Keep current' },
+                  { value: '', label: tr('keep_current', 'Keep current') },
                   ...categories
                     .map(c => String(c.name || '').trim())
                     .filter(Boolean)
@@ -3935,16 +4879,16 @@ function ProductsFullEditor() {
                 ]}
               />
             </div>
-            <div><label className="text-xs text-gray-500 block mb-1">Unit</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('unit', 'Unit')}</label>
               <AppSelect
                 value={bulkEditForm.unit || ''}
                 onChange={(nextValue) => setBulkEditForm(f => ({ ...f, unit: nextValue }))}
-                ariaLabel="Unit"
+                ariaLabel={tr('unit', 'Unit')}
                 className="w-full"
                 buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
                 optionClassName="text-xs"
                 options={[
-                  { value: '', label: 'Keep current' },
+                  { value: '', label: tr('keep_current', 'Keep current') },
                   ...units
                     .map(u => String(u.name || '').trim())
                     .filter(Boolean)
@@ -3952,46 +4896,56 @@ function ProductsFullEditor() {
                 ]}
               />
             </div>
-            <div><label className="text-xs text-gray-500 block mb-1">Supplier</label>
-              <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder="Leave blank to keep" />
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('supplier', 'Supplier')}</label>
+              <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} />
             </div>
             <div><label className="text-xs text-gray-500 block mb-1">{t('brand')||'Brand'}</label>
-              <input className="input text-xs py-1" value={bulkEditForm.brand||''} onChange={e=>setBulkEditForm(f=>({...f,brand:e.target.value}))} placeholder="Leave blank to keep" />
+              <input className="input text-xs py-1" value={bulkEditForm.brand||''} onChange={e=>setBulkEditForm(f=>({...f,brand:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} />
             </div>
             <div className="flex gap-2 items-center mt-1">
-              <label className="text-xs text-gray-500">Low Stock Threshold</label>
-              <input className="input text-xs py-1 w-20" type="number" min="0" value={bulkEditForm.low_stock_threshold??''} onChange={e=>setBulkEditForm(f=>({...f,low_stock_threshold:e.target.value}))} placeholder="Keep" />
+              <label className="text-xs text-gray-500">{tr('low_stock_threshold', 'Low Stock Threshold')}</label>
+              <input className="input text-xs py-1 w-20" type="number" min="0" value={bulkEditForm.low_stock_threshold??''} onChange={e=>setBulkEditForm(f=>({...f,low_stock_threshold:e.target.value}))} placeholder={tr('keep', 'Keep')} />
             </div>
           </div>
           <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
             const { buildProductBulkInfoUpdates } = await loadProductWriteHelpers()
             await runBulkProductUpdates(buildProductBulkInfoUpdates(bulkEditForm))
-          }}>Apply to {selectedVisibleCount} products</button>
+          }}>{tr('bulk_edit_apply_to_count', 'Apply to {count} products').replace('{count}', String(selectedVisibleCount))}</button>
         </div>
       )}
 
       {hasSelected && bulkEditMode === 'pricing' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">Update pricing for <strong>{selectedVisibleCount}</strong> products</p>
+          <p className="text-xs text-gray-500 mb-2">{(() => {
+            const [pre, post] = tr('bulk_edit_update_pricing_for_count', 'Update pricing for {count} products').split('{count}')
+            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
+          })()}</p>
           <div className="grid grid-cols-2 gap-2">
-            <div><label className="text-xs text-gray-500 block mb-1">Selling Price (USD)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">Selling Price (KHR)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">VIP Price (USD)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.special_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,special_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">VIP Price (KHR)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.special_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,special_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">Purchase Price (USD)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">Purchase Price (KHR)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('selling_price_usd', 'Selling price (USD)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('selling_price_khr', 'Selling price (KHR)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+            {/* Was the "VIP Price" pair writing special_price_usd/khr. The
+                2026-09-04 ruling deleted that tier, so these now edit the
+                wholesale price -- the same numbers, since migration 0111 moved
+                them across. Labels come from the wholesale_price_*_full keys
+                that already exist in both packs. buildProductBulkPricingUpdates
+                already accepts wholesale_price_* so the write path needs
+                nothing new. */}
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('wholesale_price_usd_full', 'Wholesale (USD)', 'តម្លៃបោះដុំ (USD)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('wholesale_price_khr_full', 'Wholesale (KHR)', 'តម្លៃបោះដុំ (KHR)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_usd', 'Purchase price (USD)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.0001" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_khr', 'Purchase price (KHR)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.0001" min="0" value={bulkEditForm.purchase_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
           </div>
-          <p className="text-xs text-gray-400 mt-1">KHR prices will auto-calculate at current exchange rate</p>
+          <p className="text-xs text-gray-400 mt-1">{tr('bulk_price_khr_auto_note', 'KHR prices will auto-calculate at current exchange rate')}</p>
           <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
             const { buildProductBulkPricingUpdates } = await loadProductWriteHelpers()
             await runBulkProductUpdates(buildProductBulkPricingUpdates(bulkEditForm))
-          }}>Apply to {selectedVisibleCount} products</button>
+          }}>{tr('bulk_edit_apply_to_count', 'Apply to {count} products').replace('{count}', String(selectedVisibleCount))}</button>
 
           {/* Relative adjustment, kept in the same panel as the absolute
               "set every price to X" fields above but visually separated,
@@ -4045,7 +4999,13 @@ function ProductsFullEditor() {
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
               {([
                 ['adjust_selling', tr('selling_price', 'Selling price'), true],
-                ['adjust_special', tr('special_price', 'Special price'), false],
+                // Was 'adjust_special' labelled "Special price". Renamed with
+                // the tier by the 2026-09-04 ruling; both adjustment paths
+                // accept wholesale_price_* (BulkPriceField in
+                // productWriteHelpers.ts for the selected-rows path,
+                // BULK_PRICE_FIELDS in cloudflare/src/routes/products.ts for
+                // the catalog-wide one), so the toggle keeps working.
+                ['adjust_wholesale', tr('wholesale_price', 'Wholesale price', 'តម្លៃបោះដុំ'), false],
                 ['adjust_cost', tr('cost_price', 'Cost price'), false],
               ] as const).map(([key, label, defaultOn]) => (
                 <label key={key} className="inline-flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
@@ -4092,14 +5052,16 @@ function ProductsFullEditor() {
 
       {hasSelected && bulkEditMode === 'stock' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">Adjust stock for <strong>{selectedVisibleCount}</strong> products</p>
+          <p className="text-xs text-gray-500 mb-2">{(() => {
+            const [pre, post] = tr('bulk_edit_adjust_stock_for_count', 'Adjust stock for {count} products').split('{count}')
+            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
+          })()}</p>
           <div className="flex gap-3 flex-wrap items-end">
-            <div><label className="text-xs text-gray-500 block mb-1">Quantity</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('quantity', 'Quantity')}</label>
               <input className="input text-xs py-1 w-24" type="number" min="0" value={bulkEditForm.qty??1} onChange={e=>setBulkEditForm(f=>({...f,qty:e.target.value}))} />
               {/* Same 1/5/10/20 quick-pick chips as InventoryStockModals.tsx's
-                  Adjust modal and BranchStockAdjuster.tsx's per-branch rows --
-                  this bulk panel was the one remaining Add/Remove/Set stock
-                  flow still missing them. */}
+                  Adjust modal -- this bulk panel was the one remaining
+                  Add/Remove/Set stock flow still missing them. */}
               <div className="mt-1 flex flex-wrap gap-1">
                 {[1, 5, 10, 20].map((n) => (
                   <button
@@ -4113,10 +5075,9 @@ function ProductsFullEditor() {
                 ))}
               </div>
             </div>
-            <div><label className="text-xs text-gray-500 block mb-1">Action</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('action', 'Action')}</label>
               {/* Same border-2 / primary-50+primary-700 selected-state styling
-                  as Inventory's Adjust-stock modal and the product edit
-                  page's BranchStockAdjuster -- was previously a solid
+                  as Inventory's Adjust-stock modal -- was previously a solid
                   blue-600 fill, its own separate look for the same
                   three-way choice. Recolored brass/primary Aug 24 2026. */}
               <div className="flex gap-1">
@@ -4126,31 +5087,34 @@ function ProductsFullEditor() {
               </div>
             </div>
           </div>
-          <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={handleBulkAddStock}>Apply to {selectedVisibleCount} products</button>
+          <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={handleBulkAddStock}>{tr('bulk_edit_apply_to_count', 'Apply to {count} products').replace('{count}', String(selectedVisibleCount))}</button>
         </div>
       )}
 
       {hasSelected && bulkEditMode === 'branch' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">Move stock to a branch for <strong>{selectedVisibleCount}</strong> products</p>
+          <p className="text-xs text-gray-500 mb-2">{(() => {
+            const [pre, post] = tr('bulk_edit_move_stock_to_branch_for_count', 'Move stock to a branch for {count} products').split('{count}')
+            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
+          })()}</p>
           <div className="flex gap-2 flex-wrap items-end">
-            <div><label className="text-xs text-gray-500 block mb-1">Target Branch</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('target_branch', 'Target Branch')}</label>
               <AppSelect
                 value={bulkEditForm.branchId || ''}
                 onChange={(nextValue) => setBulkEditForm(f => ({ ...f, branchId: nextValue }))}
-                ariaLabel="Target Branch"
+                ariaLabel={tr('target_branch', 'Target Branch')}
                 className="w-full min-w-[10rem]"
                 buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
                 optionClassName="text-xs"
                 options={[
-                  { value: '', label: 'Select branch' },
+                  { value: '', label: tr('select_branch', 'Select branch') },
                   ...branches
                     .filter(b => b.id != null && b.name)
                     .map(b => ({ value: b.id as string | number, label: String(b.name) })),
                 ]}
               />
             </div>
-            <button disabled={bulkActionBusy} className="btn-primary px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={() => { if (bulkEditForm.branchId) { handleBulkChangeBranch(bulkEditForm.branchId) } else notify('Select a branch first','error') }}>Move Stock</button>
+            <button disabled={bulkActionBusy} className="btn-primary px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={() => { if (bulkEditForm.branchId) { handleBulkChangeBranch(bulkEditForm.branchId) } else notify(tr('select_branch_first', 'Select a branch first'),'error') }}>{tr('move_stock', 'Move Stock')}</button>
           </div>
         </div>
       )}
@@ -4161,9 +5125,10 @@ function ProductsFullEditor() {
           sidebar) jumps to a section instead of hiding everything else.
           initialFilter/initialOptions plumbing removed with it below. */}
 
-      {/* The product-result surface is intentionally 90% of its former
-          visual scale. The wrapper restores the layout width so shrinking
-          rows/cards does not leave an empty 10% rail on the right. */}
+      {/* Keep the result surface explicitly width-bounded. Its compact visual
+          density comes from the rows/cards themselves; widening a zoomed
+          wrapper caused mobile WebKit and the clipped page scroll root to
+          cut off the right side of cards and the final Stock/Qty column. */}
       <div className="products-list-density-90">
         <ProductsListSurface
           allVisibleProducts={allVisibleProducts}
@@ -4182,6 +5147,8 @@ function ProductsFullEditor() {
           renderDesktopProductRow={renderDesktopProductRow}
           bindGroupHold={bindGroupHold}
           renderGroupActions={renderGroupActions}
+          renderGroupTaggedRows={renderGroupTaggedRows}
+          renderGroupTaggedCards={renderGroupTaggedCards}
           renderGroupThumbnail={renderGroupThumbnail}
           renderMobileProductCard={renderMobileProductCard}
           selectionModeActive={selectionModeActive}
@@ -4193,6 +5160,20 @@ function ProductsFullEditor() {
           visibleProducts={visibleProducts}
         />
       </div>
+
+      {/* P3-L6: "Remove entirely" / "Restore to sellable" for a held row.
+          Both reload the held rows AND the products themselves -- a restore
+          moves units back into branch stock, so the sellable numbers on this
+          page are stale until the products are re-read. */}
+      {taggedAction ? (
+        <TaggedStockActionModal
+          action={taggedAction}
+          tr={tr}
+          notify={notify}
+          onClose={() => setTaggedAction(null)}
+          onDone={() => { setTaggedReloadToken((token) => token + 1); void load(true) }}
+        />
+      ) : null}
 
       <AlphaIndexRail letters={visibleLetters} onJump={jumpToLetter} label={t('jump_to_letter') || 'Jump to letter'} />
 
@@ -4249,22 +5230,6 @@ function ProductsFullEditor() {
         </div>
       ) : null}
 
-      {/* The Add menu's merged Add Stock flow (any section) -- the shipment
-          receiver, which covers a whole delivery and a single product. */}
-      {addStockOpen ? (
-        <Suspense fallback={null}>
-          <FastStockInModal
-            branchOptions={branches.map((branch) => ({ value: String(branch.id), label: String(branch.name || branch.id) }))}
-            defaultBranchId={null}
-            tr={tr}
-            notify={notify}
-            exchangeRate={exchangeRate}
-            onClose={() => setAddStockOpen(false)}
-            onDone={() => { void load(true) }}
-          />
-        </Suspense>
-      ) : null}
-
       {/* Duplicates review section -- mirrors the contacts Possible
           Duplicates panel for the product catalog. "Open" on a row jumps
           resolution happens IN PLACE via the tab's own edit float — it
@@ -4272,7 +5237,14 @@ function ProductsFullEditor() {
       {activeProductSection === 'duplicates' && canMergeDuplicates && (
         <div className="mt-1">
           <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
-            <ProductDuplicatesTab t={t} notify={notify} />
+            <ProductDuplicatesTab
+              t={t}
+              notify={notify}
+              canRemoveProduct={canRemoveProduct}
+              onMergeLeadingZero={openLeadingZeroMergeReview}
+              reviewProductIds={identityReviewProductIds}
+              onReviewProductIdsConsumed={() => setIdentityReviewProductIds(null)}
+            />
           </Suspense>
         </div>
       )}
@@ -4292,6 +5264,7 @@ function ProductsFullEditor() {
             unitMap={unitMap}
             brandColorMap={brandColorMap}
             fmtUSD={fmtUSD}
+            navigateTo={navigateTo}
             fmtKHR={fmtKHR}
             t={t}
             onEdit={()=>{setDetailProduct(null);openProductFormTab(detailProduct, 'basic')}}
@@ -4307,14 +5280,33 @@ function ProductsFullEditor() {
         </Suspense>
       )}
 
-      {adjustStockProduct ? (
+      {adjustStockProduct || restoreStockAdjustDraftKey ? (
         <Suspense fallback={null}>
           <StockAdjustModal
             initialProduct={adjustStockProduct}
+            restoreDraftKey={restoreStockAdjustDraftKey}
             t={t}
-            onClose={() => setAdjustStockProduct(null)}
-            onDone={() => { setAdjustStockProduct(null); void load(true) }}
+            onClose={() => { setAdjustStockProduct(null); setRestoreStockAdjustDraftKey(null) }}
+            onDone={() => {
+              const adjustedProductId = adjustStockProduct?.id ?? null
+              setAdjustStockProduct(null)
+              setRestoreStockAdjustDraftKey(null)
+              void refreshAdjustedProduct(adjustedProductId)
+            }}
+            onMinimize={(label: string, detail: { draftKey: string; productId: EntityId }) => {
+              minimizeWork({
+                key: `stock-adjust-${String(detail.productId)}`,
+                kind: 'stock_adjust',
+                ...STOCK_ADJUST_RESTORE_HOST,
+                label,
+                payload: { productId: detail.productId },
+                draftKey: detail.draftKey,
+                requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
+              })
+              notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
+            }}
           />
+          {restoringStockAdjustRef.current ? <StockAdjustRestoreCommit onCommit={commitStockAdjustRestore} /> : null}
         </Suspense>
       ) : null}
 
@@ -4347,6 +5339,7 @@ function ProductsFullEditor() {
               next: t('next') || 'Next',
               imageCount: '{current}/{total}',
               dotsLabel: 'Image {current} of {total}',
+              close: t('close') || 'Close',
             }}
           />
         </Suspense>
@@ -4406,10 +5399,57 @@ function ProductsFullEditor() {
           />
         </Suspense>
       )}
+      {/* S4-12: the header step -- brand + supplier + branch once, then the
+          same ProductForm below for every item in the delivery. */}
+      {modal==='create_session' && (
+        <Suspense fallback={null}>
+          <CreateProductsSessionModal
+            categories={categoryOptions}
+            units={unitOptions}
+            branches={branchOptions}
+            brandOptions={brandOptions}
+            groupCandidates={products.map((product) => ({ id: product.id, name: String(product.name || '') }))}
+            defaultBranchId={defaultBranchId}
+            initialMode={createSessionInitialMode}
+            allowNew={canAddProduct}
+            allowExisting={canAdjustInventoryStock}
+            canReceiveStock={canAdjustInventoryStock}
+            onPrepareProduct={prepareProductForSession}
+            onCreateProduct={createProductForSession}
+            onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
+            onMinimize={(canAddProduct || canAdjustInventoryStock) ? (label: string, details: CreateProductsSessionMinimizeDetails) => {
+              const requiredPermission = details.requiredPermissions[0]
+              minimizeWork({
+                key: 'create-products-session',
+                kind: 'create_products_session',
+                pageId: 'products',
+                label,
+                payload: {
+                  draftKey: details.draftKey,
+                  mode: details.mode,
+                  requiredPermissions: details.requiredPermissions,
+                },
+                draftKey: details.draftKey,
+                requiredPermission,
+              })
+              setModal(null); setSelected(null); setFormInitialTab('basic')
+              notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
+            } : undefined}
+            onDone={() => { void load(true) }}
+            notify={notify}
+            t={t}
+            usdSymbol={usdSymbol}
+            khrSymbol={khrSymbol}
+            exchangeRate={exchangeRate}
+            user={user}
+          />
+        </Suspense>
+      )}
       {modal==='form' && (
         <Suspense fallback={null}>
           <ProductForm
             product={modalProduct}
+            draftScope="standalone-create"
             categories={categoryOptions}
             units={unitOptions}
             branches={branchOptions}
@@ -4420,11 +5460,43 @@ function ProductsFullEditor() {
             }))}
             initialTab={formInitialTab}
             onSave={(payload) => handleSaveWithGallery((payload || {}) as unknown as ProductRecord)}
-            onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
-            onMinimize={!modalProduct ? (label: string) => {
-              minimizeWork({ key: 'add-product', kind: 'add_product', pageId: 'products', label })
-              setModal(null); setSelected(null); setFormInitialTab('basic')
+            onReviewIdentityCollision={canMergeDuplicates ? (productIds) => {
+              setIdentityReviewProductIds(productIds)
+              setActiveProductSection('duplicates')
             } : undefined}
+            onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
+            // S4-20: minimizing is silent otherwise -- the form just
+            // vanishes, which reads as lost work. Say where it went.
+            onMinimize={(label: string, detail?: { draftKey: string; productId: EntityId | null }) => {
+              if (modalProduct) {
+                const productId = Number(detail?.productId || modalProduct.id || 0)
+                const draftKey = String(detail?.draftKey || '')
+                if (!productId || !draftKey) {
+                  notify(tr('unable_to_minimize', 'Unable to minimize this edit.', 'មិនអាចបង្រួមការកែប្រែនេះបានទេ។'), 'error')
+                  return
+                }
+                minimizeWork({
+                  key: `edit-product-${productId}`,
+                  kind: 'edit_product',
+                  pageId: 'products',
+                  label,
+                  payload: { productId },
+                  draftKey,
+                  requiredPermission: { permissionKey: 'products', actionKey: 'edit' },
+                })
+              } else {
+                minimizeWork({
+                  key: 'add-product',
+                  kind: 'add_product',
+                  pageId: 'products',
+                  label,
+                  draftKey: detail?.draftKey || scopedWorkDraftKey('product_new_standalone-create'),
+                  requiredPermission: { permissionKey: 'products', actionKey: 'add' },
+                })
+              }
+              setModal(null); setSelected(null); setFormInitialTab('basic')
+              notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
+            }}
             onDelete={selected ? () => { const target = selected; setModal(null); setSelected(null); setFormInitialTab('basic'); handleDelete(target) } : undefined}
             t={t}
             usdSymbol={usdSymbol}
@@ -4499,10 +5571,24 @@ function ProductsFullEditor() {
       {mergeDuplicatesReviewOpen && (
         <MergeDuplicatesReviewModal
           t={t}
-          onClose={() => { if (!mergeDuplicatesBusy) setMergeDuplicatesReviewOpen(false) }}
-          onConfirm={handleMergeDuplicates}
+          onClose={() => {
+            const active = mergeDuplicatesAbortRef.current
+            leadingZeroRequestGenerationRef.current += 1
+            leadingZeroPreviewGenerationRef.current += 1
+            active?.abort()
+            if (active) {
+              mergeDuplicatesAbortRef.current = null
+              leadingZeroWriteInFlightRef.current = false
+              setMergeDuplicatesBusy(false)
+            }
+            setMergeDuplicatesReviewOpen(false)
+            if (active) void load(true)
+          }}
+          onConfirm={mergeDuplicatesScope === 'leading_zero' ? handleLeadingZeroMerge : handleMergeDuplicates}
           onLoadPreview={loadMergeDuplicatesPreview}
+          recoveryNotice={mergeDuplicatesRecovery}
           working={mergeDuplicatesBusy}
+          scope={mergeDuplicatesScope}
         />
       )}
       {zeroQuantityCleanupOpen && (
@@ -4540,6 +5626,9 @@ function ProductsFullEditor() {
           working={deleteConfirmBusy}
         />
       )}
+
+      {/* The merge/remove stock decision behind an exact-duplicate "Keep this". */}
+      {mergeStockChoiceDialog}
     </div>
   )
 }

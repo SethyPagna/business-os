@@ -55,7 +55,13 @@ await runTest('sales export is an import-compatible compact multi-item contract'
   assert.equal(rows.length, 2)
   assert.deepEqual(Object.keys(rows[0]), [...SALES_IMPORT_COLUMNS], 'export columns stay in authoritative import order')
   assert.equal(rows[0].receipt_number, 'R-100')
-  assert.equal(rows[0].sale_date, '08/28/2026 14:30', 'UTC storage exports as Cambodia 24-hour wall time')
+  // Not the day-first display string, on purpose. This column is read back
+  // by the importer (parseSalesImportDateTime), whose slash branch is
+  // month-first forever, so the export ships unambiguous ISO instead --
+  // same instant, same Cambodia wall time, same 24-hour clock. See
+  // fmtBusinessIsoDateTime. The round trip itself is pinned in
+  // cloudflare/scripts/test-sales-export-import-roundtrip-pure.cjs.
+  assert.equal(rows[0].sale_date, '2026-08-28 14:30', 'UTC storage exports as Cambodia 24-hour wall time')
   assert.equal(rows[0].customer_phone, '012345678')
   assert.equal(rows[1].receipt_number, '', 'continuation line does not repeat invoice data')
   assert.equal(rows[1].customer_name, '', 'continuation line inherits customer from the first line')

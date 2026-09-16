@@ -11,6 +11,7 @@ const StockAdjustModal = lazy(() => import('./forms/StockAdjustModal'))
 // this section's Adjust menu too (user, Aug 31: "for fast stock in do that
 // for products pages and all sections").
 const FastStockInModal = lazy(() => import('../inventory/FastStockInModal'))
+import type { StockMode } from '../inventory/FastStockInModal'
 // The shared range step in front of an export -- defaults to this section's
 // own Start → End range (user, Aug 31: "do the date range for all the
 // exports").
@@ -23,17 +24,49 @@ import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import InfoHint from '../shared/InfoHint'
+import ProductNameRail from '../shared/ProductNameRail'
+// N13: a receipt id is never truncated -- it is shown in full and copied in
+// one tap, through the same component the Sale and Return detail modals use.
+import CopyableId from '../shared/CopyableId.tsx'
+import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
+import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
+import { todayStr } from '../../utils/dateHelpers.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
+import {
+  FAST_STOCK_IN_RESTORE_HOST,
+  RESTORE_WORK_EVENT,
+  canRestoreMinimizedWork,
+  markRestoreHandled,
+  minimizeWork,
+  peekPendingRestore,
+  reparkDeniedRestore,
+  type MinimizedWorkEntry,
+} from '../../utils/minimizedWork.ts'
+import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { STOCK_ADJUST_RESTORE_HOST } from '../../utils/stockAdjustDraft.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { buildHistoryRowModel, formatHistoryReference, historyExportField, historyField } from '../../utils/historyRowModel.ts'
+import {
+  isRevertibleStockMovement,
+  isStockSessionGenerationMovement,
+  recordedMovementCosts,
+  showReceiptAccounting,
+} from '../../utils/stockMovementDetail.ts'
+import {
+  browserStockStorage,
+  dropFailedStockAttempt,
+  emitFailedAttemptsChanged,
+  readFailedStockAttempts,
+  FAILED_ATTEMPTS_EVENT,
+  type FailedStockAttempt,
+} from '../../utils/stockAdjustOutcome.ts'
 
 // D1 (Part 415): the user's Stock Change ledger on the Products page --
 // one row per recorded action over the EXISTING movement history, with the
 // derived running balance (before -> after) the /stock-ledger kernel
-// computes by walking back from current stock. Read-only. Row click opens
-// the per-product mini-ledger (D3's absorption of Inventory's
-// view-stock-movement drill into the Products surface): the same endpoint
-// scoped to that product, so both levels always agree.
+// computes by walking back from current stock. Row click opens only that
+// selected movement's details; unrelated product history stays in the ledger.
 //
 // Part 553 (this session): reworked to the two-column In / Out model the
 // user asked for -- the "Adjustments" view is gone (its rows fold into In),
@@ -57,6 +90,12 @@ type LedgerRow = {
   signed_quantity: number
   reason: string | null
   reference_id?: number | string | null
+  // N13: the record this movement belongs to, resolved by the Worker
+  // (cloudflare/src/lib/movementReference.ts). reference_id alone identifies
+  // nothing to a person -- and which table it points at depends on the
+  // movement type, which is why the client never derives this itself.
+  reference_kind?: 'sale' | 'return' | null
+  reference_label?: string | null
   unit_cost_usd?: number | null
   unit_cost_khr?: number | null
   total_cost_usd?: number | null
@@ -134,6 +173,19 @@ function fmtOptionalUsd(value: unknown): string {
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+function fmtOptionalKhr(value: unknown): string {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return '—'
+  return `${amount.toLocaleString('en-US', { maximumFractionDigits: 2 })}៛`
+}
+
+function recordedCostLabel(usd: number | null, khr: number | null, notRecorded: string): string {
+  const values: string[] = []
+  if (usd !== null) values.push(fmtOptionalUsd(usd))
+  if (khr !== null) values.push(fmtOptionalKhr(khr))
+  return values.length ? values.join(' · ') : notRecorded
+}
+
 type BranchOption = { id: number; name: string }
 
 // The Stock Changes section's header-row actions, registered UP to Products.tsx
@@ -143,8 +195,11 @@ type BranchOption = { id: number; name: string }
 // trigger UI is lifted, via these stable callbacks.
 export type StockChangeHeaderActions = {
   canAdjust: boolean
-  openAdjust: (type: 'add' | 'remove' | 'set') => void
-  openFastStockIn: () => void
+  // N27: Add / Remove / Adjust quantity all open the fast flow in that mode.
+  // The one-by-one StockAdjustModal is no longer a header entry point; it
+  // remains only for resuming a failed attempt (below) and the per-row list
+  // adjust.
+  openFastStockIn: (mode?: StockMode) => void
   runExport: () => void
 }
 
@@ -156,11 +211,20 @@ type StockChangeSectionProps = {
   onRegisterActions?: (actions: StockChangeHeaderActions | null) => void
 }
 
+function FastStockInRestoreCommit({ onCommit }: { onCommit: () => void }) {
+  useEffect(() => { onCommit() }, [onCommit])
+  return null
+}
+
 export default function StockChangeSection({ t, onRegisterActions }: StockChangeSectionProps) {
   // Row write actions (revert / edit reason) reuse the same app context the
   // rest of the Products page reads -- can() gates them exactly as the server
   // does (Inventory adjust access), notify() surfaces the result.
-  const app = useApp() as { can: (section: string, action: string) => boolean; notify: (message: string, type?: string) => void }
+  const app = useApp() as {
+    can: (section: string, action: string) => boolean
+    notify: (message: string, type?: string) => void
+    user?: { id?: string | number; username?: string } | null
+  }
   const canAdjust = app.can('inventory', 'adjust')
   const [view, setView] = useState<LedgerView>('all')
   const [page, setPage] = useState(1)
@@ -175,27 +239,88 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [supplierId, setSupplierId] = useState(0)
   const [suppliers, setSuppliers] = useState<Array<{ id: number; name: string }>>([])
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
+  const initialToday = todayStr()
+  const [startDate, setStartDate] = useState(initialToday)
+  const [endDate, setEndDate] = useState(initialToday)
   const [rows, setRows] = useState<LedgerRow[]>([])
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<LedgerSummary>(EMPTY_SUMMARY)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [detail, setDetail] = useState<LedgerRow | null>(null)
-  const [detailRows, setDetailRows] = useState<LedgerRow[] | null>(null)
   // Row context actions on the open detail: an inline reason editor and a
   // two-step revert confirm. rowBusy blocks both while a write is in flight.
   const [rowBusy, setRowBusy] = useState(false)
   const [editingReason, setEditingReason] = useState<string | null>(null)
   const [confirmRevert, setConfirmRevert] = useState(false)
-  // Adjust menu (Add / Remove / Adjust quantity) -> opens the reused modal.
-  // The trigger button/menu now lives on the page header row (Products.tsx);
-  // this state drives which modal that menu opens.
+  // adjustType now opens StockAdjustModal ONLY to resume a failed attempt
+  // (resumeFailedAttempt below). The header's Adjust menu (Products.tsx)
+  // opens the fast flow in the chosen mode instead.
   const [adjustType, setAdjustType] = useState<'add' | 'remove' | 'set' | null>(null)
   const [fastStockInOpen, setFastStockInOpen] = useState(false)
+  const [fastStockInMode, setFastStockInMode] = useState<StockMode>('add')
+  const restoringFastStockInRef = useRef<MinimizedWorkEntry | null>(null)
   const [exportRange, setExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
+  // Unsaved failed adjustments (user, Sep 3: "also show the failed in the
+  // stock change as well"). These never reached the server -- inventory_
+  // movements only records movements that committed, and no stock-action table
+  // carries a 'failed' status -- so they are kept per user in localStorage and
+  // listed here, above the committed ledger, until they are fixed or discarded.
+  const failedStorage = useMemo(() => browserStockStorage(), [])
+  const failedUserKey = app.user?.id ?? app.user?.username ?? null
+  const [failedAttempts, setFailedAttempts] = useState<FailedStockAttempt[]>([])
+  const [resumeAttempt, setResumeAttempt] = useState<FailedStockAttempt | null>(null)
   const requestRef = useRef(0)
+  const stockWorkflowOpen = adjustType !== null || fastStockInOpen
+
+  // A hardware scanner behaves like a keyboard. Blur and disable the ledger
+  // search before opening an adjustment workflow so its barcode cannot be
+  // typed into Stock Change History while the modal is taking over.
+  const blurLedgerSearch = useCallback(() => {
+    const activeElement = typeof document === 'undefined' ? null : document.activeElement
+    if (activeElement instanceof HTMLElement) activeElement.blur()
+  }, [])
+  const openFastStockIn = useCallback((nextMode: StockMode = 'add') => {
+    blurLedgerSearch()
+    setFastStockInMode(nextMode)
+    setFastStockInOpen(true)
+  }, [blurLedgerSearch])
+
+  const restoreFastStockIn = useCallback((entry: MinimizedWorkEntry | null | undefined) => {
+    if (!entry || entry.kind !== 'fast_stockin') return
+    if (!canAdjust || !canRestoreMinimizedWork(entry, app.can)) {
+      reparkDeniedRestore(entry)
+      app.notify(tr(t, 'permission_denied', 'You no longer have permission for this action.'), 'error')
+      return
+    }
+    if (restoringFastStockInRef.current?.key === entry.key) return
+    restoringFastStockInRef.current = entry
+    openFastStockIn('add')
+  }, [app, canAdjust, openFastStockIn, t])
+
+  useEffect(() => {
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent<{ kind?: string; entry?: MinimizedWorkEntry }>).detail
+      if (detail?.kind === 'fast_stockin') restoreFastStockIn(detail.entry)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    restoreFastStockIn(peekPendingRestore('fast_stockin'))
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [restoreFastStockIn])
+
+  const commitFastStockInRestore = useCallback(() => {
+    const entry = restoringFastStockInRef.current
+    if (!entry) return
+    if (!canAdjust || !canRestoreMinimizedWork(entry, app.can)) {
+      restoringFastStockInRef.current = null
+      setFastStockInOpen(false)
+      reparkDeniedRestore(entry)
+      app.notify(tr(t, 'permission_denied', 'You no longer have permission for this action.'), 'error')
+      return
+    }
+    restoringFastStockInRef.current = null
+    markRestoreHandled('fast_stockin')
+  }, [app, canAdjust, t])
 
   const load = useCallback(async () => {
     const requestId = ++requestRef.current
@@ -227,6 +352,29 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   useEffect(() => { void load() }, [load])
   useEffect(() => { setPage(1) }, [view, debouncedSearch, branchId, startDate, endDate, supplierId])
 
+  // Keep the unsaved-failure list in step with whatever modal recorded it.
+  useEffect(() => {
+    const sync = () => setFailedAttempts(readFailedStockAttempts(failedStorage, failedUserKey))
+    sync()
+    if (typeof window === 'undefined') return
+    window.addEventListener(FAILED_ATTEMPTS_EVENT, sync)
+    return () => window.removeEventListener(FAILED_ATTEMPTS_EVENT, sync)
+  }, [failedStorage, failedUserKey])
+
+  const discardFailedAttempt = useCallback((attemptId: string) => {
+    setFailedAttempts(dropFailedStockAttempt(failedStorage, failedUserKey, attemptId))
+    emitFailedAttemptsChanged()
+  }, [failedStorage, failedUserKey])
+
+  // Reopen a failed attempt prefilled with exactly the values that failed.
+  const resumeFailedAttempt = useCallback((attempt: FailedStockAttempt) => {
+    const row = attempt.rows[0]
+    if (!row) return
+    blurLedgerSearch()
+    setResumeAttempt(attempt)
+    setAdjustType(row.type === 'remove' || row.type === 'set' ? row.type : 'add')
+  }, [blurLedgerSearch])
+
   useEffect(() => {
     let cancelled = false
     import('../../api/branchTransport.ts')
@@ -248,22 +396,31 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     return () => { cancelled = true }
   }, [])
 
-  const openDetail = useCallback(async (row: LedgerRow) => {
+  const openDetail = useCallback((row: LedgerRow) => {
     setDetail(row)
-    setDetailRows(null)
     setEditingReason(null)
     setConfirmRevert(false)
-    try {
-      const response = await getStockLedger({ productId: row.product_id, page: 1, pageSize: 20 }) as LedgerResponse
-      setDetailRows(Array.isArray(response?.items) ? response.items : [])
-    } catch {
-      setDetailRows([])
-    }
   }, [])
 
   const closeDetail = useCallback(() => {
-    setDetail(null); setDetailRows(null); setEditingReason(null); setConfirmRevert(false)
+    setDetail(null); setEditingReason(null); setConfirmRevert(false)
   }, [])
+
+  // N13: the ONE composition of "which record is this" -- "Sale 20260901-193100",
+  // "Return RET-...". Defined once here and used by the desktop row, the mobile
+  // card, the detail modal and the CSV export, so the four renderers of a
+  // single ledger row cannot word it four ways. The receipt itself is the
+  // server's answer (sales.receipt_number / returns.return_number); the free
+  // text in `reason` -- including the old system's "004419@2026-09-01" -- is
+  // never treated as a receipt number.
+  const referenceWords = useMemo(() => ({
+    sale: tr(t, 'sale', 'Sale'),
+    return: tr(t, 'return', 'Return'),
+  }), [t])
+  const referenceText = useCallback(
+    (row: LedgerRow): string => formatHistoryReference(buildHistoryRowModel(row).reference, referenceWords),
+    [referenceWords],
+  )
 
   // Ranged CSV export of the ledger, honoring the section's current search/
   // branch/supplier/view filters. Walks /stock-ledger pages (1000/page,
@@ -296,21 +453,26 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     downloadCSV(`stock-changes-${range.startDate || 'all'}-${range.endDate || 'all'}.csv`, rows.map((row) => ({
       date: isDateOnlyStamp(row.created_at) ? fmtDate(row.created_at) : fmtDateTime24(row.created_at),
       product: row.product_name,
-      barcode: row.barcode || '',
-      branch: row.branch_name || '',
+      barcode: historyExportField(row.barcode),
+      branch: historyExportField(row.branch_name),
       type: row.movement_type,
       quantity: row.signed_quantity,
       before: row.before_qty,
       after: row.after_qty,
-      batch: row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }) : '',
-      supplier: row.batch_supplier_name || '',
-      reason: row.reason || '',
+      batch: row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr(t, 'batch', 'Received date')) : '',
+      supplier: historyExportField(row.batch_supplier_name),
+      // N13: the export carries the SAME columns the table shows. `receipt` is
+      // the record a person recognises ("Sale 20260901-193100"); `reference`
+      // stays as the raw stored id beside it, for the rows whose reference is
+      // a stock-in session token rather than a receipt.
+      receipt: historyExportField(referenceText(row)),
+      reason: historyExportField(row.reason),
       reference: row.reference_id ?? '',
       unit: row.unit || '',
       category: row.category || '',
       brand: row.brand || '',
       tag: row.tag_label || '',
-      user: row.user_name || '',
+      user: historyExportField(row.user_name),
       unit_cost_usd: row.unit_cost_usd ?? row.batch_unit_cost_usd ?? '',
       unit_cost_khr: row.unit_cost_khr ?? '',
       total_cost_usd: row.total_cost_usd ?? row.batch_received_cost_usd ?? '',
@@ -319,7 +481,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       payment_status: row.batch_payment_status || '',
       credit_due_date: row.batch_credit_due_date || '',
     })))
-  }, [app, branchId, debouncedSearch, supplierId, t, view])
+  }, [app, branchId, debouncedSearch, referenceText, supplierId, t, view])
 
   // Revert: post the compensating counter-movement, then refresh the list (the
   // reverted row stays -- the ledger is append-only -- and the new counter-
@@ -373,12 +535,11 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     if (!onRegisterActions) return
     onRegisterActions({
       canAdjust,
-      openAdjust: (type) => setAdjustType(type),
-      openFastStockIn: () => setFastStockInOpen(true),
+      openFastStockIn,
       runExport: openExport,
     })
     return () => onRegisterActions(null)
-  }, [onRegisterActions, canAdjust, openExport])
+  }, [onRegisterActions, canAdjust, openExport, openFastStockIn])
 
   // Part 553: two view chips plus All -- the Adjustment chip is gone (its
   // rows fold into In).
@@ -427,9 +588,14 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // lives once on a divider header and each card need only show its time
   // (user, Aug 30 2026: "for date just show outside separating the change by
   // day... in the card just put the time as we have date to divide outside").
-  // fmtDate is mm/dd/yyyy in business time, so grouping by that string IS a
-  // business-day grouping. Rows already arrive sorted created_at desc, so
-  // iteration preserves both the day order and the within-day order. A day
+  // fmtDate renders one business day as exactly one string (dd/mm/yyyy since
+  // Sep 4 2026), so grouping by that string IS a business-day grouping. What
+  // makes that safe is that the mapping is one-to-one per day -- NOT the
+  // field order, which is why going day-first did not disturb this. Nothing
+  // here sorts or compares the rendered text: rows already arrive sorted
+  // created_at desc and iteration preserves the day and within-day order.
+  // Keep it that way; a comparison on a display string would break the
+  // moment the format moves again. A day
   // can straddle a page edge -- that's fine, the header just reappears on the
   // next page, same as every other server-paged day-grouped list here.
   const dayGroups = useMemo(() => {
@@ -448,15 +614,19 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     const dateOnly = isDateOnlyStamp(row.created_at)
     const clock = dateOnly ? '' : fmtClock24(row.created_at)
     const timeUnknown = dateOnly || clock === '—' || clock === ''
+    const model = buildHistoryRowModel(row)
     return (
       <button
         key={row.id}
         type="button"
-        onClick={() => void openDetail(row)}
-        className="flex w-full items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-900/10"
+        onClick={() => openDetail(row)}
+        className="block w-full min-w-0 rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-900/10"
       >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+        {/* Mobile row 1: the action at a glance. The shared rail keeps the
+            complete product name available in at most two readable lines;
+            its stable wrapper does not change ledger semantics. */}
+        <div data-stock-mobile-row="primary" className="flex min-w-0 items-start gap-2">
+          <div className="flex min-w-0 flex-1 items-start gap-2">
             {/* Time only -- the day header above carries the date. A
                 legacy/imported row with no time of day shows a muted marker
                 (with an explanatory tooltip) rather than a fabricated 00:00. */}
@@ -466,29 +636,57 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             >
               {timeUnknown ? '––:––' : clock}
             </span>
-            <span className="break-words text-[13px] font-semibold leading-4 text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
+            <span data-stock-mobile-product-name="true" className="min-w-0 flex-1">
+              <ProductNameRail name={row.product_name} className="text-[13px] font-semibold leading-4 text-gray-800 dark:text-gray-100" />
+            </span>
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
-            {row.batch_id ? (
-              <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
-                {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
-              </span>
-            ) : null}
-            {row.barcode ? <span className="break-all font-mono">{row.barcode}</span> : null}
-            {row.batch_supplier_name ? <span className="break-words font-medium text-gray-500 dark:text-gray-300">{row.batch_supplier_name}</span> : null}
-            {row.branch_name ? <span className="break-words">{row.branch_name}</span> : null}
-            {row.user_name ? <span className="break-words">· {row.user_name}</span> : null}
-            {row.reason ? <span className="break-words text-gray-400">· {row.reason}</span> : null}
-          </div>
-        </div>
-        <div className="shrink-0 text-right">
-          <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>
+          <span className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>
             {signedLabel(row)}
             <span className="font-normal opacity-80">{translateMovementType(row.movement_type, t)}</span>
           </span>
-          <div className="mt-1 text-xs tabular-nums text-gray-500 dark:text-gray-400">
-            {row.before_qty} <span className="text-gray-300 dark:text-gray-600">→</span> <span className="font-semibold text-gray-800 dark:text-gray-100">{row.after_qty}</span>
-          </div>
+        </div>
+
+        {/* Mobile row 2: the source record and barcode form one horizontally
+            readable identity rail. Neither identifier is clipped; a long
+            receipt or barcode pans inside the card with no visible bar. */}
+        <div
+          data-stock-mobile-row="reference"
+          className="mt-1 flex min-w-0 max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap text-[10px] text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {model.reference.label ? (
+            <CopyableId
+              compact
+              className="shrink-0"
+              value={referenceText(row)}
+              copyValue={model.reference.label}
+              copyLabel={model.reference.kind === 'return'
+                ? tr(t, 'copy_return_id', 'Copy return ID')
+                : tr(t, 'copy_receipt_number', 'Copy receipt number')}
+              copiedLabel={tr(t, 'copied', 'Copied')}
+              valueClassName="!whitespace-nowrap !break-normal text-[11px] font-semibold text-gray-600 dark:text-gray-300"
+            />
+          ) : null}
+          {model.reference.label ? <span aria-hidden="true">·</span> : null}
+          <div className="shrink-0 font-mono leading-[0.9rem]">{model.barcode}</div>
+        </div>
+
+        {/* Mobile row 3: user leads in bold, followed by the lot's true
+            received date, branch and reason. The complete metadata remains
+            reachable by horizontal pan instead of growing the card through
+            an arbitrary number of wrapped reason lines. Supplier provenance
+            remains in the opened detail. */}
+        <div
+          data-stock-mobile-row="metadata"
+          className="mt-1 flex min-w-0 max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap text-[11px] text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          <span className="shrink-0 font-bold text-gray-600 dark:text-gray-200" title={`${tr(t, 'cashier_user', 'User')}: ${model.actor}`}>{model.actor}</span>
+          {row.batch_id ? (
+            <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
+              {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr(t, 'batch', 'Received date'))}
+            </span>
+          ) : null}
+          <span className="shrink-0" title={`${tr(t, 'branch', 'Branch')}: ${model.branch}`}>· {model.branch}</span>
+          <span data-stock-mobile-reason="true" className="shrink-0 text-gray-400" title={`${tr(t, 'reason', 'Reason')}: ${model.reason}`}>· {model.reason}</span>
         </div>
       </button>
     )
@@ -498,15 +696,43 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     <div className="desktop-dense-only dense-data-shell">
       <div className="scroll-x">
         <table className="dense-data-table min-w-[980px]" aria-label={tr(t, 'stock_change_ledger', 'Stock Changes')}>
+          {/* O3 (owner, Sep 6 2026: "barcode still placed very ugly in large
+              screens"). The column budget, not the barcode line, was the
+              problem: Product held 18% -- about 180px of a 1005px content
+              width at 1280 -- so a real name ("L'Occitane Hand Cream Shea
+              Butter 20% 150ml") was cut after a third of itself while four
+              fixed-width numeric columns held width they cannot use.
+
+              The budget is solved against three hard constraints, not tuned by
+              eye, because trimming the numeric columns "as far as they go" only
+              moves the clipping one column along:
+                - every FIXED column holds its own widest content at the dense
+                  13px scale plus ~16px cell padding: Time 4.25rem ('19:31'),
+                  Type 7.5rem (the longest chip, 'Adjust Quantity', ~95px + the
+                  chip's own px-1.5), Quantity 5rem (the uppercase 'QUANTITY'
+                  header, wider than any signed integer under it),
+                  Before -> After 5.75rem ('1280 → 1300');
+                - Reason keeps >= 140px at the 980px floor: enough for a
+                  composed sale receipt ("Sale 20260901-142200") plus the
+                  compact copy button on one line; a longer return label
+                  wraps onto a second row rather than clipping, per the owner
+                  ruling that a receipt id is never truncated;
+                - Product keeps the largest proportional share, 24%.
+              22.5rem fixed + 48.5% = 360px + 475px at 980, leaving Reason
+              145px -- so the table still fits its floor with no horizontal
+              scrollbar at 1280, and nothing is starved to get there. The
+              numbers are pinned in tests/stockChangeLedgerReference.test.ts
+              section 3 with floors AND ceilings; a ceiling alone passed a
+              1rem Type column that wraps its own chip. */}
           <colgroup>
-            <col className="w-[5.5rem]" />
-            <col className="w-[18%]" />
-            <col className="w-[8rem]" />
-            <col className="w-[5.5rem]" />
+            <col className="w-[4.25rem]" />
+            <col className="w-[24%]" />
             <col className="w-[7.5rem]" />
-            <col className="w-[12%]" />
-            <col className="w-[12%]" />
-            <col className="w-[10%]" />
+            <col className="w-[5rem]" />
+            <col className="w-[5.75rem]" />
+            <col className="w-[8%]" />
+            <col className="w-[9.5%]" />
+            <col className="w-[7%]" />
             <col />
           </colgroup>
           <thead>
@@ -514,8 +740,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               <th>{tr(t, 'time', 'Time')}</th>
               <th data-tone="blue">{tr(t, 'product', 'Product')}</th>
               <th data-tone="violet">{tr(t, 'type', 'Type')}</th>
-              <th data-tone="emerald" className="text-right">{tr(t, 'quantity', 'Quantity')}</th>
-              <th className="text-right">{beforeLabel} → {afterLabel}</th>
+              <th data-tone="emerald" className="text-center">{tr(t, 'quantity', 'Quantity')}</th>
+              <th className="dense-th-wrap text-center">{beforeLabel} → {afterLabel}</th>
               <th>{tr(t, 'branch', 'Branch')}</th>
               <th>{tr(t, 'supplier', 'Supplier')}</th>
               <th>{tr(t, 'cashier_user', 'User')}</th>
@@ -529,24 +755,89 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 const dateOnly = isDateOnlyStamp(row.created_at)
                 const clock = dateOnly ? '' : fmtClock24(row.created_at)
                 const timeUnknown = dateOnly || clock === '—' || clock === ''
+                const model = buildHistoryRowModel(row)
                 return (
                   <tr
                     key={row.id}
                     data-clickable="true"
                     tabIndex={0}
-                    onClick={() => void openDetail(row)}
-                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void openDetail(row) } }}
+                    onClick={() => openDetail(row)}
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDetail(row) } }}
                     aria-label={`${row.product_name}, ${signedLabel(row)}`}
                   >
                     <td className="tabular-nums text-gray-400" title={timeUnknown ? noTimeLabel : undefined}>{timeUnknown ? '––:––' : clock}</td>
-                    <td><span className="whitespace-normal break-words font-semibold text-gray-800 dark:text-gray-100">{row.product_name}</span><span className="break-all dense-id text-gray-400">{row.barcode || (row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }) : '—')}</span></td>
-                    <td><span className={`inline-flex max-w-full items-center rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate">{translateMovementType(row.movement_type, t)}</span></span></td>
-                    <td className={`text-right font-bold tabular-nums ${row.signed_quantity >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{signedLabel(row)}</td>
-                    <td className="text-right tabular-nums text-gray-500">{row.before_qty} → <b className="text-gray-800 dark:text-gray-100">{row.after_qty}</b></td>
-                    <td><span className="dense-cell-truncate" title={row.branch_name || ''}>{row.branch_name || '—'}</span></td>
-                    <td><span className="dense-cell-truncate" title={row.batch_supplier_name || ''}>{row.batch_supplier_name || '—'}</span></td>
-                    <td><span className="dense-cell-truncate" title={row.user_name || ''}>{row.user_name || '—'}</span></td>
-                    <td><span className="dense-cell-truncate text-gray-500" title={row.reason || ''}>{row.reason || '—'}</span></td>
+                    {/* O3/N8: name on line one, barcode on its OWN muted mono
+                        line under it. Both are single-line and clipped, so a
+                        long name can no longer wrap and stretch the whole row
+                        past the dense floor -- every row is the same height.
+                        The batch label moved to the Supplier cell (a lot
+                        belongs with its supplier) so this cell means one thing
+                        per line instead of multiplexing barcode/batch/dash. */}
+                    <td>
+                      {/* The app-level text-affordance controller serves this
+                          existing dense-cell contract. The row keeps its own
+                          click while hover or press-and-hold reveals the full
+                          clipped name. */}
+                      <span className="block dense-cell-truncate font-semibold text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
+                      <span className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400" title={model.barcode}>{model.barcode}</span>
+                    </td>
+                    <td><span className={`inline-flex max-w-full items-center rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate" title={translateMovementType(row.movement_type, t)}>{translateMovementType(row.movement_type, t)}</span></span></td>
+                    <td className={`text-center font-bold tabular-nums ${row.signed_quantity >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{signedLabel(row)}</td>
+                    <td className="text-center tabular-nums text-gray-500">{row.before_qty} → <b className="text-gray-800 dark:text-gray-100">{row.after_qty}</b></td>
+                    <td><span className="dense-cell-truncate" title={model.branch}>{model.branch}</span></td>
+                    <td>
+                      <span className="block dense-cell-truncate" title={row.batch_supplier_name || ''}>{historyField(row.batch_supplier_name)}</span>
+                      {row.batch_id ? (
+                        // Titled with the label itself, like every sibling cell in this
+                        // row. The line truncates, so its tooltip is the only way to
+                        // read a long lot code; titling it with the FIELD name instead
+                        // ("Received date", the 'batch' key) spent the one affordance
+                        // that could reveal the value on repeating the column header.
+                        <span
+                          className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400"
+                          title={batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr(t, 'batch', 'Received date'))}
+                        >
+                          {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr(t, 'batch', 'Received date'))}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td><span className="dense-cell-truncate" title={model.actor}>{model.actor}</span></td>
+                    {/* N13: WHICH RECORD leads, the free text follows. A sale
+                        row used to show only its reason -- "Old-system sale
+                        004419@2026-09-01" on imported rows, nothing at all on
+                        rows the POS wrote -- so nothing on the line named the
+                        receipt. The receipt comes from the sales/returns row;
+                        the legacy "@date" text stays in the reason line under
+                        it, where it belongs, and is never printed as a
+                        receipt number. */}
+                    <td>
+                      {/* Owner ruling (Sep 6 2026): a receipt id is shown in
+                          FULL, never truncated, and is one tap to copy. So it
+                          renders through CopyableId -- the same component the
+                          Sale detail, the Return detail and this section's own
+                          movement modal use. The column budget above keeps the common
+                          case on one line; beyond it the id WRAPS rather than
+                          losing its tail, which is the half of an id that
+                          distinguishes two receipts made the same day.
+                          Displayed as the record ("Sale 20260901-142200") and
+                          copied as the bare receipt, because that is what a
+                          search box takes. CopyableId stops the click from
+                          reaching the row, so copying an id is not also the
+                          gesture that opens the movement modal. */}
+                      {model.reference.label ? (
+                        <CopyableId
+                          compact
+                          value={referenceText(row)}
+                          copyValue={model.reference.label}
+                          copyLabel={model.reference.kind === 'return'
+                            ? tr(t, 'copy_return_id', 'Copy return ID')
+                            : tr(t, 'copy_receipt_number', 'Copy receipt number')}
+                          copiedLabel={tr(t, 'copied', 'Copied')}
+                          valueClassName="font-semibold text-gray-600 dark:text-gray-300"
+                        />
+                      ) : null}
+                      <span className={`block dense-cell-truncate ${model.reference.label ? 'leading-[0.85rem] text-[0.68rem] text-gray-400' : 'text-gray-500'}`} title={model.reason}>{model.reason}</span>
+                    </td>
                   </tr>
                 )
               }),
@@ -586,13 +877,17 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     )
   }
 
+  const detailCosts = detail ? recordedMovementCosts(detail) : null
+  const detailShowsReceiptAccounting = detail ? showReceiptAccounting(detail.movement_type) : false
+  const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type, detail.reference_id) && !isStockSessionGenerationMovement(detail) : false
+
   return (
     <div className="space-y-3">
       {/* Rows 1+2 pin together while the ledger scrolls (user, Aug 31: "the
           search bar row and the date both can be pinned and stick ... for
           all sections and pages") -- same sticky treatment as the Products
           listing's own search row above this section. */}
-      <div className="sticky top-0 z-30 -mx-1 space-y-3 bg-gray-50/95 px-1 pb-2 pt-1 backdrop-blur dark:bg-gray-900/95 sm:mx-0 sm:px-0">
+      <div className="sticky top-0 z-30 -mx-1 space-y-3 bg-gray-50 px-1 pb-2 pt-1 dark:bg-gray-900 sm:mx-0 sm:px-0">
       {/* Row 1: the date-range + search bar row. It leads; every mini-section
           drops BELOW it (user, Aug 31 2026: "move all mini sections (filters,
           stats, etc.) below the date range and search bar row"). Unified
@@ -613,12 +908,12 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
           triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
         />
         <div className="min-w-48 flex-1 sm:max-w-96">
-          <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} />
+          <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} disabled={stockWorkflowOpen} />
         </div>
         {/* The barcode scanner rides the ledger search too (user, Aug 31:
             "bring the barcode scanner back") -- scanning a product fills the
             search box, same as the Products / POS / Inventory search rows. */}
-        <ScanSearchButton onDetected={setSearch} t={t} />
+        {!stockWorkflowOpen ? <ScanSearchButton onDetected={setSearch} t={t} /> : null}
         {/* The loose "↓ <total> ⓘ" export affordance that used to sit at the
             end of this row was removed (user, Aug 31: "remove the whole thing")
             -- the ledger CSV export is now folded into the page header's
@@ -671,6 +966,66 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         </div>
       ) : null}
 
+      {/* Failed, UNSAVED adjustments lead the ledger -- they are not history,
+          they are work still owed. Each shows the server's reason, the time,
+          and its rows; "Fix" reopens the adjust modal prefilled. */}
+      {failedAttempts.length ? (
+        <div data-failed-stock-attempts="true" className="space-y-2">
+          {failedAttempts.map((attempt) => (
+            <div
+              key={attempt.id}
+              className="rounded-xl border border-rose-300 bg-rose-50/70 px-3 py-2 dark:border-rose-800 dark:bg-rose-950/30"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">
+                  {tr(t, 'failed', 'Failed')}
+                </span>
+                <span className="rounded border border-rose-300 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700 dark:border-rose-700 dark:text-rose-300">
+                  {tr(t, 'unsaved_not_applied', 'Unsaved — not applied')}
+                </span>
+                <span className="text-xs tabular-nums text-gray-500">{fmtDateTime24(attempt.createdAt)}</span>
+                <InfoHint
+                  text={tr(t, 'failed_attempt_hint', 'This change never reached the server, so no stock moved. Fix it and retry, or discard it.')}
+                  label={tr(t, 'unsaved_not_applied', 'Unsaved — not applied')}
+                />
+                <div className="ml-auto flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-700"
+                    onClick={() => resumeFailedAttempt(attempt)}
+                    disabled={!canAdjust}
+                  >
+                    {tr(t, 'fix_and_retry', 'Fix and retry')}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-white dark:border-gray-600 dark:text-gray-300"
+                    onClick={() => discardFailedAttempt(attempt.id)}
+                  >
+                    {tr(t, 'discard', 'Discard')}
+                  </button>
+                </div>
+              </div>
+              {attempt.rows.map((row) => (
+                <div key={row.rowId} className="mt-1.5 text-xs text-gray-700 dark:text-gray-200">
+                  <span className="font-semibold">{row.productName || `#${row.productId}`}</span>
+                  <span className="text-gray-500">
+                    {' · '}{translateMovementType(row.type, t)}{' '}
+                    <b className="tabular-nums">{row.quantity}</b>
+                    {row.branchName ? ` · ${row.branchName}` : ''}
+                    {row.reason ? ` · ${row.reason}` : ''}
+                  </span>
+                  <div className="mt-0.5 break-words text-rose-700 dark:text-rose-300">
+                    {row.failure?.message}
+                    {row.failure?.available != null ? ` (${tr(t, 'available', 'Available')}: ${row.failure.available})` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {/* Desktop uses a compact workbook-style ledger. Mobile retains the
           day-grouped cards so values do not squeeze into unreadable columns. */}
       {loading && !rows.length ? (
@@ -714,60 +1069,108 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       </div>
 
       {detail ? (
-        <Modal title={`${detail.product_name}`} onClose={closeDetail}>
+        <Modal title={`${detail.product_name}`} onClose={closeDetail} unsavedChanges="read-only">
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {/* Identity belongs with the title. It is deliberately not another
+                fact card competing with the action summary below. */}
+            {detail.barcode ? (
+              <div className="-mt-1 break-all font-mono text-xs text-gray-500 dark:text-gray-400">
+                {detail.barcode}
+              </div>
+            ) : null}
+            <div className="grid grid-cols-2 gap-2">
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
                 <div className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'date', 'Date')}</div>
-                <div className="mt-0.5 text-sm font-semibold text-gray-800 dark:text-gray-100" title={isDateOnlyStamp(detail.created_at) ? noTimeLabel : undefined}>
+                <div className="mt-0.5 break-words text-sm font-semibold text-gray-800 dark:text-gray-100" title={isDateOnlyStamp(detail.created_at) ? noTimeLabel : undefined}>
                   {isDateOnlyStamp(detail.created_at) ? fmtDate(detail.created_at) : fmtDateTime24(detail.created_at)}
                 </div>
               </div>
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
-                <div className="text-[11px] uppercase tracking-wide text-gray-400">{beforeLabel}</div>
-                <div className="mt-0.5 text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">{detail.before_qty}</div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-400">{translateMovementType(detail.movement_type, t)}</div>
+                <div className={`mt-0.5 inline-flex max-w-full flex-wrap rounded-lg px-2 py-0.5 text-sm font-semibold ${movementColorClass(detail.movement_type, detail.signed_quantity)}`}>
+                  <span className="tabular-nums">{signedLabel(detail)}</span>
+                  {detail.unit ? <span className="ml-1 break-words font-normal opacity-80">{detail.unit}</span> : null}
+                </div>
               </div>
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
-                <div className="text-[11px] uppercase tracking-wide text-gray-400">{translateMovementType(detail.movement_type, t)}</div>
-                <div className={`mt-0.5 inline-flex rounded-lg px-2 py-0.5 text-sm font-semibold ${movementColorClass(detail.movement_type, detail.signed_quantity)}`}>{signedLabel(detail)}</div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-400">{beforeLabel}</div>
+                <div className="mt-0.5 break-words text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+                  {detail.before_qty}{detail.unit ? <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">{detail.unit}</span> : null}
+                </div>
               </div>
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
                 <div className="text-[11px] uppercase tracking-wide text-gray-400">{afterLabel}</div>
-                <div className="mt-0.5 text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">{detail.after_qty}</div>
+                <div className="mt-0.5 break-words text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+                  {detail.after_qty}{detail.unit ? <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">{detail.unit}</span> : null}
+                </div>
               </div>
             </div>
             {detail.batch_id ? (
               <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
-                <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'batch', 'Batch')}: </span>
-                {batchDisplayLabel({ id: detail.batch_id, lot_code: detail.batch_lot_code, received_at: detail.batch_received_at })}
+                <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'batch', 'Received date')}: </span>
+                {batchDisplayLabel({ id: detail.batch_id, lot_code: detail.batch_lot_code, received_at: detail.batch_received_at }, tr(t, 'batch', 'Received date'))}
                 {detail.batch_supplier_name ? <span className="text-gray-400"> · {detail.batch_supplier_name}</span> : null}
               </p>
             ) : null}
-            {detail.barcode ? (
-              <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
-                <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'barcode', 'Barcode')}: </span>
-                <span className="font-mono">{detail.barcode}</span>
-              </p>
-            ) : null}
+            {/* N13: the record this movement belongs to. Shown as a fact of
+                its own rather than folded into the reason line, and through
+                CopyableId -- the same component the Sale and Return detail
+                modals use -- so the id is never truncated and is one tap to
+                copy (owner rule: receipt ids are shown in full and copied
+                easily). */}
+            {(() => {
+              const reference = buildHistoryRowModel(detail).reference
+              if (!reference.label) return null
+              const isReturn = reference.kind === 'return'
+              return (
+                <div className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
+                  <div className="text-[11px] uppercase tracking-wide text-gray-400">
+                    {isReturn ? tr(t, 'return_number', 'Return #') : tr(t, 'receipt', 'Receipt')}
+                  </div>
+                  <CopyableId
+                    value={reference.label}
+                    copyLabel={isReturn ? tr(t, 'copy_return_id', 'Copy return ID') : tr(t, 'copy_receipt_number', 'Copy receipt number')}
+                    copiedLabel={tr(t, 'copied', 'Copied')}
+                    className="mt-0.5"
+                    valueClassName="font-mono text-sm font-semibold text-gray-800 dark:text-gray-100"
+                  />
+                </div>
+              )
+            })()}
             {detail.reason ? (
               <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
                 <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'reason', 'Reason')}: </span>
                 {detail.reason}
               </p>
             ) : null}
-            <dl className="grid gap-2 rounded-xl bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800/60 sm:grid-cols-2">
+            {/* These are costs recorded on THIS movement. A zero is real; a
+                missing snapshot is said plainly. Never substitute today's
+                product price or the lot's mutable aggregate valuation. */}
+            <dl className="grid grid-cols-2 gap-2 rounded-xl bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800/60">
+              <div className="min-w-0">
+                <dt className="uppercase tracking-wide text-gray-400">{tr(t, 'cost_price', 'Cost price')}</dt>
+                <dd className="mt-0.5 break-words font-medium text-gray-700 dark:text-gray-200">
+                  {recordedCostLabel(detailCosts?.unitUsd ?? null, detailCosts?.unitKhr ?? null, tr(t, 'not_recorded', 'Not recorded'))}
+                </dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="uppercase tracking-wide text-gray-400">{tr(t, 'total_cost', 'Total cost')}</dt>
+                <dd className="mt-0.5 break-words font-medium text-gray-700 dark:text-gray-200">
+                  {recordedCostLabel(detailCosts?.totalUsd ?? null, detailCosts?.totalKhr ?? null, tr(t, 'not_recorded', 'Not recorded'))}
+                </dd>
+              </div>
+            </dl>
+            <dl className="grid grid-cols-2 gap-2 rounded-xl bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800/60">
               {([
-                [tr(t, 'reference', 'Reference'), detail.reference_id],
-                [tr(t, 'unit', 'Unit'), detail.unit],
                 [tr(t, 'category', 'Category'), detail.category],
                 [tr(t, 'brand', 'Brand'), detail.brand],
                 [tr(t, 'tag', 'Tag'), detail.tag_label],
-                [tr(t, 'unit_cost', 'Unit cost'), detail.unit_cost_usd != null || detail.batch_unit_cost_usd != null ? fmtOptionalUsd(detail.unit_cost_usd ?? detail.batch_unit_cost_usd) : null],
-                [tr(t, 'total_cost', 'Total cost'), detail.total_cost_usd != null || detail.batch_received_cost_usd != null ? fmtOptionalUsd(detail.total_cost_usd ?? detail.batch_received_cost_usd) : null],
                 [tr(t, 'expiry_date', 'Expiry'), detail.batch_expiry_date],
-                [tr(t, 'payment_status', 'Payment status'), detail.batch_payment_status],
-                [tr(t, 'credit_due_date', 'Credit due'), detail.batch_credit_due_date],
-                [tr(t, 'receipt_sessions', 'Receipt sessions'), detail.batch_receipt_session_count],
+                ...(detailShowsReceiptAccounting ? [
+                  [tr(t, 'payment_status', 'Payment status'), detail.batch_payment_status],
+                  [tr(t, 'credit_due_date', 'Not Paid due date'), detail.batch_credit_due_date],
+                  [tr(t, 'receipt_sessions', 'Receipt sessions'), detail.batch_receipt_session_count],
+                ] : []),
               ] as Array<[string, string | number | null | undefined]>).filter(([, value]) => value !== null && value !== undefined && value !== '').map(([label, value]) => (
                 <div key={label} className="min-w-0">
                   <dt className="uppercase tracking-wide text-gray-400">{label}</dt>
@@ -776,79 +1179,81 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               ))}
             </dl>
             <div className="flex items-center justify-between text-xs text-gray-400">
-              <span>{detail.branch_name || '--'}</span>
-              <span>{detail.user_name || '--'}</span>
+              <span title={`${tr(t, 'branch', 'Branch')}`}>{buildHistoryRowModel(detail).branch}</span>
+              <span title={`${tr(t, 'cashier_user', 'User')}`}>{buildHistoryRowModel(detail).actor}</span>
             </div>
             {/* Row context actions -- Edit reason + Revert -- only for a user
                 with Inventory adjust access (the server enforces the same).
-                Revert is a two-step inline confirm; its "what it does" note
-                (append-only, which types qualify) lives behind the InfoHint. */}
+                Revert remains a two-step inline confirmation. */}
             {canAdjust ? (
               editingReason == null ? (
                 <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+                  {/* Shared button-kit actions retain their accessible names.
+                      Revert keeps visible text at every width so the destructive
+                      action is never represented by an unexplained icon. */}
                   <button
                     type="button"
                     disabled={rowBusy}
                     onClick={() => setEditingReason(detail.reason || '')}
-                    className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                    aria-label={tr(t, 'edit_reason', 'Edit reason')}
+                    title={tr(t, 'edit_reason', 'Edit reason')}
+                    className="btn-secondary inline-flex items-center gap-1.5 px-3 text-sm disabled:opacity-50"
                   >
-                    {tr(t, 'edit_reason', 'Edit reason')}
+                    <Pencil className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span className="hidden sm:inline">{tr(t, 'edit_reason', 'Edit reason')}</span>
                   </button>
-                  {confirmRevert ? (
-                    <span className="inline-flex items-center gap-1.5 text-xs">
+                  {detailCanRevert && confirmRevert ? (
+                    <span className="inline-flex flex-wrap items-center gap-2 text-xs">
                       <span className="text-gray-500 dark:text-gray-400">{tr(t, 'confirm_revert', 'Revert this change?')}</span>
-                      <button type="button" disabled={rowBusy} onClick={() => void doRevert()} className="rounded-lg bg-rose-600 px-2.5 py-1 font-medium text-white hover:bg-rose-700 disabled:opacity-50">{tr(t, 'revert', 'Revert')}</button>
-                      <button type="button" disabled={rowBusy} onClick={() => setConfirmRevert(false)} className="rounded-lg border border-gray-200 px-2.5 py-1 text-gray-600 dark:border-gray-700 dark:text-gray-300">{tr(t, 'cancel', 'Cancel')}</button>
+                      <button
+                        type="button"
+                        disabled={rowBusy}
+                        onClick={() => void doRevert()}
+                        aria-label={tr(t, 'revert', 'Revert')}
+                        title={tr(t, 'revert', 'Revert')}
+                        className="btn-danger inline-flex items-center gap-1.5 px-3 text-sm disabled:opacity-50"
+                      >
+                        <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        <span>{tr(t, 'revert', 'Revert')}</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={rowBusy}
+                        onClick={() => setConfirmRevert(false)}
+                        className="btn-secondary px-3 text-sm disabled:opacity-50"
+                      >
+                        {tr(t, 'cancel', 'Cancel')}
+                      </button>
                     </span>
-                  ) : (
+                  ) : detailCanRevert ? (
                     <button
                       type="button"
                       disabled={rowBusy}
                       onClick={() => setConfirmRevert(true)}
-                      className="rounded-lg border border-rose-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/50 dark:text-rose-300 dark:hover:bg-rose-900/20"
+                      aria-label={tr(t, 'revert', 'Revert')}
+                      title={tr(t, 'revert', 'Revert')}
+                      className="btn-secondary inline-flex items-center gap-1.5 border-rose-300 px-3 text-sm text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/60 dark:text-rose-300 dark:hover:bg-rose-900/20"
                     >
-                      {tr(t, 'revert', 'Revert')}
+                      <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span>{tr(t, 'revert', 'Revert')}</span>
                     </button>
-                  )}
-                  <InfoHint
-                    label={tr(t, 'revert', 'Revert')}
-                    text={tr(t, 'revert_info', 'Posts a compensating opposite movement — nothing is deleted, and the revert itself appears in the history. Only manual stock changes and imports can be reverted; sales, returns and transfers must be undone from their own records.')}
-                  />
+                  ) : null}
                 </div>
               ) : (
-                <div className="flex items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+                <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
                   <input
                     autoFocus
                     value={editingReason}
                     onChange={(event) => setEditingReason(event.target.value)}
-                    className="input flex-1 text-sm"
+                    className="input min-w-[10rem] flex-1 text-sm"
                     placeholder={tr(t, 'reason', 'Reason')}
                     onKeyDown={(event) => { if (event.key === 'Enter') void saveReason() }}
                   />
-                  <button type="button" disabled={rowBusy} onClick={() => void saveReason()} className="btn-primary px-3 py-1 text-xs disabled:opacity-50">{tr(t, 'save', 'Save')}</button>
-                  <button type="button" disabled={rowBusy} onClick={() => setEditingReason(null)} className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300">{tr(t, 'cancel', 'Cancel')}</button>
+                  <button type="button" disabled={rowBusy} onClick={() => void saveReason()} className="btn-primary px-3 text-sm disabled:opacity-50">{tr(t, 'save', 'Save')}</button>
+                  <button type="button" disabled={rowBusy} onClick={() => setEditingReason(null)} className="btn-secondary px-3 text-sm disabled:opacity-50">{tr(t, 'cancel', 'Cancel')}</button>
                 </div>
               )
             ) : null}
-            <div>
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{tr(t, 'stock_change_ledger', 'Stock Changes')}</div>
-              {detailRows === null ? (
-                <p className="py-3 text-center text-xs text-gray-400">{tr(t, 'loading', 'Loading')}...</p>
-              ) : (
-                <div className="max-h-64 space-y-1 overflow-y-auto">
-                  {detailRows.map((row) => (
-                    <div key={row.id} className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${row.id === detail.id ? 'ring-1 ring-blue-300 dark:ring-blue-700' : ''} bg-gray-50 dark:bg-gray-800/60`}>
-                      <span className="text-gray-400" title={isDateOnlyStamp(row.created_at) ? noTimeLabel : undefined}>
-                        {isDateOnlyStamp(row.created_at) ? fmtDate(row.created_at) : fmtDateTime24(row.created_at)}
-                      </span>
-                      <span className={`rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>{signedLabel(row)}</span>
-                      <span className="tabular-nums text-gray-500">{row.before_qty} → {row.after_qty}</span>
-                    </div>
-                  ))}
-                  {!detailRows.length ? <p className="py-2 text-center text-gray-400">{tr(t, 'no_data_found', 'No data found')}</p> : null}
-                </div>
-              )}
-            </div>
           </div>
         </Modal>
       ) : null}
@@ -857,9 +1262,28 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         <Suspense fallback={null}>
           <StockAdjustModal
             initialType={adjustType}
+            // Resuming an unsaved failure: the product AND every typed value
+            // come back with it, so nothing has to be retyped.
+            initialProduct={resumeAttempt?.rows[0]?.productId != null
+              ? { id: resumeAttempt.rows[0].productId, name: resumeAttempt.rows[0].productName }
+              : null}
+            resumeRow={resumeAttempt?.rows[0] || null}
+            resumeAttemptId={resumeAttempt?.id || null}
             t={t}
-            onClose={() => setAdjustType(null)}
-            onDone={() => { setAdjustType(null); void load() }}
+            onClose={() => { setAdjustType(null); setResumeAttempt(null) }}
+            onDone={() => { setAdjustType(null); setResumeAttempt(null); void load() }}
+            onMinimize={(label: string, detail: { draftKey: string; productId: string | number }) => {
+              minimizeWork({
+                key: `stock-adjust-${String(detail.productId)}`,
+                kind: 'stock_adjust',
+                ...STOCK_ADJUST_RESTORE_HOST,
+                label,
+                payload: { productId: detail.productId },
+                draftKey: detail.draftKey,
+                requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
+              })
+              app.notify(tr(t, 'minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.'), 'info')
+            }}
           />
         </Suspense>
       ) : null}
@@ -881,11 +1305,24 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
           <FastStockInModal
             branchOptions={branches.map((branch) => ({ value: String(branch.id), label: branch.name || String(branch.id) }))}
             defaultBranchId={branchId || null}
+            initialMode={fastStockInMode}
             tr={(key: string, fallback = key) => tr(t, key, fallback)}
             notify={(message: string, kind?: string) => app.notify(message, kind)}
             onClose={() => setFastStockInOpen(false)}
             onDone={() => { void load() }}
+            onMinimize={(label: string) => {
+              minimizeWork({
+                key: 'fast-stockin',
+                kind: 'fast_stockin',
+                ...FAST_STOCK_IN_RESTORE_HOST,
+                label,
+                draftKey: scopedWorkDraftKey('fast_stockin'),
+                requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
+              })
+              app.notify(tr(t, 'minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.'), 'info')
+            }}
           />
+          {restoringFastStockInRef.current ? <FastStockInRestoreCommit onCommit={commitFastStockInRestore} /> : null}
         </Suspense>
       ) : null}
     </div>

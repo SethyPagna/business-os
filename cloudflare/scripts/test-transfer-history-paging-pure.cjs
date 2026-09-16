@@ -42,7 +42,12 @@ check('transfer branch filters are applied before pagination', () => {
 
 check('transfer note field matches the frontend contract', () => {
   assert.match(compat, /st\.notes AS note/)
-  assert.match(branches, /transfer\.note \|\| '-'/)
+  // N13: the per-surface placeholders were replaced by the ONE shared history
+  // row model (frontend/src/utils/historyRowModel.ts), so the contract this
+  // test pins is now historyField(transfer.note) -- same empty-cell behaviour,
+  // one definition of it, and the same em dash on every ledger surface.
+  assert.match(branches, /historyField\(transfer\.note\)/)
+  assert.doesNotMatch(branches, /transfer\.note \|\| '-'/)
 })
 
 check('Branches uses server pagination and does not locally re-filter UTC dates', () => {

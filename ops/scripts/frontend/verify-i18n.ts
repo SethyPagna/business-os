@@ -16,11 +16,27 @@
 //      A key that resolves in neither pack renders raw-key or English in
 //      Khmer mode — the "sections/buttons not translated" class of bug.
 //   3. Every CORE_ENGLISH_PACK key in AppContext.tsx has a km.json entry.
+//   4. No top-level key is DEFINED TWICE in either pack. Two lanes adding the
+//      same key at different offsets auto-merge with no conflict -- the hunks
+//      never touch -- and JSON.parse then keeps only the last, so the earlier
+//      value is dead and unreachable. Checks 1-3 all run on the parsed object,
+//      where the duplicate has already been resolved away; this one reads the
+//      raw text. Found live in both packs on 2026-09-06.
+//   5. No pack value DROPS a {placeholder} its own call site substitutes. The
+//      slot check below compares en against km, so it passes when BOTH packs
+//      lost the same slot -- which is how confirm_complete_stock_session_mixed
+//      shipped in both languages with none of {lines}, {adds}, {removes},
+//      {sets} or {branch}, silently dropping the breakdown and the branch name
+//      from a mutating stock confirmation. The source's inline English
+//      fallback states what the call site actually substitutes, so it is the
+//      reference. Checks 4 and 5 are pure functions in ./i18nPackChecks.ts,
+//      exercised on crafted input by frontend/tests/i18nPackGates.test.ts.
 //
 // Run: npm run verify:i18n   (from frontend/)
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { duplicateTopLevelKeys, fallbackSlotRegressions } from './i18nPackChecks.ts'
 
 const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'frontend')
 
@@ -35,12 +51,20 @@ const flatten = (input: Tree, target: Record<string, string> = {}): Record<strin
 }
 
 const readPack = (name: string): Tree => JSON.parse(fs.readFileSync(path.join(FRONTEND, 'src', 'lang', name), 'utf8')) as Tree
+const rawText = (name: string): string => fs.readFileSync(path.join(FRONTEND, 'src', 'lang', name), 'utf8')
 const enRaw = readPack('en.json')
 const kmRaw = readPack('km.json')
 const en = flatten(enRaw)
 const km = flatten(kmRaw)
 
 const failures: string[] = []
+
+// 0. Duplicate top-level keys -- read from the RAW text, because every check
+// below this line runs on the parsed object, where JSON.parse has already
+// silently discarded the earlier definition.
+for (const name of ['en.json', 'km.json']) {
+  for (const problem of duplicateTopLevelKeys(rawText(name))) failures.push(`${name}: ${problem}`)
+}
 
 // 1. pack parity (top-level, same as langKeyIntegrity)
 const enTop = new Set(Object.keys(enRaw))
@@ -95,6 +119,44 @@ if (coreBlock) {
     if (km[m[1]] === undefined) failures.push(`CORE_ENGLISH_PACK key '${m[1]}' has no km.json entry`)
   }
 }
+
+// 4. Interpolation slots must match between the packs.
+//
+// Every call site substitutes with a literal .replace('{n}', String(count)),
+// so a slot that exists in one pack and not the other does NOT throw -- the
+// replace is simply a no-op and the number vanishes from that language only.
+// Two live keys shipped that way since the initial import: en's
+// match_import_images and sync_online_devices had lost their {n} while km
+// kept it, so Khmer showed the count and English did not. Key-set parity
+// (check 2) cannot see this -- both packs have the key; only the value differs.
+const SLOT = /\{[a-zA-Z_][a-zA-Z0-9_]*\}/g
+const slotsOf = (v: string) => new Set(v.match(SLOT) ?? [])
+for (const key of enTop) {
+  const e = en[key]
+  const k = km[key]
+  if (typeof e !== 'string' || typeof k !== 'string') continue
+  const inEn = slotsOf(e)
+  const inKm = slotsOf(k)
+  const enOnly = [...inEn].filter((x) => !inKm.has(x))
+  const kmOnly = [...inKm].filter((x) => !inEn.has(x))
+  if (enOnly.length || kmOnly.length) {
+    const detail = [
+      enOnly.length ? `en-only ${enOnly.join(' ')}` : '',
+      kmOnly.length ? `km-only ${kmOnly.join(' ')}` : '',
+    ].filter(Boolean).join(', ')
+    failures.push(
+      `interpolation slots differ for '${key}' (${detail}) — the pack missing the ` +
+        `slot silently drops the value instead of failing; give both packs the same slots`,
+    )
+  }
+}
+// 5. A pack value that DROPS a slot its own call site substitutes. Check 4
+// above only compares the two packs against each other, so it is blind to the
+// case where both lost the same slot.
+for (const problem of fallbackSlotRegressions(
+  files.map((file) => ({ file: path.relative(FRONTEND, file).replace(/\\/g, '/'), text: fs.readFileSync(file, 'utf8') })),
+  { en, km },
+)) failures.push(problem)
 
 if (failures.length) {
   console.error(`verify:i18n FAILED — ${failures.length} problem(s):`)

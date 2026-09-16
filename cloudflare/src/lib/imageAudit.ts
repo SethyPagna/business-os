@@ -38,6 +38,42 @@ const REPROCESS_BATCH = 25
 
 const IMAGE_KEY_RE = /\.(jpe?g|png|webp|avif|gif|bmp|tiff?)$/i
 
+// Returns the UPDATE statement rather than running it -- normalizeStoredImage
+// batches this together with its own image_audit upsert (one db.batch() round
+// trip for the two independent per-message writes instead of two sequential
+// awaits). Returns null when there is no file_assets row to touch (same
+// early-outs as before: a non-uploads/ key, or an empty stored name).
+function buildFileAssetMetadataStatement(
+  key: string,
+  fields: { byteSize: number; contentType?: string | null; optimized?: boolean; provider?: string | null },
+): { sql: string; params: Record<string, unknown> } | null {
+  if (!key.startsWith('uploads/')) return null
+  const storedName = key.slice('uploads/'.length)
+  if (!storedName) return null
+  return {
+    sql: `
+      UPDATE file_assets SET
+        original_byte_size = CASE WHEN @optimized = 1 THEN COALESCE(original_byte_size, byte_size) ELSE original_byte_size END,
+        optimized_byte_size = CASE WHEN @optimized = 1 THEN @byteSize ELSE optimized_byte_size END,
+        byte_size = @byteSize,
+        mime_type = COALESCE(@contentType, mime_type),
+        media_type = CASE WHEN @contentType LIKE 'image/%' THEN 'image' ELSE media_type END,
+        optimization_status = CASE WHEN @optimized = 1 THEN 'optimized' ELSE optimization_status END,
+        optimization_note = CASE WHEN @optimized = 1 THEN @optimizationNote ELSE optimization_note END,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE stored_name = @storedName OR public_path = @publicPath
+    `,
+    params: {
+      byteSize: Math.max(0, Number(fields.byteSize) || 0),
+      contentType: fields.contentType || null,
+      optimized: fields.optimized ? 1 : 0,
+      optimizationNote: fields.optimized ? `Optimized by ${fields.provider || 'media pipeline'}` : null,
+      storedName,
+      publicPath: `/${key}`,
+    },
+  }
+}
+
 export type SweepResult = {
   examined: number
   oversized: number
@@ -180,13 +216,27 @@ export async function reprocessAuditedImages(env: Env): Promise<ReprocessResult>
     await consumeQuota(env, 'r2_class_a', 1)
     optimized += 1
     bytesSaved += source.byteLength - (result.byteSize || 0)
-    await db.prepare(`
-      UPDATE image_audit SET
-        status = 'optimized', provider = @provider, reason = NULL,
-        original_size = COALESCE(original_size, @originalSize),
-        byte_size = @byteSize, optimized_at = CURRENT_TIMESTAMP, checked_at = CURRENT_TIMESTAMP
-      WHERE key = @key
-    `).run({ key, provider: result.provider, originalSize: source.byteLength, byteSize: result.byteSize || 0 })
+    // Two independent writes (image_audit, file_assets) with no data
+    // dependency on each other -- one db.batch() round trip instead of two
+    // sequential awaits per reprocessed image.
+    const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
+      sql: `
+        UPDATE image_audit SET
+          status = 'optimized', provider = @provider, reason = NULL,
+          original_size = COALESCE(original_size, @originalSize),
+          byte_size = @byteSize, optimized_at = CURRENT_TIMESTAMP, checked_at = CURRENT_TIMESTAMP
+        WHERE key = @key
+      `,
+      params: { key, provider: result.provider, originalSize: source.byteLength, byteSize: result.byteSize || 0 },
+    }]
+    const fileAssetStatement = buildFileAssetMetadataStatement(key, {
+      byteSize: result.byteSize || result.bytes.byteLength,
+      contentType: result.contentType || 'image/webp',
+      optimized: true,
+      provider: result.provider,
+    })
+    if (fileAssetStatement) statements.push(fileAssetStatement)
+    await db.batch(statements)
   }
 
   if (optimized || failed) {
@@ -212,38 +262,63 @@ export type NormalizeOutcome = 'optimized' | 'skipped' | 'failed' | 'missing' | 
 export async function normalizeStoredImage(env: Env, key: string): Promise<NormalizeOutcome> {
   if (!IMAGE_KEY_RE.test(String(key || ''))) return 'not_image'
   const db = getDb(env)
-  const upsert = (fields: { byteSize: number; status: string; reason?: string | null; provider?: string | null; originalSize?: number | null; optimized?: boolean }) => db.prepare(`
-    INSERT INTO image_audit (key, byte_size, status, reason, provider, original_size, optimized_at, checked_at)
-    VALUES (@key, @byteSize, @status, @reason, @provider, @originalSize, ${fields.optimized ? 'CURRENT_TIMESTAMP' : 'NULL'}, CURRENT_TIMESTAMP)
-    ON CONFLICT(key) DO UPDATE SET
-      byte_size = @byteSize, status = @status, reason = @reason,
-      provider = COALESCE(@provider, image_audit.provider),
-      original_size = COALESCE(image_audit.original_size, @originalSize),
-      ${fields.optimized ? 'optimized_at = CURRENT_TIMESTAMP,' : ''}
-      checked_at = CURRENT_TIMESTAMP
-  `).run({ key, byteSize: fields.byteSize, status: fields.status, reason: fields.reason ?? null, provider: fields.provider ?? null, originalSize: fields.originalSize ?? null })
+  const buildUpsert = (fields: { byteSize: number; status: string; reason?: string | null; provider?: string | null; originalSize?: number | null; optimized?: boolean }): { sql: string; params: Record<string, unknown> } => ({
+    sql: `
+      INSERT INTO image_audit (key, byte_size, status, reason, provider, original_size, optimized_at, checked_at)
+      VALUES (@key, @byteSize, @status, @reason, @provider, @originalSize, ${fields.optimized ? 'CURRENT_TIMESTAMP' : 'NULL'}, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET
+        byte_size = @byteSize, status = @status, reason = @reason,
+        provider = COALESCE(@provider, image_audit.provider),
+        original_size = COALESCE(image_audit.original_size, @originalSize),
+        ${fields.optimized ? 'optimized_at = CURRENT_TIMESTAMP,' : ''}
+        checked_at = CURRENT_TIMESTAMP
+    `,
+    params: { key, byteSize: fields.byteSize, status: fields.status, reason: fields.reason ?? null, provider: fields.provider ?? null, originalSize: fields.originalSize ?? null },
+  })
+  // The image_audit upsert and the file_assets metadata sync are two
+  // independent writes to two different tables with no data dependency on
+  // each other -- one db.batch() round trip per message instead of two
+  // sequential awaits (skipped in the 'failed'/'no_saving' branches below,
+  // which never touch file_assets).
+  const runUpsert = (
+    fields: { byteSize: number; status: string; reason?: string | null; provider?: string | null; originalSize?: number | null; optimized?: boolean },
+    fileAssetFields?: { byteSize: number; contentType?: string | null; optimized?: boolean; provider?: string | null },
+  ) => {
+    const statements = [buildUpsert(fields)]
+    if (fileAssetFields) {
+      const fileAssetStatement = buildFileAssetMetadataStatement(key, fileAssetFields)
+      if (fileAssetStatement) statements.push(fileAssetStatement)
+    }
+    return db.batch(statements)
+  }
 
   const object = await env.ASSETS.get(key)
   if (!object) return 'missing'
   const source = await object.arrayBuffer()
   if (!needsOptimization(source.byteLength)) {
-    await upsert({ byteSize: source.byteLength, status: 'ok' })
+    await runUpsert({ byteSize: source.byteLength, status: 'ok' }, {
+      byteSize: source.byteLength,
+      contentType: object.httpMetadata?.contentType || null,
+    })
     return 'skipped'
   }
   const result = await optimizeImage(env, source, key.split('/').pop() || 'image')
   if (!result.ok || !result.bytes) {
-    await upsert({ byteSize: source.byteLength, status: 'failed', reason: String(result.reason || 'unknown').slice(0, 120), provider: result.provider })
+    await runUpsert({ byteSize: source.byteLength, status: 'failed', reason: String(result.reason || 'unknown').slice(0, 120), provider: result.provider })
     return 'failed'
   }
   if (result.byteSize && result.byteSize >= source.byteLength) {
-    await upsert({ byteSize: source.byteLength, status: 'skipped', reason: 'no_saving', provider: result.provider })
+    await runUpsert({ byteSize: source.byteLength, status: 'skipped', reason: 'no_saving', provider: result.provider })
     return 'skipped'
   }
   await env.ASSETS.put(key, result.bytes, {
     httpMetadata: { contentType: result.contentType || 'image/webp' },
   })
   await consumeQuota(env, 'r2_class_a', 1)
-  await upsert({ byteSize: result.byteSize || 0, status: 'optimized', provider: result.provider, originalSize: source.byteLength, optimized: true })
+  await runUpsert(
+    { byteSize: result.byteSize || 0, status: 'optimized', provider: result.provider, originalSize: source.byteLength, optimized: true },
+    { byteSize: result.byteSize || result.bytes.byteLength, contentType: result.contentType || 'image/webp', optimized: true, provider: result.provider },
+  )
   recordAnalytics(env, { kind: 'image_reprocess', labels: ['on_upload'], values: [1, 0, source.byteLength - (result.byteSize || 0)] })
   return 'optimized'
 }

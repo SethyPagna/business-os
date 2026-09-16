@@ -1,6 +1,42 @@
 import type { D1Compat } from './db'
+import { roundMoney4, multiplyMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { normalizeSearchText } from './searchMatch'
+import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage, type StockReceiptGateInput } from './stockReceiptGate'
+import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
+import type { ActorLike } from './actorSnapshot'
+import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
+
+/**
+ * The FOURTH receipt wire (N14-D).
+ *
+ * routes/inventory.ts POST /adjust, routes/batches.ts and lib/stockSession.ts
+ * each run stockReceiptGateCode before they write a receipt. This file did
+ * not, and it INSERTs a product_batches row carrying supplier_id,
+ * supplier_name and unit_cost_usd -- so a stock-action import could mint the
+ * one receipt every interactive surface refuses: no supplier, no cost, and a
+ * lot whose blank cost then reads as free goods nobody declared. A gate on
+ * three of the four wires is not a gate.
+ *
+ * Exported because the import dispatcher must ask the SAME question before it
+ * creates a product for a row it is about to refuse: one kernel, four call
+ * sites, not a second implementation.
+ */
+export function unifiedStockReceiptRefusal(
+  input: Pick<StockReceiptGateInput, 'supplierName' | 'lotSupplierName' | 'lotAttributionDeferred' | 'unitCostUsd' | 'freeGoods'>,
+): string | null {
+  return stockReceiptGateMessage(stockReceiptGateCode({
+    isStockIn: true,
+    supplierName: input.supplierName,
+    lotSupplierName: input.lotSupplierName,
+    lotAttributionDeferred: input.lotAttributionDeferred,
+    unitCostUsd: input.unitCostUsd,
+    freeGoods: input.freeGoods,
+    // An import row is always a new receipt. 'correction' is the undo/restore
+    // exemption and no import can claim it.
+    attribution: 'receipt',
+  }))
+}
 
 export interface UnifiedStockAddInput {
   jobId: string
@@ -13,13 +49,29 @@ export interface UnifiedStockAddInput {
   date: string
   batchLabel?: string | null
   sellingPriceUsd?: number | null
-  vipPriceUsd?: number | null
+  wholesalePriceUsd?: number | null
   costPriceUsd?: number | null
+  /**
+   * The sheet's OWN cost_price cell, with no catalog fallback. The gate must
+   * be asked about what the operator actually typed on this row, never a
+   * value costPriceUsd inherited from an existing product's catalog cost --
+   * that inheritance feeds the product-price columns, not the receipt gate.
+   * Import callers (importEngine.ts) always pass this explicitly, including
+   * an explicit `null` when the sheet's cost column was blank. A caller that
+   * builds one receipt cost with no sheet/catalog distinction (a direct
+   * unit-level caller with no import sheet behind it) may omit the field
+   * entirely, in which case the gate falls back to costPriceUsd itself,
+   * unchanged from before this field existed.
+   */
+  sheetCostPriceUsd?: number | null
   /** Supplier this batch was bought from (migration 0062). Stored on batch
    *  creation; an existing batch's blank supplier is backfilled, but a
    *  supplier already recorded on the lot is never overwritten. */
   supplierName?: string | null
   supplierId?: number | null
+  /** The operator's explicit "these goods were free" declaration (N14-D),
+   *  threaded from the sheet's optional free_goods column. */
+  freeGoods?: boolean | null
 }
 
 export interface UnifiedStockCommitResult {
@@ -45,6 +97,8 @@ export interface UnifiedStockSaleInput {
   saleGroupKey: string
   date: string
   lines: UnifiedStockSaleLine[]
+  actor: ActorLike
+  recordedAt: string
 }
 
 const MAX_SALE_LINES = 8
@@ -57,7 +111,7 @@ export interface UnifiedStockCreateProductInput {
   productName: string
   barcode?: string | null
   sellingPriceUsd?: number | null
-  vipPriceUsd?: number | null
+  wholesalePriceUsd?: number | null
   costPriceUsd?: number | null
 }
 
@@ -73,25 +127,39 @@ function positiveInteger(value: unknown, field: string): number {
   return parsed
 }
 
-function optionalMoney(value: unknown): number | null {
+function optionalMoney(value: unknown, sellingDefault = false): number | null {
   if (value == null || value === '') return null
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed < 0) throw new Error('Price must be a non-negative finite number')
-  return Math.round(parsed * 100) / 100
+  return sellingDefault ? sellingPriceCeilCent(parsed) : roundMoney4(parsed)
 }
 
 function requiredMoney(value: unknown, field: string): number {
-  const parsed = optionalMoney(value)
-  if (parsed == null) throw new Error(`${field} is required`)
-  return parsed
+  // This is the existing sale-import price boundary, not a cost writer.
+  // Keep its legacy calculation until versioned sale settlement is audited.
+  if (value == null || value === '') throw new Error(`${field} is required`)
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error('Price must be a non-negative finite number')
+  return Math.round(parsed * 100) / 100
 }
 
 function normalizedBatchLabel(value: unknown): string {
   return String(value || '').trim().replace(/[\u0000-\u001f]/g, '').slice(0, 120).toLowerCase().replace(/\s+/g, ' ')
 }
 
-function batchIdentity(date: string, label: string | null | undefined): { batchKey: string; lotCode: string; receivedAt: string } {
-  const receivedAt = normalizeToIsoDate(date)
+/**
+ * Exported so the import dispatcher can compute the SAME lot key this writer
+ * keys its idempotency/attribution reads on (productId + batchKey) -- it
+ * needs that key to serialize concurrent add rows that would otherwise race
+ * each other's first-read-of-lot_supplier_name (see importEngine.ts's
+ * pendingLotKeys). One identity rule, not a second hand-copy of it.
+ */
+export function batchIdentity(date: string, label: string | null | undefined): { batchKey: string; lotCode: string; receivedAt: string } {
+  // `date` is already ISO by the time it reaches here (stockActionImport.ts
+  // normalised the sheet cell under its own column's order), so this is a
+  // re-read, not a fresh parse -- the order is stated anyway so the call
+  // cannot silently change meaning if the default ever moves.
+  const receivedAt = normalizeToIsoDate(date, 'month-first')
   if (!receivedAt) throw new Error('Stock action date is invalid')
   const datedCode = dateToBatchCode(receivedAt)
   const explicit = String(label || '').trim().replace(/[\u0000-\u001f]/g, '').slice(0, 120)
@@ -131,18 +199,18 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
   if (!product) {
     const inserted = await db.prepare(`
       INSERT OR IGNORE INTO products (
-        name, name_normalized, barcode, unit, selling_price_usd, special_price_usd, cost_price_usd,
+        name, name_normalized, barcode, unit, selling_price_usd, wholesale_price_usd, cost_price_usd,
         stock_quantity, is_active, client_request_id, created_at, updated_at
       ) VALUES (
-        @productName, @nameNormalized, @barcode, 'pcs', @sellingPriceUsd, @vipPriceUsd, @costPriceUsd,
+        @productName, @nameNormalized, @barcode, 'pcs', @sellingPriceUsd, @wholesalePriceUsd, @costPriceUsd,
         0, 1, @clientRequestId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )
     `).run({
       productName,
       nameNormalized: normalizeSearchText(productName),
       barcode: String(input.barcode || '').trim() || null,
-      sellingPriceUsd: optionalMoney(input.sellingPriceUsd) ?? 0,
-      vipPriceUsd: optionalMoney(input.vipPriceUsd) ?? 0,
+      sellingPriceUsd: optionalMoney(input.sellingPriceUsd, true) ?? 0,
+      wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd, true) ?? 0,
       costPriceUsd: optionalMoney(input.costPriceUsd) ?? 0,
       clientRequestId,
     })
@@ -182,23 +250,65 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   // next batch_number are independent scalars, so read them together. Across
   // a 20k+ row migration this saves a full D1 latency per unit (collapses the
   // separate existing-check and MAX(batch_number) reads into one).
+  // lot_supplier_name rides along for the gate below: this add may top up a
+  // lot that is ALREADY attributed, and first attribution sticks (the UPDATE
+  // further down only COALESCE-fills a blank). Demanding the sheet retype a
+  // supplier the writer cannot change would refuse a complete receipt.
   const pre = await db.prepare(`
     SELECT
       (SELECT status FROM import_stock_action_commits WHERE job_id = @jobId AND action_key = @actionKey) AS status,
-      (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId) AS next_batch
-  `).get<{ status: string | null; next_batch: number }>({ jobId, actionKey, productId })
+      (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId) AS next_batch,
+      (SELECT supplier_name FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey) AS lot_supplier_name
+  `).get<{ status: string | null; next_batch: number; lot_supplier_name: string | null }>({ jobId, actionKey, productId, batchKey })
+  // A redelivery of a row that already landed stays idempotent: the gate runs
+  // on receipts this call would WRITE, never on one the ledger already holds.
   if (pre?.status === 'applied') return { actionKey, applied: true, alreadyApplied: true }
   const batchNumber = Math.max(1, Number(pre?.next_batch || 1))
   const guard = pendingGuard()
   const supplierName = String(input.supplierName || '').trim().replace(/\s{2,}/g, ' ').slice(0, 120) || null
   const supplierId = Number.isSafeInteger(Number(input.supplierId)) && Number(input.supplierId) > 0 ? Number(input.supplierId) : null
+  // The same refusal, with the same words, that POST /adjust, POST /api/batches
+  // and the stock-in session return. Thrown before the first write, so a
+  // refused row leaves no pending commit, no lot and no movement behind --
+  // applyStockActionsJob records the message on the row and the operator sees
+  // it in the finished report.
+  const freeGoods = input.freeGoods === true
+  // The GATE must see what the sheet's own cost_price cell said, never a
+  // value costPriceUsd inherited from an existing product's catalog cost --
+  // that inheritance exists to keep the product-price columns filled, not to
+  // manufacture a receipt cost the operator never typed (sibling:F13
+  // verifier round 2). A caller with no sheet/catalog distinction (no
+  // sheetCostPriceUsd key at all) keeps today's behavior unchanged.
+  const sheetCostPriceUsd = 'sheetCostPriceUsd' in input ? input.sheetCostPriceUsd : input.costPriceUsd
+  const refusal = unifiedStockReceiptRefusal({
+    supplierName,
+    lotSupplierName: pre?.lot_supplier_name ?? null,
+    unitCostUsd: sheetCostPriceUsd,
+    freeGoods,
+  })
+  if (refusal) throw new Error(refusal)
+  // A positive sub-tick input may quantize to zero. The persisted zero still
+  // needs the operator's free-goods declaration, just like an explicit zero.
+  const roundedRefusal = unifiedStockReceiptRefusal({
+    supplierName,
+    lotSupplierName: pre?.lot_supplier_name ?? null,
+    unitCostUsd: optionalMoney(sheetCostPriceUsd),
+    freeGoods,
+  })
+  if (roundedRefusal) throw new Error(roundedRefusal)
+  const costPriceUsd = optionalMoney(input.costPriceUsd)
+  const totalCostUsd = costPriceUsd == null ? null : multiplyMoney4(costPriceUsd, quantity)
   const params = {
     jobId, actionKey, rowNumber, productId, productName, branchId, branchName,
     quantity, batchKey, lotCode, receivedAt, batchNumber, supplierName, supplierId,
-    sellingPriceUsd: optionalMoney(input.sellingPriceUsd),
-    vipPriceUsd: optionalMoney(input.vipPriceUsd),
-    costPriceUsd: optionalMoney(input.costPriceUsd),
-    reason: `Unified stock import ${jobId}, row ${rowNumber}`,
+    sellingPriceUsd: optionalMoney(input.sellingPriceUsd, true),
+    wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd, true),
+    costPriceUsd,
+    totalCostUsd,
+    // The declaration is stamped into the words, not just the zero -- the
+    // same appendReceiptNotes routes/batches.ts:218 uses for the interactive
+    // wire, so a $0.00 accepted receipt reads as free goods on this wire too.
+    reason: appendReceiptNotes(`Unified stock import ${jobId}, row ${rowNumber}`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
   }
 
   await db.batch([
@@ -219,12 +329,18 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // The add may land on an EXISTING lot (INSERT OR IGNORE above). A lot
       // with no supplier/cost yet adopts this row's; values already recorded
       // on the lot win — first attribution sticks, imports never rewrite it.
+      // Same exception as lib/productBatches.ts LOT_ATTRIBUTION_SET_SQL: a lot
+      // whose receipts were all reverted (received_quantity 0) keeps its old
+      // supplier only until a receipt that carries one lands on it.
+      // A matching inactive lot is reactivated in this same atomic batch so
+      // the received stock remains reachable from POS/FIFO reads.
       sql: `UPDATE product_batches SET
-              supplier_name = COALESCE(supplier_name, @supplierName),
-              supplier_id = COALESCE(supplier_id, @supplierId),
-              unit_cost_usd = COALESCE(unit_cost_usd, @costPriceUsd)
+              is_active = 1,
+              supplier_name = CASE WHEN received_quantity = 0 AND (@supplierId IS NOT NULL OR @supplierName IS NOT NULL) THEN @supplierName ELSE COALESCE(supplier_name, @supplierName) END,
+              supplier_id = CASE WHEN received_quantity = 0 AND (@supplierId IS NOT NULL OR @supplierName IS NOT NULL) THEN @supplierId ELSE COALESCE(supplier_id, @supplierId) END,
+              unit_cost_usd = CASE WHEN received_quantity = 0 AND @costPriceUsd IS NOT NULL THEN @costPriceUsd ELSE COALESCE(unit_cost_usd, @costPriceUsd) END
             WHERE variant_product_id = @productId AND batch_key = @batchKey
-              AND (@supplierName IS NOT NULL OR @costPriceUsd IS NOT NULL) AND ${guard}`,
+              AND ${guard}`,
       params,
     },
     {
@@ -242,8 +358,8 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // source row recorded no price; COALESCE makes that contribute 0
       // instead of borrowing a sibling receipt's price.
       sql: `UPDATE product_batches SET received_quantity = COALESCE(received_quantity, 0) + @quantity,
-              received_cost_usd = COALESCE(received_cost_usd, 0) + (@quantity * COALESCE(@costPriceUsd, 0)),
-              received_branch_id = COALESCE(received_branch_id, @branchId)
+              received_cost_usd = COALESCE(received_cost_usd, 0) + COALESCE(@totalCostUsd, 0),
+              received_branch_id = CASE WHEN received_quantity = 0 THEN @branchId ELSE COALESCE(received_branch_id, @branchId) END
             WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}`,
       params,
     },
@@ -268,8 +384,8 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
               stock_quantity = COALESCE(stock_quantity, 0) + @quantity,
               selling_price_usd = CASE WHEN @sellingPriceUsd IS NULL THEN selling_price_usd
                 ELSE MAX(COALESCE(selling_price_usd, 0), @sellingPriceUsd) END,
-              special_price_usd = CASE WHEN @vipPriceUsd IS NULL THEN special_price_usd
-                ELSE MAX(COALESCE(special_price_usd, 0), @vipPriceUsd) END,
+              wholesale_price_usd = CASE WHEN @wholesalePriceUsd IS NULL THEN wholesale_price_usd
+                ELSE MAX(COALESCE(wholesale_price_usd, 0), @wholesalePriceUsd) END,
               updated_at = CURRENT_TIMESTAMP
             WHERE id = @productId AND ${guard}`,
       params,
@@ -282,7 +398,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
                unit_cost_usd, total_cost_usd, reason, created_at, batch_id)
             SELECT @productId, @productName, @branchId, @branchName, 'add', @quantity,
               @costPriceUsd,
-              CASE WHEN @costPriceUsd IS NULL THEN NULL ELSE ROUND(@quantity * @costPriceUsd, 4) END,
+              @totalCostUsd,
               @reason, @receivedAt,
               (SELECT id FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey)
             WHERE ${guard}`,
@@ -347,7 +463,8 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
   if (!saleGroupKey) throw new Error('Sale group is required')
   if (!Array.isArray(input.lines) || input.lines.length === 0) throw new Error('Sale group has no lines')
   if (input.lines.length > MAX_SALE_LINES) throw new Error(`Sale group exceeds the ${MAX_SALE_LINES}-line safety limit`)
-  const soldAt = normalizeToIsoDate(input.date)
+  // Same: an already-ISO date carried through from the import rows.
+  const soldAt = normalizeToIsoDate(input.date, 'month-first')
   if (!soldAt) throw new Error('Sale date is invalid')
 
   const groupHash = await sha256Hex(saleGroupKey)
@@ -381,6 +498,26 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
       allocations: [],
     }
   })
+
+  // The import payload carries a branch label for review, but the permission
+  // boundary is the current branch row. Read every referenced branch once,
+  // reject a missing id, and run the same branchCanSell-backed guard as POS
+  // before constructing any write statement. An already-applied replay has
+  // returned above, so this only gates a new generated sale.
+  // sql-bound-params: bounded by construction — input.lines is capped by
+  // MAX_SALE_LINES (8), so this branch lookup can never approach D1's 100
+  // parameter ceiling.
+  const branchIds = [...new Set(lines.map((line) => line.branchId))]
+  const branchParams = Object.fromEntries(branchIds.map((branchId, index) => [`branchId${index}`, branchId]))
+  const branchRows = await db.prepare(`
+    SELECT id, name FROM branches
+    WHERE id IN (${branchIds.map((_, index) => `@branchId${index}`).join(', ')})
+  `).all<{ id: number; name: string | null }>(branchParams)
+  if (branchRows.length !== branchIds.length) throw new Error('Sale branch does not exist')
+  const unsellableBranch = firstUnsellableBranch(branchRows)
+  if (unsellableBranch) throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
+  const branchNameById = new Map(branchRows.map((branch) => [Number(branch.id), String(branch.name || '').trim()]))
+  for (const line of lines) line.branchName = branchNameById.get(line.branchId) || line.branchName
 
   // Read each product/branch once, then reserve its available lots in memory
   // in row order. The live quantities are asserted again *inside* db.batch;
@@ -422,7 +559,7 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
     const candidates = line.batchLabel
       ? pool.filter((batch) => normalizedBatchLabel(batch.batch_key || batch.lot_code) === line.batchLabel)
       : pool
-    if (line.batchLabel && candidates.length === 0) throw new Error(`Row ${line.rowNumber} batch was not found`)
+    if (line.batchLabel && candidates.length === 0) throw new Error(`Row ${line.rowNumber} received date was not found`)
     for (const batch of candidates) {
       if (remaining <= 0) break
       if (batch.quantity <= 0) continue
@@ -431,8 +568,8 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
       batch.quantity -= take
       remaining -= take
     }
-    if (remaining > 0.0000001) throw new Error(`Row ${line.rowNumber} has insufficient batch stock`)
-    if (line.allocations.length > MAX_ALLOCATIONS_PER_LINE) throw new Error(`Row ${line.rowNumber} exceeds the ${MAX_ALLOCATIONS_PER_LINE}-batch safety limit`)
+    if (remaining > 0.0000001) throw new Error(`Row ${line.rowNumber} has insufficient stock`)
+    if (line.allocations.length > MAX_ALLOCATIONS_PER_LINE) throw new Error(`Row ${line.rowNumber} exceeds the ${MAX_ALLOCATIONS_PER_LINE}-received-date safety limit`)
     allocationCount += line.allocations.length
     if (allocationCount > MAX_SALE_ALLOCATIONS) throw new Error(`Sale group exceeds the ${MAX_SALE_ALLOCATIONS}-allocation safety limit`)
   }
@@ -495,24 +632,55 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
     row: line.rowNumber, product_id: line.productId, product_name: line.productName,
     branch_id: line.branchId, quantity: line.quantity, price_usd: line.sellingPriceUsd,
   })))
+  const receiptNumber = `IMP-${soldAt.replace(/-/g, '')}-${groupHash.slice(0, 8).toUpperCase()}`
+  const branchId = uniqueBranches.length === 1 ? uniqueBranches[0] : null
+  const branchName = uniqueBranches.length === 1 ? lines[0].branchName : 'Multiple branches'
+  const creationSnapshotJson = buildSaleCreationSnapshot({
+    origin: 'stock_action_import',
+    recordedAt: input.recordedAt,
+    saleAt: soldAt,
+    receiptNumber,
+    actor: input.actor,
+    cashierName: 'Unified stock import',
+    saleStatus: 'completed',
+    items: lines.map((line) => ({
+      product_id: line.productId,
+      product_name: line.productName,
+      quantity: line.quantity,
+      applied_price_usd: line.sellingPriceUsd,
+      total_usd: Math.round(line.quantity * line.sellingPriceUsd * 100) / 100,
+    })),
+    totalUsd: subtotalUsd,
+    paymentMethod: 'Cash',
+    paymentDetails: [{ method: 'Cash', amount_usd: subtotalUsd, amount_khr: 0 }],
+    amountPaidUsd: subtotalUsd,
+    amountPaidKhr: 0,
+    changeUsd: 0,
+    changeKhr: 0,
+    isDelivery: false,
+    deliveryFeeUsd: 0,
+    customerSnapshot: null,
+    membershipSnapshot: null,
+  })
   statements.push({
     sql: `INSERT INTO sales (
             receipt_number, client_request_id, cashier_name, branch_id, branch_name,
             payment_method, payment_currency, subtotal_usd, total_usd, amount_paid_usd,
-            sale_status, notes, items, created_at, updated_at
+            sale_status, notes, items, creation_snapshot_json, created_at, updated_at
           )
           SELECT @receiptNumber, @clientRequestId, 'Unified stock import', @branchId, @branchName,
             'Cash', 'USD', @subtotalUsd, @subtotalUsd, @subtotalUsd,
-            'completed', @notes, @items, @soldAt, CURRENT_TIMESTAMP
+            'completed', @notes, @items, @creationSnapshotJson, @soldAt, CURRENT_TIMESTAMP
           WHERE ${guard}`,
     params: {
       ...common,
-      receiptNumber: `IMP-${soldAt.replace(/-/g, '')}-${groupHash.slice(0, 8).toUpperCase()}`,
-      branchId: uniqueBranches.length === 1 ? uniqueBranches[0] : null,
-      branchName: uniqueBranches.length === 1 ? lines[0].branchName : 'Multiple branches',
+      receiptNumber,
+      branchId,
+      branchName,
       subtotalUsd,
       notes: `Unified stock import ${jobId}, group ${saleGroupKey}`,
       items: itemSnapshot,
+      creationSnapshotJson,
       soldAt,
     },
   })
@@ -571,7 +739,7 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
             WHERE ${guard}`,
       params: {
         ...common, ...line, costPriceUsd,
-        totalCostUsd: Math.round(costPriceUsd * line.quantity * 100) / 100,
+        totalCostUsd: multiplyMoney4(costPriceUsd, line.quantity),
         reason: `Unified stock import ${jobId}, group ${saleGroupKey}, row ${line.rowNumber}`,
         soldAt,
         // Full coverage required: a single allocation that covers only part

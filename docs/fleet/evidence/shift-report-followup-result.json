@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "task_id": "shift-report-followup",
+  "agent": { "provider": "codex", "role": "reconciler" },
+  "status": "partial",
+  "summary": "Local shift, report, stats availability and driver fixes integrated and verified. Production completion, payment ruling and broader original UI scope remain open.",
+  "base_sha": "d3445649a6ca2898b404c9a69b2d79064088186a",
+  "changes": ["Native-currency cash estimates and grouped expenses", "Non-truncating Telegram sender", "Mixed timestamp shift bounds", "Three report readers and canonical accounting parity", "Stale report/period result guards", "Current shift history access", "Driver fallback and reversible text repair", "Bilingual financial explanations"],
+  "commits": ["8545a27b", "6768b4f3", "c5acc664"],
+  "evidence": [
+    { "claim": "Cash example reconciles", "locator": "cloudflare/scripts/test-shift-report-pure.cjs", "observed": "283700 KHR minus150000 KHR equals133700 KHR; fixture only" },
+    { "claim": "Database report readers agree with canonical totals", "locator": "cloudflare/scripts/test-reports-list-route-contract-pure.cjs", "observed": "Actual Hono/SQLite cases passed for unpaid, missing-cost returns, cancelled descriptive charges and permission redaction" },
+    { "claim": "Independent findings resolved", "locator": "docs/fleet/2026-09-05-shift-cash-review.md", "observed": "Architect and product reviewer cleared bounded financial/cash/chunk/window fixes after recheck" }
+  ],
+  "verification": [
+    { "command": "npm run test:utils", "scope": "frontend", "exit_code": 0, "expected": "All198 testfiles pass", "observed": "Passed including typecheck, syntax and chaincoverage" },
+    { "command": "npm run verify:i18n", "scope": "frontend", "exit_code": 0, "expected": "All referenced EN/KM keys resolve", "observed": "4864 keys passed" },
+    { "command": "npm run build", "scope": "frontend", "exit_code": 0, "expected": "Build completes", "observed": "Passed with existing circular/chunk-size warnings" },
+    { "command": "npm run typecheck", "scope": "cloudflare", "exit_code": 0, "expected": "No type errors", "observed": "Passed" },
+    { "command": "node each scripts/test-*.cjs", "scope": "cloudflare", "exit_code": 0, "expected": "All suites pass", "observed": "200 suites;0 failures" },
+    { "command": "node scripts/test-shift-report-pure.cjs", "scope": "cloudflare", "exit_code": 0, "expected": "Subsequent sender regression additions pass without network", "observed": "Passed: chunked nonempty sends and rejected-response handling with fetch stub" }
+  ],
+  "risks": ["Sale-time estimates are not payment-event cash-flow ledgers", "Snapshot IDs freeze insert bounds, not edits", "Full authenticated visual/production certification remains open", "No performance benchmark or live Telegram delivery proof"],
+  "blockers": ["Need Completed-versus-paid ruling and explicitly authorized fresh production target/provenance manifest"],
+  "not_done": ["No live sales status, debt or stock mutation", "No cash example inserted", "No deployment or live Telegram send", "True two-layer/header navigation and full authenticated responsive matrix remain open"],
+  "handoff": "See shift-cash-review for exact limitations and safe production preflight requirements. Do not execute archived invoice-only settlement SQL.",
+  "workspace": { "branch": "codex/business-os-reconcile", "worktree": "C:/Users/mrkl6/Downloads/business-os-v1-integration" }
+}

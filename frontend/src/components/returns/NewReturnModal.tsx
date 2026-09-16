@@ -4,6 +4,9 @@ import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
+import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
+import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { fmtTime } from '../../utils/formatters'
 import {
   beginTrackedRequest,
@@ -15,11 +18,30 @@ import {
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { searchProducts } from '../../api/methods.ts'
-import { STOCK_ACTION_OPTIONS, computeSettlementPreview, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
+import { PAYMENT_METHODS } from '../../constants.ts'
+import { STOCK_ACTION_OPTIONS, returnLineNeedsLotPick, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
+import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
+import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
+import type { DamagedDisposition } from './helpers/returnOptions.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
+import type { PendingReturnCreateV1, ReturnQuoteV1 } from '../../api/returnsTransport.ts'
+import { subtractDecimalSum } from '../../utils/moneyPrecision.ts'
 
 const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
+// Long enough that a fast typist does not fire a request per keystroke, short
+// enough that the list feels like it is keeping up with the typing.
+const RECEIPT_SUGGEST_DEBOUNCE_MS = 250
+const RECEIPT_SUGGEST_TIMEOUT_MS = 8000
+// The server caps at 20 as well; stating it here keeps the list a glanceable
+// length instead of something to scroll through.
+const RECEIPT_SUGGEST_LIMIT = 20
+// Below this a query matches most of the table, so it is not yet a search.
+const RECEIPT_SUGGEST_MIN_CHARS = 2
 const RETURN_HISTORY_LOOKUP_TIMEOUT_MS = 10000
 const RETURN_CREATE_TIMEOUT_MS = 15000
 
@@ -47,6 +69,13 @@ interface SaleItemRow {
   cost_price_khr?: number | string | null
   purchase_price_khr?: number | string | null
   branch_id?: number | string | null
+  // Which lot this line was sold from: one lot on batch_id, or several
+  // recorded as allocations (batch_id NULL, lot_allocation_count > 0). Zero
+  // of both means the sale genuinely cannot say -- the only case where the
+  // operator has to name the lot the units go back into.
+  batch_id?: number | string | null
+  batch_label?: string | null
+  lot_allocation_count?: number | string | null
 }
 
 interface SaleReturnItem extends SaleItemRow {
@@ -58,16 +87,36 @@ interface SaleReturnItem extends SaleItemRow {
   // 11.13: the ONE per-item chooser -- what happens to this item's stock.
   // return_to_stock stays derived from it (restock <=> true) for the wire.
   stock_action: ReturnStockAction
+  // P4-3: only meaningful when stock_action is 'damaged'. Defaulted the
+  // moment the item becomes 'damaged' (see updateItemAction) to the SAME
+  // values an old client's absence of these fields resolves to server-side,
+  // so the wire payload is always explicit but never changes behavior.
+  condition_tag: string
+  damaged_disposition: DamagedDisposition
+  // Only used when the sale cannot say which lot: the lots this product has
+  // at the branch, and the one the operator named. Every unit goes back into
+  // a named lot -- unspecified stock is not a destination.
+  lotOptions: ProductBatch[]
+  pickedBatchId: number | null
 }
 
-// 11.12 Replace: a line handed to the customer from SAME-NAME stock,
-// chosen the POS way (row of the group + branch + optional exact lot).
+// A replacement is a normal sale line linked to this return. It may be any
+// catalog product and is selected with the same name/barcode search as POS.
 interface ReplacementCandidate {
   id: number | string
   name?: string | null
+  sku?: string | null
   barcode?: string | null
   selling_price_usd?: number | string | null
   selling_price_khr?: number | string | null
+  // Carried by every /api/products/search row (attachBranchStock runs
+  // unconditionally) and read by the shared option sheet for the
+  // Warehouse/Shop counts. Declared here because the old narrow shape was
+  // why this picker showed a price and nothing else.
+  unit?: string | null
+  stock_quantity?: number | string | null
+  branch_stock?: Array<{ branch_id?: string | number | null; branch_name?: string; quantity?: string | number }>
+  __groupChoices?: ReplacementCandidate[]
 }
 
 interface ReplacementLine {
@@ -77,13 +126,28 @@ interface ReplacementLine {
   branch_id: number | string | null
   batch_id: number | null
   batches: ProductBatch[]
-  candidates: ReplacementCandidate[]
   quantity: number
   price_usd: number
   price_khr: number
 }
 
+// One row of the receipt typeahead. The server answers with just enough to
+// tell two similar receipts apart at a glance -- when it was rung, who for,
+// how much -- so the operator picks from the list instead of opening sales
+// one at a time to find the right one.
+interface ReceiptSuggestion {
+  id: number | string
+  receipt_number?: string | null
+  legacy_receipt_number?: string | null
+  created_at?: string | number | Date | null
+  customer_name?: string | null
+  branch_name?: string | null
+  total_usd?: number | string | null
+  sale_status?: string | null
+}
+
 interface SaleRow {
+  money_precision_version?: number | string | null
   id?: number | string | null
   receipt_number?: string | null
   customer_name?: string | null
@@ -127,7 +191,11 @@ interface ReturnCreatePayload extends Record<string, unknown> {
     cost_price_khr: number
     return_to_stock: boolean
     stock_action: ReturnStockAction
+    // P4-3: only sent when stock_action is 'damaged'.
+    condition_tag?: string
+    damaged_disposition?: DamagedDisposition
     branch_id: number | string | null
+    batch_id?: number | null
   }>
 }
 
@@ -136,6 +204,13 @@ interface NewReturnModalProps {
   onSuccess?: (result?: unknown) => void | Promise<void>
   fmtUSD: MoneyFormatter
   notify: (message: string, kind?: NoticeKind) => void
+  // Optional and additive: a caller that ALREADY knows which receipt is being
+  // returned -- the Return button on a sale detail or a receipt view -- seeds
+  // the search with it so the modal opens with the number typed and its match
+  // listed for the operator to confirm. It is the same component the Returns
+  // section opens, with the same flow; seeding the query is the whole
+  // difference. Every existing caller omits it and starts on a blank box.
+  initialReceiptQuery?: string | null
 }
 
 type ReturnedQuantityMap = Record<string, number>
@@ -169,10 +244,24 @@ function loadReturnsReadTransport(): Promise<ReturnsReadTransportModule> {
   return returnsReadTransportPromise
 }
 
-async function searchReturnSales(options: { limit: number }): Promise<SaleRow[]> {
+// The receipt typeahead. This flow used to pull 500 sales to the browser and
+// Array.find() them, so a receipt outside that page was simply "not found",
+// and nothing at all appeared while the operator typed. The server matches the
+// bare YYYYMMDD-HHMMSS number, a run of digits across its separators, the sale
+// id and the legacy NNNNNN@YYYY-MM-DD number, and caps the answer at 20 rows.
+async function lookupReceiptSuggestions(query: string, limit: number): Promise<ReceiptSuggestion[]> {
+  const { lookupReturnReceipts } = await loadReturnsReadTransport()
+  const rows = await lookupReturnReceipts({ query, limit })
+  return (Array.isArray(rows) ? rows : []) as ReceiptSuggestion[]
+}
+
+// A typeahead row carries only header fields; the item lines the return is
+// built from come from the ordinary sales read, by exact id.
+async function loadSaleById(saleId: number | string): Promise<SaleRow | null> {
   const { getSales } = await loadSalesTransport()
-  const rows = await getSales(options)
-  return (Array.isArray(rows) ? rows : []) as SaleRow[]
+  const rows = await getSales({ id: saleId })
+  const list = (Array.isArray(rows) ? rows : []) as SaleRow[]
+  return list.find((row) => String(row.id) === String(saleId)) || list[0] || null
 }
 
 async function loadExistingSaleReturns(saleId: number | string | null | undefined): Promise<ExistingReturnRow[]> {
@@ -201,8 +290,15 @@ function getSaleItemKey(item: SaleItemRow): string {
   return String(item.id || `p_${item.product_id}`)
 }
 
-export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: NewReturnModalProps) {
-  const { user, t, getPermissionTier } = useApp()
+function exactReturnQuantity(total: number, parts: number[]): number {
+  const exact = subtractDecimalSum(total, parts)
+  const quantity = Number(exact)
+  if (!Number.isFinite(quantity) || subtractDecimalSum(quantity, [exact]) !== '0') throw new Error('return_v1_review_required')
+  return quantity
+}
+
+export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, initialReceiptQuery }: NewReturnModalProps) {
+  const { user, t } = useApp()
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
     return value && value !== key ? value : fallback
@@ -213,7 +309,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
   const RETURN_REASONS = normalizeReturnReasonList([...returnReasonPresets.customer, OTHER_LABEL])
 
   const [step,          setStep]          = useState<ModalStep>('search')
-  const [searchQuery,   setSearchQuery]   = useState('')
+  const [searchQuery,   setSearchQuery]   = useState(() => String(initialReceiptQuery || '').trim())
   const [foundSale,     setFoundSale]     = useState<SaleRow | null>(null)
   const [searching,     setSearching]     = useState(false)
   const [selectedItems, setSelectedItems] = useState<SaleReturnItem[]>([])
@@ -222,22 +318,124 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
   const [returnType,    setReturnType]    = useState<ReturnType>('restock')
   const [notes,         setNotes]         = useState('')
   const [submitting,    setSubmitting]    = useState(false)
+  const [quote, setQuote] = useState<ReturnQuoteV1 | null>(null)
+  const [quoteBusy, setQuoteBusy] = useState(false)
+  const [pendingV1, setPendingV1] = useState<PendingReturnCreateV1 | null>(null)
+  const [reviewedPendingBody, setReviewedPendingBody] = useState<string | null>(null)
+  const [pendingError, setPendingError] = useState('')
+  const [pendingLoaded, setPendingLoaded] = useState(false)
+  const [pendingQuoteRejected, setPendingQuoteRejected] = useState(false)
+  const [sessionStale, setSessionStale] = useState(false)
+  const lifecycle = useRef({ alive: true, generation: 0, scope: captureActorReadScope('returns') })
+  const currentAuthority = captureActorReadScope('returns').authority
   const searchRequestRef = useRef(0)
   const searchInFlightRef = useRef(false)
   const submitInFlightRef = useRef(false)
   const [replacements, setReplacements] = useState<ReplacementLine[]>([])
-  const [settleDifference, setSettleDifference] = useState(false)
+  // The replacement is an ordinary sale, so it takes an ordinary tender.
+  const [replacementPaymentMethod, setReplacementPaymentMethod] = useState<string>(PAYMENT_METHODS[0])
+  // Receipt typeahead. suggestOpen is separate from suggestions.length so that
+  // dismissing the list (Escape, or a pick) does not also throw away rows the
+  // operator may want back on the next keystroke.
+  const [suggestions, setSuggestions] = useState<ReceiptSuggestion[]>([])
+  const [suggestOpen, setSuggestOpen] = useState(false)
+  const [suggestLoading, setSuggestLoading] = useState(false)
+  const [suggestIndex, setSuggestIndex] = useState(-1)
+  const suggestRequestRef = useRef(0)
+  // The replacement section owns ONE search over the whole catalog -- not one
+  // search box per already-picked line, which is what forced the operator to
+  // add a line before they could look for what should be on it.
+  const [replacementQuery, setReplacementQuery] = useState('')
+  const [replacementResults, setReplacementResults] = useState<ReplacementCandidate[]>([])
+  // Same-name rows collapse to ONE title row; tapping it opens the shared
+  // option sheet to choose branch / option / received date. A standalone
+  // product opens the same sheet, so the flow never changes shape.
+  const [replacementPicking, setReplacementPicking] = useState<ReplacementCandidate | null>(null)
+  const [replacementSearching, setReplacementSearching] = useState(false)
+  const [replacementSearched, setReplacementSearched] = useState(false)
   const isKnownReason = RETURN_REASONS.includes(reason)
+  useEffect(() => {
+    lifecycle.current.alive = true
+    return () => { lifecycle.current.alive = false; lifecycle.current.generation++ }
+  }, [])
+  useEffect(() => {
+    if (!isActorReadScopeCurrent(lifecycle.current.scope, false)) {
+      lifecycle.current.generation++
+      invalidateTrackedRequest(searchRequestRef)
+      invalidateTrackedRequest(suggestRequestRef)
+      setSessionStale(true)
+      setFoundSale(null); setSelectedItems([]); setSuggestions([]); setQuote(null); setPendingV1(null)
+      return
+    }
+    const generation = lifecycle.current.generation
+    const scope = captureActorReadScope('returns')
+    void loadReturnsTransport().then(transport => {
+      if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
+      setPendingV1(transport.loadPendingReturnCreateV1(user?.id))
+      setPendingError('')
+      setPendingLoaded(true)
+    }).catch(() => {
+      if (lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) setPendingError('return_v1_storage_failed')
+    })
+  }, [user?.id, currentAuthority])
   useEffect(() => {
     if (!reason || reason === OTHER_LABEL || isKnownReason) return
     setCustomReason((current) => current || reason)
     setReason(OTHER_LABEL)
   }, [OTHER_LABEL, isKnownReason, reason])
-  // Locked note: "Non-default price adjustment requires full access and an
-  // explicit preview" -- the checkbox below IS the explicit preview, and
-  // it only unlocks for Full Access to Returns.
-  const canSettleDifference = getPermissionTier?.('returns') === 'full'
-  const normName = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+
+  // Ask the server as the operator types. Every request carries an id and only
+  // the newest one is allowed to write state, so a slow early keystroke can
+  // never overwrite the answer to a later, more specific one.
+  useEffect(() => {
+    const query = searchQuery.trim()
+    if (step !== 'search' || query.length < RECEIPT_SUGGEST_MIN_CHARS) {
+      invalidateTrackedRequest(suggestRequestRef)
+      setSuggestions([])
+      setSuggestLoading(false)
+      setSuggestIndex(-1)
+      return
+    }
+    const requestId = beginTrackedRequest(suggestRequestRef)
+    setSuggestLoading(true)
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const rows = await withLoaderTimeout(
+            () => lookupReceiptSuggestions(query, RECEIPT_SUGGEST_LIMIT),
+            'Receipt lookup',
+            RECEIPT_SUGGEST_TIMEOUT_MS,
+          )
+          if (!isTrackedRequestCurrent(suggestRequestRef, requestId)) return
+          setSuggestions(rows)
+          setSuggestOpen(true)
+          setSuggestIndex(rows.length > 0 ? 0 : -1)
+        } catch {
+          if (!isTrackedRequestCurrent(suggestRequestRef, requestId)) return
+          // A failed lookup is not an error the operator has to dismiss --
+          // they can still type the full number and press Find, which reports
+          // its own failure. Silently leaving the list empty is the honest
+          // state: we do not know what matches.
+          setSuggestions([])
+          setSuggestIndex(-1)
+        } finally {
+          if (isTrackedRequestCurrent(suggestRequestRef, requestId)) setSuggestLoading(false)
+        }
+      })()
+    }, RECEIPT_SUGGEST_DEBOUNCE_MS)
+    return () => {
+      window.clearTimeout(timer)
+      invalidateTrackedRequest(suggestRequestRef)
+    }
+  }, [searchQuery, step])
+
+  // A caller that already knows the receipt (the Return button on a sale
+  // detail or a receipt view) seeds searchQuery above, and that seed flows
+  // through the SAME debounced lookup a typed query goes through: the modal
+  // opens with the number already in the box and the matching receipt rows
+  // listed, highlighted on the first one, so Enter or a tap confirms it. There
+  // is deliberately no separate auto-open path -- a scan or a seed never
+  // picks a record on the operator's behalf; they see the match and choose.
 
   const loadReplacementBatches = async (lineKey: string, productId: number | string, branchId: number | string | null) => {
     if (!branchId) return
@@ -246,76 +444,121 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
       setReplacements((prev) => prev.map((line) => line.key === lineKey
         ? { ...line, batches: (Array.isArray(batches) ? batches : []).filter((batch) => (Number(batch.quantity) || 0) > 0) }
         : line))
-    } catch { /* the lot picker is a nicety -- "any stock" still works */ }
+    } catch {
+      // The lot list is an aid for the operator, not the authority: a
+      // replacement with no hand-picked lot still drains FIFO on the server,
+      // and a genuine shortfall comes back as the 409 the server raises.
+    }
   }
 
-  const addReplacementFor = async (item: SaleReturnItem) => {
-    if (!item.product_id) return
-    const name = String(item.product_name || item.name || '').trim()
-    const branchId = item.branch_id || foundSale?.branch_id || null
-    const key = `rep_${item.product_id}_${Date.now()}`
+  // One place a replacement line is born, whatever chose it: the catalog
+  // search, or the one-tap "same item" shortcut for a straight swap.
+  const addReplacementLine = (input: {
+    productId: number | string
+    productName: string
+    branchId: number | string | null
+    quantity: number
+    priceUsd: number
+    priceKhr: number
+    batchId?: number | null
+  }) => {
+    const branchId = input.branchId || foundSale?.branch_id || null
+    const key = `rep_${input.productId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
     setReplacements((prev) => [...prev, {
       key,
-      product_id: item.product_id as number | string,
-      product_name: name,
+      product_id: input.productId,
+      product_name: input.productName,
       branch_id: branchId,
-      batch_id: null,
+      batch_id: input.batchId ?? null,
       batches: [],
-      candidates: [],
-      quantity: item.returnQty || 1,
-      // seeding with the SAME row at the price the customer paid keeps the
-      // default an even exchange; picking a different row of the group
-      // switches to that row's own price (a real gap worth surfacing)
-      price_usd: toNumber(item.applied_price_usd),
-      price_khr: toNumber(item.applied_price_khr),
+      quantity: Math.max(1, Math.floor(input.quantity) || 1),
+      price_usd: input.priceUsd,
+      price_khr: input.priceKhr,
     }])
-    void loadReplacementBatches(key, item.product_id, branchId)
-    try {
-      const payload = await searchProducts({ query: name, pageSize: 20 }) as { items?: ReplacementCandidate[] }
-      const rows = (Array.isArray(payload?.items) ? payload.items : []).filter((row) => normName(row.name) === normName(name))
-      setReplacements((prev) => prev.map((line) => line.key === key ? { ...line, candidates: rows } : line))
-    } catch { /* same-row replacement still works without the sibling list */ }
+    void loadReplacementBatches(key, input.productId, branchId)
   }
 
-  const pickReplacementRow = (lineKey: string, candidate: ReplacementCandidate) => {
-    let branchForBatches: number | string | null = null
-    setReplacements((prev) => prev.map((line) => {
-      if (line.key !== lineKey) return line
-      branchForBatches = line.branch_id
-      return {
-        ...line,
-        product_id: candidate.id,
-        product_name: String(candidate.name || line.product_name),
-        batch_id: null,
-        batches: [],
-        price_usd: toNumber(candidate.selling_price_usd),
-        price_khr: toNumber(candidate.selling_price_khr),
-      }
-    }))
-    void loadReplacementBatches(lineKey, candidate.id, branchForBatches || foundSale?.branch_id || null)
+  const addReplacementFromCandidate = (
+    candidate: ReplacementCandidate,
+    selection?: { branchId: string | null; batch?: { batchId: number } },
+  ) => {
+    addReplacementLine({
+      productId: candidate.id,
+      productName: String(candidate.name || '').trim() || String(candidate.id),
+      // The branch the sheet resolved wins over the sale's own branch: the
+      // replacement is drawn from wherever the operator was just looking at
+      // stock, and the sheet refuses the warehouse for them.
+      branchId: selection?.branchId ?? (foundSale?.branch_id || null),
+      quantity: 1,
+      priceUsd: toNumber(candidate.selling_price_usd),
+      priceKhr: toNumber(candidate.selling_price_khr),
+      batchId: selection?.batch?.batchId ?? null,
+    })
+  }
+
+  // The straight swap -- same product back out, at the price it was sold for.
+  // It lives INSIDE the replacement section (not under the returned rows), so
+  // the section stays the one place a replacement is chosen.
+  const addReplacementSameItem = (item: SaleReturnItem) => {
+    if (!item.product_id) return
+    addReplacementLine({
+      productId: item.product_id as number | string,
+      productName: String(item.product_name || item.name || '').trim(),
+      branchId: item.branch_id || foundSale?.branch_id || null,
+      quantity: item.returnQty || 1,
+      priceUsd: toNumber(item.applied_price_usd),
+      priceKhr: toNumber(item.applied_price_khr),
+    })
   }
 
   const updateReplacement = (lineKey: string, patch: Partial<ReplacementLine>) => {
     setReplacements((prev) => prev.map((line) => line.key === lineKey ? { ...line, ...patch } : line))
   }
+
+  // The replacement section's own catalog search -- the whole catalog, by
+  // name, SKU or barcode, exactly as POS searches it. It is deliberately not
+  // scoped to the returned product: a customer swapping a faulty item for a
+  // different one is the ordinary case, not the exception.
+  const searchReplacementCatalog = async (scannedQuery?: string) => {
+    const query = (scannedQuery ?? replacementQuery).trim()
+    if (!query || replacementSearching) return
+    if (scannedQuery != null) setReplacementQuery(query)
+    setReplacementSearching(true)
+    try {
+      const payload = await searchProducts({ query, page: 1, pageSize: 30 }) as { items?: ReplacementCandidate[] }
+      const rows = Array.isArray(payload?.items) ? payload.items : []
+      // Project rule (barcode-scan-select-then-confirm): a scan NEVER
+      // auto-picks a product on any surface. The scanned/typed code becomes
+      // the query and narrows the result list -- the operator still chooses
+      // the row, because a replacement changes what the customer walks out
+      // with and what the linked sale charges.
+      setReplacementResults(rows)
+      setReplacementSearched(true)
+    } catch (error) {
+      setReplacementResults([])
+      setReplacementSearched(true)
+      notify(`${T('search_error', 'Search error')}: ${getLoaderErrorMessage(error, T('error', 'Error'))}`, 'error')
+    } finally {
+      setReplacementSearching(false)
+    }
+  }
   const removeReplacement = (lineKey: string) => setReplacements((prev) => prev.filter((line) => line.key !== lineKey))
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) return
+  // Load ONE sale (by exact id) and open the item step on it. Both entry
+  // points end here: picking a typeahead row, and pressing Find/Enter on a
+  // query that resolves to a single receipt.
+  const openSaleForReturn = async (saleId: number | string) => {
     if (!beginSingleAction(searchInFlightRef)) return
     const requestId = beginTrackedRequest(searchRequestRef)
     setSearching(true)
+    setSuggestOpen(false)
     try {
-      const sales = await withLoaderTimeout(
-        () => searchReturnSales({ limit: 500 }),
+      const found = await withLoaderTimeout(
+        () => loadSaleById(saleId),
         'Return sale search',
         RETURN_SALE_SEARCH_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
-      const q = searchQuery.trim().toLowerCase()
-      const found = sales.find((s) =>
-        s.receipt_number?.toLowerCase().includes(q) || String(s.id) === q
-      )
       if (found) {
         const items = Array.isArray(found.items) ? found.items : []
         const alreadyReturned: ReturnedQuantityMap = {}
@@ -330,7 +573,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
             if ((ret.status || 'completed') === 'cancelled') return
             ;(ret.items || []).forEach((ri) => {
               const key = ri.sale_item_id || `p_${ri.product_id}`
-              alreadyReturned[key] = (alreadyReturned[key] || 0) + toNumber(ri.quantity)
+              alreadyReturned[key] = Number(found.money_precision_version) === 1
+                ? exactReturnQuantity(alreadyReturned[key] || 0, [-toNumber(ri.quantity)])
+                : (alreadyReturned[key] || 0) + toNumber(ri.quantity)
             })
           })
         } catch (error) {
@@ -346,10 +591,38 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
         setSelectedItems(items.map((item) => {
           const key = getSaleItemKey(item)
           const alreadyQty = alreadyReturned[key] || 0
-          const remaining = Math.max(0, toNumber(item.quantity) - alreadyQty)
-          return { ...item, alreadyQty, remaining, returnQty: 0, included: remaining > 0, return_to_stock: true, stock_action: 'restock' as ReturnStockAction }
+          const remaining = Math.max(0, Number(found.money_precision_version) === 1
+            ? exactReturnQuantity(toNumber(item.quantity), [alreadyQty])
+            : toNumber(item.quantity) - alreadyQty)
+          return {
+            ...item,
+            alreadyQty,
+            remaining,
+            returnQty: 0,
+            included: remaining > 0,
+            return_to_stock: true,
+            stock_action: 'restock' as ReturnStockAction,
+            condition_tag: DEFAULT_STOCK_CONDITION_TAG,
+            damaged_disposition: 'keep' as DamagedDisposition,
+            lotOptions: [],
+            pickedBatchId: null,
+          }
         }))
         setStep('items')
+        // Lines the sale cannot place in a lot need one named before they can
+        // be restocked, so fetch what this product HAS at the branch. Every
+        // active lot is offered, not only the ones with stock left: an empty
+        // lot is exactly where returned units of that lot belong.
+        void Promise.all(items.map(async (item, index) => {
+          const lotKnown = toNumber(item.batch_id) > 0 || toNumber(item.lot_allocation_count) > 0
+          const branchId = item.branch_id || found.branch_id || null
+          if (lotKnown || !item.product_id || !branchId) return
+          try {
+            const { batches } = await getProductBatches(item.product_id, branchId, false)
+            if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
+            setSelectedItems((prev) => prev.map((row, i) => i === index ? { ...row, lotOptions: Array.isArray(batches) ? batches : [] } : row))
+          } catch { /* leave the line without options; the server refuses it rather than guessing */ }
+        }))
       } else {
         if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
         notify(T('sale_not_found', 'Sale not found. Try the receipt number or sale ID.'), 'error')
@@ -362,6 +635,79 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
         finishSingleAction(searchInFlightRef)
         setSearching(false)
       }
+    }
+  }
+
+  // Find/Enter without a highlighted row. If the debounced list already holds
+  // exactly one match we take it; otherwise we ask the server for this exact
+  // query rather than guessing off a stale list -- pressing Enter faster than
+  // the debounce must not mean "not found".
+  const handleSearch = async () => {
+    const query = searchQuery.trim()
+    if (!query) return
+    if (suggestIndex >= 0 && suggestions[suggestIndex]) {
+      await openSaleForReturn(suggestions[suggestIndex].id)
+      return
+    }
+    if (suggestions.length === 1) {
+      await openSaleForReturn(suggestions[0].id)
+      return
+    }
+    if (suggestions.length > 1) {
+      setSuggestOpen(true)
+      notify(T('receipt_pick_one', 'Several receipts match. Pick the one you mean from the list.'), 'info')
+      return
+    }
+    setSuggestLoading(true)
+    try {
+      const rows = await withLoaderTimeout(
+        () => lookupReceiptSuggestions(query, RECEIPT_SUGGEST_LIMIT),
+        'Receipt lookup',
+        RECEIPT_SUGGEST_TIMEOUT_MS,
+      )
+      setSuggestions(rows)
+      setSuggestIndex(rows.length > 0 ? 0 : -1)
+      if (rows.length === 1) {
+        await openSaleForReturn(rows[0].id)
+        return
+      }
+      if (rows.length > 1) {
+        setSuggestOpen(true)
+        notify(T('receipt_pick_one', 'Several receipts match. Pick the one you mean from the list.'), 'info')
+        return
+      }
+      notify(T('sale_not_found', 'Sale not found. Try the receipt number or sale ID.'), 'error')
+    } catch (error) {
+      notify((T('search_error','Search error') || T('error','Error')) + ': ' + getLoaderErrorMessage(error, T('error', 'Error')), 'error')
+    } finally {
+      setSuggestLoading(false)
+    }
+  }
+
+  // Arrow keys walk the list, Enter takes the highlighted row (or falls back
+  // to the resolve-then-open path above), Escape dismisses without clearing
+  // what was typed.
+  const handleSearchKeyDown = (event: { key: string; preventDefault: () => void }) => {
+    if (event.key === 'ArrowDown' && suggestions.length > 0) {
+      event.preventDefault()
+      setSuggestOpen(true)
+      setSuggestIndex((current) => (current + 1) % suggestions.length)
+      return
+    }
+    if (event.key === 'ArrowUp' && suggestions.length > 0) {
+      event.preventDefault()
+      setSuggestOpen(true)
+      setSuggestIndex((current) => (current <= 0 ? suggestions.length - 1 : current - 1))
+      return
+    }
+    if (event.key === 'Escape' && suggestOpen) {
+      event.preventDefault()
+      setSuggestOpen(false)
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      void handleSearch()
     }
   }
 
@@ -388,7 +734,29 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
   }
 
   const updateItemAction = (idx: number, action: ReturnStockAction) => {
-    setSelectedItems((prev) => prev.map((it, i) => i === idx ? { ...it, stock_action: action, return_to_stock: action === 'restock' } : it))
+    setSelectedItems((prev) => prev.map((it, i) => i === idx ? {
+      ...it, stock_action: action, return_to_stock: action === 'restock',
+      // Landing on 'damaged' always starts on the SAME default the server
+      // resolves an old client's absent fields to -- kept, tagged 'damaged'.
+      ...(action === 'damaged' && it.stock_action !== 'damaged'
+        ? { condition_tag: DEFAULT_STOCK_CONDITION_TAG, damaged_disposition: 'keep' as DamagedDisposition }
+        : {}),
+    } : it))
+  }
+
+  // The StockConditionTagRow's own value model: '' = "Remove entirely" (no
+  // tag, destroyed immediately, a booked loss), a tag = "Keep in group as
+  // <tag>" (held). See planDamagedReturnLine's transition table.
+  const updateItemDamagedChoice = (idx: number, value: string) => {
+    setSelectedItems((prev) => prev.map((it, i) => i === idx ? {
+      ...it,
+      damaged_disposition: (value ? 'keep' : 'remove') as DamagedDisposition,
+      condition_tag: value || it.condition_tag || DEFAULT_STOCK_CONDITION_TAG,
+    } : it))
+  }
+
+  const updateItemLot = (idx: number, batchId: number | null) => {
+    setSelectedItems((prev) => prev.map((it, i) => i === idx ? { ...it, pickedBatchId: batchId } : it))
   }
 
   const selectAll = () => setSelectedItems((prev) => prev.map((it) =>
@@ -397,20 +765,41 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
   const clearAll  = () => setSelectedItems((prev) => prev.map((it) => ({ ...it, included: false, returnQty: 0 })))
 
   const activeItems    = selectedItems.filter((it) => it.included && (it.returnQty || 0) > 0)
-  const totalRefund    = activeItems.reduce((s, it) => s + toNumber(it.applied_price_usd) * it.returnQty, 0)
-  const totalRefundKhr = activeItems.reduce((s, it) => s + toNumber(it.applied_price_khr) * it.returnQty, 0)
+  const isV1Sale = Number(foundSale?.money_precision_version) === 1
+  const unsupportedMoneyVersion = foundSale?.money_precision_version != null && ![0, 1].includes(Number(foundSale.money_precision_version))
+  const totalRefund    = isV1Sale ? (quote?.total_refund_usd ?? 0) : activeItems.reduce((s, it) => s + toNumber(it.applied_price_usd) * it.returnQty, 0)
+  const totalRefundKhr = isV1Sale ? (quote?.total_refund_khr ?? 0) : activeItems.reduce((s, it) => s + toNumber(it.applied_price_khr) * it.returnQty, 0)
   const replacementTotalUsd = replacements.reduce((s, line) => s + line.price_usd * line.quantity, 0)
-  const replacementTotalKhr = replacements.reduce((s, line) => s + line.price_khr * line.quantity, 0)
-  // Mirrors the backend kernel's math exactly -- the preview and the
-  // server's verdict can never disagree.
-  const settlementPreview = computeSettlementPreview({ returnedTotalUsd: totalRefund, returnedTotalKhr: totalRefundKhr, replacementTotalUsd, replacementTotalKhr })
   const finalReason    = reason === OTHER_LABEL ? customReason.trim() : reason
+  const quoteIntent = JSON.stringify([foundSale?.id, activeItems.map(it => [it.id, it.returnQty, it.stock_action, it.pickedBatchId]), finalReason, notes, returnType, replacements])
+  const quoteIntentRef = useRef(quoteIntent)
+  quoteIntentRef.current = quoteIntent
+  const reviewedIntentRef = useRef<string | null>(null)
+  useEffect(() => { setQuote(null); reviewedIntentRef.current = null }, [quoteIntent])
+
+  // Every line that still owes an answer about WHICH lot. Restock is the only
+  // action that puts units back on a shelf, so it is the only one that needs
+  // one; the server refuses the same lines (return_lot_required), this is
+  // just the operator finding out before they press Confirm.
+  const lineNeedsLot = (item: SaleReturnItem): boolean => item.stock_action === 'restock' && returnLineNeedsLotPick({
+    originalBatchId: toNumber(item.batch_id) > 0 ? item.batch_id : (toNumber(item.lot_allocation_count) > 0 ? 1 : null),
+    pickedBatchId: item.pickedBatchId,
+    lotOptionCount: item.lotOptions.length,
+  })
+  const itemsMissingLot = activeItems.filter(lineNeedsLot)
+  const replacementsMissingLot = replacements.filter((line) => line.batches.length > 0 && line.batch_id == null)
 
   const handleSubmit = async () => {
+    if (!pendingLoaded || pendingError) return
+    if (sessionStale || !isActorReadScopeCurrent(lifecycle.current.scope, false)) return
+    if (pendingV1 || isV1Sale || unsupportedMoneyVersion) {
+      await submitNetReturn()
+      return
+    }
     if (!activeItems.length) { notify(T('select_items_to_return','Select at least one item to return.'), 'error'); return }
     if (!finalReason) { notify(T('return_reason','Please provide a return reason.'), 'error'); return }
-    if (replacements.length && !settlementPreview.isEven && !settleDifference) {
-      notify(T('uneven_exchange_blocked', 'This is not an even exchange -- tick "Settle this price difference" (Full Access) or match the totals.'), 'error')
+    if (itemsMissingLot.length || replacementsMissingLot.length) {
+      notify(T('lot_required', 'Pick the received date for every line first — stock never goes back to, or comes out of, unspecified stock.'), 'error')
       return
     }
     if (!beginSingleAction(submitInFlightRef)) return
@@ -441,7 +830,19 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
             cost_price_khr:    toNumber(it.cost_price_khr || it.purchase_price_khr),
             return_to_stock:   it.return_to_stock !== false,
             stock_action:      it.stock_action,
+            // The tag always rides along, even under "Remove entirely" --
+            // it still stamps the held-then-disposed row and its write_off's
+            // reason (see planDamagedReturnLine); only disposition decides
+            // whether the row stays open.
+            ...(it.stock_action === 'damaged' ? {
+              condition_tag: it.condition_tag || DEFAULT_STOCK_CONDITION_TAG,
+              damaged_disposition: it.damaged_disposition,
+            } : {}),
             branch_id:         it.branch_id || foundSale?.branch_id || null,
+            // Sent ONLY for a line the sale itself cannot place. When the
+            // sale knows the lot(s), the server restocks exactly those --
+            // including a multi-lot split an operator pick would collapse.
+            ...(it.pickedBatchId != null ? { batch_id: it.pickedBatchId } : {}),
           })),
           ...(replacements.length ? {
             replacement_items: replacements.map((line) => ({
@@ -453,20 +854,31 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
               applied_price_usd: line.price_usd,
               applied_price_khr: line.price_khr,
             })),
-            settlement_mode: settlementPreview.isEven ? 'even_exchange' : 'price_difference',
+            replacement_payment_method: replacementPaymentMethod,
           } : {}),
         }),
         'Create return',
         RETURN_CREATE_TIMEOUT_MS,
       )
-      notify(T('sale_complete','Return processed successfully'))
+      const response = (result || {}) as { replacementReceiptNumber?: string | null }
+      notify(response.replacementReceiptNumber
+        ? `${T('return_processed_with_receipt', 'Return processed. Replacement sale receipt')}: ${response.replacementReceiptNumber}`
+        : T('sale_complete','Return processed successfully'))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-      await Promise.resolve(onSuccess?.(result))
+      // The save already succeeded server-side, so the modal can close (and
+      // show the success state) immediately -- Returns.tsx's list refetch,
+      // history snapshot fetch and undo-entry push run in the background
+      // instead of holding the modal open for them (same pattern as
+      // Products.tsx's row patch replacing a full-page reload).
       onClose()
+      void Promise.resolve(onSuccess?.(result))
     } catch (error) {
-      notify((T('error','Error') || 'Error') + ': ' + getLoaderErrorMessage(error, T('error', 'Error')), 'error')
+      // A replacement line the Worker refuses (its branch is the warehouse)
+      // is shown as the same pack sentence the replacement picker greys the
+      // warehouse pill with, in whichever language is active.
+      notify((T('error','Error') || 'Error') + ': ' + localizeBranchRuleError(getLoaderErrorMessage(error, T('error', 'Error')), (key: string) => T(key, '')), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
       setSubmitting(false)
@@ -481,15 +893,144 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
   // already use for this exact reason (an outside click or the X button
   // used to close the modal mid-request even though the Confirm button
   // itself was correctly disabled during `submitting`).
+  // S4-21: what an accidental dismissal would really cost here is the
+  // looked-up receipt plus every line, lot, reason and replacement chosen
+  // against it -- minutes of work at a counter. A receipt number typed and
+  // nothing else is NOT worth a prompt (retyping it is the same keystrokes),
+  // so the guard starts once a sale is actually loaded and something has
+  // been chosen on it.
+  const returnDirty = Boolean(foundSale) && (
+    activeItems.length > 0
+    || replacements.length > 0
+    || notes.trim().length > 0
+    || customReason.trim().length > 0
+  )
+  const closeGuard = useCloseGuard({ dirty: returnDirty }, onClose)
+
+  // Both the backdrop and the ✕ land here.
   const closeIfIdle = () => {
-    if (!submitting) onClose()
+    if (!submitting) closeGuard.requestClose()
   }
 
-  const reviewReturn = () => {
+  const reviewReturn = async () => {
+    if (!pendingLoaded || pendingError) return
     if (!activeItems.length) { notify(T('select_items_to_return', 'Select at least one item to return.'), 'error'); return }
     if (!finalReason) { notify(T('return_reason', 'Please provide a return reason.'), 'error'); return }
+    if (itemsMissingLot.length || replacementsMissingLot.length) {
+      notify(T('lot_required', 'Pick the received date for every line first — stock never goes back to, or comes out of, unspecified stock.'), 'error')
+      return
+    }
+    if (pendingV1 || sessionStale || unsupportedMoneyVersion) return
+    if (isV1Sale) {
+      if (replacements.length) { notify(T('return_v1_replacements_unsupported', 'Create the replacement sale separately for this net-refund return.'), 'error'); return }
+      if (pendingError) { notify(T(pendingError, 'The original return request could not be saved safely. No new request was sent.'), 'error'); return }
+      if (!beginSingleAction(submitInFlightRef)) return
+      const generation = lifecycle.current.generation
+      const scope = captureActorReadScope('returns')
+      const intent = quoteIntent
+      const current = () => lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false) && quoteIntentRef.current === intent
+      setQuoteBusy(true)
+      try {
+        const transport = await loadReturnsTransport()
+        if (!current()) return
+        const next = await withLoaderTimeout(() => transport.getReturnQuoteV1(Number(foundSale?.id), activeItems.map(it => ({ sale_item_id: Number(it.id), quantity: it.returnQty }))), 'Return quote', RETURN_HISTORY_LOOKUP_TIMEOUT_MS)
+        if (!current()) return
+        setQuote(next); reviewedIntentRef.current = intent; setStep('confirm')
+      } catch (error) {
+        if (current()) { setQuote(null); notify(T((error as { code?: string })?.code || 'return_v1_review_required', getLoaderErrorMessage(error)), 'error') }
+      } finally {
+        finishSingleAction(submitInFlightRef)
+        if (lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) setQuoteBusy(false)
+      }
+      return
+    }
     setStep('confirm')
   }
+
+  const submitNetReturn = async () => {
+    if (sessionStale || !isActorReadScopeCurrent(lifecycle.current.scope, false) || !beginSingleAction(submitInFlightRef)) return
+    const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation
+    const current = () => lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)
+    setSubmitting(true)
+    try {
+      const transport = await loadReturnsTransport()
+      if (!current()) return
+      let pending = pendingV1 || transport.loadPendingReturnCreateV1(user?.id)
+      const recovery = pending ? transport.authorizeReturnCreateRecovery(user?.id, pending, reviewedPendingBody === pending.bodyJson) : undefined
+      setReviewedPendingBody(null)
+      if (!pending) {
+        if (!isV1Sale || !quote || reviewedIntentRef.current !== quoteIntent || pendingError) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
+        if (replacements.length || !activeItems.length || !finalReason || itemsMissingLot.length) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
+        pending = await transport.prepareReturnCreateV1(user?.id, {
+          reason: finalReason, return_type: returnType, notes: notes || null,
+          branch_id: foundSale?.branch_id || null,
+          items: activeItems.map(it => ({ sale_item_id: Number(it.id), product_id: it.product_id, quantity: it.returnQty,
+            stock_action: it.stock_action, return_to_stock: it.stock_action === 'restock', branch_id: it.branch_id || foundSale?.branch_id || null,
+            ...(it.stock_action === 'damaged' ? {
+              condition_tag: it.condition_tag || DEFAULT_STOCK_CONDITION_TAG,
+              damaged_disposition: it.damaged_disposition,
+            } : {}),
+            ...(it.pickedBatchId != null ? { batch_id: it.pickedBatchId } : {}) })),
+        }, quote)
+        if (!current()) return
+        setPendingV1(pending)
+      }
+      const result = await withLoaderTimeout(() => transport.submitReturnCreateV1(user?.id, pending!, recovery), 'Create net return', RETURN_CREATE_TIMEOUT_MS)
+      if (!current()) return
+      await transport.clearPendingReturnCreateV1(user?.id, pending, recovery)
+      if (!current()) return
+      setPendingV1(null)
+      notify(T('success', 'Return created successfully'), 'success')
+      for (const channel of ['returns', 'inventory', 'sales']) window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel } }))
+      // Same close-before-refetch as handleSubmit above: the save already
+      // succeeded, so the modal closes immediately and the list refetch runs
+      // in the background instead of holding the modal open for it.
+      if (current()) onClose()
+      void Promise.resolve(onSuccess?.(result))
+    } catch (error) {
+      if (!current()) return
+      // Unknown, permission and capability failures never rewrite/remove the
+      // frozen request: an earlier timed-out attempt could already be committed.
+      setPendingQuoteRejected((error as { returnV1QuoteRejected?: boolean })?.returnV1QuoteRejected === true)
+      notify(T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
+    } finally {
+      finishSingleAction(submitInFlightRef)
+      if (current()) setSubmitting(false)
+    }
+  }
+
+  if (sessionStale || !isActorReadScopeCurrent(lifecycle.current.scope, false)) return createPortal(<div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-center justify-center bg-black/50 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-xl bg-white p-4 dark:bg-gray-800"><p role="status">{T('return_v1_session_changed', 'Your session changed. Close and reopen this return before continuing.')}</p><button className="btn-secondary mt-4 w-full" onClick={onClose}>{T('close', 'Close')}</button></div></div>, document.body)
+
+  const pendingReview = pendingV1 ? JSON.parse(pendingV1.bodyJson) as { return_number: string; reason?: string; expected_quote: ReturnQuoteV1; items: Array<{ sale_item_id: number; quantity: number; stock_action: string }> } : null
+  if (pendingV1 && pendingReview) return createPortal(
+    <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 p-4 sm:items-center">
+      <div role="dialog" aria-modal="true" aria-label={T('new_return', 'New Return')} className="w-full max-w-lg rounded-xl bg-white p-4 dark:bg-gray-800">
+        <p role="status" className="mb-4 text-sm">{T('return_v1_pending', 'An earlier return has an unknown outcome. Retry only the saved original request.')}</p>
+        <div className="mb-3 max-h-64 overflow-auto rounded border p-3 text-sm">
+          <p className="break-all">{T('return_number', 'Return #')}: {pendingReview.return_number}</p>
+          <p>{T('refund_amount', 'Refund Amount')}: ${pendingReview.expected_quote.total_refund_usd.toFixed(2)} / {pendingReview.expected_quote.total_refund_khr}៛</p>
+          <p className="break-words">{T('reason', 'Reason')}: {pendingReview.reason}</p>
+          <ul className="mt-2 space-y-1">{pendingReview.items.map(item => <li key={item.sale_item_id}>#{item.sale_item_id} · {T('quantity', 'Quantity')}: {item.quantity} · {T('stock_action', 'Stock action')}: {T(item.stock_action, item.stock_action)}</li>)}</ul>
+        </div>
+        <details className="mb-3"><summary className="cursor-pointer text-sm">{T('details', 'Details')}</summary><pre tabIndex={0} className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded border p-2 text-xs">{JSON.stringify(JSON.parse(pendingV1.bodyJson), null, 2)}</pre></details>
+        <label className="mb-4 flex items-start gap-2 text-sm"><input type="checkbox" disabled={submitting} checked={reviewedPendingBody === pendingV1.bodyJson} onChange={event => setReviewedPendingBody(event.target.checked ? pendingV1.bodyJson : null)} />{T('confirm', 'Confirm')}: {T('retry_original_request', 'Retry original request')}</label>
+        <div className="flex gap-2"><button type="button" disabled={submitting} onClick={onClose} className="btn-secondary flex-1">{T('close', 'Close')}</button>
+          <button type="button" disabled={submitting || reviewedPendingBody !== pendingV1.bodyJson} onClick={submitNetReturn} className="btn-primary flex-1">{submitting ? T('submitting', 'Processing…') : T('retry_original_request', 'Retry original request')}</button></div>
+        {pendingQuoteRejected && <button type="button" disabled={submitting} className="btn-secondary mt-3 w-full" onClick={async () => {
+          const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation
+          try {
+            const transport = await loadReturnsTransport()
+            if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
+            const recovery = transport.authorizeReturnCreateRecovery(user?.id, pendingV1, reviewedPendingBody === pendingV1.bodyJson)
+            await transport.clearPendingReturnCreateV1(user?.id, pendingV1, recovery)
+            if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
+            setPendingV1(null); setPendingQuoteRejected(false); setQuote(null); reviewedIntentRef.current = null
+            setStep(foundSale ? 'items' : 'search')
+          } catch (error) { if (lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) notify(getLoaderErrorMessage(error), 'error') }
+        }}>{T('return_v1_review_required', 'Review the current server refund before confirming.')}</button>}
+      </div>
+    </div>, document.body,
+  )
 
   return createPortal(
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={closeIfIdle}>
@@ -499,8 +1040,6 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
         <div className="flex items-center justify-between gap-2 p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
           <h2 className="min-w-0 truncate text-lg font-bold text-gray-900 dark:text-white">↩️ {T('new_return','New Return')}</h2>
           <div className="flex shrink-0 items-center gap-2">
-            {step === 'items' ? <button type="button" onClick={reviewReturn} className="btn-primary min-h-9 max-w-28 truncate px-3 py-1.5 text-xs sm:hidden">{T('confirm','Review')}</button> : null}
-            {step === 'confirm' ? <button type="button" onClick={handleSubmit} disabled={submitting} className="btn-primary min-h-9 max-w-28 truncate px-3 py-1.5 text-xs sm:hidden">{submitting ? T('submitting','Processing…') : T('confirm','Confirm')}</button> : null}
             <div className="hidden items-center gap-2 sm:flex">{STEPS.map((s, i) => (
               <div key={s} className="flex items-center gap-1">
                 <div className={`w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold transition-colors
@@ -515,6 +1054,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
         </div>
 
         <div className="modal-scroll p-4 space-y-4">
+          {pendingError && <p role="alert" className="text-sm text-red-600">{T('return_v1_storage_failed', 'The original return request could not be saved safely. No new request was sent.')}</p>}
 
           {/* Step 1 — Find Sale */}
           {step === 'search' && (
@@ -526,15 +1066,69 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">
                   {T('search_receipt_or_id','Receipt Number or Sale ID')}
                 </label>
-                <div className="flex gap-2">
+                {/* The matching receipts appear as they are typed -- part of a
+                    number is enough, and the date/customer/total on each row
+                    is what tells two similar receipts apart. */}
+                <div className="relative flex gap-2">
                   <input className="input flex-1" placeholder={T('search_receipt_or_id','e.g. 20260831-143000')}
-                    value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleSearch()} autoFocus />
-                  <button onClick={handleSearch} disabled={searching || !searchQuery.trim()}
+                    value={searchQuery}
+                    onChange={e => { setSearchQuery(e.target.value); setSuggestOpen(true) }}
+                    onFocus={() => { if (suggestions.length > 0) setSuggestOpen(true) }}
+                    onKeyDown={handleSearchKeyDown}
+                    role="combobox"
+                    aria-expanded={suggestOpen && suggestions.length > 0}
+                    aria-controls="return-receipt-suggestions"
+                    aria-autocomplete="list"
+                    autoFocus />
+                  <button onClick={() => void handleSearch()} disabled={searching || !searchQuery.trim()}
                     className="btn-primary px-4 disabled:opacity-50">
                     {searching ? '⏳' : T('btn_search','🔍 Find')}
                   </button>
+                  {suggestOpen && suggestions.length > 0 && (
+                    <ul
+                      id="return-receipt-suggestions"
+                      role="listbox"
+                      aria-label={T('receipt_matches', 'Matching receipts')}
+                      className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-600 dark:bg-gray-800"
+                    >
+                      {suggestions.map((row, index) => (
+                        <li key={String(row.id)} role="option" aria-selected={index === suggestIndex}>
+                          <button
+                            type="button"
+                            onMouseEnter={() => setSuggestIndex(index)}
+                            onClick={() => { void openSaleForReturn(row.id) }}
+                            className={`block w-full px-3 py-2 text-left transition-colors ${index === suggestIndex
+                              ? 'bg-blue-50 dark:bg-blue-900/30'
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-700/60'}`}
+                          >
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="font-mono text-sm font-semibold text-gray-900 dark:text-white">
+                                {row.receipt_number || row.legacy_receipt_number || `#${row.id}`}
+                              </span>
+                              <span className="flex-shrink-0 text-sm font-medium text-gray-700 dark:text-gray-200">{fmtUSD(row.total_usd || 0)}</span>
+                            </div>
+                            <div className="mt-0.5 text-xs text-gray-400">
+                              {fmtTime(row.created_at)}
+                              {row.customer_name ? ` · ${row.customer_name}` : ''}
+                              {row.branch_name ? ` · ${row.branch_name}` : ''}
+                              {/* The legacy number only shows when it is NOT
+                                  what is already on the first line, so an
+                                  old receipt is still recognisable by the
+                                  number printed on the customer's copy. */}
+                              {row.legacy_receipt_number && row.receipt_number ? ` · ${row.legacy_receipt_number}` : ''}
+                            </div>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
+                {suggestLoading && searchQuery.trim().length >= RECEIPT_SUGGEST_MIN_CHARS ? (
+                  <div className="mt-1 text-xs text-gray-400">{T('searching', 'Searching…')}</div>
+                ) : null}
+                {!suggestLoading && !searching && searchQuery.trim().length >= RECEIPT_SUGGEST_MIN_CHARS && suggestions.length === 0 ? (
+                  <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">{T('no_receipts_found', 'No receipt matches that yet.')}</div>
+                ) : null}
               </div>
               <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
                 <button onClick={() => { invalidateTrackedRequest(searchRequestRef); finishSingleAction(searchInFlightRef); setSearching(false); setFoundSale(null); setSelectedItems([]); setStep('items') }}
@@ -621,8 +1215,22 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                               {isIncluded && <span className="text-[10px] font-bold leading-none">✓</span>}
                             </button>
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
-                                {item.product_name || item.name}
+                              {/* The name decides WHICH product is coming
+                                  back, so it is never cut off here: it wraps
+                                  onto as many lines as it needs. */}
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-sm font-medium text-gray-800 break-words dark:text-gray-200">
+                                  {item.product_name || item.name}
+                                </span>
+                                {isIncluded && item.stock_action === 'damaged' ? (
+                                  <span
+                                    data-tag="damaged"
+                                    title={T('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
+                                    className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
+                                  >
+                                    {stockActionOption('damaged').icon} {T('stock_action_damaged', 'Damaged')}
+                                  </span>
+                                ) : null}
                               </div>
                               <div className="text-xs text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
                                 <span>{T('qty_sold','Sold')}: {toNumber(item.quantity)} × {fmtUSD(toNumber(item.applied_price_usd))}</span>
@@ -670,20 +1278,63 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                                   ))}
                                 </div>
                                 <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 flex-shrink-0">
-                                  {fmtUSD(toNumber(item.applied_price_usd) * (item.returnQty || 0))}
+                                  {isV1Sale ? '—' : fmtUSD(toNumber(item.applied_price_usd) * (item.returnQty || 0))}
                                 </span>
                               </div>
                               {item.stock_action === 'damaged' && (
-                                <div className="text-[10px] text-orange-500 dark:text-orange-400">
-                                  {T('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
+                                <div className="space-y-1">
+                                  {/* P4-3: the SAME remove-stock chooser
+                                      (StockConditionTagRow, mode='remove') --
+                                      keep as a tagged, held row (default) or
+                                      destroy immediately as a booked loss. */}
+                                  <StockConditionTagRow
+                                    mode="remove"
+                                    value={item.damaged_disposition === 'remove' ? '' : (item.condition_tag || DEFAULT_STOCK_CONDITION_TAG)}
+                                    onChange={(next) => updateItemDamagedChoice(idx, next)}
+                                    tr={(key, fallback) => T(key, fallback ?? key)}
+                                    id={`return-damaged-tag-${idx}`}
+                                  />
+                                  <div className="text-[10px] text-orange-500 dark:text-orange-400">
+                                    {item.damaged_disposition === 'remove'
+                                      ? T('stock_action_damaged_remove_hint', 'Destroyed immediately -- booked as a loss at cost.')
+                                      : T('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
+                                  </div>
                                 </div>
                               )}
-                              {item.product_id ? (
-                                <button type="button" onClick={() => void addReplacementFor(item)}
-                                  className="text-[11px] text-emerald-600 hover:underline dark:text-emerald-400">
-                                  🔁 {T('add_replacement', 'Hand out a replacement for this item')}
-                                </button>
-                              ) : null}
+                              {/* WHICH lot these units go back into. When the
+                                  sale knows, it is stated and not editable --
+                                  units belong in the lot they came out of,
+                                  including a multi-lot split. When the sale
+                                  cannot say, the operator names one; there is
+                                  nothing unspecified to fall back on. */}
+                              {item.stock_action === 'restock' && (
+                                toNumber(item.batch_id) > 0 || toNumber(item.lot_allocation_count) > 0 ? (
+                                  <div data-lot="known" className="text-[10px] text-gray-400">
+                                    ↩ {T('return_lot_from_sale', 'Back into the received date this line was sold from')}
+                                    {item.batch_label ? `: ${item.batch_label}` : ''}
+                                  </div>
+                                ) : item.lotOptions.length > 0 ? (
+                                  <div data-lot="pick" className="flex items-center gap-2">
+                                    <span className="flex-shrink-0 text-[10px] text-gray-400">{T('return_lot_pick', 'Back into received date')}</span>
+                                    <AppSelect
+                                      value={item.pickedBatchId != null ? String(item.pickedBatchId) : ''}
+                                      onChange={(next) => updateItemLot(idx, next ? Number(next) : null)}
+                                      ariaLabel={T('return_lot_pick', 'Back into received date')}
+                                      className="min-w-0 flex-1"
+                                      buttonClassName={`h-8 w-full text-xs ${item.pickedBatchId == null ? 'border-amber-400 dark:border-amber-600' : ''}`}
+                                      optionClassName="text-xs"
+                                      options={[
+                                        { value: '', label: T('select_lot', 'Choose a received date…') },
+                                        ...item.lotOptions.map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) })),
+                                      ]}
+                                    />
+                                  </div>
+                                ) : (
+                                  <div data-lot="untracked" className="text-[10px] text-gray-400">
+                                    {T('lot_untracked', 'This product has no received dates — stock goes back to the branch count.')}
+                                  </div>
+                                )
+                              )}
                             </div>
                           )}
                         </div>
@@ -697,7 +1348,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                           ? <span className="text-orange-500 ml-1 font-normal">({T('status_partial_return','partial')})</span>
                           : null}
                       </span>
-                      <span className="text-blue-700 dark:text-blue-300">{fmtUSD(totalRefund)} {T('refund','refund')}</span>
+                      <span className="text-blue-700 dark:text-blue-300">{isV1Sale && !quote ? T('return_v1_review_required', 'Review the current server refund before confirming.') : <>{fmtUSD(totalRefund)} {T('refund','refund')}</>}</span>
                     </div>
                   )}
                 </div>
@@ -709,42 +1360,119 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                 </div>
               )}
 
-              {/* 11.12 Replace: same-name stock handed out with the return,
-                  chosen the POS way (row of the group + exact lot), with the
-                  settlement preview the backend will enforce. */}
-              {replacements.length > 0 && (
-                <div>
-                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 block mb-2">
-                    🔁 {T('replacement_items_label','Replacement items (same-name stock)')}
-                  </label>
-                  <div className="space-y-2">
+              {/* Replacement sale -- its OWN section with its OWN catalog
+                  search, not a search box buried under each returned row.
+                  Any product can be found here by name, SKU or barcode and
+                  then drawn from an optional exact lot. */}
+              <div data-section="replacement-sale" className="rounded-xl border border-emerald-200 p-3 dark:border-emerald-800">
+                <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                  🔁 {T('replacement_sale_items_label','Replacement sale items')}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    className="input h-9 min-w-0 flex-1 py-1 text-xs"
+                    value={replacementQuery}
+                    onChange={(event) => { setReplacementQuery(event.target.value); setReplacementSearched(false) }}
+                    onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void searchReplacementCatalog() } }}
+                    placeholder={T('replacement_product_search', 'Search another product by name, SKU or barcode')}
+                    aria-label={T('replacement_product_search', 'Search another product by name, SKU or barcode')}
+                  />
+                  <button
+                    type="button"
+                    className="btn-secondary h-9 flex-shrink-0 px-3 py-1 text-xs"
+                    disabled={replacementSearching || !replacementQuery.trim()}
+                    onClick={() => void searchReplacementCatalog()}
+                  >
+                    {replacementSearching ? '…' : T('btn_search', 'Search')}
+                  </button>
+                  <ScanSearchButton
+                    onDetected={(value) => { void searchReplacementCatalog(value) }}
+                    t={(key: string) => T(key, key)}
+                    className="h-9 w-9"
+                  />
+                </div>
+                {replacementResults.length > 0 && (
+                  <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto">
+                    {buildProductGroups(replacementResults as never[], new Map(), { preserveInputOrder: true }).map((group) => {
+                      const rows = (group.items || []) as unknown as ReplacementCandidate[]
+                      const lead = (group.leadProduct || rows[0]) as unknown as ReplacementCandidate
+                      return (
+                        <li key={group.key}>
+                          <button
+                            type="button"
+                            onClick={() => setReplacementPicking({ ...lead, __groupChoices: rows })}
+                            className="flex w-full items-baseline justify-between gap-2 rounded-lg border border-gray-200 px-2 py-1.5 text-left transition-colors hover:border-emerald-400 hover:bg-emerald-50/60 dark:border-gray-600 dark:hover:border-emerald-600 dark:hover:bg-emerald-900/20"
+                          >
+                            <span className="min-w-0">
+                              <span className="block break-words text-xs font-medium text-gray-800 dark:text-gray-200">{group.name}</span>
+                              <span className="block text-[10px] text-gray-400">
+                                {rows.length > 1
+                                  ? `${rows.length} ${T('options', 'options')}`
+                                  : [lead?.sku, lead?.barcode].filter(Boolean).join(' · ')}
+                              </span>
+                            </span>
+                            <span className="flex-shrink-0 text-xs font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(toNumber(lead?.selling_price_usd))}</span>
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+                {replacementPicking ? (
+                  <ProductOptionSheet
+                    product={replacementPicking as never}
+                    t={(key: string) => T(key, key)}
+                    fmtUSD={(value: number) => fmtUSD(value)}
+                    intent="sell"
+                    activeBranchId={foundSale?.branch_id ?? null}
+                    pickLabel={T('add', 'Add')}
+                    onClose={() => setReplacementPicking(null)}
+                    onPick={(picked, selection) => {
+                      addReplacementFromCandidate(picked as unknown as ReplacementCandidate, selection as { branchId: string | null; batch?: { batchId: number } })
+                      setReplacementPicking(null)
+                    }}
+                  />
+                ) : null}
+                {replacementSearched && !replacementSearching && replacementResults.length === 0 ? (
+                  <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">{T('no_products_found', 'No products found. Try another name, SKU or barcode.')}</div>
+                ) : null}
+                {/* The straight swap, kept where a replacement is chosen. */}
+                {activeItems.length > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] text-gray-400">{T('replacement_same_item', 'Same item back out:')}</span>
+                    {activeItems.filter((item) => item.product_id).map((item, index) => (
+                      <button
+                        key={`same_${item.id ?? item.product_id}_${index}`}
+                        type="button"
+                        onClick={() => addReplacementSameItem(item)}
+                        className="rounded-full border border-emerald-300 px-2 py-0.5 text-[11px] text-emerald-700 transition-colors hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+                      >
+                        + {item.product_name || item.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {replacements.length > 0 && (
+                <>
+                  <div className="mt-3 space-y-2">
                     {replacements.map((line) => (
                       <div key={line.key} className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-2 dark:border-emerald-800 dark:bg-emerald-900/10">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{line.product_name}</div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 break-words text-sm font-medium text-gray-800 dark:text-gray-200">{line.product_name}</div>
                           <button type="button" onClick={() => removeReplacement(line.key)} className="flex-shrink-0 text-xs text-red-500 hover:underline">{T('remove','Remove')}</button>
                         </div>
-                        {line.candidates.length > 1 && (
-                          <AppSelect
-                            value={String(line.product_id)}
-                            onChange={(next) => { const candidate = line.candidates.find((row) => String(row.id) === next); if (candidate) pickReplacementRow(line.key, candidate) }}
-                            ariaLabel={T('replacement_row','Which row of the group')}
-                            className="w-full"
-                            buttonClassName="h-9 w-full text-xs"
-                            optionClassName="text-xs"
-                            options={line.candidates.map((row) => ({ value: String(row.id), label: `${row.name}${row.barcode ? ` · ${row.barcode}` : ''} · ${fmtUSD(toNumber(row.selling_price_usd))}` }))}
-                          />
-                        )}
                         <div className="flex items-center gap-2">
                           <AppSelect
                             value={line.batch_id != null ? String(line.batch_id) : ''}
                             onChange={(next) => updateReplacement(line.key, { batch_id: next ? Number(next) : null })}
-                            ariaLabel={T('batch','Batch')}
+                            ariaLabel={T('batch','Received date')}
                             className="flex-1 min-w-0"
-                            buttonClassName="h-9 w-full text-xs"
                             optionClassName="text-xs"
-                            options={[{ value: '', label: T('any_stock','Any stock (no specific lot)') },
-                              ...line.batches.map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) }))]}
+                            buttonClassName={`h-9 w-full text-xs ${line.batches.length > 0 && line.batch_id == null ? 'border-amber-400 dark:border-amber-600' : ''}`}
+                            options={line.batches.length > 0
+                              ? [{ value: '', label: T('select_lot', 'Choose a received date…') },
+                                ...line.batches.map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) }))]
+                              : [{ value: '', label: T('lot_untracked_out', 'No received dates — drawn from the branch count') }]}
                           />
                           <input type="number" min="1" step="1" className="input w-16 flex-shrink-0 py-1 text-center text-sm"
                             aria-label={T('quantity','Quantity')}
@@ -755,29 +1483,34 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                       </div>
                     ))}
                   </div>
-                  <div className={`mt-2 rounded-lg border px-3 py-2 text-sm ${settlementPreview.isEven
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300'
-                    : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'}`}>
-                    {settlementPreview.isEven ? (
-                      <span>✓ {T('even_exchange','Even exchange')} — {T('even_exchange_desc','replacement value equals the returned value; no money moves.')}</span>
-                    ) : (
-                      <div className="space-y-1">
-                        <div>
-                          {settlementPreview.diffUsd > 0
-                            ? `${T('customer_owes','Customer pays the difference')}: ${fmtUSD(settlementPreview.diffUsd)}`
-                            : `${T('shop_refunds','Shop refunds the difference')}: ${fmtUSD(Math.abs(settlementPreview.diffUsd))}`}
-                        </div>
-                        <label className={`flex items-center gap-2 text-xs ${canSettleDifference ? 'cursor-pointer' : 'opacity-60'}`}>
-                          <input type="checkbox" className="rounded accent-amber-600" checked={settleDifference}
-                            disabled={!canSettleDifference}
-                            onChange={(e) => setSettleDifference(e.target.checked)} />
-                          <span>{T('settle_difference','Settle this price difference')}{canSettleDifference ? '' : ` (${T('requires_full_access','requires Full Access to Returns')})`}</span>
-                        </label>
-                      </div>
-                    )}
+                  {/* Two separate movements of money, stated as two. The
+                      refund is what the return pays back; this is a new sale
+                      the customer pays for as usual. Nothing is netted, so
+                      there is no difference to owe or settle. */}
+                  <div data-section="replacement-sale-summary" className="mt-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
+                    <div className="flex items-center justify-between gap-2">
+                      <span>🧾 {T('replacement_sale_new', 'New sale for these items')}</span>
+                      <span className="font-semibold">{fmtUSD(replacementTotalUsd)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="flex-shrink-0 text-xs">{T('payment_method', 'Payment method')}</span>
+                      <AppSelect
+                        value={replacementPaymentMethod}
+                        onChange={(next) => setReplacementPaymentMethod(next)}
+                        ariaLabel={T('payment_method', 'Payment method')}
+                        className="min-w-0 flex-1"
+                        buttonClassName="h-8 w-full text-xs"
+                        optionClassName="text-xs"
+                        options={PAYMENT_METHODS.map((method) => ({ value: method, label: method }))}
+                      />
+                    </div>
+                    <div className="text-[11px] opacity-80">
+                      {T('replacement_sale_hint', 'It gets its own receipt and is recorded in Sales like any other sale. The refund above is paid back separately.')}
+                    </div>
                   </div>
-                </div>
-              )}
+                </>
+                )}
+              </div>
 
               {/* Reason */}
               <div>
@@ -808,14 +1541,6 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                   value={notes} onChange={e => setNotes(e.target.value)} />
               </div>
 
-              <div className="flex gap-2 pt-1">
-                <button onClick={() => setStep('search')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
-                <button onClick={reviewReturn} className="btn-primary text-sm flex-1">
-                  {T('confirm','Review')} → {activeItems.length} {T('items','item(s)')}
-                  {activeItems.length < selectedItems.filter((it) => (it.remaining ?? toNumber(it.quantity)) > 0).length
-                    ? ` (${T('status_partial_return','partial')})` : ''}
-                </button>
-              </div>
             </div>
           )}
 
@@ -837,11 +1562,14 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                   {activeItems.filter(it => it.stock_action === 'none').length > 0 && (
                     <div>🚫 {activeItems.filter(it => it.stock_action === 'none').length} {T('written_off','will NOT restock')}</div>
                   )}
-                  {activeItems.filter(it => it.stock_action === 'damaged').length > 0 && (
-                    <div>🟠 {activeItems.filter(it => it.stock_action === 'damaged').length} {T('tracked_as_damaged','tracked as damaged stock')}</div>
+                  {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition !== 'remove').length > 0 && (
+                    <div>🟠 {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition !== 'remove').length} {T('tracked_as_damaged','tracked as damaged stock')}</div>
+                  )}
+                  {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length > 0 && (
+                    <div>🗑️ {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length} {T('stock_action_damaged_remove_hint_short','destroyed immediately (booked loss)')}</div>
                   )}
                   {replacements.length > 0 && (
-                    <div>🔁 {replacements.length} {T('replacement_items_short','replacement item(s) handed out')} — {settlementPreview.isEven ? T('even_exchange','even exchange') : T('price_difference','price difference')}</div>
+                    <div>🔁 {replacements.length} {T('replacement_sale_items_short','item(s) on the replacement sale receipt')} — {fmtUSD(replacementTotalUsd)} · {replacementPaymentMethod}</div>
                   )}
                 </div>
               </div>
@@ -850,14 +1578,26 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                 {activeItems.map((it, i) => (
                   <div key={i} className="flex justify-between text-sm py-1 border-b border-gray-200 dark:border-gray-700 last:border-0">
                     <div className="flex-1 min-w-0 mr-2">
-                      <span className="text-gray-700 dark:text-gray-300 truncate block">{it.product_name || it.name}</span>
-                      <span className="text-[10px] text-gray-400">
+                      {/* Reviewed in full: the last screen before the write is
+                          the worst place to cut a product name short. */}
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <span className="break-words text-gray-700 dark:text-gray-300">{it.product_name || it.name}</span>
+                        {it.stock_action === 'damaged' ? (
+                          <span
+                            data-tag="damaged"
+                            className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
+                          >
+                            {stockActionOption('damaged').icon} {T('stock_action_damaged', 'Damaged')}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="block text-[10px] text-gray-400">
                         {stockActionOption(it.stock_action).icon} {T(stockActionOption(it.stock_action).labelKey, stockActionOption(it.stock_action).labelEn)}
                         {' · '}{T('quantity','qty')} {it.returnQty}
                       </span>
                     </div>
                     <span className="font-medium text-gray-900 dark:text-white flex-shrink-0">
-                      {fmtUSD(toNumber(it.applied_price_usd) * it.returnQty)}
+                      {fmtUSD(isV1Sale ? (quote?.items.find(line => line.sale_item_id === Number(it.id))?.total_usd ?? 0) : toNumber(it.applied_price_usd) * it.returnQty)}
                     </span>
                   </div>
                 ))}
@@ -871,28 +1611,50 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                 <div className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
                   {replacements.map((line) => (
                     <div key={line.key} className="flex justify-between py-1 text-sm">
-                      <span className="mr-2 truncate text-gray-700 dark:text-gray-300">🔁 {line.product_name} × {line.quantity}</span>
+                      <span className="mr-2 min-w-0 break-words text-gray-700 dark:text-gray-300">🔁 {line.product_name} × {line.quantity}</span>
                       <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(line.price_usd * line.quantity)}</span>
                     </div>
                   ))}
                   <div className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">
-                    <span>{settlementPreview.isEven ? T('even_exchange','Even exchange') : T('price_difference','Price difference')}</span>
-                    <span>{settlementPreview.isEven ? '±0' : (settlementPreview.diffUsd > 0 ? '+' : '−') + fmtUSD(Math.abs(settlementPreview.diffUsd))}</span>
+                    <span>{T('replacement_sale_total', 'New sale total')} · {replacementPaymentMethod}</span>
+                    <span>{fmtUSD(replacementTotalUsd)}</span>
                   </div>
                 </div>
               )}
 
-              <div className="flex gap-2 pt-1">
-                <button onClick={() => setStep('items')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
-                <button onClick={handleSubmit} disabled={submitting}
-                  className="btn-primary text-sm flex-1 disabled:opacity-50">
-                  {submitting ? `⏳ ${T('submitting','Processing…')}` : `✅ ${T('submit_return','Confirm Return')}`}
-                </button>
-              </div>
             </div>
           )}
         </div>
+        {/* S4-20: one footer for the whole wizard, at the END of the panel
+            and outside .modal-scroll. Each step used to end with its own
+            Back/Next row buried at the bottom of the scrolling content, plus
+            a duplicate phone-only primary up beside the ✕ to make it
+            reachable. Now the step's action is always the last thing in the
+            panel and always on screen, so neither the scroll nor a mis-tap
+            next to Close is in the way. The search step has no action of its
+            own -- finding a sale advances by itself -- so it renders no
+            footer rather than a disabled one. */}
+        {step === 'items' ? (
+          <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+            <button onClick={() => setStep('search')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
+            <button onClick={reviewReturn} disabled={!pendingLoaded || !!pendingError || quoteBusy || unsupportedMoneyVersion} className="btn-primary text-sm flex-1 disabled:opacity-50">
+              {quoteBusy ? T('return_v1_quote_loading', 'Checking the net refund…') : T('confirm','Review')} → {activeItems.length} {T('items','item(s)')}
+              {activeItems.length < selectedItems.filter((it) => (it.remaining ?? toNumber(it.quantity)) > 0).length
+                ? ` (${T('status_partial_return','partial')})` : ''}
+            </button>
+          </div>
+        ) : null}
+        {step === 'confirm' ? (
+          <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+            <button onClick={() => setStep('items')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
+            <button onClick={handleSubmit} disabled={!pendingLoaded || !!pendingError || submitting || (isV1Sale && (!quote || reviewedIntentRef.current !== quoteIntent))}
+              className="btn-primary text-sm flex-1 disabled:opacity-50">
+              {submitting ? `⏳ ${T('submitting','Processing…')}` : `✅ ${T('submit_return','Confirm Return')}`}
+            </button>
+          </div>
+        ) : null}
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

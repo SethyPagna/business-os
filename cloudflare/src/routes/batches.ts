@@ -1,22 +1,76 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { hasPermission, isActionBlocked } from '../lib/permissions'
+import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, receiveBatchStock } from '../lib/productBatches'
 import { listOpenDamagedLots } from '../lib/returnsStock'
-import { dateToBatchCode, normalizeToIsoDate } from '../lib/batchCode'
+import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
+import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
+import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
+import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
 
 // Batch / expiry-date tracking -- schema notes and design rationale live in
 // lib/productBatches.ts. Gated behind the same 'inventory' permission as
 // routes/inventory.ts, since receiving/correcting batch stock is the same
 // class of action as any other stock adjustment.
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+
+// Shared with lib/stockInCommit.ts (batched fast stock-in): the same context
+// type as POST '/' below, pulled out from runReceiveAction's own handler
+// wrapper so a batched caller can build one without going through Hono.
+export type BatchesContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
+
+async function positiveBatchStock(db: ReturnType<typeof getDb>, batchId: number): Promise<number> {
+  const row = await db.prepare(`
+    SELECT COALESCE(SUM(CASE WHEN quantity > 0 THEN quantity ELSE 0 END), 0) AS total
+    FROM branch_batch_stock
+    WHERE batch_id = @batchId
+  `).get<{ total: number }>({ batchId })
+  return Math.max(0, Number(row?.total) || 0)
+}
+
+function activeBatchStockError(quantity: number): string {
+  return `This received date still has ${quantity} unit(s) of stock. Correct the quantity to 0 before deactivating.`
+}
+
 app.use('*', requireAuth)
+// Deliberately before the general batch gate: return creators need stock
+// provenance, not the supplier/cost/payment metadata on inventory reads.
+// This handler terminates only its exact GET/HEAD route; other reads and all
+// writes still use the unchanged general permission gate below.
+app.get('/picker-lots', async (c) => {
+  const user = c.get('user')
+  const returnAdd = getActionTier(user, 'returns', 'add')
+  const canCreateReturn = getPermissionTier(user, 'returns') !== 'none' && (returnAdd === 'full' || returnAdd === 'review')
+  if (!(hasPermission(user, 'pos') || getActionTier(user, 'sales', 'view') === 'full' || canCreateReturn)) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const productId = Number(c.req.query('productId'))
+  const branchId = Number(c.req.query('branchId'))
+  if (!Number.isSafeInteger(productId) || productId <= 0 || !Number.isSafeInteger(branchId) || branchId <= 0) {
+    return c.json({ error: 'Positive integer productId and branchId are required' }, 400)
+  }
+  const db = getDb(c.env)
+  const rows = await listBatchesForProduct(db, productId, branchId)
+  const knownPositive = await db.prepare(`
+    SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
+    FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id = bbs.batch_id
+    WHERE pb.variant_product_id = ? AND bbs.branch_id = ? AND bbs.quantity > 0
+  `).get<{ quantity: number }>([productId, branchId])
+  c.header('Cache-Control', 'private, no-store')
+  return c.json({
+    batches: rows.map(({ id, lot_code, received_at, expiry_date, is_active, quantity, batch_number }) => ({
+      id, lot_code, received_at, expiry_date, is_active, quantity, batch_number,
+    })),
+    known_positive_quantity: Math.max(0, Number(knownPositive?.quantity) || 0),
+  })
+})
 app.use('*', async (c, next) => {
   const user = c.get('user')
   // Receiving or correcting batch stock is a stock adjustment, so WRITES
@@ -33,7 +87,7 @@ app.use('*', async (c, next) => {
   //
   // Reading which lots exist is not a privileged action -- it is strictly
   // less than the product/price data 'pos' already grants.
-  const isRead = c.req.method === 'GET'
+  const isRead = c.req.method === 'GET' || c.req.method === 'HEAD'
   // products_image_only_show_batches (K6): the image-only role's opt-in
   // lot VIEW -- read-only by construction (writes stay inventory-only),
   // and note batch rows carry unit_cost_usd, so this grant is the
@@ -42,7 +96,7 @@ app.use('*', async (c, next) => {
   // ride the 'inventory:adjust' per-action override (Part 546) -- the same
   // action key Branches.tsx's canReceiveStock reads via can().
   const allowed = isRead
-    ? (hasPermission(user, 'inventory') || hasPermission(user, 'pos') || hasPermission(user, 'sales') || hasPermission(user, 'products_image_only_show_batches'))
+    ? (getActionTier(user, 'inventory', 'view') === 'full' || hasPermission(user, 'pos') || getActionTier(user, 'sales', 'view') === 'full' || hasPermission(user, 'products_image_only_show_batches'))
     : hasPermission(user, 'inventory') && !isActionBlocked(user, 'inventory', 'adjust')
   if (!allowed) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
@@ -83,60 +137,124 @@ app.get('/', async (c) => {
   if (!productId || !branchId) return c.json({ error: 'productId and branchId are required' }, 400)
   const onlyAvailable = c.req.query('onlyAvailable') === '1' || c.req.query('onlyAvailable') === 'true'
   const batches = await listBatchesForProduct(db, productId, branchId, { onlyAvailable })
+  // The picker keeps its active-lot array unchanged, but POS also needs the
+  // authoritative total of EVERY positive known lot to decide whether the
+  // branch_stock remainder is truly unrecorded. Inactive lots remain hidden
+  // and unselectable; their existing stock still has provenance and must not
+  // be offered as a date-less sale choice. This read is advisory for the UI;
+  // sales.ts rechecks the same remainder inside its stock write transaction.
+  const knownPositive = await db.prepare(`
+    SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
+    FROM branch_batch_stock bbs
+    JOIN product_batches pb ON pb.id = bbs.batch_id
+    WHERE pb.variant_product_id = ?
+      AND bbs.branch_id = ?
+      AND bbs.quantity > 0
+  `).get<{ quantity: number }>([productId, branchId])
+  const knownPositiveQuantity = Math.max(0, Number(knownPositive?.quantity) || 0)
   // A reader admitted ONLY via the image-only lot-view grant (K6) sees the
   // lots -- code, expiry, quantity, supplier NAME -- but never the money
   // terms: unit cost and paid/credit state stay with the roles that manage
   // purchasing. Same name-only supplier rule batches follow everywhere.
-  const moneyBlind = !hasPermission(user, 'inventory') && !hasPermission(user, 'pos') && !hasPermission(user, 'sales')
+  const moneyBlind = getActionTier(user, 'inventory', 'view') !== 'full' && !hasPermission(user, 'pos') && getActionTier(user, 'sales', 'view') !== 'full'
   const payload = moneyBlind
     ? (batches as Array<Record<string, unknown>>).map(({ unit_cost_usd: _c, payment_status: _p, credit_due_date: _d, ...rest }) => rest)
     : batches
-  return c.json({ batches: payload })
+  return c.json({ batches: payload, known_positive_quantity: knownPositiveQuantity })
 })
 
 // POST /api/batches -- receive stock into a batch (creates a new batch, or
 // tops up an existing one if the received date's derived code matches one
 // already on this product -- see lib/batchCode.ts).
-app.post('/', async (c) => {
+//
+// `ReceiveBody` moved to module scope (P4-B) so it names the parameter type
+// of both runReceiveBatchAction below and the batched-commit route in
+// lib/stockInCommit.ts, instead of only existing inside the POST '/' closure.
+export type ReceiveBody = {
+  product_id?: number
+  branch_id?: number
+  quantity?: number
+  expiry_date?: string | null
+  received_date?: string | null
+  // D4b: explicit existing lot to top up -- the same picker every adjust
+  // surface has. receiveBatchStock validates it belongs to product_id and
+  // keeps the lot's own received_at (first attribution sticks).
+  batch_id?: number | null
+  notes?: string | null
+  // P3-L2: the operator's own reason for this receipt, written onto the
+  // inventory_movements row as typed. Optional: a caller that sends none
+  // keeps the generated "Stock received (<lot>)" label below.
+  reason?: string | null
+  supplier_id?: number | null
+  supplier_name?: string | null
+  unit_cost_usd?: number | null
+  /** N14-D: the operator's explicit declaration that a $0.00 receipt was free. */
+  free_goods?: boolean
+  payment_status?: string | null
+  credit_due_date?: string | null
+  session_id?: number | null
+}
+
+// Pulled out from behind `app.post('/', ...)` (P4-B, batched fast stock-in)
+// so lib/stockInCommit.ts's batched-commit route can run the exact same
+// validation/write kernel per line instead of re-implementing it -- the body
+// only, no logic changed.
+export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody): Promise<Response> {
   const db = getDb(c.env)
   const user = c.get('user')
-  type ReceiveBody = {
-    product_id?: number
-    branch_id?: number
-    quantity?: number
-    expiry_date?: string | null
-    received_date?: string | null
-    // D4b: explicit existing lot to top up -- the same picker every adjust
-    // surface has. receiveBatchStock validates it belongs to product_id and
-    // keeps the lot's own received_at (first attribution sticks).
-    batch_id?: number | null
-    notes?: string | null
-    supplier_id?: number | null
-    supplier_name?: string | null
-    unit_cost_usd?: number | null
-    payment_status?: string | null
-    credit_due_date?: string | null
-    session_id?: number | null
-  }
-  const body = await c.req.json<ReceiveBody>().catch(() => ({} as ReceiveBody))
 
   const productId = Number(body.product_id)
   const branchId = Number(body.branch_id)
   const quantity = Number(body.quantity)
   if (!productId || !branchId) return c.json({ error: 'product_id and branch_id are required' }, 400)
   if (!Number.isFinite(quantity) || quantity <= 0) return c.json({ error: 'quantity must be a positive number' }, 400)
+  let unitCostUsd: number | null
+  let totalCostUsd: number | null
+  try {
+    if (body.unit_cost_usd != null && Number(body.unit_cost_usd) < 0) throw new RangeError('Cost must be non-negative')
+    unitCostUsd = nullableMoney4(body.unit_cost_usd)
+    if (unitCostUsd != null && unitCostUsd < 0) throw new RangeError('Cost must be non-negative')
+    totalCostUsd = unitCostUsd == null ? null : multiplyMoney4(unitCostUsd, quantity)
+  } catch {
+    return c.json({ error: 'Invalid or out-of-range receipt cost' }, 400)
+  }
   // Paid vs on-credit (migration 0065). A credit purchase without a due
   // date has no reminder to fire, which defeats the point of recording it.
   const paymentStatus = body.payment_status === 'paid' || body.payment_status === 'credit' ? body.payment_status : null
   const creditDueDate = String(body.credit_due_date || '').slice(0, 10) || null
   if (paymentStatus === 'credit' && !creditDueDate) {
-    return c.json({ error: 'A credit purchase needs its due date — that is what the admin reminder is built on.' }, 400)
+    return c.json({ error: 'A Not Yet Paid purchase needs its due date — that is what the admin reminder is built on.' }, 400)
   }
+  // N14-D: this is the THIRD receipt wire (FastStockInModal's ordinary lines
+  // and ReceiveBatchModal both land here, not on /api/inventory/adjust), so it
+  // runs the same gate -- supplier and unit cost required, $0.00 only as
+  // declared free goods. A rule enforced on two of three wires is not enforced.
+  const freeGoods = body.free_goods === true
+  const reason = String(body.reason ?? '').trim() || null
+  // The one cap every reason writer shares (lib/stockReason.ts): a receipt
+  // reason this wire accepted unbounded could not be edited afterwards.
+  if (stockReasonTooLong(reason)) return c.json({ error: `Reason is too long (max ${STOCK_REASON_MAX_LENGTH} characters)`, code: 'reason_too_long' }, 400)
+  // A top-up of an existing lot inherits that lot's supplier: first attribution
+  // sticks, so ReceiveBatchModal deliberately sends none for an attributed lot.
+  const topUpBatchId = Number.isSafeInteger(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null
+  const lotSupplierName = topUpBatchId
+    ? (await getDb(c.env).prepare('SELECT supplier_name FROM product_batches WHERE id = @id').get<{ supplier_name: string | null }>({ id: topUpBatchId }))?.supplier_name ?? null
+    : null
+  const receiptGate = stockReceiptGateCode({
+    isStockIn: true,
+    supplierName: body.supplier_name,
+    lotSupplierName,
+    unitCostUsd,
+    freeGoods,
+  })
+  if (receiptGate) return c.json({ error: stockReceiptGateMessage(receiptGate), code: receiptGate }, 400)
 
   const product = await db.prepare('SELECT id, name FROM products WHERE id = ?').get<{ id: number; name: string }>([productId])
   if (!product) return c.json({ error: 'Product not found' }, 404)
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = ?').get<{ id: number; name: string }>([branchId])
 
+  const explicitBatchId = Number.isFinite(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null
+  const sessionId = Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null
   let received: { batchId: number; batchNumber: number | null; lotCode: string }
   try {
     received = await receiveBatchStock(db, {
@@ -145,75 +263,96 @@ app.post('/', async (c) => {
       quantity,
       expiryDate: body.expiry_date || null,
       receivedDate: body.received_date || null,
-      batchId: Number.isFinite(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null,
+      batchId: explicitBatchId,
       notes: body.notes || null,
       supplierId: Number.isFinite(Number(body.supplier_id)) && Number(body.supplier_id) > 0 ? Number(body.supplier_id) : null,
       supplierName: body.supplier_name || null,
-      unitCostUsd: body.unit_cost_usd == null ? null : Number(body.unit_cost_usd),
+      unitCostUsd,
       paymentStatus,
       creditDueDate,
+      // receiveBatchStock now also moves branch_stock/products.stock_quantity
+      // (see that function's own comment for why -- it used to only touch
+      // branch_batch_stock, silently leaving the aggregate stock unchanged).
+      // Log it as an ordinary inventory_movements 'add' row too, same as any
+      // other stock addition, so this doesn't become a receipt that's visible
+      // in the batch ledger and the audit log but invisible in Stock History.
+      // P4-4a: folded into receiveBatchStock's own db.batch call (via the
+      // resolved-batch-id subquery it hands back) instead of a second,
+      // separate INSERT round trip after receiveBatchStock returns.
+      buildBatchStatements: ({ batchKey, lotCode: planLotCode, resolvedBatchIdSql }) => [{
+        sql: `
+          INSERT INTO inventory_movements (
+            product_id, product_name, branch_id, branch_name, movement_type, quantity,
+            unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name,
+            created_at, batch_id
+          )
+          VALUES (
+            @productId, @productName, @branchId, @branchName, 'add', @quantity,
+            @unitCostUsd, @totalCostUsd, @reason, @referenceId, @userId, @userName,
+            CURRENT_TIMESTAMP, ${resolvedBatchIdSql}
+          )
+        `,
+        params: {
+          productId,
+          productName: product.name,
+          branchId,
+          branchName: branch?.name || null,
+          quantity,
+          // A receipt's money belongs to this movement, not only to the
+          // cumulative lot row. Same-day top-ups can share one
+          // product_batches row while carrying different costs; movement
+          // snapshots let Stock-in Sessions report each receipt accurately
+          // without mutating the product's cost.
+          unitCostUsd,
+          totalCostUsd,
+          // planLotCode matches the batch's real lot_code for every newly
+          // created lot (by far the common case -- it is the exact value
+          // just inserted into product_batches.lot_code). It can differ from
+          // the FINAL received.lotCode only when topping up an EXISTING lot
+          // (an explicit batch picked from a different date) via a request
+          // that also leaves reason blank -- a narrow, cosmetic edge case in
+          // the auto-generated label, traded here for not re-adding the
+          // round trip this fix removes.
+          reason: appendReceiptNotes(reason || `Stock received (${planLotCode})`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
+          referenceId: sessionId,
+          userId: user?.id ?? null,
+          userName: actorSnapshot(user),
+          batchId: explicitBatchId,
+          batchKey,
+        },
+      }],
     })
   } catch (err) {
     // The explicit-lot pick can fail validation ("Selected batch does not
     // belong to this product") -- a caller mistake, not a server fault, so
     // it answers 400 exactly as /inventory/adjust's batch path does.
-    return c.json({ error: err instanceof Error ? err.message : 'Failed to receive batch stock' }, 400)
+    return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
   }
   const { batchId, batchNumber, lotCode } = received
 
-  // receiveBatchStock now also moves branch_stock/products.stock_quantity
-  // (see that function's own comment for why -- it used to only touch
-  // branch_batch_stock, silently leaving the aggregate stock unchanged).
-  // Log it as an ordinary inventory_movements 'add' row too, same as any
-  // other stock addition, so this doesn't become a receipt that's visible
-  // in the batch ledger and the audit log but invisible in Stock History.
-  await db.prepare(`
-    INSERT INTO inventory_movements (
-      product_id, product_name, branch_id, branch_name, movement_type, quantity,
-      unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name,
-      created_at, batch_id
-    )
-    VALUES (
-      @productId, @productName, @branchId, @branchName, 'add', @quantity,
-      @unitCostUsd, @totalCostUsd, @reason, @referenceId, @userId, @userName,
-      CURRENT_TIMESTAMP, @batchId
-    )
-  `).run({
-    productId,
-    productName: product.name,
-    branchId,
-    branchName: branch?.name || null,
-    quantity,
-    // A receipt's money belongs to this movement, not only to the cumulative
-    // lot row. Same-day top-ups can share one product_batches row while
-    // carrying different costs; movement snapshots let Stock-in Sessions
-    // report each receipt accurately without mutating the product's cost.
-    unitCostUsd: Number.isFinite(Number(body.unit_cost_usd)) && Number(body.unit_cost_usd) >= 0 ? Number(body.unit_cost_usd) : null,
-    totalCostUsd: Number.isFinite(Number(body.unit_cost_usd)) && Number(body.unit_cost_usd) >= 0
-      ? Math.round(Number(body.unit_cost_usd) * quantity * 10000) / 10000
-      : null,
-    reason: `Batch receipt (${lotCode})`,
-    referenceId: Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null,
-    userId: user?.id ?? null,
-    userName: user?.name ?? null,
-    batchId,
-  })
-
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_receive', 'product_batch', batchId, {
-    product_id: productId,
-    product_name: product.name,
-    branch_id: branchId,
-    quantity,
-    expiry_date: body.expiry_date || null,
-    lot_code: lotCode,
-  })
+  // P4-4a: the response below does not read the audit row, so it can run
+  // alongside the cache bump/broadcasts instead of its own awaited round trip.
   c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_receive', 'product_batch', batchId, {
+      product_id: productId,
+      product_name: product.name,
+      branch_id: branchId,
+      quantity,
+      expiry_date: body.expiry_date || null,
+      lot_code: lotCode,
+      reason,
+    }),
     bumpVersion(c.env, 'products'),
     broadcast(c.env, 'inventory', { type: 'batch_received', productId, branchId }),
     broadcast(c.env, 'products', { action: 'update', id: productId }),
   ]))
 
   return c.json({ success: true, batchId, batchNumber, lotCode })
+}
+
+app.post('/', async (c) => {
+  const body = await c.req.json<ReceiveBody>().catch(() => ({} as ReceiveBody))
+  return runReceiveBatchAction(c, body)
 })
 
 // PATCH /api/batches/:id -- edit a batch's own fields (expiry/lot/notes) or
@@ -228,7 +367,7 @@ app.patch('/:id', async (c) => {
     .catch(() => ({} as { expiry_date?: string | null; notes?: string | null; is_active?: boolean; received_at?: string | null }))
 
   const existing = await db.prepare('SELECT id, updated_at FROM product_batches WHERE id = ?').get<{ id: number; updated_at: string | null }>([id])
-  if (!existing) return c.json({ error: 'Batch not found' }, 404)
+  if (!existing) return c.json({ error: 'Received date not found' }, 404)
 
   // Optimistic-concurrency guard, the same one products/contacts/sales use.
   // No-op when the editor sends no token; a stale token means someone else
@@ -247,6 +386,7 @@ app.patch('/:id', async (c) => {
   const params: Record<string, unknown> = { id }
   if (body.expiry_date !== undefined) { updates.push('expiry_date = @expiry_date'); params.expiry_date = body.expiry_date || null }
   if (body.notes !== undefined) { updates.push('notes = @notes'); params.notes = body.notes || null }
+  const deactivating = body.is_active !== undefined && !body.is_active
   if (body.is_active !== undefined) { updates.push('is_active = @is_active'); params.is_active = body.is_active ? 1 : 0 }
   // received_at (the "batch date" -- when this lot actually came in) is
   // the ONLY thing that determines this batch's code now -- editing it
@@ -258,8 +398,11 @@ app.patch('/:id', async (c) => {
   // surfaced as a normal 409/error rather than silently merging two
   // distinct batch rows into one.
   if (body.received_at !== undefined) {
-    const iso = normalizeToIsoDate(body.received_at) || (body.received_at ? null : new Date().toISOString().slice(0, 10))
-    if (body.received_at && !iso) return c.json({ error: 'received_at is not a valid date' }, 400)
+    // This value comes from the operator-facing editor, whose display/input
+    // convention is day-first. Ambiguous 03/09/2026 must therefore remain
+    // September 3, matching the frontend lineage date shown to the user.
+    const iso = normalizeTypedDate(body.received_at) || (body.received_at ? null : new Date().toISOString().slice(0, 10))
+    if (body.received_at && !iso) return c.json({ error: 'received_at is not a valid date (use dd/mm/yyyy)' }, 400)
     const resolvedIso = iso || new Date().toISOString().slice(0, 10)
     const code = dateToBatchCode(resolvedIso) as string
     updates.push('received_at = @received_at', 'batch_key = @batch_key', 'lot_code = @lot_code')
@@ -274,7 +417,7 @@ app.patch('/:id', async (c) => {
   if (bodyExtra.payment_status !== undefined) {
     const nextStatus = bodyExtra.payment_status === 'paid' || bodyExtra.payment_status === 'credit' ? bodyExtra.payment_status : null
     const nextDue = String(bodyExtra.credit_due_date || '').slice(0, 10) || null
-    if (nextStatus === 'credit' && !nextDue) return c.json({ error: 'A credit purchase needs its due date.' }, 400)
+    if (nextStatus === 'credit' && !nextDue) return c.json({ error: 'A Not Yet Paid purchase needs its due date.' }, 400)
     updates.push('payment_status = @payment_status', 'credit_due_date = @credit_due_date')
     params.payment_status = nextStatus
     params.credit_due_date = nextStatus === 'credit' ? nextDue : null
@@ -288,16 +431,38 @@ app.patch('/:id', async (c) => {
     params.supplier_id = Number.isFinite(Number(bodyExtra.supplier_id)) && Number(bodyExtra.supplier_id) > 0 ? Number(bodyExtra.supplier_id) : null
   }
   if (bodyExtra.unit_cost_usd !== undefined) {
-    const cost = Number(bodyExtra.unit_cost_usd)
+    let cost: number | null
+    try {
+      if (bodyExtra.unit_cost_usd != null && Number(bodyExtra.unit_cost_usd) < 0) throw new RangeError('Cost must be non-negative')
+      cost = nullableMoney4(bodyExtra.unit_cost_usd)
+      if (cost != null && cost < 0) throw new RangeError('Cost must be non-negative')
+    } catch {
+      return c.json({ error: 'Invalid or out-of-range batch cost' }, 400)
+    }
     updates.push('unit_cost_usd = @unit_cost_usd')
-    params.unit_cost_usd = Number.isFinite(cost) && cost >= 0 ? cost : null
+    params.unit_cost_usd = cost
   }
   if (!updates.length) return c.json({ error: 'No fields to update' }, 400)
   updates.push(`updated_at = datetime('now')`)
 
-  await db.prepare(`UPDATE product_batches SET ${updates.join(', ')} WHERE id = @id`).run(params)
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_update', 'product_batch', id, body)
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }))
+  // Deactivation and the positive-stock check are one SQL statement. A
+  // separate pre-read would allow a receipt/quantity correction to land in
+  // between the check and this UPDATE, hiding stock in an inactive lot.
+  const update = await db.prepare(`UPDATE product_batches SET ${updates.join(', ')} WHERE id = @id${deactivating
+    ? ` AND NOT EXISTS (
+          SELECT 1 FROM branch_batch_stock
+          WHERE batch_id = @id AND quantity > 0
+        )`
+    : ''}`).run(params)
+  if (deactivating && update.changes === 0) {
+    return c.json({ error: activeBatchStockError(await positiveBatchStock(db, id)) }, 400)
+  }
+  // Perf-2: `{ success: true }` reads nothing audit() writes -- defer it
+  // into the same waitUntil the broadcast already used.
+  c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_update', 'product_batch', id, body),
+    broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }),
+  ]))
   return c.json({ success: true })
 })
 
@@ -315,7 +480,7 @@ app.patch('/:id/branches/:branchId', async (c) => {
   if (!Number.isFinite(quantity) || quantity < 0) return c.json({ error: 'quantity must be a non-negative number' }, 400)
 
   const batch = await db.prepare('SELECT id, variant_product_id AS productId FROM product_batches WHERE id = ?').get<{ id: number; productId: number }>([batchId])
-  if (!batch) return c.json({ error: 'Batch not found' }, 404)
+  if (!batch) return c.json({ error: 'Received date not found' }, 404)
   const product = await db.prepare('SELECT id, name FROM products WHERE id = ?').get<{ id: number; name: string }>([batch.productId])
 
   // A direct SET (a stock-take correction, not a delta) -- read the
@@ -332,13 +497,25 @@ app.patch('/:id/branches/:branchId', async (c) => {
   const previousQuantity = Number(existingRow?.quantity) || 0
   const delta = quantity - previousQuantity
 
-  const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
-    {
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
+  if (quantity > 0) {
+    // Positive stock must always be reachable from POS/FIFO reads, all of
+    // which intentionally exclude inactive lots. Reactivation belongs in the
+    // same atomic batch as the quantity and aggregate corrections: whichever
+    // transaction wins against a concurrent deactivation leaves a valid
+    // state (positive => active; inactive => zero).
+    statements.push({
+      sql: `UPDATE product_batches
+            SET is_active = 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = @batchId`,
+      params: { batchId },
+    })
+  }
+  statements.push({
       sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @quantity)
             ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = @quantity, updated_at = datetime('now')`,
       params: { batchId, branchId, quantity },
-    },
-  ]
+  })
   if (delta !== 0) {
     // The branch_stock floor is DELIBERATE here (Part-77 clamp audit,
     // reviewed and kept): this is a stock-take CORRECTION -- the tool an
@@ -371,15 +548,17 @@ app.patch('/:id/branches/:branchId', async (c) => {
       productName: product?.name || null,
       branchId,
       quantity: Math.abs(delta),
-      reason: `Batch quantity correction (Batch #${batchId})`,
+      reason: `Quantity correction (received date #${batchId})`,
       userId: user?.id ?? null,
-      userName: user?.name ?? null,
+      userName: actorSnapshot(user),
       batchId,
     })
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_quantity_correction', 'product_batch', batchId, { branch_id: branchId, quantity, previous_quantity: previousQuantity })
+  // Perf-2: `{ success: true }` reads nothing audit() writes -- defer it
+  // into the same waitUntil the bumpVersion/broadcast calls already used.
   c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_quantity_correction', 'product_batch', batchId, { branch_id: branchId, quantity, previous_quantity: previousQuantity }),
     bumpVersion(c.env, 'products'),
     broadcast(c.env, 'inventory', { type: 'batch_updated', batchId }),
     broadcast(c.env, 'products', { action: 'update', id: batch.productId }),
@@ -396,7 +575,7 @@ app.delete('/:id', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
   const existing = await db.prepare('SELECT id FROM product_batches WHERE id = ?').get<{ id: number }>([id])
-  if (!existing) return c.json({ error: 'Batch not found' }, 404)
+  if (!existing) return c.json({ error: 'Received date not found' }, 404)
 
   // A deactivated batch drops out of every FIFO picker (listBatchesForProduct
   // filters `is_active = 1`) -- POS's lot picker, Inventory's mandatory
@@ -408,17 +587,27 @@ app.delete('/:id', async (c) => {
   // stranding it; the admin corrects the quantity to zero first (PATCH
   // .../branches/:branchId, which reconciles the aggregate down with it),
   // then deactivates.
-  const remaining = await db.prepare(
-    'SELECT COALESCE(SUM(quantity), 0) AS total FROM branch_batch_stock WHERE batch_id = ?',
-  ).get<{ total: number }>([id])
-  const remainingQty = Number(remaining?.total) || 0
-  if (remainingQty > 0) {
-    return c.json({ error: `This batch still has ${remainingQty} unit(s) of stock. Correct the quantity to 0 before deactivating.` }, 400)
+  // Keep the invariant atomic with the state change. If a receipt/correction
+  // committed first, this matches zero rows; if this committed first, every
+  // positive producer reactivates the lot in its own atomic write.
+  const deactivated = await db.prepare(`
+    UPDATE product_batches
+    SET is_active = 0, updated_at = datetime('now')
+    WHERE id = @id
+      AND NOT EXISTS (
+        SELECT 1 FROM branch_batch_stock
+        WHERE batch_id = @id AND quantity > 0
+      )
+  `).run({ id })
+  if (deactivated.changes === 0) {
+    return c.json({ error: activeBatchStockError(await positiveBatchStock(db, id)) }, 400)
   }
-
-  await db.prepare(`UPDATE product_batches SET is_active = 0, updated_at = datetime('now') WHERE id = ?`).run([id])
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_deactivate', 'product_batch', id, null)
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }))
+  // Perf-2: `{ success: true }` reads nothing audit() writes -- defer it
+  // into the same waitUntil the broadcast already used.
+  c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_deactivate', 'product_batch', id, null),
+    broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }),
+  ]))
   return c.json({ success: true })
 })
 

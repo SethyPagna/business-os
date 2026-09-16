@@ -10,13 +10,16 @@ function loadBranchModule(): Promise<BranchModule> {
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
+import History from 'lucide-react/dist/esm/icons/history.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import Modal from '../shared/Modal'
+import MinimizeButton from '../shared/MinimizeButton.tsx'
 import SearchInput from '../shared/SearchInput'
 import FilterMenu, { type FilterOption } from '../shared/FilterMenu'
 import PaginationControls, { DEFAULT_PAGE_SIZE, clampPage } from '../shared/PaginationControls'
+import PagerActionRow from '../shared/PagerActionRow.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -29,6 +32,7 @@ import { isWriteConflictError } from '../../api/http.ts'
 import {
   createFee as createFeeRequest,
   deleteFee as deleteFeeRequest,
+  getFee as getFeeRequest,
   getAllFeesForExport,
   getFees as getFeesRequest,
   getFeesReport,
@@ -38,14 +42,26 @@ import {
   type FeeRecord,
   type FeeType,
 } from '../../api/feesTransport.ts'
-import FeeForm, { FEE_TYPE_OPTIONS } from './FeeForm.tsx'
+import FeeForm, { FEE_TYPE_OPTIONS, feeFormDraftBaseKey, feeFormWorkKey } from './FeeForm.tsx'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
-import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
 import ExportMenu from '../shared/ExportMenu.tsx'
+import SectionExportAction from '../shared/SectionExportAction.tsx'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
-import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
+import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
+import { fmtClock24 } from '../../utils/formatters.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
+import {
+  RESTORE_WORK_EVENT,
+  consumePendingRestore,
+  markRestoreHandled,
+  minimizeWork,
+  reparkDeniedRestore,
+  type MinimizedWorkEntry,
+} from '../../utils/minimizedWork.ts'
+import { flushPendingWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'fees-export-options')
 const ExpenseLabelManagerModal = lazyRetry(() => import('./ExpenseLabelManagerModal'), 'expense-label-manager-modal')
@@ -58,6 +74,7 @@ interface FeesAppContextValue {
   // a per-action boolean, because nothing here is blocked -- it needs to
   // know whether a delete will queue, not whether it is allowed.
   getPermissionTier: (key: string) => string
+  can: (permissionKey: string, actionKey: string) => boolean
   t: TranslateFn
   notify: NotifyFn
   fmtUSD: (value: unknown) => string
@@ -65,6 +82,7 @@ interface FeesAppContextValue {
   khrToUsd: (value: unknown) => number
   usdToKhr: (value: unknown) => number
   displayCurrency: string
+  user?: { id?: number | string | null } | null
 }
 
 interface FeesSyncContextValue {
@@ -91,15 +109,68 @@ const useSync = useSyncHook as unknown as () => FeesSyncContextValue
 const FEES_LOAD_TIMEOUT_MS = 12000
 const FEES_MUTATION_TIMEOUT_MS = 12000
 
-type FeeModal = 'form' | null
+type FeeModal = 'detail' | 'form' | null
 type FeeTypeFilter = FeeType | 'all'
+
+type ExpenseDeleteOperation = {
+  canDelete: () => boolean
+  confirmDelete: () => boolean
+  begin: () => boolean
+  remove: () => Promise<unknown>
+  onStart: () => void
+  onSuccess: (outcome: 'deleted' | 'pending') => Promise<void>
+  onError: (error: unknown) => void
+  onFinish: () => void
+}
+
+export function expenseSaleLabel(receipt: string | null | undefined, saleId: number | null | undefined, saleLabel: string): string {
+  const id = Number(saleId)
+  const linkedId = Number.isSafeInteger(id) && id > 0 ? `${saleLabel} #${id}` : ''
+  return [String(receipt || '').trim(), linkedId].filter(Boolean).join(' · ')
+}
+
+export async function performExpenseDelete(operation: ExpenseDeleteOperation): Promise<boolean> {
+  if (!operation.canDelete()) return false
+  if (!operation.confirmDelete()) return false
+  if (!operation.canDelete()) return false
+  if (!operation.begin()) return false
+  operation.onStart()
+  try {
+    const result = await operation.remove()
+    if (!result || typeof result !== 'object' || !('success' in result) || result.success !== true) {
+      throw new Error('The server did not confirm the expense deletion request.')
+    }
+    const pending = 'pending' in result && result.pending === true
+    await operation.onSuccess(pending ? 'pending' : 'deleted')
+    return true
+  } catch (error) {
+    operation.onError(error)
+    return false
+  } finally {
+    operation.onFinish()
+  }
+}
 
 
 function formatFeeDate(value: string | null | undefined): string {
   if (!value) return '--'
   const date = new Date(`${value}T00:00:00`)
   if (Number.isNaN(date.getTime())) return String(value)
-  return date.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
+  // dd/mm/yyyy, day-first (Sep 4 2026).
+  const dd = String(date.getDate()).padStart(2, '0')
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}/${date.getFullYear()}`
+}
+
+export function groupFeesByDate(rows: readonly FeeRecord[]): Array<{ date: string; rows: FeeRecord[] }> {
+  const groups: Array<{ date: string; rows: FeeRecord[] }> = []
+  for (const row of rows) {
+    const date = String(row.fee_date || '')
+    const current = groups[groups.length - 1]
+    if (!current || current.date !== date) groups.push({ date, rows: [row] })
+    else current.rows.push(row)
+  }
+  return groups
 }
 
 export function feeTypeToneClass(type: string): string {
@@ -130,7 +201,7 @@ export function buildFeeExportRows(rows: FeeRecord[], feeTypeLabel: (type: strin
 }
 
 export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
-  const { getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency } = useApp()
+  const { can, getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, user } = useApp()
   // Display-currency-aware money formatter (see utils/reportMoney.ts) —
   // honors the display_currency setting without touching stored data.
   const fmtMoney = useMemo(
@@ -147,6 +218,16 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   // What they need instead is to know that deleting will not take effect
   // immediately. Labelling the outcome is the whole job on this page.
   const feesNeedsApproval = getPermissionTier('fees') === 'review'
+  const canAddFee = can('fees', 'add')
+  const canEditFee = can('fees', 'edit')
+  const canDeleteFee = can('fees', 'delete')
+  const canExportFee = can('fees', 'export')
+  const canEditFeeRef = useRef(canEditFee)
+  const canDeleteFeeRef = useRef(canDeleteFee)
+  const canExportFeeRef = useRef(canExportFee)
+  canEditFeeRef.current = canEditFee
+  canDeleteFeeRef.current = canDeleteFee
+  canExportFeeRef.current = canExportFee
   const { syncChannel } = useSync()
   // E2: Fees renders as a SECTION of the Sales hub now (see Returns.tsx's
   // matching re-key note).
@@ -168,7 +249,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   // stats strip AND the expenses list — there is no separate Filters-menu date
   // range that could disagree with it. Starts all-time; presets are inside
   // the shared date/time picker. (Strip data state is declared further down.)
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [branchFilter, setBranchFilter] = useState('')
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
   const [page, setPage] = useState(1)
@@ -176,6 +257,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
 
   const [modal, setModal] = useState<FeeModal>(null)
   const [selected, setSelected] = useState<FeeRecord | null>(null)
+  const [feeFormLocked, setFeeFormLocked] = useState(false)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   const [showLabelManager, setShowLabelManager] = useState(false)
@@ -183,6 +265,11 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const loadRequestRef = useRef(0)
   const deleteActionRef = useRef<Set<string>>(new Set())
   const exportInFlightRef = useRef(false)
+
+  useEffect(() => {
+    if (!canExportFee) setExportDialog(null)
+    if (!canEditFee) setShowLabelManager(false)
+  }, [canEditFee, canExportFee])
 
   const load = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -336,7 +423,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         details: days.slice(0, 8).map((day) => {
           const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(day.date || ''))
           return {
-            label: m ? `${m[2]}/${m[3]}/${m[1]}` : String(day.date || ''),
+            label: m ? `${m[3]}/${m[2]}/${m[1]}` : String(day.date || ''),
             value: `${Number(day.count) || 0} · ${fmtMoney(Number(day.amount_usd) || 0, Number(day.amount_khr) || 0)}`,
           }
         }),
@@ -349,6 +436,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   }, [])
 
   const fees = result.fees || []
+  const feeDayGroups = useMemo(() => groupFeesByDate(fees), [fees])
 
   const feeTypeLabel = useCallback((type: string): string => {
     const option = FEE_TYPE_OPTIONS.find((opt) => opt.value === type)
@@ -358,7 +446,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const openFeeExport = useCallback(async (
     scope: 'visible' | 'filtered' | 'all',
   ): Promise<void> => {
-    if (exportInFlightRef.current) return
+    if (!canExportFeeRef.current || exportInFlightRef.current) return
     exportInFlightRef.current = true
     try {
       const sourceRows = scope === 'visible'
@@ -370,6 +458,9 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           to: stripRange.endDate || undefined,
           branch_id: branchFilter || undefined,
         } : {})
+      // A fetch begun while allowed must not open an export result after the
+      // permission is revoked. The live ref also protects a stale menu callback.
+      if (!canExportFeeRef.current) return
       if (!sourceRows.length) {
         notify(tr('no_data_to_export', 'No data to export'), 'error')
         return
@@ -379,7 +470,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         baseName: scope === 'all' ? 'expenses-all' : scope === 'filtered' ? 'expenses-filtered' : 'expenses-visible',
       })
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error || ''), 'error')
+      if (canExportFeeRef.current) notify(error instanceof Error ? error.message : String(error || ''), 'error')
     } finally {
       exportInFlightRef.current = false
     }
@@ -391,9 +482,62 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     { label: tr('export_all', 'Export all expenses'), onClick: () => { void openFeeExport('all') } },
   ]), [openFeeExport, tr])
 
-  const openAdd = () => { setSelected(null); setModal('form') }
-  const openEdit = (fee: FeeRecord) => { setSelected(fee); setModal('form') }
-  const closeModal = () => { setModal(null); setSelected(null) }
+  const openAdd = () => { if (canAddFee) { setFeeFormLocked(false); setSelected(null); setModal('form') } }
+  const openDetail = (fee: FeeRecord) => { setSelected(fee); setModal('detail') }
+  const openEdit = (fee: FeeRecord) => { if (canEditFeeRef.current) { setFeeFormLocked(false); setSelected(fee); setModal('form') } }
+  const openLabelManager = useCallback(() => {
+    if (canEditFeeRef.current) setShowLabelManager(true)
+  }, [])
+  const closeModal = () => { setFeeFormLocked(false); setModal(null); setSelected(null) }
+
+  const restoreFeeForm = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
+    const rawFeeId = entry.payload?.feeId
+    const feeId = typeof rawFeeId === 'number' || typeof rawFeeId === 'string' ? Number(rawFeeId) : 0
+    const isEdit = Number.isFinite(feeId) && feeId > 0
+    if ((isEdit && !canEditFee) || (!isEdit && !canAddFee)) {
+      reparkDeniedRestore(entry)
+      notify(tr('access_denied', 'Access denied'), 'warning')
+      return false
+    }
+    if (!isEdit) {
+      setFeeFormLocked(false)
+      setSelected(null)
+      setModal('form')
+      return true
+    }
+    try {
+      const result = await getFeeRequest(feeId)
+      if (!result?.fee) throw new Error('fee missing')
+      setFeeFormLocked(false)
+      setSelected(result.fee)
+      setModal('form')
+      return true
+    } catch {
+      reparkDeniedRestore(entry)
+      notify(tr('failed_to_load_data', 'Failed to load data'), 'warning')
+      return false
+    }
+  }, [canAddFee, canEditFee, notify, tr])
+
+  useEffect(() => {
+    const pending = consumePendingRestore('fee_form')
+    if (pending) {
+      void restoreFeeForm(pending).then((restored) => {
+        if (restored) markRestoreHandled('fee_form')
+      })
+    }
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'fee_form') return
+      const entry = detail.entry as MinimizedWorkEntry | undefined
+      if (!entry) return
+      void restoreFeeForm(entry).then((restored) => {
+        if (restored) markRestoreHandled('fee_form')
+      })
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [restoreFeeForm])
 
   const handleSave = async (payload: FeePayload) => {
     try {
@@ -405,11 +549,11 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         )
         notify(tr('fee_updated', 'Expense updated'), 'success')
       } else {
-        await withLoaderTimeout(
-          () => createFeeRequest(payload),
-          'fees:create',
-          FEES_MUTATION_TIMEOUT_MS,
-        )
+        // createFee owns its uncertain-outcome lifecycle. Wrapping it in a
+        // UI timeout would reject while the underlying request kept running,
+        // allowing a late success to clear the receipt behind an "unknown"
+        // form and turn the next Save into a duplicate request.
+        await createFeeRequest(payload, user?.id)
         notify(tr('fee_created', 'Expense added'), 'success')
       }
       await load(true)
@@ -420,7 +564,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       // here would double it up. Reload instead so the list reflects the
       // latest server state, same pattern Sales.tsx/EditReturnModal.tsx
       // already use for this case.
-      if (isWriteConflictError(error)) {
+      if (isWriteConflictError(error) || String((error as { code?: unknown } | null)?.code || '') === 'idempotency_conflict') {
         await load(true)
       } else {
         notify(error instanceof Error ? error.message : String(error || ''), 'error')
@@ -429,24 +573,50 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  const handleDelete = async (fee: FeeRecord) => {
-    if (!window.confirm(tr('delete_fee_confirm', 'Delete this expense record? This cannot be undone.'))) return
-    if (!beginKeyedAction(deleteActionRef, fee.id)) return
-    setDeletingId(fee.id)
-    try {
-      await withLoaderTimeout(
+  const feeDraftKey = scopedWorkDraftKey(feeFormDraftBaseKey(selected?.id))
+  const canMinimizeFeeForm = selected ? canEditFee : canAddFee
+  const preserveFeeForm = () => {
+    if (feeFormLocked) return
+    flushPendingWorkDraft(feeDraftKey)
+    const isEdit = selected != null
+    minimizeWork({
+      key: feeFormWorkKey(selected?.id),
+      kind: 'fee_form',
+      pageId: 'sales',
+      anchor: 'hub:sales:fees',
+      label: isEdit
+        ? `${tr('edit_fee', 'Edit Expense')} — ${selected.label || selected.id}`
+        : tr('add_fee', 'Add Expense'),
+      payload: { feeId: selected?.id ?? null },
+      draftKey: feeDraftKey,
+      requiredPermission: { permissionKey: 'fees', actionKey: isEdit ? 'edit' : 'add' },
+    })
+    closeModal()
+  }
+
+  const handleDelete = async (fee: FeeRecord): Promise<boolean> => {
+    return performExpenseDelete({
+      canDelete: () => canDeleteFeeRef.current,
+      confirmDelete: () => window.confirm(tr('delete_fee_confirm', 'Delete this expense record? This cannot be undone.')),
+      begin: () => beginKeyedAction(deleteActionRef, fee.id),
+      onStart: () => setDeletingId(fee.id),
+      remove: () => withLoaderTimeout(
         () => deleteFeeRequest(fee.id),
         'fees:delete',
         FEES_MUTATION_TIMEOUT_MS,
-      )
-      notify(tr('fee_deleted', 'Expense deleted'), 'success')
-      await load(true)
-    } catch (error) {
-      notify(error instanceof Error ? error.message : String(error || ''), 'error')
-    } finally {
-      finishKeyedAction(deleteActionRef, fee.id)
-      setDeletingId(null)
-    }
+      ),
+      onSuccess: async (outcome) => {
+        notify(outcome === 'pending'
+          ? tr('reason_submitted_for_review', 'Submitted for review -- changes will appear once approved.')
+          : tr('fee_deleted', 'Expense deleted'), 'success')
+        await load(true)
+      },
+      onError: (error) => notify(error instanceof Error ? error.message : String(error || ''), 'error'),
+      onFinish: () => {
+        finishKeyedAction(deleteActionRef, fee.id)
+        setDeletingId(null)
+      },
+    })
   }
 
   const activeFilterCount = useMemo(
@@ -503,31 +673,39 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         cards={stripCards}
         loading={stripLoading}
         t={t}
+        iconOnly
+        compactRange
         rangeActions={(
           <>
-            <ExportMenu label={tr('export', 'Export')} items={exportItems} triggerClassName="h-8 px-2.5 text-xs" />
-            <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 py-0 text-xs" onClick={() => setShowLabelManager(true)} title={tr('manage_expense_labels', 'Manage expense labels')}>
-              <Tags className="h-3.5 w-3.5" />
-              <span>{tr('labels', 'Labels')}</span>
-            </button>
+            {canExportFee ? <SectionExportAction>
+              <ExportMenu
+                label={tr('export', 'Export')}
+                items={exportItems}
+                iconOnly
+                triggerClassName={`${toolbarIconButtonClassName} !h-10 !min-h-10 !w-10 !rounded-full !border-0 !bg-transparent !p-0`}
+              />
+            </SectionExportAction> : null}
           </>
         )}
-        actions={(
+        actions={canAddFee ? (
           // Fit-to-content, not the wide toolbar-width button ("the add
           // button for fees are too wide, can make fit") — and it shares
           // the range row to save a row.
           <button
             type="button"
-            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
+            className="inline-flex h-10 min-h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-blue-500 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-500"
             onClick={openAdd}
+            aria-label={tr('add_fee', 'Add Expense')}
+            title={tr('add_fee', 'Add Expense')}
           >
-            <Plus className="h-3.5 w-3.5 shrink-0" />
-            {tr('add_fee', 'Add Expense')}
+            <Plus className="h-5 w-5" />
           </button>
-        )}
+        ) : null}
+        range={stripRange}
+        onRangeChange={setStripRange}
       />
 
-      {exportDialog ? (
+      {exportDialog && canExportFee ? (
         <Suspense fallback={null}>
           <ExportOptionsDialog
             title={tr('export_options_title', 'Export options')}
@@ -542,13 +720,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         </Suspense>
       ) : null}
 
-      <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-3 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
-        {/* The Start→End range that scopes the stats strip above now leads
-            this pinned toolbar as its own row, directly above the search bar
-            (user, Aug 31: "fish out the start date and end date from the stats
-            button ... right above the search bar row"). Same range state
-            (stripRange) still feeds the strip's cards. */}
-        <StatsRangeRow className="pt-1" range={stripRange} onRangeChange={setStripRange} t={t} />
+      <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-2 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:flex-nowrap">
           <SearchInput
             id="fees-search"
@@ -565,9 +737,39 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             onClear={() => { setTypeFilter('all'); setBranchFilter('') }}
             compact
           />
-          {/* Add Fee moved into the stats strip's range row above ("date
-              start and end date is one row with the add buttons"). */}
+          {/* Add Fee lives in the stats strip's shared range/action row. */}
         </div>
+        <PagerActionRow
+          leading={(
+            <ShiftHistoryModal
+              label={<><History className="h-4 w-4" aria-hidden="true" /><span className="sr-only">{tr('shift_code', 'Shift')}</span></>}
+              buttonClassName="btn-secondary inline-flex h-10 w-10 min-w-10 items-center justify-center p-0"
+            />
+          )}
+          trailing={canEditFee ? (
+            <button
+              type="button"
+              className={toolbarIconButtonClassName}
+              onClick={openLabelManager}
+              aria-label={tr('manage_expense_labels', 'Manage expense labels')}
+              title={tr('manage_expense_labels', 'Manage expense labels')}
+            >
+              <Tags className="h-4 w-4" />
+            </button>
+          ) : null}
+        >
+          <PaginationControls
+            compact
+            rangeAsPageSize
+            compactCentered
+            page={page}
+            pageSize={pageSize}
+            totalItems={result.total}
+            t={t}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
+          />
+        </PagerActionRow>
       </div>
 
       {loadError ? (
@@ -589,41 +791,39 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         <div className="flex flex-col items-center gap-2 py-16 text-center text-sm text-slate-400">
           <Receipt className="h-8 w-8 text-slate-300" />
           <span>{tr('no_fees', 'No expenses recorded yet.')}</span>
-          <button
+          {canAddFee ? <button
             type="button"
             onClick={openAdd}
             className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300"
           >
             <Plus className="h-3.5 w-3.5" />
             {tr('add_fee', 'Add Expense')}
-          </button>
+          </button> : null}
         </div>
       ) : (
         <>
-          {/* One Amount column (display-currency aware, the raw USD/KHR pair
-              folded by reportMoney) and one Details column (receipt-style
-              sale chip + branch, stacked, simply BLANK when unset) replace
-              the old USD / KHR / Sale ID / Branch four-some -- almost every
-              imported row has no branch, no sale and only one currency, so
-              that layout was mostly "--" cells (user: "no need such weird
-              not consistent breakdown"). */}
+          {/* Rows open a single read-only detail surface. Mutating actions live
+              there rather than competing with the record facts in this list. */}
           <div className="dense-data-shell hidden overflow-x-auto md:block">
             <table className="dense-data-table min-w-[720px]">
-              <colgroup><col className="w-[7rem]" /><col className="w-[7rem]" /><col /><col className="w-[9rem]" /><col className="w-[12rem]" /><col className="w-[4.5rem]" /></colgroup>
+              <colgroup><col className="w-[7rem]" /><col className="w-[7rem]" /><col /><col className="w-[9rem]" /><col className="w-[12rem]" /></colgroup>
               <thead>
                 <tr>
-                  <th>{tr('date', 'Date')}</th>
+                  <th>{tr('time', 'Time')}</th>
                   <th data-tone="violet">{tr('type', 'Type')}</th>
                   <th data-tone="blue">{tr('expense_category', 'Category')}</th>
                   <th data-tone="emerald" className="text-right">{tr('amount', 'Amount')}</th>
                   <th>{tr('details', 'Details')}</th>
-                  <th className="text-right">{tr('actions', 'Actions')}</th>
                 </tr>
               </thead>
-              <tbody>
-                {fees.map((fee) => (
-                  <tr key={fee.id} data-clickable="true" tabIndex={0} onClick={() => openEdit(fee)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openEdit(fee) } }}>
-                    <td className="whitespace-nowrap text-slate-500 dark:text-slate-400">{formatFeeDate(fee.fee_date)}</td>
+              {feeDayGroups.map((group) => (
+                <tbody key={group.date || 'unknown'}>
+                  <tr className="bg-slate-50/90 dark:bg-slate-800/80">
+                    <td colSpan={5} className="!py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-200">{formatFeeDate(group.date)}</td>
+                  </tr>
+                  {group.rows.map((fee) => (
+                  <tr key={fee.id} data-clickable="true" tabIndex={0} onClick={() => openDetail(fee)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDetail(fee) } }}>
+                    <td className="whitespace-nowrap text-slate-500 dark:text-slate-400">{fmtClock24(fee.created_at)}</td>
                     <td className="whitespace-nowrap">
                       <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
                         {feeTypeLabel(fee.fee_type)}
@@ -638,83 +838,56 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                         {fee.sale_receipt_number || fee.sale_id ? (
                           <span className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                             <Receipt className="h-3 w-3 shrink-0" />
-                            <span className="truncate">{fee.sale_receipt_number || `#${fee.sale_id}`}</span>
+                            <span className="truncate">{expenseSaleLabel(fee.sale_receipt_number, fee.sale_id, tr('sale', 'Sale'))}</span>
                           </span>
+                        ) : null}
+                        {fee.created_by_name ? (
+                          <span className="truncate text-[11px] text-slate-400">{fee.created_by_name}</span>
                         ) : null}
                         {fee.branch_name ? (
                           <span className="truncate text-[11px] text-slate-400">{fee.branch_name}</span>
                         ) : null}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="flex flex-nowrap items-center justify-end gap-0.5">
-                        <button
-                          type="button"
-                          onClick={(event) => { event.stopPropagation(); openEdit(fee) }}
-                          aria-label={tr('edit', 'Edit')}
-                          title={tr('edit', 'Edit')}
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-700"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => { event.stopPropagation(); void handleDelete(fee) }}
-                          disabled={deletingId === fee.id}
-                          aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
-                          title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        {fee.delivery_contact_name ? (
+                          <span className="truncate text-[11px] text-slate-400">{fee.delivery_contact_name}</span>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
-                ))}
-              </tbody>
+                  ))}
+                </tbody>
+              ))}
             </table>
           </div>
 
-          {/* Card layout for narrow screens -- the 7-column table doesn't
+          {/* Card layout for narrow screens -- the dense table doesn't
               fit comfortably below sm, same pattern as the other list pages
               in this app (Branches, Returns). */}
-          <div className="space-y-2 md:hidden">
-            {fees.map((fee) => (
-              <div key={fee.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
-                        {feeTypeLabel(fee.fee_type)}
-                      </span>
-                      <span className="text-xs text-slate-400">{formatFeeDate(fee.fee_date)}</span>
-                    </div>
-                    <p className="mt-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{fee.label || '--'}</p>
-                    {fee.branch_name ? (
-                      <p className="mt-0.5 truncate text-xs text-slate-400">{fee.branch_name}</p>
-                    ) : null}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button type="button" onClick={() => openEdit(fee)} aria-label={tr('edit', 'Edit')} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button type="button" onClick={() => handleDelete(fee)} disabled={deletingId === fee.id} aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} className="rounded-full p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+          <div className="space-y-3 md:hidden">
+            {feeDayGroups.map((group) => (
+              <section key={group.date || 'unknown'} className="space-y-1.5" aria-label={formatFeeDate(group.date)}>
+                <div className="sticky top-[7.25rem] z-10 rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                  {formatFeeDate(group.date)}
                 </div>
-                <div className="mt-2 flex items-center justify-between gap-2 text-sm">
-                  <span className="font-semibold text-slate-700 dark:text-slate-200">
+                {group.rows.map((fee) => (
+              <button type="button" key={fee.id} data-expense-card="" onClick={() => openDetail(fee)} className="block w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/20">
+                <div data-expense-line="primary" className="flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 text-xs text-slate-400">{fmtClock24(fee.created_at)}</span>
+                  <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
+                    {feeTypeLabel(fee.fee_type)}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{fee.label || ''}</span>
+                  <span className="ml-auto shrink-0 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
                     {fmtMoney(Number(fee.amount_usd) || 0, Number(fee.amount_khr) || 0)}
                   </span>
-                  {fee.sale_receipt_number || fee.sale_id ? (
-                    <span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                      <Receipt className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{fee.sale_receipt_number || `#${fee.sale_id}`}</span>
-                    </span>
-                  ) : null}
                 </div>
-              </div>
+                <div data-expense-line="secondary" className="mt-1 flex min-w-0 items-center gap-1.5 text-sm font-normal text-slate-700 dark:text-slate-200">
+                  {fee.created_by_name ? <span className="min-w-0 truncate" aria-label={`${tr('cashier', 'Cashier')}: ${fee.created_by_name}`}>{fee.created_by_name}</span> : null}
+                  {fee.created_by_name && fee.branch_name ? <span aria-hidden="true" className="shrink-0">·</span> : null}
+                  {fee.branch_name ? <span className="min-w-0 truncate" aria-label={`${tr('branch', 'Branch')}: ${fee.branch_name}`}>{fee.branch_name}</span> : null}
+                </div>
+              </button>
+                ))}
+              </section>
             ))}
           </div>
 
@@ -722,6 +895,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             <PaginationControls
               compact
               rangeAsPageSize
+              compactCentered
               page={page}
               pageSize={pageSize}
               totalItems={result.total}
@@ -733,20 +907,100 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         </>
       )}
 
+      {modal === 'detail' && selected ? (
+        <Modal
+          title={tr('details', 'Details')}
+          onClose={closeModal}
+          size="sm"
+          closeDisabled={deletingId === selected.id}
+          unsavedChanges="read-only"
+        >
+          <div data-expense-detail="" className="space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs font-semibold ${feeTypeToneClass(selected.fee_type)}`}>
+                      {feeTypeLabel(selected.fee_type)}
+                    </span>
+                    <span className="min-w-0 break-words text-sm font-semibold text-slate-800 dark:text-slate-100">{selected.label || '—'}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {formatFeeDate(selected.fee_date)} · {fmtClock24(selected.created_at)}
+                  </p>
+                </div>
+                <span className="shrink-0 text-base font-bold text-emerald-700 dark:text-emerald-300">
+                  {fmtMoney(Number(selected.amount_usd) || 0, Number(selected.amount_khr) || 0)}
+                </span>
+              </div>
+            </div>
+
+            <dl className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
+              <dt className="text-slate-500 dark:text-slate-400">{tr('cashier', 'Cashier')}</dt>
+              <dd className="min-w-0 break-words text-slate-800 dark:text-slate-100">{selected.created_by_name || '—'}</dd>
+              <dt className="text-slate-500 dark:text-slate-400">{tr('branch', 'Branch')}</dt>
+              <dd className="min-w-0 break-words text-slate-800 dark:text-slate-100">{selected.branch_name || '—'}</dd>
+              <dt className="text-slate-500 dark:text-slate-400">{tr('receipt', 'Receipt')}</dt>
+              <dd className="min-w-0 break-all font-mono text-slate-800 dark:text-slate-100">
+                {expenseSaleLabel(selected.sale_receipt_number, selected.sale_id, tr('sale', 'Sale')) || '—'}
+              </dd>
+              <dt className="text-slate-500 dark:text-slate-400">{tr('delivery', 'Delivery')}</dt>
+              <dd className="min-w-0 break-words text-slate-800 dark:text-slate-100">{selected.delivery_contact_name || '—'}</dd>
+              <dt className="text-slate-500 dark:text-slate-400">{tr('notes', 'Notes')}</dt>
+              <dd className="min-w-0 whitespace-pre-wrap break-words text-slate-800 dark:text-slate-100">{selected.notes || '—'}</dd>
+            </dl>
+
+            <div data-expense-detail-actions="" className="flex items-stretch justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+              {canEditFee ? (
+                <button type="button" onClick={() => openEdit(selected)} disabled={deletingId === selected.id} className="btn-secondary inline-flex min-h-10 items-center justify-center gap-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-50">
+                  <Pencil className="h-4 w-4" />
+                  <span>{tr('edit', 'Edit')}</span>
+                </button>
+              ) : null}
+              {canDeleteFee ? (
+                <button
+                  type="button"
+                  onClick={() => { void handleDelete(selected).then((accepted) => { if (accepted) closeModal() }) }}
+                  disabled={deletingId === selected.id}
+                  className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 px-3 text-sm font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40"
+                  aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
+                  title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span>{feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}</span>
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
       {modal === 'form' ? (
-        <Modal title={selected ? tr('edit_fee', 'Edit Expense') : tr('add_fee', 'Add Expense')} onClose={closeModal} size="sm">
+        <Modal
+          title={selected ? tr('edit_fee', 'Edit Expense') : tr('add_fee', 'Add Expense')}
+          onClose={closeModal}
+          closeDisabled={feeFormLocked}
+          onMinimize={canMinimizeFeeForm && !feeFormLocked ? preserveFeeForm : undefined}
+          headerExtra={canMinimizeFeeForm ? <MinimizeButton tr={(key, fallback) => tr(key, fallback)} onMinimize={preserveFeeForm} disabled={feeFormLocked} /> : null}
+          size="sm"
+          unsavedChanges={{ workKey: feeFormWorkKey(selected?.id) }}
+        >
           <FeeForm
+            key={`${selected?.id ?? 'new'}:${user?.id ?? 'anonymous'}`}
             fee={selected}
+            actorId={user?.id}
             labelSuggestions={[...new Set(fees.map((row) => String(row.label || '').trim()).filter(Boolean))].sort()}
             onSave={handleSave}
             onClose={closeModal}
+            onInteractionLockChange={setFeeFormLocked}
           />
         </Modal>
       ) : null}
 
-      {showLabelManager ? (
+      {showLabelManager && canEditFee ? (
         <Suspense fallback={null}>
           <ExpenseLabelManagerModal
+            canEdit={() => canEditFeeRef.current}
             onClose={() => setShowLabelManager(false)}
             onChanged={() => load(true)}
             notify={notify}

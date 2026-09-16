@@ -41,6 +41,7 @@ const expectedConsumers = [
   'src/components/contacts/ApInvoicesSection.tsx',
   'src/components/contacts/ArInvoicesSection.tsx',
   'src/components/contacts/ContactImportConflictsModal.tsx',
+  'src/components/contacts/DuplicatesTab.tsx',
   'src/components/contacts/SaleLinkConflictsSection.tsx',
   'src/components/contacts/shared.tsx',
   'src/components/contacts/StockInInvoicesSection.tsx',
@@ -50,9 +51,11 @@ const expectedConsumers = [
   'src/components/files/FilesPage.tsx',
   'src/components/imports/ServerImportReviewScreen.tsx',
   'src/components/inventory/InventoryMovementsSurface.tsx',
+  'src/components/inventory/InventoryProductsSurface.tsx',
   'src/components/pos/POS.tsx',
   'src/components/products/Products.tsx',
   'src/components/products/ProductsImageOnlyView.tsx',
+  'src/components/products/SelectedConflictMergeReviewModal.tsx',
   'src/components/products/StockChangeSection.tsx',
   'src/components/products/StockInSessionsSection.tsx',
   'src/components/products/import/ProductImportConflictsModal.tsx',
@@ -73,17 +76,104 @@ check('every audited paginated consumer is inventoried', () => {
   }
 })
 
+// An inventory is not evidence if it can certify a file nothing renders.
+// ArInvoicesSection.tsx sat in the list above -- paging correctly, clamping
+// correctly, counting correctly -- while the only references to its name in
+// the whole frontend were its own `export default` and this file's two path
+// strings. docs/DATA-VISIBILITY-AND-CREDIT-AUDIT.md had asked for it to be
+// mounted into the Customers tab; nothing was, so the audited behavior was
+// unreachable and this test's green was about a file no user could open.
+//
+// So the inventory now also proves each entry is REACHED: some other module
+// under src/ names it in a static or dynamic import. That is the weakest true
+// statement available from source alone -- it does not prove a route renders
+// it -- but it is exactly the gap that let an orphan through, and it is
+// mechanical rather than a hand-kept list of "these ones are really mounted".
+function importedBasenames(): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>()
+  for (const file of walk(path.join(frontendRoot, 'src')).filter((f) => /\.(ts|tsx)$/.test(f))) {
+    const source = fs.readFileSync(file, 'utf8')
+    // `from './X'`, `from './X.tsx'` and `import('./X')` alike.
+    for (const match of source.matchAll(/(?:from\s*|import\s*\(\s*)['"]([^'"]+)['"]/g)) {
+      const spec = match[1]
+      if (!spec.startsWith('.')) continue
+      const base = path.basename(spec).replace(/\.(tsx|ts|js)$/, '')
+      if (!map.has(base)) map.set(base, new Set())
+      map.get(base)!.add(relative(file))
+    }
+  }
+  return map
+}
+
+check('every inventoried paginated surface is reachable from the app', () => {
+  const imports = importedBasenames()
+  const importersOf = (file: string): string[] => {
+    const base = path.basename(file).replace(/\.tsx$/, '')
+    return [...(imports.get(base) || [])].filter((importer) => importer !== file).sort()
+  }
+
+  const orphans = expectedConsumers.filter((file) => importersOf(file).length === 0)
+  assert.deepStrictEqual(
+    orphans,
+    [],
+    'a paginated surface no module imports cannot be opened, so auditing its paging proves nothing -- mount it or drop it',
+  )
+
+  // Positive control. A resolver that silently matched everything (a bad
+  // regex, an empty walk) would report zero orphans forever and the assertion
+  // above would be a green that means nothing. So the same resolver is asked
+  // about a name that is deliberately absent, and must say "nothing".
+  assert.deepStrictEqual(
+    importersOf('src/components/contacts/NoSuchPaginatedSurface.tsx'),
+    [],
+    'the reachability resolver must report a name nothing imports as unimported',
+  )
+  assert.ok(
+    importersOf('src/components/contacts/ArInvoicesSection.tsx').includes('src/components/contacts/CustomersTab.tsx'),
+    'the AR ledger is mounted by the Customers tab, mirroring how SuppliersTab mounts the supplier ledgers',
+  )
+})
+
+check('the storefront pager offers the same 20/50/100 sizes as the admin pager', () => {
+  const catalogPagination = read('frontend/src/components/catalog/catalogPagination.tsx')
+  const controls = read('frontend/src/components/shared/PaginationControls.tsx')
+  const sharedOptions = controls.match(/export const PAGE_SIZE_OPTIONS: number\[\] = \[([^\]]+)\]/)
+  const catalogOptions = catalogPagination.match(/export const CATALOG_PAGE_SIZE_OPTIONS: number\[\] = \[([^\]]+)\]/)
+  assert.ok(sharedOptions && catalogOptions, 'both pagers must declare their option list as a named constant')
+  assert.strictEqual(catalogOptions[1].replace(/\s/g, ''), '20,50,100', 'the owner picked 20/50/100 for the storefront (2026-09-14)')
+  assert.strictEqual(
+    catalogOptions[1].replace(/\s/g, ''),
+    sharedOptions[1].replace(/\s/g, ''),
+    'storefront and admin page sizes stay the same three -- one server cap (100) serves both',
+  )
+  assert.match(catalogPagination, /export const CATALOG_DEFAULT_PAGE_SIZE = 50/, 'the storefront default stays 50')
+  assert.match(catalogPagination, /onPageSizeChange=\{onPageSizeChange\}/, 'the storefront pager must forward the size handler')
+})
+
 check('no page-local Previous/Next paginator remains', () => {
-  const manualPager = /(tr|t)\('previous'|>Previous<|>Next<|(tr|t)\('next'/
+  const manualPagerLabel = /(tr|t)\('previous'|>Previous<|>Next<|(tr|t)\('next'/
+  const manualPagerButtons = (source: string): string[] =>
+    (source.match(/<button\b[\s\S]*?<\/button>/g) || []).filter((button) => manualPagerLabel.test(button))
   const allowed = new Set([
     'src/components/products/Products.tsx', // image-lightbox navigation, not row pagination
     'src/components/shared/PaginationControls.tsx',
   ])
   const offenders = componentFiles
-    .filter((file) => manualPager.test(fs.readFileSync(file, 'utf8')))
+    .filter((file) => manualPagerButtons(fs.readFileSync(file, 'utf8')).length > 0)
     .map(relative)
     .filter((file) => !allowed.has(file))
   assert.deepStrictEqual(offenders, [])
+
+  assert.equal(
+    manualPagerButtons("<section>{tr('previous', 'Previous')} review values</section>").length,
+    0,
+    'negative control: historical Previous text is not a page-local paginator',
+  )
+  assert.equal(
+    manualPagerButtons("<button type=\"button\">{tr('previous', 'Previous')}</button>").length,
+    1,
+    'positive control: a manual Previous button is still detected',
+  )
 })
 
 check('server-paged mutable/filterable lists correct an empty former last page', () => {

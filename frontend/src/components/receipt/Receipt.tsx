@@ -1,24 +1,47 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { receiptRoundingDisplay } from '../../utils/receiptRoundingDisplay.ts'
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import ImageDown from 'lucide-react/dist/esm/icons/image-down.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd } from '../../utils/receiptLineMath'
+import { receiptTotalsFigures } from '../../utils/receiptTotals'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import InfoHint from '../shared/InfoHint.tsx'
+import { RECEIPT_CONTRAST_ATTR, normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
+import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
+import {
+  RECEIPT_ITEM_COLUMN_GAP_EM,
+  RECEIPT_ITEM_NUMERIC_FONT_EM,
+  RECEIPT_ROW_GRID_TEMPLATE,
+  receiptItemGridTemplate,
+} from '../../utils/receiptItemColumns.ts'
+import { promotionLabelText } from '../../utils/saleItemNameLayout.ts'
+import { customerDisplayName as displayCustomerName, isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
+import { openPrintPreviewWindow } from '../../utils/printSurface.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
-type ReceiptExportMode = 'print' | 'open' | 'image'
+// PDF is a deterministic physical-size artifact. Unlike the HTML Print
+// preview, its MediaBox cannot be re-laid out by Chrome when the selected
+// printer advertises a different paper size (the driver may still scale it
+// unless the operator selects Actual size).
+type ReceiptExportMode = 'print' | 'pdf' | 'image'
 type ReceiptLabelKey = keyof typeof LABELS.en
 type ReceiptPrintModule = typeof import('../../utils/printReceipt')
 type TranslateFn = (key: string) => string | undefined
 type MoneyFormatter = (value: number | string) => string
 
 interface ReceiptItem {
+  pricing_snapshot_json?: string | null
+  total_usd?: number | string | null
+  total_khr?: number | string | null
   id?: number | string | null
   product_id?: number | string | null
   product_name?: string | null
@@ -34,17 +57,25 @@ interface ReceiptItem {
   // product-level (promotion/special) cut, so the receipt can show the full
   // per-line discount (list − charged) as (-$x.xx).
   base_price_usd?: number | string | null
+  base_price_khr?: number | string | null
   product_discount_usd?: number | string | null
+  product_discount_khr?: number | string | null
   // The line's price tier -- comes straight through on the stored sale_items
   // row (the list query SELECTs si.*) and on the POS in-memory checkout
-  // payload, so the receipt can print a small tier tag ("VIP" / "Wholesale")
-  // under the item name. Absent or 'selling' -> no tag. Toggled per line in
-  // the cart (the VIP marker), so a deselected line arrives here as 'selling'.
+  // payload, so the receipt can print a small "Wholesale" tier tag beside the
+  // item name. Absent or 'selling' -> no tag. Toggled per line in the cart, so
+  // a deselected line arrives here as 'selling'. A legacy 'special' value also
+  // prints the wholesale tag -- see the tierTag derivation below.
   price_mode?: string | null
   product_discount_label?: string | null
 }
 
 interface ReceiptSale {
+  id?: number | string | null
+  pricing_identity_bindings?: unknown
+  money_precision_version?: number | null
+  calculated_total_usd?: number | string | null
+  rounding_adjustment_usd?: number | string | null
   receiptNumber?: string | null
   receipt_number?: string | null
   created_at?: string | number | Date | null
@@ -63,6 +94,11 @@ interface ReceiptSale {
   tax_khr?: number | string | null
   delivery_fee_usd?: number | string | null
   delivery_fee_khr?: number | string | null
+  // Who the fee fell on. Only ever meaningful with is_delivery: `store`
+  // means the shop absorbed it and the customer was NOT charged, so it is
+  // absent from total_usd. Anything else (including missing, which is the
+  // column's default) means the customer paid it.
+  delivery_fee_paid_by?: string | null
   total_usd?: number | string | null
   total?: number | string | null
   total_khr?: number | string | null
@@ -82,6 +118,7 @@ interface ReceiptSale {
   customer_phone?: string | null
   customer_address?: string | null
   customer_membership_number?: string | null
+  customer_is_anonymous?: number | boolean | null
   is_delivery?: boolean | number | string | null
   delivery_contact_name?: string | null
   delivery_contact_phone?: string | null
@@ -102,6 +139,16 @@ interface ReceiptProps {
   sale: ReceiptSale
   settings?: ReceiptSettings
   onClose: () => void
+  // "also has the returns button right in the sales receipt directly" (user,
+  // Sep 3 2026). Supplied by Sales.tsx only when the signed-in user holds
+  // `returns:add`; omitted everywhere else (POS's post-sale receipt, the
+  // Receipt Settings preview), so the action simply does not render there.
+  onReturn?: () => void
+  returnLabel?: string
+  // Non-empty when the sale cannot be returned (cancelled / already fully
+  // returned) -- the button stays visible but inert, with the reason behind
+  // an InfoHint rather than as inline prose in this one-row toolbar.
+  returnDisabledReason?: string
   _previewMode?: boolean
 }
 
@@ -111,6 +158,7 @@ interface RowProps {
   subValue?: ReactNode
   bold?: boolean
   tone?: string
+  breakAll?: boolean
 }
 
 const useApp = useAppHook as () => {
@@ -137,15 +185,6 @@ function stripEmoji<T>(text: T): T
 function stripEmoji(text: unknown): unknown {
   if (typeof text !== 'string') return text
   return text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FEFF}]/gu, '').replace(/\s{2,}/g, ' ').trim()
-}
-
-function displayAddress(raw: unknown): string {
-  if (!raw) return ''
-  try {
-    const parsed = JSON.parse(String(raw))
-    if (Array.isArray(parsed)) return String(parsed[0] || '')
-  } catch {}
-  return String(raw)
 }
 
 function parseItems(raw: ReceiptSale['items']): ReceiptItem[] {
@@ -195,13 +234,13 @@ const LABELS = {
     date: 'Date:',
     cashier: 'Cashier:',
     payment: 'Payment:',
-    rate: 'Rate:',
     status: 'Status:',
     customer: 'Customer:',
     phone: 'Phone:',
     address: 'Address:',
     membership: 'Membership:',
     delivery: 'Delivery Fee:',
+    free: 'Free',
     driver: 'Delivery:',
     subtotal: 'Subtotal:',
     discount: 'Discount:',
@@ -209,11 +248,18 @@ const LABELS = {
     pointsRedeemed: 'Points redeemed:',
     tax: 'Tax:',
     total: 'TOTAL',
+    netTotal: 'Net total:',
     paid: 'Paid:',
+    balanceDue: 'Balance due:',
     change: 'Change:',
     refunded: 'Refunded:',
     thankYou: 'Thank you for your patronage!',
     qty: 'Qty',
+    item: 'Item',
+    unitPrice: 'Price',
+    lineTotal: 'Total',
+    itemDiscount: 'Item Discount:',
+    totalDiscount: 'Total Discount:',
     visitWebsite: 'Visit our website',
     followUs: 'Follow us',
   },
@@ -223,13 +269,13 @@ const LABELS = {
     date: 'កាលបរិច្ឆេទ:',
     cashier: 'អ្នកគិតលុយ:',
     payment: 'ការទូទាត់:',
-    rate: 'អត្រាប្តូរ:',
     status: 'ស្ថានភាព:',
     customer: 'អតិថិជន:',
     phone: 'ទូរស័ព្ទ:',
     address: 'អាសយដ្ឋាន:',
     membership: 'លេខសមាជិក:',
-    delivery: 'ថ្លៃដឹកជញ្ជូន:',
+    delivery: 'ថ្លៃដឹក:',
+    free: 'ឥតគិតថ្លៃ',
     driver: 'ដឹកជញ្ជូន:',
     subtotal: 'សរុបរង:',
     discount: 'បញ្ចុះតម្លៃ:',
@@ -237,11 +283,18 @@ const LABELS = {
     pointsRedeemed: 'ពិន្ទុបានប្រើ:',
     tax: 'ពន្ធ:',
     total: 'សរុប',
+    netTotal: 'សរុបសុទ្ធ:',
     paid: 'បានបង់:',
+    balanceDue: 'នៅជំពាក់:',
     change: 'ប្រាក់អាប់:',
     refunded: 'បានសងវិញ:',
     thankYou: 'សូមអរគុណសម្រាប់ការទិញទំនិញ!',
     qty: 'ចំនួន',
+    item: 'ទំនិញ',
+    unitPrice: 'តម្លៃ',
+    lineTotal: 'សរុប',
+    itemDiscount: 'សរុបបញ្ចុះលើទំនិញ:',
+    totalDiscount: 'សរុបបញ្ចុះតម្លៃ:',
     visitWebsite: 'ទស្សនាគេហទំព័ររបស់យើង',
     followUs: 'តាមដានពួកយើង',
   },
@@ -256,28 +309,42 @@ function stripTrailingColon(value: string): string {
 function labelFor(mode: LanguageMode, key: ReceiptLabelKey): string {
   if (mode === 'km') return RECEIPT_KHMER_LABELS[key]
   if (mode !== 'both') return LABELS.en[key]
-  // Bilingual labels: join the English/Khmer terms with a single trailing
+  // Bilingual labels: join the Khmer/English terms with a single trailing
   // colon instead of concatenating two colon-terminated strings (which
   // produced "Receipt #: / លេខបង្កាន់ដៃ:" -- two colons for one label).
+  // Khmer comes FIRST (user, Sep 3 2026): the shop's customers read Khmer,
+  // English is the secondary reading, so "លេខបង្កាន់ដៃ / Receipt #:".
   const enLabel = LABELS.en[key]
   const kmLabel = RECEIPT_KHMER_LABELS[key]
   const endsWithColon = enLabel.endsWith(':')
-  return `${stripTrailingColon(enLabel)} / ${stripTrailingColon(kmLabel)}${endsWithColon ? ':' : ''}`
+  return `${stripTrailingColon(kmLabel)} / ${stripTrailingColon(enLabel)}${endsWithColon ? ':' : ''}`
 }
 
-function Row({ label, value, subValue, bold = false, tone = '' }: RowProps) {
+function Row({ label, value, subValue, bold = false, tone = '', breakAll = false }: RowProps) {
   return (
-    <div data-receipt-line="true" className={`my-1 grid grid-cols-[minmax(0,1fr)_minmax(4.6rem,auto)] items-start gap-x-3 gap-y-1 ${tone}`}>
+    // The value track comes from utils/receiptItemColumns, the ONE place that
+    // owns the receipt's grid geometry, so printReceipt.ts's paper re-layout
+    // cannot drift from what the screen shows (it carried 4.25rem against this
+    // row's 4.6rem). `em`, not `rem`: a receipt printed at 9px must not pay a
+    // 16px-rooted value column.
+    <div data-receipt-line="true" style={{ gridTemplateColumns: RECEIPT_ROW_GRID_TEMPLATE }} className={`my-1 grid items-start gap-x-3 gap-y-1 ${tone}`}>
       <span className={`min-w-0 overflow-visible whitespace-normal break-words pr-1 leading-snug ${bold ? 'font-semibold' : ''}`}>{label}</span>
-      <div className="min-w-0 whitespace-normal break-words text-right leading-snug">
+      {/* `breakAll` is for identifiers: a receipt number has no spaces to
+          wrap at, so on a narrow paper width (or a phone) `break-words`
+          alone can leave it overflowing the column. It must wrap onto a
+          second line -- never clip, never scroll. Every other structured
+          value may also wrap when its complete token is wider than the value
+          track. `overflow-wrap:anywhere` makes that width pressure visible to
+          grid sizing; the printable clone then grows its implicit row. */}
+      <div className={`min-w-0 whitespace-normal text-right leading-snug [overflow-wrap:anywhere] ${breakAll ? 'break-all' : 'break-words'}`}>
         <div className={`${bold ? 'font-semibold' : ''}`}>{value}</div>
-        {subValue ? <div className="text-[10px] text-gray-500">{subValue}</div> : null}
+        {subValue ? <div className="whitespace-normal break-words text-[10px] text-gray-500 [overflow-wrap:anywhere]">{subValue}</div> : null}
       </div>
     </div>
   )
 }
 
-export default function Receipt({ sale, settings = {}, onClose, _previewMode }: ReceiptProps) {
+export default function Receipt({ sale, settings = {}, onClose, onReturn, returnLabel, returnDisabledReason = '', _previewMode }: ReceiptProps) {
   const { fmtUSD, fmtKHR, khrSymbol, t } = useApp()
   const printRef = useRef<HTMLDivElement | null>(null)
   const compactPrintRef = useRef<HTMLDivElement | null>(null)
@@ -285,7 +352,22 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const tpl = parseReceiptTemplate(appliedConfig.serializedTemplate)
   const appliedSettings = appliedConfig.settings
   const appliedPrintSettings = appliedConfig.printSettings
+  // Two independent controls, kept side by side rather than one replacing
+  // the other. highContrastBold is the older per-print switch: it darkens and
+  // BOLDS, and thickens dividers. text_contrast = maximum is the newer
+  // root-level switch: it forces pure black on every descendant including
+  // borders, and never touches weight. A weak-ink thermal printer wants both.
   const highContrastBold = appliedPrintSettings.highContrastBold
+  // Text contrast: ONE root-level switch (styles/main.css's
+  // `[data-receipt-contrast="maximum"] *` override does the rest -- forcing
+  // every descendant's color/opacity/border-color, never font size/weight).
+  // Applied to every shell wrapper below so it covers the on-screen preview,
+  // the interactive receipt view, and -- because printReceipt.ts bakes
+  // computed styles into the print/PDF/image export clones from this live,
+  // already-styled DOM -- the printed and exported receipt too.
+  const contrastMode = normalizeReceiptTextContrast(tpl.text_contrast)
+  const contrastAttrs = { [RECEIPT_CONTRAST_ATTR]: contrastMode }
+  const contrastTextColor = contrastMode === 'maximum' ? '#000000' : undefined
   const compactSalesReceipt = tpl.sales_receipt_enabled === true || String(appliedPrintSettings.paperSize || '').toLowerCase() === '80x50mm'
   // B5: enabling the 80x50 card must not make the FULL receipt unreachable
   // -- with it on, BOTH renditions preview and Print offers BOTH sizes.
@@ -293,7 +375,10 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   // the layout); the full receipt prints on the continuous roll -- an
   // '80x50mm' paper setting maps to the 80mm roll for it, any other
   // configured size is kept as the operator set it.
-  const compactPrintSettings = { ...appliedPrintSettings, paperSize: 'custom', customWidth: '80', customHeight: '50', marginTop: '0', marginRight: '0', marginBottom: '0', marginLeft: '0' }
+  // Keep the named preset on the object passed to printReceipt. That is the
+  // explicit single-card intent; an arbitrary custom 80 x 50 document must
+  // remain a normal paginated document rather than being inferred as compact.
+  const compactPrintSettings = { ...appliedPrintSettings, paperSize: '80x50mm', customWidth: '80', customHeight: '50', marginTop: '0', marginRight: '0', marginBottom: '0', marginLeft: '0' }
   const fullPrintSettings = String(appliedPrintSettings.paperSize || '').toLowerCase() === '80x50mm'
     ? { ...appliedPrintSettings, paperSize: '80mm' }
     : appliedPrintSettings
@@ -310,31 +395,114 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const em = (text: string): string => (tpl.show_emojis === false ? stripEmoji(text) : text)
   const items = useMemo(() => parseItems(sale.items), [sale.items])
   const paymentDetails = useMemo(() => parsePaymentDetails(sale.payment_details), [sale.payment_details])
+  const paymentMethodText = useMemo(() => {
+    const detailMethods = Array.from(new Set(paymentDetails.map((detail) => detail.method)))
+    return detailMethods.join(' + ') || String(sale.payment_method || '').trim() || 'Cash'
+  }, [paymentDetails, sale.payment_method])
   const rNum = sale.receiptNumber || sale.receipt_number || 'Receipt'
   const createdAt = sale.created_at
   // Route every supported timestamp shape through the shared formatter:
   // Date objects, epoch numbers, ISO values, and SQLite's timezone-less UTC
-  // all resolve to the same mm/dd/yyyy HH:mm Phnom Penh wall clock.
+  // all resolve to the same dd/mm/yyyy HH:mm Phnom Penh wall clock.
   const dateStr = fmtDateTime24(createdAt || new Date())
-  const exchangeRate = toNumber(sale.exchange_rate) || toNumber(appliedSettings.exchange_rate as number | string | undefined) || 4100
-  const subtotalUsd = toNumber(sale.subtotal_usd ?? sale.subtotal)
-  const discountUsd = toNumber(sale.discount_usd ?? sale.discount)
-  const discountKhr = toNumber(sale.discount_khr) || discountUsd * exchangeRate
-  const membershipDiscountUsd = toNumber(sale.membership_discount_usd)
-  const membershipDiscountKhr = toNumber(sale.membership_discount_khr) || membershipDiscountUsd * exchangeRate
+  const showItemDiscount = tpl.show_item_discount !== false
+  // ONE derivation of this sale's money column, shared with the admin sale
+  // detail (utils/receiptTotals.ts). Each surface used to read the raw row
+  // for itself, with its own `?? sale.total` coalescing, which is how they
+  // came to disagree about who paid the delivery fee, about what a refund
+  // does to the Total, and about whether riel counts as payment.
+  // receiptTotals.test.ts asserts the printed column reconciles to
+  // sale.total_usd on real fixtures rather than a reader trusting that it does.
+  //
+  // The composition lines below are spelled out as receiptLineMath.test.ts
+  // pins them (Sep 4 2026); their inputs come from the shared read so the two
+  // surfaces cannot drift on the same row.
+  const totals = useMemo(() => receiptTotalsFigures(sale, {
+    showItemDiscount,
+    fallbackExchangeRate: toNumber(appliedSettings.exchange_rate as number | string | undefined) || 4100,
+  }), [appliedSettings.exchange_rate, sale, showItemDiscount])
+  const roundingDisplay = totals.calculatedTotalUsd === null ? null : receiptRoundingDisplay(totals.roundingAdjustmentUsd, fmtUSD)
+  const exchangeRate = totals.exchangeRate
+  const subtotalUsd = totals.subtotalUsd
+  const discountUsd = totals.discountUsd
+  const discountKhr = totals.discountKhr
+  const membershipDiscountUsd = totals.membershipDiscountUsd
+  const membershipDiscountKhr = totals.membershipDiscountKhr
   const membershipPointsRedeemed = toNumber(sale.membership_points_redeemed)
-  const taxUsd = toNumber(sale.tax_usd ?? sale.tax)
-  const taxKhr = toNumber(sale.tax_khr) || taxUsd * exchangeRate
-  const deliveryFeeUsd = toNumber(sale.delivery_fee_usd)
-  const deliveryFeeKhr = toNumber(sale.delivery_fee_khr) || deliveryFeeUsd * exchangeRate
+  const taxUsd = totals.taxUsd
+  const taxKhr = totals.taxKhr
+  const delivery = receiptDeliveryFigures(sale, exchangeRate)
+  const deliveryFeeUsd = delivery.faceUsd
+  const deliveryFeeKhr = delivery.faceKhr
+  const deliveryPaidByStore = delivery.printsAsFree
+  // The owner's rule (Sep 4 2026): a line prints its SELLING price, and every
+  // discount is carried in the Discount row -- "selling price (-discount)",
+  // not "discounted price (-discount)".
+  //
+  // sales.subtotal_usd is the sum of CHARGED line totals, so before this the
+  // per-line cut appeared beside its line and then vanished: Subtotal already
+  // had it removed and Discount never mentioned it. Production carries 24,085
+  // such lines across 11,974 sales and $99,534.40 of discount the totals never
+  // showed.
+  //
+  // Both displayed figures move by the SAME amount, so the total is provably
+  // unchanged: (subtotal + savings) - (discount + savings) = subtotal - total.
+  // That is what lets every historical receipt reprint to the same money, and
+  // it is why nothing here touches sale.total_usd or the tax base.
+  //
+  // Every per-line cut on the sale. It is printed on its OWN row (Item
+  // Discount, per the owner’s Sep-4 photo) rather than folded into Subtotal
+  // and Discount, so it is named rather than merely included -- and, unlike
+  // before the Sep-4 line fix, it can no longer vanish from the totals.
+  const lineSavingsUsd = receiptLineSavingsUsd(items.filter(item => totals.moneyPrecisionVersion === 1 || (item.applied_price_usd !== null && item.total_usd !== null)), showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale)
+  // The lines now print their NET totals, so their sum IS sales.subtotal_usd
+  // and Subtotal needs no adjustment. Discount goes back to meaning the
+  // order-level cut alone.
+  const displayedSubtotalUsd = subtotalUsd
+  const displayedDiscountUsd = discountUsd
+  const displayedDiscountKhr = discountKhr
+  // Every cut on the sale in one figure: per line, order-level, and the
+  // membership tier. This is the owner’s "total discount". A RECAP of rows
+  // printed above it, never a further subtraction: subtotal_usd already
+  // excludes the per-line cut, and the Total below already has the other two
+  // taken off. receiptTotals.test.ts states the size of that gap.
+  const totalDiscountUsd = lineSavingsUsd + discountUsd + membershipDiscountUsd
+  // The item table’s column track, defined ONCE -- in
+  // utils/receiptItemColumns, which printReceipt.ts reads for the paper
+  // re-layout too -- so the header, the rows and the export cannot drift
+  // apart. Four columns by default (item, qty, price, total), three when a
+  // shop turns the price column off.
+  //
+  // N33 (owner, Sep 6 2026): "for the items, qty, price, total make them
+  // compact... especially name, it is being pushed two rows." See that
+  // module's header for the two causes -- `auto` money tracks taking their
+  // max-content width, and `rem` sizing that ignored the receipt's own font
+  // size -- and why fit-content in em fixes both.
+  const showUnitPriceCol = tpl.show_item_unit_price !== false
+  const itemGridStyle: CSSProperties = {
+    gridTemplateColumns: receiptItemGridTemplate(showUnitPriceCol),
+    columnGap: `${RECEIPT_ITEM_COLUMN_GAP_EM}em`,
+  }
+  // Qty, Price and Total print a touch smaller than the product name: the
+  // name is what a customer reads, the figures only have to be legible.
+  const itemNumericStyle: CSSProperties = { fontSize: `${RECEIPT_ITEM_NUMERIC_FONT_EM}em` }
   const totalUsd = toNumber(sale.total_usd ?? sale.total)
-  const totalKhr = toNumber(sale.total_khr) || totalUsd * exchangeRate
-  const paidUsd = toNumber(sale.amount_paid_usd ?? sale.amount_paid)
-  const paidKhr = toNumber(sale.amount_paid_khr)
-  const changeUsd = toNumber(sale.change_usd ?? sale.change_returned)
-  const changeKhr = toNumber(sale.change_khr)
-  const refundUsd = toNumber(sale.refund_usd)
-  const refundKhr = toNumber(sale.refund_khr)
+  const totalKhr = totals.totalKhr
+  const paidUsd = totals.paidUsd
+  const paidKhr = totals.paidKhr
+  const changeUsd = totals.changeUsd
+  const changeKhr = totals.changeKhr
+  const refundUsd = totals.refundUsd
+  const refundKhr = totals.refundKhr
+  // A return is a later event against the sale, so total_usd does not net it:
+  // the refund prints BELOW the Total with the net beneath it, or the minus
+  // sign describes a subtraction no printed row ever makes.
+  const netTotalUsd = totals.netTotalUsd
+  const netTotalKhr = totals.netTotalKhr
+  // Still owed. A cancelled sale owes nothing; riel tendered counts as
+  // payment, converted at the rate the sale was booked at (receiptTotals.ts).
+  const outstandingUsd = String(sale.sale_status || '') === 'cancelled' ? 0 : totals.outstandingUsd
+  const outstandingKhr = outstandingUsd > 0 ? totals.outstandingKhr : 0
   const actualFont =
     lang === 'km' || lang === 'both'
       ? `"Khmer OS", "Noto Sans Khmer", "Segoe UI", sans-serif`
@@ -349,12 +517,34 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const footerDivider = (tpl.footer_separator || '-').repeat(28)
   const headerAlignClass = tpl.align_header === 'left' ? 'text-left' : tpl.align_header === 'right' ? 'text-right' : 'text-center'
 
+  // The rate, as the owner asked for it: the bare value, no label. Empty
+  // when the template hides it, which is also what decides whether the
+  // cashier row carries it at all.
+  const exchangeRateText = tpl.show_exchange_rate ? `1 USD = ${Number(exchangeRate).toLocaleString()} ${khrSymbol}` : ''
   const showMembershipId = tpl.show_customer_membership !== false
-  const hasCustomer = sale.customer_name || sale.customer_phone || sale.customer_address || (showMembershipId && sale.customer_membership_number)
+  const customerIsAnonymous = isAnonymousCustomerIdentity(sale)
+  const customerDisplayName = displayCustomerName(sale, lang === 'km' ? 'អតិថិជនទូទៅ' : 'General')
+  // N21: sales.customer_address may hold the Contact Options JSON that was
+  // snapshotted raw out of customers.address. Rendering it through the shared
+  // kernel (contactOptionUtils.ts, twinned in cloudflare/src/lib/contactOptions.ts)
+  // is what stops the receipt printing "[]" -- and gating the section on the
+  // RESOLVED value stops a row that resolves to nothing forcing an empty
+  // customer block onto the paper.
+  const customerAddress = contactDisplayAddress(sale.customer_address)
+  const hasCustomer = customerDisplayName || sale.customer_phone || customerAddress || (!customerIsAnonymous && showMembershipId && sale.customer_membership_number)
   const hasDelivery = !!sale.is_delivery && (sale.delivery_contact_name || sale.delivery_contact_phone || sale.delivery_contact_address)
   const showDeliveryContactSection = tpl.delivery_show_contact !== false
   const showDeliveryDriverName = showDeliveryContactSection && tpl.delivery_show_driver_name !== false
   const showDeliveryDriverPhone = showDeliveryContactSection && tpl.delivery_show_driver_phone !== false
+  // With the fee heading gone the section is nothing but its driver rows, so
+  // it must not render when every one of them is switched off -- an empty
+  // block still prints its dashed rule, and a divider with nothing under it
+  // is exactly the kind of stray line the owner is asking us to remove.
+  const hasDeliveryContactRows = Boolean(
+    (showDeliveryDriverName && sale.delivery_contact_name)
+    || (showDeliveryDriverPhone && sale.delivery_contact_phone)
+    || (showDeliveryContactSection && sale.delivery_contact_address && tpl.delivery_show_address !== false),
+  )
 
   const sectionMap: Record<string, ReactNode> = {
     header: (
@@ -370,24 +560,53 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     ),
     order_info: (
       <div key="order_info">
-        {tpl.show_receipt_number ? <Row label={labelFor(lang, 'receiptNum')} value={rNum} bold /> : null}
+        {tpl.show_receipt_number ? <Row label={labelFor(lang, 'receiptNum')} value={rNum} bold breakAll /> : null}
         {tpl.show_date ? <Row label={labelFor(lang, 'date')} value={dateStr} /> : null}
-        {tpl.show_cashier ? <Row label={labelFor(lang, 'cashier')} value={sale.cashier_name || '-'} /> : null}
-        {tpl.show_payment_method ? <Row label={labelFor(lang, 'payment')} value={sale.payment_method || 'Cash'} subValue={paymentDetails.length > 1 ? paymentDetails.map((detail) => `${detail.method}: ${detail.amount_usd > 0 ? fmtUSD(detail.amount_usd) : ''}${detail.amount_usd > 0 && detail.amount_khr > 0 ? ' + ' : ''}${detail.amount_khr > 0 ? fmtKHR(detail.amount_khr) : ''}`).join(' · ') : ''} /> : null}
-        {tpl.show_exchange_rate ? <Row label={labelFor(lang, 'rate')} value={`1 USD = ${Number(exchangeRate).toLocaleString()} ${khrSymbol}`} /> : null}
+        {/* N33 (owner, Sep 6 2026, reading a printed 80mm receipt): "the
+            exchange rate just show the rate, no need 'Exchange Rate: n' just
+            'n' ... and merge into same row as cashier." So the rate is no
+            longer a labelled row of its own -- it rides the cashier row as a
+            bare value, which is also one printed line fewer on the roll. With
+            the cashier row switched off it still prints, unlabelled, so
+            hiding the cashier cannot silently take the rate with it. */}
+        {tpl.show_cashier || exchangeRateText ? (
+          <Row
+            label={tpl.show_cashier ? labelFor(lang, 'cashier') : ''}
+            value={tpl.show_cashier ? (
+              <>
+                {sale.cashier_name || '-'}
+                {/* A REAL space, not `ml-1`: a margin is not a soft wrap
+                    opportunity, so the nowrap rate span had nowhere to break
+                    and stayed welded to the cashier's name. On 58mm paper --
+                    and in `both` mode, whose label is twice as long -- the row
+                    then had to overflow or break the LABEL. With the space the
+                    rate drops whole onto a second line under the name:
+                    "Rath" / "· 1 USD = 4,065 ៛". */}
+                {exchangeRateText ? <>{' '}<span className="whitespace-nowrap text-[0.85em] font-normal">· {exchangeRateText}</span></> : null}
+              </>
+            ) : <span className="whitespace-nowrap">{exchangeRateText}</span>}
+          />
+        ) : null}
       </div>
     ),
     customer: hasCustomer ? (
       <div key="customer" className="mt-2 border-t border-dashed border-gray-300 pt-2">
-        {tpl.show_customer_name && sale.customer_name ? <Row label={labelFor(lang, 'customer')} value={sale.customer_name} /> : null}
+        {tpl.show_customer_name && customerDisplayName ? <Row label={labelFor(lang, 'customer')} value={customerDisplayName} /> : null}
         {tpl.show_customer_phone && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
-        {tpl.show_customer_address && sale.customer_address ? <Row label={labelFor(lang, 'address')} value={displayAddress(sale.customer_address)} /> : null}
-        {showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}
+        {tpl.show_customer_address && customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
+        {!customerIsAnonymous && showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}
       </div>
     ) : null,
-    delivery: hasDelivery && showDeliveryContactSection ? (
+    // N33 (owner, Sep 6 2026): "the delivery fee is shown twice in a row, by
+    // the delivery driver and phone number and the mid to bottom ... remove
+    // the by the delivery driver and phone ... keep near the mid to bottom."
+    // The heading that used to open this section was the SAME "Delivery Fee:"
+    // label the totals row prints, so the phrase appeared twice on one
+    // receipt. The fee now has exactly one home -- the totals block below --
+    // and this section is what it always described: the driver's name, phone
+    // and address rows, each under its own flag.
+    delivery: hasDelivery && showDeliveryContactSection && hasDeliveryContactRows ? (
       <div key="delivery" className="mt-2 border-t border-dashed border-gray-300 pt-2">
-        <div className="mb-1 font-semibold">{labelFor(lang, 'delivery')}</div>
         {showDeliveryDriverName && sale.delivery_contact_name ? <Row label={labelFor(lang, 'driver') || 'Delivery:'} value={sale.delivery_contact_name} /> : null}
         {showDeliveryDriverPhone && sale.delivery_contact_phone ? <Row label={labelFor(lang, 'phone')} value={sale.delivery_contact_phone} /> : null}
         {showDeliveryContactSection && sale.delivery_contact_address && tpl.delivery_show_address !== false ? <Row label={labelFor(lang, 'address')} value={sale.delivery_contact_address} /> : null}
@@ -395,49 +614,66 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     ) : null,
     items: (
       <div key="items" className="mt-2 border-t border-dashed border-gray-300 pt-2">
-        <div data-receipt-line="true" className="mb-1 grid grid-cols-[minmax(0,1fr)_2.8rem_minmax(4.6rem,auto)] gap-x-2 border-b border-dashed border-gray-300 pb-1 text-[10px] font-semibold text-gray-500">
-          <span data-receipt-cell="name">Name</span>
-          <span data-receipt-cell="qty" className="whitespace-normal text-center leading-tight">{labelFor(lang, 'qty')}</span>
-          <span data-receipt-cell="price" className="text-right">Price</span>
+        {/* FOUR columns (owner, Sep 4 2026, from a photo of a printed
+            receipt): item, qty, unit price, line total. The two money
+            columns are narrower than the old single one was, because there
+            are now two of them on the same 58mm paper -- the item column
+            still takes every pixel the other three leave. */}
+        {/* `text-[10px]` sits on the CELLS, never on this grid container. The
+            tracks and the column gap are `em`, so a 10px container resolved
+            them against 10px while the item rows below resolved the same
+            template against the receipt's own font size -- the header lined up
+            with nothing underneath it. One em base for the header and the rows
+            is what gives the Price figures a shared right edge down the page. */}
+        <div data-receipt-line="true" style={itemGridStyle} className="mb-1 grid border-b border-dashed border-gray-300 pb-1 font-semibold text-gray-500">
+          <span data-receipt-cell="name" className="text-[10px]">Item</span>
+          <span data-receipt-cell="qty" className="whitespace-normal text-center text-[10px] leading-tight">Qty</span>
+          {showUnitPriceCol ? <span data-receipt-cell="price" className="text-right text-[10px] leading-tight">Price</span> : null}
+          <span data-receipt-cell="line-total" className="text-right text-[10px] leading-tight">Total</span>
         </div>
         {items.map((item, index) => {
-          const qty = toNumber(item.quantity) || 1
-          const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
-          const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
-          const lineUsd = unitUsd * qty
-          const lineKhr = unitKhr * qty
-          // Per-line discount = the line's ORIGINAL selling price minus what
-          // was actually charged, shown as a crossed-out original + savings.
-          // Z2: the original is the base/selling price plus any product-level
-          // cut (base_price + product_discount = the pre-discount list price),
-          // so BOTH the product-level discount AND the cashier's manual
-          // discount show -- previously this used price_usd, which checkout
-          // stores as the CHARGED price, so real sales showed no discount at
-          // all. Falls back to price_usd for older sales without base_price.
-          const baseUnitUsd = toNumber(item.base_price_usd)
-          const productDiscUnitUsd = toNumber(item.product_discount_usd)
-          const originalUnitUsd = baseUnitUsd > 0
-            ? baseUnitUsd + productDiscUnitUsd
-            : toNumber(item.price_usd ?? item.price)
-          const hasItemDiscount = tpl.show_item_discount !== false
-            && originalUnitUsd > 0
-            && unitUsd > 0
-            && originalUnitUsd > unitUsd + 0.005
-            && item.applied_price_usd != null
-          const itemSavingsUsd = hasItemDiscount ? (originalUnitUsd - unitUsd) * qty : 0
-          // Price-tier tag printed under the item name (user). Derived from
-          // the persisted price_mode, so a VIP line the cashier left marked
-          // prints "VIP" and one they deselected (recorded as 'selling') prints
-          // nothing. "VIP" is identical in both packs; Wholesale carries its
-          // Khmer បោះដុំ for the forthcoming wholesale tier.
-          const tierTag = item.price_mode === 'special'
-            ? 'VIP'
-            : item.price_mode === 'wholesale'
-              ? (lang === 'km' ? 'បោះដុំ' : 'Wholesale')
-              : ''
+          // Every figure on this line comes from the shared calculation, so the
+          // printed price and the Discount row can never disagree.
+          const figures = receiptLineFigures(item, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale)
+          const unknownRecordedUnit = totals.moneyPrecisionVersion === 0 && item.applied_price_usd === null
+          const unknownRecordedTotal = totals.moneyPrecisionVersion === 0 && item.total_usd === null
+          const unknownRecordedKhr = totals.moneyPrecisionVersion === 0 && item.total_khr === null
+          const qty = figures.qty
+          // Price column = the SELLING unit price with the unit cut beside it.
+          // Total column = what the line actually came to. 28.00 (-7.00) then
+          // 21.00, which is the owner’s photo read left to right.
+          const unitUsd = figures.sellingUnitUsd
+          const lineUsd = figures.lineUsd
+          const lineKhr = figures.lineKhr
+          // Per-line discount = the line's LIST price minus what was actually
+          // charged. Both come from receiptLineFigures above; see
+          // utils/receiptLineMath for the derivation and its fallbacks.
+          const hasItemDiscount = !unknownRecordedUnit && !unknownRecordedTotal && figures.hasDiscount
+          const unitSavingsUsd = figures.unitSavingsUsd
+          // The promotion's own title, capped to the shared 40 characters (see
+          // promotionLabelText) so a long rule title cannot widen the line.
+          const promotionLabel = hasItemDiscount ? promotionLabelText(item.product_discount_label) : ''
+          // Price-tier tag printed beside the item name (user). Derived from
+          // the persisted price_mode, so a wholesale line the cashier left
+          // marked prints the tag and one they deselected (recorded as
+          // 'selling') prints nothing.
+          //
+          // 'special' is accepted here as a DEFENSIVE legacy alias and prints
+          // the WHOLESALE label, not "VIP". The 2026-09-04 ruling established
+          // that the tier this app called VIP was the wholesale price all
+          // along, so any historical row still carrying 'special' means
+          // wholesale and must be reprinted as such -- a receipt reprint has to
+          // say the same thing today that the sale meant. (Production was
+          // checked: zero sale_items rows carry price_mode='special', only
+          // 'custom' and 'selling'. This branch exists so an unreprinted or
+          // imported old row can never resurrect the deleted VIP wording.)
+          const displayMode = figures.displayPriceMode ?? item.price_mode
+          const tierTag = (displayMode === 'wholesale' || displayMode === 'special')
+            ? (lang === 'km' ? 'បោះដុំ' : 'Wholesale')
+            : ''
           return (
             <div key={`${item.product_id || item.id || index}-${index}`} className="py-1.5">
-              <div data-receipt-line="true" className="grid grid-cols-[minmax(0,1fr)_2.8rem_minmax(4.6rem,auto)] items-start gap-x-2">
+              <div data-receipt-line="true" style={itemGridStyle} className="grid items-start">
                 <div data-receipt-cell="name" className="min-w-0 overflow-visible whitespace-normal break-words font-semibold leading-snug">
                   <div data-receipt-main="true">
                     {item.product_name || item.name}
@@ -445,25 +681,41 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
                         take extra space) -- a tiny marker beside the title, like
                         the SKU chip, not its own line. */}
                     {tierTag ? <span className="ml-1 text-[10px] font-semibold text-emerald-700">{tierTag}</span> : null}
+                    {/* The promotion that produced the cut, captured on the
+                        line at sale time (product_discount_label -- the rule's
+                        title, only when the rule shows it). Same tiny inline
+                        marker as the tier tag, in the savings colour, so the
+                        customer can read WHICH offer the "(-$x)" below is;
+                        beside the name and not in the Price cell, because that
+                        cell's width is pinned to one figure (N33 above). */}
+                    {promotionLabel ? <span className="ml-1 text-[10px] font-semibold text-red-600" title={String(item.product_discount_label || '')}>{promotionLabel}</span> : null}
                     {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
                   </div>
                 </div>
-                <div data-receipt-cell="qty" className="whitespace-nowrap text-center leading-snug">{tpl.show_item_qty ? qty : ''}</div>
-                <div data-receipt-cell="price" className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
-                  {/* Savings describe the charged price, so they belong in
-                      the Price column—not as a second price block beneath the
-                      product name. This keeps a discounted row readable as
-                      "$2.50 (-$0.50)" at a glance. */}
-                  <div>
-                    {fmtUSD(lineUsd)}
-                    {hasItemDiscount ? <span className="ml-1 text-[10px] font-normal text-red-600">(-{fmtUSD(itemSavingsUsd)})</span> : null}
+                <div data-receipt-cell="qty" style={itemNumericStyle} className="whitespace-nowrap text-center leading-snug">{tpl.show_item_qty ? qty : ''}</div>
+                {/* Savings describe the price, so they sit in the Price
+                    column -- not as a second block under the product name.
+                    A discounted row reads "$28.00 (-$7.00)" at a glance.
+                    The old "qty × unit" subline is gone: the unit price is
+                    its own column now, so the subline only repeated it.
+
+                    N33: the cut is its own BLOCK under the price, not an
+                    inline span beside it. Inline, this cell's max-content was
+                    "$21.00 (-$3.00)" on one line -- ~95px of an 80mm receipt's
+                    ~270px content box -- so the discounted row's price track
+                    grew past its floor and stopped matching the plain rows and
+                    the header. As a block the cell's max-content is the widest
+                    SINGLE figure, both figures are nowrap, and no number is
+                    ever broken across lines. */}
+                {showUnitPriceCol ? (
+                  <div data-receipt-cell="price" style={itemNumericStyle} className="min-w-0 text-right leading-snug">
+                    <div className="whitespace-nowrap">{unknownRecordedUnit ? '—' : fmtUSD(unitUsd)}</div>
+                    {hasItemDiscount ? <div className="whitespace-nowrap font-normal text-red-600">(-{fmtUSD(unitSavingsUsd)})</div> : null}
                   </div>
-                  {tpl.show_item_unit_price && qty > 1 ? (
-                    <div data-receipt-subline="true" className="text-[10px] font-normal text-gray-500">
-                      {qty} × {fmtUSD(unitUsd)}
-                    </div>
-                  ) : null}
-                  {tpl.show_item_khr && lineKhr > 0 ? <div className="text-[10px] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
+                ) : null}
+                <div data-receipt-cell="line-total" style={itemNumericStyle} className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
+                  <div>{unknownRecordedTotal ? '—' : fmtUSD(lineUsd)}</div>
+                  {tpl.show_item_khr && !unknownRecordedKhr && !unknownRecordedTotal && lineKhr > 0 ? <div className="text-[0.85em] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
                 </div>
               </div>
               {tpl.item_separator && index < items.length - 1 ? <div aria-hidden="true" className="mt-1.5 border-t border-gray-200/80" /> : null}
@@ -472,9 +724,21 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
         })}
       </div>
     ),
-    subtotal: tpl.show_subtotal ? <Row key="subtotal" label={labelFor(lang, 'subtotal')} value={fmtUSD(subtotalUsd)} /> : null,
-    discount: tpl.show_discount && discountUsd > 0 ? (
-      <Row key="discount" label={labelFor(lang, 'discount')} value={`-${fmtUSD(discountUsd)}`} subValue={tpl.show_discount_khr !== false && discountKhr > 0 ? `-${fmtKHR(discountKhr)}` : ''} tone="text-red-600" />
+    // The per-line cut, by name. Hidden when there is none, so an
+    // undiscounted sale does not print a row of zeroes.
+    item_discount: showItemDiscount && lineSavingsUsd > 0 ? (
+      <Row key="item_discount" label={labelFor(lang, 'itemDiscount')} value={`-${fmtUSD(lineSavingsUsd)}`} tone="text-red-600" />
+    ) : null,
+    subtotal: tpl.show_subtotal ? <Row key="subtotal" label={labelFor(lang, 'subtotal')} value={fmtUSD(displayedSubtotalUsd)} /> : null,
+    // Every cut on the sale in one figure. Only printed when it says
+    // something the rows above did not already say on their own -- i.e.
+    // when more than one kind of discount is present.
+    total_discount: tpl.show_discount !== false && totalDiscountUsd > 0
+      && [lineSavingsUsd, displayedDiscountUsd, membershipDiscountUsd].filter((v) => v > 0).length > 1 ? (
+      <Row key="total_discount" label={labelFor(lang, 'totalDiscount')} value={`-${fmtUSD(totalDiscountUsd)}`} tone="text-red-600" bold />
+    ) : null,
+    discount: tpl.show_discount && displayedDiscountUsd > 0 ? (
+      <Row key="discount" label={labelFor(lang, 'discount')} value={`-${fmtUSD(displayedDiscountUsd)}`} subValue={tpl.show_discount_khr !== false && displayedDiscountKhr > 0 ? `-${fmtKHR(displayedDiscountKhr)}` : ''} tone="text-red-600" />
     ) : null,
     membership_discount: tpl.show_membership_discount !== false && membershipDiscountUsd > 0 ? (
       <Row
@@ -492,20 +756,58 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
       <Row key="tax" label={labelFor(lang, 'tax')} value={fmtUSD(taxUsd)} subValue={taxKhr > 0 ? fmtKHR(taxKhr) : ''} />
     ) : null,
     delivery_fee: tpl.show_delivery !== false && tpl.delivery_show_fee !== false && deliveryFeeUsd > 0 ? (
-      <Row key="delivery_fee" label={labelFor(lang, 'delivery')} value={fmtUSD(deliveryFeeUsd)} subValue={tpl.show_delivery_khr !== false && deliveryFeeKhr > 0 ? fmtKHR(deliveryFeeKhr) : ''} />
-    ) : null,
-    refund: refundUsd > 0 ? (
-      <Row key="refund" label={labelFor(lang, 'refunded')} value={`-${fmtUSD(refundUsd)}`} subValue={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : ''} tone="text-orange-600" />
+      <Row
+        key="delivery_fee"
+        label={labelFor(lang, 'delivery')}
+        value={deliveryPaidByStore ? (
+          <>
+            {labelFor(lang, 'free')} <span className="text-gray-500 line-through">{fmtUSD(deliveryFeeUsd)}</span>
+          </>
+        ) : fmtUSD(deliveryFeeUsd)}
+        subValue={tpl.show_delivery_khr !== false && deliveryFeeKhr > 0 ? (
+          deliveryPaidByStore ? <span className="line-through">{fmtKHR(deliveryFeeKhr)}</span> : fmtKHR(deliveryFeeKhr)
+        ) : ''}
+      />
     ) : null,
     total: (
       <div key="total" className="my-2 border-y-2 border-black py-2">
+        {roundingDisplay ? <Row label={t?.(roundingDisplay.labelKey) || 'Rounding adjustment'} value={roundingDisplay.amount} /> : null}
         <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={tpl.show_total_khr ? fmtKHR(totalKhr) : ''} bold />
       </div>
     ),
+    // Returns booked against this sale, then what the customer is left with.
+    // BELOW the Total, never above it: sale.total_usd is what the sale rang up
+    // and does not net a refund, so a minus row printed above that line
+    // described a subtraction the line beneath it never made. Underneath it,
+    // Net total states the result so both halves foot.
+    refund: refundUsd > 0 ? (
+      <div key="refund">
+        <Row label={labelFor(lang, 'refunded')} value={`-${fmtUSD(refundUsd)}`} subValue={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : ''} tone="text-orange-600" />
+        <Row label={labelFor(lang, 'netTotal')} value={fmtUSD(netTotalUsd)} subValue={tpl.show_total_khr && netTotalKhr > 0 ? fmtKHR(netTotalKhr) : ''} bold />
+      </div>
+    ) : null,
     payment: tpl.show_amount_paid ? (
       <div key="payment">
-        {paidUsd > 0 ? <Row label={`${labelFor(lang, 'paid')} (USD)`} value={fmtUSD(paidUsd)} /> : null}
-        {paidKhr > 0 ? <Row label={`${labelFor(lang, 'paid')} (KHR)`} value={fmtKHR(paidKhr)} /> : null}
+        {paidUsd > 0 || paidKhr > 0 ? (
+          <Row
+            label={`${labelFor(lang, 'paid')}${tpl.show_payment_method ? ` ${paymentMethodText}` : ''}`}
+            value={paidUsd > 0 ? fmtUSD(paidUsd) : fmtKHR(paidKhr)}
+            subValue={paidUsd > 0 && paidKhr > 0 ? fmtKHR(paidKhr) : ''}
+          />
+        ) : null}
+        {/* What is still owed. A credit / awaiting-payment sale printed a
+            Total and a smaller Paid and then simply stopped, leaving the
+            customer to do the subtraction on a receipt that never named the
+            balance. Riel tendered counts against it -- see receiptTotals.ts. */}
+        {outstandingUsd > 0 ? (
+          <Row
+            label={labelFor(lang, 'balanceDue')}
+            value={fmtUSD(outstandingUsd)}
+            subValue={tpl.show_total_khr && outstandingKhr > 0 ? fmtKHR(outstandingKhr) : ''}
+            bold
+            tone="text-red-600"
+          />
+        ) : null}
       </div>
     ) : null,
     change: tpl.show_change && (changeUsd > 0 || changeKhr > 0) ? (
@@ -516,7 +818,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
         <div data-receipt-line="true" data-receipt-align="center" className="text-center text-[11px] text-gray-500">{footerDivider}</div>
         <div data-receipt-line="true" className="mt-1 text-center text-[11px]">
           {tpl.custom_footer || settings?.receipt_footer || (lang === 'both' ? (
-            <><div>{LABELS.en.thankYou}</div><div className="mt-0.5">{RECEIPT_KHMER_LABELS.thankYou}</div></>
+            <><div>{RECEIPT_KHMER_LABELS.thankYou}</div><div className="mt-0.5">{LABELS.en.thankYou}</div></>
           ) : labelFor(lang, 'thankYou'))}
         </div>
         <div data-receipt-line="true" data-receipt-align="center" className="text-center text-[11px] text-gray-500">{footerDivider}</div>
@@ -530,10 +832,16 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
 
   const fieldOrder: string[] = []
   for (const key of fieldOrderBase) {
+    if (key === 'items') {
+      fieldOrder.push('items')
+      fieldOrder.push('item_discount')
+      continue
+    }
     if (key === 'discount') {
       fieldOrder.push('discount')
       fieldOrder.push('membership_discount')
       fieldOrder.push('membership_points')
+      fieldOrder.push('total_discount')
       continue
     }
     fieldOrder.push(key)
@@ -548,7 +856,18 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   }
   if (!fieldOrder.includes('membership_discount')) fieldOrder.push('membership_discount')
   if (!fieldOrder.includes('membership_points')) fieldOrder.push('membership_points')
-  if (!fieldOrder.includes('refund')) fieldOrder.splice(Math.max(fieldOrder.indexOf('total'), 0), 0, 'refund')
+  // A hand-edited field_order that dropped `items` or `discount` still gets
+  // the new rows rather than silently losing them.
+  for (const key of ['item_discount', 'total_discount']) {
+    if (!fieldOrder.includes(key)) fieldOrder.push(key)
+  }
+  // AFTER the total, never before it: the refund row carries the Net total
+  // with it, and that pair only reads correctly under the figure they net.
+  if (!fieldOrder.includes('refund')) {
+    const totalIndex = fieldOrder.indexOf('total')
+    if (totalIndex >= 0) fieldOrder.splice(totalIndex + 1, 0, 'refund')
+    else fieldOrder.push('refund')
+  }
 
   const renderedSections = fieldOrder
     .map((key, index) => (key === '---divider---' || key.startsWith('divider_')
@@ -574,8 +893,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
       <div className="border-t border-gray-300 pt-1">
         <Row label={labelFor(lang, 'date')} value={dateStr} />
         {sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
-        {sale.customer_address ? <Row label={labelFor(lang, 'address')} value={displayAddress(sale.customer_address)} /> : null}
-        <Row label={labelFor(lang, 'qty')} value={items.reduce((sum, item) => sum + (toNumber(item.quantity) || 1), 0).toLocaleString()} />
+        {customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
       </div>
       <div className="border-y border-gray-900 py-1">
         <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={fmtKHR(totalKhr)} bold />
@@ -595,45 +913,63 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   // Which rendition an action targets. Export must mirror the detailed
   // receipt the cashier is looking at, even when the optional 80x50 summary
   // card is enabled. The compact card remains an explicit Print-menu choice;
-  // silently exporting it made Open PDF / Image show different data and a
-  // fixed 80x50 page instead of the complete continuous receipt.
+  // silently exporting it made Image show different data and a fixed 80x50
+  // page instead of the complete continuous receipt.
   type ReceiptVariant = 'full' | 'compact'
   const defaultVariant: ReceiptVariant = 'full'
   const variantTitle = (variant: ReceiptVariant) => `${receiptTitle} - ${variant === 'compact' ? '80x50mm' : `${fullReceiptWidthMm}mm`}`
 
-  const exportReceiptVariant = async (printTools: ReceiptPrintModule, mode: ReceiptExportMode, variant: ReceiptVariant) => {
+  const exportReceiptVariant = async (printTools: ReceiptPrintModule, mode: ReceiptExportMode, variant: ReceiptVariant, previewWindow?: Window | null) => {
     const target = variant === 'compact' ? compactPrintRef.current : printRef.current
     const variantSettings = variant === 'compact' ? compactPrintSettings : fullPrintSettings
-    if (!target) return
+    if (!target) {
+      // Nothing to print: do not leave the blank tab opened in the tap behind.
+      try { previewWindow?.close?.() } catch { /* already closed */ }
+      return
+    }
     const title = variantTitle(variant)
     if (mode === 'image') {
       await printTools.downloadReceiptImage(target, {
         title,
         fileName: title,
         printSettings: variantSettings,
+        // Only reached by the rare text-only canvas fallback (the primary
+        // html2canvas render already carries the CSS-forced #000 through its
+        // computed styles); keeps that fallback pure black too when Maximum
+        // is set.
+        textColor: contrastTextColor,
       })
-    } else if (mode === 'print') {
-      await printTools.printReceipt(target, {
-        title,
-        printSettings: variantSettings,
-      })
-    } else {
-      await printTools.openReceiptPdf(target, {
+    } else if (mode === 'pdf') {
+      await printTools.downloadReceiptPdf(target, {
         title,
         fileName: title,
         printSettings: variantSettings,
-        previewFallback: true,
-        previewFallbackNote: t?.('receipt_pdf_preview_fallback') || 'PDF export was unavailable, so a printable receipt preview was opened instead.',
+      })
+    } else {
+      await printTools.printReceipt(target, {
+        title,
+        printSettings: variantSettings,
+        previewTranslate: t,
+        previewWindow,
       })
     }
   }
 
   const exportReceiptPdf = async (mode: ReceiptExportMode, variant: ReceiptVariant = defaultVariant) => {
+    // Opened HERE, still inside the tap that triggered this handler: the
+    // module load below is a dynamic import, and once it has been awaited iOS
+    // and Safari no longer accept window.open as user-initiated. null (an
+    // installed iOS app, or a blocked popup) is not an error -- printReceipt
+    // then prints from a hidden iframe in this document instead.
+    const previewWindow = mode === 'print' ? openPrintPreviewWindow() : null
     setPdfBusy(mode)
     try {
       const printTools = await loadReceiptPrintModule()
-      await exportReceiptVariant(printTools, mode, variant)
+      await exportReceiptVariant(printTools, mode, variant, previewWindow)
     } catch (error) {
+      // printReceipt closes the window on ITS failures; a failed module load
+      // happens before it ever sees the window, so close it here.
+      try { previewWindow?.close?.() } catch { /* already closed */ }
       window.alert(getErrorMessage(error, t?.('unable_generate_receipt_pdf') || 'Unable to generate receipt PDF'))
     } finally {
       setPdfBusy('')
@@ -691,25 +1027,77 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
       return (
         <div>
           <p className="mb-1 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">80 × 50 mm</p>
-          <div data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} style={shellStyle}>{compactReceiptBlock}</div>
+          <div data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} {...contrastAttrs} style={shellStyle}>{compactReceiptBlock}</div>
           <p className="mb-1 mt-4 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">{fullReceiptWidthMm} mm</p>
-          <div data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} style={shellStyleFor(fullReceiptWidthMm)}>{renderedSections}{qrBlock}</div>
+          <div data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} {...contrastAttrs} style={shellStyleFor(fullReceiptWidthMm)}>{renderedSections}{qrBlock}</div>
         </div>
       )
     }
-    return <div data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} style={shellStyle}>{renderedSections}{qrBlock}</div>
+    return <div data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} {...contrastAttrs} style={shellStyle}>{renderedSections}{qrBlock}</div>
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-gray-100 dark:bg-zinc-900">
       {/* ONE compact toolbar row (user, Aug 30: the buttons stacked into
-          multiple rows here, "not compact one row"). On phones the
-          secondary actions (Open PDF / Image / Back) collapse to icon-only
-          buttons -- same treatment as the Branches toolbar -- so
-          Print + PDF + Image + language + Back all fit a single row;
-          labels return from sm up. */}
+          multiple rows here, "not compact one row"). N9(b) + N4 (owner, Sep 6
+          2026) MIRRORED it -- Back on the LEFT, Print and Image on the RIGHT --
+          and dropped "Open PDF": the replacement here is Download PDF, a
+          deterministic exact-size file rather than another print-preview
+          alias. Below sm every
+          label collapses to its icon so the row stays a single line on a
+          320px phone; btn-primary/btn-secondary keep the 40px hit target. */}
       <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto border-b border-gray-200 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800 sm:gap-2 sm:py-3">
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <button
+          type="button"
+          className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
+          onClick={onClose}
+          title={t?.('back') || 'Back'}
+          aria-label={t?.('back') || 'Back'}
+        >
+          <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
+            <ArrowLeft className="h-4 w-4 shrink-0" />
+            <span className="hidden truncate sm:inline">{t?.('back') || 'Back'}</span>
+          </span>
+        </button>
+        <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-zinc-700">
+          {([
+            ['en', 'EN'],
+            ['km', 'KH'],
+            ['both', 'KH/EN'],
+          ] as Array<[LanguageMode, string]>).map(([code, text]) => (
+            <button
+              key={code}
+              type="button"
+              onClick={() => setLang(code)}
+              className={`whitespace-nowrap rounded-md px-1.5 py-1 text-xs font-medium transition-colors sm:px-2.5 ${lang === code ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-zinc-600'}`}
+            >
+              {text}
+            </button>
+          ))}
+        </div>
+        {onReturn ? (
+          <span className="inline-flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm text-orange-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-orange-300 sm:px-3"
+              onClick={onReturn}
+              disabled={returnDisabledReason !== ''}
+              title={returnLabel || t?.('return') || 'Return'}
+              aria-label={returnLabel || t?.('return') || 'Return'}
+            >
+              <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
+                <Undo2 className="h-4 w-4 shrink-0" />
+                <span className="hidden truncate sm:inline">{returnLabel || t?.('return') || 'Return'}</span>
+              </span>
+            </button>
+            {returnDisabledReason ? (
+              <InfoHint text={returnDisabledReason} label={returnLabel || t?.('return') || 'Return'} />
+            ) : null}
+          </span>
+        ) : null}
+        </div>
+        <div className="ml-auto flex min-w-0 items-center justify-end gap-1.5 sm:gap-2">
         {compactSalesReceipt ? (
           // The 80x50 card and the full receipt are two print FORMATS. Rather
           // than two dimension-labeled Print buttons (the old B5 layout),
@@ -725,13 +1113,15 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
             trigger={(
               <button
                 type="button"
-                className="btn-primary w-full min-w-0 justify-center px-3 py-2 text-sm"
+                className="btn-primary w-full min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
                 disabled={pdfBusy !== ''}
                 aria-haspopup="true"
+                aria-label={t?.('print') || 'Print'}
+                title={t?.('print') || 'Print'}
               >
                 <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
                   <Printer className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
+                  <span className="hidden truncate sm:inline">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
                   <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" />
                 </span>
               </button>
@@ -745,105 +1135,76 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
         ) : (
         <button
           type="button"
-          className="btn-primary min-w-0 justify-center px-3 py-2 text-sm"
+          className="btn-primary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
           onClick={() => exportReceiptPdf('print')}
           disabled={pdfBusy !== ''}
+          title={t?.('print') || 'Print'}
+          aria-label={t?.('print') || 'Print'}
         >
           <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
             <Printer className="h-4 w-4 shrink-0" />
-            <span className="truncate">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
+            <span className="hidden truncate sm:inline">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
           </span>
         </button>
         )}
         {compactSalesReceipt ? (
-          <>
-            <LazyPortalMenu
-              align="auto"
-              compact
-              triggerWrapperClassName="min-w-0"
-              menuClassName="min-w-[11rem]"
-              trigger={(
-                <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3" disabled={pdfBusy !== ''} aria-haspopup="true" aria-label={t?.('open_pdf') || 'Open PDF'} title={t?.('open_pdf') || 'Open PDF'}>
-                  <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'open' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('open_pdf') || 'Open PDF')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
-                </button>
-              )}
-              items={[
-                { label: `${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('open', 'full') } },
-                { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('open', 'compact') } },
-                { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('open') } },
-              ]}
-            />
-            <LazyPortalMenu
-              align="auto"
-              compact
-              triggerWrapperClassName="min-w-0"
-              menuClassName="min-w-[11rem]"
-              trigger={(
-                <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3" disabled={pdfBusy !== ''} aria-haspopup="true" aria-label={t?.('receipt_image_short') || 'Image'} title={t?.('receipt_image_short') || 'Image'}>
-                  <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
-                </button>
-              )}
-              items={[
-                { label: `${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('image', 'full') } },
-                { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('image', 'compact') } },
-                { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('image') } },
-              ]}
-            />
-          </>
+          <LazyPortalMenu
+            align="auto"
+            compact
+            triggerWrapperClassName="min-w-0"
+            menuClassName="min-w-[11rem]"
+            trigger={(
+              <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3" disabled={pdfBusy !== ''} aria-haspopup="true" aria-label={t?.('download_pdf') || 'Download PDF'} title={t?.('download_pdf') || 'Download PDF'}>
+                <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'pdf' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('download_pdf') || 'Download PDF')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
+              </button>
+            )}
+            items={[
+              { label: `${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('pdf', 'full') } },
+              { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('pdf', 'compact') } },
+              { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('pdf') } },
+            ]}
+          />
         ) : (
-          <>
-            <button
-              type="button"
-              className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
-              onClick={() => exportReceiptPdf('open')}
-              disabled={pdfBusy !== ''}
-              title={t?.('open_pdf') || 'Open PDF'}
-              aria-label={t?.('open_pdf') || 'Open PDF'}
-            >
-              <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'open' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('open_pdf') || 'Open PDF')}</span></span>
-            </button>
-            <button
-              type="button"
-              className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
-              onClick={() => exportReceiptPdf('image')}
-              disabled={pdfBusy !== ''}
-              title={t?.('receipt_image_short') || 'Image'}
-              aria-label={t?.('receipt_image_short') || 'Image'}
-            >
-              <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span></span>
-            </button>
-          </>
+          <button
+            type="button"
+            className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
+            onClick={() => exportReceiptPdf('pdf')}
+            disabled={pdfBusy !== ''}
+            title={t?.('download_pdf') || 'Download PDF'}
+            aria-label={t?.('download_pdf') || 'Download PDF'}
+          >
+            <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'pdf' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('download_pdf') || 'Download PDF')}</span></span>
+          </button>
         )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-        <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-zinc-700">
-          {([
-            ['en', 'EN'],
-            ['km', 'KH'],
-            ['both', 'EN/KH'],
-          ] as Array<[LanguageMode, string]>).map(([code, text]) => (
-            <button
-              key={code}
-              type="button"
-              onClick={() => setLang(code)}
-              className={`whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium transition-colors sm:px-2.5 ${lang === code ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-zinc-600'}`}
-            >
-              {text}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
-          onClick={onClose}
-          title={t?.('back') || 'Back'}
-          aria-label={t?.('back') || 'Back'}
-        >
-          <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
-            <ArrowLeft className="h-4 w-4 shrink-0" />
-            <span className="hidden truncate sm:inline">{t?.('back') || 'Back'}</span>
-          </span>
-        </button>
+        {compactSalesReceipt ? (
+          <LazyPortalMenu
+            align="auto"
+            compact
+            triggerWrapperClassName="min-w-0"
+            menuClassName="min-w-[11rem]"
+            trigger={(
+              <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3" disabled={pdfBusy !== ''} aria-haspopup="true" aria-label={t?.('receipt_image_short') || 'Image'} title={t?.('receipt_image_short') || 'Image'}>
+                <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
+              </button>
+            )}
+            items={[
+              { label: `${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('image', 'full') } },
+              { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('image', 'compact') } },
+              { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('image') } },
+            ]}
+          />
+        ) : (
+          <button
+            type="button"
+            className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
+            onClick={() => exportReceiptPdf('image')}
+            disabled={pdfBusy !== ''}
+            title={t?.('receipt_image_short') || 'Image'}
+            aria-label={t?.('receipt_image_short') || 'Image'}
+          >
+            <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span></span>
+          </button>
+        )}
         </div>
       </div>
 
@@ -856,20 +1217,20 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
             <>
               <p className="mb-1 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">80 × 50 mm</p>
               <div className="mx-auto rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white" style={{ maxWidth: `calc(${receiptWidthMm}mm + 16px)` }}>
-                <div ref={compactPrintRef} data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} style={shellStyle}>
+                <div ref={compactPrintRef} data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} {...contrastAttrs} style={shellStyle}>
                   {compactReceiptBlock}
                 </div>
               </div>
               <p className="mb-1 mt-4 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">{fullReceiptWidthMm} mm</p>
               <div className="mx-auto rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white" style={{ maxWidth: `calc(${fullReceiptWidthMm}mm + 16px)` }}>
-                <div ref={printRef} data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} style={shellStyleFor(fullReceiptWidthMm)}>
+                <div ref={printRef} data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} {...contrastAttrs} style={shellStyleFor(fullReceiptWidthMm)}>
                   {renderedSections}{qrBlock}
                 </div>
               </div>
             </>
           ) : (
             <div className="rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white">
-            <div ref={printRef} data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} style={shellStyle}>
+            <div ref={printRef} data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} {...contrastAttrs} style={shellStyle}>
               {renderedSections}{qrBlock}
             </div>
             </div>

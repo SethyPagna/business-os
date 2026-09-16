@@ -38,12 +38,14 @@ function load(relativePath, stubs = {}) {
 
 const media = load('lib/media.ts')
 const productWrites = load('lib/productWrites.ts', {
+  './moneyPrecision': load('lib/moneyPrecision.ts'),
   './db': { getDb: () => { throw new Error('DB must not be touched by pure gallery validation') } },
   './media': media,
   './batchCode': { dateToBatchCode: () => '' },
   './searchMatch': { normalizeSearchText: String, compactSearchText: String },
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
   '../index': {},
+  './schemaProbe': load('lib/schemaProbe.ts'),
 })
 
 const { validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError } = productWrites
@@ -85,7 +87,11 @@ const formSource = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 
 assert.doesNotMatch(formSource, /Math\.min\(5, existingCount/)
 assert.doesNotMatch(formSource, /next\.length < 5/)
 assert.match(formSource, /Math\.min\(imageLimit, existingCount/)
-assert.match(formSource, /next\.length < imageLimit/)
-assert.match(formSource, /image_gallery: imageList\.slice\(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES\)/)
+assert.match(formSource, /current\.length >= imageLimit \? current : \[\.\.\.current, publicPath\]/)
+assert.match(
+  formSource,
+  /image_gallery: savableImageList\.map\(\(path\) => canonicalizePersistedMediaPath\(path\)\)\.filter\(Boolean\)\.slice\(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES\)/,
+  'the editor persists canonical library paths before applying the administrator gallery cap',
+)
 
 console.log('PASS product galleries reject over-limit writes: normal=3, admin=5; no silent slicing or hidden client five-image bypass')

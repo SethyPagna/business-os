@@ -30,7 +30,8 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
   }
 }
 
-await runTest('POS checkout keeps client, API, and backend duplicate guards', () => {
+await runTest('POS checkout keeps client, API, and backend duplicate guards', async () => {
+  await import('./posMoneyV1.test.ts') // execute production checkout and duplicate/lost-ack recovery
   const pos = readFrontend('src/components/pos/POS.tsx')
   const methods = readFrontend('src/api/methods.ts')
   const saleWriteTransport = readFrontend('src/api/saleWriteTransport.ts')
@@ -40,7 +41,7 @@ await runTest('POS checkout keeps client, API, and backend duplicate guards', ()
   assert.match(pos, /if \(loading \|\| checkoutInFlightRef\.current\) return/)
   assert.match(pos, /checkoutInFlightRef\.current = true[\s\S]*setLoading\(true\)/)
   assert.match(pos, /const POS_CHECKOUT_TIMEOUT_MS = 45000/)
-  assert.match(pos, /withLoaderTimeout\(\s*\(\) => createPosSale\(saleData\)[\s\S]*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/)
+  assert.match(pos, /withLoaderTimeout\(\s*\(\) => createPosSale\(frozen, checkoutScope\)[\s\S]*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/)
   assert.match(pos, /finally \{[\s\S]*checkoutInFlightRef\.current = false[\s\S]*setLoading\(false\)/)
 
   assert.match(methods, /export async function createSale\(d\) \{[\s\S]*loadSaleWriteTransport\(\)/)
@@ -52,7 +53,7 @@ await runTest('POS checkout keeps client, API, and backend duplicate guards', ()
   assert.match(salesTransport, /skipWriteDedupe: true/)
 
   assert.match(salesRoute, /function normalizeClientRequestId\(value: unknown\)/)
-  assert.match(salesRoute, /const existingSale = await db[\s\S]*WHERE client_request_id = \?[\s\S]*if \(existingSale\) return c\.json\(\{ id: existingSale\.id, receiptNumber: existingSale\.receipt_number, duplicate: true \}\)/)
+  assert.match(salesRoute, /const existingSale = await db[\s\S]*WHERE client_request_id = \?[\s\S]*if \(existingSale\) \{[\s\S]*sale_incomplete[\s\S]*return c\.json\(\{ id: existingSale\.id, receiptNumber: existingSale\.receipt_number, duplicate: true, sale: await authoritativeSaleSnapshot\(db, existingSale\.id\) \}\)/)
   assert.match(salesRoute, /INSERT INTO sales \([\s\S]*receipt_number, client_request_id/)
 })
 
@@ -160,8 +161,9 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.doesNotMatch(newReturn, /getReturnApi|window\.api|api\.createReturn/)
   assert.match(editReturn, /const RETURN_UPDATE_TIMEOUT_MS = 15000/)
   assert.match(editReturn, /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/)
-  assert.match(editReturn, /async function updateReturnRequest\(id: number \| string, payload: ReturnUpdatePayload\): Promise<unknown>[\s\S]*updateReturn\(id, payload\)/)
-  assert.match(editReturn, /const payload: ReturnUpdatePayload = \{[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(ret\.id, payload\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/)
+  assert.match(editReturn, /async function prepareReturnRequest\(id: number \| string, payload: ReturnUpdatePayload\): Promise<PreparedReturnUpdateRequest>[\s\S]*prepareReturnUpdateRequest\(id, payload\)/)
+  assert.match(editReturn, /async function updateReturnRequest\(id: number \| string, payload: PreparedReturnUpdateRequest\): Promise<unknown>[\s\S]*submitReturnUpdateRequest\(id, payload\)/)
+  assert.match(editReturn, /const payload: ReturnUpdatePayload = \{[\s\S]*const prepared = activePendingRequest\?\.body \|\| freezeDirectMutationBody\(await prepareReturnRequest\(ret\.id,[\s\S]*savePendingDirectMutation\('return-edit'[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(ret\.id, prepared\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/)
   assert.doesNotMatch(editReturn, /getReturnApi|window\.api|api\.updateReturn/)
   assert.match(supplierReturn, /const SUPPLIER_RETURN_CREATE_TIMEOUT_MS = 15000/)
   assert.match(supplierReturn, /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/)
@@ -178,7 +180,9 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(returns, /function loadReturnsWriteTransport\(\): Promise<ReturnsWriteTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/)
   assert.match(returns, /const historyRestoreInFlightRef = useRef\(false\)/)
   assert.match(returns, /if \(!beginSingleAction\(historyRestoreInFlightRef\)\) return/)
-  assert.match(returns, /withLoaderTimeout\(\s*\(\) => updateReturnRequest\(snapshot\.id as number \| string, \{[\s\S]*\}\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/)
+  assert.match(returns, /const submitReturnHistoryRequest = useCallback\(async \(returnId:[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(returnId, body\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/)
+  assert.match(returns, /const restoreReturnSnapshot = useCallback[\s\S]*const current = await fetchReturnDetail\(snapshot\.id\)[\s\S]*expected_updated_at: currentUpdatedAt,[\s\S]*savePendingHistoryRequest\(snapshot\.id as number \| string, body, historyContext\)[\s\S]*await submitReturnHistoryRequest\(snapshot\.id as number \| string, body\)/)
+  assert.match(returns, /const retryPendingReturnHistoryRequest[\s\S]*actionHistory\[history\.direction\]\(history\.entryId\)/)
   assert.match(returns, /finally \{[\s\S]*finishSingleAction\(historyRestoreInFlightRef\)/)
   assert.doesNotMatch(returns, /getReturnApi|window\.api|api\.(?:getReturn|updateReturn)/)
 
@@ -187,9 +191,13 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'return'\)/)
   assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'supplier_return'\)/)
   assert.match(returnsRoute, /function normalizeClientRequestId\(value: unknown\)/)
-  const returnDedupePattern = /if \(clientRequestId\) \{\s*const existing = await db\.prepare\(["']SELECT id, return_number FROM returns WHERE client_request_id = \? AND client_request_id <> '' LIMIT 1["']\)[\s\S]*?if \(existing\) return c\.json\(\{ id: existing\.id, returnNumber: existing\.return_number, duplicate: true \}\)\s*\}/g
-  const returnDedupeMatches = returnsRoute.match(returnDedupePattern) || []
-  assert.equal(returnDedupeMatches.length, 2, 'expected the same dedupe check in both the customer-return and supplier-return POST handlers')
+  const legacyReturnDedupeQuery = /SELECT id, return_number FROM returns WHERE client_request_id = \? AND client_request_id <> '' LIMIT 1/g
+  const legacyReturnDedupeMatches = returnsRoute.match(legacyReturnDedupeQuery) || []
+  assert.equal(legacyReturnDedupeMatches.length, 1, 'supplier returns retain the indexed legacy request lookup')
+  assert.match(returnsRoute, /const readReceipt = async \(\) => db\.prepare\(`SELECT return_id,sale_id,request_digest,response_json[\s\S]*FROM return_create_receipts WHERE actor_id=\? AND request_id=\? LIMIT 1`\)/)
+  assert.match(returnsRoute, /if \(priorReceipt\) \{[\s\S]*priorReceipt\.request_digest !== requestDigest[\s\S]*idempotency_conflict[\s\S]*JSON\.parse\(priorReceipt\.response_json\)/)
+  assert.match(returnsRoute, /const occupiedRequest = await db\.prepare\("SELECT id FROM returns WHERE client_request_id=\? AND client_request_id<>'' LIMIT 1"\)/)
+  assert.match(returnsRoute, /if \(occupiedRequest\) \{[\s\S]*client_request_id is already owned by another return\.[\s\S]*idempotency_conflict/)
 })
 
 await runTest('file picker and library upload/delete flows keep synchronous action guards', () => {
@@ -238,14 +246,13 @@ await runTest('product form image upload and save keep synchronous guards', () =
 
   assert.match(source, /const imageUploadInFlightRef = useRef\(false\)/)
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)
-  assert.match(source, /if \(imageUploading \|\| imageUploadInFlightRef\.current\) return/)
+  assert.match(source, /if \(!canManageImages \|\| imageUploading \|\| imageUploadInFlightRef\.current\) return/)
   assert.match(source, /imageUploadInFlightRef\.current = true/)
   assert.match(source, /finally \{[\s\S]*imageUploadInFlightRef\.current = false[\s\S]*setImageUploading\(false\)/)
-  // Guard now also blocks while an image is still uploading (Part 241
-  // save-button race fix, ProductForm.tsx) -- accept either the original
-  // two-condition guard or that extended form so this assertion doesn't
-  // regress if a future session drops the extra condition again.
-  assert.match(source, /if \(saving \|\| saveInFlightRef\.current(?: \|\| imageUploading)?\) return/)
+  // Both React state and the synchronous ref must block save while upload is
+  // opening the picker or posting bytes. The ref closes the same-tick gap
+  // before imageUploading has rendered.
+  assert.match(source, /if \(saving \|\| saveInFlightRef\.current \|\| imageUploading \|\| imageUploadInFlightRef\.current\) return/)
   assert.match(source, /saveInFlightRef\.current = true[\s\S]*const payload(?:: ProductSavePayload)? = \{/)
   assert.match(source, /finally \{[\s\S]*saveInFlightRef\.current = false[\s\S]*setSaving\(false\)/)
   assert.match(source, /const PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS = 30000/)
@@ -429,6 +436,27 @@ await runTest('loyalty point rule save uses the shared single-action guard', () 
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(saveInFlightRef\)[\s\S]*setSaving\(false\)/)
 })
 
+await runTest('customer undo/redo replays flag themselves as restores, the manual form does not', () => {
+  const source = readFrontend('src/components/contacts/CustomersTab.tsx')
+
+  // Membership numbers gap-fill (cloudflare/src/lib/membershipNumber.ts), so a
+  // hard-deleted customer's number is handed to the next signup. An undo that
+  // replays that exact number therefore has to tell the server it is a restore,
+  // or the server 400s on a collision the user has no field to fix. A manual Add
+  // Customer submit must NOT carry the flag: there the same collision is a real
+  // typo/duplicate signal staff need to see.
+  assert.match(source, /const buildCustomerPayload = useCallback\([\s\S]*?isUndoRestore: true,[\s\S]*?\}\), \[/, 'the undo/redo replay payload must mark itself as a restore')
+
+  const manualSave = source.slice(source.indexOf('const handleSave = async'), source.indexOf('const handleDelete'))
+  assert.ok(manualSave.length > 0, 'handleSave should still be findable')
+  assert.doesNotMatch(manualSave, /isUndoRestore/, 'the manual Add/Edit Customer submit must never claim to be a restore')
+
+  // Every restore-shaped call site, and only those: buildCustomerPayload plus
+  // the bulk-delete undo payload built inline.
+  assert.equal((source.match(/isUndoRestore: true/g) || []).length, 2, 'exactly the two replay payloads (buildCustomerPayload and the bulk-restore literal) set the flag')
+  assert.match(source, /Restore deleted customers'\)/, 'the bulk-restore call site must still exist')
+})
+
 await runTest('contact tabs use same-tick guards and bounded mutations', () => {
   const targets = [
     {
@@ -481,59 +509,74 @@ await runTest('contact tabs use same-tick guards and bounded mutations', () => {
   }
 })
 
-await runTest('sales status and membership actions use shared guards and bounded mutations', () => {
+await runTest('sales status and customer actions use shared guards and bounded mutations', () => {
   const source = readFrontend('src/components/sales/Sales.tsx')
 
   assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
-  assert.match(source, /const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000/)
-  assert.match(source, /const SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS = 12000/)
+  assert.match(source, /const SALES_STATUS_MUTATION_TIMEOUT_MS = 45000/)
   assert.match(source, /const statusActionRef = useRef<Set<string>>\(new Set\(\)\)/)
-  assert.match(source, /const membershipActionRef = useRef<Set<string>>\(new Set\(\)\)/)
   assert.match(source, /const bulkStatusInFlightRef = useRef\(false\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => getSalesApi\(\)\.updateSaleStatus\(saleId, nextStatus, notes, extra \|\| undefined\),\s*'Update sale status',\s*SALES_STATUS_MUTATION_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => getSalesApi\(\)\.attachSaleCustomer\(saleId, payload\),\s*'Attach sale membership',\s*SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => getSalesApi\(\)\.submitSaleStatusRequest\(saleId, request\),\s*'Update sale status',\s*SALES_STATUS_MUTATION_TIMEOUT_MS,\s*\)/)
+  assert.doesNotMatch(source, /getSalesApi\(\)\.attachSaleCustomer|handleAttachMembership|runSaleMembershipMutation/, 'the removed direct membership writer cannot bypass the receipt-backed customer action')
   assert.match(source, /if \(!beginKeyedAction\(statusActionRef, actionKey\)\) return false/)
   assert.match(source, /finishKeyedAction\(statusActionRef, actionKey\)[\s\S]*return false/)
-  assert.match(source, /await runSaleStatusMutation\(saleId, newStatus, notes, extra\)/)
+  assert.match(source, /const isSettlementRequest = Array\.isArray\(\(extra as \{ payment_details\?: unknown \} \| null\)\?\.payment_details\)/)
+  assert.match(source, /getSalesApi\(\)\.prepareSaleStatusRequest\([\s\S]*savePendingDirectStatus\(saleId, preparedRequest, historyContext\)[\s\S]*await runSaleStatusMutation\(saleId, preparedRequest\)/)
+  assert.match(source, /const replaySaleStatusHistory[\s\S]*result === true[\s\S]*'statusUpdatedAt' in result[\s\S]*throw new Error/)
+  assert.match(source, /const retryPendingDirectStatusRequest[\s\S]*actionHistory\[history\.direction\]\(history\.entryId\)/)
   assert.match(source, /finally \{[\s\S]*finishKeyedAction\(statusActionRef, actionKey\)/)
-  assert.match(source, /if \(!beginKeyedAction\(membershipActionRef, actionKey\)\) return false/)
-  assert.match(source, /await runSaleMembershipMutation\(saleId, \{/)
-  assert.match(source, /await runSaleMembershipMutation\(saleId, payload\)/)
-  assert.match(source, /finally \{[\s\S]*finishKeyedAction\(membershipActionRef, actionKey\)/)
-  assert.match(source, /runConcurrentTasks<SaleStatusEntry, number>\(entries, async \(entry: SaleStatusEntry\) => \{[\s\S]*await runSaleStatusMutation\(saleId, nextStatus, notes, nextStatus === 'cancelled' \? extra : null\)/)
-  assert.match(source, /if \(!selectedSales\.length \|\| !beginSingleAction\(bulkStatusInFlightRef, \{ blocked: !!bulkStatusSaving \}\)\) return/)
+  assert.match(source, /const submitSaleCustomerChange = async[\s\S]*if \(!beginSingleAction\(bulkStatusInFlightRef, \{ blocked: bulkFieldSaving \|\| saleCustomerSaving \}\)\) return false/)
+  assert.match(source, /savePendingBulkFieldRequest\(payload\)[\s\S]*await updateSalesBulkField\(payload\)/, 'the one-sale customer receipt is saved before its mutation')
+  const bulkStart = source.indexOf('  const handleBulkStatusUpdate = async')
+  const bulkEnd = source.indexOf('  const exportVisibleSales =', bulkStart)
+  assert.ok(bulkStart >= 0 && bulkEnd > bulkStart, 'bulk status handler must remain identifiable')
+  const bulk = source.slice(bulkStart, bulkEnd)
+  assert.match(bulk, /if \(!canChangeSaleStatus\)/, 'bulk changes retain the sales.status permission gate')
+  assert.match(bulk, /items: bulkStatusSelectionRef\.current/, 'one bulk request carries the selection frozen for confirmation')
+  assert.match(bulk, /target_status: nextStatus/, 'bulk request retains the confirmed target status')
+  assert.match(bulk, /skip_stock:[^\n]*=== true/, 'skip-stock is an explicit boolean choice')
+  assert.match(bulk, /nextStatus === 'cancelled' \? \{ cancel_reason:/, 'cancellation fields only accompany cancellation')
+  assert.equal((bulk.match(/await updateSalesBulkStatus\(/g) || []).length, 1, 'bulk confirmation submits one grouped request')
+  assert.match(bulk, /const request: BulkSaleStatusPayload = retryRequest \|\| \{[\s\S]*client_request_id: crypto.randomUUID\(\)/, 'new requests mint one key; retries retain the original frozen body')
+  assert.match(bulk, /savePendingBulkRequest\(request\)[\s\S]*await updateSalesBulkStatus\(request\)/, 'persist the exact request before dispatch')
+  assert.doesNotMatch(bulk, /runConcurrentTasks|runSaleStatusMutation|applySaleStatusEntries|pushAction/, 'bulk status must not fan out per-sale writes or create duplicate client-closure history')
+  const salesTransport = readFrontend('src/api/salesTransport.ts')
+  assert.match(salesTransport, /route\('sales:bulkStatus', \(\) => apiFetch\('POST', '\/api\/sales\/bulk-status', payload\), null, true\)/, 'bulk status uses one server-only write route without local fallback')
+  assert.match(source, /if \(\(!retryRequest && !selectedSales\.length\) \|\| !beginSingleAction\(bulkStatusInFlightRef, \{ blocked: !!bulkStatusSaving \}\)\) return/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(bulkStatusInFlightRef\)[\s\S]*setBulkStatusSaving\(''\)/)
 })
 
-await runTest('branch CRUD and transfer actions use shared guards and bounded mutations', () => {
+await runTest('canonical branch metadata edits and transfers use shared guards', () => {
   const branches = readFrontend('src/components/branches/Branches.tsx')
+  const branchForm = readFrontend('src/components/branches/BranchForm.tsx')
   const transfer = readFrontend('src/components/branches/TransferModal.tsx')
 
   assert.match(branches, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(branches, /const BRANCH_MUTATION_TIMEOUT_MS = 12000/)
-  assert.match(branches, /const \[bulkDeleteBusy, setBulkDeleteBusy\] = useState\(false\)/)
   assert.match(branches, /const saveInFlightRef = useRef\(false\)/)
-  assert.match(branches, /const deleteInFlightRef = useRef\(false\)/)
-  assert.match(branches, /const bulkDeleteInFlightRef = useRef\(false\)/)
   assert.match(branches, /withLoaderTimeout\(loader, label, BRANCH_MUTATION_TIMEOUT_MS\)/)
+  assert.match(branches, /if \(!selected\) return/)
   assert.match(branches, /if \(!beginSingleAction\(saveInFlightRef\)\) return/)
   assert.match(branches, /await runBranchMutation\(\(\) => branchApi\.updateBranch\(selected\.id, payload\), 'Update branch'\)/)
-  assert.match(branches, /await runBranchMutation\(\(\) => branchApi\.createBranch\(payload\), 'Create branch'\)/)
   assert.match(branches, /finally \{[\s\S]*finishSingleAction\(saveInFlightRef\)/)
-  assert.match(branches, /if \(!beginSingleAction\(deleteInFlightRef\)\) return/)
-  assert.match(branches, /await runBranchMutation\(\s*\(\) => branchApi\.deleteBranch\(branch\.id, user\?\.id, user\?\.name\),\s*'Delete branch',\s*\)/)
-  assert.match(branches, /finally \{[\s\S]*finishSingleAction\(deleteInFlightRef\)/)
-  assert.match(branches, /if \(!beginSingleAction\(bulkDeleteInFlightRef, \{ blocked: bulkDeleteBusy \}\)\) return/)
-  assert.match(branches, /await runBranchMutation\(\s*\(\) => branchApi\.deleteBranch\(branch\.id, user\?\.id, user\?\.name\),\s*'Bulk delete branches',\s*\)/)
-  assert.match(branches, /finally \{[\s\S]*finishSingleAction\(bulkDeleteInFlightRef\)[\s\S]*setBulkDeleteBusy\(false\)/)
-  assert.match(branches, /disabled=\{bulkDeleteBusy\}/)
+  assert.match(branches, /branchRoleFromName\(currentBranch\.name\) === 'other' \|\| !currentBranch\.is_active/)
+  assert.match(branches, /canEditBranch && branchRoleFromName\(branch\.name\) !== 'other' && !!branch\.is_active/)
+  assert.doesNotMatch(branches, /branchApi\.(createBranch|deleteBranch)\(/)
+  assert.doesNotMatch(branches, /canAddBranch|handleBulkDelete|handleDelete|bulkDeleteBusy|selectedIds/)
+  assert.doesNotMatch(branches, /tr\('add_branch'|title=\{tr\('delete'/)
+  assert.match(branchForm, /name: base\.name/)
+  assert.match(branchForm, /is_active: base\.is_active/)
+  assert.match(branchForm, /id="branch-name"[\s\S]*?readOnly[\s\S]*?aria-readonly="true"/)
+  assert.doesNotMatch(branchForm, /id="branch-active"/)
+  assert.match(branchForm, /id="branch-default"[\s\S]*?onChange=\{\(event\) => set\('is_default'/)
 
   assert.match(transfer, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
-  assert.match(transfer, /const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000/)
+  assert.match(transfer, /const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 45000/)
   assert.match(transfer, /const transferInFlightRef = useRef\(false\)/)
   assert.match(transfer, /if \(!beginSingleAction\(transferInFlightRef, \{ blocked: saving \}\)\) return/)
   assert.match(transfer, /function getTransferApi\(\): TransferApi/)
-  assert.match(transfer, /withLoaderTimeout<TransferResult>\(\(\) => getTransferApi\(\)\.transferStock\(\{[\s\S]*'Transfer branch stock', TRANSFER_STOCK_MUTATION_TIMEOUT_MS\)/)
+  assert.match(transfer, /saveTransferRun\(user\?\.id, run\)[\s\S]*executeTransferRun\(run/)
+  assert.match(readFrontend('src/api/branchTransport.ts'), /apiFetch\('POST', '\/api\/branches\/transfer-bulk', body, 90_000\)/)
   assert.match(transfer, /finally \{[\s\S]*finishSingleAction\(transferInFlightRef\)[\s\S]*setSaving\(false\)/)
 })
 
@@ -563,7 +606,9 @@ await runTest('inventory adjust, transfer, and batch actions use shared guards a
   assert.match(source, /if \(!beginSingleAction\(transferStockInFlightRef, \{ blocked: transferSaving \}\)\) return/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(adjustStockInFlightRef\)[\s\S]*setAdjustSaving\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(transferStockInFlightRef\)[\s\S]*setTransferSaving\(false\)/)
-  assert.ok(mutationLines.length >= 2, 'inventory should still call adjust + transfer stock mutation APIs through the bounded runInventoryMutation wrapper')
+  assert.ok(mutationLines.length >= 1, 'inventory adjustment must keep its bounded mutation wrapper')
+  assert.match(source, /api\.executeInventoryTransfer\(run, checkpoint\)/, 'transfer uses the durable executor and shared HTTP deadline')
+  assert.match(source, /api\.saveInventoryTransfer\(actorId, run\)/, 'freeze and persist before transfer dispatch')
 
   // ManageBatchesModal owns per-batch edits since Part 562 relocated them out
   // of Inventory; its save must keep a synchronous ref guard (state alone is
@@ -725,11 +770,9 @@ await runTest('product page save and delete actions use shared guards and bounde
 
 await runTest('product stock helper modals use shared guards and bounded mutations', () => {
   const bulk = readFrontend('src/components/products/forms/BulkAddStockModal.tsx')
-  const branch = readFrontend('src/components/products/forms/BranchStockAdjuster.tsx')
 
   for (const [label, source, constant, runner] of [
     ['bulk stock add', bulk, 'BULK_ADD_STOCK_MUTATION_TIMEOUT_MS', 'runBulkStockMutation'],
-    ['branch stock adjuster', branch, 'BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS', 'runBranchStockMutation'],
   ]) {
     assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/, `${label} should import shared action guards`)
     assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/\.\.\/utils\/loaders\.ts'/, `${label} should import loader timeout helper`)

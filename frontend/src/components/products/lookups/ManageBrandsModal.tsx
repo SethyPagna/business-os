@@ -593,7 +593,7 @@ export default function ManageBrandsModal({
   }
 
   return (
-    <Modal title={`${t('brand') || 'Brand'} ${t('manage') || 'Manage'}`} onClose={onClose}>
+    <Modal title={`${t('brand') || 'Brand'} ${t('manage') || 'Manage'}`} onClose={onClose} unsavedChanges={{ dirty: Boolean(newBrand.trim()) || Boolean(renamingBrand) }}>
       <div className="space-y-4">
         {error ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{error}</div> : null}
         <ActionHistoryBar history={actionHistoryForBar} t={t} />
@@ -605,7 +605,7 @@ export default function ManageBrandsModal({
               className="input"
               value={newBrand}
               onChange={(event) => setNewBrand(event.target.value)}
-              placeholder="e.g. L'Oreal"
+              placeholder={t('brand_name_example_placeholder') || "e.g. L'Oreal"}
               disabled={busy}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') addLibraryBrand()
@@ -649,7 +649,7 @@ export default function ManageBrandsModal({
                   ) : null}
                 </div>
               ) : null}
-              <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white/95 px-3 py-2 text-xs shadow-sm backdrop-blur dark:border-gray-700 dark:bg-gray-900/95">
+              <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <label className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
                   <input
                     type="checkbox"

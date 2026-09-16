@@ -1,4 +1,6 @@
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
+import { LegalInlineLink } from './legal/LegalPages.tsx'
+import { LEGAL_PAGE_TITLE_KEY, legalText } from './legal/legalContent.ts'
 
 // The standing "we don't take online payments, contact us — for your safety"
 // notice (§2). The user gave one canonical sentence and said various versions
@@ -6,6 +8,10 @@ import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 // a shorter variant where space is tight (the cart drawer header, a card
 // footer). Copy comes through the storefront's i18n `copy()` so both languages
 // stay in sync.
+//
+// The sentence ends on a privacy promise, so it carries a link to the
+// privacy policy that backs the promise up -- an assurance with nothing
+// behind it is the claim a consumer-protection complaint is made of.
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
@@ -24,13 +30,18 @@ export default function PortalNoPaymentNotice({
   const text = variant === 'short'
     ? copy('noPaymentNoticeShort', SHORT)
     : copy('noPaymentNotice', FULL)
+  const privacyKey = LEGAL_PAGE_TITLE_KEY.privacy
+  const privacyLabel = copy(privacyKey, legalText('en', privacyKey), legalText('km', privacyKey))
   return (
     <div
       role="note"
       className={`flex items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] font-medium leading-relaxed text-emerald-800 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-200 ${className}`}
     >
       <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-      <span>{text}</span>
+      <span>
+        {text}{' '}
+        <LegalInlineLink page="privacy" label={privacyLabel} />
+      </span>
     </div>
   )
 }

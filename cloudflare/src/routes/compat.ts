@@ -1,20 +1,28 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { tableColumnSet } from '../lib/schemaProbe'
 import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
 import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } from '../lib/backup'
 import { buildDriveOauthStartUrl, completeDriveOauth, consumeDriveOauthState, disconnectDrive, driveSyncStatus, updateDrivePreferences } from '../lib/googleDrive'
 import { enqueueDriveRestoreStageJob, enqueueDriveSyncJob } from '../lib/driveSyncQueue'
-import { hasPermission, hasAnyPermission, isAdminControlUser, getPermissionTier } from '../lib/permissions'
-import { audit } from '../lib/audit'
+import { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier } from '../lib/permissions'
+import { resolvePlanTier } from '../lib/planTier'
+import { readAllQuotas } from '../lib/quotaGuard'
+import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { buildAuditLogFilters } from '../lib/auditLogQuery'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
-import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
-import { getFamilyStockStats } from '../lib/familyStockStats'
-import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTodayRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
+import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertState } from '../lib/familyStockStats'
+import { loadLowStockConfig } from '../lib/lowStockSettings'
+import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { actorSnapshot } from '../lib/actorSnapshot'
+import { gateTotals } from './reports'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
+const DASHBOARD_STOCK_ALERT_PAGE_SIZE = 10
+const DASHBOARD_STOCK_ALERT_MAX_PAGE_SIZE = 50
 
 // Shared gate matching backend's requirePermission/requireAnyPermission for
 // the system/backup/audit endpoints below -- previously these only checked
@@ -73,9 +81,11 @@ function isoNow() {
   return new Date().toISOString()
 }
 
+// Memoized per isolate by schemaProbe.ts -- was a fresh PRAGMA table_info()
+// on every write through this compat route that needed to know which
+// columns exist.
 async function columnsFor(env: Env, table: string): Promise<Set<string>> {
-  const rows = await env.DB.prepare(`PRAGMA table_info("${table}")`).all<{ name: string }>()
-  return new Set((rows.results || []).map((row) => row.name))
+  return tableColumnSet(getDb(env), table)
 }
 
 function payloadForColumns(body: Record<string, unknown>, columns: Set<string>) {
@@ -142,36 +152,39 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
-function saleItemCount(value: unknown): number {
-  let rows: unknown = value
-  if (typeof rows === 'string') {
-    try { rows = JSON.parse(rows) } catch { return 0 }
-  }
-  if (!Array.isArray(rows)) return 0
-  return rows.reduce((total, item) => {
-    if (!item || typeof item !== 'object') return total
-    const row = item as Record<string, unknown>
-    const quantity = num(row.quantity ?? row.qty ?? 1)
-    return total + Math.max(0, quantity)
-  }, 0)
-}
-
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ''), 10)
   if (!Number.isFinite(n)) return fallback
   return Math.min(max, Math.max(min, n))
 }
 
-function dateRange(query: Record<string, string>) {
-  // An empty dashboard range means all recorded history. The UI no longer
-  // silently presets Today; explicit picker values still use the same local
-  // business-day SQL below.
+type DashboardDateRange = {
+  startDate: string
+  endDate: string
+  granularity: string
+  allTime: boolean
+}
+
+// Missing dates retain the legacy TODAY default. An explicit rangeScope=all
+// is different: it is emitted only when the Dashboard deliberately selects
+// All time and leaves both endpoints empty, so it must stay unbounded instead
+// of being silently relabelled Today.
+function dateRange(query: Record<string, string>): DashboardDateRange {
   const today = businessToday()
-  return {
-    startDate: String(query.startDate || '2000-01-01').slice(0, 10),
+  const allTime = String(query.rangeScope || '').trim().toLowerCase() === 'all'
+    && query.startDate === ''
+    && query.endDate === ''
+  const range: DashboardDateRange = {
+    startDate: String(query.startDate || today).slice(0, 10),
     endDate: String(query.endDate || today).slice(0, 10),
     granularity: ['week', 'month'].includes(String(query.granularity || 'day')) ? String(query.granularity) : 'day',
+    allTime,
   }
+  if (allTime) {
+    range.startDate = ''
+    range.endDate = ''
+  }
+  return range
 }
 
 function emptySummary() {
@@ -217,107 +230,160 @@ function emptyAnalytics() {
   }
 }
 
-async function dashboardSummary(env: Env) {
+async function dashboardSummary(env: Env, query: Record<string, string>) {
   const db = getDb(env)
+  // The owner's low-stock switch/amount/scope, read once and used by BOTH the
+  // badge counts (getFamilyStockStats) and the card's list below them -- the
+  // two are rendered together on Dashboard.tsx, so they must be built from
+  // the same number or the card contradicts its own heading.
+  const lowStockConfig = await loadLowStockConfig(env)
+  const range = dateRange(query)
+  const { startDate, endDate } = range
+  const branchId = query.branchId || null
+  const params = range.allTime
+    ? (branchId ? { branchId } : {})
+    : (branchId ? { startDate, endDate, branchId } : { startDate, endDate })
+  const saleBranchClause = (alias: string) => branchId ? ` AND ${alias}.branch_id = @branchId` : ''
+  // The selected Start->End range scopes everything that is a MOVEMENT:
+  // sales, returns and the recent-sales feed. It deliberately does NOT
+  // scope the STOCK surfaces -- the product/in-stock/low/out counts, the
+  // stock value, and the low-stock / out-of-stock / expiring alert lists and
+  // their counts -- which report current on-hand state for the whole active
+  // catalog. The stock/alert cards are the deliberate exception to the
+  // one-range-scopes-list-and-stats convention (user, 2026-09-03): a period
+  // figure may appear inside such a card as a secondary line, never as its
+  // face value.
+  //
+  // An earlier revision restricted those to "products that had a recognized
+  // sale in the range". That inverts the alert: a product which is out of
+  // stock cannot sell, so anything out of stock for the whole window
+  // dropped off the out-of-stock card exactly when it mattered most, and
+  // the same trap applied more weakly to low stock and expiry. The
+  // low-stock/out-of-stock badge counts come from getFamilyStockStats and
+  // are rendered directly above those lists (Dashboard.tsx), so they are
+  // scoped identically -- a range-scoped badge over a catalog-wide list
+  // would disagree with itself.
   // Family-aware counts (see familyStockStats.ts) so this dashboard tile
   // agrees with the family-grouped pagination total on Products/Inventory
   // -- previously a flat COUNT(*)/SUM() here counted every variant row (and
   // group-header placeholder rows) individually, overcounting vs. those
   // listing pages whenever grouped products existed.
-  const [todaySales, allSales, todayReturns, inventory, lowStock, outOfStock, expiring, expiringCount, recentSales] = await Promise.all([
+  // today_* and all_* below both read the same window-scoped `sales` rows
+  // (same WHERE clause, same params) -- historical naming from when they
+  // scoped two different windows, kept for API back-compat. Previously two
+  // separate queries recomputed the identical SUM twice; one query with a
+  // COUNT now backs both.
+  const [salesTotals, todayReturns, inventory, lowStockPage, outOfStockPage, expiring, expiringCount, recentSales] = await Promise.all([
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
       FROM sales
-      WHERE ${localTodayRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'
-    `).get({}),
-    db.prepare(`
-      SELECT COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
-      FROM sales
-      WHERE COALESCE(sale_status, 'completed') <> 'cancelled'
-    `).get({}),
+      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'${saleBranchClause('sales')}
+    `).get(params),
+    // RETURN-DATE ACTIVITY, customer scope only: "how many refunds were
+    // processed in this window, and for how much". It is NOT the kernel
+    // reversal of this window's revenue -- a refund belongs to its SALE's
+    // bucket -- so nothing may subtract it from a revenue figure.
+    //
+    // FIXED Sep 6 2026 (owner ask N6): the scope predicate was missing, so a
+    // SUPPLIER return (goods sent back to a supplier, no customer money
+    // involved) was counted and its total_refund_usd added to what the
+    // Dashboard labels customer refunds. Every sibling returns query in this
+    // file already carries this predicate; this one did not.
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS total_usd
       FROM returns
-      WHERE ${localTodayRangeClause('created_at')} AND COALESCE(status, 'completed') <> 'cancelled'
-    `).get({}),
+      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')}
+        AND COALESCE(return_scope, 'customer') = 'customer'
+        AND COALESCE(status, 'completed') <> 'cancelled'${saleBranchClause('returns')}
+    `).get(params),
     getFamilyStockStats({
       db,
+      lowStock: lowStockConfig,
       joinSql: '',
       whereSql: 'WHERE p.is_active = 1',
-      params: {},
+      params,
       qtyExpr: 'COALESCE(p.stock_quantity, 0)',
     }),
-    db.prepare(`
-      SELECT id, name, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold
-      FROM products
-      WHERE is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(low_stock_threshold, 10) AND COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0)
-      ORDER BY stock_quantity ASC, lower(name) ASC
-      LIMIT 10
-    `).all({}),
-    db.prepare(`
-      SELECT id, name, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold
-      FROM products
-      WHERE is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)
-      ORDER BY stock_quantity ASC, lower(name) ASC
-      LIMIT 10
-    `).all({}),
+    getFamilyStockAlertPage({ db, lowStock: lowStockConfig, state: 'low', page: 1, pageSize: DASHBOARD_STOCK_ALERT_PAGE_SIZE }),
+    getFamilyStockAlertPage({ db, lowStock: lowStockConfig, state: 'out', page: 1, pageSize: DASHBOARD_STOCK_ALERT_PAGE_SIZE }),
     db.prepare(`
       SELECT id, name, category, unit, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
-      FROM products
-      WHERE is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
+      FROM products p
+      WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
       ORDER BY date(expiry_date) ASC
       LIMIT 10
-    `).all({}),
+    `).all(params),
     db.prepare(`
       SELECT COUNT(*) AS count
-      FROM products
-      WHERE is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
-    `).get({}),
+      FROM products p
+      WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
+    `).get(params),
     db.prepare(`
-      SELECT id, receipt_number, created_at, sale_status, branch_name, customer_name, cashier_name, total_usd, total_khr, items
+      SELECT id, receipt_number, created_at, sale_status, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
+        (SELECT COALESCE(SUM(quantity), 0) FROM sale_items WHERE sale_id = sales.id) AS item_count
       FROM sales
+      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')}${saleBranchClause('sales')}
       ORDER BY created_at DESC, id DESC
       LIMIT 10
-    `).all({}),
+    `).all(params),
   ])
 
   return {
     ...emptySummary(),
-    today_count: num((todaySales as Record<string, unknown>)?.count),
-    today_total: num((todaySales as Record<string, unknown>)?.total_usd),
-    today_total_khr: num((todaySales as Record<string, unknown>)?.total_khr),
+    today_count: num((salesTotals as Record<string, unknown>)?.count),
+    today_total: num((salesTotals as Record<string, unknown>)?.total_usd),
+    today_total_khr: num((salesTotals as Record<string, unknown>)?.total_khr),
     today_return_count: num((todayReturns as Record<string, unknown>)?.count),
     today_return_usd: num((todayReturns as Record<string, unknown>)?.total_usd),
-    all_total: num((allSales as Record<string, unknown>)?.total_usd),
-    all_total_khr: num((allSales as Record<string, unknown>)?.total_khr),
+    all_total: num((salesTotals as Record<string, unknown>)?.total_usd),
+    all_total_khr: num((salesTotals as Record<string, unknown>)?.total_khr),
     product_count: inventory.total_products,
     in_stock_count: inventory.in_stock,
     low_stock_count: inventory.low_stock,
     out_of_stock_count: inventory.out_of_stock,
     stock_value_usd: inventory.stock_value_usd,
     stock_value_khr: inventory.stock_value_khr,
-    low_stock: lowStock || [],
-    out_of_stock: outOfStock || [],
+    low_stock: lowStockPage.items,
+    out_of_stock: outOfStockPage.items,
+    low_stock_preview_limit: DASHBOARD_STOCK_ALERT_PAGE_SIZE,
+    out_of_stock_preview_limit: DASHBOARD_STOCK_ALERT_PAGE_SIZE,
+    low_stock_preview_truncated: lowStockPage.hasMore,
+    out_of_stock_preview_truncated: outOfStockPage.hasMore,
     expiring_products: expiring || [],
     expiring_count: num((expiringCount as Record<string, unknown>)?.count),
     recent_sales: (recentSales || []).map((sale) => ({
       ...sale,
-      item_count: saleItemCount((sale as Record<string, unknown>).items),
+      // The relational sale_items table is canonical.  Do not derive this
+      // from the legacy sales.items JSON, which was empty for older and some
+      // recent writes and caused real sales to display as 0 items.
+      item_count: num((sale as Record<string, unknown>).item_count),
     })),
   }
 }
 
-async function dashboardAnalytics(env: Env, query: Record<string, string>) {
+async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdmin: boolean) {
   const db = getDb(env)
-  const { startDate, endDate, granularity } = dateRange(query)
-  const params = { startDate, endDate }
+  const range = dateRange(query)
+  const { startDate, endDate, granularity } = range
+  const params = range.allTime ? {} : { startDate, endDate }
   const filters = { startDate, endDate, branchId: query.branchId || null }
   const analyticsParams = filters.branchId ? { ...params, branchId: filters.branchId } : params
   const branchClause = (alias: string) => filters.branchId ? ` AND ${alias}.branch_id = @branchId` : ''
-  const activeSalesClause = (alias: string) => `${localDateRangeClause(`${alias}.created_at`)} AND ${recognizedExpr(`${alias}.`)}${branchClause(alias)}`
+  const activeSalesClause = (alias: string) => `${range.allTime ? '1 = 1' : localDateRangeClause(`${alias}.created_at`)} AND ${recognizedExpr(`${alias}.`)}${branchClause(alias)}`
+  // Apportions a sale's net revenue across its lines by each line's share of
+  // subtotal_usd. The > 0 guard avoids a divide-by-zero.
+  //
+  // It used to cost an asymmetry: a sale whose subtotal was never written
+  // contributed 0 to every by-product figure while still appearing in the
+  // by-payment-method and by-branch ones, which read the sale row directly --
+  // which is how the Sep 2-3 import's 22 zero-subtotal receipts hid here. As
+  // of Sep 6 2026 the kernel's valuedSaleExpr holds those receipts out of the
+  // sale-level figures too (netSaleExpr floors at 0 and netRefundExpr caps at
+  // that 0), so both populations now agree at zero and the same 22 receipts
+  // are reported as unvalued_tx_count instead of silently split.
   const attributedLineRevenue = `CASE
     WHEN COALESCE(s.subtotal_usd, 0) > 0
-      THEN COALESCE(si.total_usd, 0) / s.subtotal_usd * (${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0))
+      THEN COALESCE(si.total_usd, 0) / s.subtotal_usd * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
     ELSE 0
   END`
   const [
@@ -334,13 +400,13 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
     hourlyDist,
   ] = await Promise.all([
     getSalesTotals(env, filters),
-    getSalesTotals(env, previousPeriodFilters(filters)),
+    range.allTime ? Promise.resolve({}) : getSalesTotals(env, previousPeriodFilters(filters)),
     getSalesPeriodSeries(env, filters, granularity as 'day' | 'week' | 'month'),
     db.prepare(`
       WITH matching_returns AS (
         SELECT r.id, r.total_refund_usd
         FROM returns r
-        WHERE ${localDateRangeClause('r.created_at')}
+        WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('r.created_at')}
           AND COALESCE(r.return_scope, 'customer') = 'customer'
           AND COALESCE(r.status, 'completed') <> 'cancelled'${branchClause('r')}
       )
@@ -354,7 +420,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
              COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd,
              COALESCE(SUM(r.supplier_loss_usd), 0) AS loss_usd
       FROM returns r
-      WHERE ${localDateRangeClause('r.created_at')}
+      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('r.created_at')}
         AND COALESCE(r.return_scope, 'customer') = 'supplier'
         AND COALESCE(r.status, 'completed') <> 'cancelled'${branchClause('r')}
     `).get(analyticsParams),
@@ -362,7 +428,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
       SELECT COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown') AS method,
              COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown') AS payment_method,
              COUNT(*) AS count,
-             COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS revenue_usd
+             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
       FROM sales s
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
@@ -372,51 +438,64 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
     db.prepare(`
       SELECT s.branch_id, COALESCE(s.branch_name, 'Unassigned') AS branch_name,
              COUNT(*) AS tx_count, COUNT(*) AS count,
-             COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS revenue_usd
+             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
       FROM sales s
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
       GROUP BY s.branch_id, COALESCE(s.branch_name, 'Unassigned')
       ORDER BY revenue_usd DESC
     `).all(analyticsParams),
+    // Grouped by product_id (COALESCE(si.product_id, 0), falling back to a
+    // normalized name key only for the NULL-id/no-link legacy rows) -- NOT
+    // by (product_id, product_name). A product merge (migration 0165+) keeps
+    // one keeper id but leaves old sale_items rows carrying the pre-merge
+    // product_name snapshot, so grouping by the pair split one merged
+    // product's history back into N rows here, one per historical name. The
+    // display name is read live from `products` (COALESCE(MAX(p.name),
+    // MAX(si.product_name))) so a renamed/merged product shows its current
+    // name; the snapshot is only a fallback for a deleted product_id.
+    // Same id-only grouping shape as lib/salesAnalytics.ts's top-products
+    // kernel (line ~3049), just this endpoint's own revenue-attribution math.
     db.prepare(`
-      SELECT si.product_id, si.product_name, SUM(si.quantity) AS qty_sold,
+      SELECT si.product_id, COALESCE(MAX(p.name), MAX(si.product_name)) AS product_name, SUM(si.quantity) AS qty_sold,
              COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
+      LEFT JOIN products p ON p.id = si.product_id
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
-      GROUP BY si.product_id, si.product_name
+      GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
       ORDER BY revenue_usd DESC
       LIMIT 20
     `).all(analyticsParams),
     db.prepare(`
-      SELECT si.product_id, si.product_name, SUM(si.quantity) AS qty_sold,
+      SELECT si.product_id, COALESCE(MAX(p.name), MAX(si.product_name)) AS product_name, SUM(si.quantity) AS qty_sold,
              COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
+      LEFT JOIN products p ON p.id = si.product_id
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
-      GROUP BY si.product_id, si.product_name
+      GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
       ORDER BY qty_sold DESC
       LIMIT 20
     `).all(analyticsParams),
     db.prepare(`
-      SELECT COALESCE(NULLIF(TRIM(s.customer_name), ''), 'Walk-in') AS customer_name, COUNT(*) AS sale_count,
+      SELECT MAX(CASE WHEN ${identifiedCustomerExpr('s.')} IS NULL THEN '' ELSE ${reportCustomerNameExpr('s.')} END) AS customer_name, COUNT(*) AS sale_count,
              COALESCE(SUM(s.subtotal_usd), 0) AS gross_revenue_usd,
              COALESCE(SUM(s.discount_usd), 0) AS store_discount_usd,
              COALESCE(SUM(s.membership_discount_usd), 0) AS membership_discount_usd,
-             COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS net_revenue_usd
+             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS net_revenue_usd
       FROM sales s
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
-      GROUP BY COALESCE(NULLIF(TRIM(s.customer_name), ''), 'Walk-in')
+      GROUP BY ${identifiedCustomerExpr('s.')}
       ORDER BY net_revenue_usd DESC
       LIMIT 20
     `).all(analyticsParams),
     db.prepare(`
       SELECT CAST(${localHourExpr('s.created_at')} AS INTEGER) AS hour, COUNT(*) AS count,
-             COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS revenue_usd
+             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
       FROM sales s
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
@@ -425,8 +504,14 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
     `).all(analyticsParams),
   ])
   return {
-    totals: totals || {},
-    prevTotals: prevTotals || {},
+    // cost_usd / profit_usd and the removal-loss pair are the SAME admin-only
+    // money reports.ts's gateTotals already gates -- reused rather than
+    // re-implemented so the two surfaces cannot drift apart (F1, Sep 15
+    // 2026: this endpoint previously ran its own five-key strip and left
+    // cost_usd / profit_usd ungated, so a non-admin dashboard permission
+    // still saw COGS and profit).
+    totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin),
+    prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin),
     periodReturns: periodReturns || {},
     periodSupplierReturns: periodSupplierReturns || {},
     periodData: periodData || [],
@@ -447,19 +532,40 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
 app.get('/dashboard', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
-  return c.json(await dashboardSummary(c.env))
+  return c.json(await dashboardSummary(c.env, c.req.query()))
+})
+app.get('/dashboard/stock-alerts', async (c) => {
+  const denied = denyUnless(c, 'dashboard')
+  if (denied) return denied
+  const rawState = String(c.req.query('state') || '').toLowerCase()
+  if (rawState !== 'low' && rawState !== 'out') {
+    return c.json({ error: 'state must be low or out' }, 400)
+  }
+  const page = Math.max(1, Number.parseInt(c.req.query('page') || '1', 10) || 1)
+  const pageSize = Math.min(
+    DASHBOARD_STOCK_ALERT_MAX_PAGE_SIZE,
+    Math.max(1, Number.parseInt(c.req.query('pageSize') || String(DASHBOARD_STOCK_ALERT_PAGE_SIZE), 10) || DASHBOARD_STOCK_ALERT_PAGE_SIZE),
+  )
+  const result = await getFamilyStockAlertPage({
+    db: getDb(c.env),
+    lowStock: await loadLowStockConfig(c.env),
+    state: rawState as FamilyStockAlertState,
+    page,
+    pageSize,
+  })
+  return c.json(result)
 })
 app.get('/analytics', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
-  return c.json(await dashboardAnalytics(c.env, c.req.query()))
+  return c.json(await dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user'))))
 })
 app.get('/dashboard/startup', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
   const [summary, analytics] = await Promise.all([
-    dashboardSummary(c.env),
-    dashboardAnalytics(c.env, c.req.query()),
+    dashboardSummary(c.env, c.req.query()),
+    dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user'))),
   ])
   return c.json({ summary, analytics })
 })
@@ -494,7 +600,7 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
   // (or an admin-control user) sees everyone's and may filter by user. A 'view'
   // value fails the old strict denyUnless('audit_log'), so gate on the tier.
   const user = c.get('user')
-  const tier = getPermissionTier(user, 'audit_log')
+  const tier = getActionTier(user, 'audit_log', 'view')
   if (tier === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const ownOnly = tier === 'view'
   const page = Math.max(1, Number.parseInt(c.req.query('page') || '1', 10) || 1)
@@ -602,11 +708,22 @@ app.delete('/system/audit-logs/retention', requireAuth, async (c) => {
   if (!confirmedBody && confirmedQuery !== 'true' && confirmedQuery !== '1') {
     return c.json({ error: 'Confirmation is required to clear old audit logs.' }, 400)
   }
-  const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  // Raw column against a full 'YYYY-MM-DD HH:MM:SS' cutoff (matches audit_logs'
+  // own CURRENT_TIMESTAMP shape), batched by id -- same fix as the scheduled
+  // retention in lib/audit.ts:140-147: the old `date(created_at) < @cutoff`
+  // wrapped the column, defeating any index and forcing a full-table scan, and
+  // deleted in ONE unbounded statement that could exceed D1's per-statement
+  // budget on a large backlog.
+  const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ')
   const db = getDb(c.env)
-  const result = await db.prepare("DELETE FROM audit_logs WHERE date(created_at) < @cutoff").run({ cutoff })
-  const deleted = (result as any)?.meta?.changes ?? (result as any)?.changes ?? 0
-  await audit(c.env, user?.id ?? null, user?.name ?? user?.username ?? null, 'audit_log_retention_delete', 'audit_log', null, { olderThanDays, cutoffDate: cutoff, deleted })
+  let deleted = 0
+  for (;;) {
+    const result = await db.prepare(buildAuditLogRetentionDeleteSql()).run({ cutoff })
+    const n = (result as any)?.meta?.changes ?? (result as any)?.changes ?? 0
+    deleted += n
+    if (n < 5000) break
+  }
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'audit_log_retention_delete', 'audit_log', null, { olderThanDays, cutoffDate: cutoff, deleted })
   return c.json({ ok: true, deleted })
 })
 // The legacy deleted-sale audit ledger (migration 0088): every line the old
@@ -646,8 +763,8 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
   // no date filter set).
   const from = String(query.from || '').slice(0, 10)
   const to = String(query.to || '').slice(0, 10)
-  if (from) { conditions.push("d.deleted_at IS NOT NULL AND date(d.deleted_at, '+7 hours') >= @from"); params.from = from }
-  if (to) { conditions.push("d.deleted_at IS NOT NULL AND date(d.deleted_at, '+7 hours') <= @to"); params.to = to }
+  if (from) { conditions.push(`d.deleted_at IS NOT NULL AND ${localDateAtOrAfter('d.deleted_at', '@from')}`); params.from = from }
+  if (to) { conditions.push(`d.deleted_at IS NOT NULL AND ${localDateAtOrBefore('d.deleted_at', '@to')}`); params.to = to }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
   try {
@@ -748,7 +865,29 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
     backupCheck = { ok: false, status: 'needs_attention', message: error instanceof Error ? error.message : 'R2 backup listing failed' }
   }
 
-  const queue = { ok: true, status: 'configured', message: 'Cloudflare Queues configured.', queues: ['business-os-import', 'business-os-media'] }
+  // This was hard-coded `ok: true, 'configured'` -- it reported a healthy
+  // queue on a deployment with no queue binding at all, which is exactly the
+  // configuration the doctor exists to catch. Read the binding.
+  const importQueueBound = !!c.env.IMPORT_QUEUE
+  const mediaQueueBound = !!c.env.MEDIA_QUEUE
+  const queue = importQueueBound
+    ? {
+        ok: true,
+        status: 'configured',
+        message: mediaQueueBound
+          ? 'Cloudflare Queues configured.'
+          : 'Import queue configured; the media queue binding is missing, so uploaded images are normalized by the 6-hourly sweep instead of on upload.',
+        queues: mediaQueueBound ? ['business-os-import', 'business-os-media'] : ['business-os-import'],
+      }
+    : {
+        ok: false,
+        status: 'needs_attention',
+        message: 'No IMPORT_QUEUE binding on this deployment. Imports and bulk deletes still run, but inline inside the request that starts them (see lib/queueDispatch.ts), so a large one will be cut short by the CPU limit. Check [[queues.producers]] in the config this Worker was deployed from.',
+        queues: mediaQueueBound ? ['business-os-media'] : [],
+      }
+  // ...and it counts towards the overall verdict. It never did before,
+  // because it was a literal true.
+  if (!queue.ok) ok = false
 
   // DuckDB/Parquet has no equivalent in a Workers isolate (no native modules,
   // no filesystem) -- this deployment never uses it, so report that plainly
@@ -779,7 +918,11 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
   }
 
   const checks = { database, objectStorage, queue, analytics, googleDrive, googleLogin, backup: backupCheck }
-  return c.json({ item: { checks, runtime: { objectStorageDriver: 'r2' } }, checks, ok })
+  // tier rides in `runtime` beside objectStorageDriver: the doctor is where
+  // someone looks when production behaves like a smaller machine than they
+  // expect, and "which plan is this deployment on" is the first question.
+  const runtime = { objectStorageDriver: 'r2', tier: resolvePlanTier(c.env), quotas: await readAllQuotas(c.env) }
+  return c.json({ item: { checks, runtime }, checks, ok })
 })
 
 // Ported from backend's testObjectStore(): write, read-back, delete a probe
@@ -1034,7 +1177,7 @@ app.get('/transfers', async (c) => {
   // Transfer history is a read surface shared by Inventory and Branches.
   // Review-tier users may read both parent pages, so requiring a strict Full
   // grant here made the history panel fail with 403 after the page opened.
-  if (getPermissionTier(user, 'inventory') === 'none' && getPermissionTier(user, 'branches') === 'none') {
+  if (getActionTier(user, 'inventory', 'view') === 'none' && getActionTier(user, 'branches', 'view') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
 

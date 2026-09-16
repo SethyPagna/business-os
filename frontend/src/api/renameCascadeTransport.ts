@@ -3,7 +3,7 @@ import { apiFetch } from './http.ts'
 // D6: rename-cascade preview + brand carry (see cloudflare
 // lib/renameCascade.ts -- one impact shape for all four rename kinds).
 
-export type RenameKind = 'category' | 'brand' | 'unit' | 'supplier' | 'customer' | 'user' | 'product_name'
+export type RenameKind = 'category' | 'brand' | 'unit' | 'supplier' | 'customer' | 'delivery_contact' | 'user' | 'product_name'
 
 export type RenameImpact = {
   kind: RenameKind

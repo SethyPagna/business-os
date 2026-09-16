@@ -59,8 +59,3 @@ export function toggleMultiValues(raw: string | null | undefined, values: string
   const next = checked ? [...kept, ...values] : kept
   return next.length ? next.join(SEPARATOR) : ALL
 }
-
-/** Number of individually selected values (for "Filters (n)" badges that should count values, not just active dimensions). */
-export function countMultiValues(raw: string | null | undefined): number {
-  return parseMultiValues(raw).length
-}

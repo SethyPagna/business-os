@@ -41,8 +41,14 @@ fs.writeFileSync(path.join(tmpDir, 'salesAnalytics.ts'), kernelSrc)
 // salesAnalytics.ts imports ./businessDateWindow (the UTC+7 helpers); copy that
 // pure dependency in so the isolated strict compile resolves and emits it.
 fs.writeFileSync(path.join(tmpDir, 'businessDateWindow.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+fs.writeFileSync(path.join(tmpDir, 'moneyPrecision.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'moneyPrecision.ts'), 'utf8'))
+fs.writeFileSync(path.join(tmpDir, 'reportMoneyPrecision.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'reportMoneyPrecision.ts'), 'utf8'))
+const readerDependencies = ['customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts', 'removalLosses.ts', 'schemaProbe.ts']
+for (const file of readerDependencies) {
+  fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', file), 'utf8'))
+}
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2022 --strict --skipLibCheck --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')}`, { cwd: tmpDir, stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2022 --strict --skipLibCheck --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')} ${path.join(tmpDir, 'moneyPrecision.ts')} ${path.join(tmpDir, 'reportMoneyPrecision.ts')} ${readerDependencies.map((file) => path.join(tmpDir, file)).join(' ')}`, { cwd: tmpDir, stdio: 'inherit' })
 
 // ---- real schema ----------------------------------------------------------
 const migrationSql = (file) => fs.readFileSync(path.join(cloudflareRoot, 'migrations', file), 'utf8')
@@ -55,13 +61,22 @@ function liftFrom(file, tableName) {
 }
 const lift = (tableName) => liftFrom('0001_init.sql', tableName)
 const db = new Database(':memory:')
+db.exec('CREATE TABLE customers(id INTEGER PRIMARY KEY, is_anonymous INTEGER DEFAULT 0)')
 db.exec(lift('sales'))
 db.exec(lift('sale_items'))
+db.exec('ALTER TABLE sale_items ADD COLUMN manual_discount_usd REAL DEFAULT 0')
 // getSalesTotals now LEFT JOINs a per-sale customer-refund subquery over the
 // `returns` table (net-sales revenue is stated net of customer refunds). Provide
 // the real returns schema so that SQL resolves; this suite seeds no returns, so
 // refund_usd is 0 and the payment/delivery assertions below are unaffected.
 db.exec(lift('returns'))
+// COGS is now stated net of goods a return put back on the SELLABLE shelf, so
+// the kernel reads return_items -- and reads 0074's stock_action to tell a
+// restock from damaged stock or goods the customer kept. No returns are seeded
+// here, so the reversal is 0 and the assertions below are unaffected; the
+// convergence suite owns the reversal arithmetic.
+db.exec(lift('return_items'))
+db.exec('ALTER TABLE return_items ADD COLUMN stock_action TEXT')
 // getDeliveryContactTotals (fees lane) folds courier expense rows into the
 // delivery report: real fees schema (0018) + the 0105 link column, plus the
 // delivery_contacts table it joins for names. No fees are seeded here, so
@@ -71,6 +86,10 @@ db.exec(liftFrom('0018_fees.sql', 'fees'))
 db.exec('ALTER TABLE fees ADD COLUMN delivery_contact_id INTEGER')
 db.exec('ALTER TABLE sales ADD COLUMN delivery_actual_cost_usd REAL')
 db.exec('ALTER TABLE sales ADD COLUMN delivery_actual_cost_khr REAL')
+// 0106 links a replacement sale back to the return that produced it. The
+// kernel's collectedExpr reads it to tell a settlement apart from a tender,
+// so the column has to be here for the real SQL to resolve.
+db.exec('ALTER TABLE sales ADD COLUMN source_return_id INTEGER')
 
 // getDb-compatible shim: named @params -> better-sqlite3 named binding.
 const dbShim = {
@@ -103,6 +122,19 @@ const seed = (row) => insertSale.run({
   status: row.status ?? 'completed', at: row.at ?? `${D}T10:00:00.000Z`,
 })
 
+// A replacement sale carries two extra columns the ordinary helper never
+// sets: what was actually tendered, and the return it settles.
+const insertExchange = db.prepare(`
+  INSERT INTO sales (receipt_number, branch_id, payment_method, subtotal_usd, total_usd,
+                     amount_paid_usd, source_return_id, sale_status, created_at)
+  VALUES (@receipt, 1, 'Return Exchange', @total, @total, @paid, @returnId, 'completed', @at)
+`)
+// They live on their own day so every existing day-D expectation below
+// keeps its exact numbers -- this check is about the money model, not about
+// re-deriving the day report's totals.
+const EXCHANGE_DAY = '2026-08-26'
+const rawSeedExchange = (row) => insertExchange.run({ ...row, at: `${EXCHANGE_DAY}T11:00:00.000Z` })
+
 seed({ receipt: 'R1', method: 'Cash', subtotal: 10, total: 10 })
 seed({ receipt: 'R2', method: 'ABA', subtotal: 30, discount: 5, total: 25, isDel: 1, contactId: 7, contactName: 'Grab', fee: 2, paidBy: 'customer', actual: 1.5 })
 seed({ receipt: 'R3', method: 'aba ', subtotal: 20, member: 2, total: 18, isDel: 1, contactId: 7, contactName: 'Grab Cambodia', fee: 3, paidBy: 'store', actual: 2, at: `${D}T15:00:00.000Z` })
@@ -110,6 +142,19 @@ seed({ receipt: 'R4', method: '', subtotal: 8, total: 8, isDel: 1, contactId: nu
 seed({ receipt: 'R5', method: 'Cash', subtotal: 99, total: 99, status: 'cancelled' })
 seed({ receipt: 'R6', method: 'Cash', subtotal: 40, total: 40, branch: 2 })
 seed({ receipt: 'R7', method: 'Cash', subtotal: 11, total: 11, at: '2026-08-27T09:00:00.000Z' })
+// R8 is a REPLACEMENT sale (routes/returns.ts writes source_return_id): the
+// customer swapped $20 of goods for $20 of goods, so $20 left the shelf and
+// the till took nothing. R9 is the same shape but the customer topped up $6.
+rawSeedExchange({ receipt: 'R8', total: 20, paid: 0, returnId: 501 })
+rawSeedExchange({ receipt: 'R9', total: 30, paid: 6, returnId: 502 })
+
+// Collected money is a settled-cash cohort: awaiting credit contributes zero,
+// and a completed receipt's customer refund leaves the till exactly once.
+const COLLECTED_DAY = '2026-08-25'
+const settledId = Number(seed({ receipt: 'R10', method: 'Card', subtotal: 50, total: 50, at: `${COLLECTED_DAY}T10:00:00.000Z` }).lastInsertRowid)
+seed({ receipt: 'R11', method: 'Card', subtotal: 70, total: 70, status: 'awaiting_payment', at: `${COLLECTED_DAY}T11:00:00.000Z` })
+db.prepare(`INSERT INTO returns(sale_id,total_refund_usd,status,return_scope,created_at)
+  VALUES(? ,8,'completed','customer',?)`).run(settledId, `${COLLECTED_DAY}T12:00:00.000Z`)
 
 const env = { DB: {} }
 
@@ -132,6 +177,32 @@ const env = { DB: {} }
     'collected = total_usd; the customer-paid delivery fee is already inside total_usd, never added twice')
   const abaLower = byMethod.get('aba')
   ok(abaLower.collected_usd === 18, "store-paid delivery adds nothing to the customer's collected figure")
+
+  // ---- exchanges collect the tender, not the goods ------------------------
+  // An exchange is a settlement, not a tender. Reading total_usd as
+  // "collected" credited the till with money it never took -- on every
+  // exchange, in the payment-method breakdown, the day report and every
+  // customer total. collectedExpr reads amount_paid_usd for these rows.
+  const exchangeDay = await kernel.getPaymentMethodBreakdown(env, { startDate: EXCHANGE_DAY, endDate: EXCHANGE_DAY })
+  const exchange = exchangeDay.find((m) => m.payment_method === 'Return Exchange')
+  ok(exchange.tx_count === 2,
+    'the exchanges are still COUNTED -- goods really moved, the row is not dropped')
+  ok(exchange.total_usd === 50,
+    'and their goods value is still reported (20 + 30)')
+  ok(exchange.collected_usd === 6,
+    'but collected is only the $6 one customer actually topped up -- not 50')
+
+  const collectedMethods = await kernel.getPaymentMethodBreakdown(env, { startDate: COLLECTED_DAY, endDate: COLLECTED_DAY })
+  const collectedCard = collectedMethods.find((m) => m.payment_method === 'Card')
+  ok(collectedCard.tx_count === 2 && collectedCard.total_usd === 120 && collectedCard.collected_usd === 42,
+    'exact payment breakdown excludes awaiting credit and subtracts the settled refund once')
+  const collectedDay = await kernel.getSalesDayReport(env, COLLECTED_DAY)
+  const settled = collectedDay.sales.find((sale) => sale.receipt_number === 'R10')
+  const awaiting = collectedDay.sales.find((sale) => sale.receipt_number === 'R11')
+  ok(collectedDay.totals.collected_total_usd === 42 && collectedDay.payment_methods[0].collected_usd === 42,
+    'day totals and payment methods share the same collected-money basis')
+  ok(settled.collected_usd === 42 && awaiting.collected_usd === 0,
+    'per-sale collected subtracts refunds and never treats awaiting credit as cash')
 
   // ---- delivery contacts --------------------------------------------------
   const couriers = await kernel.getDeliveryContactTotals(env, { startDate: D, endDate: D })

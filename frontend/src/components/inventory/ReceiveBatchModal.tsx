@@ -3,12 +3,20 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
-import { clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
+import InfoHint from '../shared/InfoHint.tsx'
+import MinimizeButton from '../shared/MinimizeButton.tsx'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import { clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey, writeWorkDraft } from '../../utils/workDrafts.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { getProductBatches, receiveBatchStock, type ProductBatch } from '../../api/batchesTransport.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
+import StockReasonField from '../shared/StockReasonField.tsx'
+import { useSavedStockReasons } from '../../utils/useSavedStockReasons.ts'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 
 function todayIsoDate(): string {
   return todayStr()
@@ -30,6 +38,14 @@ type ReceiveBatchModalProps = {
   defaultBranchId?: string
   notify: (message: string, type?: string) => void
   onClose: () => void
+  onMinimize?: (request: {
+    branchId: string
+    draftKey: string
+    label: string
+    productId: InventoryId
+    productName: string
+    productUnit: string
+  }) => void
   onReceived: () => void
   t: Translator
   tr: TranslationWithFallback
@@ -46,6 +62,7 @@ export default function ReceiveBatchModal({
   defaultBranchId,
   notify,
   onClose,
+  onMinimize,
   onReceived,
   t,
   tr,
@@ -55,6 +72,9 @@ export default function ReceiveBatchModal({
   const [receivedDate, setReceivedDate] = useState(todayIsoDate())
   const [expiryDate, setExpiryDate] = useState('')
   const [notes, setNotes] = useState('')
+  // P3-L2: why this stock came in, written on the receipt's own movement as
+  // typed. Blank keeps the Worker's 'Stock received (<lot>)' label.
+  const [reason, setReason] = useState('')
   // Supplier + cost + paid/on-credit (migrations 0062/0065): who this lot
   // came from, what one unit cost, and — when on credit — the due date the
   // admin reminder is built on. D5a: the supplier is a real picker now --
@@ -63,6 +83,9 @@ export default function ReceiveBatchModal({
   const [supplierName, setSupplierName] = useState('')
   const [supplierId, setSupplierId] = useState<number | null>(null)
   const [unitCost, setUnitCost] = useState('')
+  // N14-D: the explicit free-goods declaration. POST /api/batches refuses a
+  // $0.00 unit cost without it.
+  const [freeGoods, setFreeGoods] = useState(false)
   const [paymentStatus, setPaymentStatus] = useState<'' | 'paid' | 'credit'>('')
   const [creditDueDate, setCreditDueDate] = useState('')
   const [saving, setSaving] = useState(false)
@@ -75,6 +98,7 @@ export default function ReceiveBatchModal({
   const [batchChoice, setBatchChoice] = useState<'new' | number>('new')
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
   const [batchLoading, setBatchLoading] = useState(false)
+  const savedReasons = useSavedStockReasons()
 
   useEffect(() => {
     const productId = Number(product?.id)
@@ -106,6 +130,7 @@ export default function ReceiveBatchModal({
     setReceivedDate(todayIsoDate())
     setExpiryDate('')
     setNotes('')
+    setReason('')
     setSupplierName('')
     setSupplierId(null)
     setUnitCost('')
@@ -117,7 +142,7 @@ export default function ReceiveBatchModal({
   // in-progress stock work -- page navigation must ask, not strand it.
   const dirtyStateRef = useRef(false)
   dirtyStateRef.current = Boolean(product) && (
-    quantity !== '1' || expiryDate !== '' || notes !== '' ||
+    quantity !== '1' || expiryDate !== '' || notes !== '' || reason !== '' ||
     supplierName !== '' || unitCost !== '' || paymentStatus !== '' || creditDueDate !== ''
   )
   // Part 388 "Canva-level" persistence: typed values survive a crash,
@@ -137,6 +162,7 @@ export default function ReceiveBatchModal({
         if (draft.receivedDate) setReceivedDate(draft.receivedDate)
         if (draft.expiryDate !== undefined) setExpiryDate(draft.expiryDate)
         if (draft.notes !== undefined) setNotes(draft.notes)
+        if (draft.reason !== undefined) setReason(draft.reason)
         if (draft.supplierName !== undefined) setSupplierName(draft.supplierName)
         // D5a: the contact link rides with the drafted name. Only restored
         // when a name is drafted too -- an id with no name would be
@@ -153,7 +179,7 @@ export default function ReceiveBatchModal({
       // hosts this flow now, so the nav-guard dot must point THERE.
       // (Rider on F3 slice 1, flagged from a7's E1 notes.)
       pageId: 'branches',
-      label: `${tr('receive_batch', 'Receive Batch')}${product.name ? ` — ${product.name}` : ''}`,
+      label: `${tr('receive_batch', 'Receive Stock')}${product.name ? ` — ${product.name}` : ''}`,
       isDirty: () => dirtyStateRef.current,
       discard: () => clearWorkDraft(draftKey),
     })
@@ -162,14 +188,43 @@ export default function ReceiveBatchModal({
 
   useEffect(() => {
     if (!product || !dirtyStateRef.current) return
-    return scheduleWorkDraftWrite(draftKey, { quantity, receivedDate, expiryDate, notes, supplierName, supplierId, unitCost, paymentStatus, creditDueDate }, 600)
+    return scheduleWorkDraftWrite(draftKey, { quantity, receivedDate, expiryDate, notes, reason, supplierName, supplierId, unitCost, paymentStatus, creditDueDate }, 600)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quantity, receivedDate, expiryDate, notes, supplierName, supplierId, unitCost, paymentStatus, creditDueDate])
+  }, [quantity, receivedDate, expiryDate, notes, reason, supplierName, supplierId, unitCost, paymentStatus, creditDueDate])
+
+  // S4-21: this modal already declares its own in-progress state to the
+  // nav guard above (`receive-batch-<id>`), so the dismissal guard asks the
+  // SAME registry entry rather than recomputing dirtiness a second way --
+  // and its Discard runs the same `clearWorkDraft` the nav guard's
+  // "Discard & Leave" runs. A null product yields an unregistered key,
+  // which the guard treats as clean (fails open, never blocks a close).
+  const currentDraft = () => ({
+    quantity, receivedDate, expiryDate, notes, reason, supplierName, supplierId,
+    unitCost, paymentStatus, creditDueDate,
+  })
+  const preserveAndMinimize = product && onMinimize ? () => {
+    // Persist synchronously before the host unmounts this modal. The normal
+    // debounce cleanup cancels a pending timer, so relying on it here could
+    // lose the final keystroke the minus button promised to preserve.
+    writeWorkDraft(draftKey, currentDraft())
+    onMinimize({
+      branchId,
+      draftKey,
+      label: `${tr('receive_batch', 'Receive Stock')}${product.name ? ` — ${product.name}` : ''}`,
+      productId: product.id ?? '',
+      productName: product.name || '',
+      productUnit: product.unit || '',
+    })
+    onClose()
+  } : undefined
+  const closeGuard = useCloseGuard({ workKey: product ? `receive-batch-${product.id}` : '' }, onClose, preserveAndMinimize)
 
   if (!product) return null
 
+  // Both the ✕ and the backdrop land here, so routing this one function
+  // through the guard covers both dismissal paths.
   const closeIfIdle = () => {
-    if (!saving) onClose()
+    if (!saving) closeGuard.requestClose()
   }
 
   // D5a: same visibility-mirror rule as the received date -- an existing
@@ -189,22 +244,38 @@ export default function ReceiveBatchModal({
     if (!parsedBranchId) { notify(tr('choose_branch', 'Choose a branch'), 'error'); return }
     if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) { notify(tr('quantity_must_be_positive', 'Quantity must be a positive number'), 'error'); return }
     if (paymentStatus === 'credit' && !creditDueDate) {
-      notify(tr('credit_needs_due_date', 'A credit purchase needs its due date — the admin reminder is built on it.'), 'error')
+      notify(tr('credit_needs_due_date', 'A supplier purchase marked Not Yet Paid needs a due date — reminders use it.'), 'error')
       return
     }
     const branchName = branchSelectOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'selected branch')
     const lotLabel = typeof batchChoice === 'number'
-      ? batchDisplayLabel({ id: batchChoice, lot_code: selectedLot?.lot_code ?? null, received_at: selectedLot?.received_at ?? null, batch_number: selectedLot?.batch_number ?? null }, t('batch') || 'Batch')
-      : tr('new_batch', 'a new lot')
+      ? batchDisplayLabel({ id: batchChoice, lot_code: selectedLot?.lot_code ?? null, received_at: selectedLot?.received_at ?? null, batch_number: selectedLot?.batch_number ?? null }, t('batch') || 'Received date')
+      : tr('new_batch', 'a new received date')
     if (!window.confirm(tr(
       'confirm_receive_batch_details',
-      'Receive {quantity} {unit} of {product} into {branch}, using {lot}? This posts stock movement(s).',
+      'Receive {quantity} {unit} of {product} into {branch}, using received date {lot}? This posts stock movement(s).',
     )
       .replace('{quantity}', String(parsedQuantity))
       .replace('{unit}', product.unit || 'unit(s)')
       .replace('{product}', product.name || 'this product')
       .replace('{branch}', String(branchName))
       .replace('{lot}', lotLabel))) return
+
+    // N14-D: the same rule POST /api/batches enforces
+    // (cloudflare/src/lib/stockReceiptGate.ts). An already-attributed lot
+    // supplies the supplier itself -- first attribution sticks, which is why
+    // the picker locks and this wire sends none.
+    const receiptGate = stockReceiptGateCode({
+      isStockIn: true,
+      supplierName,
+      lotSupplierName: lotAttributedName,
+      unitCostUsd: unitCost,
+      freeGoods,
+    })
+    if (receiptGate) {
+      notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
+      return
+    }
 
     setSaving(true)
     try {
@@ -218,25 +289,28 @@ export default function ReceiveBatchModal({
         receivedDate: batchChoice === 'new' ? (receivedDate || null) : null,
         batchId: typeof batchChoice === 'number' ? batchChoice : null,
         notes: notes.trim() || null,
+        // As typed; blank sends null so the Worker keeps its own lot label.
+        reason: reason.trim() || null,
         // Mirrors the picker's visibility: locked (lot already attributed)
         // sends nothing, so the wire never carries a choice the UI
         // couldn't offer.
         supplierName: lotAttributedName ? null : (supplierName.trim() || null),
         supplierId: lotAttributedName ? null : supplierId,
         unitCostUsd: unitCost.trim() === '' ? null : Number(unitCost),
+        freeGoods,
         paymentStatus: paymentStatus || null,
         creditDueDate: paymentStatus === 'credit' ? creditDueDate : null,
       })
       if (res?.success === false) {
-        notify((res as any)?.error || tr('receive_batch_failed', 'Failed to receive batch stock'), 'error')
+        notify((res as any)?.error || tr('receive_batch_failed', 'Failed to receive stock'), 'error')
         return
       }
-      notify(tr('batch_received', 'Batch stock received'))
+      notify(tr('batch_received', 'Stock received'))
       clearWorkDraft(scopedWorkDraftKey(`receive_${productId}`))
       onReceived()
       onClose()
     } catch (e: unknown) {
-      notify(e instanceof Error ? e.message : tr('receive_batch_failed', 'Failed to receive batch stock'), 'error')
+      notify(e instanceof Error ? e.message : tr('receive_batch_failed', 'Failed to receive stock'), 'error')
     } finally {
       setSaving(false)
     }
@@ -247,13 +321,13 @@ export default function ReceiveBatchModal({
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
-            <h2 className="font-bold text-gray-900 dark:text-white">{tr('receive_batch', 'Receive Batch')}</h2>
+            <h2 className="font-bold text-gray-900 dark:text-white">{tr('receive_batch', 'Receive Stock')}</h2>
             <div className="mt-0.5 truncate text-xs text-gray-400">{product.name}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <button type="button" className="btn-primary min-h-9 px-3 py-1.5 text-xs sm:hidden" onClick={submit} disabled={saving}>
-              {saving ? (t('saving') || 'Saving...') : tr('receive_stock', 'Receive stock')}
-            </button>
+            {preserveAndMinimize ? (
+              <MinimizeButton disabled={saving} tr={tr} onMinimize={preserveAndMinimize} />
+            ) : null}
             <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>
               <X className="h-4 w-4" />
             </button>
@@ -293,7 +367,7 @@ export default function ReceiveBatchModal({
                 original create-or-match-by-date behavior; picking a lot
                 tops up that exact one. */}
             <div className="block sm:col-span-2">
-              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch', 'Batch')}</span>
+              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch', 'Received date')}</span>
               {batchLoading ? (
                 <div className="text-[11px] text-gray-400">{t('loading') || 'Loading...'}</div>
               ) : (
@@ -303,7 +377,7 @@ export default function ReceiveBatchModal({
                     className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                     onClick={() => setBatchChoice('new')}
                   >
-                    {tr('new_batch', '+ New batch')}
+                    {tr('new_batch', '+ New received date')}
                   </button>
                   {batchOptions.map((batch) => (
                     <button
@@ -312,7 +386,7 @@ export default function ReceiveBatchModal({
                       className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === Number(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                       onClick={() => setBatchChoice(Number(batch.id))}
                     >
-                      {batchDisplayLabel(batch, tr('batch', 'Batch'))} ({batch.quantity})
+                      {batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})
                     </button>
                   ))}
                 </div>
@@ -321,11 +395,14 @@ export default function ReceiveBatchModal({
             {batchChoice === 'new' ? (
               <label className="block">
                 <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('received_date', 'Received date')}</span>
-                <input
-                  className="input w-full text-sm"
-                  type="date"
+                {/* Typed, not a native picker (Sep 3) -- staff key this on a
+                    numeric pad and it derives the lot code. */}
+                <DateEntryInput
+                  className="w-full text-sm"
+                  t={t}
+                  ariaLabel={tr('received_date', 'Received date')}
                   value={receivedDate}
-                  onChange={(event) => setReceivedDate(event.target.value)}
+                  onChange={(iso) => setReceivedDate(iso)}
                 />
                 {/* Preview only -- the backend always recomputes and stores
                     the authoritative code itself from whichever date is
@@ -333,7 +410,7 @@ export default function ReceiveBatchModal({
                     A receipt on the same date as an existing batch tops it
                     up automatically; there's no separate lot code to type. */}
                 <span className="mt-1 block text-[11px] text-gray-400">
-                  {tr('batch_code_preview', 'Batch code')}: {dateToBatchCode(receivedDate) || '--'}
+                  {tr('batch_code_preview', 'Received date code')}: {dateToBatchCode(receivedDate) || '--'}
                 </span>
               </label>
             ) : (
@@ -343,17 +420,18 @@ export default function ReceiveBatchModal({
               <div className="block">
                 <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('received_date', 'Received date')}</span>
                 <span className="mt-2 block text-[11px] text-gray-400">
-                  {tr('existing_lot_keeps_date', 'Tops up the selected lot — its received date stays.')}
+                  {tr('existing_lot_keeps_date', 'Tops up the selected received date — that date stays.')}
                 </span>
               </div>
             )}
             <label className="block">
               <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_date', 'Expiry date')}</span>
-              <input
-                className="input w-full text-sm"
-                type="date"
+              <DateEntryInput
+                className="w-full text-sm"
+                t={t}
+                ariaLabel={tr('expiry_date', 'Expiry date')}
                 value={expiryDate}
-                onChange={(event) => setExpiryDate(event.target.value)}
+                onChange={(iso) => setExpiryDate(iso)}
               />
             </label>
           </div>
@@ -366,21 +444,28 @@ export default function ReceiveBatchModal({
               tr={tr}
               lockedName={lotAttributedName}
               hint={selectedLot && !lotAttributedName
-                ? tr('supplier_will_fill_lot', 'This lot has no supplier yet — your choice will be recorded on it.')
+                ? tr('supplier_will_fill_lot', 'This received date has no supplier yet — your choice will be recorded on it.')
                 : null}
             />
             <label className="block">
-              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('unit_cost_usd', 'Unit cost (USD)')}</span>
+              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('unit_cost_usd', 'Unit cost (USD)')} <span className="text-red-500" aria-hidden="true">*</span></span>
               <input
                 className="input w-full text-sm"
                 type="number"
                 min="0"
                 step="any"
+                required
+                disabled={freeGoods}
                 inputMode="decimal"
-                value={unitCost}
+                value={freeGoods ? '0' : unitCost}
                 onChange={(event) => setUnitCost(event.target.value)}
-                placeholder="0.00"
               />
+              {/* N14-D: a zero cost is a claim, and this is where it is made. */}
+              <span className="mt-1 flex items-center gap-1 text-[10px] text-gray-600 dark:text-gray-400">
+                <input type="checkbox" className="h-3 w-3" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) setUnitCost('0') }} />
+                {tr('stock_receipt_free_goods', 'Free goods')}
+                <InfoHint label={tr('stock_receipt_free_goods', 'Free goods')} text={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')} />
+              </span>
             </label>
           </div>
           {/* Paid vs on-credit; the due date appears only when credit and is
@@ -389,7 +474,7 @@ export default function ReceiveBatchModal({
             <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('payment_to_supplier', 'Payment to supplier')}</span>
             <div className="flex items-center gap-2">
               <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-xs font-medium dark:border-gray-600">
-                {([['', tr('payment_unset', '—')], ['paid', tr('paid', 'Paid')], ['credit', tr('on_credit', 'On credit')]] as const).map(([value, label], index) => (
+                {([['', tr('payment_unset', '—')], ['paid', tr('paid', 'Paid')], ['credit', tr('on_credit', 'Not Yet Paid')]] as const).map(([value, label], index) => (
                   <button
                     key={value || 'unset'}
                     type="button"
@@ -403,16 +488,29 @@ export default function ReceiveBatchModal({
               {paymentStatus === 'credit' ? (
                 <label className="flex min-w-0 flex-1 items-center gap-1.5">
                   <span className="flex-shrink-0 text-[11px] text-gray-500">{tr('due', 'Due')}</span>
-                  <input
-                    className="input min-w-0 flex-1 text-sm"
-                    type="date"
+                  <DateEntryInput
+                    className="min-w-0 flex-1 text-sm"
+                    t={t}
+                    ariaLabel={tr('due', 'Due')}
                     value={creditDueDate}
-                    onChange={(event) => setCreditDueDate(event.target.value)}
+                    onChange={(iso) => setCreditDueDate(iso)}
                   />
                 </label>
               ) : null}
             </div>
           </div>
+          {/* P3-L2: the same reason control every other stock write renders.
+              Above Notes because it is what the ledger shows; Notes stays the
+              free-form receipt detail. */}
+          <StockReasonField
+            id="receive-batch-reason"
+            labelClassName="text-[11px] font-medium text-gray-600 dark:text-gray-400"
+            label={<span className="inline-flex items-center gap-1">{tr('reason', 'Reason')}<InfoHint label={tr('reason', 'Reason')} text={tr('receive_batch_reason_hint', "Written on this receipt's stock movement exactly as typed. Leave blank to use the received-date label.")} /></span>}
+            value={reason}
+            onChange={setReason}
+            savedReasons={savedReasons}
+            placeholder={tr('reason_placeholder', 'e.g. Physical count, Damaged goods…')}
+          />
           <label className="block">
             <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('notes') || 'Notes'}</span>
             <textarea
@@ -423,8 +521,8 @@ export default function ReceiveBatchModal({
             />
           </label>
         </div>
-        <div className="hidden items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex">
-          <button type="button" className="btn-secondary text-sm" onClick={onClose} disabled={saving}>
+        <div className="flex items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+          <button type="button" className="btn-secondary text-sm" onClick={closeIfIdle} disabled={saving}>
             {t('cancel') || 'Cancel'}
           </button>
           <button type="button" className="btn-primary text-sm" onClick={submit} disabled={saving}>
@@ -432,6 +530,7 @@ export default function ReceiveBatchModal({
           </button>
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>
   )
 

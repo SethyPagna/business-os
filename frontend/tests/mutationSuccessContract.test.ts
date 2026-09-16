@@ -51,11 +51,26 @@ for (const rel of GUARDED_FILES) {
   })
 }
 
-runTest('the transfer + branch-delete fixes are present (positive assertion)', () => {
+runTest('transfer success remains explicit and branch management is edit-only', () => {
   const transfer = readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
   assert.match(transfer, /res\?\.success !== false/, 'the transfer handlers must accept a flag-less success')
   const branches = readFileSync(new URL('../src/components/branches/Branches.tsx', import.meta.url), 'utf8')
-  assert.match(branches, /res\?\.success === false/, 'branch delete must only fail on an explicit success:false')
+  assert.match(branches, /res\?\.success === false/, 'branch metadata edit must only fail on explicit success:false')
+  assert.doesNotMatch(branches, /branchApi\.(createBranch|deleteBranch)\(/, 'the UI must not call fixed-identity create/delete routes')
+})
+
+runTest('sale status mutations preserve normal notes and omit settlement notes', () => {
+  const sales = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
+  assert.match(
+    sales,
+    /const isSettlementRequest = Array\.isArray\([\s\S]*?prepareSaleStatusRequest\(\s*saleId,\s*newStatus,\s*isSettlementRequest \? undefined : notes,[\s\S]*?runSaleStatusMutation\(saleId, preparedRequest\)/,
+    'the shared status guard must freeze normal notes into the prepared request, omit settlement notes, and submit that exact request body',
+  )
+  assert.doesNotMatch(
+    sales,
+    /await runSaleStatusMutation\(saleId, newStatus, notes, extra\)/,
+    'settlement must not regress to always sending the notes field rejected by its route contract',
+  )
 })
 
 if (failed > 0) {

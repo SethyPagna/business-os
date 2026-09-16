@@ -6,6 +6,7 @@
 // first-attribution-sticks visible instead of silently ignored.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { bulkStockReceiptWire as bulkReceiptWire } from '../src/utils/stockReceiptFields.ts'
 
 let passed = 0
 function ok(label: string) {
@@ -20,7 +21,6 @@ function read(rel: string): string {
 const picker = read('components/shared/SupplierPickerField.tsx')
 const receiveModal = read('components/inventory/ReceiveBatchModal.tsx')
 const inventoryModals = read('components/inventory/InventoryStockModals.tsx')
-const branchAdjuster = read('components/products/forms/BranchStockAdjuster.tsx')
 const bulkModal = read('components/products/forms/BulkAddStockModal.tsx')
 const inventoryPage = read('components/inventory/Inventory.tsx')
 const transport = read('api/batchesTransport.ts')
@@ -31,27 +31,65 @@ const transport = read('api/batchesTransport.ts')
 for (const [name, src] of [
   ['ReceiveBatchModal', receiveModal],
   ['InventoryStockModals', inventoryModals],
-  ['BranchStockAdjuster', branchAdjuster],
   ['BulkAddStockModal', bulkModal],
 ] as const) {
   assert.match(src, /import SupplierPickerField from ['"].*shared\/SupplierPickerField/, `${name} imports the shared picker`)
   assert.match(src, /<SupplierPickerField/, `${name} renders the shared picker`)
 }
-ok('all four manual add surfaces render the ONE shared SupplierPickerField (cross-surface rule)')
+ok('all three manual add surfaces render the ONE shared SupplierPickerField (cross-surface rule) -- InventoryStockModals is the one live surface every per-branch add/remove/set adjust form (Inventory.tsx and StockAdjustModal.tsx) actually renders through')
 
 // --- The picker itself: typing always breaks the contact link (an id may
 // only ever come from an explicit pick), and picks land on mousedown so
 // the input's blur can't swallow them.
-assert.match(picker, /onChange\(\{ supplierId: null, supplierName: event\.target\.value \}\)/, 'typing clears supplierId')
-assert.match(picker, /onMouseDown=\{\(event\) => \{ event\.preventDefault\(\); pick\(row\) \}\}/, 'suggestion picks beat blur via mousedown')
+// The input + floating list is now the ONE shared SuggestionTextInput (the
+// same control the product form's Category/Brand/Unit/Supplier and the
+// create-products header's Brand render), so the field keeps only what is
+// supplier-specific. The GUARANTEES are unchanged and asserted in both
+// places: the id semantics here, the pointer safety there.
+//
+// The pointer rule this file has always pinned is UNCHANGED: a pick lands on
+// mousedown. A tap synthesises mousedown before the focus change that blurs
+// the input, which is why this picker worked on its four touch surfaces with
+// no touch handler at all -- so a touchstart that picks is not "the mobile
+// path", it is a regression that turns a scroll of the list into a selection.
+const suggestionInput = read('components/shared/SuggestionTextInput.tsx')
+assert.match(picker, /import SuggestionTextInput/, 'the picker wraps the shared control instead of copying it')
+assert.match(
+  picker,
+  /if \(option\) \{[\s\S]{0,80}?onChange\(\{ supplierId: Number\(option\.payload\), supplierName: option\.value \}\)/,
+  'a pick carries the contact id outright',
+)
+// P3-9: typing no longer always drops the id. It is RE-RESOLVED from the
+// typed text on every keystroke against the loaded name list, so an edited
+// name still cannot ride on the previous pick's id, while typing an existing
+// supplier's name exactly now attributes the lot to that contact instead of
+// minting a second name-only attribution for a supplier that already exists.
+// An unmatched OR ambiguous name still resolves to null (name-only).
+assert.match(
+  picker,
+  /const resolved = resolveSupplierByExactName\(resolvable, next\)/,
+  'the typed name goes through the exact-name resolver',
+)
+assert.match(
+  picker,
+  /onChange\(\{ supplierId: resolved \? resolved\.id : null, supplierName: next \}\)/,
+  'an unresolved name is still recorded by name only',
+)
+assert.doesNotMatch(
+  picker,
+  /else onChange\(\{ supplierId: null, supplierName: next \}\)/,
+  'the unconditional drop is gone',
+)
+assert.match(suggestionInput, /onMouseDown=\{\(event\) => \{ event\.preventDefault\(\); pick\(option\) \}\}/, 'suggestion picks beat blur via mousedown')
+assert.doesNotMatch(suggestionInput, /onTouchStart=\{[^}]*pick\(/, 'a tap already reaches the mousedown path; a touchstart pick would fire mid-scroll')
 assert.match(picker, /fields: ['"]names['"]/, 'suggestions come from the permission-free name-only suppliers read')
-ok('picker: free text stays name-only, picks are mousedown-safe, list is the names-only read')
+ok('picker: free text stays name-only, picks are mousedown-safe on mouse and touch, list is the names-only read')
 
 // --- Locked variant: when the lot is already attributed the field is
 // read-only -- no input element in that branch, so no choice can be
 // collected that the server would ignore.
 {
-  const lockedBlock = picker.slice(picker.indexOf('if (lockedName)'), picker.indexOf('const query'))
+  const lockedBlock = picker.slice(picker.indexOf('if (lockedName)'), picker.indexOf('const suggestionOptions'))
   assert.ok(lockedBlock.includes('supplier_first_attribution'), 'locked variant explains first-attribution-sticks')
   assert.ok(!lockedBlock.includes('<input'), 'locked variant renders NO input')
   ok('picker: attributed lots render read-only, never a dead input')
@@ -64,17 +102,34 @@ assert.match(receiveModal, /supplierId: lotAttributedName \? null : supplierId/,
 ok('ReceiveBatchModal: locked lot sends nothing (visibility-mirror rule)')
 
 assert.match(inventoryModals, /supplier_id: '', supplier_name: ''/, 'InventoryStockModals clears supplier when an attributed lot is picked')
-assert.match(inventoryPage, /supplierId: adjustForm\.type === 'add' && adjustForm\.supplier_id !== ''/, "Inventory.tsx sends supplier only for adds")
-assert.match(inventoryPage, /supplierName: adjustForm\.type === 'add' && String\(adjustForm\.supplier_name \|\| ''\)\.trim\(\) !== ''/, 'Inventory.tsx name likewise add-only')
-ok('Inventory adjust: form cleared on attributed lots, wire is add-only')
+// S4-16 widened "adds only" to "stock-ins only": a 'set' above the current
+// figure is converted to an add of the difference by routes/inventory.ts and
+// creates a real lot, so it attributes that lot exactly as an add does. A
+// remove -- and a set that lowers the figure -- still carries no supplier.
+assert.match(inventoryPage, /supplierId: isStockIn && adjustForm\.supplier_id !== ''/, 'Inventory.tsx sends supplier only for stock-ins')
+assert.match(inventoryPage, /supplierName: isStockIn && String\(adjustForm\.supplier_name \|\| ''\)\.trim\(\) !== ''/, 'Inventory.tsx name likewise stock-in only')
+assert.match(inventoryPage, /const isStockIn = isStockInSubmission\(adjustForm\.type, qty, previousQuantity\)/, 'Inventory.tsx derives that from the shared rule, not its own copy')
+ok('Inventory adjust: form cleared on attributed lots, wire is stock-in only')
 
-assert.match(branchAdjuster, /supplierId: row\.type === 'add' && row\.supplierId != null \? row\.supplierId : undefined/, 'BranchStockAdjuster sends supplier only on add rows')
-assert.match(branchAdjuster, /onChange\(\{ supplierId: null, supplierName: '' \}\)/, 'BranchStockAdjuster clears the row when its lot is attributed')
-ok('BranchStockAdjuster: per-row honesty (adds only, attributed lots cleared)')
-
-assert.match(bulkModal, /supplierId: action === 'add' && supplierId != null \? supplierId : undefined/, 'BulkAddStockModal sends supplier only for adds')
+// N14-D widened "adds only" here too, and for the same reason S4-16 widened
+// it on Inventory.tsx: routes/inventory.ts converts a 'set' that RAISES a
+// row's stock into an add, and this surface -- one figure applied to many
+// products, with no branch quantity in sight -- cannot tell which rows those
+// are. So a bulk set states the supplier too; a remove still states none.
+// Asserted by evaluating the shared rule, not by matching the expression.
+assert.match(bulkModal, /bulkStockReceiptWire\(action, \{/, 'BulkAddStockModal builds its receipt half from the shared rule')
+assert.deepEqual(
+  bulkReceiptWire('remove', { unitCost: '3', freeGoods: false, supplierId: 9, supplierName: 'Bong Long', receivedDate: '2026-09-06' }),
+  {},
+  'a bulk remove carries no supplier and no cost',
+)
+assert.equal(
+  bulkReceiptWire('set', { unitCost: '3', freeGoods: false, supplierId: 9, supplierName: 'Bong Long', receivedDate: '2026-09-06' }).supplierId,
+  9,
+  'a bulk set can raise a row, and a raise is a receipt that names its supplier',
+)
 assert.match(bulkModal, /supplier_bulk_hint/, 'BulkAddStockModal explains the fill-not-rewrite semantics for existing lots')
-ok('BulkAddStockModal: one supplier per bulk event, adds only, semantics explained')
+ok('BulkAddStockModal: one supplier per bulk event, receipts only, semantics explained')
 
 // --- Transport: the lot list carries attribution so the pickers can tell
 // locked from fill; the receive payload carries the id beside the name.

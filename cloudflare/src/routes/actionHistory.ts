@@ -2,9 +2,22 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { isServerReplayable, resolveUndoApplier, applierPermissionTier } from '../lib/undoAppliers'
+import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
+import { SALE_ADD_ITEMS_ACTION_KIND, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
+import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
+import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
+import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
+import { isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE } from '../lib/saleCustomerAssignmentGuard'
+import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
+import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/saleSettlementAction'
+import { STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession } from '../lib/stockSession'
+import { actorSnapshot } from '../lib/actorSnapshot'
+import { TRANSFER_OPERATION_KIND, canReplayTransferPayload, notifyTransferOperation } from '../lib/transferOperation'
+
+const SERVER_SALE_BULK_KINDS = new Set([BULK_STATUS_KIND, ...SALE_BULK_UPDATE_KINDS])
+const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND, STOCK_SESSION_KIND, SALE_SETTLEMENT_ACTION_KIND])
 
 // Ported from backend/src/routes/actionHistory.ts. This replaces the
 // read-only GET-only stub that lived in compat.ts (no create, no
@@ -73,8 +86,12 @@ function canReadAllHistory(user: SessionUser, requestedAll = false): boolean {
 
 function canOperateHistoryRow(user: SessionUser, row: ActionHistoryRow | null | undefined): boolean {
   if (!row) return false
+  if (parseJson(row.undo_payload).applier === CUSTOMER_GENDER_RESTORATION_KIND) return canRestoreCustomerGender(user) && Number(row.created_by_id) === Number(user.id)
   if (isAdminControlUser(user)) return true
-  const permission = permissionForActionHistory(row)
+  const transferPayload = parseJson(row.undo_payload)
+  const permission = transferPayload.applier === TRANSFER_OPERATION_KIND
+    && (transferPayload.permission === 'branches' || transferPayload.permission === 'inventory')
+    ? transferPayload.permission : permissionForActionHistory(row)
   if (permission && !hasPermission(user, permission)) return false
   const payload = { ...parseJson(row.undo_payload), ...parseJson(row.redo_payload) }
   if (isSensitiveActionHistory({ ...row, payload })) return false
@@ -91,12 +108,28 @@ function canOperateHistoryRow(user: SessionUser, row: ActionHistoryRow | null | 
 function canUseNamedAppliers(user: SessionUser, payloads: Array<unknown>): boolean {
   for (const raw of payloads) {
     const applier = resolveUndoApplier(raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null)
-    if (applier && applierPermissionTier(user, applier) !== 'full') return false
+    if (applier?.name === TRANSFER_OPERATION_KIND) {
+      if (!canReplayTransferPayload(user, raw as Record<string, unknown>)) return false
+    } else if (applier?.name === STOCK_SESSION_KIND) {
+      const payload = raw as Record<string, unknown>
+      if (payload.snapshot_version !== 2 || !canReplayStockSessionPayload(user, payload)) return false
+    } else if (applier?.name === CUSTOMER_GENDER_RESTORATION_KIND) {
+      if (!canRestoreCustomerGender(user)) return false
+    } else if (applier && applierPermissionTier(user, applier) !== 'full') return false
   }
   return true
 }
 
+function isServerManagedPayload(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const payload = value as Record<string, unknown>
+  const kind = String(payload.applier || '')
+  return kind === CUSTOMER_GENDER_RESTORATION_KIND || kind === TRANSFER_OPERATION_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
+    || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
+}
+
 function canRecordHistory(user: SessionUser, body: Record<string, unknown>): boolean {
+  if ([body.undo_payload, body.redo_payload].some(isServerManagedPayload)) return false
   if (isAdminControlUser(user)) return true
   if (!canUseNamedAppliers(user, [body.undo_payload, body.redo_payload])) return false
   const permission = permissionForActionHistory({ entity: body.entity, scope: body.scope })
@@ -110,7 +143,7 @@ function canRecordHistory(user: SessionUser, body: Record<string, unknown>): boo
   return !isSensitiveActionHistory({ entity: body.entity, scope: body.scope, payload })
 }
 
-function mapRow(row: ActionHistoryRow, user: SessionUser) {
+async function mapRow(row: ActionHistoryRow, user: SessionUser, env: Env) {
   const undoPayload = parseJson(row.undo_payload)
   const redoPayload = parseJson(row.redo_payload)
   // K1 slice 2: tells the client this row's next transition can be replayed
@@ -123,12 +156,18 @@ function mapRow(row: ActionHistoryRow, user: SessionUser) {
   const applier = replayable
     ? resolveUndoApplier(String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload)
     : null
+  const replayChangesImages = applier
+    ? await mergeReplayChangesProductImages(env, String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload, String(row.status || '').toLowerCase() === 'redoable' ? 'redo' : 'undo')
+    : false
   return {
     ...row,
     reversible: !!row.reversible,
     undo_payload: undoPayload,
     redo_payload: redoPayload,
-    server_replayable: !!(applier && applierPermissionTier(user, applier) === 'full'),
+    server_replayable: !!(applier
+      && canUseNamedAppliers(user, [undoPayload, redoPayload])
+      && (applier.name !== CUSTOMER_GENDER_RESTORATION_KIND || Number(row.created_by_id) === Number(user.id))
+      && (!replayChangesImages || getActionTier(user, 'products', 'image') === 'full')),
   }
 }
 
@@ -163,10 +202,79 @@ app.get('/', async (c) => {
         ORDER BY updated_at DESC, id DESC LIMIT @limit
       `).all<ActionHistoryRow>({ scope, user_id: user?.id || 0, limit })
     }
-    return c.json({ success: true, items: rows.map((row) => mapRow(row, user)) })
+    return c.json({ success: true, items: await Promise.all(rows.map((row) => mapRow(row, user, c.env))) })
   } catch (error) {
     return c.json({ success: false, error: (error as Error)?.message || 'Failed to load action history' }, 500)
   }
+})
+
+app.get('/:id/details', async (c) => {
+  const user = c.get('user'), db = getDb(c.env)
+  const row = await db.prepare('SELECT * FROM action_history WHERE id=?').get<ActionHistoryRow>([Number(c.req.param('id'))])
+  if (!row || !canOperateHistoryRow(user, row)) return c.json({ error: 'Action not found.' }, 404)
+  const payload = parseJson(row.undo_payload)
+  const applierKind = String(payload.applier || '')
+  if (applierKind === PRODUCT_REMOVE_ACTION_KIND) {
+    if (!canUseNamedAppliers(user, [payload])) return c.json({ error: 'No permission.' }, 403)
+    const operation = await db.prepare(`SELECT operation_id,product_id,reason,source,status,generation,created_at,updated_at
+      FROM product_remove_operations WHERE action_history_id=@history AND operation_id=@operation`)
+      .get<Record<string, unknown>>({ history: row.id, operation: String(payload.operation_id || '') })
+    if (!operation) return c.json({ error: 'Saved details unavailable.' }, 404)
+    return c.json({ success: true, kind: PRODUCT_REMOVE_ACTION_KIND, total: 1, offset: 0, limit: 1,
+      items: [operation], next_offset: null })
+  }
+  if (applierKind === PRODUCT_MERGE_GROUP_ACTION_KIND) {
+    if (!canUseNamedAppliers(user, [payload])) return c.json({ error: 'No permission.' }, 403)
+    const group = await db.prepare(`
+      SELECT g.review_id,g.ordinal,g.group_key,g.status,g.reversal_generation,
+             g.updated_at,COUNT(m.undo_snapshot_id) AS child_count
+      FROM product_conflict_action_groups g
+      JOIN product_conflict_action_reviews r ON r.id=g.review_id
+      JOIN action_history h ON h.id=g.action_history_id AND h.created_by_id=r.actor_id
+      LEFT JOIN product_conflict_action_group_members m
+        ON m.review_id=g.review_id AND m.group_ordinal=g.ordinal
+      WHERE g.action_history_id=? AND g.review_id=? AND g.group_key=?
+      GROUP BY g.review_id,g.ordinal,g.group_key,g.status,g.reversal_generation,g.updated_at
+    `).get<Record<string, unknown>>([row.id, String(payload.review_id || ''), String(payload.group_key || '')])
+    if (!group) return c.json({ error: 'Saved details unavailable.' }, 404)
+    const offset = Math.max(0, Math.min(3999, Number.parseInt(c.req.query('offset') || '0', 10) || 0))
+    const limit = Math.max(1, Math.min(10, Number.parseInt(c.req.query('limit') || '10', 10) || 10))
+    const items = await db.prepare(`
+      SELECT member_ordinal,product_id,role,status
+      FROM product_conflict_action_group_members
+      WHERE review_id=? AND group_ordinal=?
+      ORDER BY member_ordinal LIMIT ? OFFSET ?
+    `).all<Record<string, unknown>>([String(group.review_id), Number(group.ordinal), limit, offset])
+    const totalRow = await db.prepare(`
+      SELECT COUNT(*) AS total FROM product_conflict_action_group_members
+      WHERE review_id=? AND group_ordinal=?
+    `).get<{ total: number }>([String(group.review_id), Number(group.ordinal)])
+    return c.json({
+      action: { review_id: group.review_id, group_key: group.group_key, status: group.status, generation: group.reversal_generation },
+      items,
+      total: Number(totalRow?.total || 0),
+      childCount: Number(group.child_count || 0),
+    })
+  }
+  if (!SERVER_BULK_KINDS.has(applierKind) || !canUseNamedAppliers(user, [payload])) return c.json({ error: 'No permission.' }, 403)
+  const operationTable = applierKind === STOCK_SESSION_KIND
+    ? 'stock_session_operations'
+    : applierKind === RETURN_BULK_ACTION_KIND
+      ? 'return_bulk_operations'
+      : applierKind === SALE_SETTLEMENT_ACTION_KIND
+        ? 'sale_mutation_receipts'
+        : 'sale_bulk_operations'
+  const receiptColumn = applierKind === SALE_SETTLEMENT_ACTION_KIND ? 'response_json' : 'receipt_json'
+  const operation = await db.prepare(`SELECT ${receiptColumn} AS receipt_json FROM ${operationTable} WHERE history_id=?`).get<{ receipt_json: string }>([row.id])
+  if (!operation) return c.json({ error: 'Saved details unavailable.' }, 404)
+  const receipt = JSON.parse(operation.receipt_json)
+  const items = Array.isArray(receipt.items) ? receipt.items : []
+  const offset = Math.max(0, Math.min(25, Number.parseInt(c.req.query('offset') || '0', 10) || 0))
+  const limit = Math.max(1, Math.min(10, Number.parseInt(c.req.query('limit') || '10', 10) || 10))
+  const action = receipt.action || (applierKind === RETURN_BULK_ACTION_KIND
+    ? { field: payload.field, source: payload.source, target: payload.target }
+    : null)
+  return c.json({ action, items: items.slice(offset, offset + limit), total: items.length, changedCount: receipt.changedCount, unchangedCount: receipt.unchangedCount })
 })
 
 app.post('/', async (c) => {
@@ -197,7 +305,7 @@ app.post('/', async (c) => {
       undo_payload: serializePayload(body.undo_payload),
       redo_payload: serializePayload(body.redo_payload),
       created_by_id: user?.id ?? null,
-      created_by_name: user?.name ?? null,
+      created_by_name: actorSnapshot(user),
     })
     return c.json({ success: true, id: result.lastInsertRowid })
   } catch (error) {
@@ -220,12 +328,14 @@ app.patch('/:id', async (c) => {
       .get<ActionHistoryRow>({ id: actionId, user_id: user?.id || 0 })
     if (!existing) return c.json({ success: false, error: 'Action history item not found' }, 404)
 
+    if ([parseJson(existing.undo_payload), parseJson(existing.redo_payload)].some(isServerManagedPayload)) return c.json({ success: false, error: 'Grouped history is server-managed.' }, 403)
+
     await db.prepare(`
       UPDATE action_history SET status = @status, last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id
     `).run({ status, last_error: body.last_error ? String(body.last_error) : null, id: actionId })
 
     if (status === 'redoable' || status === 'undoable') {
-      await audit(c.env, user?.id ?? null, user?.name ?? null, status === 'redoable' ? 'action_undo' : 'action_redo',
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), status === 'redoable' ? 'action_undo' : 'action_redo',
         existing.entity || 'action_history', existing.entity_id || existing.id,
         { actionHistoryId: existing.id, scope: existing.scope, label: existing.label, status })
     }
@@ -256,7 +366,12 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const currentStatus = String(existing.status || '').toLowerCase()
     const expected = direction === 'undo' ? 'undoable' : 'redoable'
     const nextStatus = direction === 'undo' ? 'redoable' : 'undoable'
-    if (currentStatus !== expected) {
+    const stockReplay = parseJson(existing.undo_payload)?.applier === STOCK_SESSION_KIND
+    const groupReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_MERGE_GROUP_ACTION_KIND
+    const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
+    const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
+    const genderReplay = parseJson(existing.undo_payload)?.applier === CUSTOMER_GENDER_RESTORATION_KIND
+    if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay && !genderReplay) {
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now` }, 409)
     }
 
@@ -266,12 +381,22 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     // applier leaves the action reversible and retryable rather than half-done.
     const payload = direction === 'undo' ? parseJson(existing.undo_payload) : parseJson(existing.redo_payload)
     const applier = resolveUndoApplier(payload)
+    const serverManagedReplay = !!(applier && isServerManagedPayload(payload))
+    const replayChangesProductImages = applier
+      ? await mergeReplayChangesProductImages(c.env, payload, direction)
+      : false
     // The applier's own declared permission gates its replay -- full tier,
     // checked HERE at operate time too (recording is gated the same way, but
     // rows written before this gate existed, or by a user since demoted,
     // must not replay on the strength of the row alone). Runs before any
     // status flip so a refusal changes nothing.
-    if (applier && applierPermissionTier(user, applier) !== 'full') {
+    if (genderReplay && !canRestoreCustomerGender(user)) return c.json({ success: false, error: 'Administrator Contacts edit permission is required.' }, 403)
+    if (applier && (applier.name === TRANSFER_OPERATION_KIND
+      ? !canReplayTransferPayload(user, payload)
+      : applier.name === STOCK_SESSION_KIND
+      ? !canReplayStockSessionPayload(user, payload)
+      : applierPermissionTier(user, applier) !== 'full'
+        || (replayChangesProductImages && getActionTier(user, 'products', 'image') !== 'full'))) {
       return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
     }
     // Refuse BEFORE any status flip: if the caller cannot replay the payload
@@ -286,22 +411,52 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       }, 409)
     }
     let applied = false
+    let outcome: UndoApplierOutcome | void = undefined
     if (applier) {
       try {
-        await applier.run(payload, { env: c.env, user, direction })
+        outcome = await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation })
         applied = true
       } catch (error) {
-        await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
+        if (!serverManagedReplay) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
-        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action` }, 500)
+        const code = Number((error as Error & { statusCode?: number })?.statusCode) // Preserve statusCode 409 as a conflict.
+        const saleCustomerReplay = SALE_BULK_UPDATE_KINDS.has(applier.name) && (payload.action === 'customer' || payload.action === 'customer_name')
+        const status = (stockReplay || saleCustomerReplay || genderReplay) && (code === 400 || code === 403 || code === 404) ? code : code === 409 ? 409 : 500
+        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
       }
+    }
+
+    if (serverManagedReplay && applier) {
+      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND) c.executionCtx.waitUntil(applier.name === CUSTOMER_GENDER_RESTORATION_KIND
+        ? notifyCustomerGenderRestoration(c.env)
+        : applier.name === TRANSFER_OPERATION_KIND
+        ? notifyTransferOperation(c.env)
+        : applier.name === STOCK_SESSION_KIND
+        ? notifyStockSession(c.env, { operationId: String(payload.operation_id) })
+        : applier.name === SALE_SETTLEMENT_ACTION_KIND
+          ? notifySaleSettlementAction(c.env)
+          : applier.name === RETURN_BULK_ACTION_KIND
+            ? notifyReturnBulkAction(c.env)
+            : applier.name === BULK_STATUS_KIND
+              ? notifyBulkStatus(c.env)
+              : notifySaleBulkUpdate(c.env, String(payload.action || '')))
+      const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
+      return c.json({
+        success: true,
+        applied: true,
+        item: row ? await mapRow(row, user, c.env) : null,
+        payload,
+        ...(applier.name === PRODUCT_MERGE_GROUP_ACTION_KIND || genderReplay
+          ? (outcome || { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: Number(body.expected_generation || 0) })
+          : {}),
+      })
     }
 
     await db.prepare(`
       UPDATE action_history SET status = @status, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id
     `).run({ status: nextStatus, id: existing.id })
 
-    await audit(c.env, user?.id ?? null, user?.name ?? null, direction === 'undo' ? 'action_undo' : 'action_redo',
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), direction === 'undo' ? 'action_undo' : 'action_redo',
       existing.entity || 'action_history', existing.entity_id || existing.id,
       { actionHistoryId: existing.id, scope: existing.scope, label: existing.label, status: nextStatus, serverApplied: applied, appliedBy: applier?.name || null })
 
@@ -309,7 +464,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     return c.json({
       success: true,
       applied,
-      item: row ? mapRow(row, user) : null,
+      item: row ? await mapRow(row, user, c.env) : null,
       payload,
     })
   } catch (error) {

@@ -25,9 +25,11 @@ import AllFieldsPanel    from './AllFieldsPanel'
 import ReceiptPreview    from './ReceiptPreview'
 import PrintSettings     from './PrintSettings'
 import AppSelect from '../shared/AppSelect.tsx'
+import InfoHint from '../shared/InfoHint.tsx'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import { normalizeSocialQrUrl } from '../../utils/socialQrLink.ts'
+import { normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
 
 const RECEIPT_SETTINGS_SAVE_TIMEOUT_MS = 12000
 const RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS = 10000
@@ -297,15 +299,15 @@ function ReceiptQrSettingsTab({ tpl, setT, t }: ReceiptQrSettingsTabProps) {
       <Section title={t('sales_receipt_title') || '80 × 50mm ABA Sales Receipt'}>
         <Toggle
           label={t('sales_receipt_enabled') || 'Use compact 80 × 50mm sales receipt'}
-          desc={t('sales_receipt_enabled_desc') || 'Shows shop and customer details, item count, total, ABA payment details, and an optional payment note.'}
+          desc={t('sales_receipt_enabled_desc') || 'Shows shop and customer details, total, ABA payment details, and an optional payment note.'}
           value={tpl.sales_receipt_enabled === true}
           onChange={(value) => setT('sales_receipt_enabled', value)}
         />
         {tpl.sales_receipt_enabled ? (
           <div className="mt-3 space-y-3">
-            <input className="input" aria-label="ABA account name" placeholder={t('aba_account_name') || 'ABA account name'} value={tpl.sales_receipt_aba_account_name || ''} onChange={(event) => setT('sales_receipt_aba_account_name', event.target.value)} />
-            <input className="input" aria-label="ABA account number" placeholder={t('aba_account_number') || 'ABA account number'} value={tpl.sales_receipt_aba_account_number || ''} onChange={(event) => setT('sales_receipt_aba_account_number', event.target.value)} />
-            <input className="input" aria-label="ABA QR image" placeholder={t('aba_qr_image') || 'ABA QR image URL'} value={tpl.sales_receipt_aba_qr_image || ''} onChange={(event) => setT('sales_receipt_aba_qr_image', event.target.value)} />
+            <input className="input" aria-label={t('aba_account_name') || 'ABA account name'} placeholder={t('aba_account_name') || 'ABA account name'} value={tpl.sales_receipt_aba_account_name || ''} onChange={(event) => setT('sales_receipt_aba_account_name', event.target.value)} />
+            <input className="input" aria-label={t('aba_account_number') || 'ABA account number'} placeholder={t('aba_account_number') || 'ABA account number'} value={tpl.sales_receipt_aba_account_number || ''} onChange={(event) => setT('sales_receipt_aba_account_number', event.target.value)} />
+            <input className="input" aria-label={t('aba_qr_image') || 'ABA QR image URL'} placeholder={t('aba_qr_image') || 'ABA QR image URL'} value={tpl.sales_receipt_aba_qr_image || ''} onChange={(event) => setT('sales_receipt_aba_qr_image', event.target.value)} />
             <AppSelect
               value={tpl.sales_receipt_note || 'none'}
               onChange={(value) => setT('sales_receipt_note', value)}
@@ -568,7 +570,7 @@ export default function ReceiptSettings() {
             Tabs stay scrollable (min-w-0 + overflow-x-auto); the button
             group is flex-shrink-0 so it never gets squeezed off-screen. */}
         <div
-          className="sticky top-0 z-20 mb-4 flex items-center gap-2 border-b border-gray-200 bg-gray-50/95 px-4 pb-1 pt-4 backdrop-blur dark:border-gray-800 dark:bg-zinc-950/95 sm:px-6 sm:pt-6"
+          className="sticky top-0 z-20 mb-4 flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 pb-1 pt-4 dark:border-gray-800 dark:bg-zinc-950 sm:px-6 sm:pt-6"
           title={t('rs_auto_save_hint') || 'Toggle any field on/off. All changes auto-save and apply instantly to the live preview and to receipts printed from POS & Sales.'}
         >
           <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-3 sm:flex-wrap sm:overflow-visible">
@@ -639,8 +641,8 @@ export default function ReceiptSettings() {
               <Section title={t('delivery_fee_position') || 'Delivery Fee Position'}>
                 <div className="space-y-2">
                   {[
-                    ['totals',      t('totals_section') || 'In Totals Section',   t('delivery_position_totals_desc') || 'Appears with subtotal, discount, tax (recommended)'],
-                    ['after_items', t('delivery_fee_position_after') || 'After Items List', t('delivery_position_after_desc') || 'Appears right after the items, before totals'],
+                    ['totals',      t('totals_section') || 'In Totals Section',   t('delivery_fee_position_totals_desc') || 'Delivery fee shown inside the totals section'],
+                    ['after_items', t('delivery_fee_position_after') || 'After items', t('delivery_fee_position_after_desc') || 'Delivery fee shown after the items, before totals'],
                   ].map(([val, label, desc]) => (
                     <button key={val} onClick={() => setT('delivery_fee_position', val)}
                       className={`w-full p-3 rounded-xl border-2 text-left ${tpl.delivery_fee_position === val ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-gray-300'}`}>
@@ -686,6 +688,21 @@ export default function ReceiptSettings() {
                 </div>
                 <label htmlFor="receipt-font-size" className="text-sm text-gray-700 dark:text-gray-300 block mb-2">{t('font_size_label') || 'Font Size'}: {tpl.font_size}px</label>
                 <input id="receipt-font-size" name="receipt_font_size" autoComplete="off" type="range" min="9" max="16" value={tpl.font_size} onChange={e => setT('font_size', parseInt(e.target.value))} className="w-full" />
+                <div className="mt-4 flex items-center gap-1.5">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">{t('receipt_text_contrast') || 'Text Contrast'}</span>
+                  <InfoHint
+                    label={t('receipt_text_contrast') || 'Text Contrast'}
+                    text={t('receipt_text_contrast_desc') || 'Maximum renders every receipt text node in pure black, without changing font size or weight.'}
+                  />
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {[['normal', t('receipt_text_contrast_normal') || 'Normal'], ['maximum', t('receipt_text_contrast_maximum') || 'Maximum black']].map(([val, label]) => (
+                    <button key={val} onClick={() => setT('text_contrast', val)}
+                      className={`py-2 rounded-lg text-xs font-medium border-2 ${normalizeReceiptTextContrast(tpl.text_contrast) === val ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </Section>
               <Section title={t('header_alignment') || 'Header Alignment'}>
                 <div className="grid grid-cols-3 gap-2">
@@ -742,13 +759,13 @@ export default function ReceiptSettings() {
                 <textarea id="receipt-default-footer" name="receipt_footer" className="input resize-none" rows={2}
                   value={defaultFooter}
                   onChange={e => setDefaultFooter(e.target.value)}
-                  placeholder="Thank you!"
+                  placeholder={t('default_footer_placeholder') || 'Thank you!'}
                   autoComplete="off"
                 />
               </Section>
               <Section title={t('custom_header_text') || 'Custom Header Text'}>
                 <label htmlFor="receipt-custom-header" className="sr-only">{t('custom_header_text') || 'Custom Header Text'}</label>
-                <input id="receipt-custom-header" name="receipt_custom_header" className="input mb-3" value={tpl.custom_header} onChange={e => setT('custom_header', e.target.value)} placeholder="e.g. ** OFFICIAL RECEIPT **" autoComplete="off" />
+                <input id="receipt-custom-header" name="receipt_custom_header" className="input mb-3" value={tpl.custom_header} onChange={e => setT('custom_header', e.target.value)} placeholder={t('custom_header_placeholder') || 'e.g. ** OFFICIAL RECEIPT **'} autoComplete="off" />
               </Section>
             </>
           )}
@@ -800,7 +817,7 @@ export default function ReceiptSettings() {
                     </button>
                   ))}
                 </div>
-                <button type="button" onClick={() => setPreviewOpen(false)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-white" aria-label="Close preview"><X className="h-4 w-4" /></button>
+                <button type="button" onClick={() => setPreviewOpen(false)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-white" aria-label={t('close_preview') || 'Close preview'}><X className="h-4 w-4" /></button>
               </div>
             </div>
             <div ref={previewTargetRef} className="min-h-0 flex-1 overflow-auto overscroll-contain p-4">

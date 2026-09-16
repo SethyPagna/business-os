@@ -4,7 +4,8 @@
 // batch-picker wiring into InventoryStockModals.tsx). See progress.md's
 // "Batch selection made mandatory on add/remove stock" item: "Default
 // batch `n+1: mm/dd/yyyy` stays the default for add stock / add product /
-// import; batch number still auto-increments per product." `batch_number`
+// import; batch number still auto-increments per product." (Quoted as
+// written; that label is day-first since Sep 4 2026.) `batch_number`
 // itself is assigned once, server-side, at INSERT time (migration 0016 +
 // lib/productBatches.ts's `nextBatchNumber`) -- this file only turns that
 // stored number (plus the stored received-at timestamp) into display text,
@@ -25,16 +26,29 @@ export type BatchLike = {
 export function formatBatchReceivedDate(receivedAt: string | null | undefined): string | null {
   const raw = String(receivedAt || '').trim()
   if (!raw) return null
+  // A received DATE is a calendar value, not an instant. Parsing YYYY-MM-DD
+  // through Date would reinterpret it at midnight UTC and show the previous
+  // day west of UTC. Keep date-only values literal and validate them in UTC;
+  // timestamp values below retain the existing local-time display behaviour.
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
+  if (dateOnly) {
+    const yyyy = Number(dateOnly[1])
+    const mm = Number(dateOnly[2])
+    const dd = Number(dateOnly[3])
+    const candidate = new Date(Date.UTC(yyyy, mm - 1, dd))
+    if (candidate.getUTCFullYear() !== yyyy || candidate.getUTCMonth() + 1 !== mm || candidate.getUTCDate() !== dd) return null
+    return `${dateOnly[3]}/${dateOnly[2]}/${dateOnly[1]}`
+  }
   const isoish = raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`
   const date = new Date(isoish)
   if (Number.isNaN(date.getTime())) return null
   const mm = String(date.getMonth() + 1).padStart(2, '0')
   const dd = String(date.getDate()).padStart(2, '0')
   const yyyy = date.getFullYear()
-  return `${mm}/${dd}/${yyyy}`
+  return `${dd}/${mm}/${yyyy}`
 }
 
-// "n: mm/dd/yyyy" -- the decided default label (word "Batch" prefix is
+// "n: dd/mm/yyyy" -- the decided default label (word "Batch" prefix is
 // added by the caller, batchDisplayLabel below, so this stays reusable
 // for a plain numeric badge too) for a batch that was never given a lot
 // code. Degrades gracefully if either half is missing (old pre-migration
@@ -52,13 +66,39 @@ export function formatDefaultBatchLabel(batchNumber: number | null | undefined, 
 
 // Z1a: a lot code that is a pure 8-digit MMDDYYYY string (dateToBatchCode's
 // output, e.g. "08242026") is really the received date wearing a code's
-// clothes -- showing it verbatim next to real mm/dd/yyyy dates on other
+// clothes -- showing it verbatim next to real dd/mm/yyyy dates on other
 // surfaces is exactly the "08242026 where a date belongs" confusion the user
-// flagged. Decode it back to mm/dd/yyyy; return null for anything that is not
+// flagged. Decode it back to dd/mm/yyyy; return null for anything that is not
 // a valid MMDDYYYY calendar date (a genuine custom lot code, which must render
-// AS a code, per the rule "dates render mm/dd/yyyy, lot codes render as
+// AS a code, per the rule "dates render dd/mm/yyyy, lot codes render as
 // codes, never interchanged").
+//
+// THE STORED CODE IS STILL MMDDYYYY AND MUST STAY THAT WAY. It is a
+// lot_code/batch_key that production rows already carry and that
+// dateToBatchCode recomputes for matching -- re-cutting it as DDMMYYYY would
+// orphan every existing lot. Only the string this function HANDS BACK became
+// day-first (Sep 4 2026); the digits it reads are unchanged.
 export function lotCodeAsDate(lotCode: string | null | undefined): string | null {
+  const iso = lotCodeToIsoDate(lotCode)
+  if (!iso) return null
+  const [yyyy, mm, dd] = iso.split('-')
+  return `${dd}/${mm}/${yyyy}`
+}
+
+/**
+ * The same MMDDYYYY lot code decoded to ISO 'YYYY-MM-DD' -- the machine-
+ * readable half, for anything that SORTS or COMPARES lots rather than showing
+ * them. null for a genuine custom code, exactly like lotCodeAsDate.
+ *
+ * This exists because posCore's batchReceivedInstant used to build its sort
+ * key by splitting lotCodeAsDate()'s DISPLAY string on '/' and reading the
+ * fields positionally. That silently tied lot ORDERING to the display format:
+ * when the app went day-first on Sep 4 2026 the same code started yielding a
+ * different instant (08242026 read as month 24, landing in Dec 2027), so the
+ * POS lot picker would have reordered itself. A sort key must never be
+ * derived from a display string -- callers take this one.
+ */
+export function lotCodeToIsoDate(lotCode: string | null | undefined): string | null {
   const raw = String(lotCode || '').trim()
   if (!/^\d{8}$/.test(raw)) return null
   const mm = Number(raw.slice(0, 2))
@@ -67,24 +107,25 @@ export function lotCodeAsDate(lotCode: string | null | undefined): string | null
   if (mm < 1 || mm > 12 || dd < 1 || yyyy < 1970 || yyyy > 2999) return null
   const lastDay = new Date(Date.UTC(yyyy, mm, 0)).getUTCDate()
   if (dd > lastDay) return null
-  return `${String(mm).padStart(2, '0')}/${String(dd).padStart(2, '0')}/${yyyy}`
+  return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
 }
 
 // Full fallback chain for displaying one batch. Z1a display rule: a batch
-// reads as its received DATE (mm/dd/yyyy) everywhere -- the stored
+// reads as its received DATE (dd/mm/yyyy) everywhere -- the stored
 // received_at wins (authoritative), falling back to decoding a date-derived
 // lot code. Only a GENUINE custom lot code (not an MMDDYYYY date) renders as a
-// code. Then "Batch <n: mm/dd/yyyy>" for pre-redesign rows, then a bare id so
+// code. Then "Batch <n: dd/mm/yyyy>" for pre-redesign rows, then a bare id so
 // a pill/row is never blank.
-export function batchDisplayLabel(batch: BatchLike, batchWord = 'Batch'): string {
+export function batchDisplayLabel(batch: BatchLike, batchWord = 'Received date'): string {
   const codeAsDate = lotCodeAsDate(batch.lot_code)
-  // A real custom code (has a lot_code that is NOT an MMDDYYYY date) shows as
-  // the code.
-  if (batch.lot_code && !codeAsDate) return batch.lot_code
-  // Otherwise show the received date: the stored received_at, or the code
-  // decoded to a date.
-  const dateLabel = formatBatchReceivedDate(batch.received_at) || codeAsDate
+  // received_at is the authoritative inventory date, including for synthetic
+  // adjustment codes such as ADJ09/02/2026. A genuine custom code is only the
+  // fallback when no valid date exists; letting it win hid real received dates
+  // on POS, Sales and Inventory rows.
+  const dateLabel = formatBatchReceivedDate(batch.received_at)
   if (dateLabel) return dateLabel
+  if (codeAsDate) return codeAsDate
+  if (batch.lot_code) return batch.lot_code
   const defaultLabel = formatDefaultBatchLabel(batch.batch_number, batch.received_at)
   if (defaultLabel) return `${batchWord} ${defaultLabel}`
   return `${batchWord} #${batch.id}`

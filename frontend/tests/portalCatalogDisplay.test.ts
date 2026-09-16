@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { transformSync } from 'esbuild'
 import {
   buildPortalHighlightBadges,
   buildPortalPricePresentation,
@@ -20,6 +21,8 @@ const catalogSecondaryTabsSource = fs.readFileSync(new URL('../src/components/ca
 const publicCatalogPageSource = fs.readFileSync(new URL('../src/components/catalog/PublicCatalogPage.tsx', import.meta.url), 'utf8')
 const catalogPreviewSurfaceSource = fs.readFileSync(new URL('../src/components/catalog/CatalogPreviewSurface.tsx', import.meta.url), 'utf8')
 const catalogProductsSectionSource = fs.readFileSync(new URL('../src/components/catalog/CatalogProductsSection.tsx', import.meta.url), 'utf8')
+const catalogPaginationSource = fs.readFileSync(new URL('../src/components/catalog/catalogPagination.tsx', import.meta.url), 'utf8')
+const paginationControlsSource = fs.readFileSync(new URL('../src/components/shared/PaginationControls.tsx', import.meta.url), 'utf8')
 const portalFilterSource = fs.readFileSync(new URL('../src/components/catalog/PortalFilterCombobox.tsx', import.meta.url), 'utf8')
 const productDetailFlyoutSource = fs.readFileSync(new URL('../src/components/catalog/ProductDetailFlyout.tsx', import.meta.url), 'utf8')
 const catalogImagesSource = fs.readFileSync(new URL('../src/components/catalog/catalogImages.tsx', import.meta.url), 'utf8')
@@ -322,20 +325,267 @@ runTest('portal editor work leaves product filter popovers viewport-portalled', 
 })
 
 runTest('public product discovery uses a sticky unified search, responsive brand index, and explicit paging controls', () => {
-  const paginationSource = fs.readFileSync(new URL('../src/components/catalog/catalogPagination.tsx', import.meta.url), 'utf8')
   assert.match(catalogProductsSectionSource, /sticky top-16[\s\S]*focus-within:border-blue-400/,
     'search should stay sticky and use the same blue discovery accent as filters')
   assert.match(catalogProductsSectionSource, /copy\('jumpToBrand', 'Jump to brand'\)/,
-    'large screens need a labelled brand index rail')
-  assert.match(catalogProductsSectionSource, /max-h-\[min\(18rem,calc\(100vh-32rem\)\)\][\s\S]*overflow-y-auto/,
-    'the desktop alphabet rail must scroll within the sticky sidebar')
-  assert.match(catalogProductsSectionSource, /overflow-x-auto[\s\S]*lg:hidden/,
-    'small screens need a horizontally scrollable alphabet row')
-  assert.match(paginationSource, /import PaginationControls from '\.\.\/shared\/PaginationControls'/,
-    'storefront paging should use the same current Back/Next/page-size control as the rest of the app')
-  assert.match(paginationSource, /pageSizeOptions=\{CATALOG_PAGE_SIZE_OPTIONS\}/)
-  assert.match(paginationSource, /editablePageSizeInput=\{false\}/,
-    'items-per-page should stay bounded to the storefront API presets')
+    'the brand index still needs its labelled, translated name')
+  // The brand index used to be TWO controls: a scrolling 4-column letter grid
+  // in the desktop aside and a horizontally scrolling chip row below `lg`.
+  // Both were inner scroll containers over the product list. They are now one
+  // screen-edge rail that serves every breakpoint (see alphaIndexRail.test.ts
+  // and storefrontScrollRoot.test.ts) -- and BOTH mounts of this section keep
+  // an index: the storefront pins it to the screen edge, the admin portal
+  // editor's preview takes the in-flow variant so it cannot float out of the
+  // preview panel.
+  assert.match(catalogProductsSectionSource, /<AlphaIndexRail\b[\s\S]*edge=\{publicView \? 'screen' : 'inline'\}/,
+    'every breakpoint gets the same vertical brand rail, and the editor preview gets one too')
+  assert.doesNotMatch(catalogProductsSectionSource, /max-h-\[min\(18rem,calc\(100vh-32rem\)\)\]/,
+    'the desktop letter grid and its inner scroller are retired')
+  assert.match(catalogPaginationSource, /import PaginationControls from '\.\.\/shared\/PaginationControls'/,
+    'storefront paging should use the same current Back/Next control as the rest of the app')
+  assert.match(catalogPaginationSource, /export const CATALOG_DEFAULT_PAGE_SIZE = 50/,
+    'the default storefront page size remains aligned with the server response contract')
+  // Reverses the 2026-09-07 removal of the shopper-facing size control
+  // (owner decision, 2026-09-14): the selector is back, with exactly three
+  // sizes, handed straight to the shared pager.
+  assert.match(catalogPaginationSource, /export const CATALOG_PAGE_SIZE_OPTIONS: number\[\] = \[20, 50, 100\]/,
+    'the shopper picks between exactly 20, 50 and 100 products a page')
+  assert.match(catalogPaginationSource, /onPageSizeChange=\{onPageSizeChange\}[\s\S]*pageSizeOptions=\{pageSizeOptions\}/,
+    'the centred public pager must forward the size handler and the option list')
+  assert.match(catalogPaginationSource, /layout="centered"/,
+    'public paging remains one centred Back/page/Next control')
+})
+
+runTest('public catalog scrolls through the document and keeps its pager controls in the storefront order', () => {
+  // BOTH public entries, not just the one CatalogPage owns. index.tsx mounts
+  // PublicCatalogRoot -> PublicCatalogPage for every path on the customer
+  // host; App.tsx mounts <CatalogPage publicView /> for the in-app route. The
+  // marker is what main.css keys the document-scroll unlock off, so a route
+  // that forgets it ships a storefront the browser will not scroll. Each one
+  // also RESTORES the previous value instead of blindly removing it, so a
+  // StrictMode double-mount -- or a public route nested under a shell that
+  // already set the marker -- cannot leave the document stripped of it.
+  for (const [route, source] of [['PublicCatalogPage', publicCatalogPageSource], ['CatalogPage', catalogPageSource]]) {
+    // Named for BOTH elements on purpose. main.css keys the scroll unlock off
+    // html[data-public-portal] and the body growth off body[data-public-portal],
+    // so a route that stamps only one of them still ships a page that will not
+    // scroll -- and one loose wildcard match across the whole file would not
+    // notice the missing half.
+    assert.ok(source.includes("html.setAttribute('data-public-portal', 'true')"),
+      route + ' must stamp the document element with the public scroll marker')
+    assert.ok(source.includes("body.setAttribute('data-public-portal', 'true')"),
+      route + ' must stamp the body with the public scroll marker')
+    assert.ok(source.includes("const previousHtmlMarker = html.getAttribute('data-public-portal')")
+      && source.includes("const previousBodyMarker = body.getAttribute('data-public-portal')"),
+      route + ' must capture the previous marker values before overwriting them')
+    assert.ok(source.includes("if (previousHtmlMarker === null) html.removeAttribute('data-public-portal')")
+      && source.includes("if (previousBodyMarker === null) body.removeAttribute('data-public-portal')"),
+      route + ' must RESTORE the previous markers on unmount, not blindly remove them')
+  }
+  // Neither public root may declare a vertical scroller of its own: the
+  // document owns the one page scroll. storefrontScrollRoot.test.ts carries
+  // the full shell contract, including why 'overflow-x: clip' is the only
+  // overflow left on the preview surface.
+  assert.match(catalogPreviewSurfaceSource, /publicView \? 'min-h-screen w-full overflow-x-clip'/,
+    'the public surface must not create a nested vertical scroller')
+  assert.doesNotMatch(catalogPreviewSurfaceSource, /publicView \? \{[^}]*overflowY:\s*'auto'/,
+    'the content-height public root must not trap wheel/touch events in a second scroll owner')
+  assert.doesNotMatch(catalogPageSource, /publicView \? \{[^}]*overflowY:\s*'auto'/,
+    'legacy public-view wrappers must not trap wheel/touch events in a second scroll owner')
+  // Pager ORDER, on the one control both public paths mount: CatalogPage and
+  // PublicCatalogPage -> CatalogPreviewSurface both render
+  // CatalogProductsSection, which mounts CatalogPaginationControls above and
+  // below the grid. Asserting layout="centered" alone only proves which
+  // variant is asked for; this reads the variant's own branch so a reordering
+  // edit inside PaginationControls cannot silently move Back behind the page
+  // number on the storefront.
+  assert.match(catalogPaginationSource, /layout="centered"/)
+  const pagerBranchStart = paginationControlsSource.indexOf("if (layout === 'centered')")
+  const pagerBranchEnd = paginationControlsSource.indexOf('if (compact && rangeAsPageSize)')
+  assert.ok(pagerBranchStart >= 0 && pagerBranchEnd > pagerBranchStart, 'the dedicated storefront pager branch must exist')
+  const pagerBranch = paginationControlsSource.slice(pagerBranchStart, pagerBranchEnd)
+  // Anchored on the page FIELD, not on `aria-label={pageLabel}`: the branch's
+  // <nav> landmark is named from the same label and sits before Back, so that
+  // string finds the wrapper first and the order check passes on any layout.
+  const pageSizeSelectAt = pagerBranch.indexOf('ariaLabel={perPageLabel}')
+  const backAt = pagerBranch.indexOf('aria-label={backLabel}')
+  const pageFieldAt = pagerBranch.indexOf('inputMode="numeric"')
+  const totalPagesAt = pagerBranch.indexOf('/ {totalPages}')
+  const nextAt = pagerBranch.indexOf('aria-label={nextLabel}')
+  assert.ok(backAt > 0 && pageFieldAt > 0 && totalPagesAt > 0 && nextAt > 0,
+    'the storefront pager must keep a Back control, an editable page field, a total-page count and a Next control')
+  // 2026-09-15 (owner, supersedes 2026-09-14's [size][Back] order): Back
+  // leads the row, then the page-size selector.
+  assert.ok(pageSizeSelectAt > backAt,
+    'the page-size selector must sit AFTER Back: [Back] [20/50/100] [page / total] [Next] (owner, 2026-09-15)')
+  assert.ok(backAt < pageSizeSelectAt && pageSizeSelectAt < pageFieldAt, 'Back and the size selector must precede the page indicator')
+  assert.ok(pageFieldAt < totalPagesAt, 'the page number must precede its total')
+  assert.ok(totalPagesAt < nextAt, 'the page indicator must precede Next')
+  const navAt = pagerBranch.indexOf('<nav ')
+  assert.ok(navAt >= 0 && navAt < backAt, 'the whole storefront pager must sit inside a landmark, not a bare div')
+  assert.ok(pagerBranch.slice(navAt, backAt).includes('aria-label={pageLabel}'),
+    'the pager landmark must carry an accessible name a screen-reader user can jump to')
+  // Both captions come from the shared pack keys with an English fallback --
+  // never the raw lowercase key, which is what a map's '|| key' fallback
+  // prints when the map has no entry for it.
+  assert.match(paginationControlsSource, /const backLabel = typeof t === 'function' \? \(t\('back'\) \|\| 'Back'\)/)
+  assert.match(paginationControlsSource, /const nextLabel = typeof t === 'function' \? \(t\('next'\) \|\| 'Next'\)/)
+})
+
+runTest('the public pager carries a 20/50/100 size selector, wired end to end on both public paths', () => {
+  const pagerBranch = paginationControlsSource.slice(
+    paginationControlsSource.indexOf("if (layout === 'centered')"),
+    paginationControlsSource.indexOf('if (compact && rangeAsPageSize)'),
+  )
+  // The shared PageSizeSelect, the same control the admin pagers use -- a
+  // native <select> is banned in components/ (tests/sourceSyntaxCheck.ts).
+  assert.match(pagerBranch, /<PageSizeSelect[\s\S]{0,600}ariaLabel=\{perPageLabel\}/,
+    'the selector must be the shared control, named from the translated per-page label')
+  assert.match(pagerBranch, /options=\{sizeOptions\}/,
+    'the selector must offer the caller\'s sizes, plus any off-menu configured one')
+  assert.match(pagerBranch, /allowCustom=\{false\}/,
+    'the storefront must not let a shopper type an unbounded page size')
+  assert.match(paginationControlsSource, /const perPageLabel = typeof t === 'function' \? \(t\('per_page'\) \|\| 'per page'\)/,
+    'the per-page name comes from the shared pack key with an English fallback, never the raw key')
+  // A one-page result still has a size to change. Hiding the whole pill on
+  // totalPages <= 1 is exactly how the previous in-pill chooser became
+  // unreachable for a shopper who had narrowed the catalogue right down.
+  assert.match(pagerBranch, /if \(totalPages <= 1 && !showPageSizeSelect\) return null/,
+    'a one-page result must keep the pill when it carries the size selector')
+
+  // Wired at BOTH pager mounts of the products section...
+  assert.equal((catalogProductsSectionSource.match(/onPageSizeChange=\{updatePageSize\}/g) || []).length, 2,
+    'the pagers above and below the grid must both change the page size')
+  // Counted, not matched: with only one mount required, dropping the key from
+  // the other left every test AND verify:i18n green while that selector
+  // announced the raw key "per_page" to a screen reader.
+  assert.equal((catalogProductsSectionSource.match(/per_page: copy\('perPage', 'Per page'\)/g) || []).length, 2,
+    'BOTH pagers must resolve the accessible name through the portal packs, which already translate perPage')
+  assert.doesNotMatch(catalogProductsSectionSource, /it is a Filters field now/,
+    'the size control is on the pager row again, so the Filters-field note must not survive')
+
+  // ...and fed identically by BOTH public paths: the viewer's choice outranks
+  // the server's page size, resets to page 1, and is remembered per browser.
+  for (const [route, source, handler] of [
+    ['PublicCatalogPage', publicCatalogPageSource, 'changeProductPageSize'],
+    ['CatalogPage', catalogPageSource, 'changePortalProductPageSize'],
+  ]) {
+    assert.match(source, new RegExp('setProductPageSize[=:] ?\\{?' + handler),
+      route + ' must hand the products section a page-size handler')
+    const body = source.slice(source.indexOf('const ' + handler + ' = (nextSize: number) => {'))
+    assert.ok(body.startsWith('const ' + handler), route + ' must define that handler')
+    const handlerBody = body.slice(0, body.indexOf('\n  }'))
+    assert.match(handlerBody, /writeStoredCatalogPageSize\(size\)/, route + ' must persist the choice for the next visit')
+    assert.match(handlerBody, /viewerPageSizeRef\.current = size/, route + ' must make the choice outrank later server payloads')
+    assert.match(handlerBody, /Page\(1\)/, route + ' must return to page 1 when the page size changes')
+    assert.match(source, /viewerPageSizeRef = useRef\(readStoredCatalogPageSize\(\)\)/,
+      route + ' must read the stored viewer size before the server tells it one')
+    assert.match(source, /if \(!viewerPageSizeRef\.current\) set(Portal)?ProductPageSize\(Number\(/,
+      route + ' must not let a bootstrap payload overwrite the viewer choice')
+    assert.match(source, /bootstrapPageSizeMatchesViewer\(/,
+      route + ' must re-run the product search when the bootstrap page was cut at another size')
+  }
+})
+
+// The two portal cache readers are module-local functions inside component
+// files far too heavy to bundle whole, so each is lifted out by source slice
+// and compiled with esbuild: the REAL source runs, and `window` arrives as a
+// parameter, which is the only way to hand it one whose storage getters throw.
+function loadPortalCacheReader(source: string, keyConst: string, otherConsts: string[]) {
+  const lf = source.replace(/\r\n/g, '\n')
+  const start = lf.indexOf('function readPortalCache(')
+  assert.ok(start > 0, 'readPortalCache must still exist')
+  const end = lf.indexOf('\n}\n', start)
+  assert.ok(end > start, 'readPortalCache must still end at a top-level brace')
+  const declarations = [keyConst, ...otherConsts].map((name) => {
+    const declared = lf.match(new RegExp('^const ' + name + ' = .*$', 'm'))
+    assert.ok(declared, name + ' must still be a module constant')
+    return declared[0]
+  })
+  const compiled = transformSync(declarations.join('\n') + '\n' + lf.slice(start, end + 2), {
+    loader: 'ts',
+    format: 'esm',
+  }).code
+  const factory = new Function('window', compiled + '\nreturn readPortalCache')
+  const key = String(declarations[0].split(' = ')[1] || '').replace(/^'|'$/g, '')
+  return { key, read: (hostWindow: unknown) => (factory(hostWindow) as () => unknown)() }
+}
+
+runTest('both portal cache readers survive a browser that blocks site data', () => {
+  // Safari private mode and Chrome's "block all cookies" make the PROPERTY
+  // throw, not getItem -- so a reader that lists the stores outside its try
+  // throws out of a useRef initializer on the very first render. The
+  // storefront root has a Suspense boundary but no error boundary, so that
+  // rendered the whole page blank.
+  const blockedWindow = {}
+  for (const property of ['sessionStorage', 'localStorage']) {
+    Object.defineProperty(blockedWindow, property, {
+      configurable: true,
+      get() { throw new Error('SecurityError: The operation is insecure.') },
+    })
+  }
+
+  for (const [route, source, keyConst, otherConsts] of [
+    ['PublicCatalogPage', publicCatalogPageSource, 'PUBLIC_PORTAL_CACHE_KEY', ['PUBLIC_PORTAL_CACHE_MAX_AGE_MS', 'PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT']],
+    ['CatalogPage', catalogPageSource, 'PORTAL_CACHE_KEY', ['PORTAL_CACHE_MAX_AGE_MS', 'PORTAL_CACHE_PRODUCT_LIMIT']],
+  ] as Array<[string, string, string, string[]]>) {
+    const { key, read } = loadPortalCacheReader(source, keyConst, otherConsts)
+    assert.equal(read(blockedWindow), null, route + ' must read blocked storage as "no cache", never throw')
+
+    // Positive control: same reader, same call, a storage that works. Without
+    // it this test would pass just as happily against a reader that returns
+    // null unconditionally.
+    const entries = new Map<string, string>([[key, JSON.stringify({
+      cachedAt: Date.now(),
+      products: [{ id: 7, name: 'Serum' }],
+    })]])
+    const store = {
+      getItem: (name: string) => entries.get(name) ?? null,
+      setItem: (name: string, value: string) => { entries.set(name, value) },
+      removeItem: (name: string) => { entries.delete(name) },
+    }
+    const cached = read({ sessionStorage: store, localStorage: store }) as { products?: unknown[] } | null
+    assert.equal(cached?.products?.length, 1, route + ' must still read a real cached payload')
+  }
+})
+
+runTest('neither public path seeds its grid from a payload cut at another page size', () => {
+  // The embedded/cached payload is page 1 at the Worker's fixed 50, ordered
+  // promoted/brand/name (routes/portal.ts buildPortalCatalog), while a browse
+  // payload renders A-Z by name -- so for a shopper on 20 it is neither page 1
+  // nor a prefix of it. Seeding it anyway put 50 cards under a pager that read
+  // "1 / total-over-20" for one round trip.
+  const seeded = ([
+    ['PublicCatalogPage', publicCatalogPageSource],
+    ['CatalogPage', catalogPageSource],
+  ] as Array<[string, string]>).filter(([, source]) => (
+    /const seedMatchesViewerPageSize = !cachedPortal/.test(source)
+    && /seedMatchesViewerPageSize (\?|&&)/.test(source)
+    && /useState\(\(\) => !seedMatchesViewerPageSize\)/.test(source)
+    && /if \(bootstrapMatchesViewer\) setProducts\(/.test(source)
+    && /setAwaitingViewerSizedProducts\(false\)/.test(source)
+    && /loadingProducts[:=] ?\{?\(?[^\r\n]*awaitingViewerSizedProducts/.test(source)
+  ))
+  assert.equal(seeded.length, 2,
+    'both public paths must gate the grid seed on the viewer page size and keep the skeletons up meanwhile')
+
+  for (const [route, source] of [
+    ['PublicCatalogPage', publicCatalogPageSource],
+    ['CatalogPage', catalogPageSource],
+  ]) {
+    assert.doesNotMatch(source, /slice\(0, ?viewerPageSize/,
+      route + ' must not seed a PREFIX either: the payload is ordered by brand, the grid by name')
+    // EVERY seed from a bootstrap payload, not just the first one found: both
+    // of CatalogPage's bootstrap paths (public route and editor preview) mount
+    // the same viewer-sized pager, so one gated site proves nothing about the
+    // other.
+    const bootstrapSeeds = source.match(/[^\r\n]*setProducts\((?:mergedProducts|nextProducts)\)[^\r\n]*/g) || []
+    assert.ok(bootstrapSeeds.length > 0, route + ' must still seed its grid from the bootstrap payload')
+    for (const seed of bootstrapSeeds) {
+      assert.match(seed, /if \(bootstrapMatchesViewer\) setProducts\(/,
+        route + ' seeds the grid from a bootstrap payload without checking its page size: ' + seed.trim())
+    }
+  }
 })
 
 runTest('public product details keep every prepared section visible when its data is empty', () => {

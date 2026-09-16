@@ -1,0 +1,13 @@
+const {DatabaseSync}=require('node:sqlite')
+const fs=require('node:fs')
+const path=require('node:path')
+const assert=require('node:assert/strict')
+const db=new DatabaseSync(':memory:')
+db.exec("CREATE TABLE customers(id INTEGER PRIMARY KEY,membership_number TEXT); INSERT INTO customers VALUES(1,'LC-00001'),(2,' ABC123XY ');")
+db.exec(fs.readFileSync(path.join(__dirname,'../migrations/0122_membership_lookup_index.sql'),'utf8'))
+const sql='SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(?) LIMIT 2'
+assert.equal(db.prepare(sql).get('abc123xy').id,2)
+assert.match(JSON.stringify(db.prepare('EXPLAIN QUERY PLAN '+sql).all('abc123xy')),/idx_customers_membership_normalized/)
+assert.equal(db.prepare('SELECT membership_number FROM customers WHERE id=2').get().membership_number,' ABC123XY ')
+db.close()
+console.log('PASS: normalized membership lookup uses index without renumbering')

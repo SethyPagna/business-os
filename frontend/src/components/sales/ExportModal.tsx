@@ -4,6 +4,7 @@ import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Modal from '../shared/Modal'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 import StatusBadge from './StatusBadge'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { todayStr, businessYear, businessMonth } from '../../utils/dateHelpers'
@@ -88,7 +89,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
-  const [period, setPeriod] = useState<ExportPeriod>('monthly')
+  const [period, setPeriod] = useState<ExportPeriod>('daily')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [loading, setLoading] = useState(false)
@@ -222,7 +223,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
   }
 
   return (
-    <Modal title={tr('export_sales_report', 'Export Sales Report')} onClose={onClose} wide>
+    <Modal title={tr('export_sales_report', 'Export Sales Report')} onClose={onClose} wide unsavedChanges="read-only">
       <div className="space-y-5">
         <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
           <div className="rounded-2xl bg-blue-100 p-3 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
@@ -236,8 +237,8 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
           </div>
         </div>
 
-        <div>
-          <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">{tr('report_period', 'Report Period')}</label>
+        <fieldset className="min-w-0">
+          <legend className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">{tr('report_period', 'Report Period')}</legend>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {([
               ['daily', tr('period_daily', 'Daily')],
@@ -263,12 +264,12 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
           {period === 'custom' ? (
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className="mb-1 block text-xs text-gray-500">{tr('start_date', 'Start Date')}</label>
-                <input type="date" className="input text-sm" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+                <label htmlFor="sales-export-start-date" className="mb-1 block text-xs text-gray-500">{tr('start_date', 'Start Date')}</label>
+                <DateEntryInput id="sales-export-start-date" className="text-sm" t={t} ariaLabel={tr('start_date', 'Start Date')} value={startDate} onChange={(iso) => setStartDate(iso)} />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-gray-500">{tr('end_date', 'End Date')}</label>
-                <input type="date" className="input text-sm" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+                <label htmlFor="sales-export-end-date" className="mb-1 block text-xs text-gray-500">{tr('end_date', 'End Date')}</label>
+                <DateEntryInput id="sales-export-end-date" className="text-sm" t={t} ariaLabel={tr('end_date', 'End Date')} value={endDate} onChange={(iso) => setEndDate(iso)} />
               </div>
             </div>
           ) : (
@@ -277,7 +278,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
               {previewDates.start} to {previewDates.end}
             </div>
           )}
-        </div>
+        </fieldset>
 
         <div className="flex flex-col gap-2 sm:flex-row">
           <button type="button" onClick={handlePreview} disabled={loading} className="btn-secondary flex-1 text-sm disabled:opacity-50">

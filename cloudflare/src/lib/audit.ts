@@ -17,6 +17,40 @@ const AUDIT_LOG_RETENTION_LAST_RUN_KEY = 'audit_log_retention_last_run'
 // to not do needless work on every tick.
 const AUDIT_LOG_RETENTION_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
 
+// Return bulk undo/redo audit rows are the only durable source of the actor
+// and timestamp for those replays. The operation receipt retains the status
+// transition and generation, but it cannot identify who replayed it or when.
+// Shift lifecycle requests also use their atomic audit row as the durable
+// replay receipt. Only the four exact-request lifecycle actions qualify;
+// ordinary Shift logs and legacy writes without request identity still age out.
+// Keep this predicate narrow: ordinary audit data, the original bulk receipt,
+// and unrelated undo/redo rows continue to follow the configured retention.
+export function buildAuditLogRetentionDeleteSql(): string {
+  return `DELETE FROM audit_logs WHERE id IN (
+    SELECT id FROM audit_logs
+    WHERE created_at < @cutoff
+      AND NOT COALESCE(CASE WHEN json_valid(details) THEN (
+        (entity = 'return'
+        AND action IN ('action_undo','action_redo')
+        AND json_extract(details, '$.kind') = 'return.fields.bulk'
+        ) OR (
+          entity = 'shift_session'
+          AND action IN ('shift.close','shift.reopen','shift.amend','shift.cancel')
+          AND json_type(details, '$.request.id') = 'text'
+          AND length(json_extract(details, '$.request.id')) BETWEEN 16 AND 128
+          AND json_extract(details, '$.request.id') NOT GLOB '*[^a-zA-Z0-9_-]*'
+          AND json_type(details, '$.request.target') = 'integer'
+          AND json_extract(details, '$.request.target') > 0
+          AND json_type(details, '$.request.canonical') = 'text'
+          AND CASE WHEN json_valid(json_extract(details, '$.request.canonical')) THEN
+            json_extract(json_extract(details, '$.request.canonical'), '$.client_request_id') = json_extract(details, '$.request.id')
+          ELSE 0 END
+        )
+      ) ELSE 0 END, 0)
+    LIMIT 5000
+  )`
+}
+
 // Ported from backend/src/helpers.ts's audit(). Deliberately swallows its
 // own errors (matching the original's comment: "Audit failures must never
 // crash the main request") -- an audit log write failing should never be
@@ -43,26 +77,34 @@ const AUDIT_LOG_RETENTION_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
 // allowed-fields lists) -- left null here rather than guessed at with the
 // server's own clock, since `auditTimezoneLabel`'s fallback already
 // produces a reasonable "Server time" label for that case.
-async function lookupAuditDeviceInfo(
-  env: Env,
-  userId: number | null,
-): Promise<{ device_name: string | null; device_tz: string | null }> {
-  if (!userId) return { device_name: null, device_tz: null }
-  try {
-    const db = getDb(env)
-    const row = await db.prepare(`
-      SELECT device_name, device_tz
-      FROM user_sessions
-      WHERE user_id = @user_id AND revoked_at IS NULL
-      ORDER BY last_seen_at DESC, id DESC
-      LIMIT 1
-    `).get<{ device_name: string | null; device_tz: string | null }>({ user_id: userId })
-    return { device_name: row?.device_name ?? null, device_tz: row?.device_tz ?? null }
-  } catch (_) {
-    return { device_name: null, device_tz: null }
-  }
-}
-
+// N13: the actor stored on an audit row is the account USERNAME, resolved here
+// from users.id rather than taken on trust from the caller.
+//
+// audit() is called from 130+ places and every one of them passed a *display*
+// name -- `user?.name` (the full name) at almost all sites, `user.name ||
+// user.username` at a handful -- so the Audit Log read "Za Sethy" while the
+// stock, sale and return ledgers built from the same session read "za".
+// Resolving from the id fixes every call site at once and makes the value
+// unforgeable: the only thing a caller influences is WHICH account id it names,
+// and that already comes from the authenticated session.
+//
+// audit_logs stays OUT of the rename cascade (see userIdentity.ts) because an
+// audit row is a point-in-time record; storing the username at write time is
+// what makes that exclusion harmless instead of a second naming convention.
+//
+// P4-4a: this used to be two SELECTs (lookupAuditDeviceInfo, resolveAuditActorName)
+// plus the INSERT -- three sequential D1 round trips, awaited at 135 call sites.
+// Both lookups are expressed here as LEFT JOINs against the same @user_id bind,
+// folded into ONE `INSERT ... SELECT`, so audit() costs exactly one round trip
+// regardless of whether userId is set. The fallback semantics are unchanged:
+//   - user_name: the account's own username when the users row exists and is
+//     non-blank, else the caller-provided name (mirrors resolveActorUsername's
+//     `trimmed(row?.username) || trimmed(fallback) || null`); when userId is
+//     null the LEFT JOIN matches no row, which is the same "no account" case
+//     resolveAuditActorName short-circuited on before.
+//   - device_name/device_tz: the most-recently-active live session's device
+//     info (mirrors lookupAuditDeviceInfo's ORDER BY last_seen_at DESC, id DESC
+//     LIMIT 1), NULL when there is no such session or no userId.
 export async function audit(
   env: Env,
   userId: number | null,
@@ -76,11 +118,24 @@ export async function audit(
     const detailsStr = details != null
       ? (typeof details === 'object' ? JSON.stringify(details) : String(details))
       : null
-    const { device_name: deviceName, device_tz: deviceTz } = await lookupAuditDeviceInfo(env, userId)
     const db = getDb(env)
     await db.prepare(`
       INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, new_value, device_name, device_tz)
-      VALUES (@user_id, @user_name, @action, @entity, @entity_id, @details, @table_name, @record_id, @new_value, @device_name, @device_tz)
+      SELECT
+        @user_id,
+        COALESCE(NULLIF(TRIM(u.username), ''), NULLIF(TRIM(@user_name), '')),
+        @action, @entity, @entity_id, @details, @table_name, @record_id, @new_value,
+        s.device_name,
+        s.device_tz
+      FROM (SELECT 1 AS one) AS _dummy
+      LEFT JOIN users u ON u.id = @user_id
+      LEFT JOIN (
+        SELECT device_name, device_tz
+        FROM user_sessions
+        WHERE user_id = @user_id AND revoked_at IS NULL
+        ORDER BY last_seen_at DESC, id DESC
+        LIMIT 1
+      ) AS s ON 1 = 1
     `).run({
       user_id: userId,
       user_name: userName,
@@ -91,8 +146,6 @@ export async function audit(
       table_name: entity,
       record_id: entityId,
       new_value: detailsStr,
-      device_name: deviceName,
-      device_tz: deviceTz,
     })
   } catch (_) {
     // Swallow -- see comment above.
@@ -141,7 +194,7 @@ export async function maybeRunScheduledAuditLogRetention(env: Env): Promise<{ sk
   const db = getDb(env)
   let deleted = 0
   for (;;) {
-    const result = await db.prepare('DELETE FROM audit_logs WHERE id IN (SELECT id FROM audit_logs WHERE created_at < @cutoff LIMIT 5000)').run({ cutoff })
+    const result = await db.prepare(buildAuditLogRetentionDeleteSql()).run({ cutoff })
     const n = result.changes ?? 0
     deleted += n
     if (n < 5000) break

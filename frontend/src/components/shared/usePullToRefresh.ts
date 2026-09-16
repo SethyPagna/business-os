@@ -3,6 +3,7 @@ import {
   canStartPull,
   computeIndicatorDistance,
   isAtScrollTop,
+  shouldBlockNativeScroll,
   shouldTriggerRefresh,
 } from '../../utils/pullToRefresh.ts'
 
@@ -101,6 +102,17 @@ export function usePullToRefresh(
       // natively with {passive:false} rather than as JSX onTouch* props,
       // which React may register as passive and silently ignore
       // preventDefault() on.
+      //
+      // "In progress" has to mean a real downward pull, not merely "the
+      // gesture is still being tracked". canStartPull above deliberately
+      // tolerates the -4px..0 jitter band so a wobbling finger doesn't
+      // abandon a pull; preventing the FIRST touchmove of an upward swipe
+      // (WebKit dispatches 1-3px moves) cancelled native scrolling for the
+      // whole touch sequence, which is what "the public storefront can't be
+      // scrolled on my phone" actually was. Returning here leaves the
+      // gesture armed: the next touchmove re-evaluates, so a swipe that
+      // turns into a genuine pull still works.
+      if (!shouldBlockNativeScroll(rawDelta)) return
       event.preventDefault()
       const distance = computeIndicatorDistance(rawDelta)
       setPullDistance(distance)

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import {
   buildDeletedProductIdSet,
   buildDefinedProductUpdates,
@@ -36,7 +37,14 @@ const basePayload = buildProductWritePayload({
 assert.equal(basePayload.name, 'Product A')
 assert.equal(basePayload.unit, 'pcs', 'blank unit falls back to pieces')
 assert.equal(basePayload.selling_price_usd, 10)
-assert.equal(basePayload.special_price_usd, 10, 'special price falls back to selling price')
+// This assertion used to read "special price falls back to selling price",
+// pinning the defect rather than the behaviour: a snapshot with no tier price
+// silently shipped the SELLING price into the tier column, so any writer
+// building a payload from a partial record overwrote the server's value with
+// a client-composed one. The 2026-09-04 ruling moved the tier to wholesale
+// and there is no fallback any more -- absent means 0, which reads as "no
+// wholesale price set" and offers no tier at the POS.
+assert.equal(basePayload.wholesale_price_usd, 0, 'a missing wholesale price must NOT inherit the selling price')
 assert.equal(basePayload.purchase_price_usd, 4, 'purchase price falls back to cost price')
 assert.equal(basePayload.cost_price_usd, 4)
 assert.deepEqual(basePayload.image_gallery, ['/uploads/a.png', '/uploads/b.png'])
@@ -165,13 +173,20 @@ assert.deepEqual(
     type: 'add',
     quantity: 8,
     branchId: 2,
-    unitCostUsd: 3,
-    unitCostKhr: 12000,
+    // N14-D. This used to read 3 / 12000 -- the product's stored purchase
+    // price, forwarded as though it were the cost of THIS delivery. A receipt
+    // states what was actually paid or it is refused server-side; a stored
+    // catalogue price is not evidence of either.
+    unitCostUsd: undefined,
+    unitCostKhr: undefined,
     reason: 'Bulk add stock',
     userId: 7,
     userName: 'Owner',
+    supplierId: undefined,
+    supplierName: undefined,
+    attribution: undefined,
   },
-  'stock adjustment payload uses product costs, branch id, quantity, and user attribution',
+  'stock adjustment payload forwards branch id, quantity and user attribution -- and invents no cost',
 )
 
 assert.deepEqual(
@@ -204,6 +219,9 @@ assert.deepEqual(
     reason: 'Clear stock',
     userId: 8,
     userName: 'Admin',
+    supplierId: undefined,
+    supplierName: undefined,
+    attribution: undefined,
   },
   'stock adjustment payload accepts explicit product id and unit-cost overrides',
 )
@@ -233,11 +251,16 @@ assert.deepEqual(
     type: 'add',
     quantity: 0,
     branchId: 6,
-    unitCostUsd: 2,
-    unitCostKhr: 8200,
+    // Same rule: cost_price_usd 2 is the catalogue's number, not this
+    // movement's, and no longer leaks onto the wire as one.
+    unitCostUsd: undefined,
+    unitCostKhr: undefined,
     reason: 'Initialize branch',
     userId: 9,
     userName: 'Restorer',
+    supplierId: undefined,
+    supplierName: undefined,
+    attribution: undefined,
   },
   'stock adjustment payload supports snapshot name overrides and zero-quantity branch initialization',
 )
@@ -439,19 +462,51 @@ assert.deepEqual(
   buildProductBulkPricingUpdates({
     selling_price_usd: '10.111',
     selling_price_khr: '',
-    special_price_usd: undefined,
-    special_price_khr: '4000.001',
+    wholesale_price_usd: undefined,
+    wholesale_price_khr: '4000.001',
     purchase_price_usd: '3',
     purchase_price_khr: null,
   }),
   {
     selling_price_usd: 10.12,
-    special_price_khr: 4000.01,
-    purchase_price_usd: 3,
+    wholesale_price_khr: 4000.01,
+    purchase_price_usd: '3',
     purchase_price_khr: 0,
   },
   'bulk pricing updates normalize provided price fields and preserve existing null behavior',
 )
+
+assert.deepEqual(
+  buildProductBulkPricingUpdates({
+    selling_price_usd: '1.23001',
+    purchase_price_usd: '1.23455',
+    purchase_price_khr: '4321.12345',
+  }),
+  {
+    selling_price_usd: 1.24,
+    purchase_price_usd: '1.23455',
+    purchase_price_khr: '4321.12345',
+  },
+  'absolute bulk edits keep selling ceil-cent policy but preserve purchase-cost decimal input for authoritative server comparison',
+)
+
+assert.deepEqual(
+  buildProductBulkPricingUpdates({
+    purchase_price_usd: '2.345678',
+    purchase_price_khr: '-0.00004',
+  }),
+  {
+    purchase_price_usd: '2.345678',
+    purchase_price_khr: '-0.00004',
+  },
+  'absolute purchase input is neither canonicalized nor clamped before server validation',
+)
+
+{
+  const productsSource = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
+  assert.match(productsSource, /purchase_price_usd[^>]*>[\s\S]{0,240}?step="0\.0001"/)
+  assert.match(productsSource, /purchase_price_khr[^>]*>[\s\S]{0,240}?step="0\.0001"/)
+}
 
 assert.equal(
   getDefaultProductRestoreBranchId([{ id: 1 }, { id: '2', is_default: true }]),

@@ -1,6 +1,11 @@
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { apiFetch, route } from './http.ts'
 import type { RenameImpact } from './renameCascadeTransport.ts'
+import type {
+  GenderRestorationChunk,
+  GenderRestorationReceipt,
+  GenderRestorationStatus,
+} from '../components/contacts/customerGenderRestorationFlow.ts'
 
 type ContactWritePayload = Record<string, unknown>
 type ContactTableName = 'customers' | 'suppliers' | 'delivery_contacts'
@@ -99,6 +104,19 @@ export function deleteCustomer(id: number | string): Promise<unknown> {
   return deleteContact('customers', '/api/customers', 'customers', id)
 }
 
+export function previewCustomerGenderRestoration(chunk: GenderRestorationChunk): Promise<GenderRestorationReceipt> {
+  return apiFetch('POST', '/api/customers/gender-restoration/preview', chunk)
+}
+
+export function applyCustomerGenderRestoration(chunk: GenderRestorationChunk): Promise<GenderRestorationReceipt> {
+  return apiFetch('POST', '/api/customers/gender-restoration/apply', chunk)
+}
+
+export function getCustomerGenderRestorationStatus(campaignId: string): Promise<GenderRestorationStatus> {
+  const query = new URLSearchParams({ campaign_id: campaignId })
+  return apiFetch('GET', `/api/customers/gender-restoration/status?${query.toString()}`)
+}
+
 export function awardCustomerPoints(id: number | string, payload: { points: number; note?: string }): Promise<unknown> {
   return route(
     'customers:awardPoints',
@@ -131,6 +149,11 @@ export function createDeliveryContact(payload: ContactWritePayload = {}): Promis
 
 export function updateDeliveryContact(id: number | string, payload: ContactWritePayload = {}): Promise<unknown> {
   return updateContact('deliveryContacts', '/api/delivery-contacts', 'delivery_contacts', id, payload)
+}
+
+export function getDeliveryContactRenameImpact(id: number | string, to: string): Promise<RenameImpact> {
+  const query = new URLSearchParams({ to })
+  return apiFetch('GET', `/api/delivery-contacts/${encodeURIComponent(String(id))}/rename-impact?${query.toString()}`)
 }
 
 export function deleteDeliveryContact(id: number | string): Promise<unknown> {

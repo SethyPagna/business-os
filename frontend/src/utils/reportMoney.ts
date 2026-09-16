@@ -16,6 +16,8 @@
 // MAIN exchange rate via khrToUsd/usdToKhr, exactly like every other display
 // conversion in the app.
 
+import { actualUsdValue } from './financialPrecision.ts'
+
 export interface ReportMoneyDeps {
   /** The persisted display_currency setting, any case ('USD'|'KHR'|'BOTH'). */
   displayCurrency: string
@@ -43,7 +45,12 @@ export function formatReportMoney(usd: number, khr: number | undefined, deps: Re
     return parts.length ? parts.join(' · ') : deps.fmtUSD(0)
   }
   // usd (default): fold any KHR portion into USD at the main rate.
-  return deps.fmtUSD(u + (deps.khrToUsd(k) || 0))
+  // Reports use ordinary nearest-cent display rounding. Quantize the final
+  // folded value exactly once, at this display boundary, before handing it to
+  // the global pricing formatter (which intentionally rounds prices upward).
+  // Do not round the USD and converted-KHR portions separately: that creates
+  // double-rounding artifacts and can move the displayed total by a cent.
+  return deps.fmtUSD(actualUsdValue(u + (deps.khrToUsd(k) || 0)))
 }
 
 /** Curry the deps once per render so callers just pass (usd, khr?). `khr`

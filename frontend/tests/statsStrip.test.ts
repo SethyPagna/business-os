@@ -3,12 +3,14 @@
 // stats ... based on date range. default per day ... do so for all
 // pages"). Tests the pure range-preset helpers, then pins the rollout:
 // every data page renders the SAME shared component (never a bespoke tile
-// grid again). Sales/Returns/Fees start all-time; Reports begins on an
+// grid again). Sales/Returns/Fees start Today; Reports begins on an
 // actionable Today range so every chosen report has concrete endpoints.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { createRequire } from 'node:module'
+import { transformSync } from 'esbuild'
 import { statsPresetRange, activeStatsPreset } from '../src/components/shared/statsStripPresets.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -35,6 +37,21 @@ test('statsPresetRange: 7d spans exactly seven calendar days ending today', () =
   assert.equal(range.endDate, '2026-08-30')
 })
 
+test('statsPresetRange: 30d spans 30 inclusive calendar days across boundaries', () => {
+  const cases: Array<[string, Date, string]> = [
+    ['month', new Date(2026, 4, 1), '2026-04-02'],
+    ['year', new Date(2026, 0, 15), '2025-12-17'],
+    ['leap February', new Date(2024, 2, 1), '2024-02-01'],
+  ]
+  for (const [boundary, now, expectedStart] of cases) {
+    const range = statsPresetRange('30d', now)
+    assert.equal(range.startDate, expectedStart, `30d start survives the ${boundary} boundary`)
+    assert.equal(range.endDate, `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`)
+    assert.equal(range.startTime, '00:00')
+    assert.equal(range.endTime, '23:59')
+  }
+})
+
 test('statsPresetRange: month/year anchor to the 1st, and survive month rollovers', () => {
   const now = new Date(2026, 0, 3) // Jan 3 -- 7d crosses a year boundary
   assert.equal(statsPresetRange('month', now).startDate, '2026-01-01')
@@ -54,13 +71,36 @@ test('activeStatsPreset round-trips every preset and rejects a custom range', ()
   // Wednesday avoids the inherent Sunday overlap between "This week" and
   // "Last 7 days"; the active state is derived from dates alone.
   const now = new Date(2026, 7, 26)
-  for (const preset of ['all', 'today', '7d', 'week', 'month', 'year'] as const) {
+  for (const preset of ['all', 'today', '7d', '30d', 'week', 'month', 'year'] as const) {
     assert.equal(activeStatsPreset(statsPresetRange(preset, now), now), preset)
   }
   assert.equal(activeStatsPreset({ startDate: '2026-08-01', endDate: '2026-08-15', startTime: '', endTime: '' }, now), null)
 })
 
-test('date/time picker owns all-time/today presets and exposes time only where endpoints honor it', () => {
+test('activeStatsPreset: 30d follows common precedence and rejects custom times', () => {
+  const ordinaryNow = new Date(2026, 7, 26)
+  const thirtyDays = statsPresetRange('30d', ordinaryNow)
+  assert.equal(
+    activeStatsPreset({ ...thirtyDays, startTime: '08:15', endTime: '17:45' }, ordinaryNow),
+    null,
+    'a partial day must not highlight a full-day preset',
+  )
+
+  const monthCollision = new Date(2026, 3, 30)
+  assert.deepEqual(statsPresetRange('30d', monthCollision), statsPresetRange('month', monthCollision))
+  assert.equal(activeStatsPreset(statsPresetRange('month', monthCollision), monthCollision), '30d', 'first visible matching preset owns the highlight')
+})
+
+const REPORT_VIEW_FILES = [
+  'src/components/sales/reports/OverviewReport.tsx',
+  'src/components/sales/reports/PeriodReport.tsx',
+  'src/components/sales/reports/SalesListReport.tsx',
+  'src/components/sales/reports/GroupedReport.tsx',
+  'src/components/sales/reports/ReturnsReport.tsx',
+  'src/components/sales/reports/ExpensesReport.tsx',
+]
+
+test('shared stats controls own all-time/today presets and expose time only where endpoints honor it', () => {
   const picker = read('src/components/shared/DateTimeRangePicker.tsx')
   const presets = read('src/components/shared/statsStripPresets.ts')
   assert.ok(picker.includes("{ id: 'all'") && picker.includes("{ id: 'today'"), 'All time and Today live inside the shared picker')
@@ -70,12 +110,16 @@ test('date/time picker owns all-time/today presets and exposes time only where e
   assert.ok(picker.includes('Quick range') && picker.includes('quickRanges.map'), 'quick presets are folded into the opened date/time picker')
 
   const sales = read('src/components/sales/Sales.tsx')
-  assert.match(sales, /<StatsRangeRow[^>]*showTime/, 'Sales exposes the 24-hour control')
+  assert.match(sales, /<StatsStrip[\s\S]{0,300}range=\{stripRange\}[\s\S]{0,80}onRangeChange=\{setStripRange\}[\s\S]{0,80}showTime/, 'Sales exposes the shared StatsStrip 24-hour control')
   assert.match(sales, /getSalesStatsStrip\(\{[\s\S]{0,180}startTime: stripRange\.startTime[\s\S]{0,80}endTime: stripRange\.endTime/, 'Sales threads the selected time window into its stats request')
 
   const reports = read('src/components/sales/ReportsHub.tsx')
-  assert.ok(reports.includes("showTime={selectedType === 'sales'}"), 'the Reports hub exposes time only for its timestamp-backed Sales report')
-  assert.match(reports, /selectedType !==?= 'sales'|selectedType === 'sales'/, 'the Reports hub guards the Sales-only time behavior')
+  assert.ok(reports.includes('showTime={supportsTime}'), 'the Reports hub exposes time only for views whose endpoints honor a clock window')
+  assert.ok(reports.includes('const supportsTime = !!view?.supportsTime'), 'the Reports hub derives the clock affordance from the active view definition')
+  const model = read('src/components/sales/reports/reportModel.ts')
+  assert.ok(/id: 'returns'[^}]*supportsTime: true/.test(model) && /id: 'expenses'[^}]*supportsTime: true/.test(model), 'Returns and Expenses expose their implemented continuous entry-time window')
+  assert.ok(model.includes('q.createdFrom = createdFrom') && model.includes('q.createdTo = createdTo'), 'time-capable reports serialize the server endpoint bounds')
+  assert.ok(/id: 'sales'[^}]*supportsTime: true/.test(model), 'the per-receipt Sales list keeps the 24-hour window')
 })
 
 // ---- rollout pins (cross-file) --------------------------------------------
@@ -89,7 +133,7 @@ test('data pages render the ONE shared StatsStrip and use their intended initial
   for (const [label, rel] of pages) {
     const src = read(rel)
     assert.ok(src.includes('<StatsStrip'), `${label} must render the shared strip`)
-    assert.ok(src.includes("startDate: '', endDate: ''") || src.includes('EMPTY_DATE_TIME_RANGE'), `${label} starts unfiltered instead of silently limiting records to today`)
+    assert.match(src, /useState<DateTimeRange>\(\(\) => (?:todayDateTimeRange\(\)|statsPresetRange\('today'\))\)/, `${label} starts on the current business Today`)
   }
   const reports = read('src/components/sales/ReportsHub.tsx')
   assert.ok(reports.includes('todayDateTimeRange'), 'Reports hub imports the shared business-day range helper')
@@ -133,6 +177,26 @@ test('the whole strip hides behind a click-to-open Stats chip; cards wrap, never
   assert.ok(!/grid-cols-\d.*grid-cols-6|xl:grid-cols-6/.test(strip), 'no fixed 6-track grid that strands empty tracks on few-card pages')
 })
 
+test('compact Stats and range chrome are opt-in, accessible, and preserve full endpoints', () => {
+  const strip = read('src/components/shared/StatsStrip.tsx')
+  const row = read('src/components/shared/StatsRangeRow.tsx')
+  const picker = read('src/components/shared/DateTimeRangePicker.tsx')
+  assert.match(strip, /iconOnly = false/, 'existing StatsStrip callers retain their visible label')
+  assert.match(strip, /compactRange = false/, 'existing range layout remains the default')
+  assert.match(strip, /aria-label=\{iconOnly \? tr\('stats', 'Stats'\) : undefined\}/, 'icon-only Stats keeps a localized accessible name')
+  assert.match(strip, /\{iconOnly \? null : tr\('stats', 'Stats'\)\}/, 'only opted-in callers hide the visible Stats word')
+  assert.match(strip, /compactRange=\{compactRange\}/, 'StatsStrip forwards the compact range contract')
+  assert.match(row, /showCalendarIcon=\{false\}/, 'the shared stats range has no leading calendar')
+  assert.match(row, /compactTriggerLabels=\{compactRange\}/, 'compact endpoint rendering reaches the picker')
+  assert.match(row, /showQuickRanges=\{!showPresets\}/, 'the picker hides its private presets exactly when the row already renders the external preset rail')
+  assert.doesNotMatch(row, /min-w-fit/, 'compact dates must be allowed to shrink inside action-heavy phone rows')
+  assert.match(picker, /showCalendarIcon = false/, 'calendar chrome is absent by default across range triggers')
+  assert.match(picker, /compactTriggerLabels \? 'text-\[clamp\(10px,2\.75vw,11px\)\]'/, 'compact endpoints use a readable bounded responsive size rather than an intrinsic-width floor')
+  assert.match(picker, /data-date-range-trigger-values/, 'both complete endpoint values share one shrinkable three-column track')
+  assert.match(picker, /triggerEndpoint\(startTriggerDate, value\.startTime \|\| '00:00'\)/, 'selected time remains visibly paired with the full start date')
+  assert.doesNotMatch(picker, /min-w-0 truncate/, 'range endpoints must not be silently ellipsized')
+})
+
 test('secondary controls stay on the Stats-chip row whether the strip is folded or open', () => {
   // User, Aug 31 (superseding the earlier "merge onto the cards row" pin):
   // "move [the buttons] to same row as the stats so when stat button expands
@@ -150,29 +214,48 @@ test('secondary controls stay on the Stats-chip row whether the strip is folded 
   // regardless of open state.
   assert.ok(/\{rangeActions\}\s*\{actions\}/.test(strip), 'row 1 renders rangeActions + actions together on the chip row')
   assert.ok(!strip.includes('PRESETS.map'), 'the shared strip no longer renders preset chips')
-  // Sales feeds History+Manage through the slot; Returns feeds Export+History
-  // there while its Add button stays a PRIMARY action with an always-visible
-  // label.
+  // Sales, Returns and Expenses feed Shift/export/history through the slot
+  // while their primary add actions stay separate and labelled.
   assert.ok(read('src/components/sales/Sales.tsx').includes('rangeActions={('), 'Sales wires History/Manage as rangeActions')
   const returns = read('src/components/returns/Returns.tsx')
   assert.ok(returns.includes('rangeActions={('), 'Returns wires Export/History as rangeActions')
+  assert.ok(returns.includes('<ShiftHistoryModal'), 'Returns wires Shift through the stats row')
   assert.ok(returns.includes("tr('add_return', 'Add Return')"), 'Returns add button says Add Return')
   assert.ok(returns.includes("tr('add_supplier_return', 'Add Supplier Return')"), 'supplier scope says Add Supplier Return')
   assert.ok(!/hidden sm:inline">\{tr\('add_return'/.test(returns), 'the add label never hides on phones')
+  const fees = read('src/components/fees/FeesPage.tsx')
+  assert.ok(fees.includes('<ShiftHistoryModal') && !fees.includes('<CurrentShiftSummary'), 'Expenses wires Shift through the stats row')
 })
 
-test('Part 548: the Reports range totals show Profit on every viewport', () => {
-  const report = read('src/components/sales/SalesDailyReport.tsx')
-  const totalsRow = report.slice(report.indexOf('rangeTotals.tx'), report.indexOf('rangeTotals.profit') + 200)
-  assert.ok(totalsRow.includes('rangeTotals.profit'), 'Profit renders beside N sales | Revenue')
-  assert.ok(!/hidden sm:inline[^>]*>\{t\('profit'\)/.test(report), 'Profit is not hidden below the sm breakpoint')
+test('Part 548: report figures remain visible on every viewport without duplicate Overview prose', () => {
+  // Detail views retain their compact summary. Overview renders the canonical
+  // income-statement rows directly, so a second prose summary cannot drift.
+  for (const rel of [
+    'src/components/sales/reports/SalesListReport.tsx',
+    'src/components/sales/reports/PeriodReport.tsx',
+    'src/components/sales/reports/GroupedReport.tsx',
+  ]) {
+    const src = read(rel)
+    assert.match(src, /tr\('rpt_gross_profit',\s*'[^']+'\)/, `${rel} renders the shared profit label in its summary`)
+    assert.ok(!/hidden sm:inline/.test(src), `${rel} never hides a figure below the sm breakpoint`)
+  }
+  const overview = read('src/components/sales/reports/OverviewReport.tsx')
+  assert.ok(overview.includes('buildIncomeStatement('), 'Overview retains the canonical profit statement')
+  assert.ok(overview.includes('lines.map((l)'), 'Overview renders all permitted statement rows on every viewport')
+  assert.doesNotMatch(overview, /summary=\{|summaryNote=/, 'Overview no longer repeats the statement as prose')
+  const frame = read('src/components/sales/reports/ReportFrame.tsx')
+  assert.ok(frame.includes('data-report-summary'), 'ReportFrame still supports detail-view summaries')
 })
 
-test('Part 549/552: the Sales report status/method filters are compact chip-selects', () => {
-  const report = read('src/components/sales/SalesDailyReport.tsx')
-  // Compact h-7 chip-selects (not the old full-height dropdowns), matching
-  // the Returns/Fees report density.
-  assert.ok(report.includes("buttonClassName=\"h-7 py-0 px-2 text-[11px]\""), 'status/method use the compact chip-select size')
+test('Part 549/552: the Reports status/method filters are compact chip-selects', () => {
+  const report = read('src/components/sales/ReportsHub.tsx')
+  // The menu select controls use the shared h-9 control height for readable
+  // desktop/mobile tap targets.
+  // Part 586 moved these selects into the one filter menu, where they take
+  // the menu column's full width -- so pin the DENSITY rather than the exact
+  // layout around it,
+  // rather than the exact class literal.
+  assert.ok(/buttonClassName="h-9 w-full py-0 px-2 text-\[12px\]"/.test(report), 'status/method use the consistent filter control size')
   assert.ok(report.includes('options={statusOptions}') && report.includes('options={paymentOptions}'), 'both selects render')
 })
 
@@ -224,12 +307,22 @@ test('Sales statistics keep COGS, gross profit, and permitted expenses visible',
 })
 
 test('Part 564: headline + day-group counts count only what the money counts', () => {
-  // User, Aug 31: "count only what the money counts." Cancelled (and, for
-  // sales, awaiting-payment) records still appear in the list but are excluded
-  // from every count shown, so the count reconciles with the money and with
-  // the stats strip (which already excludes them).
+  // User, Aug 31: "count only what the money counts." Cancelled records still
+  // appear in the list but are excluded from every count shown, so the count
+  // reconciles with the money and with the stats strip.
+  //
+  // CORRECTED Sep 6 2026 (owner ask N6). This used to pin a predicate that
+  // dropped awaiting_payment too, and the money it was meant to reconcile with
+  // never did: recognizedExpr is `<> 'cancelled'`, so unpaid credit is INSIDE
+  // revenue and inside GET /api/sales/stats's revenue_count. The footer read
+  // "4 sales" beside a revenue built out of 5. What is pinned now is that the
+  // page takes the rule from ONE place -- the shared kernel mirror in
+  // utils/statsFormulas.ts -- rather than restating it in a local list.
   const sales = read('src/components/sales/Sales.tsx')
-  assert.ok(/isCountedSale[\s\S]{0,160}cancelled[\s\S]{0,60}awaiting_payment/.test(sales), 'Sales defines the money-counting predicate')
+  assert.ok(/isCountedSale = useCallback\(\(sale: SaleRecord\) => isRevenueCountedSale\(sale\)/.test(sales),
+    'Sales takes the money-counting predicate from the shared kernel mirror')
+  assert.ok(!/isCountedSale[\s\S]{0,200}'awaiting_payment'/.test(sales),
+    'and no longer restates it as a local list that drops the cohort the kernel counts')
   assert.ok(/revenueCount[\s\S]{0,60}filter\(isCountedSale\)/.test(sales), 'Sales computes the reconciled headline count')
   const salesSurface = read('src/components/sales/SalesListSurface.tsx')
   assert.ok(salesSurface.includes('{revenueCount}'), 'the Sales footer shows the money-counting count')
@@ -238,55 +331,69 @@ test('Part 564: headline + day-group counts count only what the money counts', (
   assert.ok(/section\.items\.filter\(isCountedReturn\)/.test(returnsSurface), 'Returns day headers exclude cancelled from the count')
 })
 
-test('Part 552: report section controls ride the title row; hub tabs fit; branch merges', () => {
-  // Each report section places its controls on the hub-provided title row
-  // (user: "the sales, returns and fees, sections the card title can be
-  // moved to title row"): the section owns a `titleNode` prop and ReportsHub
-  // stops rendering a standalone title.
-  for (const rel of [
-    'src/components/sales/SalesDailyReport.tsx',
-    'src/components/sales/ReturnsReportSection.tsx',
-    'src/components/sales/FeesReportSection.tsx',
-  ]) {
+test('Part 552: report headers keep exactly four controls; hub tabs fit; branch merges', () => {
+  // The active report selector replaces the static title and shares one row
+  // with Filter, Show, and the report's overflow menu. View-specific mode and
+  // history controls remain functional on the secondary rail below.
+  for (const rel of REPORT_VIEW_FILES) {
     const src = read(rel)
-    assert.ok(/titleNode\??: ReactNode/.test(src), `${rel} accepts a titleNode`)
-    assert.ok(src.includes('{titleNode}'), `${rel} renders the titleNode on its control row`)
+    assert.ok(src.includes('<ReportFrame'), `${rel} renders inside a ReportFrame`)
+    assert.ok(!/<ReportFrame[\s\S]{0,800}\bactions=\{/.test(src), `${rel} does not put a mixed action group in the four-control header`)
   }
   const hub = read('src/components/sales/ReportsHub.tsx')
-  assert.ok(hub.includes('titleNode={titleNode}'), 'ReportsHub passes the title into each section')
   assert.ok(!/<Icon className="h-4 w-4" \/> \{label\}/.test(hub), 'ReportsHub no longer renders its own standalone section title row')
-  // The branch select rides the type-chips row, not its own line.
-  assert.ok(/typeChips\.map[\s\S]{0,900}branches\.length \? \(\s*<AppSelect/.test(hub), 'the branch select sits inside the type-chips row')
+  const compoundTitle = hub.slice(hub.indexOf('const reportControlRow'), hub.indexOf('const viewProps'))
+  assert.match(compoundTitle, /\{viewPicker\}[\s\S]*\{filtersButton\}[\s\S]*trh\('show', 'Show'\)/, 'the shared report title contributes selector, Filter, and Show in order')
+  assert.match(hub, /titleControl: reportControlRow/, 'every report receives the shared compound title')
+  const frame = read('src/components/sales/reports/ReportFrame.tsx')
+  assert.match(frame, /actions=\{menuAction \? <span className="reports-frame-menu">\{menuAction\}<\/span> : undefined\}/, 'the fourth header control is only the report overflow menu')
+  assert.match(frame, /secondaryActions \? <div className="reports-frame-secondary-actions">\{secondaryActions\}<\/div> : null/, 'mode and history controls remain on the secondary rail')
+  // The branch select rides the shared control row's filters slot, not its own line.
+  assert.ok(/const filterSelects = \([\s\S]{0,120}branches\.length \? <AppSelect/.test(hub), 'the branch select is part of the control-row filters')
+  // Part 586: the selects no longer sit inline on wide screens at all -- they
+  // are in the one filter menu at every width (user: "the various options
+  // into filtermenu"), which is what gave the search box back its room. The
+  // invariant that still matters is that they reach the user through the
+  // shared ControlRow's menu rather than being dropped; reportsHub.test.ts
+  // pins the "nothing is dropped at any tier" side of it.
+  assert.ok(hub.includes('<ControlRow'), 'the hub renders the shared ControlRow')
+  assert.ok(/filterControls=\{hasFilterControls \? filterSelects : null\}/.test(hub), 'the branch/status/method selects reach the user through the filter menu')
 
   // The hub tab row fits one row on phones: equal grid cells with complete,
   // wrapping labels, including Khmer, instead of hiding Reports with an
   // ellipsis or pushing it beyond the iPhone viewport.
+  // Since Section 6 the strip is rendered by the shared HubSectionNav (every
+  // hub gets the same phone treatment); the invariant is pinned there.
   const shell = read('src/components/sales/SalesHubPage.tsx')
-  assert.ok(shell.includes('grid w-full rounded-xl'), 'the tab strip is full-width')
-  assert.ok(shell.includes('gridTemplateColumns'), 'each visible tab receives an equal bounded cell')
-  assert.ok(shell.includes('break-words text-center leading-tight'), 'tab labels stay complete and may use a second line')
+  assert.ok(shell.includes('<HubSectionNav'), 'the Sales hub renders its tab strip through HubSectionNav')
+  const nav = read('src/components/shared/HubSectionNav.tsx')
+  assert.ok(nav.includes('hub-section-pills flex max-w-full flex-wrap'), 'the chip row is viewport bounded and wraps')
+  assert.ok(!nav.includes('hub-section-pills flex max-w-full overflow-x-auto'), 'the chip row does not require horizontal scrolling')
+  const sidebar = read('src/components/navigation/Sidebar.tsx')
+  assert.ok(sidebar.includes('grid min-w-0 grid-cols-2'), 'inline mobile group children use two bounded columns')
+  assert.ok(sidebar.includes('flex min-h-16 min-w-0 flex-col items-center justify-center'), 'mobile leaf tiles keep a 64px touch target with icon above title')
+  assert.ok(sidebar.includes('<SectionIcon className="h-5 w-5 shrink-0" aria-hidden="true" />'), 'subpage icons stay decorative inside the mobile page-selection menu')
+  assert.ok(sidebar.includes('<span className="min-w-0 max-w-full break-words text-center leading-tight">{sectionLabel(section)}</span>'), 'English and Khmer mobile leaf titles fully wrap instead of clipping')
+  assert.ok(nav.includes('if (layered || visible.length <= 1) return <>{content}</>'), 'default mobile mode enters the stable keyed body directly, without another tile page')
 })
 
-test('Part 553/554: report sections render display-currency money + a CSV export', () => {
+test('Part 553/554: report sections render selected-currency money + a CSV export', () => {
   // Money now flows through the display-currency-aware fmtMoney (Part 554,
   // utils/reportMoney.ts) so a KHR fee never reads as "$0.00" and the
-  // display_currency setting is honored. Each section also offers an Export
+  // selected report currency is honored. Each section also offers an Export
   // action (user: "no actions to choose export etc"). Deeper reportMoney
   // behavior is pinned in tests/reportMoney.test.ts.
-  for (const rel of [
-    'src/components/sales/FeesReportSection.tsx',
-    'src/components/sales/ReturnsReportSection.tsx',
-  ]) {
+  for (const rel of REPORT_VIEW_FILES) {
     const src = read(rel)
     assert.ok(src.includes('fmtMoney('), `${rel} renders money via fmtMoney`)
     assert.ok(src.includes('downloadCSV('), `${rel} exports CSV`)
-    assert.ok(/onClick=\{exportCsv\}/.test(src), `${rel} wires an Export button`)
+    assert.ok(src.includes('exportMenuItems('), `${rel} offers Export CSV / Print on its title row`)
   }
-  const sales = read('src/components/sales/SalesDailyReport.tsx')
-  assert.ok(sales.includes('downloadCSV(') && /onClick=\{exportCsv\}/.test(sales), 'Sales report exports CSV')
-  // The hub threads the display-currency fmtMoney into every section.
+  // The hub threads its explicit report-currency fmtMoney into every view.
   const hub = read('src/components/sales/ReportsHub.tsx')
-  assert.ok(hub.includes('fmtMoney={fmtMoney}'), 'ReportsHub passes fmtMoney to the sections')
+  assert.ok(/const viewProps[\s\S]{0,400}fmtMoney,/.test(hub), 'ReportsHub passes fmtMoney to the views')
+  assert.ok(hub.includes('displayCurrency: options.currency'), 'report currency is display-only and defaults independently to USD')
+  assert.ok(!hub.includes("options.currency === 'setting'"), 'the removed App setting choice cannot remain active invisibly')
 })
 
 test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {
@@ -296,42 +403,59 @@ test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {
   assert.ok(!inventory.includes("getReturns({ scope: 'all' })"), 'the all-rows client-side returns sum is gone (range endpoints instead)')
 })
 
-test('Part 560: the Start→End date row is lifted OUT of the stats fold into a StatsRangeRow above the search bar', () => {
-  // User, Aug 31: "fish out the start date and end date from the stats
-  // button ... this should be right above the search bar row ... make sure
-  // this applies to all section, mini sections, and pages ... stats can be
-  // placed at the top ... but of course the start and end date will also
-  // apply to it." The picker moved into the shared StatsRangeRow,
-  // which each list page renders directly above its search bar (inside the
-  // pinned wrapper, per the sticky search+date rule); the page stops passing
-  // range/onRangeChange to StatsStrip and keeps feeding the strip's cards
-  // from the SAME stripRange state. StatsStrip is left backward-compatible on
-  // purpose (its internal date row still renders for a caller that passes the
-  // props) so pages migrate one at a time across parallel sessions —
-  // Inventory's stats live on their own section chip and migrate in the lane
-  // that owns that file.
+test('Part 560: StatsStrip owns one stable date/action row and a one-row preset rail', () => {
+  // The shared strip owns the range surface for migrated data pages. It
+  // delegates that surface to StatsRangeRow itself, so pages cannot drift by
+  // composing another page-owned row beside it. Presets stay visible while
+  // Stats is folded and scroll in one non-wrapping rail on narrow screens.
   const rangeRow = read('src/components/shared/StatsRangeRow.tsx')
   assert.ok(rangeRow.includes('<DateTimeRangePicker'), 'StatsRangeRow carries the shared Start→End picker')
-  assert.ok(!rangeRow.includes('PRESETS.map'), 'StatsRangeRow does not render preset chips')
-  // Sales/Returns/Fees place it above the search bar; Inventory's stats sit on
-  // their own section chip so its row leads the stats section instead — but all
-  // four render the shared row wired to stripRange and drop the props from the
-  // strip.
+  assert.ok(rangeRow.includes('STATS_PRESETS.map') && rangeRow.includes('overflow-x-auto'), 'presets are restored in a single scroll rail')
+  assert.ok(rangeRow.includes('flex-nowrap'), 'date controls and presets never wrap')
+  const strip = read('src/components/shared/StatsStrip.tsx')
+  assert.match(strip, /<StatsRangeRow range=\{range\} onRangeChange=\{onRangeChange\}/, 'StatsStrip owns the shared date row when its range contract is supplied')
+  assert.ok(strip.includes('leading={statsTrigger}') && !strip.includes('statsOpen && range'), 'range stays visible beside Stats while cards are folded')
+  assert.match(strip, /showTime=\{showTime\} showPresets=\{showPresets\}/, 'StatsStrip forwards the clock and preset contract to the shared row')
+  // Sales, Returns, and Expenses pass their one range state to StatsStrip and
+  // no longer render a sibling StatsRangeRow. Inventory retains a separate
+  // range surface for its mixed embedded/product modes and is not used as a
+  // reason to pin the obsolete page-owned pattern onto migrated pages.
   for (const rel of [
     'src/components/sales/Sales.tsx',
     'src/components/returns/Returns.tsx',
     'src/components/fees/FeesPage.tsx',
-    'src/components/inventory/Inventory.tsx',
   ]) {
     const src = read(rel)
-    // Rendered above the search bar and wired to the strip's range state
-    // (single-line StatsRangeRow form).
-    assert.ok(/<StatsRangeRow[^>]*range=\{stripRange\}[^>]*onRangeChange=\{(?:setStripRange|handleStripRangeChange)\}/.test(src), `${rel} renders StatsRangeRow wired to stripRange`)
-    // The strip on these pages no longer owns the range: the old multi-line
-    // `range={stripRange}` / `onRangeChange={setStripRange}` prop pair passed
-    // into <StatsStrip> (each on its own line) is gone. The new StatsRangeRow
-    // form keeps both on ONE line, so this only catches the removed strip props.
-    assert.ok(!/range=\{stripRange\}\s*\n\s*onRangeChange=\{setStripRange\}/.test(src), `${rel} no longer passes the range into StatsStrip`)
+    const statsAt = src.indexOf('<StatsStrip')
+    assert.ok(statsAt >= 0, `${rel} renders StatsStrip`)
+    const statsEnd = src.indexOf('\n      />', statsAt)
+    assert.ok(statsEnd > statsAt, `${rel} closes its StatsStrip call at page indentation`)
+    const statsCall = src.slice(statsAt, statsEnd + '\n      />'.length)
+    assert.match(statsCall, /range=\{stripRange\}/, `${rel} gives StatsStrip the list/stats range`)
+    assert.match(statsCall, /onRangeChange=\{setStripRange\}/, `${rel} lets StatsStrip change the shared range`)
+    assert.doesNotMatch(src, /<StatsRangeRow[^>]*range=\{stripRange\}/, `${rel} must not restore a sibling page-owned range row`)
+  }
+})
+
+test('preset buttons execute the shared date-only and timestamp range callbacks', () => {
+  const require = createRequire(import.meta.url)
+  const mod = { exports: {} as Record<string, any> }
+  const compiled = transformSync(read('src/components/shared/StatsRangeRow.tsx'), { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
+  new Function('require', 'module', 'exports', compiled)((id: string) => {
+    if (id.includes('DateTimeRangePicker')) return () => null
+    if (id.includes('statsStripPresets')) return require('../src/components/shared/statsStripPresets.ts')
+    return require(id)
+  }, mod, mod.exports)
+  for (const showTime of [false, true]) {
+    let changed: ReturnType<typeof statsPresetRange> | null = null
+    const tree = mod.exports.default({ range: statsPresetRange('all'), t: (key: string) => key, showTime, onRangeChange: (value: ReturnType<typeof statsPresetRange>) => { changed = value } })
+    const rail = tree.props.children[1]
+    const buttons = rail.props.children
+    assert.equal(buttons.length, 8)
+    buttons[1].props.onClick()
+    assert.deepEqual(changed, showTime ? statsPresetRange('today') : { ...statsPresetRange('today'), startTime: '', endTime: '' })
+    buttons[0].props.onClick()
+    assert.deepEqual(changed, statsPresetRange('all'))
   }
 })
 

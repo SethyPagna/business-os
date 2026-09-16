@@ -1,0 +1,528 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import React, { act } from 'react'
+import { createRoot } from 'react-dom/client'
+
+const readSource = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
+const productFormSource = readSource('../src/components/products/forms/ProductForm.tsx')
+const fastStockInSource = readSource('../src/components/inventory/FastStockInModal.tsx')
+const createSessionSource = readSource('../src/components/products/CreateProductsSessionModal.tsx')
+const productsSource = readSource('../src/components/products/Products.tsx')
+const confirmDialogSource = readSource('../src/components/shared/ConfirmDialog.tsx')
+const filePickerSource = readSource('../src/components/files/FilePickerModal.tsx')
+const renameCascadeSource = readSource('../src/components/shared/RenameCascadeModal.tsx')
+
+assert.match(productFormSource, /draftScope\?: string/, 'ProductForm needs an explicit create-flow draft scope')
+assert.match(productFormSource, /useStableHydratedState/, 'form hydration must be guarded by a stable entity/session key')
+assert.match(productFormSource, /useStableHydratedState<ProductFormState>\(hydratedInitialForm, draftKey\)/, 'unstable caller seeds must be insulated by the scoped hydration key')
+assert.match(fastStockInSource, /draftScope=\{`fast-stock-in-/, 'scanner creation needs a session/barcode-specific draft')
+assert.match(createSessionSource, /draftScope=\{editingNewLine \? `create-products-session-/, 'each create-session item and queued-line editor needs an isolated draft')
+assert.match(createSessionSource, /useState\(\(\) => rows\.length\)/, 'a restored unified session must reopen the current item draft key')
+assert.match(productsSource, /draftScope="standalone-create"/, 'standalone creation needs its own draft namespace')
+assert.match(productsSource, /if \(!res\?\.success\) throw new Error/, 'failed product creates must reject back to ProductForm')
+assert.match(productFormSource, /clearAfterSuccessfulProductSave/, 'draft clearing must be gated by a resolved save')
+assert.match(productFormSource, /await Promise\.resolve\(save\(\)\)\s+clear\(\)\s+close\(\)/, 'successful save must mark clean before the form closes')
+assert.match(productFormSource, /clearAfterSuccessfulProductSave\([\s\S]*?clearCurrentProductDraft\(\)[\s\S]*?onClose,[\s\S]*?\)/, 'ProductForm must own the ordered successful close')
+assert.match(productFormSource, /const legacyDraft = !draft && legacyDraftKey/, 'legacy fallback must run only when the new scoped draft is absent')
+assert.match(productFormSource, /restoredLegacyDraftKeyRef\.current = legacyDraft\?\.data \? legacyDraftKey : null/, 'legacy clearing must be armed only by an actual fallback restore')
+assert.match(productFormSource, /useEffect\(\(\) => \(\) => \{[\s\S]*?flushPendingWorkDraft\(draftKey\)[\s\S]*?\}, \[draftKey\]\)/, 'unmount/key change must flush only this form pending draft')
+assert.match(productFormSource, /const preserveAndMinimize = onMinimize \? \(\) => \{[\s\S]*?flushPendingWorkDraft\(draftKey\)[\s\S]*?productId: product\?\.id \?\? null/, 'create and edit minimize must flush and identify the exact entity draft before parking')
+assert.match(productFormSource, /<Modal[\s\S]*?onMinimize=\{preserveAndMinimize\}/, 'ProductForm must expose its proven preservation capability to the shared close prompt')
+assert.match(productFormSource, /<ConfirmDialogLayerContext\.Provider value=\{modalLayer\}>/, 'nested ProductForm must propagate its layer to indirect confirmation dialogs')
+assert.match(productFormSource, /<Modal[\s\S]*?layer=\{modalLayer\}/, 'ProductForm must retain its requested layer while a child is open')
+assert.doesNotMatch(productFormSource, /effectiveModalLayer|nestedChildSurfaceOpen/, 'the parent layer must never be lowered behind its own parent session')
+assert.match(productFormSource, /dialog\.setAttribute\('inert', ''\)[\s\S]*?dialog\.setAttribute\('aria-hidden', 'true'\)/, 'a ProductForm must be inert while its latest child surface is active')
+assert.match(confirmDialogSource, /layer\?: ConfirmDialogLayer/)
+assert.match(confirmDialogSource, /const resolvedLayer = layer \|\| inheritedLayer/)
+assert.match(confirmDialogSource, /layer=\{resolvedLayer\}/)
+assert.match(filePickerSource, /layer\?: 'default' \| 'nested'/)
+assert.match(filePickerSource, /<Modal title=\{title\} onClose=\{onClose\} wide layer=\{layer\} unsavedChanges="read-only">/)
+assert.match(renameCascadeSource, /layer === 'nested' \? 'z-\[1080\]' : 'z-\[1060\]'/)
+assert.match(productFormSource, /function canManageProductImages/, 'product image controls need the products:image action gate')
+assert.match(productFormSource, /import \{ effectivePermissions, isAdminControlUser \} from '\.\.\/\.\.\/\.\.\/utils\/permissions\.ts'/, 'ProductForm must use the shared effective-permission authority')
+assert.match(productFormSource, /function canManageProductImages\(user\?: ProductUser \| null\): boolean \{\s*return effectivePermissions\(user\)\.can\('products', 'image'\)\s*\}/, 'the image gate must merge role and user overrides before applying the same products:image action contract as the permission editor/backend')
+assert.match(productFormSource, /canManageImages \? \([\s\S]*?onClick=\{addImages\}/, 'upload controls must stay hidden when products:image is blocked')
+assert.match(productFormSource, /<MinimizeButton[\s\S]*?onMinimize=\{preserveAndMinimize\}/, 'header and close-prompt minimize must use the same preservation path')
+assert.match(productsSource, /onMinimize=\{\(label:[\s\S]*?if \(modalProduct\) \{[\s\S]*?kind: 'edit_product'[\s\S]*?draftKey,[\s\S]*?requiredPermission: \{ permissionKey: 'products', actionKey: 'edit' \}/,
+  'edit minimize must park the exact entity draft behind products:edit')
+assert.match(productsSource, /\} else \{[\s\S]*?kind: 'add_product'[\s\S]*?requiredPermission: \{ permissionKey: 'products', actionKey: 'add' \}/,
+  'the same host callback must keep standalone create behind products:add')
+const sessionProductForm = createSessionSource.match(/<ProductForm[\s\S]*?\/>/)?.[0] || ''
+const stockInProductForm = fastStockInSource.match(/<ProductForm[\s\S]*?\/>/)?.[0] || ''
+assert.doesNotMatch(sessionProductForm, /onMinimize=/, 'create session must not fake a restorable minimized item')
+assert.doesNotMatch(stockInProductForm, /onMinimize=/, 'scanner-created stock-in item must not fake a separate minimized form')
+
+const catalogSaveStart = productsSource.indexOf('  const handleSaveWithGallery = async')
+const catalogSaveEnd = productsSource.indexOf('\n\n  // Opens DeleteConfirmModal', catalogSaveStart)
+const catalogSaveBody = productsSource.slice(catalogSaveStart, catalogSaveEnd)
+assert.doesNotMatch(catalogSaveBody, /setModal\(null\)|setSelected\(null\)|setDetailProduct\(null\)/, 'the catalog host must not unmount ProductForm before its successful clean latch')
+assert.match(catalogSaveBody, /void \(async \(\) => \{[\s\S]*?await fetchProductsByIds/, 'post-save enrichment must not delay ProductForm clean-and-close')
+
+const sessionNewSaveStart = createSessionSource.indexOf('  const saveNewItem = async')
+const sessionNewSaveEnd = createSessionSource.indexOf('\n\n  const saveEditedNewLine', sessionNewSaveStart)
+const sessionEditSaveStart = sessionNewSaveEnd + 2
+const sessionEditSaveEnd = createSessionSource.indexOf('\n\n  const removeLine', sessionEditSaveStart)
+assert.doesNotMatch(createSessionSource.slice(sessionNewSaveStart, sessionNewSaveEnd), /closeItemForm\(\)/, 'a queued new session item resolves to ProductForm before ProductForm closes itself')
+assert.doesNotMatch(createSessionSource.slice(sessionEditSaveStart, sessionEditSaveEnd), /closeItemForm\(\)/, 'an edited queued item resolves to ProductForm before ProductForm closes itself')
+
+const scannedCreateStart = fastStockInSource.indexOf('  const createProductForScannedBarcode = async')
+const scannedCreateEnd = fastStockInSource.indexOf('\n\n  const addLine', scannedCreateStart)
+assert.doesNotMatch(fastStockInSource.slice(scannedCreateStart, scannedCreateEnd), /setCreateBarcode\(''\)/, 'the scanner host must let ProductForm clear its draft before onClose replaces it')
+
+console.log('PASS product draft lifecycle source contracts')
+
+class MemoryStorage {
+  private values = new Map<string, string>()
+  getItem(key: string): string | null { return this.values.get(key) ?? null }
+  setItem(key: string, value: string): void { this.values.set(key, String(value)) }
+  removeItem(key: string): void { this.values.delete(key) }
+  clear(): void { this.values.clear() }
+}
+
+class MemoryNode {
+  nodeType: number
+  nodeName: string
+  tagName: string
+  ownerDocument: MemoryDocument
+  parentNode: MemoryNode | null = null
+  childNodes: MemoryNode[] = []
+  style: Record<string, string> = {}
+  namespaceURI = 'http://www.w3.org/1999/xhtml'
+  nodeValue = ''
+  private ownText = ''
+
+  constructor(nodeType: number, nodeName: string, ownerDocument: MemoryDocument) {
+    this.nodeType = nodeType
+    this.nodeName = nodeName
+    this.tagName = nodeName
+    this.ownerDocument = ownerDocument
+  }
+
+  appendChild(child: MemoryNode): MemoryNode {
+    child.parentNode = this
+    this.ownText = ''
+    this.childNodes.push(child)
+    return child
+  }
+
+  insertBefore(child: MemoryNode, before: MemoryNode): MemoryNode {
+    child.parentNode = this
+    this.ownText = ''
+    const index = this.childNodes.indexOf(before)
+    if (index < 0) this.childNodes.push(child)
+    else this.childNodes.splice(index, 0, child)
+    return child
+  }
+
+  removeChild(child: MemoryNode): MemoryNode {
+    const index = this.childNodes.indexOf(child)
+    if (index >= 0) this.childNodes.splice(index, 1)
+    child.parentNode = null
+    return child
+  }
+
+  addEventListener(): void {}
+  removeEventListener(): void {}
+  setAttribute(): void {}
+  removeAttribute(): void {}
+
+  set textContent(value: string) {
+    this.ownText = String(value)
+    this.childNodes = []
+  }
+
+  get textContent(): string {
+    if (this.nodeType === 3) return this.nodeValue
+    if (this.childNodes.length) return this.childNodes.map((child) => child.textContent).join('')
+    return this.ownText
+  }
+}
+
+type MemoryDocument = {
+  nodeType: number
+  nodeName: string
+  documentElement: MemoryNode | null
+  activeElement: MemoryNode | null
+  defaultView: Record<string, unknown> | null
+  createElement: (name: string) => MemoryNode
+  createTextNode: (text: string) => MemoryNode
+  addEventListener: () => void
+  removeEventListener: () => void
+}
+
+const memoryDocument: MemoryDocument = {
+  nodeType: 9,
+  nodeName: '#document',
+  documentElement: null,
+  activeElement: null,
+  defaultView: null,
+  createElement(name: string): MemoryNode { return new MemoryNode(1, name.toUpperCase(), memoryDocument) },
+  createTextNode(text: string): MemoryNode {
+    const node = new MemoryNode(3, '#text', memoryDocument)
+    node.nodeValue = String(text)
+    return node
+  },
+  addEventListener() {},
+  removeEventListener() {},
+}
+
+const localStorage = new MemoryStorage()
+const sessionStorage = new MemoryStorage()
+const memoryWindow = {
+  document: memoryDocument,
+  localStorage,
+  sessionStorage,
+  HTMLElement: MemoryNode,
+  HTMLIFrameElement: class {},
+  addEventListener() {},
+  removeEventListener() {},
+  getSelection() { return null },
+  setTimeout: globalThis.setTimeout.bind(globalThis),
+  clearTimeout: globalThis.clearTimeout.bind(globalThis),
+}
+memoryDocument.defaultView = memoryWindow
+memoryDocument.documentElement = memoryDocument.createElement('html')
+memoryDocument.activeElement = memoryDocument.documentElement
+Object.defineProperty(globalThis, 'window', { configurable: true, value: memoryWindow })
+Object.defineProperty(globalThis, 'document', { configurable: true, value: memoryDocument })
+Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: localStorage })
+Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: sessionStorage })
+Object.defineProperty(globalThis, 'HTMLElement', { configurable: true, value: MemoryNode })
+Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true })
+
+const {
+  clearWorkDraft,
+  flushPendingWorkDraft,
+  readWorkDraft,
+  scheduleWorkDraftWrite,
+  scopedWorkDraftKey,
+  writeWorkDraft,
+} = await import('../src/utils/workDrafts.ts')
+const { isWorkDirty, registerDirtyWork } = await import('../src/utils/dirtyWork.ts')
+const { useCloseGuard } = await import('../src/utils/useCloseGuard.ts')
+const { STORAGE_KEYS } = await import('../src/constants.ts')
+
+// Node executes this repository's .ts helpers directly but does not load JSX
+// modules. Execute the exact hook/helper bodies from ProductForm.tsx with the
+// installed React runtime, matching the established lifecycle-test pattern.
+const hydrationHookStart = productFormSource.indexOf('export function useStableHydratedState')
+const hydrationHookEnd = productFormSource.indexOf('\n\nexport async function clearAfterSuccessfulProductSave', hydrationHookStart)
+assert.ok(hydrationHookStart >= 0 && hydrationHookEnd > hydrationHookStart, 'hydration hook source must be extractable')
+const hydrationHookSource = productFormSource.slice(hydrationHookStart, hydrationHookEnd)
+  .replace(
+    /export function useStableHydratedState<T>\(initialState: T, hydrationKey: string\): \[T, Dispatch<SetStateAction<T>>\] \{/,
+    'return function useStableHydratedState(initialState, hydrationKey) {',
+  )
+  .replace(/useState<T>/g, 'useState')
+const useStableHydratedState = Function(
+  'useState',
+  'useRef',
+  'useEffect',
+  hydrationHookSource,
+)(React.useState, React.useRef, React.useEffect) as <T>(initialState: T, hydrationKey: string) => [T, React.Dispatch<React.SetStateAction<T>>]
+
+const draftKeyStart = productFormSource.indexOf('export function productFormDraftBaseKey')
+const draftKeyEnd = productFormSource.indexOf('\n\n// Before create flows were isolated', draftKeyStart)
+assert.ok(draftKeyStart >= 0 && draftKeyEnd > draftKeyStart, 'draft-key helper source must be extractable')
+const draftKeySource = productFormSource.slice(draftKeyStart, draftKeyEnd)
+  .replace(
+    /export function productFormDraftBaseKey\(productId: unknown, draftScope = 'standalone-create'\): string \{/,
+    "return function productFormDraftBaseKey(productId, draftScope = 'standalone-create') {",
+  )
+const productFormDraftBaseKey = Function(draftKeySource)() as (productId: unknown, draftScope?: string) => string
+
+const legacyKeyStart = productFormSource.indexOf('export function legacyStandaloneProductDraftBaseKey')
+const legacyKeyEnd = productFormSource.indexOf('\n\n// ProductForm receives', legacyKeyStart)
+assert.ok(legacyKeyStart >= 0 && legacyKeyEnd > legacyKeyStart, 'legacy-key helper source must be extractable on LF and CRLF checkouts')
+const legacyKeySource = productFormSource.slice(legacyKeyStart, legacyKeyEnd)
+  .replace(
+    /export function legacyStandaloneProductDraftBaseKey\(productId: unknown, draftScope = 'standalone-create'\): string \| null \{/,
+    "return function legacyStandaloneProductDraftBaseKey(productId, draftScope = 'standalone-create') {",
+  )
+const legacyStandaloneProductDraftBaseKey = Function(legacyKeySource)() as (productId: unknown, draftScope?: string) => string | null
+
+const saveGateStart = productFormSource.indexOf('export async function clearAfterSuccessfulProductSave')
+const saveGateEnd = productFormSource.indexOf('\n\nfunction editableInitialForm', saveGateStart)
+assert.ok(saveGateStart >= 0 && saveGateEnd > saveGateStart, 'successful-save gate source must be extractable')
+const saveGateSource = productFormSource.slice(saveGateStart, saveGateEnd)
+  .replace(
+    /export async function clearAfterSuccessfulProductSave[\s\S]*?\): Promise<void> \{/,
+    'return async function clearAfterSuccessfulProductSave(save, clear, close) {',
+  )
+const clearAfterSuccessfulProductSave = Function(saveGateSource)() as (
+  save: () => unknown | Promise<unknown>,
+  clear: () => void,
+  close: () => void,
+) => Promise<void>
+
+type HarnessState = {
+  name: string
+  barcode: string
+  selling_price_usd: string
+  cost_price_usd: string
+  unit: string
+  branch_id: string
+}
+let updateHarness: React.Dispatch<React.SetStateAction<HarnessState>> | null = null
+let updateHarnessTab: React.Dispatch<React.SetStateAction<'basic' | 'pricing'>> | null = null
+function HydrationHarness({ seed, hydrationKey }: { seed: HarnessState; hydrationKey: string }) {
+  const [state, setState] = useStableHydratedState(seed, hydrationKey)
+  const [activeTab, setActiveTab] = React.useState<'basic' | 'pricing'>('basic')
+  updateHarness = setState
+  updateHarnessTab = setActiveTab
+  return React.createElement('span', null, [
+    activeTab,
+    state.barcode,
+    state.name,
+    state.cost_price_usd,
+    state.selling_price_usd,
+    state.unit,
+    state.branch_id,
+  ].join('|'))
+}
+
+const blankSeed = (barcode: string): HarnessState => ({
+  barcode,
+  name: '',
+  selling_price_usd: '0',
+  cost_price_usd: '0',
+  unit: 'pcs',
+  branch_id: 'qa-shop',
+})
+
+const container = memoryDocument.createElement('div')
+const root = createRoot(container as unknown as Element)
+await act(async () => {
+  root.render(React.createElement(HydrationHarness, {
+    seed: blankSeed('8850001'),
+    hydrationKey: 'actor-1:fast-stock-in:session-7:item-8850001',
+  }))
+})
+assert.equal(container.textContent, 'basic|8850001||0|0|pcs|qa-shop')
+
+await act(async () => {
+  updateHarness?.((current) => ({
+    ...current,
+    name: 'QA Draft Persistence',
+    cost_price_usd: '10',
+    selling_price_usd: '15',
+  }))
+  updateHarnessTab?.('pricing')
+})
+assert.equal(container.textContent, 'pricing|8850001|QA Draft Persistence|10|15|pcs|qa-shop')
+
+await act(async () => {
+  // A real parent rerender with a newly allocated seed object must not erase
+  // the live name while the actor/session/item identity is unchanged.
+  root.render(React.createElement(HydrationHarness, {
+    seed: blankSeed('8850001'),
+    hydrationKey: 'actor-1:fast-stock-in:session-7:item-8850001',
+  }))
+})
+assert.equal(container.textContent, 'pricing|8850001|QA Draft Persistence|10|15|pcs|qa-shop')
+
+await act(async () => {
+  // Moving to another item is intentional hydration, not a background rerender.
+  root.render(React.createElement(HydrationHarness, {
+    seed: blankSeed('8850002'),
+    hydrationKey: 'actor-1:fast-stock-in:session-7:item-8850002',
+  }))
+})
+assert.equal(container.textContent, 'pricing|8850002||0|0|pcs|qa-shop')
+await act(async () => root.unmount())
+console.log('PASS mounted React keeps session name/barcode/prices/defaults/tab through a parent rerender and resets only for a new item')
+
+sessionStorage.setItem(STORAGE_KEYS.USER, JSON.stringify({ id: 41, organization_public_id: 'org-a' }))
+const actorOneStandalone = scopedWorkDraftKey(productFormDraftBaseKey(null, 'standalone-create'))
+const actorOneFast = scopedWorkDraftKey(productFormDraftBaseKey(null, 'fast-stock-in-7-8850001'))
+const actorOneSessionItem = scopedWorkDraftKey(productFormDraftBaseKey(null, 'create-products-session-7-item-0'))
+assert.equal(new Set([actorOneStandalone, actorOneFast, actorOneSessionItem]).size, 3, 'separate create flows must not share drafts')
+
+sessionStorage.setItem(STORAGE_KEYS.USER, JSON.stringify({ id: 42, organization_public_id: 'org-a' }))
+const actorTwoStandalone = scopedWorkDraftKey(productFormDraftBaseKey(null, 'standalone-create'))
+assert.notEqual(actorTwoStandalone, actorOneStandalone, 'different users must not share a standalone draft')
+assert.equal(productFormDraftBaseKey(123, 'ignored-flow'), 'product_123', 'existing-product drafts remain entity keyed')
+console.log('PASS product draft keys isolate actor, workflow, session item, and edit entity')
+
+sessionStorage.clear()
+localStorage.clear()
+sessionStorage.setItem(STORAGE_KEYS.USER, JSON.stringify({ id: 51, organization_public_id: 'org-upgrade' }))
+const upgradedStandaloneKey = scopedWorkDraftKey(productFormDraftBaseKey(null, 'standalone-create'))
+const actorOneLegacyKey = scopedWorkDraftKey(legacyStandaloneProductDraftBaseKey(null, 'standalone-create')!)
+writeWorkDraft(actorOneLegacyKey, { name: 'Existing deployed draft' })
+assert.equal(readWorkDraft(upgradedStandaloneKey), null, 'upgrade starts without the new standalone key')
+assert.equal(readWorkDraft<{ name: string }>(actorOneLegacyKey)?.data.name, 'Existing deployed draft', 'same actor can restore the deployed standalone draft')
+assert.equal(legacyStandaloneProductDraftBaseKey(null, 'fast-stock-in-1-code'), null, 'fast stock-in must never inspect the ambiguous legacy draft')
+assert.equal(legacyStandaloneProductDraftBaseKey(null, 'create-products-session-1-item-0'), null, 'create session must never inspect the ambiguous legacy draft')
+assert.equal(legacyStandaloneProductDraftBaseKey(123, 'standalone-create'), null, 'editing an existing product must never inspect the create draft')
+
+sessionStorage.setItem(STORAGE_KEYS.USER, JSON.stringify({ id: 52, organization_public_id: 'org-upgrade' }))
+assert.equal(readWorkDraft(scopedWorkDraftKey('product_new')), null, 'another actor cannot see the deployed draft')
+sessionStorage.setItem(STORAGE_KEYS.USER, JSON.stringify({ id: 51, organization_public_id: 'org-upgrade' }))
+
+// A pre-existing new-key draft wins and leaves the ambiguous legacy draft
+// untouched. Only a fallback-selected legacy key is eligible for later clear.
+writeWorkDraft(upgradedStandaloneKey, { name: 'New scoped draft wins' })
+const primary = readWorkDraft<{ name: string }>(upgradedStandaloneKey)
+const selectedLegacyKey = primary ? null : actorOneLegacyKey
+clearWorkDraft(upgradedStandaloneKey)
+if (selectedLegacyKey) clearWorkDraft(selectedLegacyKey)
+assert.equal(readWorkDraft<{ name: string }>(actorOneLegacyKey)?.data.name, 'Existing deployed draft', 'saving a new-key draft must not silently delete unrelated legacy state')
+const restoredLegacyKey = readWorkDraft(upgradedStandaloneKey) ? null : actorOneLegacyKey
+clearWorkDraft(upgradedStandaloneKey)
+if (restoredLegacyKey) clearWorkDraft(restoredLegacyKey)
+assert.equal(readWorkDraft(actorOneLegacyKey), null, 'save/discard clears legacy only after fallback selected it')
+console.log('PASS standalone-only legacy fallback survives upgrade, stays actor-isolated, and clears conditionally')
+
+const pendingKey = scopedWorkDraftKey('product_new_unmount-test')
+function DraftUnmountHarness({ draftKey, name }: { draftKey: string; name: string }) {
+  React.useEffect(() => () => {
+    flushPendingWorkDraft(draftKey)
+  }, [draftKey])
+  React.useEffect(() => scheduleWorkDraftWrite(draftKey, { name }, 60_000), [draftKey, name])
+  return React.createElement('span', null, name)
+}
+const unmountContainer = memoryDocument.createElement('div')
+const unmountRoot = createRoot(unmountContainer as unknown as Element)
+await act(async () => {
+  unmountRoot.render(React.createElement(DraftUnmountHarness, { draftKey: pendingKey, name: 'Initial value' }))
+})
+await act(async () => {
+  unmountRoot.render(React.createElement(DraftUnmountHarness, { draftKey: pendingKey, name: 'Latest before minimize' }))
+})
+assert.equal(readWorkDraft(pendingKey), null, 'debounce remains asynchronous during typing')
+await act(async () => unmountRoot.unmount())
+assert.equal(readWorkDraft<{ name: string }>(pendingKey)?.data.name, 'Latest before minimize')
+
+const clearedKey = scopedWorkDraftKey('product_new-cleared-unmount-test')
+const clearedContainer = memoryDocument.createElement('div')
+const clearedRoot = createRoot(clearedContainer as unknown as Element)
+await act(async () => {
+  clearedRoot.render(React.createElement(DraftUnmountHarness, { draftKey: clearedKey, name: 'Saved value' }))
+})
+clearWorkDraft(clearedKey)
+await act(async () => clearedRoot.unmount())
+assert.equal(flushPendingWorkDraft(clearedKey), false, 'cleared success/discard cannot be resurrected by later unmount cleanup')
+assert.equal(readWorkDraft(clearedKey), null)
+clearWorkDraft(pendingKey)
+assert.equal(flushPendingWorkDraft(pendingKey), false, 'cleared success/discard cannot be resurrected by later unmount cleanup')
+assert.equal(readWorkDraft(pendingKey), null)
+console.log('PASS mounted React unmount/minimize flush preserves latest dirty state without resurrecting cleared work')
+
+let clearCount = 0
+await assert.rejects(
+  clearAfterSuccessfulProductSave(
+    async () => { throw new Error('server refused create') },
+    () => { clearCount += 1 },
+    () => { throw new Error('a refused save must not close') },
+  ),
+  /server refused create/,
+)
+assert.equal(clearCount, 0, 'a rejected create must leave its draft intact')
+let closeCount = 0
+await clearAfterSuccessfulProductSave(
+  async () => ({ success: true }),
+  () => { clearCount += 1 },
+  () => { closeCount += 1 },
+)
+assert.equal(clearCount, 1, 'only a resolved save clears its draft')
+assert.equal(closeCount, 1, 'only a resolved save closes the form')
+console.log('PASS failed saves preserve drafts and successful saves clear then close once')
+
+type LifecycleSave = () => Promise<unknown>
+let runLifecycleSave: (() => Promise<void>) | null = null
+let requestLifecycleClose: (() => void) | null = null
+let backFromLifecyclePrompt: (() => void) | null = null
+let discardLifecycleDraft: (() => void) | null = null
+let lifecycleCloseSawDirty: boolean[] = []
+
+function SaveCloseForm({ draftKey, save, close }: { draftKey: string; save: LifecycleSave; close: () => void }) {
+  const dirtyRef = React.useRef(true)
+  const workKey = `save-close-${draftKey}`
+  React.useEffect(() => registerDirtyWork({
+    key: workKey,
+    pageId: 'products',
+    label: 'Save close lifecycle',
+    isDirty: () => dirtyRef.current,
+    discard: () => clearWorkDraft(draftKey),
+  }), [draftKey, workKey])
+  const guard = useCloseGuard({ workKey }, close)
+  runLifecycleSave = () => clearAfterSuccessfulProductSave(
+    save,
+    () => {
+      dirtyRef.current = false
+      clearWorkDraft(draftKey)
+    },
+    close,
+  )
+  requestLifecycleClose = guard.requestClose
+  backFromLifecyclePrompt = guard.dismissPrompt
+  discardLifecycleDraft = guard.discardAndClose
+  return React.createElement('span', null, guard.promptOpen ? 'prompt' : 'form')
+}
+
+function SaveCloseHost({ draftKey, save }: { draftKey: string; save: LifecycleSave }) {
+  const [open, setOpen] = React.useState(true)
+  if (!open) return React.createElement('span', null, 'closed')
+  const workKey = `save-close-${draftKey}`
+  return React.createElement(SaveCloseForm, {
+    draftKey,
+    save,
+    close: () => {
+      lifecycleCloseSawDirty.push(isWorkDirty(workKey))
+      setOpen(false)
+    },
+  })
+}
+
+const successLifecycleKey = scopedWorkDraftKey('product_save-close-success')
+writeWorkDraft(successLifecycleKey, { name: 'Committed product draft' })
+let resolveServerSave: (() => void) | null = null
+const serverSave = new Promise<void>((resolve) => { resolveServerSave = resolve })
+const successLifecycleContainer = memoryDocument.createElement('div')
+const successLifecycleRoot = createRoot(successLifecycleContainer as unknown as Element)
+lifecycleCloseSawDirty = []
+await act(async () => {
+  successLifecycleRoot.render(React.createElement(SaveCloseHost, {
+    draftKey: successLifecycleKey,
+    save: () => serverSave,
+  }))
+})
+const pendingSuccessfulSave = runLifecycleSave!()
+assert.equal(successLifecycleContainer.textContent, 'form', 'the form stays mounted while the server save is pending')
+assert.ok(readWorkDraft(successLifecycleKey), 'the restorable draft remains while the server save is pending')
+await act(async () => {
+  resolveServerSave?.()
+  await pendingSuccessfulSave
+})
+assert.equal(successLifecycleContainer.textContent, 'closed')
+assert.deepEqual(lifecycleCloseSawDirty, [false], 'the actual React host must observe clean work before it unmounts the form')
+assert.equal(readWorkDraft(successLifecycleKey), null, 'the exact committed draft is cleared before close')
+await act(async () => successLifecycleRoot.unmount())
+
+const failedLifecycleKey = scopedWorkDraftKey('product_save-close-failed')
+writeWorkDraft(failedLifecycleKey, { name: 'Retryable product draft' })
+const failedLifecycleContainer = memoryDocument.createElement('div')
+const failedLifecycleRoot = createRoot(failedLifecycleContainer as unknown as Element)
+lifecycleCloseSawDirty = []
+await act(async () => {
+  failedLifecycleRoot.render(React.createElement(SaveCloseHost, {
+    draftKey: failedLifecycleKey,
+    save: async () => { throw new Error('server refused create') },
+  }))
+})
+await assert.rejects(runLifecycleSave!(), /server refused create/)
+assert.equal(failedLifecycleContainer.textContent, 'form', 'a failed save keeps the form mounted')
+assert.ok(readWorkDraft(failedLifecycleKey), 'a failed save keeps the exact draft')
+await act(async () => requestLifecycleClose?.())
+assert.equal(failedLifecycleContainer.textContent, 'prompt', 'failed work still raises Back/Discard')
+await act(async () => backFromLifecyclePrompt?.())
+assert.equal(failedLifecycleContainer.textContent, 'form', 'Back keeps failed work mounted and editable')
+assert.ok(readWorkDraft(failedLifecycleKey), 'Back preserves the failed draft')
+await act(async () => requestLifecycleClose?.())
+await act(async () => discardLifecycleDraft?.())
+assert.equal(failedLifecycleContainer.textContent, 'closed')
+assert.deepEqual(lifecycleCloseSawDirty, [true], 'Discard closes dirty work without pretending it was saved')
+assert.equal(readWorkDraft(failedLifecycleKey), null, 'Discard removes only the local draft')
+await act(async () => failedLifecycleRoot.unmount())
+console.log('PASS actual React save lifecycle clears before close; failure keeps Back/Discard and draft state')

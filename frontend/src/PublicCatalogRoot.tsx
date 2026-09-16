@@ -1,6 +1,7 @@
 import { Suspense, type ReactElement } from 'react'
 import PublicCatalogPage from './components/catalog/PublicCatalogPage.tsx'
 import { PublicCatalogAppProvider } from './app/PublicCatalogAppProvider.tsx'
+import RootErrorBoundary from './components/shared/RootErrorBoundary.tsx'
 import './public-web-api.ts'
 
 function PublicCatalogFallback(): ReactElement {
@@ -15,10 +16,17 @@ function PublicCatalogFallback(): ReactElement {
 
 export default function PublicCatalogRoot(): ReactElement {
   return (
-    <PublicCatalogAppProvider>
-      <Suspense fallback={<PublicCatalogFallback />}>
-        <PublicCatalogPage />
-      </Suspense>
-    </PublicCatalogAppProvider>
+    // Suspense alone only covers a pending lazy import; it does not catch a
+    // THROW. readPortalCache() in PublicCatalogPage.tsx documents the exact
+    // incident: window.sessionStorage threw inside a ref initializer on an
+    // iOS device with site data blocked, nothing caught it, and the whole
+    // storefront rendered blank instead of simply loading without a cache.
+    <RootErrorBoundary surface="public-catalog-root">
+      <PublicCatalogAppProvider>
+        <Suspense fallback={<PublicCatalogFallback />}>
+          <PublicCatalogPage />
+        </Suspense>
+      </PublicCatalogAppProvider>
+    </RootErrorBoundary>
   )
 }

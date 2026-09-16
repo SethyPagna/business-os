@@ -1,7 +1,7 @@
 // POS
 /**
  * Point-of-Sale screen.
- * Sub-components (ProductImage, CartItem) are imported from
+ * Sub-components (ProductCard, CartItem) are imported from
  * sibling files.
  *
  * Key features:
@@ -19,9 +19,9 @@ import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'rea
 import type { ChangeEvent, KeyboardEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
-import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
-import { useApp, useSync } from '../../AppContext'
+import { useApp, useLowStockConfig, useSync } from '../../AppContext'
+import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import {
   PAYMENT_METHODS,
   DELIVERY_FEE_PAYER,
@@ -30,8 +30,13 @@ import {
   EMPTY_CUSTOMER,
   createEmptyOrder,
 } from '../../constants'
-import ProductImage from './ProductImage'
+import ProductCard, { type ProductCardProduct } from './ProductCard.tsx'
+import { createPosTrackingOwner, needsPosTrackingSheet, posTrackingFingerprint, type PosTrackingState } from './posProductTracking.ts'
+import { readFreshPickerLots } from '../../utils/pickerLotFreshness.ts'
 import CartItem     from './CartItem'
+import ShiftGate, { EndShiftButton } from './ShiftGate'
+import { SHIFT_BRANCH_CHANGED_EVENT } from './ShiftGate'
+import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import PaginationControls, { POS_DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import InfoHint from '../shared/InfoHint'
@@ -45,16 +50,24 @@ import {
   getCartLineId,
   findMatchingCartLineIndex,
   applyManualDiscount,
-  computeExpiryStatus,
   repricePromotionCartLines,
+  quoteSaleCartLines,
+  posV1BasketTotals,
+  parsePosInternalAmount,
+  posV1Tender,
+  frozenPosPreview,
+  resolveWholesaleAutoRule,
+  applyWholesaleAutoPricing,
   isSaleRecorded,
   findCheckoutBlocker,
   resolveChangeExchangeRate,
+  resolvePosDisplayStock,
   type ManualDiscountType,
 } from './posCore.ts'
-import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
+import { promotionBadgeForProduct, type PromotionRule } from '../../utils/promotionRules.ts'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { businessDateTimeId } from '../../utils/timestampId.ts'
+import { effectiveTaxRate } from '../../utils/taxSettings.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -66,23 +79,34 @@ import { calculateProductDiscount, normalizePriceValue } from '../../utils/prici
 import { cashierCollectKhr, cashierChangeKhr } from '../../utils/rielRounding.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
-import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import {
   buildProductLightboxState,
   getProductGalleryImages,
 } from '../products/helpers/productGalleryHelpers.ts'
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
+import { cartTotalQuantity } from '../../utils/addressPresets.ts'
 import { toggleMultiValue, toggleMultiValues, matchesMulti, parseMultiValues } from '../../utils/multiSelect.ts'
 import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
 import { buildProductSupplierOptions } from '../products/helpers/productSupplierOptions.ts'
-import { getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
+import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
+import { resolveSaleBranch } from './productSheetState.ts'
+import { branchCanSell } from '../../utils/branchRoles.ts'
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
+import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
+import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
+import { captureActorReadScope, isActorReadScopeCurrent, assertActorSessionDispatchAllowed } from '../../api/actorReadScope.ts'
+import { useSaleMoneyCapability } from '../sales/useSaleMoneyCapability.ts'
+import { saleSecurityFingerprint } from '../sales/saleSettlementConfig.ts'
+import { canonicalSaleReceipt, frozenSaleCheckoutBody, SaleCheckoutRecoveryRequiredError } from '../../utils/saleMoneyV1.ts'
+import { divideMoney4, multiplyMoney4, nativeChangeAmounts, roundMoney2, roundMoney4, sellingPriceCeilCent, sellingPriceDivideCeilCent } from '../../utils/moneyPrecision.ts'
 const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'pos-receipt')
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'pos-image-gallery-lightbox')
 const FilterPanel = lazyRetry(() => import('./FilterPanel'), 'pos-filter-panel')
 const ProductDetailSheet = lazyRetry(() => import('./ProductDetailSheet'), 'pos-product-detail-sheet')
 const POSQuickAddModals = lazyRetry(() => import('./POSQuickAddModals'), 'pos-quick-add-modals')
+const AddressPresetPicker = lazyRetry(() => import('./AddressPresetPicker'), 'pos-address-preset-picker')
 
 const POS_CATALOG_LOAD_TIMEOUT_MS = 15000
 const POS_CONTACT_OPTIONS_TIMEOUT_MS = 8000
@@ -91,6 +115,13 @@ const POS_CATEGORY_OPTIONS_TIMEOUT_MS = 8000
 const POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 const POS_CUSTOMER_CREATE_TIMEOUT_MS = 12000
 const POS_DELIVERY_CREATE_TIMEOUT_MS = 12000
+// One short page per customer typeahead read, well above the number of
+// suggestions the dropdown shows (LAYOUT.AUTOCOMPLETE_MAX_RESULTS) so the
+// local narrowing below always has more than it can display.
+const POS_CUSTOMER_PAGE_SIZE = 50
+// Long enough that a full name typed at speed is one request, short enough
+// that the list feels live.
+const POS_CUSTOMER_SEARCH_DEBOUNCE_MS = 300
 // Y2: 20s produced FALSE failures -- a Worker busy with an import apply can
 // take longer than that to commit a sale, so the client reported an error
 // while the sale landed (the user hit exactly this). The write is deduped
@@ -103,6 +134,14 @@ import type { ContactOption } from '../contacts/contactOptionUtils'
 // proper primary option row (editable later in the full form) instead of a
 // bare string in the address column.
 import { createContactOption, serializeContactOptions } from '../contacts/contactOptionUtils'
+import {
+  createSeparateContactDecision,
+  readContactDuplicateDecisionError,
+  resolveContactDuplicateSyncError,
+  type ContactDuplicateCheck,
+  type ContactDuplicateDecision,
+  type ContactDuplicateMatch,
+} from '../contacts/contactDuplicates.ts'
 
 type ContactOptionUtilsModule = typeof import('../contacts/contactOptionUtils')
 
@@ -141,6 +180,7 @@ type AppSettings = Record<string, unknown> & {
   pos_payment_methods?: string
   product_brand_options?: string
   tax_rate?: string | number
+  tax_enabled?: string | number
 }
 
 type AppContextValue = {
@@ -152,7 +192,8 @@ type AppContextValue = {
   settings: AppSettings
   t: (key: string) => string
   usdSymbol: string
-  user: { id?: string | number; name?: string } | null
+  user: { id?: string | number; name?: string; permissions?: string | Record<string, unknown>; role_permissions?: string | Record<string, unknown>; role_code?: string; organization_id?: number } | null
+  authReady: boolean
 }
 
 type SyncContextValue = {
@@ -227,6 +268,7 @@ type ProductRecord = Record<string, unknown> & {
   out_of_stock_threshold?: string | number
   parent_id?: string | number | null
   price_mode?: string
+  display_price_mode?: 'selling' | 'wholesale'
   product_discount_khr?: number
   product_discount_label?: string
   product_discount_type?: string | null
@@ -237,8 +279,8 @@ type ProductRecord = Record<string, unknown> & {
   selling_price_khr?: string | number
   selling_price_usd?: string | number
   sku?: string
-  special_price_khr?: string | number
-  special_price_usd?: string | number
+  // No special_price_* pair: the 2026-09-04 ruling retired the "VIP" tier and
+  // the products route stopped selecting the columns, so they never arrive.
   wholesale_price_khr?: string | number
   wholesale_price_usd?: string | number
   stock_quantity?: string | number
@@ -269,6 +311,9 @@ type CartLineRecord = ProductRecord & {
   batch_label?: string | null
   batch_expiry_date?: string | null
   batch_available_quantity?: number
+  // Explicitly chosen branch_stock remainder with no received-date identity.
+  unlotted_stock?: boolean
+  unlotted_available_quantity?: number
   // 11.9: this line draws from a damaged lot -- capped by that lot's
   // quantity_remaining, and the checkout sends damaged_lot_id so the
   // server consumes the LOT, never branch/batch stock.
@@ -284,6 +329,7 @@ type CustomerRecord = Record<string, unknown> & {
   membership_number?: string
   name: string
   phone?: string
+  is_anonymous?: number | boolean | null
 }
 
 type DeliveryContactRecord = Record<string, unknown> & {
@@ -318,6 +364,9 @@ type DeliveryFormState = {
 type PosOrder = Record<string, unknown> & {
   cart: CartLineRecord[]
   checkoutRequestId: string
+  money_precision_version?: 0 | 1
+  checkoutPayload?: Record<string, unknown>
+  checkoutReviewRequestId?: string
   customPayment?: boolean
   customer: CustomerRecord & {
     _baseCustomer?: CustomerRecord
@@ -352,6 +401,7 @@ type PosOrder = Record<string, unknown> & {
   // Y12: actual change handed back per currency (see constants.ts PosOrder).
   changeGivenUsd: string
   changeGivenKhr: string
+  changeIsActual?: boolean
   paymentDetails: PaymentDetail[]
   paymentMethod: string
   selectedDelivery: DeliveryContactRecord | null
@@ -366,7 +416,11 @@ type PaymentDetail = {
 
 type MembershipInfo = {
   customer?: { membership_number?: string }
-  points?: { balance?: number }
+  // `redeemableUnits` is the server's own answer to "how many whole units can
+  // this member spend right now", and it is the single place the membership-
+  // points switch is applied to spending. The till reads it rather than
+  // dividing the balance itself -- see maxMembershipUnits.
+  points?: { balance?: number; redeemableUnits?: number }
 }
 
 type ProductFilterMeta = {
@@ -435,8 +489,7 @@ let productReadTransportPromise: Promise<typeof import('../../api/productReadTra
 let lookupTransportPromise: Promise<typeof import('../../api/lookupTransport.ts')> | null = null
 let contactReadTransportPromise: Promise<typeof import('../../api/contactReadTransport.ts')> | null = null
 let contactWriteTransportPromise: Promise<typeof import('../../api/contactWriteTransport.ts')> | null = null
-let portalTransportPromise: Promise<typeof import('../../api/portalTransport.ts')> | null = null
-let saleWriteTransportPromise: Promise<typeof import('../../api/saleWriteTransport.ts')> | null = null
+let saleWriteTransportPromise: Promise<typeof import('../../api/salesTransport.ts')> | null = null
 
 function getProductReadTransport(): Promise<typeof import('../../api/productReadTransport.ts')> {
   if (!productReadTransportPromise) productReadTransportPromise = import('../../api/productReadTransport.ts')
@@ -458,13 +511,8 @@ function getContactWriteTransport(): Promise<typeof import('../../api/contactWri
   return contactWriteTransportPromise
 }
 
-function getPortalTransport(): Promise<typeof import('../../api/portalTransport.ts')> {
-  if (!portalTransportPromise) portalTransportPromise = import('../../api/portalTransport.ts')
-  return portalTransportPromise
-}
-
-function getSaleWriteTransport(): Promise<typeof import('../../api/saleWriteTransport.ts')> {
-  if (!saleWriteTransportPromise) saleWriteTransportPromise = import('../../api/saleWriteTransport.ts')
+function getSaleWriteTransport(): Promise<typeof import('../../api/salesTransport.ts')> {
+  if (!saleWriteTransportPromise) saleWriteTransportPromise = import('../../api/salesTransport.ts')
   return saleWriteTransportPromise
 }
 
@@ -488,9 +536,63 @@ async function loadPosCategories(): Promise<unknown[]> {
   return getCategories() as Promise<unknown[]>
 }
 
-async function loadPosCustomers(): Promise<CustomerRecord[]> {
-  const { getCustomers } = await getContactReadTransport()
-  return getCustomers() as Promise<CustomerRecord[]>
+// The till never downloads the customer table. GET /api/customers with no
+// query returns every column of every row plus a per-row loyalty
+// aggregation -- measured at ~2.4 MB / ~4 s against 5,000 customers, the
+// slowest request in the system -- and the picker only ever shows a
+// handful of matches. So it asks the server the same question the person
+// is asking: "who matches what I just typed", capped at one short page.
+function toPosCustomerRows(data: unknown): CustomerRecord[] {
+  // Paged reads answer { items, total, ... }; the offline fallback (the
+  // local mirror, see contactReadTransport.ts) answers a plain array.
+  if (Array.isArray(data)) return filterSelectableCustomerRows(data as CustomerRecord[])
+  const items = (data as { items?: unknown } | null)?.items
+  return Array.isArray(items) ? filterSelectableCustomerRows(items as CustomerRecord[]) : []
+}
+
+export function authoritativePosCustomerSuggestions(customers: CustomerRecord[], resultsQuery = '', inputQuery = resultsQuery): CustomerRecord[] {
+  // `sales_picker` already applies the server's canonical name-word and phone
+  // matching. Re-filtering that page with raw substring rules hides valid
+  // reordered-name and formatted-phone matches. Query ownership still matters:
+  // a completed page for A must disappear as soon as the input becomes B.
+  if (!inputQuery.trim() || resultsQuery.trim() !== inputQuery.trim()) return []
+  return customers.slice(0, LAYOUT.AUTOCOMPLETE_MAX_RESULTS)
+}
+
+async function searchPosCustomers(search: string): Promise<CustomerRecord[]> {
+  const { getSalesCustomerPicker } = await getContactReadTransport()
+  const data = await getSalesCustomerPicker({
+    ...(search ? { search } : {}),
+    page: 1,
+    pageSize: POS_CUSTOMER_PAGE_SIZE,
+  })
+  return toPosCustomerRows(data)
+}
+
+// One bounded read for contacts already known by id -- the customer just
+// created, or the existing owner of a phone number the till collided with.
+// Backed by routes/contacts.ts's `ids=` filter (lib/contactIds.ts).
+//
+// The rows are re-checked against the ids that were asked for, and the
+// caller gets ONLY those. Never trust the answer to be narrow: a read that
+// fails falls back to the whole local mirror (contactReadTransport.ts's
+// catch), and a Worker that predates `ids=` ignores the param and answers
+// with the whole table. Both hand back a list whose FIRST row is simply
+// the alphabetically-first customer -- and both call sites here take
+// `[0]`, so without this filter a phone conflict would silently put a
+// stranger on the sale.
+async function loadPosCustomersByIds(ids: Array<string | number>): Promise<CustomerRecord[]> {
+  const wanted = ids.map((id) => String(id ?? '').trim()).filter(Boolean)
+  if (!wanted.length) return []
+  const { getSalesCustomerPicker } = await getContactReadTransport()
+  const rows = toPosCustomerRows(await getSalesCustomerPicker({ ids: wanted.join(',') }))
+  const wantedSet = new Set(wanted)
+  return rows.filter((row) => wantedSet.has(String(row?.id ?? '').trim()))
+}
+
+async function invalidatePosCustomerReads(): Promise<void> {
+  const { invalidateCustomerReadCache } = await getContactReadTransport()
+  invalidateCustomerReadCache()
 }
 
 async function loadPosDeliveryContacts(): Promise<DeliveryContactRecord[]> {
@@ -498,23 +600,40 @@ async function loadPosDeliveryContacts(): Promise<DeliveryContactRecord[]> {
   return getDeliveryContacts() as Promise<DeliveryContactRecord[]>
 }
 
-async function createPosCustomer(payload: CustomerFormState & { confirmDuplicate?: boolean }): Promise<Partial<CustomerRecord>> {
+async function loadPosDeliveryContactsByIds(ids: Array<string | number>): Promise<DeliveryContactRecord[]> {
+  const wanted = ids.map((id) => String(id ?? '').trim()).filter(Boolean)
+  if (!wanted.length) return []
+  const { getDeliveryContacts } = await getContactReadTransport()
+  const data = await getDeliveryContacts({ ids: wanted.join(',') })
+  const rows = Array.isArray(data) ? data : Array.isArray((data as { items?: unknown } | null)?.items) ? (data as { items: DeliveryContactRecord[] }).items : []
+  const wantedSet = new Set(wanted)
+  return rows.filter((row) => wantedSet.has(String(row?.id ?? '').trim()))
+}
+
+async function createPosCustomer(payload: CustomerFormState & { duplicateDecision?: ContactDuplicateDecision }): Promise<Partial<CustomerRecord>> {
   const { createCustomer } = await getContactWriteTransport()
   return createCustomer(payload) as Promise<Partial<CustomerRecord>>
 }
 
-async function createPosDeliveryContact(payload: DeliveryFormState & { confirmDuplicate?: boolean; address?: string }): Promise<Partial<DeliveryContactRecord>> {
+async function createPosDeliveryContact(payload: DeliveryFormState & { duplicateDecision?: ContactDuplicateDecision; address?: string }): Promise<Partial<DeliveryContactRecord>> {
   const { createDeliveryContact } = await getContactWriteTransport()
   return createDeliveryContact(payload) as Promise<Partial<DeliveryContactRecord>>
 }
 
-async function lookupPosPortalMembership(membershipNumber: string): Promise<MembershipInfo | null> {
-  const { lookupPortalMembership } = await getPortalTransport()
-  return lookupPortalMembership(membershipNumber) as Promise<MembershipInfo | null>
+async function lookupPosMembership(membershipNumber: string): Promise<MembershipInfo | null> {
+  const { lookupCustomerMembership } = await getContactReadTransport()
+  return lookupCustomerMembership(membershipNumber) as Promise<MembershipInfo | null>
 }
 
-async function createPosSale(payload: Record<string, unknown>): Promise<SaleResult> {
+// Missing means no manual choice. Resolve on every render so delayed/cached
+// settings work, while each saved draft keeps its explicit boolean override.
+export function resolveOrderLoyaltyAccrual(override: unknown, setting: unknown): boolean {
+  return typeof override === 'boolean' ? override : !['0', 'false', 'no', 'off'].includes(String(setting ?? 'true').trim().toLowerCase())
+}
+
+async function createPosSale(payload: Record<string, unknown>, scope = captureActorReadScope('pos-checkout')): Promise<SaleResult> {
   const { createSale } = await getSaleWriteTransport()
+  assertActorSessionDispatchAllowed(scope)
   return createSale(payload) as Promise<SaleResult>
 }
 
@@ -556,40 +675,63 @@ function asNumber(value: unknown): number {
   return Number(value || 0)
 }
 
+// iOS Safari with "Block All Cookies" (and older private-mode Safari)
+// throws SecurityError on the very act of TOUCHING window.localStorage or
+// window.sessionStorage -- not only on the getItem call -- so a bare
+// `sessionStorage.getItem(...)` inside a useState initializer takes the whole
+// till down to a blank page before a single product renders. Every storage
+// access in this file goes through these three helpers instead. A till with
+// blocked storage still renders and still sells; it only forgets its filters
+// and cart drafts between visits. readPosDraft/writePosDraft below build on
+// the same primitives so there is one guarded family here, not two.
+type PosStore = 'local' | 'session'
+
+function posStorage(kind: PosStore): Storage | null {
+  try {
+    return (kind === 'local' ? window.localStorage : window.sessionStorage) || null
+  } catch {
+    return null
+  }
+}
+
+function readPosStorage(kind: PosStore, key: string): string | null {
+  try {
+    return posStorage(kind)?.getItem(key) ?? null
+  } catch {
+    return null
+  }
+}
+
+function writePosStorage(kind: PosStore, key: string, value: string): void {
+  try {
+    posStorage(kind)?.setItem(key, value)
+  } catch {
+    // Blocked or quota-full: the value simply is not durable. Callers that
+    // REQUIRE durability (checkout below) verify with a read-back instead of
+    // trusting this call.
+  }
+}
+
+function removePosStorage(kind: PosStore, key: string): void {
+  try {
+    posStorage(kind)?.removeItem(key)
+  } catch {
+    // Nothing to clean up if the store was never writable in the first place.
+  }
+}
+
 function paymentMethodSummary(details: PaymentDetail[]): string {
   const methods = Array.from(new Set(details.map((detail) => detail.method.trim()).filter(Boolean)))
   return methods.join(' + ') || 'Cash'
 }
 
-function ProductDiscountBadge({
-  product,
-  exchangeRate,
-  fmtUSD,
-  label = 'Discounts',
-  promotionRules = [],
-}: {
-  exchangeRate: number
-  fmtUSD: (value: unknown) => string
-  label?: string
-  product: ProductRecord
-  promotionRules?: readonly PromotionRule[]
-}) {
-  // G1: one kernel decides what the card advertises -- the product's own
-  // discount OR the best promotion rule, including "buy >= X" deals that
-  // don't cut the qty-1 price but must still be visible on the card.
-  const badge = promotionBadgeForProduct(product, promotionRules)
-  if (!badge.active) return null
-  const text = badge.kind === 'quantity_hint'
-    ? ((badge.show_title && badge.title) || `${label} ${badge.min_quantity}+`)
-    : `${(badge.show_title && badge.title) || String(product?.discount_label || '') || label} ${fmtUSD(evaluatePromotionPricing(product, 1, promotionRules, exchangeRate).unit_price_usd || 0)}`
-  return (
-    <span className="absolute bottom-1 left-1 right-1 z-10 truncate rounded-md px-1.5 py-0.5 text-center text-[10px] font-bold text-white shadow-sm" style={{ backgroundColor: badge.badge_color || '#e11d48' }} title={text}>
-      {text}
-    </span>
-  )
-}
 export default function POS() {
-  const { t, user, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp() as AppContextValue
+  const { t, user, authReady, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate: currentExchangeRate } = useApp() as AppContextValue
+  const moneyCapability = useSaleMoneyCapability(Boolean(user && authReady), saleSecurityFingerprint(user, authReady))
+  // Settings > Stock Alerts. The till colours its grid and answers its stock
+  // pills by the owner's number, offline included (the config rides the
+  // settings map, which the offline snapshot already carries).
+  const lowStockConfig = useLowStockConfig()
   const { syncChannel } = useSync() as SyncContextValue
   const isActive = useIsPageActive('pos')
   const posCopy = useCallback((en: string, km = en) => ((settings.language || 'en') === 'km' ? km : en), [settings.language])
@@ -600,12 +742,12 @@ export default function POS() {
   const posOrdersStorageKey = `businessos_pos_orders_${posStorageScope}`
   const posActiveStorageKey = `businessos_pos_active_${posStorageScope}`
   const posCounterStorageKey = `businessos_pos_counter_${posStorageScope}`
-  const readPosDraft = (key: string, legacyKey: string): string | null => {
-    try { return localStorage.getItem(key) || sessionStorage.getItem(key) || sessionStorage.getItem(legacyKey) } catch { return null }
-  }
+  const readPosDraft = (key: string, legacyKey: string): string | null => (
+    readPosStorage('local', key) || readPosStorage('session', key) || readPosStorage('session', legacyKey)
+  )
   const writePosDraft = (key: string, value: string): void => {
-    try { localStorage.setItem(key, value) } catch {}
-    try { sessionStorage.setItem(key, value) } catch {}
+    writePosStorage('local', key, value)
+    writePosStorage('session', key, value)
   }
 
 // Remote data shared across all orders
@@ -614,6 +756,7 @@ export default function POS() {
   // search/bootstrap responses carry them) -- POS offline inherits the
   // last cached payload's rules the same way it inherits its products.
   const [promotionRules,   setPromotionRules]   = useState<PromotionRule[]>([])
+  const [promotionReadVersion, setPromotionReadVersion] = useState<0 | 1 | null>(null)
   const [categories,       setCategories]       = useState<CategoryRecord[]>([])
   const [branches,         setBranches]         = useState<BranchRecord[]>([])
   const [customers,        setCustomers]        = useState<CustomerRecord[]>([])
@@ -627,20 +770,20 @@ export default function POS() {
   // away whatever the person had typed, while every OTHER filter dimension
   // survived the same reload. Reported as "sometimes it causes the page to
   // refresh thus losing search results".
-  const [search,          setSearch]          = useState(() => sessionStorage.getItem('pos_search') || '')
+  const [search,          setSearch]          = useState(() => readPosStorage('session', 'pos_search') || '')
   // AND/OR toggle restored (Aug 20 2026) -- no longer a standalone button
   // next to the search box (that's still gone, per the Aug 19 2026 UI
   // request), but reachable again from inside the Filter menu itself, via
   // buildSearchModeFilterSection (components/shared/SearchModeFilterOptions.tsx).
   // AND stays the default, matching the initial state below.
   const [searchMode, setSearchMode] = useState<'AND' | 'OR'>('AND')
-  const [categoryFilter,  setCategoryFilter]  = useState(() => sessionStorage.getItem('pos_cat')      || 'all')
-  const [brandFilter,     setBrandFilter]     = useState(() => sessionStorage.getItem('pos_brand')    || 'all')
-  const [branchFilter,    setBranchFilter]    = useState(() => sessionStorage.getItem('pos_branch')   || 'all')
-  const [stockFilter,     setStockFilter]     = useState(() => sessionStorage.getItem('pos_stock')    || 'all')
-  const [groupFilter,     setGroupFilter]     = useState(() => sessionStorage.getItem('pos_group')    || 'all')
-  const [supplierFilter,  setSupplierFilter]  = useState(() => sessionStorage.getItem('pos_supplier') || 'all')
-  const [initialFilter,   setInitialFilter]   = useState(() => sessionStorage.getItem('pos_initial')  || 'all')
+  const [categoryFilter,  setCategoryFilter]  = useState(() => readPosStorage('session', 'pos_cat')      || 'all')
+  const [brandFilter,     setBrandFilter]     = useState(() => readPosStorage('session', 'pos_brand')    || 'all')
+  const [branchFilter,    setBranchFilter]    = useState(() => readPosStorage('session', 'pos_branch')   || 'all')
+  const [stockFilter,     setStockFilter]     = useState(() => readPosStorage('session', 'pos_stock')    || 'all')
+  const [groupFilter,     setGroupFilter]     = useState(() => readPosStorage('session', 'pos_group')    || 'all')
+  const [supplierFilter,  setSupplierFilter]  = useState(() => readPosStorage('session', 'pos_supplier') || 'all')
+  const [initialFilter,   setInitialFilter]   = useState(() => readPosStorage('session', 'pos_initial')  || 'all')
   const [filterOpen,      setFilterOpen]      = useState(false)
 
   const [productPage, setProductPage] = useState(1)
@@ -658,30 +801,35 @@ export default function POS() {
   // current branch filter -- see batchesTransport.ts. Drives whether
   // tapping a product forces the detail sheet's batch-picker step (see
   // openProductCard) instead of the normal one-tap/detail-sheet flow.
-  const [trackedBatchProductIds, setTrackedBatchProductIds] = useState<Set<number>>(new Set())
+  const [batchTracking, setBatchTracking] = useState<PosTrackingState>({ scope: '', status: 'loading', ids: new Set() })
+  const trackingOwner = useRef(createPosTrackingOwner())
+  const trackingScope = trackingOwner.current.scope(JSON.stringify([isActive, posTrackingFingerprint(user, authReady, branchFilter)]))
+  const trackingScopeRef = useRef(trackingScope)
+  trackingScopeRef.current = trackingScope
+  const trackedBatchProductIds = batchTracking.scope === trackingScope ? batchTracking.ids : new Set<number>()
   // True when the tracked-ids lookup above actually FAILED, as opposed to
   // legitimately returning nothing. Drives the conservative routing in
   // openProductCard plus a visible warning, so a cashier is never quietly
   // handed a one-tap add for stock that needed a lot chosen.
-  const [trackedBatchLoadFailed, setTrackedBatchLoadFailed] = useState(false)
+  const trackedBatchLoadFailed = batchTracking.scope === trackingScope && batchTracking.status === 'failed'
   // Bumped by the warning banner's "Try again" to re-run the lookup effect
   // below without needing the branch filter to change.
   const [batchTrackingReloadKey, setBatchTrackingReloadKey] = useState(0)
   // Persist filter changes. Each setter now *toggles* the given value in/out
   // of a comma-joined multi-select set (passing 'all' clears the whole filter).
-  const setPersistedCat      = (v: string) => { const next = toggleMultiValue(categoryFilter, v); sessionStorage.setItem('pos_cat',      next); setCategoryFilter(next) }
+  const setPersistedCat      = (v: string) => { const next = toggleMultiValue(categoryFilter, v); writePosStorage('session', 'pos_cat',      next); setCategoryFilter(next) }
   // Batch variant of setPersistedCat -- applies one checked/unchecked state
   // to several category values at once (selecting a whole "Main - Sub"
   // hierarchical group from the Category filter in one tap, same as
   // Products/Inventory). See utils/multiSelect.ts's toggleMultiValues and
   // components/shared/CategoryFilterOptions.tsx.
-  const setPersistedCatBatch = (values: string[], checked: boolean) => { const next = toggleMultiValues(categoryFilter, values, checked); sessionStorage.setItem('pos_cat', next); setCategoryFilter(next) }
-  const setPersistedBrand    = (v: string) => { const next = toggleMultiValue(brandFilter,    v); sessionStorage.setItem('pos_brand',    next); setBrandFilter(next) }
-  const setPersistedBranch   = (v: string) => { const next = toggleMultiValue(branchFilter,   v); sessionStorage.setItem('pos_branch',   next); setBranchFilter(next) }
-  const setPersistedStock    = (v: string) => { const next = toggleMultiValue(stockFilter,    v); sessionStorage.setItem('pos_stock',    next); setStockFilter(next) }
-  const setPersistedGroup    = (v: string) => { const next = toggleMultiValue(groupFilter,    v); sessionStorage.setItem('pos_group',    next); setGroupFilter(next) }
-  const setPersistedSupplier = (v: string) => { const next = toggleMultiValue(supplierFilter, v); sessionStorage.setItem('pos_supplier', next); setSupplierFilter(next) }
-  const setPersistedInitial  = (v: string) => { sessionStorage.setItem('pos_initial',  v); setInitialFilter(v) }
+  const setPersistedCatBatch = (values: string[], checked: boolean) => { const next = toggleMultiValues(categoryFilter, values, checked); writePosStorage('session', 'pos_cat', next); setCategoryFilter(next) }
+  const setPersistedBrand    = (v: string) => { const next = toggleMultiValue(brandFilter,    v); writePosStorage('session', 'pos_brand',    next); setBrandFilter(next) }
+  const setPersistedBranch   = (v: string) => { const next = toggleMultiValue(branchFilter,   v); writePosStorage('session', 'pos_branch', next); setBranchFilter(next); window.dispatchEvent(new Event(SHIFT_BRANCH_CHANGED_EVENT)) }
+  const setPersistedStock    = (v: string) => { const next = toggleMultiValue(stockFilter,    v); writePosStorage('session', 'pos_stock',    next); setStockFilter(next) }
+  const setPersistedGroup    = (v: string) => { const next = toggleMultiValue(groupFilter,    v); writePosStorage('session', 'pos_group',    next); setGroupFilter(next) }
+  const setPersistedSupplier = (v: string) => { const next = toggleMultiValue(supplierFilter, v); writePosStorage('session', 'pos_supplier', next); setSupplierFilter(next) }
+  const setPersistedInitial  = (v: string) => { writePosStorage('session', 'pos_initial',  v); setInitialFilter(v) }
   // A stale filter value (e.g. a category/brand/supplier that was renamed or
   // deleted, or an old branch selection) silently matches zero products
   // server-side forever, since these persist in sessionStorage across visits
@@ -690,7 +838,7 @@ export default function POS() {
   // hunting for which one is the culprit.
   const clearAllPosFilters = () => {
     setSearch('')
-    ;['pos_cat', 'pos_brand', 'pos_branch', 'pos_stock', 'pos_group', 'pos_supplier', 'pos_initial', 'pos_search'].forEach((key) => sessionStorage.removeItem(key))
+    ;['pos_cat', 'pos_brand', 'pos_branch', 'pos_stock', 'pos_group', 'pos_supplier', 'pos_initial', 'pos_search'].forEach((key) => removePosStorage('session', key))
     setCategoryFilter('all')
     setBrandFilter('all')
     setBranchFilter('all')
@@ -726,6 +874,17 @@ export default function POS() {
   // The currently visible order. Derived, not stored separately.
   const resolvedActiveId = activeId && orders.find(o => o.id === activeId) ? activeId : orders[0]?.id
   const active = orders.find(o => o.id === resolvedActiveId) || orders[0] || normalizeOrder({}, 1)
+  const moneyVersion = active.money_precision_version === 1 ? 1 : 0
+  const exchangeRate = active.checkoutRequestId && typeof active.checkoutPayload?.exchange_rate === 'number' && active.checkoutPayload.exchange_rate > 0 ? active.checkoutPayload.exchange_rate : currentExchangeRate
+  // New capable carts need the unrounded v1 rule inputs before their first
+  // item is quoted. An existing legacy cart keeps its original read policy.
+  const catalogMoneyVersion = moneyCapability.ready && (moneyVersion === 1 || active.cart.length === 0) ? 1 : 0
+  const catalogMoneyVersionRef = useRef(catalogMoneyVersion)
+  catalogMoneyVersionRef.current = catalogMoneyVersion
+  const ordersRef = useRef(orders)
+  ordersRef.current = orders
+  const branchBatchValidationRef = useRef(new Map<string, number>())
+  const loyaltyAccrual = resolveOrderLoyaltyAccrual(active.loyaltyAccrual, settings.loyalty_points_enabled)
 
 // Sync payment method default when settings load
   useEffect(() => {
@@ -763,8 +922,22 @@ export default function POS() {
 
   /** Apply a partial update to the active order. Mirrors React's setState signature. */
   const patchActive = useCallback((patch: Partial<PosOrder>) => {
-    setOrders(prev => prev.map(o => o.id === resolvedActiveId ? { ...o, ...patch } : o))
+    setOrders(prev => prev.map(o => o.id === resolvedActiveId && !o.checkoutRequestId ? { ...o, ...patch } : o))
   }, [resolvedActiveId])
+
+  // A marker can arrive from the bounded offline mirror when this tab is
+  // restored. Treat it as no selected profile before membership lookup or
+  // checkout can reuse the stale customer payload.
+  useEffect(() => {
+    if (!isAnonymousCustomerIdentity(active.customer)) return
+    patchActive({
+      customer: { ...EMPTY_CUSTOMER },
+      customerSearch: '',
+      membershipDiscountUsd: '',
+      membershipDiscountKhr: '',
+      membershipRedeemUnits: '',
+    })
+  }, [active.customer, patchActive])
 
   const addNewOrder = () => {
     if (orders.length >= LAYOUT.MAX_CONCURRENT_ORDERS) {
@@ -778,16 +951,22 @@ export default function POS() {
     setOrderCounter(nextNum + 1)
   }
 
-  const closeOrder = (orderId: string) => {
-    if (orders.length === 1) {
+  const closeOrder = (orderId: string, committed = false) => {
+    const currentOrders = ordersRef.current
+    if (!currentOrders.some(order => order.id === orderId)) return
+    if (!committed && currentOrders.find(order => order.id === orderId)?.checkoutRequestId) {
+      notify(t('money_checkout_recovery_required'), 'error')
+      return
+    }
+    if (currentOrders.length === 1) {
       const reset = normalizeOrder({}, 1)
       setOrders([reset])
       setActiveId(reset.id)
       setOrderCounter(2)
       return
     }
-    const idx = orders.findIndex(o => o.id === orderId)
-    const remaining = orders.filter(o => o.id !== orderId)
+    const idx = currentOrders.findIndex(o => o.id === orderId)
+    const remaining = currentOrders.filter(o => o.id !== orderId)
     // Renumber labels sequentially so tabs always show Order 1, 2, 3...
     const renumbered = remaining.map((o, i) => ({ ...o, label: `Order ${i + 1}` }))
     setOrders(renumbered)
@@ -807,6 +986,7 @@ export default function POS() {
 
 // Autocomplete suggestions (UI-level, not per-order)
   const [customerSuggestions,  setCustomerSuggestions]  = useState<CustomerRecord[]>([])
+  const [customerResultsQuery, setCustomerResultsQuery] = useState('')
   const [deliverySuggestions,  setDeliverySuggestions]  = useState<DeliveryContactRecord[]>([])
   const [showCustomerDrop,     setShowCustomerDrop]     = useState(false)
   const [showDeliveryDrop,     setShowDeliveryDrop]     = useState(false)
@@ -815,14 +995,31 @@ export default function POS() {
   const [showAddCustomer,  setShowAddCustomer]  = useState(false)
   const [newCustomerForm,  setNewCustomerForm]  = useState<CustomerFormState>({ name: '', membership_number: '', phone: '', address: '' })
   const [savingCustomer,   setSavingCustomer]   = useState(false)
+  const [customerDuplicateCheck, setCustomerDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
 
   const [showAddDelivery,  setShowAddDelivery]  = useState(false)
   const [newDeliveryForm,  setNewDeliveryForm]  = useState<DeliveryFormState>({ name: '', phone: '', area: '' })
+  const [deliveryDuplicateCheck, setDeliveryDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
 
 // Customer option picker shown after selecting a customer with multiple options
   const [customerOptionsList, setCustomerOptionsList] = useState<ContactOption[]>([])
   const [showOptionPicker,    setShowOptionPicker]    = useState(false)
+  const [addressPresetTarget, setAddressPresetTarget] = useState<'order' | 'quick-customer' | null>(null)
+  // Per held order, remember only the suffix this picker last applied. When
+  // reopened, that exact suffix can be replaced while the cashier's typed
+  // house/street prefix remains untouched. A manually changed address that no
+  // longer ends with it is never stripped.
+  const appliedAddressSuffixRef = useRef<Record<string, string>>({})
+  const quickCustomerAddressSuffixRef = useRef('')
   const [savingDelivery,   setSavingDelivery]   = useState(false)
+
+  const resetQuickCustomerAddressPreset = useCallback(() => {
+    quickCustomerAddressSuffixRef.current = ''
+    setAddressPresetTarget((target) => target === 'quick-customer' ? null : target)
+  }, [])
+
+  useEffect(() => { setCustomerDuplicateCheck(null) }, [newCustomerForm.name, newCustomerForm.phone, newCustomerForm.address, newCustomerForm.membership_number])
+  useEffect(() => { setDeliveryDuplicateCheck(null) }, [newDeliveryForm.name, newDeliveryForm.phone, newDeliveryForm.area])
 
 // Other UI state
   const [mobileView,       setMobileView]       = useState<'products' | 'cart'>('products')
@@ -840,12 +1037,12 @@ export default function POS() {
   // POS display toggles (pos_cat, pos_branch, etc.) are.
   const [cartViewMode, setCartViewMode] = useState<'all' | 'products' | 'details'>(
     () => {
-      const stored = sessionStorage.getItem('pos_cart_view')
+      const stored = readPosStorage('session', 'pos_cart_view')
       return stored === 'products' || stored === 'details' ? stored : 'all'
     },
   )
   const setPersistedCartViewMode = (mode: 'all' | 'products' | 'details') => {
-    sessionStorage.setItem('pos_cart_view', mode)
+    writePosStorage('session', 'pos_cart_view', mode)
     setCartViewMode(mode)
   }
 
@@ -863,7 +1060,7 @@ export default function POS() {
   const CART_WIDTH_MAX_PX = 860       // was 720 -- some cashiers want the cart
   // to take most of the screen while reconciling a large order
   const [cartWidthPx, setCartWidthPx] = useState<number>(() => {
-    const stored = Number(window.localStorage.getItem(CART_WIDTH_STORAGE_KEY))
+    const stored = Number(readPosStorage('local', CART_WIDTH_STORAGE_KEY))
     return Number.isFinite(stored) && stored >= CART_WIDTH_MIN_PX && stored <= CART_WIDTH_MAX_PX
       ? stored
       : CART_WIDTH_DEFAULT_PX
@@ -917,7 +1114,7 @@ export default function POS() {
       document.body.style.cursor = previousCursor
       setCartResizing(false)
       setCartWidthPx((current) => {
-        window.localStorage.setItem(CART_WIDTH_STORAGE_KEY, String(current))
+        writePosStorage('local', CART_WIDTH_STORAGE_KEY, String(current))
         return current
       })
     }
@@ -930,7 +1127,7 @@ export default function POS() {
 
   const resetCartWidth = useCallback(() => {
     setCartWidthPx(CART_WIDTH_DEFAULT_PX)
-    window.localStorage.setItem(CART_WIDTH_STORAGE_KEY, String(CART_WIDTH_DEFAULT_PX))
+    writePosStorage('local', CART_WIDTH_STORAGE_KEY, String(CART_WIDTH_DEFAULT_PX))
   }, [])
 
   // --- Cart 'All' view: draggable products/details split (user, Aug 29:
@@ -947,7 +1144,7 @@ export default function POS() {
   const CART_SPLIT_MAX_PCT = 78
   const cartPanelRef = useRef<HTMLDivElement | null>(null)
   const [cartDetailsPct, setCartDetailsPct] = useState<number>(() => {
-    const stored = Number(window.localStorage.getItem(CART_SPLIT_STORAGE_KEY))
+    const stored = Number(readPosStorage('local', CART_SPLIT_STORAGE_KEY))
     return Number.isFinite(stored) && stored >= CART_SPLIT_MIN_PCT && stored <= CART_SPLIT_MAX_PCT
       ? stored
       : CART_SPLIT_DEFAULT_PCT
@@ -979,7 +1176,7 @@ export default function POS() {
       window.removeEventListener('touchend', stop)
       document.body.style.userSelect = previousUserSelect
       setCartSplitResizing(false)
-      window.localStorage.setItem(CART_SPLIT_STORAGE_KEY, String(Math.round(cartDetailsPctRef.current)))
+      writePosStorage('local', CART_SPLIT_STORAGE_KEY, String(Math.round(cartDetailsPctRef.current)))
     }
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup', stop)
@@ -988,7 +1185,7 @@ export default function POS() {
   }, [])
   const resetCartSplit = useCallback(() => {
     setCartDetailsPct(CART_SPLIT_DEFAULT_PCT)
-    window.localStorage.setItem(CART_SPLIT_STORAGE_KEY, String(CART_SPLIT_DEFAULT_PCT))
+    writePosStorage('local', CART_SPLIT_STORAGE_KEY, String(CART_SPLIT_DEFAULT_PCT))
   }, [])
 
   // Re-clamp a stored/dragged width against the window itself resizing
@@ -1031,26 +1228,44 @@ export default function POS() {
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
   const customerOptionsLoadedRef = useRef(false)
+  // The customer term the picker is currently showing results for, kept in
+  // a ref so the sync-push effect can re-run that search without listing
+  // customerSearch among its dependencies (see its comment).
+  const customerSearchRef = useRef('')
   const deliveryOptionsLoadedRef = useRef(false)
   const membershipRequestRef = useRef(0)
-  const membershipInfoRef = useRef<MembershipInfo | null>(null)
   const savingCustomerRef = useRef(false)
   const savingDeliveryRef = useRef(false)
   const checkoutInFlightRef = useRef(false)
   // Y2: per-order idempotency key for checkout -- kept across failed/timed-out
   // attempts (so a retry dedupes server-side), cleared on success.
   const checkoutRequestIdsRef = useRef(new Map<string, string>())
-  const taxRate   = parseFloat(asText(settings.tax_rate || '0')) / 100
+  // Tax only applies when the owner's switch is on (S4-30). With the switch
+  // never set this is identical to the old `tax_rate/100`, so nothing changes
+  // for an existing shop; once it is turned off the rate stops applying without
+  // the rate itself having to be wiped and re-typed later.
+  const taxRate   = effectiveTaxRate(settings.tax_enabled, settings.tax_rate)
   // Settings > POS Settings > "Show Discount in Cart" (pos_show_item_discount).
   // Unset/anything but the literal string 'false' means shown -- same
   // default-on convention as the notifications toggles in Settings.tsx.
   const showItemDiscountInCart = asText(settings.pos_show_item_discount ?? 'true') !== 'false'
+  // Settings > POS Settings > "Automatic Wholesale Price". Default OFF (the
+  // rule resolver enforces that), so a shop that never opens the setting
+  // prices exactly as it did before this shipped. Memoised on the two raw
+  // setting values so the reprice effect below has a stable dependency.
+  const wholesaleAutoRule = useMemo(
+    () => resolveWholesaleAutoRule(settings as Record<string, unknown>),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings.pos_wholesale_auto_enabled, settings.pos_wholesale_auto_min_qty],
+  )
   const redeemPointsStep = Math.max(1, parseInt(asText(settings.customer_portal_redeem_points || '100'), 10) || 100)
   // Cents precision, NOT whole dollars (Part-77, money audit): the old
   // Math.round here turned a configured $0.50-per-step into $1 (double the
   // redemption value) and $0.25 into $0 -- the member's points were still
   // burned (membership_points_redeemed is sent regardless) for a $0 discount.
-  const redeemValueUsdStep = Math.max(0, Math.round((parseFloat(asText(settings.customer_portal_redeem_value_usd || '1')) || 1) * 100) / 100)
+  const redeemValueUsdStep = moneyVersion === 1
+    ? (() => { try { return parsePosInternalAmount(settings.customer_portal_redeem_value_usd ?? '1') } catch { return NaN } })()
+    : Math.max(0, Math.round((parseFloat(asText(settings.customer_portal_redeem_value_usd || '1')) || 1) * 100) / 100)
   const rawRedeemValueKhrStep = Math.max(0, Math.round(parseFloat(asText(settings.customer_portal_redeem_value_khr || String(exchangeRate))) || exchangeRate))
   const redeemValueKhrStep = rawRedeemValueKhrStep === 0 ? 0 : Math.max(1000, Math.ceil(rawRedeemValueKhrStep / 1000) * 1000)
   // Change (money handed back to the customer) converts at its OWN exchange
@@ -1122,10 +1337,6 @@ export default function POS() {
     })
   }, [])
 
-  useEffect(() => {
-    membershipInfoRef.current = membershipInfo
-  }, [membershipInfo])
-
   // Filters are persisted in sessionStorage across visits (see setPersistedBranch
   // etc. above) so a value picked in a previous session -- a branch that's since
   // been deactivated/deleted, a brand/category/supplier that was renamed -- can
@@ -1156,22 +1367,23 @@ export default function POS() {
 
     const nextBranch = pruneBranch(branchFilter)
     if (nextBranch !== branchFilter) {
-      sessionStorage.setItem('pos_branch', nextBranch)
+      writePosStorage('session', 'pos_branch', nextBranch)
       setBranchFilter(nextBranch)
+      window.dispatchEvent(new Event(SHIFT_BRANCH_CHANGED_EVENT))
     }
     const nextBrand = pruneAgainst(brandFilter, knownBrands)
     if (nextBrand !== brandFilter) {
-      sessionStorage.setItem('pos_brand', nextBrand)
+      writePosStorage('session', 'pos_brand', nextBrand)
       setBrandFilter(nextBrand)
     }
     const nextSupplier = pruneAgainst(supplierFilter, knownSuppliers)
     if (nextSupplier !== supplierFilter) {
-      sessionStorage.setItem('pos_supplier', nextSupplier)
+      writePosStorage('session', 'pos_supplier', nextSupplier)
       setSupplierFilter(nextSupplier)
     }
     const nextCategory = pruneAgainst(categoryFilter, knownCategories)
     if (nextCategory !== categoryFilter) {
-      sessionStorage.setItem('pos_cat', nextCategory)
+      writePosStorage('session', 'pos_cat', nextCategory)
       setCategoryFilter(nextCategory)
     }
     // Deliberately only keyed on the *metadata* inputs (branches, brands,
@@ -1218,10 +1430,12 @@ export default function POS() {
           // cannot escalate: without the `pos` permission this is refused
           // outright rather than silently downgraded.
           surface: 'pos',
+          money_precision_version: catalogMoneyVersion,
         } satisfies QueryParams
         const metadataScope = JSON.stringify([
           productQuery.branchId, productQuery.brand, productQuery.category,
           productQuery.supplier, productQuery.stockState, productQuery.groupState,
+          productQuery.money_precision_version,
         ])
         const scopeChanged = catalogMetadataScopeRef.current !== metadataScope
         const shouldLoadMetadata = Boolean(options.forceMetadata || !catalogMetadataLoadedRef.current || scopeChanged)
@@ -1239,13 +1453,16 @@ export default function POS() {
           label,
           POS_CATALOG_LOAD_TIMEOUT_MS,
         )
-        if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
+        if (!isTrackedRequestCurrent(catalogRequestRef, requestId) || catalogMoneyVersionRef.current !== catalogMoneyVersion) return null
         const payloadRecord = isPlainRecord(productPayload) ? productPayload : {}
         const prods = Array.isArray(payloadRecord.items)
           ? payloadRecord.items as ProductRecord[]
           : (Array.isArray(productPayload) ? productPayload : [])
         applyCatalogProducts(prods)
-        if (Array.isArray(payloadRecord.promotion_rules)) setPromotionRules(payloadRecord.promotion_rules as PromotionRule[])
+        if (Array.isArray(payloadRecord.promotion_rules)) {
+          setPromotionRules(payloadRecord.promotion_rules as PromotionRule[])
+          setPromotionReadVersion(catalogMoneyVersion)
+        }
         setProductTotal(Number(payloadRecord.total ?? prods.length) || 0)
         setCatalogLoadError('')
         catalogLoadedOnceRef.current = true
@@ -1285,19 +1502,23 @@ export default function POS() {
     })
     catalogLoadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [applyBranchMetadata, applyCatalogProducts, applyProductFilterMeta, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter])
+  }, [applyBranchMetadata, applyCatalogProducts, applyProductFilterMeta, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter, catalogMoneyVersion])
 
   useEffect(() => {
     latestLoadCatalogRef.current = loadCatalogData
   }, [loadCatalogData])
 
-  const loadCustomers = useCallback(async (label = 'POS customers') => {
+  // `search` is the term the person has typed; '' loads the first page of
+  // the name-ordered list so an untouched picker still shows something.
+  // Either way this is one bounded page, never the whole table.
+  const loadCustomers = useCallback(async (label = 'POS customers', search = '') => {
     const requestId = beginTrackedRequest(customerRequestRef)
     try {
-      const data = await withLoaderTimeout(() => loadPosCustomers(), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
+      const rows = await withLoaderTimeout(() => searchPosCustomers(search), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(customerRequestRef, requestId)) return null
-      const nextCustomers = Array.isArray(data) ? data : []
+      const nextCustomers = Array.isArray(rows) ? rows : []
       setCustomers(nextCustomers)
+      setCustomerResultsQuery(search.trim())
       customerOptionsLoadedRef.current = true
       return nextCustomers
     } catch (error) {
@@ -1363,7 +1584,7 @@ export default function POS() {
     setMembershipError('')
     try {
       const data = await withLoaderTimeout(
-        () => lookupPosPortalMembership(membershipNumber),
+        () => lookupPosMembership(membershipNumber),
         label,
         POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
       )
@@ -1373,11 +1594,6 @@ export default function POS() {
       return data || null
     } catch (error) {
       if (!isTrackedRequestCurrent(membershipRequestRef, requestId)) return null
-      const currentMembershipNumber = String(membershipInfoRef.current?.customer?.membership_number || '').trim().toLowerCase()
-      if (currentMembershipNumber && currentMembershipNumber === String(membershipNumber || '').trim().toLowerCase()) {
-        setMembershipError('')
-        return membershipInfoRef.current
-      }
       setMembershipInfo(null)
       setMembershipError(getErrorMessage(error, posCopy('Membership lookup failed')))
       return null
@@ -1478,14 +1694,31 @@ export default function POS() {
   useEffect(() => {
     if (!isActive || !contactOptionsReady) return
     const tasks: Promise<unknown>[] = []
-    if ((showCustomer || showAddCustomer) && !customerOptionsLoadedRef.current) {
-      tasks.push(loadCustomers('POS customer options on demand'))
-    }
     if (((showDelivery && Boolean(active?.isDelivery)) || showAddDelivery) && !deliveryOptionsLoadedRef.current) {
       tasks.push(loadDeliveryContacts('POS delivery options on demand'))
     }
     if (tasks.length) void Promise.allSettled(tasks)
-  }, [active?.isDelivery, contactOptionsReady, isActive, loadCustomers, loadDeliveryContacts, showAddCustomer, showAddDelivery, showCustomer, showDelivery])
+  }, [active?.isDelivery, contactOptionsReady, isActive, loadDeliveryContacts, showAddDelivery, showDelivery])
+
+  // Customer typeahead: one debounced, bounded server read per search term
+  // while the customer section (or its create dialog) is open. This replaced
+  // a single "load every customer once, then filter in memory" read -- fine
+  // at a few hundred contacts, ruinous at thousands, and the reason an
+  // unfiltered /api/customers showed up in the production logs.
+  useEffect(() => {
+    if (!isActive || !contactOptionsReady) return undefined
+    if (!showCustomer && !showAddCustomer) return undefined
+    const search = String(active?.customerSearch || '').trim()
+    customerSearchRef.current = search
+    // The first open has nothing typed yet and no rows to show: fetch that
+    // first page immediately rather than making the person wait out a
+    // debounce for a term they have not entered.
+    const delay = !customerOptionsLoadedRef.current && !search ? 0 : POS_CUSTOMER_SEARCH_DEBOUNCE_MS
+    const timer = window.setTimeout(() => {
+      void loadCustomers('POS customer search', search)
+    }, delay)
+    return () => window.clearTimeout(timer)
+  }, [active?.customerSearch, contactOptionsReady, isActive, loadCustomers, showAddCustomer, showCustomer])
 
   useEffect(() => {
     if (!isActive) {
@@ -1519,7 +1752,7 @@ export default function POS() {
   useEffect(() => {
     if (!isActive || !syncChannel) return
     const { channel } = syncChannel
-    if (channel === 'products' || channel === 'branches' || channel === 'categories') {
+    if (channel === 'products' || channel === 'branches' || channel === 'categories' || channel === 'settings') {
       filterMetaLoadedRef.current = false
       setFilterMetaReady(false)
       invalidateTrackedRequest(filterMetaRequestRef)
@@ -1528,7 +1761,7 @@ export default function POS() {
         setCategoryOptionsReady(Boolean(filterOpen))
         invalidateTrackedRequest(categoryOptionsRequestRef)
       }
-      void loadCatalogData('POS sync catalog', { forceMetadata: channel === 'branches' })
+      void loadCatalogData('POS sync catalog', { forceMetadata: channel === 'branches' || channel === 'settings' })
     }
     if (channel === 'inventory' || channel === 'sales' || channel === 'returns') {
       // Stock moved on another device/till (adjustment, transfer, sale, or
@@ -1537,8 +1770,40 @@ export default function POS() {
       // branches) is unaffected, so no forceMetadata here.
       void loadCatalogData('POS sync stock')
     }
-    if (channel === 'customers' && customerOptionsLoadedRef.current) {
-      void loadCustomers('POS sync customers')
+    if (channel === 'customers') {
+      // Re-run the SAME search the picker is showing, not a bare list read.
+      // Read through a ref: putting customerSearch in this effect's deps
+      // would re-run the whole sync branch (catalog reloads included) on
+      // every keystroke.
+      void (async () => {
+        await invalidatePosCustomerReads()
+        const selected = ordersRef.current.find((order) => order.id === resolvedActiveId)?.customer
+        if (selected?.id != null) {
+          const rows = await withLoaderTimeout(
+            () => loadPosCustomersByIds([selected.id as string | number]),
+            'POS selected customer refresh',
+            POS_CONTACT_OPTIONS_TIMEOUT_MS,
+          ).catch(() => [])
+          const current = resolveSelectableCustomerById(rows, selected.id)
+          if (!current) {
+            setOrders((previous) => previous.map((order) => (
+              order.id === resolvedActiveId && String(order.customer?.id ?? '') === String(selected.id)
+                ? {
+                    ...order,
+                    customer: { ...EMPTY_CUSTOMER },
+                    customerSearch: '',
+                    membershipDiscountUsd: '',
+                    membershipDiscountKhr: '',
+                    membershipRedeemUnits: '',
+                  }
+                : order
+            )))
+          }
+        }
+        if (customerOptionsLoadedRef.current) {
+          await loadCustomers('POS sync customers', customerSearchRef.current)
+        }
+      })()
     }
     if (channel === 'deliveryContacts' && deliveryOptionsLoadedRef.current) {
       void loadDeliveryContacts('POS sync delivery contacts')
@@ -1558,14 +1823,18 @@ export default function POS() {
 
 // Customer autocomplete
   useEffect(() => {
-    const q = (active?.customerSearch || '').toLowerCase().trim()
-    if (!q) { setCustomerSuggestions([]); return }
-    setCustomerSuggestions(
-      customers
-        .filter(c => c.name.toLowerCase().includes(q) || (c.phone || '').includes(q))
-        .slice(0, LAYOUT.AUTOCOMPLETE_MAX_RESULTS)
-    )
-  }, [active?.customerSearch, customers])
+    setCustomerSuggestions(authoritativePosCustomerSuggestions(customers, customerResultsQuery, active?.customerSearch || ''))
+  }, [active?.customerSearch, customerResultsQuery, customers])
+
+  const changeCustomerSearch = (value: string): void => {
+    // Invalidate before the debounce starts the next request. Otherwise the
+    // preceding query's row remains selectable during the debounce/network gap.
+    invalidateTrackedRequest(customerRequestRef)
+    setCustomerResultsQuery('')
+    setCustomerSuggestions([])
+    patchActive({ customerSearch: value, customer: { ...active.customer, name: value } })
+    setShowCustomerDrop(true)
+  }
 
 // Delivery autocomplete
   useEffect(() => {
@@ -1606,6 +1875,7 @@ export default function POS() {
 
 // Customer actions
   const selectCustomer = async (c: CustomerRecord) => {
+    if (!isSelectableCustomerIdentity(c)) return
     const opts = await parseContactOptions(c.address)
     setCustomerSuggestions([])
     setShowCustomerDrop(false)
@@ -1675,28 +1945,7 @@ export default function POS() {
     membershipRedeemUnits: '',
   })
 
-  // A create can come back 409 as a duplicate: either a soft "possible
-  // duplicate" (same name already uses this phone -- save again to confirm)
-  // or a hard "phone conflict" (that phone already belongs to someone
-  // else). The POS quick-add used to just surface the raw error and
-  // dead-end (11.8: "add new delivery/customer failed"). Now it acts:
-  // a possible-duplicate retries once confirmed, and a phone-conflict
-  // selects the existing contact instead -- the "create vs select the
-  // existing" choice the user asked for, made automatically at checkout.
-  const readDuplicateError = (error: unknown): { code: 'possible_duplicate' | 'phone_conflict'; id: number | null; name: string } | null => {
-    const e = error as { code?: unknown; duplicate?: { id?: unknown; name?: unknown } } | null
-    const code = e?.code
-    if (code !== 'possible_duplicate' && code !== 'phone_conflict') return null
-    const dup = e?.duplicate || {}
-    const id = Number(dup.id)
-    return { code, id: Number.isFinite(id) && id > 0 ? id : null, name: String(dup.name || '') }
-  }
-
-  const handleAddCustomer = async (confirmDuplicateArg: unknown = false) => {
-    // The QuickAddModal save button forwards its click event here, so only
-    // an explicit boolean true (from the possible-duplicate retry below)
-    // counts as a confirmation -- a MouseEvent must not.
-    const confirmDuplicate = confirmDuplicateArg === true
+  const submitNewCustomer = async (duplicateDecision: ContactDuplicateDecision | null = null) => {
     if (!newCustomerForm.name.trim()) return notify('Name required', 'error')
     if (savingCustomerRef.current) return
     savingCustomerRef.current = true
@@ -1712,7 +1961,7 @@ export default function POS() {
           phone: newCustomerForm.phone.trim(),
           address: newCustomerForm.address.trim(),
         })]) || '',
-        ...(confirmDuplicate ? { confirmDuplicate: true } : {}),
+        ...(duplicateDecision ? { duplicateDecision } : {}),
       }
       const created = await withLoaderTimeout(
         () => createPosCustomer(customerPayload),
@@ -1733,37 +1982,52 @@ export default function POS() {
         return exists ? prev.map(customer => String(customer.id) === String(createdCustomer.id) ? { ...customer, ...createdCustomer } : customer) : [...prev, createdCustomer]
       })
       await selectCustomer(createdCustomer)
+      if (duplicateDecision) resolveContactDuplicateSyncError(customerDuplicateCheck)
       setShowAddCustomer(false)
+      setCustomerDuplicateCheck(null)
       setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
-      await loadCustomers('POS refresh customers after create')
-    } catch (e) {
-      const dup = readDuplicateError(e)
-      if (dup?.code === 'possible_duplicate' && !confirmDuplicate) {
-        // The person deliberately chose "add new"; the backend just wants a
-        // confirm that this is a different contact. Retry once, confirmed.
-        savingCustomerRef.current = false
-        setSavingCustomer(false)
-        return handleAddCustomer(true)
-      }
-      if (dup?.code === 'phone_conflict' && dup.id) {
-        // That phone already belongs to someone -- select THEM instead of
-        // failing. Refresh the list so the full record is available, then
-        // pick it out; fall back to a minimal record if the refresh misses.
-        try {
-          const refreshed = await loadCustomers('POS select existing after phone conflict') as unknown
-          const list = Array.isArray(refreshed) ? refreshed as CustomerRecord[] : customers
-          const existing = list.find((customer) => String(customer.id) === String(dup.id))
-            || { id: dup.id, name: dup.name, phone: newCustomerForm.phone, address: '', email: '', membership_number: '' } as CustomerRecord
-          await selectCustomer(existing)
-          setShowAddCustomer(false)
-          setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
-          notify((t('customer_phone_exists_selected') || 'That phone already belongs to {name} — selected them.').replace('{name}', dup.name))
-          return
-        } catch {
-          // fall through to the generic error below
+      resetQuickCustomerAddressPreset()
+      // Re-read just the row that was created (server-side defaults, ids
+      // and normalized fields), not the whole table.
+      if (createdCustomer.id) {
+        const [stored] = await loadPosCustomersByIds([createdCustomer.id]).catch(() => [])
+        if (stored) {
+          setCustomers(prev => prev.map(customer => (
+            String(customer.id) === String(createdCustomer.id) ? { ...customer, ...stored } : customer
+          )))
         }
       }
+    } catch (e) {
+      const duplicateCheck = readContactDuplicateDecisionError(e)
+      if (duplicateCheck) { setCustomerDuplicateCheck(duplicateCheck); return }
       notify(getErrorMessage(e), 'error')
+    } finally {
+      savingCustomerRef.current = false
+      setSavingCustomer(false)
+    }
+  }
+
+  const handleAddCustomer = () => { void submitNewCustomer() }
+  const handleCreateSeparateCustomer = () => {
+    if (!customerDuplicateCheck) return
+    const decision = createSeparateContactDecision(customerDuplicateCheck)
+    if (decision) void submitNewCustomer(decision)
+  }
+  const handleUseExistingCustomer = async (match: ContactDuplicateMatch) => {
+    if (savingCustomerRef.current) return
+    savingCustomerRef.current = true
+    setSavingCustomer(true)
+    try {
+      const [existing] = await loadPosCustomersByIds([match.id])
+      if (!existing) throw new Error(t('contact_duplicate_existing_load_failed') || 'Could not load the existing record. Try again.')
+      await selectCustomer(existing)
+      resolveContactDuplicateSyncError(match)
+      setShowAddCustomer(false)
+      setCustomerDuplicateCheck(null)
+      setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
+      resetQuickCustomerAddressPreset()
+    } catch (error) {
+      notify(getErrorMessage(error), 'error')
     } finally {
       savingCustomerRef.current = false
       setSavingCustomer(false)
@@ -1778,8 +2042,7 @@ export default function POS() {
   }
   const clearDelivery = () => patchActive({ selectedDelivery: null, deliverySearch: '', deliveryActualCostUsd: '' })
 
-  const handleAddDelivery = async (confirmDuplicateArg: unknown = false) => {
-    const confirmDuplicate = confirmDuplicateArg === true
+  const submitNewDelivery = async (duplicateDecision: ContactDuplicateDecision | null = null) => {
     if (!newDeliveryForm.name.trim() && !newDeliveryForm.phone.trim()) {
       return notify('Driver name or phone is required', 'error')
     }
@@ -1799,7 +2062,7 @@ export default function POS() {
           phone: newDeliveryForm.phone.trim(),
           area: newDeliveryForm.area.trim(),
         })]) || '',
-        ...(confirmDuplicate ? { confirmDuplicate: true } : {}),
+        ...(duplicateDecision ? { duplicateDecision } : {}),
       }
       const res = await withLoaderTimeout(
         () => createPosDeliveryContact(payload),
@@ -1810,26 +2073,40 @@ export default function POS() {
       const created = { ...payload, id: res.id }
       setDeliveryContacts(prev => [...prev, created])
       selectDelivery(created)
+      if (duplicateDecision) resolveContactDuplicateSyncError(deliveryDuplicateCheck)
       setShowAddDelivery(false)
+      setDeliveryDuplicateCheck(null)
       setNewDeliveryForm({ name: '', phone: '', area: '' })
     } catch (e) {
-      const dup = readDuplicateError(e)
-      if (dup?.code === 'possible_duplicate' && !confirmDuplicate) {
-        savingDeliveryRef.current = false
-        setSavingDelivery(false)
-        return handleAddDelivery(true)
-      }
-      if (dup?.code === 'phone_conflict' && dup.id) {
-        // Select the existing driver that already owns this phone.
-        const existing = deliveryContacts.find((contact) => String(contact.id) === String(dup.id))
-          || { id: dup.id, name: dup.name, phone: newDeliveryForm.phone, area: newDeliveryForm.area } as DeliveryContactRecord
-        selectDelivery(existing)
-        setShowAddDelivery(false)
-        setNewDeliveryForm({ name: '', phone: '', area: '' })
-        notify((t('delivery_phone_exists_selected') || 'That phone already belongs to {name} — selected them.').replace('{name}', dup.name))
-        return
-      }
+      const duplicateCheck = readContactDuplicateDecisionError(e)
+      if (duplicateCheck) { setDeliveryDuplicateCheck(duplicateCheck); return }
       notify(getErrorMessage(e), 'error')
+    } finally {
+      savingDeliveryRef.current = false
+      setSavingDelivery(false)
+    }
+  }
+
+  const handleAddDelivery = () => { void submitNewDelivery() }
+  const handleCreateSeparateDelivery = () => {
+    if (!deliveryDuplicateCheck) return
+    const decision = createSeparateContactDecision(deliveryDuplicateCheck)
+    if (decision) void submitNewDelivery(decision)
+  }
+  const handleUseExistingDelivery = async (match: ContactDuplicateMatch) => {
+    if (savingDeliveryRef.current) return
+    savingDeliveryRef.current = true
+    setSavingDelivery(true)
+    try {
+      const [existing] = await loadPosDeliveryContactsByIds([match.id])
+      if (!existing) throw new Error(t('contact_duplicate_existing_load_failed') || 'Could not load the existing record. Try again.')
+      selectDelivery(existing)
+      resolveContactDuplicateSyncError(match)
+      setShowAddDelivery(false)
+      setDeliveryDuplicateCheck(null)
+      setNewDeliveryForm({ name: '', phone: '', area: '' })
+    } catch (error) {
+      notify(getErrorMessage(error), 'error')
     } finally {
       savingDeliveryRef.current = false
       setSavingDelivery(false)
@@ -1855,6 +2132,9 @@ export default function POS() {
   // Single-branch context (adding to cart, "display stock for this branch") uses the
   // first selected branch even when several are selected for browsing/filtering.
   const primaryBranchFilterId = branchFilterIds.length ? branchFilterIds[0] : null
+  const primaryBranchName = primaryBranchFilterId == null
+    ? null
+    : (branches.find((branch) => Number(branch?.id) === Number(primaryBranchFilterId))?.name || null)
 
   // Which products currently carry active batch/expiry tracking, scoped to
   // the branch filter -- refetched whenever it changes.
@@ -1874,17 +2154,22 @@ export default function POS() {
   // one-tap add.
   useEffect(() => {
     let cancelled = false
+    const scope = trackingScope
+    setBatchTracking({ scope, status: 'loading', ids: new Set() })
+    if (!isActive || !authReady || !user) return
     getTrackedBatchProductIds(primaryBranchFilterId ?? undefined).then((res) => {
-      if (cancelled) return
-      setTrackedBatchProductIds(new Set((res?.productIds || []).map((id) => Number(id))))
-      setTrackedBatchLoadFailed(false)
+      if (cancelled || scope !== trackingScopeRef.current) return
+      if (!Array.isArray(res?.productIds)) throw new Error('Invalid batch tracking response')
+      setBatchTracking({ scope, status: 'ready', ids: new Set(res.productIds.map((id) => Number(id))) })
     }).catch((error) => {
-      if (cancelled) return
+      if (cancelled || scope !== trackingScopeRef.current) return
       console.error('[POS] batch tracking lookup failed:', getErrorMessage(error))
-      setTrackedBatchLoadFailed(true)
+      setBatchTracking({ scope, status: 'failed', ids: new Set() })
     })
     return () => { cancelled = true }
-  }, [primaryBranchFilterId, batchTrackingReloadKey])
+  }, [primaryBranchFilterId, batchTrackingReloadKey, trackingScope, authReady, isActive])
+
+  useEffect(() => () => trackingOwner.current.cancel(), [])
 
   // Self-heal for that lookup (user report, Aug 31: the amber "Batch and
   // expiry tracking could not be loaded" banner was showing). The failure
@@ -2070,8 +2355,8 @@ export default function POS() {
       if (stockStates.length) {
         return stockStates.some((state) => {
           if (state === 'out')      return qty <= asNumber(p.out_of_stock_threshold)
-          if (state === 'low')      return qty > asNumber(p.out_of_stock_threshold) && qty <= (asNumber(p.low_stock_threshold) || 10)
-          if (state === 'in_stock') return qty > (asNumber(p.low_stock_threshold) || 10)
+          if (state === 'low')      return qty > asNumber(p.out_of_stock_threshold) && qty <= effectiveLowStockThreshold(lowStockConfig, p.low_stock_threshold)
+          if (state === 'in_stock') return qty > asNumber(p.out_of_stock_threshold) && qty > effectiveLowStockThreshold(lowStockConfig, p.low_stock_threshold)
           return true
         })
       }
@@ -2146,8 +2431,10 @@ export default function POS() {
   // still needs buildVisibleProductCards to collapse same-name rows for
   // display, it just no longer re-filters by groupFilter afterward.
   const visibleProductCards = useMemo(() => (
-    buildVisibleProductCards(filteredProducts, productsById) as unknown as ProductRecord[]
-  ), [filteredProducts, productsById])
+    buildVisibleProductCards(filteredProducts, productsById, {
+      preserveInputOrder: Boolean(debouncedProductSearch.trim()),
+    }) as unknown as ProductRecord[]
+  ), [debouncedProductSearch, filteredProducts, productsById])
 
   useEffect(() => {
     setProductPage(1)
@@ -2169,82 +2456,60 @@ export default function POS() {
     return row ? Number(row.quantity || 0) : 0
   }, [])
 
-  const pickBestBranchId = useCallback((product: ProductRecord) => {
-    let bestBranchId: number | null = null
-    let bestQuantity = 0
-    const preferredBranchId = defaultBranchId ? Number(defaultBranchId) : null
+  // Which branch a cart line books against -- resolveSaleBranch, so the
+  // rule lives in one tested place rather than being re-stated here.
+  //
+  // The loop this replaces did not know the warehouse cannot sell. It won on
+  // quantity (which is what a warehouse is for) and it won outright whenever
+  // it was the deployment's default branch, so the line resolved to a branch
+  // that does not sell and the cashier found out at checkout, as a 400.
+  const pickBestBranchId = useCallback(
+    (product: ProductRecord) => resolveSaleBranch(product as never, { defaultBranchId }).branchId,
+    [defaultBranchId],
+  )
 
-    for (const entry of product?.branch_stock || []) {
-      const branchId = Number(entry.branch_id)
-      const qty = Number(entry.quantity || 0)
-      if (!Number.isFinite(branchId) || qty <= 0) continue
-      if (preferredBranchId != null && branchId === preferredBranchId) return branchId
-      if (qty > bestQuantity) {
-        bestBranchId = branchId
-        bestQuantity = qty
-      }
-    }
-
-    return bestBranchId || defaultBranchId || null
-  }, [defaultBranchId])
-
-  /**
-   * Stock quantity relevant to the active branch filter or item branch
-   * assignment.
-   *
-   * With no branch filter and no cart line yet, this used to fall back to
-   * `product.stock_quantity` -- the sum across ALL branches. A sale line
-   * only ever books against ONE branch (`pickBestBranchId` picks it on the
-   * first add, and every quantity check after that is scoped to that same
-   * branch via `getBranchStockQty`), so a product split e.g. 3+3 across two
-   * branches displayed "6" on the card but could only ever actually accept
-   * 3 into the cart -- the 4th unit always failed with "not enough stock"
-   * even though the card's own number said otherwise. Falling back to the
-   * same single best branch `pickBestBranchId` would assign makes the
-   * number on the card match the real ceiling enforced when adding.
-   */
+  // Product cards use aggregate stock in the unfiltered catalogue. Once a
+  // branch filter or cart assignment exists, quantity checks remain scoped to
+  // that one branch.
   const getDisplayStock = useCallback((product: ProductRecord | undefined, cartItem: { branch_id?: string | number | null } | null = null) => {
-    if (!product) return 0
-
-    if (primaryBranchFilterId != null) {
-      return getBranchStockQty(product, primaryBranchFilterId)
-    }
-
-    if (cartItem?.branch_id) {
-      return getBranchStockQty(product, cartItem.branch_id)
-    }
-
-    const bestBranchId = pickBestBranchId(product)
-    if (bestBranchId != null) {
-      return getBranchStockQty(product, bestBranchId)
-    }
-
-    return Number(product.stock_quantity || 0)
-  }, [primaryBranchFilterId, getBranchStockQty, pickBestBranchId])
+    return resolvePosDisplayStock(product, primaryBranchFilterId, cartItem?.branch_id)
+  }, [primaryBranchFilterId])
 
   const openProductCard = useCallback((product: ProductRecord, { groupProduct = false, inStock = false }: { groupProduct?: boolean; inStock?: boolean } = {}) => {
-    if (!product) return
-    const hasSpecial = asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0
+    if (!product || !isActive || !authReady || !user || trackingScope !== trackingScopeRef.current) return
+    trackingOwner.current.cancel()
+    // Wholesale is the only alternate tier a product can carry now (the VIP
+    // tier was retired by the 2026-09-04 ruling), so it alone decides whether
+    // a one-tap add has to divert to the detail sheet's price picker.
+    const hasWholesale = asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0
     const hasPromotion = promotionBadgeForProduct(product, promotionRules).active
     // Batch-tracked products always need the detail sheet's lot picker --
     // a one-tap add can't know which lot to sell from -- same gate as
-    // groupProduct/hasSpecial/hasPromotion below.
+    // groupProduct/hasWholesale/hasPromotion below.
     //
     // When the tracking lookup itself failed we don't know which products
     // are tracked, so EVERY product takes the detail-sheet path. One extra
     // tap on an untracked product is a far better error than silently
     // one-tapping a tracked one past its lot picker.
-    const isBatchTracked = trackedBatchLoadFailed || trackedBatchProductIds.has(Number(product.id))
-    if (groupProduct || hasSpecial || hasPromotion || isBatchTracked) {
+    const isBatchTracked = needsPosTrackingSheet(batchTracking, trackingScope, Number(product.id))
+    if (groupProduct || hasWholesale || hasPromotion || isBatchTracked) {
       setDetailProduct(product)
       return
     }
     if (inStock) {
-      addToCart(product, 'selling')
+      const branch = resolveSaleBranch(product as never, { activeBranchFilterId: primaryBranchFilterId, defaultBranchId })
+      if (branch.blocked || !branch.branchId) { setDetailProduct(product); return }
+      void trackingOwner.current.prove(
+        (signal) => readFreshPickerLots(Number(product.id), String(branch.branchId), signal),
+        (untracked) => {
+          if (untracked) addToCart(product, 'selling', undefined, branch.branchId)
+          else setDetailProduct(product)
+        },
+      )
       return
     }
     setDetailProduct(product)
-  }, [addToCart, exchangeRate, promotionRules, trackedBatchProductIds, trackedBatchLoadFailed])
+  }, [addToCart, exchangeRate, promotionRules, batchTracking, trackingScope, authReady, user, primaryBranchFilterId, defaultBranchId, isActive])
 
   /** Open shared image lightbox from POS product cards/detail sheet. */
   const openImageLightbox = useCallback((product: ProductRecord, startIndex = 0) => {
@@ -2256,6 +2521,45 @@ export default function POS() {
     if (nextLightbox) setImageLightbox(nextLightbox)
   }, [t])
 
+  // P4-4b: ProductCard is React.memo'd because the grid renders 20-50+ of
+  // them per page and re-renders on every cart/keyboard change unrelated to
+  // the catalogue. That memo only pays off if the `onOpen`/`onOpenImage`
+  // props stay the SAME function reference across an unrelated re-render --
+  // the `.map()` below used to build `(options) => openProductCard(p, options)`
+  // fresh on every render (it closes over `p`), which would make every
+  // card's shallow prop comparison fail every time. Cache one pair of
+  // handlers per product id and only rebuild them when the row itself or
+  // the underlying (already-stable) openProductCard/openImageLightbox
+  // callbacks actually changed.
+  const productCardHandlersRef = useRef(new Map<string | number, {
+    p: ProductRecord
+    openProductCard: typeof openProductCard
+    openImageLightbox: typeof openImageLightbox
+    onOpen: (options: { groupProduct: boolean; inStock: boolean }) => void
+    onOpenImage: () => void
+  }>())
+  const getProductCardHandlers = useCallback((p: ProductRecord) => {
+    const cache = productCardHandlersRef.current
+    const cached = cache.get(p.id as string | number)
+    if (cached && cached.p === p && cached.openProductCard === openProductCard && cached.openImageLightbox === openImageLightbox) {
+      return cached
+    }
+    const next = {
+      p,
+      openProductCard,
+      openImageLightbox,
+      onOpen: (options: { groupProduct: boolean; inStock: boolean }) => openProductCard(p, options),
+      onOpenImage: () => openImageLightbox(p, 0),
+    }
+    cache.set(p.id as string | number, next)
+    return next
+  }, [openProductCard, openImageLightbox])
+
+  /** Stable across renders (only its deps -- primaryBranchFilterId via
+   *  getDisplayStock -- change its identity), so it doesn't defeat
+   *  ProductCard's memo the way a fresh `(row) => ...` per render would. */
+  const getPosCardStock = useCallback((row: ProductCardProduct) => getDisplayStock(row as ProductRecord), [getDisplayStock])
+
   /** Primary image used by cards/sheets, with gallery-first fallback. */
   const getPrimaryProductImage = useCallback((product: ProductRecord) => {
     return getProductGalleryImages(product)[0] || product?.image_path || ''
@@ -2263,6 +2567,14 @@ export default function POS() {
 
 // Cart mutations
   function addToCart(product: ProductRecord, priceMode = 'selling', batchSelection?: BatchSelection, branchIdOverride?: string | number | null, damagedSelection?: { damagedLotId: number; quantity: number; label: string }) {
+    if (active.checkoutRequestId) return notify(t('money_checkout_recovery_required'), 'error')
+    // An empty basket with no request is a new purchase. Existing persisted
+    // legacy baskets are never silently repriced or stamped during hydration.
+    const version = active.money_precision_version === 1 || active.cart.length === 0 ? 1 : 0
+    if (version === 1) {
+      try { moneyCapability.assertReady() } catch { moneyCapability.retry(); return notify(t('money_precision_unavailable'), 'error') }
+      if (promotionReadVersion !== 1) { void loadCatalogData('POS pricing data', { forceMetadata: true }); return notify(t('money_precision_unavailable'), 'error') }
+    }
     // An explicit branch from the detail sheet WINS. The sheet resolves its
     // own branch for the Branch step, the stock figure and the lot list, so
     // re-deriving a different one here (highest-stock, or the branch filter)
@@ -2272,12 +2584,26 @@ export default function POS() {
     const overrideBranchId = branchIdOverride == null || branchIdOverride === ''
       ? null
       : Number(branchIdOverride)
-    const assignedBranchId = overrideBranchId != null && Number.isFinite(overrideBranchId)
-      ? overrideBranchId
-      : (primaryBranchFilterId != null ? primaryBranchFilterId : pickBestBranchId(product))
+    // The last gate before a cart line exists. `primaryBranchFilterId` used
+    // to be taken verbatim, so filtering the grid to the warehouse added
+    // warehouse lines with nothing between them and a checkout 400; and a
+    // product held ONLY at the warehouse -- the normal state of something
+    // waiting to be transferred -- resolved there through the fallback.
+    // Both come back blocked now, and the sheet is opened instead: it shows
+    // the warehouse pill greyed WITH its quantity and says why, which is the
+    // answer the cashier actually needs.
+    const saleBranch = overrideBranchId != null && Number.isFinite(overrideBranchId)
+      ? { branchId: overrideBranchId, blocked: false }
+      : resolveSaleBranch(product as never, { activeBranchFilterId: primaryBranchFilterId, defaultBranchId })
+    if (saleBranch.blocked) {
+      notify(t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.', 'error')
+      setDetailProduct(product)
+      return
+    }
+    const assignedBranchId = saleBranch.branchId
     const priceValues = resolveCartPriceValues(product, priceMode, exchangeRate, {
       usdToKhr: (value: unknown, rate: unknown) => CURRENCY.usdToKhr(Number(value || 0), Number(rate || 0)),
-    }, promotionRules)
+    }, promotionRules, version)
     // Batch-tracked products are capped by the picked lot's own remaining
     // stock, not the product's overall stock -- a different lot for the
     // same product/branch/price is a separate cart line (see
@@ -2298,6 +2624,7 @@ export default function POS() {
           priceMode: priceValues.price_mode,
           branchId: assignedBranchId,
           batchId: batchSelection?.batchId ?? null,
+          unlottedStock: batchSelection?.unlottedStock === true,
         })
     if (!damagedSelection && existingIndex >= 0 && (active.cart[existingIndex] as CartLineRecord).damaged_lot_id) existingIndex = -1
     const existing = existingIndex >= 0 ? active.cart[existingIndex] : null
@@ -2316,15 +2643,19 @@ export default function POS() {
       if (stock <= 0) { notify(t('not_enough_stock'), 'error'); return }
       newCart = [...active.cart, {
         ...product,
-        cart_line_id: `${Number(product.id)}:${priceValues.price_mode}:${Number(assignedBranchId || 0)}:${batchSelection?.batchId || 0}:D${damagedSelection?.damagedLotId || 0}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
+        cart_line_id: `${Number(product.id)}:${priceValues.price_mode}:${Number(assignedBranchId || 0)}:${batchSelection?.batchId || (batchSelection?.unlottedStock ? 'unlotted' : 0)}:D${damagedSelection?.damagedLotId || 0}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
         quantity: 1,
         ...priceValues,
         branch_id: assignedBranchId || null,
-        ...(batchSelection ? {
+        ...(batchSelection?.batchId ? {
           batch_id: batchSelection.batchId,
           batch_label: batchSelection.batchLabel,
           batch_expiry_date: batchSelection.batchExpiryDate,
           batch_available_quantity: batchCeiling ?? 0,
+        } : {}),
+        ...(batchSelection?.unlottedStock ? {
+          unlotted_stock: true,
+          unlotted_available_quantity: batchCeiling ?? 0,
         } : {}),
         ...(damagedSelection ? {
           damaged_lot_id: damagedSelection.damagedLotId,
@@ -2333,7 +2664,7 @@ export default function POS() {
         } : {}),
       } as CartLineRecord]
     }
-    patchActive({ cart: newCart })
+    patchActive({ cart: newCart, money_precision_version: version })
     // Clear + refocus the search only on desktop -- both exist for the
     // barcode-scanner workflow (scan -> item added -> search cleared ->
     // ready for the next scan without touching the keyboard). On mobile
@@ -2344,7 +2675,7 @@ export default function POS() {
     // time I tap a product" report). Gated on the same `isDesktopViewport`
     // media-query flag already used elsewhere in this file.
     if (isDesktopViewport) {
-      sessionStorage.removeItem('pos_search')
+      removePosStorage('session', 'pos_search')
       setSearch('')
       searchRef.current?.focus()
     }
@@ -2359,7 +2690,7 @@ export default function POS() {
     // product's overall stock across every lot.
     const stockCeiling = cartItem?.damaged_lot_id
       ? (cartItem.damaged_available_quantity ?? 0)
-      : cartItem?.batch_id ? (cartItem.batch_available_quantity ?? 0) : getDisplayStock(product, cartItem)
+      : cartItem?.batch_id ? (cartItem.batch_available_quantity ?? 0) : cartItem?.unlotted_stock ? (cartItem.unlotted_available_quantity ?? 0) : getDisplayStock(product, cartItem)
     if (qty > stockCeiling) { notify(t('not_enough_stock'), 'error'); return }
     patchActive({ cart: active.cart.map((item) => getCartLineId(item) === cartLineId ? { ...item, quantity: qty } : item) })
   }
@@ -2369,13 +2700,36 @@ export default function POS() {
   // kernel (repricePromotionCartLines is pure and returns changed=false
   // when prices already agree, so this settles immediately).
   useEffect(() => {
-    const { cart, changed } = repricePromotionCartLines(active.cart, promotionRules, exchangeRate)
+    if (active.checkoutRequestId) return
+    if (moneyVersion === 1 && promotionReadVersion !== 1) return
+    const { cart, changed } = repricePromotionCartLines(active.cart, promotionRules, exchangeRate, moneyVersion)
     if (changed) patchActive({ cart: cart as CartLineRecord[] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active.cart, promotionRules, exchangeRate])
+  }, [active.cart, promotionRules, exchangeRate, moneyVersion, promotionReadVersion])
+
+  // "Wholesale only > N" (the automation migration 0093 deferred). Same shape
+  // and same reasoning as the promotion pass above: the decision depends on a
+  // line's QUANTITY, so it has to be re-evaluated on every cart change rather
+  // than only at add-to-cart time -- otherwise typing a bigger quantity into
+  // an existing line would never reach the threshold. applyWholesaleAutoPricing
+  // is pure and reports changed=false once the cart agrees with the rule, so
+  // this settles in one pass and cannot loop. It only moves lines it is
+  // allowed to move (plain 'selling', no manual price edit) and only reverses
+  // its own work, so it never fights the promotion pass or the cashier.
+  useEffect(() => {
+    if (active.checkoutRequestId) return
+    const { cart, changed } = applyWholesaleAutoPricing(active.cart, wholesaleAutoRule, exchangeRate, {}, moneyVersion)
+    if (changed) patchActive({ cart: cart as CartLineRecord[] })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active.cart, wholesaleAutoRule, exchangeRate])
 
   const updatePrice = (cartLineId: string | number, field: 'usd' | 'khr', rawValue: string) => {
-    const num = normalizePriceValue(rawValue, 0)
+    if (moneyVersion === 1) {
+      try { if (!rawValue.trim()) throw new Error('invalid_money_input'); parsePosInternalAmount(rawValue) }
+      catch { notify(t('money_precision_unavailable'), 'error'); return }
+    }
+    const num = moneyVersion === 1 ? Number(rawValue || 0) : normalizePriceValue(rawValue, 0)
+    if (!Number.isFinite(num) || num < 0) return
     patchActive({
       cart: active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
@@ -2386,11 +2740,14 @@ export default function POS() {
         // discounted price. (Previously typing a price silently CREATED a
         // fixed discount == base − typed, which is exactly what conflated the
         // price field with the discount.)
-        const newBaseUsd = field === 'usd' ? num : normalizePriceValue(CURRENCY.khrToUsd(num, exchangeRate), 0)
-        const newBaseKhr = field === 'khr' ? num : normalizePriceValue(CURRENCY.usdToKhr(num, exchangeRate), 0)
-        const result = applyManualDiscount(newBaseUsd, newBaseKhr, exchangeRate, item.manual_discount_type || null, item.manual_discount_value || 0)
+        const sellingInputUsd = moneyVersion === 1 ? field === 'usd' ? sellingPriceCeilCent(rawValue || 0) : sellingPriceDivideCeilCent(rawValue || 0, exchangeRate)
+          : field === 'usd' ? num : normalizePriceValue(CURRENCY.khrToUsd(num, exchangeRate), 0)
+        const newBaseUsd = moneyVersion === 1 ? sellingPriceCeilCent(sellingInputUsd) : sellingInputUsd
+        const newBaseKhr = moneyVersion === 1 ? multiplyMoney4(newBaseUsd, exchangeRate) : field === 'khr' ? num : normalizePriceValue(CURRENCY.usdToKhr(num, exchangeRate), 0)
+        const result = applyManualDiscount(newBaseUsd, newBaseKhr, exchangeRate, item.manual_discount_type || null, item.manual_discount_value || 0, moneyVersion)
         return {
           ...item,
+          ...(moneyVersion === 1 ? { selling_price_input_usd: sellingInputUsd, price_mode: 'selling', wholesale_auto_optout: true, product_discount_usd: 0, product_discount_khr: 0, product_discount_label: '' } : {}),
           base_price_usd: newBaseUsd,
           base_price_khr: newBaseKhr,
           applied_price_usd: result.applied_price_usd,
@@ -2427,15 +2784,29 @@ export default function POS() {
   // discount type at all". Passing type: null (the Clear button) still
   // clears it, since `type` itself is null in that call.
   const updateDiscount = (cartLineId: string | number, type: ManualDiscountType | null, rawValue: string) => {
-    const value = normalizePriceValue(rawValue, 0)
+    let value: number
+    try {
+      if (moneyVersion === 1) parsePosInternalAmount(rawValue)
+      value = moneyVersion === 1 ? type === 'percent' ? Number(rawValue || 0) : roundMoney4(rawValue.trim() || '0') : normalizePriceValue(rawValue, 0)
+    } catch { notify(t('money_precision_unavailable'), 'error'); return }
+    if (!Number.isFinite(value) || value < 0) return
     patchActive({
       cart: active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
-        const baseUsd = item.base_price_usd ?? item.applied_price_usd
-        const baseKhr = item.base_price_khr ?? item.applied_price_khr
-        const result = applyManualDiscount(baseUsd, baseKhr, exchangeRate, type, value)
+        const money = moneyVersion === 1 ? (value: unknown) => roundMoney4(Number(value ?? 0)) : normalizePriceValue
+        const baseUsd = money(item.base_price_usd ?? item.applied_price_usd)
+        const suppliedBaseKhr = money(item.base_price_khr ?? item.applied_price_khr)
+        const baseKhr = baseUsd > 0 && exchangeRate > 0
+          ? moneyVersion === 1 ? multiplyMoney4(baseUsd, exchangeRate) : normalizePriceValue(baseUsd * exchangeRate, 0)
+          : suppliedBaseKhr
+        const result = applyManualDiscount(baseUsd, baseKhr, exchangeRate, type, value, moneyVersion)
         return {
           ...item,
+          // Preserve the resolved canonical base alongside the applied price.
+          // This matters when a cart line came from an older cached payload
+          // whose KHR base was empty or based on a prior exchange rate.
+          base_price_usd: baseUsd,
+          base_price_khr: baseKhr,
           applied_price_usd: result.applied_price_usd,
           applied_price_khr: result.applied_price_khr,
           manual_discount_type: type,
@@ -2447,31 +2818,45 @@ export default function POS() {
     })
   }
 
-  // A tier chip in the cart (VIP or wholesale) is a MARKER toggle (user): it
-  // flips only whether this line is recorded/printed as that tier, never the
-  // price. Default on (the line was added at that tier); deselecting drops it
-  // to plain 'selling' while keeping applied/base price exactly, so the number
+  // The wholesale tier chip in the cart is a MARKER toggle (user): it flips
+  // only whether this line is recorded/printed as that tier, never the price.
+  // Default on (the line was added at that tier); deselecting drops it to
+  // plain 'selling' while keeping applied/base price exactly, so the number
   // stays put and the receipt simply stops printing the tag (the receipt
-  // derives the tag from the persisted price_mode). Re-selecting restores the
-  // mark; picking the other tier just moves the single price_mode value. Cart
-  // line identity is the stored cart_line_id, so flipping price_mode never
-  // re-keys or merges the line.
-  const toggleTierTag = (cartLineId: string | number, tier: 'special' | 'wholesale') => {
+  // derives the tag from the persisted price_mode). Cart line identity is the
+  // stored cart_line_id, so flipping price_mode never re-keys or merges the
+  // line. (The VIP chip that used to share this handler is gone -- the
+  // 2026-09-04 ruling left exactly one tier, so there is no "other tier" to
+  // move the value to any more.)
+  //
+  // wholesale_auto_optout is what stops this fighting the "wholesale only > N"
+  // automation. Without it, deselecting the chip on a line the automation had
+  // upgraded would drop the line to 'selling', the effect would immediately
+  // see quantity-still-over-threshold and upgrade it straight back, and the
+  // cashier's tap would look broken. The stamp says "a human has ruled on
+  // this line" and the automation leaves it alone from then on.
+  const toggleTierTag = (cartLineId: string | number) => {
     patchActive({
       cart: active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
-        const nextMode = String(item.price_mode || 'selling') === tier ? 'selling' : tier
-        return { ...item, price_mode: nextMode }
+        const nextMode = String(item.display_price_mode ?? item.price_mode ?? 'selling') === 'wholesale' ? 'selling' : 'wholesale'
+        if (moneyVersion === 1) return { ...item, display_price_mode: nextMode, wholesale_auto: false, wholesale_auto_optout: true }
+        return { ...item, price_mode: nextMode, wholesale_auto: false, wholesale_auto_optout: true }
       }),
     })
   }
 
-  const updateItemBranch = (cartLineId: string | number, branchId: string) => {
+  const updateItemBranch = async (cartLineId: string | number, branchId: string) => {
     const nextBranchId = branchId ? parseInt(branchId, 10) : null
     const item = active.cart.find((entry) => getCartLineId(entry) === cartLineId)
     const product = productsById.get(Number(item?.id))
     if (!item || !product) return
-
+    const targetBranch = nextBranchId == null ? null : branchesById.get(nextBranchId)
+    if (!targetBranch || !branchCanSell(targetBranch.name)) {
+      notify(t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.', 'error')
+      return
+    }
+    const targetBranchId = Number(targetBranch.id)
     // Must check the TARGET branch's own stock directly via
     // getBranchStockQty, not through getDisplayStock -- getDisplayStock
     // gives first priority to the active branch filter (primaryBranchFilterId)
@@ -2481,19 +2866,91 @@ export default function POS() {
     // targeting. That let a line be moved to a zero-stock branch as long
     // as the originally-selected/filtered branch still had stock. Bypass
     // that fallback chain entirely for this check.
-    const available = nextBranchId != null
-      ? getBranchStockQty(product, nextBranchId)
-      : Number(product.stock_quantity || 0)
+    const available = getBranchStockQty(product, targetBranchId)
     if (item.quantity > available) {
       const branchName = branchesById.get(Number(nextBranchId))?.name || t('selected_branch') || 'selected branch'
       notify(`${t('not_enough_stock') || 'Not enough stock'} (${branchName})`, 'error')
       return
     }
 
-    patchActive({ cart: active.cart.map((entry) => getCartLineId(entry) === cartLineId ? { ...entry, branch_id: nextBranchId } : entry) })
+    const originalBranchId = item.branch_id == null ? null : Number(item.branch_id)
+    if (originalBranchId === targetBranchId) return
+
+    // A selected received-date lot belongs to one product+branch identity.
+    // Never carry it blindly to another branch. Re-read the target branch's
+    // available lots and keep this exact lot only when it exists there and
+    // still covers the current quantity. A miss or failed lookup leaves the
+    // line unchanged so checkout can never receive stale batch metadata.
+    if (item.batch_id) {
+      const requestKey = String(cartLineId)
+      const requestId = (branchBatchValidationRef.current.get(requestKey) || 0) + 1
+      branchBatchValidationRef.current.set(requestKey, requestId)
+      try {
+        const response = await getProductBatches(Number(product.id), targetBranchId, true)
+        if (branchBatchValidationRef.current.get(requestKey) !== requestId) return
+        const currentOrder = ordersRef.current.find((order) => order.id === resolvedActiveId)
+        const currentItem = currentOrder?.cart.find((entry) => getCartLineId(entry) === cartLineId)
+        if (!currentItem
+          || Number(currentItem.batch_id || 0) !== Number(item.batch_id)
+          || (currentItem.branch_id == null ? null : Number(currentItem.branch_id)) !== originalBranchId) return
+        const targetBatch = response.batches.find((batch) => Number(batch.id) === Number(currentItem.batch_id))
+        if (!targetBatch || Number(targetBatch.quantity || 0) < currentItem.quantity) {
+          notify(t('no_batches_for_branch') || 'No received dates for this branch', 'error')
+          return
+        }
+        setOrders((previous) => previous.map((order) => order.id !== resolvedActiveId ? order : {
+          ...order,
+          cart: order.cart.map((entry) => getCartLineId(entry) !== cartLineId ? entry : {
+            ...entry,
+            branch_id: targetBranchId,
+            batch_id: targetBatch.id,
+            batch_expiry_date: targetBatch.expiry_date ?? null,
+            batch_available_quantity: Number(targetBatch.quantity || 0),
+          }),
+        }))
+      } catch (error) {
+        if (branchBatchValidationRef.current.get(requestKey) === requestId) notify(getErrorMessage(error), 'error')
+      }
+      return
+    }
+
+    // A plain line has no batch identity to carry. Clear every optional batch
+    // display/cap field while switching so legacy drafts with partial stale
+    // metadata cannot leak a previous branch's received date into checkout.
+    patchActive({
+      cart: active.cart.map((entry) => getCartLineId(entry) === cartLineId
+        ? { ...entry, branch_id: targetBranchId, batch_id: null, batch_label: null, batch_expiry_date: null, batch_available_quantity: undefined, unlotted_stock: undefined, unlotted_available_quantity: undefined }
+        : entry),
+    })
   }
 
 // Totals derived from the active order
+  const pendingPreview = useMemo(() => {
+    if (!active.checkoutRequestId || moneyVersion !== 1) return null
+    try { return frozenPosPreview(active.checkoutPayload || {}) } catch { return null }
+  }, [active.checkoutRequestId, active.checkoutPayload, moneyVersion])
+  const pricedCart = useMemo(() => {
+    if (moneyVersion !== 1) return { quotes: null, error: null }
+    if (active.checkoutRequestId) return { quotes: null, error: null }
+    if (promotionReadVersion !== 1) return { quotes: null, error: new Error('money_precision_unavailable') }
+    try { return { quotes: quoteSaleCartLines(active.cart, promotionRules, exchangeRate), error: null } }
+    catch (error) { return { quotes: null, error } }
+  }, [active.cart, active.checkoutRequestId, promotionRules, exchangeRate, moneyVersion, promotionReadVersion])
+  const v1Basket = useMemo(() => {
+    if (moneyVersion !== 1) return { totals: null, error: null }
+    try {
+      if (active.checkoutRequestId) {
+        if (!pendingPreview) throw new SaleCheckoutRecoveryRequiredError()
+        return { totals: pendingPreview.totals, error: null }
+      }
+      if (pricedCart.error || !pricedCart.quotes) throw new Error('money_precision_unavailable')
+      return { totals: posV1BasketTotals({ lines: [...pricedCart.quotes.values()], exchangeRate,
+        discountType: active.discountType, discountPercent: active.discountPercent, discountUsd: active.discountUsd, discountKhr: active.discountKhr,
+        membershipUsd: active.membershipDiscountUsd, membershipKhr: active.membershipDiscountKhr,
+        taxPercent: taxRate > 0 ? settings.tax_rate : 0, feeUsd: active.deliveryFeeUsd,
+        customerPaysFee: active.isDelivery && active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER }), error: null }
+    } catch (error) { return { totals: null, error } }
+  }, [active.checkoutRequestId, pendingPreview, active.discountType, active.discountPercent, active.discountUsd, active.discountKhr, active.membershipDiscountUsd, active.membershipDiscountKhr, active.deliveryFeeUsd, active.isDelivery, active.deliveryFeePaidBy, pricedCart, moneyVersion, exchangeRate, taxRate, settings.tax_rate])
   const cartTotals = useMemo(() => {
     let subtotalUsd = 0
     let subtotalKhr = 0
@@ -2508,11 +2965,11 @@ export default function POS() {
     }
 
     return {
-      subtotalUsd,
-      subtotalKhr,
+      subtotalUsd: moneyVersion === 1 ? v1Basket.totals?.subtotalUsd ?? 0 : subtotalUsd,
+      subtotalKhr: moneyVersion === 1 ? v1Basket.totals?.subtotalKhr ?? 0 : subtotalKhr,
       branchIds: Array.from(branchIds),
     }
-  }, [active.cart])
+  }, [active.cart, moneyVersion, v1Basket])
 
   const subtotalUsd = cartTotals.subtotalUsd
   const subtotalKhr = cartTotals.subtotalKhr
@@ -2523,48 +2980,73 @@ export default function POS() {
   // without doing the math by hand. Percent mode is derived off the cart
   // subtotal so it stays correct as items are added/removed.
   const discountPercentValue = Math.min(100, Math.max(0, parseFloat(active.discountPercent) || 0))
-  const discUsd = active.discountType === 'percent'
-    ? normalizePriceValue(subtotalUsd * (discountPercentValue / 100), 0)
-    : parseFloat(active.discountUsd) || 0
+  const discUsd = moneyVersion === 1 ? v1Basket.totals?.discUsd ?? 0 : active.discountType === 'percent'
+    ? normalizePriceValue(subtotalUsd * (discountPercentValue / 100), 0) : parseFloat(active.discountUsd) || 0
   // KHR amounts are whole riel end to end (Part-77, money audit): the tax
   // and change multiplications below used to hand fractional riel to the
   // checkout payload and the printed receipt. usdToKhr already rounds; the
   // operator-typed KHR fields are rounded here too so a stray decimal never
   // rides through.
-  const discKhr = active.discountType === 'percent'
+  const discKhr = moneyVersion === 1 ? v1Basket.totals?.discKhr ?? 0 : active.discountType === 'percent'
     ? normalizePriceValue(subtotalKhr * (discountPercentValue / 100), 0)
     : Math.round(parseFloat(active.discountKhr) || CURRENCY.usdToKhr(discUsd, exchangeRate))
-  const membershipDiscUsd = parseFloat(active.membershipDiscountUsd) || 0
-  const membershipDiscKhr = Math.round(parseFloat(active.membershipDiscountKhr) || CURRENCY.usdToKhr(membershipDiscUsd, exchangeRate))
+  const membershipDiscUsd = moneyVersion === 1 ? v1Basket.totals?.membershipDiscUsd ?? 0 : parseFloat(active.membershipDiscountUsd) || 0
+  const membershipDiscKhr = moneyVersion === 1 ? v1Basket.totals?.membershipDiscKhr ?? 0 : Math.round(parseFloat(active.membershipDiscountKhr) || CURRENCY.usdToKhr(membershipDiscUsd, exchangeRate))
   const membershipRedeemUnits = Math.max(0, parseInt(active.membershipRedeemUnits || '0', 10) || 0)
-  const maxMembershipUnits = Math.max(0, Math.floor((membershipInfo?.points?.balance || 0) / redeemPointsStep))
+  // ONE rule, ONE implementation. This used to be `balance / redeemPointsStep`
+  // computed here, which is the same arithmetic the Worker does -- and that is
+  // exactly the problem: when membership points are switched off the Worker
+  // reports redeemableUnits = 0 while the balance itself stays truthful (the
+  // switch is forward-only and erases nothing), so a till doing its own
+  // division would go on offering redemptions the shop has turned off. The
+  // local division survives only as a fallback for a Worker old enough not to
+  // send the field.
+  const serverRedeemableUnits = Number(membershipInfo?.points?.redeemableUnits)
+  const maxMembershipUnits = Number.isFinite(serverRedeemableUnits)
+    ? Math.max(0, Math.floor(serverRedeemableUnits))
+    : Math.max(0, Math.floor((membershipInfo?.points?.balance || 0) / redeemPointsStep))
 
-  const afterDiscUsd = Math.max(0, subtotalUsd - discUsd - membershipDiscUsd)
+  const afterDiscUsd = Math.max(0, moneyVersion === 1 ? v1Basket.totals?.afterDiscUsd ?? 0 : subtotalUsd - discUsd - membershipDiscUsd)
   const afterDiscKhr = Math.max(0, subtotalKhr - discKhr - membershipDiscKhr)
 
-  const taxUsd       = afterDiscUsd * taxRate
-  const taxKhr       = Math.round(afterDiscKhr * taxRate)
+  const taxUsd       = moneyVersion === 1 ? v1Basket.totals?.taxUsd ?? 0 : afterDiscUsd * taxRate
+  const taxKhr       = moneyVersion === 1 ? v1Basket.totals?.taxKhr ?? 0 : Math.round(afterDiscKhr * taxRate)
 
-  const feeUsd       = parseFloat(active.deliveryFeeUsd) || 0
-  const feeKhr       = CURRENCY.usdToKhr(feeUsd, exchangeRate)
+  const feeUsd       = moneyVersion === 1 ? v1Basket.totals?.feeUsd ?? 0 : parseFloat(active.deliveryFeeUsd) || 0
+  const feeKhr       = moneyVersion === 1 ? v1Basket.totals?.feeKhr ?? 0 : CURRENCY.usdToKhr(feeUsd, exchangeRate)
 
   // Delivery fee is only added to the customer's bill when THEY are the payer
   const customerFeeUsd = active.isDelivery && active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? feeUsd : 0
   const customerFeeKhr = active.isDelivery && active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? feeKhr : 0
 
-  const totalUsd     = afterDiscUsd + taxUsd + customerFeeUsd
-  const totalKhr     = Math.round(afterDiscKhr + taxKhr + customerFeeKhr)
+  const calculatedTotalUsd = moneyVersion === 1 ? v1Basket.totals?.calculatedTotalUsd ?? 0 : afterDiscUsd + taxUsd + customerFeeUsd
+  const basketRounding = moneyVersion === 1 ? v1Basket.totals?.rounding ?? null : null
+  const totalUsd     = basketRounding?.payableTotal2 ?? calculatedTotalUsd
+  const totalKhr     = moneyVersion === 1 ? v1Basket.totals?.totalKhr ?? 0 : Math.round(afterDiscKhr + taxKhr + customerFeeKhr)
 
   const activePaymentDetails = active.paymentDetails.length
     ? active.paymentDetails
     : [{ id: 'legacy-payment', method: active.paymentMethod || 'Cash', usd: active.paidUsd, khr: active.paidKhr }]
-  const paidUsdNum   = activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.usd) || 0), 0)
-  const paidKhrNum   = activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.khr) || 0), 0)
+  const newNativeTender = (() => {
+    if (moneyVersion !== 1) return null
+    try { return posV1Tender(activePaymentDetails) } catch { return null }
+  })()
+  const paidUsdNum   = moneyVersion === 1 ? newNativeTender?.paidUsd ?? 0 : activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.usd) || 0), 0)
+  const paidKhrNum   = moneyVersion === 1 ? newNativeTender?.paidKhr ?? 0 : activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.khr) || 0), 0)
   const totalPaid    = paidUsdNum + paidKhrNum / exchangeRate
-  const changeUsd    = totalPaid - totalUsd
+  const computedNativeChange = (() => {
+    if (moneyVersion !== 1) return null
+    if (active.checkoutRequestId) {
+      const usd = active.checkoutPayload?.change_usd, khr = active.checkoutPayload?.change_khr
+      return typeof usd === 'number' && typeof khr === 'number' && Number.isFinite(usd) && Number.isFinite(khr) && usd >= 0 && khr >= 0 ? { changeUsd: usd, changeKhr: khr } : null
+    }
+    try { return nativeChangeAmounts({ paidUsd: paidUsdNum, paidKhr: paidKhrNum, payableUsd: totalUsd, exchangeRate, changeExchangeRate }) }
+    catch { return null }
+  })()
+  const changeUsd    = moneyVersion === 1 && computedNativeChange && totalPaid >= totalUsd ? computedNativeChange.changeUsd : totalPaid - totalUsd
   // Change uses the dedicated change rate (see changeExchangeRate above); the
   // main rate still governs the amount owed and the customer's KHR payment.
-  const changeKhr    = Math.round(changeUsd * changeExchangeRate)
+  const changeKhr    = moneyVersion === 1 && computedNativeChange ? computedNativeChange.changeKhr : Math.round(changeUsd * changeExchangeRate)
 
   // Physical-cash cashier figures (business rule, Aug 31 2026): the whole-100៛
   // notes actually collected from / handed back to the customer. Display-only
@@ -2577,13 +3059,30 @@ export default function POS() {
   const cashCollectKhr = cashierCollectKhr(totalKhr, { isCashPayment, isWalkIn: isWalkInSale })
   const cashChangeKhr = cashierChangeKhr(changeKhr)
 
-  const handleDiscountUsd = (v: string) => patchActive({ discountType: 'fixed', discountUsd: v, discountKhr: String(CURRENCY.usdToKhr(parseFloat(v) || 0, exchangeRate)) })
-  const handleDiscountKhr = (v: string) => patchActive({ discountType: 'fixed', discountKhr: v, discountUsd: String(CURRENCY.khrToUsd(parseFloat(v) || 0, exchangeRate)) })
+  const handleDiscountUsd = (v: string) => {
+    if (moneyVersion !== 1) return patchActive({ discountType: 'fixed', discountUsd: v, discountKhr: String(CURRENCY.usdToKhr(parseFloat(v) || 0, exchangeRate)) })
+    let khr = ''
+    try { khr = v.trim() ? String(multiplyMoney4(parsePosInternalAmount(v), exchangeRate)) : '' } catch { /* Keep invalid text visible for correction. */ }
+    patchActive({ discountType: 'fixed', discountUsd: v, discountKhr: khr })
+  }
+  const handleDiscountKhr = (v: string) => {
+    if (moneyVersion !== 1) return patchActive({ discountType: 'fixed', discountKhr: v, discountUsd: String(CURRENCY.khrToUsd(parseFloat(v) || 0, exchangeRate)) })
+    let usd = ''
+    try { usd = v.trim() ? String(divideMoney4(parsePosInternalAmount(v), exchangeRate)) : '' } catch { /* Keep invalid text visible for correction. */ }
+    patchActive({ discountType: 'fixed', discountKhr: v, discountUsd: usd })
+  }
   const handleDiscountPercent = (v: string) => patchActive({ discountType: 'percent', discountPercent: v })
   const handleDiscountType = (type: 'fixed' | 'percent') => patchActive({ discountType: type })
   const handleMembershipUnits = (value: string) => {
     const rawUnits = Math.max(0, parseInt(value || '0', 10) || 0)
     const units = Math.min(rawUnits, maxMembershipUnits)
+    if (moneyVersion === 1) {
+      try {
+        const usd = multiplyMoney4(redeemValueUsdStep, units)
+        patchActive({ membershipRedeemUnits: units ? String(units) : '', membershipDiscountUsd: units ? String(usd) : '', membershipDiscountKhr: units ? String(multiplyMoney4(usd, exchangeRate)) : '' })
+      } catch { notify(t('money_precision_unavailable'), 'error') }
+      return
+    }
     patchActive({
       membershipRedeemUnits: units ? String(units) : '',
       membershipDiscountUsd: units ? String((units * redeemValueUsdStep).toFixed(2)) : '',
@@ -2611,16 +3110,69 @@ export default function POS() {
   const closeAddCustomerModal = useCallback(() => {
     if (savingCustomerRef.current) return
     setShowAddCustomer(false)
+    setCustomerDuplicateCheck(null)
     setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
-  }, [])
+    resetQuickCustomerAddressPreset()
+  }, [resetQuickCustomerAddressPreset])
 
   const closeAddDeliveryModal = useCallback(() => {
     if (savingDeliveryRef.current) return
     setShowAddDelivery(false)
+    setDeliveryDuplicateCheck(null)
     setNewDeliveryForm({ name: '', phone: '', area: '' })
   }, [])
 
   const handleCheckout = async (saleStatus = 'completed') => {
+    if (loading || checkoutInFlightRef.current) return
+    const checkoutScope = captureActorReadScope('pos-checkout')
+    const orderKey = String(resolvedActiveId || 'pos-order')
+    const finishRecorded = (result: unknown) => {
+      if (!isActorReadScopeCurrent(checkoutScope)) return
+      try {
+        const receipt = canonicalSaleReceipt(result)
+        setReceiptQueue(queue => [...queue, receipt])
+        checkoutRequestIdsRef.current.delete(orderKey)
+        if (resolvedActiveId) closeOrder(resolvedActiveId, true)
+        void loadCatalogData('POS catalog after checkout')
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+      } catch {
+        // A confirmed commit with an incomplete snapshot is not a new sale.
+        // Keep the exact pending request for receipt recovery; never print the
+        // locally calculated request as if it were the saved receipt.
+        notify(t('money_receipt_unavailable'), 'error')
+      }
+    }
+    const pendingId = String(active.checkoutRequestId || checkoutRequestIdsRef.current.get(orderKey) || '').trim()
+    if (pendingId) {
+      checkoutInFlightRef.current = true; setLoading(true)
+      try {
+        const transport = await getSaleWriteTransport()
+        assertActorSessionDispatchAllowed(checkoutScope)
+        const proof = await transport.recoverSaleCreateReceipt(pendingId) as { committed?: boolean; response?: unknown }
+        if (!isActorReadScopeCurrent(checkoutScope)) return
+        if (proof.committed === true) { finishRecorded(proof.response); return }
+        // No receipt cannot reconstruct an old id-only request, and a lookup
+        // failure is never permission to create a fresh checkout identity.
+        if (proof.committed !== false || !active.checkoutPayload) throw new SaleCheckoutRecoveryRequiredError()
+        const frozen = frozenSaleCheckoutBody(pendingId, active.checkoutPayload)
+        const result = await withLoaderTimeout(() => createPosSale(frozen, checkoutScope), 'Retry POS sale', POS_CHECKOUT_TIMEOUT_MS)
+        if (!isActorReadScopeCurrent(checkoutScope)) return
+        if (isSaleRecorded(result)) finishRecorded(result)
+        else notify(localizeBranchRuleError(result.error, t) || t('error'), 'error')
+      } catch (error) {
+        if (isActorReadScopeCurrent(checkoutScope)) {
+          if ((error as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === pendingId ? { ...order, checkoutReviewRequestId: pendingId } : order))
+          notify(getErrorMessage(error) === 'money_checkout_recovery_required' ? t('money_checkout_recovery_required') : getErrorMessage(error, t('error')), 'error')
+        }
+      } finally { checkoutInFlightRef.current = false; setLoading(false) }
+      return
+    }
+    if (moneyVersion !== 1) return notify(t('money_precision_unavailable'), 'error')
+    if (v1Basket.error || !v1Basket.totals) return notify(t('money_precision_unavailable'), 'error')
+    if (!newNativeTender) return notify(t('money_precision_unavailable'), 'error')
+    if (!computedNativeChange) return notify(t('money_precision_unavailable'), 'error')
+    try { moneyCapability.assertReady() } catch { moneyCapability.retry(); return notify(t('money_precision_unavailable'), 'error') }
     if (active.cart.length === 0)        return notify(t('cart_empty'), 'error')
     // Guardrail: a genuinely broken line (non-positive/NaN quantity, negative/
     // NaN price) or a negative grand total must never be submitted. A $0 line
@@ -2661,6 +3213,9 @@ export default function POS() {
     checkoutInFlightRef.current = true
     setLoading(true)
 
+    let submittedRequestId: string | null = null
+    try {
+    if (pricedCart.error || !pricedCart.quotes || pricedCart.quotes.size !== active.cart.length) throw new Error('money_precision_unavailable')
     const saleBranchId = cartTotals.branchIds.length === 1 ? cartTotals.branchIds[0] : null
 
     // Y2: ONE client_request_id per order until a checkout SUCCEEDS. The
@@ -2670,41 +3225,47 @@ export default function POS() {
     // instead of creating a second one. A fresh id per click (the old
     // behavior, generated inside the transport) made every retry a
     // potential duplicate sale.
-    const orderKey = String(resolvedActiveId || 'pos-order')
     let clientRequestId = String(active.checkoutRequestId || '').trim() || checkoutRequestIdsRef.current.get(orderKey)
     if (!clientRequestId) {
       clientRequestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? `sale_${crypto.randomUUID()}`
         : `sale_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-      checkoutRequestIdsRef.current.set(orderKey, clientRequestId)
       // Persist before the network request starts. If iOS kills the process
       // after the server commits but before the response arrives, relaunching
       // and retrying the restored order reuses this exact idempotency key.
-      const durableOrders = orders.map((order) => (
-        order.id === resolvedActiveId ? { ...order, checkoutRequestId: clientRequestId as string } : order
-      ))
-      writePosDraft(posOrdersStorageKey, JSON.stringify(durableOrders))
-      setOrders(durableOrders)
     }
 
     // Y10: with no payment typed on an awaiting-payment sale, record NO
     // payment method -- "Cash" here would be a fabrication; the method is
     // chosen later when the sale is completed on the Sales page.
     const hasPaymentInput = paidUsdNum > 0 || paidKhrNum > 0
+    if (active.changeIsActual === true) {
+      // Validate the original text before denomination rounding can erase a
+      // sub-tick negative. Saved/frozen requests bypass this new-input path.
+      parsePosInternalAmount(active.changeGivenUsd)
+      parsePosInternalAmount(active.changeGivenKhr)
+    }
 
     const device = getClientDeviceInfo()
+    const checkoutCustomer: CustomerRecord = isSelectableCustomerIdentity(active.customer)
+      ? active.customer
+      : { ...EMPTY_CUSTOMER }
     const saleData = {
       client_request_id: clientRequestId,
+      money_precision_version: 1,
       cashier_id:   user?.id || null,
       // Store the USERNAME as the cashier display (cashier_id is the real link).
       // Keeps new sales consistent with historical ones and with the rename
       // cascade, which writes the username into cashier_name too.
       cashier_name: (user as { username?: string } | null | undefined)?.username || user?.name || '',
-      customer_name:    active.customer.name    || null,
-      customer_id:      active.customer.id      || null,
-      customer_membership_number: active.customer.membership_number || null,
-      customer_phone:   active.customer.phone   || null,
-      customer_address: active.customer.address || null,
+      customer_name:    checkoutCustomer.name    || null,
+      customer_id:      checkoutCustomer.id      || null,
+      customer_membership_number: checkoutCustomer.membership_number || null,
+      customer_phone:   checkoutCustomer.phone   || null,
+      // N21: the receipt and the sale detail print this snapshot, so it is
+      // the display address, not the Contact Options JSON a linked customer
+      // carries in customers.address.
+      customer_address: contactDisplayAddress(checkoutCustomer.address) || null,
       branch_id: saleBranchId,
       items: active.cart.map(i => ({
         id:                i.id,
@@ -2721,43 +3282,52 @@ export default function POS() {
         product_discount_khr: i.product_discount_khr || 0,
         base_price_usd:    i.base_price_usd ?? i.applied_price_usd,
         base_price_khr:    i.base_price_khr ?? i.applied_price_khr,
+        ...(i.selling_price_input_usd !== undefined ? { selling_price_input_usd: i.selling_price_input_usd } : {}),
         manual_discount_type:  i.manual_discount_type  || null,
         manual_discount_value: i.manual_discount_value || 0,
         manual_discount_usd:   i.manual_discount_usd   || 0,
         manual_discount_khr:   i.manual_discount_khr   || 0,
-        cost_price_usd:    i.cost_price_usd    || i.purchase_price_usd    || 0,
-        cost_price_khr:    i.cost_price_khr    || i.purchase_price_khr    || 0,
-        purchase_price_usd: i.purchase_price_usd || 0,
-        purchase_price_khr: i.purchase_price_khr || 0,
-        total:     i.applied_price_usd * i.quantity,
+        cost_price_usd:    i.cost_price_usd ?? i.purchase_price_usd ?? null,
+        cost_price_khr:    i.cost_price_khr ?? i.purchase_price_khr ?? null,
+        purchase_price_usd: i.purchase_price_usd ?? null,
+        purchase_price_khr: i.purchase_price_khr ?? null,
+        total:     pricedCart.quotes!.get(getCartLineId(i))!.total_usd,
+        // Server compares the exact line quote before storing its own snapshot.
+        client_line_key: pricedCart.quotes!.get(getCartLineId(i))!.client_line_key,
+        pricing_source: pricedCart.quotes!.get(getCartLineId(i))!.pricing_source,
+        pricing_quote: pricedCart.quotes!.get(getCartLineId(i))!.pricing_quote,
+        total_usd: pricedCart.quotes!.get(getCartLineId(i))!.total_usd,
+        total_khr: pricedCart.quotes!.get(getCartLineId(i))!.total_khr,
         branch_id: i.branch_id || null,
         batch_id:          i.batch_id || null,
         batch_label:       i.batch_label || null,
         batch_expiry_date: i.batch_expiry_date || null,
+        unlotted_stock:     i.unlotted_stock === true,
         damaged_lot_id:    i.damaged_lot_id || null,
       })),
-      subtotal_usd: subtotalUsd, subtotal_khr: Math.round(subtotalKhr),
+      subtotal_usd: subtotalUsd, subtotal_khr: subtotalKhr,
       discount_usd: discUsd,    discount_khr: discKhr,
-      membership_discount_usd: membershipDiscUsd,
-      membership_discount_khr: membershipDiscKhr,
-      membership_points_redeemed: membershipRedeemUnits * redeemPointsStep,
-      loyalty_accrual: active.loyaltyAccrual !== false,
+      membership_discount_usd: isSelectableCustomerIdentity(active.customer) ? membershipDiscUsd : 0,
+      membership_discount_khr: isSelectableCustomerIdentity(active.customer) ? membershipDiscKhr : 0,
+      membership_points_redeemed: isSelectableCustomerIdentity(active.customer) ? membershipRedeemUnits * redeemPointsStep : 0,
+      loyalty_accrual: loyaltyAccrual,
       tax_usd:      taxUsd,     tax_khr:      taxKhr,
       total_usd:    totalUsd,   total_khr:    totalKhr,
       payment_method:   saleStatus === 'awaiting_payment' && !hasPaymentInput ? '' : paymentMethodSummary(activePaymentDetails),
-      payment_details: saleStatus === 'awaiting_payment' && !hasPaymentInput ? [] : activePaymentDetails.map((detail) => ({
-        method: detail.method.trim() || 'Cash',
-        amount_usd: parseFloat(detail.usd) || 0,
-        amount_khr: parseFloat(detail.khr) || 0,
-      })),
+      payment_details: saleStatus === 'awaiting_payment' && !hasPaymentInput ? [] : newNativeTender.details,
       payment_currency: (paidUsdNum > 0 && paidKhrNum > 0) ? 'MIXED' : paidKhrNum > 0 ? 'KHR' : 'USD',
       amount_paid_usd: paidUsdNum,
       amount_paid_khr: paidKhrNum,
-      // Y12: when the cashier entered the actual change handed back (either
-      // currency non-empty), record THOSE per-currency amounts additively;
-      // otherwise fall back to the computed dual representation, unchanged.
-      change_usd: (active.changeGivenUsd !== '' || active.changeGivenKhr !== '') ? Math.max(0, parseFloat(active.changeGivenUsd) || 0) : Math.max(0, changeUsd),
-      change_khr: (active.changeGivenUsd !== '' || active.changeGivenKhr !== '') ? Math.max(0, Math.round(parseFloat(active.changeGivenKhr) || 0)) : Math.max(0, changeKhr),
+      // Only a direct edit marks these as the actual native amounts handed
+      // back. Explicit zero counts; the computed-fill shortcut keeps the
+      // canonical dual fallback and deliberately sends no intent marker.
+      change_usd: active.changeIsActual === true
+        ? roundMoney2(active.changeGivenUsd.trim() || '0')
+        : Math.max(0, changeUsd),
+      change_khr: active.changeIsActual === true
+        ? Math.max(0, cashierChangeKhr(parseFloat(active.changeGivenKhr) || 0))
+        : Math.max(0, changeKhr),
+      ...(active.changeIsActual === true ? { change_is_actual: true } : {}),
       exchange_rate: exchangeRate,
       is_delivery:               active.isDelivery ? 1 : 0,
       delivery_contact_id:       active.selectedDelivery?.id      || null,
@@ -2776,30 +3346,41 @@ export default function POS() {
       device_name: device.deviceName || null,
     }
 
-    try {
+      moneyCapability.assertReady()
+      assertActorSessionDispatchAllowed(checkoutScope)
+      const frozen = frozenSaleCheckoutBody(clientRequestId, undefined, () => saleData)
+      submittedRequestId = clientRequestId
+      const durableOrders = ordersRef.current.map(order => order.id === resolvedActiveId ? { ...order, checkoutRequestId: clientRequestId, checkoutPayload: frozen } : order)
+      const serialized = JSON.stringify(durableOrders)
+      writePosDraft(posOrdersStorageKey, serialized)
+      if (readPosStorage('local', posOrdersStorageKey) !== serialized && readPosStorage('session', posOrdersStorageKey) !== serialized) throw new SaleCheckoutRecoveryRequiredError()
+      assertActorSessionDispatchAllowed(checkoutScope)
+      checkoutRequestIdsRef.current.set(orderKey, clientRequestId)
+      ordersRef.current = durableOrders
+      setOrders(durableOrders)
       const result = await withLoaderTimeout(
-        () => createPosSale(saleData),
+        () => createPosSale(frozen, checkoutScope),
         'Create POS sale',
         POS_CHECKOUT_TIMEOUT_MS,
       )
+      if (!isActorReadScopeCurrent(checkoutScope)) return
       // The server returns the sale itself ({ id, receiptNumber, ... }) with no
       // top-level success flag, so the old raw success-flag check treated every
       // committed online sale as a failure -- an error toast, no receipt, the
       // order left open, while the sale had in fact landed. isSaleRecorded reads
       // the real signal: an id (or an explicit success) and no error.
       if (isSaleRecorded(result)) {
-        checkoutRequestIdsRef.current.delete(orderKey)
-        const receiptNumber = result.receiptNumber || result.receipt_number || businessDateTimeId()
-        setReceiptQueue(q => [...q, { ...saleData, id: result.id, receiptNumber, created_at: new Date().toISOString() }])
-        if (resolvedActiveId) closeOrder(resolvedActiveId)
-        void loadCatalogData('POS catalog after checkout')
-        // Trigger local inventory refresh immediately
-        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
-        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+        finishRecorded(result)
       } else {
-        notify(result.error || t('error'), 'error')
+        // A warehouse line refused by the Worker reads back as the pack
+        // sentence the sheet's greyed pill shows, not as the server's
+        // English -- this is the path an offline sale replayed later, or a
+        // stale tab, actually arrives on.
+        notify(localizeBranchRuleError(result.error, t) || t('error'), 'error')
       }
     } catch (e) {
+      if (!isActorReadScopeCurrent(checkoutScope)) return
+      if (submittedRequestId && (e as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === submittedRequestId ? { ...order, checkoutReviewRequestId: submittedRequestId! } : order))
       // Y2: a timeout is NOT a confirmed failure -- the request keeps
       // running server-side and may commit. Say so, and say that retrying
       // is safe (the stable client_request_id makes the retry return the
@@ -2810,8 +3391,62 @@ export default function POS() {
           'ម៉ាស៊ីនមេមិនទាន់បញ្ជាក់ការលក់នេះទេ។ វាប្រហែលជាត្រូវបានកត់ត្រា - ចុច Complete ម្តងទៀតដោយសុវត្ថិភាព វានឹងមិនបង្កើតច្បាប់ចម្លងទេ។',
         ), 'error')
       } else {
-        notify(getErrorMessage(e, t('error') || 'Error'), 'error')
+        notify(localizeBranchRuleError(getErrorMessage(e, t('error') || 'Error'), t), 'error')
       }
+    } finally {
+      checkoutInFlightRef.current = false
+      setLoading(false)
+    }
+  }
+
+  const reviewCheckoutPrices = async () => {
+    const orderId = resolvedActiveId, order = ordersRef.current.find(entry => entry.id === orderId)
+    if (loading || checkoutInFlightRef.current || !order?.checkoutRequestId || order.checkoutReviewRequestId !== order.checkoutRequestId) return
+    const requestId = order.checkoutRequestId, scope = captureActorReadScope('pos-price-review')
+    checkoutInFlightRef.current = true
+    setLoading(true)
+    try {
+      const transport = await getSaleWriteTransport()
+      assertActorSessionDispatchAllowed(scope)
+      const proof = await transport.recoverSaleCreateReceipt(requestId) as { committed?: boolean; response?: unknown }
+      if (!isActorReadScopeCurrent(scope)) return
+      if (proof.committed === true) {
+        const receipt = canonicalSaleReceipt(proof.response)
+        setReceiptQueue(previous => [...previous, receipt as SaleResult])
+        closeOrder(orderId, true)
+        return
+      }
+      if (proof.committed !== false) throw new SaleCheckoutRecoveryRequiredError()
+      const { getProductsByIds } = await import('../../api/productReadTransport.ts')
+      assertActorSessionDispatchAllowed(scope)
+      moneyCapability.assertReady()
+      const response = await getProductsByIds(order.cart.map(item => item.id), { surface: 'pos', money_precision_version: 1, metadata: '1', pricing_review: Date.now() }) as { items?: ProductRecord[]; promotion_rules?: PromotionRule[] }
+      if (!isActorReadScopeCurrent(scope)) return
+      if (!Array.isArray(response.items) || !Array.isArray(response.promotion_rules)) throw new Error('money_precision_unavailable')
+      const byId = new Map(response.items.map(item => [Number(item.id), item]))
+      const cart = order.cart.map(item => {
+        const fresh = byId.get(Number(item.id))
+        if (!fresh) throw new Error('money_precision_unavailable')
+        // Refresh pricing context only: lot, quantity, manual override and
+        // branch intent remain exactly what the cashier chose.
+        return { ...item, pricing_product: fresh }
+      })
+      quoteSaleCartLines(cart, response.promotion_rules, exchangeRate)
+      const current = ordersRef.current.find(entry => entry.id === orderId)
+      if (current?.checkoutRequestId !== requestId || current.checkoutReviewRequestId !== requestId) throw new SaleCheckoutRecoveryRequiredError()
+      assertActorSessionDispatchAllowed(scope)
+      const next = ordersRef.current.map(entry => entry.id === orderId ? { ...entry, cart, checkoutRequestId: '', checkoutPayload: undefined, checkoutReviewRequestId: undefined } : entry)
+      const serialized = JSON.stringify(next)
+      writePosDraft(posOrdersStorageKey, serialized)
+      if (readPosStorage('local', posOrdersStorageKey) !== serialized && readPosStorage('session', posOrdersStorageKey) !== serialized) throw new SaleCheckoutRecoveryRequiredError()
+      assertActorSessionDispatchAllowed(scope)
+      checkoutRequestIdsRef.current.delete(orderId)
+      ordersRef.current = next
+      setPromotionRules(response.promotion_rules)
+      setPromotionReadVersion(1)
+      setOrders(next)
+    } catch (error) {
+      if (isActorReadScopeCurrent(scope)) notify(getErrorMessage(error, t('money_precision_unavailable')), 'error')
     } finally {
       checkoutInFlightRef.current = false
       setLoading(false)
@@ -2857,7 +3492,7 @@ export default function POS() {
                   ? (t('search_mode_and_hint') || 'Matching ALL terms - change in Filters to match ANY term instead')
                   : (t('search_mode_or_hint') || 'Matching ANY term - change in Filters to match ALL terms instead')}
                 value={search}
-                onChange={e => { const next = e.target.value; sessionStorage.setItem('pos_search', next); setSearch(next) }}
+                onChange={e => { const next = e.target.value; writePosStorage('session', 'pos_search', next); setSearch(next) }}
               />
               <ScanSearchButton onDetected={setSearch} t={t} />
               {/* AND/OR toggle no longer sits here as its own button (Aug
@@ -2911,13 +3546,13 @@ export default function POS() {
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
                 <span className="flex-1 min-w-[12rem]">
                   {posCopy(
-                    'Batch and expiry tracking could not be loaded, so lot selection cannot be skipped. Check each item before selling.',
-                    'Batch and expiry tracking could not be loaded, so lot selection cannot be skipped. Check each item before selling.',
+                    'Batch and expiry tracking could not be loaded, so received-date selection cannot be skipped. Check each item before selling.',
+                    'មិនអាចផ្ទុកការតាមដានថ្ងៃចូល និងផុតកំណត់បានទេ ដូច្នេះមិនអាចរំលងការជ្រើសថ្ងៃចូលបានទេ។ សូមពិនិត្យទំនិញនីមួយៗមុនលក់។',
                   )}
                 </span>
                 <button
                   type="button"
-                  onClick={() => { setTrackedBatchLoadFailed(false); setBatchTrackingReloadKey((key) => key + 1) }}
+                  onClick={() => { setBatchTracking({ scope: trackingScope, status: 'loading', ids: new Set() }); setBatchTrackingReloadKey((key) => key + 1) }}
                   className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700"
                 >
                   {posCopy('Try again', 'ព្យាយាមម្តងទៀត')}
@@ -2971,88 +3606,24 @@ export default function POS() {
             </div>
             <div className="pos-product-grid">
               {pagedProductCards.map(p => {
-                const variants = getVariantChoices(p)
-                const groupProduct = hasVariantChoices(p)
-                const groupMeta: ProductGroupMeta | null = p.__groupMeta || null
-                const choiceLabel = groupMeta?.groupKind === 'variant'
-                  ? posCopy('Variants', 'ជម្រើសផ្សេងៗ')
-                  : posCopy('Options', 'ជម្រើស')
-                const stock   = getDisplayStock(p)
-                const variantInStock = variants.some((variant) => getDisplayStock(variant) > asNumber(variant.out_of_stock_threshold))
-                const inStock = groupProduct ? variantInStock : stock > asNumber(p.out_of_stock_threshold)
-                const promoBadge = promotionBadgeForProduct(p, promotionRules)
-                const expiryInfo = !groupProduct ? computeExpiryStatus(p.expiry_date, p.expiry_alert_days) : null
+                const handlers = getProductCardHandlers(p)
                 return (
-                  <div
+                  <ProductCard
                     key={p.id}
-                    role="button"
-                    tabIndex={0}
-                    className={`card relative cursor-pointer p-3 text-left transition-all ${inStock ? 'hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600' : 'opacity-60'}`}
-                    onClick={() => openProductCard(p, { groupProduct, inStock })}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        openProductCard(p, { groupProduct, inStock })
-                      }
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="relative w-full aspect-square rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-2 overflow-hidden"
-                      onClick={(event) => { event.stopPropagation(); openImageLightbox(p, 0) }}
-                      aria-label={posCopy('Preview product images', 'មើលរូបភាពទំនិញ')}
-                    >
-                      {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.__displayName || p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-5 w-5 text-gray-400" />}
-                      <ProductDiscountBadge product={p} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} promotionRules={promotionRules} />
-                    </button>
-                    {/* The purple "Groups: N" chip that used to sit here was
-                        removed (user): it duplicated the "Options: N" count now
-                        shown on the bottom row below — same number twice. */}
-                    <p {...getKhmerTextProps(p.__displayName || p.name, 'text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2')}>
-                      {p.__displayName || p.name}
-                      {/* P4: the operator's own memory-aid tag chip */}
-                      {String(p.tag_label || '').trim() ? (
-                        <span className="ml-1 inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 align-middle text-[9px] font-semibold text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">{String(p.tag_label).trim()}</span>
-                      ) : null}
-                    </p>
-                    {/* Product cards show only the normal selling price. VIP
-                        stays inside the product's price options, matching the
-                        wholesale tier instead of advertising a tier label on
-                        the outside grid. Grouped cards still show the highest
-                        option selling price. */}
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                      <span className="text-sm font-bold text-blue-600">
-                        {fmtUSD(groupProduct ? (groupMeta?.maxSellingPriceUsd || asNumber(p.selling_price_usd)) : asNumber(p.selling_price_usd))}
-                      </span>
-                    </div>
-                    {asNumber(p.selling_price_khr) > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(asNumber(p.selling_price_khr))}</p> : null}
-                    {promoBadge.active ? (
-                      <p className="text-[11px] font-semibold" style={{ color: promoBadge.badge_color || '#e11d48' }}>
-                        {promoBadge.kind === 'quantity_hint'
-                          ? ((promoBadge.show_title && promoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${promoBadge.min_quantity}+`)
-                          : `${(promoBadge.show_title && promoBadge.title) || p.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${fmtUSD(evaluatePromotionPricing(p, 1, promotionRules, exchangeRate).unit_price_usd)}`}
-                      </p>
-                    ) : null}
-                    {/* Colored qty+unit instead of a separate "Out of Stock" label --
-                        same convention as Products/Inventory/Branches: red when out,
-                        amber/yellow when low, emerald when healthy. Group products have
-                        no single qty to color against (variants can each differ), so
-                        they keep the neutral gray style. */}
-                    {/* Grouped card's bottom row (user): "Options: N | Total
-                        Qty: n" — the single home for the option count (the
-                        removed purple chip's duplicate) and the summed stock.
-                        A flat product keeps its coloured "qty unit". */}
-                    <p {...getKhmerTextProps(groupProduct ? choiceLabel : p.unit, `text-xs mt-0.5 font-medium ${groupProduct ? 'text-gray-400 font-normal' : !inStock ? 'text-red-500' : stock <= (asNumber(p.low_stock_threshold) || 10) ? 'text-yellow-500' : 'text-emerald-500'}`)}>
-                      {groupProduct
-                        ? `${choiceLabel}: ${variants.length}${groupMeta?.stockTotal != null ? ` | ${posCopy('Total Qty', 'ចំនួនសរុប')}: ${groupMeta.stockTotal}` : ''}`
-                        : `${stock} ${p.unit}`}
-                    </p>
-                    {expiryInfo && expiryInfo.status !== 'ok' ? (
-                      <p className={`text-[11px] font-semibold ${expiryInfo.status === 'expired' ? 'text-red-600' : 'text-yellow-600'}`}>
-                        {expiryInfo.status === 'expired' ? (t('expired') || 'Expired') : (t('expiring_soon') || 'Expiring soon')}
-                      </p>
-                    ) : null}
-                  </div>
+                    product={p}
+                    variants={getVariantChoices(p)}
+                    groupMeta={p.__groupMeta || null}
+                    getStock={getPosCardStock}
+                    lowStockConfig={lowStockConfig}
+                    promotionRules={promotionRules}
+                    exchangeRate={exchangeRate}
+                    fmtUSD={fmtUSD}
+                    fmtKHR={fmtKHR}
+                    t={t}
+                    copy={posCopy}
+                    onOpen={handlers.onOpen}
+                    onOpenImage={handlers.onOpenImage}
+                  />
                 )
               })}
               {visibleProductCards.length === 0 && (
@@ -3139,8 +3710,15 @@ export default function POS() {
           style={isDesktopViewport ? { width: `${cartWidthPx}px`, minWidth: `${cartWidthPx}px` } : undefined}
         >
 
-          {/* Order tabs */}
-          <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-gray-200 dark:border-gray-700 overflow-x-auto bg-gray-50 dark:bg-gray-900 scroll-x">
+          {/* Order tabs. N4: the Shift-history / End-Shift group used to sit
+              INSIDE this scroller with `ml-auto`. From the third order tab on,
+              the row overflows, `ml-auto` stops pushing anything, and that
+              group is carried off the right edge -- on a phone the controls
+              were reachable only by swiping the tab strip sideways. The
+              scroller now holds only the order tabs; the group is its own
+              non-scrolling cell pinned beside it. */}
+          <div className="flex-shrink-0 flex items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+          <div className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 overflow-x-auto scroll-x">
             {orders.map(order => (
               <div key={order.id} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors cursor-pointer
                 ${resolvedActiveId === order.id ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:border-blue-400'}`}
@@ -3165,6 +3743,15 @@ export default function POS() {
             {orders.length < LAYOUT.MAX_CONCURRENT_ORDERS && (
               <button onClick={addNewOrder} className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-lg bg-white dark:bg-gray-800 border border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 text-gray-400 hover:text-blue-600 text-sm font-bold transition-colors" title="New order">+</button>
             )}
+          </div>
+          {/* Shift history remains visible before opening, while open, after
+              close, and for shift-exempt administrators. End Shift remains
+              the current-day compatible action and appears only while the
+              current row can actually be closed. */}
+          <div className="flex shrink-0 items-center gap-1 px-2 py-1.5 pl-0">
+            <ShiftHistoryPanel branchId={primaryBranchFilterId} compact label={t('shift_code')} />
+            <EndShiftButton branchId={primaryBranchFilterId} />
+          </div>
           </div>
 
           {/* Cart panel view toggle -- lets the person collapse to just the
@@ -3211,12 +3798,17 @@ export default function POS() {
                 </div>
               ) : (
                 <>
+                  {active.checkoutRequestId ? <div role="status" className="px-3 py-2 text-xs text-amber-800 dark:text-amber-300"><p>{t('money_checkout_recovery_required')}</p>{active.checkoutReviewRequestId === active.checkoutRequestId ? <button type="button" className="btn-secondary mt-2" disabled={loading} onClick={reviewCheckoutPrices}>{posCopy('Review prices', 'ពិនិត្យតម្លៃ')}</button> : null}</div> : null}
                   <div className="flex items-center justify-between px-3 pt-2 pb-1">
-                    <span className="text-xs text-gray-400 font-medium">{active.cart.length} item{active.cart.length !== 1 ? 's' : ''}</span>
+                    <span className="text-xs text-gray-400 font-medium">
+                      {(active.cart.length === 1 ? (t('pos_item_line') || '{count} item') : (t('pos_item_lines') || '{count} items')).replace('{count}', String(active.cart.length))}
+                      <span aria-hidden="true"> · </span>
+                      {(t('pos_total_quantity') || 'Total quantity: {quantity}').replace('{quantity}', cartTotalQuantity(active.cart).toLocaleString())}
+                    </span>
                     <button onClick={() => patchActive({ cart: [] })} className="text-xs text-red-500 hover:underline">{t('clear_cart')}</button>
                   </div>
                   {active.cart.map(item => (
-                    <CartItem key={item.cart_line_id || `${item.id}-${item.price_mode || 'selling'}-${item.branch_id || 'none'}`} item={item} branches={branches} t={t}
+                    <CartItem key={item.cart_line_id || `${item.id}-${item.price_mode || 'selling'}-${item.branch_id || 'none'}`} item={item} branches={branches} t={t} moneyPrecisionVersion={moneyVersion} pricingQuote={(active.checkoutRequestId ? pendingPreview?.lines : pricedCart.quotes)?.get(getCartLineId(item))}
                       onQtyChange={updateQty} onPriceChange={updatePrice} onDiscountChange={updateDiscount}
                       onBranchChange={updateItemBranch} onToggleTierTag={toggleTierTag}
                       onRemove={id => patchActive({ cart: active.cart.filter(i => getCartLineId(i) !== id) })}
@@ -3270,14 +3862,14 @@ export default function POS() {
                     : <span className="text-gray-400">({t('optional')||'optional'})</span>}
                   <span className="ml-auto text-[10px] text-gray-400">{showCustomer ? t('hide') : t('show')}</span>
                 </button>
-                <button onClick={() => setShowAddCustomer(true)} className="ml-2 text-xs text-blue-500 hover:text-blue-700 font-medium whitespace-nowrap">{t('add_new')||'+ New'}</button>
+                <button onClick={() => { resetQuickCustomerAddressPreset(); setShowAddCustomer(true) }} className="ml-2 text-xs text-blue-500 hover:text-blue-700 font-medium whitespace-nowrap">{t('add_new')||'+ New'}</button>
               </div>
               {showCustomer && (
                 <div className="px-3 pb-3 space-y-2">
                   <div className="relative">
                     <label htmlFor="pos-customer-search" className="sr-only">{t('search_customer')}</label>
                     <input id="pos-customer-search" name="pos_customer_search" autoComplete="name" className="input text-xs py-1.5 pr-8" placeholder={t('search_customer')} value={active.customerSearch || ''}
-                      onChange={e => { patchActive({ customerSearch: e.target.value, customer: { ...active.customer, name: e.target.value } }); setShowCustomerDrop(true) }}
+                      onChange={e => changeCustomerSearch(e.target.value)}
                       onFocus={() => setShowCustomerDrop(true)} />
                     {active.customerSearch && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500" onClick={clearCustomer}>{t('clear')||'Clear'}</button>}
                     {showCustomerDrop && customerSuggestions.length > 0 && (
@@ -3306,7 +3898,7 @@ export default function POS() {
                         <label htmlFor="pos-customer-phone-inline" className="sr-only">{t('phone')}</label>
                         <input id="pos-customer-phone-inline" name="pos_customer_phone_inline" autoComplete="tel" className="input text-xs py-1" placeholder={t('phone')} value={active.customer.phone||''} onChange={e => patchActive({ customer: { ...active.customer, phone: e.target.value } })} />
                         <label htmlFor="pos-customer-address-inline" className="sr-only">{t('address')}</label>
-                        <input id="pos-customer-address-inline" name="pos_customer_address_inline" autoComplete="street-address" className="input text-xs py-1" placeholder={t('address')} value={active.customer.address||''} onChange={e => patchActive({ customer: { ...active.customer, address: e.target.value } })} />
+                        <input id="pos-customer-address-inline" name="pos_customer_address_inline" autoComplete="street-address" className="input cursor-pointer text-xs py-1" placeholder={t('address')} value={active.customer.address||''} onChange={e => patchActive({ customer: { ...active.customer, address: e.target.value } })} onClick={() => setAddressPresetTarget('order')} aria-haspopup="dialog" />
                       </div>
                       {/* Option picker appears inline when a customer has multiple options */}
                       {showOptionPicker && customerOptionsList.length > 0 && (
@@ -3371,6 +3963,11 @@ export default function POS() {
                         <div className="rounded-lg bg-white/90 px-3 py-2 text-xs text-emerald-900">
                           <div>{posCopy('1 unit')} = {redeemPointsStep} pts = {fmtUSD(redeemValueUsdStep)}</div>
                           <div className="mt-1">{posCopy('Available units')}: {maxMembershipUnits}</div>
+                          {maxMembershipUnits === 0 && (membershipInfo?.points?.balance || 0) >= redeemPointsStep ? (
+                            <div className="mt-1 text-[11px] text-gray-500">
+                              {posCopy('Membership points are turned off in Settings.', 'ពិន្ទុសមាជិកត្រូវបានបិទក្នុងការកំណត់។')}
+                            </div>
+                          ) : null}
                           <div className="mt-1">{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}: {fmtUSD(membershipDiscUsd)} / {fmtKHR(membershipDiscKhr)}</div>
                         </div>
                       </div>
@@ -3385,19 +3982,19 @@ export default function POS() {
                 {/* Earn-points toggle: any sale attached to a customer accrues
                     points (balances are computed by summing sales server-side),
                     so this shows for every selected customer, not only members.
-                    Default ON preserves the long-standing auto-accrual. */}
+                    Each new order follows settings; a manual choice stays on this draft. */}
                 {active.customer?.id ? (
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <span className="text-xs font-medium text-gray-500">{posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}</span>
                     <button
                       type="button"
                       role="switch"
-                      aria-checked={active.loyaltyAccrual !== false}
+                      aria-checked={loyaltyAccrual}
                       aria-label={posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}
-                      onClick={() => patchActive({ loyaltyAccrual: active.loyaltyAccrual === false })}
-                      className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${active.loyaltyAccrual !== false ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                      onClick={() => patchActive({ loyaltyAccrual: !loyaltyAccrual })}
+                      className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${loyaltyAccrual ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                     >
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${active.loyaltyAccrual !== false ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${loyaltyAccrual ? 'translate-x-4' : 'translate-x-0.5'}`} />
                     </button>
                   </div>
                 ) : null}
@@ -3537,6 +4134,7 @@ export default function POS() {
             <div className="border-t border-gray-200 dark:border-gray-700 px-3 pt-3 pb-2 space-y-3">
               {/* Order summary */}
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-2.5 space-y-1 text-xs">
+                {moneyVersion === 1 && v1Basket.error && active.cart.length > 0 ? <div role="alert" className="text-red-600">{t('money_precision_unavailable')}</div> : null}
                 <div className="flex justify-between text-gray-500"><span>{t('subtotal')}</span><span>{fmtUSD(subtotalUsd)}</span></div>
                 {discUsd > 0 && <div className="flex justify-between text-red-500"><span>{t('discount')}</span><span>-{fmtUSD(discUsd)}</span></div>}
                 {membershipDiscUsd > 0 && <div className="flex justify-between text-emerald-600"><span>{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}</span><span>-{fmtUSD(membershipDiscUsd)}</span></div>}
@@ -3547,11 +4145,12 @@ export default function POS() {
                     <span>{active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? `+${fmtUSD(feeUsd)}` : `${fmtUSD(feeUsd)} included`}</span>
                   </div>
                 )}
+                {basketRounding && basketRounding.roundingAdjustment4 !== 0 ? <div className="flex justify-between text-gray-500"><span>{t('money_rounding_adjustment')}</span><span>{basketRounding.roundingAdjustment4 < 0 ? '-' : '+'}{fmtUSD(Math.abs(roundMoney2(basketRounding.roundingAdjustment4)))}</span></div> : null}
                 <div className="flex justify-between font-bold text-gray-900 dark:text-white text-sm border-t border-gray-200 dark:border-gray-600 pt-1.5 mt-1">
                   <span>{t('total')}</span>
                   {/* One row (user, Aug 28): USD with the KHR beside it, not stacked. */}
                   <span className="text-right">
-                    {fmtUSD(totalUsd)} <span className="text-xs font-normal text-gray-400">({fmtKHR(totalKhr)})</span>
+                    {moneyVersion === 1 && v1Basket.error ? '—' : <>{fmtUSD(totalUsd)} <span className="text-xs font-normal text-gray-400">({fmtKHR(totalKhr)})</span></>}
                   </span>
                 </div>
                 {/* Physical-cash figure: rounded up to 100៛ for a non-cash
@@ -3620,7 +4219,7 @@ export default function POS() {
                           <button
                             type="button"
                             className="text-[11px] text-blue-500 hover:underline"
-                            onClick={() => patchActive({ changeGivenUsd: changeUsd > 0 ? changeUsd.toFixed(2) : '', changeGivenKhr: '' })}
+                            onClick={() => patchActive({ changeGivenUsd: changeUsd > 0 ? changeUsd.toFixed(2) : '', changeGivenKhr: '', changeIsActual: false })}
                             title={t('use_computed_change_hint') || 'Fill USD with the full computed change'}
                           >
                             {t('use_computed') || 'Use computed'}: {fmtUSD(changeUsd)}{changeKhr > 1 ? ` / ${fmtKHR(changeKhr)}` : ''}
@@ -3649,7 +4248,7 @@ export default function POS() {
                               inputMode="decimal"
                               placeholder={changeUsd > 0 ? changeUsd.toFixed(2) : '0.00'}
                               value={active.changeGivenUsd}
-                              onChange={e => patchActive({ changeGivenUsd: e.target.value })}
+                              onChange={e => patchActive({ changeGivenUsd: e.target.value, changeIsActual: true })}
                               autoComplete="off"
                             />
                           </div>
@@ -3662,7 +4261,8 @@ export default function POS() {
                               inputMode="numeric"
                               placeholder="0"
                               value={active.changeGivenKhr}
-                              onChange={e => patchActive({ changeGivenKhr: e.target.value })}
+                              onChange={e => patchActive({ changeGivenKhr: e.target.value, changeIsActual: true })}
+                              onBlur={() => patchActive({ changeGivenKhr: String(cashierChangeKhr(parseFloat(active.changeGivenKhr) || 0)), changeIsActual: true })}
                               autoComplete="off"
                             />
                           </div>
@@ -3692,7 +4292,9 @@ export default function POS() {
                 label={t('status_stock_effect_label') || 'What each sale status does to stock'}
                 text={[
                   `${getPosStatusLabel('completed', t)}: ${t('pos_status_completed_desc') || 'Payment received - stock deducted now'}`,
-                  `${getPosStatusLabel('awaiting_payment', t)}: ${t('pos_status_awaiting_payment_desc') || 'Order placed, payment pending - stock held (not deducted)'}`,
+                  // Both language packs and this fallback say "stock deducted";
+                  // the unpaid order is already out of sellable stock.
+                  `${getPosStatusLabel('awaiting_payment', t)}: ${t('pos_status_awaiting_payment_desc') || 'Not Paid - stock deducted'}`,
                   `${getPosStatusLabel('awaiting_delivery', t)}: ${t('pos_status_awaiting_delivery_desc') || 'Paid, not yet delivered - stock deducted'}`,
                 ].join('\n\n')}
               />
@@ -3717,7 +4319,7 @@ export default function POS() {
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('pos_status_choose_desc')||'Choose how this sale is being processed. This will appear in Sales history.'}</p>
               {([
                 ['completed',         getPosStatusLabel('completed',         t), t('pos_status_completed_desc')||'Payment received - stock deducted now'],
-                ['awaiting_payment',  getPosStatusLabel('awaiting_payment',  t), t('pos_status_awaiting_payment_desc')||'Order placed, payment pending - stock held'],
+                ['awaiting_payment',  getPosStatusLabel('awaiting_payment',  t), t('pos_status_awaiting_payment_desc')||'Not Paid - stock deducted'],
                 ['awaiting_delivery', getPosStatusLabel('awaiting_delivery', t), t('pos_status_awaiting_delivery_desc')||'Paid, not yet delivered - stock deducted'],
               ] as const).map(([status, label, desc]) => (
                 <button key={status}
@@ -3738,8 +4340,17 @@ export default function POS() {
           <POSQuickAddModals
             closeAddCustomerModal={closeAddCustomerModal}
             closeAddDeliveryModal={closeAddDeliveryModal}
+            customerDuplicateCheck={customerDuplicateCheck}
+            deliveryDuplicateCheck={deliveryDuplicateCheck}
             handleAddCustomer={handleAddCustomer}
             handleAddDelivery={handleAddDelivery}
+            handleCreateSeparateCustomer={handleCreateSeparateCustomer}
+            handleCreateSeparateDelivery={handleCreateSeparateDelivery}
+            handleUseExistingCustomer={handleUseExistingCustomer}
+            handleUseExistingDelivery={handleUseExistingDelivery}
+            onOpenCustomerAddressPresets={() => setAddressPresetTarget('quick-customer')}
+            clearCustomerDuplicateCheck={() => setCustomerDuplicateCheck(null)}
+            clearDeliveryDuplicateCheck={() => setDeliveryDuplicateCheck(null)}
             newCustomerForm={newCustomerForm}
             newDeliveryForm={newDeliveryForm}
             posCopy={posCopy}
@@ -3753,6 +4364,32 @@ export default function POS() {
           />
         </Suspense>
       ) : null}
+
+      {isActive && addressPresetTarget ? (
+        <Suspense fallback={null}>
+          <AddressPresetPicker
+            actorKey={captureActorReadScope('pos:address-presets').authority}
+            currentAddress={addressPresetTarget === 'quick-customer' ? newCustomerForm.address : (active.customer.address || '')}
+            previousSuffix={addressPresetTarget === 'quick-customer' ? quickCustomerAddressSuffixRef.current : (appliedAddressSuffixRef.current[String(active.id)] || '')}
+            onApply={({ address, suffix }) => {
+              if (addressPresetTarget === 'quick-customer') {
+                quickCustomerAddressSuffixRef.current = suffix
+                setNewCustomerForm((form) => ({ ...form, address }))
+              } else {
+                appliedAddressSuffixRef.current[String(active.id)] = suffix
+                patchActive({ customer: { ...active.customer, address } })
+              }
+            }}
+            onClose={() => setAddressPresetTarget(null)}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
+
+      {/* Opening-cash prompt (S4R4-5). Mounted last so it overlays the till,
+          and non-dismissible: the owner's rule is that the first use of POS
+          each day keeps prompting until the drawer float is registered. */}
+      <ShiftGate branchId={primaryBranchFilterId} branchName={primaryBranchName} />
 
       {/* Product detail bottom-sheet */}
       {detailProduct ? (
@@ -3768,6 +4405,7 @@ export default function POS() {
             posCopy={posCopy}
             activeBranchId={primaryBranchFilterId ?? pickBestBranchId(detailProduct)}
             trackedBatchProductIds={trackedBatchProductIds}
+            trackedBatchLookupUnavailable={batchTracking.scope !== trackingScope || batchTracking.status !== 'ready'}
             getDisplayStock={getDisplayStock}
             getPrimaryProductImage={getPrimaryProductImage}
             getVariantChoices={getVariantChoices}
@@ -3802,6 +4440,7 @@ export default function POS() {
                 next: posCopy('Next'),
                 imageCount: '{current}/{total}',
                 dotsLabel: 'Image {current} of {total}',
+                close: t('close') || 'Close',
               }}
             />
           ) : null}

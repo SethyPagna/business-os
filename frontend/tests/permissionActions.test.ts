@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 import {
   PERMISSION_ACTIONS,
   actionsForKey,
@@ -80,15 +81,37 @@ assert.equal(actionAllowed('products', 'bulk_delete', 'review'), false)
 assert.equal(actionAllowed('inventory', 'adjust', 'review'), false)
 assert.equal(actionAllowed('branches', 'transfer', 'review'), false)
 assert.equal(actionAllowed('returns', 'edit', 'review'), false)
+assert.equal(actionAllowed('returns', 'bulk', 'review'), false)
+assert.equal(actionAllowed('returns', 'export', 'review'), false)
 assert.equal(actionAllowed('contacts', 'delete', 'review'), false)
+assert.equal(actionAllowed('contacts', 'bulk', 'review'), false)
 assert.equal(actionAllowed('sales', 'export', 'view'), true)
 assert.equal(actionAllowed('sales', 'status', 'view'), false)
+assert.equal(actionAllowed('sales', 'bulk', 'view'), false)
+assert.equal(actionAllowed('contacts', 'financial_history', 'review'), false)
 assert.equal(actionAllowed('promotions', 'manage', 'view'), false)
 
 // Fees is the permissive one: only delete needs approval.
 assert.equal(actionAllowed('fees', 'add', 'review'), true)
 assert.equal(actionAllowed('fees', 'edit', 'review'), true)
 assert.equal(outcomeAt(actionsForKey('fees').find((a) => a.key === 'delete')!, 'review'), 'queue')
+assert.equal(actionAllowed('fees', 'export', 'review'), true, 'Fees export preserves the existing Review default')
+assert.equal(actionAllowed('fees', 'export', 'full'), true, 'Fees export preserves the existing Full default')
+
+// Canonical Shop/Warehouse identities cannot be created or deleted. Their
+// editor rows must not claim otherwise; export remains available by default.
+const branchActionKeys = actionsForKey('branches').map((action) => action.key)
+assert.ok(!branchActionKeys.includes('add') && !branchActionKeys.includes('delete'))
+assert.equal(actionAllowed('branches', 'export', 'review'), true)
+assert.equal(actionAllowed('branches', 'export', 'full'), true)
+
+for (const section of ['fees', 'branches']) {
+  assert.equal(
+    actionAllowed(section, 'export', 'full', () => false, (candidate, action) => candidate === section && action === 'export'),
+    false,
+    `${section}:export explicit false narrows the default`,
+  )
+}
 
 // Returns allows create directly but never edit.
 assert.equal(outcomeAt(actionsForKey('returns').find((a) => a.key === 'add')!, 'review'), 'allow')
@@ -178,11 +201,47 @@ const salesRoute = routeSource('sales.ts')
 assert.match(salesRoute, /getActionTier\(user, 'sales', 'status'\) !== 'full'/, 'sales status writes must enforce the action capability server-side')
 assert.match(salesRoute, /getActionTier\(user, 'sales', 'customer'\) !== 'full'/, 'sales customer writes must enforce the action capability server-side')
 assert.match(salesRoute, /getActionTier\(c\.get\('user'\), 'sales', 'export'\) === 'none'/, 'sales export must enforce its action override server-side')
+const bulkStatus = readFileSync(new URL('../../cloudflare/src/lib/saleBulkStatus.ts', import.meta.url), 'utf8')
+const bulkUpdate = readFileSync(new URL('../../cloudflare/src/lib/saleBulkUpdate.ts', import.meta.url), 'utf8')
+assert.match(bulkStatus, /getActionTier\(user, 'sales', 'bulk'\) !== 'full'/)
+// Execute the actual Worker permission function rather than pinning its old
+// ternary spelling. Both single-sale customer actions share the common gate;
+// only relationship reassignment additionally requires customer_reassign.
+const permissionStart = bulkUpdate.indexOf('function permission(')
+const permissionEnd = bulkUpdate.indexOf('function parseRequest(', permissionStart)
+assert.ok(permissionStart >= 0 && permissionEnd > permissionStart)
+const permissionCode = ts.transpileModule(bulkUpdate.slice(permissionStart, permissionEnd), {
+  compilerOptions: { target: ts.ScriptTarget.ES2022 },
+}).outputText
+const checkCustomerPermission = new Function('getActionTier', 'fail', `${permissionCode}; return permission`)(
+  (grants: Record<string, string>, section: string, action: string) => grants[`${section}:${action}`] || 'none',
+  (message: string, status: number) => { throw Object.assign(new Error(message), { status }) },
+)
+const customerFull = { 'sales:customer': 'full', 'sales:customer_reassign': 'full' }
+const customerName = { 'sales:customer': 'full' }
+for (const kind of ['customer', 'customer_name']) {
+  assert.doesNotThrow(() => checkCustomerPermission(customerFull, { kind }, 1), `${kind} single-sale does not require bulk/Contacts`)
+  for (const tier of ['none', 'view', 'review']) {
+    assert.throws(() => checkCustomerPermission({ ...customerFull, 'sales:customer': tier }, { kind }, 1), (error: { status?: number }) => error.status === 403, `${kind} requires common customer Full`)
+  }
+  assert.throws(() => checkCustomerPermission(customerFull, { kind }, 2), (error: { status?: number }) => error.status === 403, `${kind} cannot bypass bulk authority`)
+}
+assert.doesNotThrow(() => checkCustomerPermission(customerName, { kind: 'customer_name' }, 1), 'name-only remains allowed without reassignment')
+assert.throws(() => checkCustomerPermission(customerName, { kind: 'customer' }, 1), (error: { status?: number }) => error.status === 403, 'name-only cannot change relationship')
+assert.doesNotThrow(() => checkCustomerPermission({ ...customerFull, 'sales:bulk': 'full' }, { kind: 'customer' }, 2), 'bulk assignment needs all three capabilities')
+
+const returnBulk = readFileSync(new URL('../../cloudflare/src/lib/returnBulkAction.ts', import.meta.url), 'utf8')
+const undoAppliers = readFileSync(new URL('../../cloudflare/src/lib/undoAppliers.ts', import.meta.url), 'utf8')
+assert.match(returnBulk, /getActionTier\(user, 'returns', 'bulk'\) !== 'full'/)
+assert.match(undoAppliers, /\[RETURN_BULK_ACTION_KIND\]: \{\s*permission: 'returns', action: 'bulk'/)
 
 const promotionsRoute = routeSource('promotions.ts')
 assert.equal((promotionsRoute.match(/requireAction\('promotions', 'manage'\)/g) || []).length, 3, 'all three promotion-rule write routes must share promotions.manage')
 
 assert.match(contactsRoute, /denyUnlessFullContactAction\(c, 'resolve_conflicts'\)/, 'contact conflict writes must enforce the explicit resolution capability')
+assert.equal((contactsRoute.match(/getActionTier\(user, 'contacts', 'bulk'\) === 'none'/g) || []).length, 2, 'contact merge and server bulk delete must share contacts.bulk')
+const importJobsRoute = routeSource('importJobs.ts')
+assert.match(importJobsRoute, /overrideSection === 'contacts' && isActionBlocked\(user, 'contacts', 'bulk'\)/)
 
 const branchesRoute = routeSource('branches.ts')
 assert.equal((branchesRoute.match(/getActionTier\(user, 'branches', 'transfer'\)/g) || []).length, 2, 'single and bulk branch transfers must share branches.transfer')

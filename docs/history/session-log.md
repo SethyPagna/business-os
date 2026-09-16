@@ -19018,6 +19018,496 @@ migration figures from direct `SELECT`s on `d1_migrations` and the affected tabl
 `rc/s4-2026-09-04`. `/health`'s `version` field is a hard-coded string and is **not** the deploy id — only wrangler
 prints that.
 
+## Part 600 — the S4 round-3 batch shipped, and three frozen readings that would have gone red on a good run
+
+**Ask.** The owner, Sep 4 2026: merge and reconcile taking only what is useful, never reverting to older
+deploys; make the receipt break down properly and be fully correct; give the summary the shift CLOSING time,
+not only the opening one; extend the theoretical unpaid figures to delivery, profit and discounts; and add the
+missing arithmetic from total revenue → gross profit → total profit, including cost of goods sold and actual
+delivery costs. Then, separately: the actual courier cost must NOT print on the receipt but MUST be computed
+internally "so we know the actual costs vs what was received or what we paid", surfaced as a detailed
+breakdown in the summary. Then commit, push, deploy.
+
+**What changed.** Three lanes merged into `rc/ee-integrate-2026-09-04` and deployed as `c7ef7264`, wrangler
+version `798d9e19-76d0-4909-8db3-6a7a4ad43ad7`. The report waterfall now states revenue − COGS + delivery
+collected − delivery paid → gross profit, every term measured rather than derived; the line that used to read
+"Store-paid delivery" was a residual (`revenue − cost − profit`) that always footed while naming the wrong
+quantity, and is now the measured `store_delivery_usd`. Delivery reconciliation is a MEMO block — charged /
+actually paid / waived / net — with no operator, so it is reported without entering any total. The receipt has
+a footing check asserted to zero on every fixture, and the same helper feeds the receipt and the sale detail.
+Shift summaries carry `closed_at` and a duration, switching label to "Ending at"/"Open for" while still open.
+
+**What was found.**
+
+- **A residual always closes.** A figure derived by subtraction makes the page foot no matter what it names.
+  Footing assertions therefore prove nothing here; value assertions carry the weight.
+
+- **Line-survival is not composition.** After merging, a check confirmed every added line from every lane had
+  survived the auto-merge — 0 missing across the two files that two lanes both touched. It passed, and the
+  build was still broken: the receipt and shift lanes had each independently added a `saleTotals` binding to
+  `test-shift-report-pure.cjs` (duplicate declaration), and the shift lane's NEW
+  `test-shift-close-report-pure.cjs` never got the key at all. Each lane was green alone; the defect existed
+  only in the union. **After any multi-lane merge, run every test file individually** — and note that
+  `test:utils` chains with `&&` and stops at the first red, so a union defect can hide behind an earlier green.
+
+- **`fastStockIn.test.ts` exited 0 over a real failure.** Its `if (failed > 0) process.exitCode = 1` sat at line
+  152 with three `runTest()` calls after it, so any failure in those three printed FAIL and still exited 0 —
+  and the whole chained gate reported green. Guard moved to the end of the file, where it must stay. That
+  exposed two stale assertions demanding the pre-`3eec9f22` two-control layout, which also contradicted
+  `modalPrimaryPlacement.test.ts` across 237 components. Replaced with the rule, verified by four mutations.
+
+- **Three frozen readings, the third of which was already "fixed".** The 0117 verifier asserted against
+  hardcoded pre-counts (45 rows, 269 concat bytes) measured when the owner approved. The shop kept selling;
+  by deploy time it was 48 rows, and those assertions would have gone red on a perfectly good migration. The
+  third instance survived the first fix and was the instructive one:
+  `captured_rows_present == BASE.accruing_rows` looked safe because BASE was captured at runtime rather than
+  hardcoded — but BASE was read ten minutes before the migration ran, so any sale in that window breaks it.
+  **Capturing at the wrong instant is the same bug.** The rule: an equality is traffic-immune only when BOTH
+  sides are read at the same instant. Fixed to `captured_rows_present == logged_reset_count`, log-vs-log,
+  which also subsumes the `count == id_count` cross-check and adds row-existence. For a "still zero" assertion
+  the companion rule is to enumerate every writer: `loyalty_accrual` has three INSERT sites and no UPDATE
+  anywhere in `cloudflare/src`, so the flag is immutable after row creation and the assertion cannot be
+  perturbed by traffic (enumeration by peer 88).
+
+- **`d1 migrations list` lies from the wrong tree.** Run in the main checkout it reported "No migrations to
+  apply" — that checkout's `migrations/` stops at 0106, so it compared a stale folder against a database with
+  0117 pending. Querying `d1_migrations` directly, and re-running from the deploy tree, both showed exactly one
+  pending. Migration ids are row counters, not filename numbers: file 0117 is row id 116.
+
+**Verified.** cloudflare `tsc` clean · **196/196** pure scripts · frontend `tsc` clean · `verify:i18n` **4813**
+keys at parity · **194/194** frontend tests run individually · the real `test:utils` chain green at the shipped
+sha · `vite build` clean. Post-deploy: `/health` `status: ok` on both hosts · `/api/products` unauthenticated
+**401** · storefront **200** · admin **200** · `/ws` **426** · nothing pending. 0117 verified id-scoped:
+`captured_still_accruing` **0**, `captured_rows_present == logged_reset_count` **48 == 48**, `log_rows` **1**,
+`total_sales` **15059 → 15060** as control. Reset touched **48 sales / 34 customers**. Language packs were
+checked against the expected union after merging — 5478 keys each, nothing re-admitted, both packs at parity.
+
+**Not done.**
+
+- **The membership-points switch is still ON with balances at zero.** 0117 writes no settings row and
+  `loyalty_points_enabled` defaults to on, so every sale since 11:37 UTC accrues again and partially undoes the
+  reset; `new_accruing_since_before` was already 1 at verification. One owner action: Settings → Membership
+  points → OFF → Save. Deliberately not written from a session — production D1 is SELECT-only here, and the
+  owner flipping it is the switch being verified.
+- **The authenticated read-site check was NOT performed.** Every SQL check above re-asks the migration's own
+  `WHERE` clause, so a missing void filter at a read site would survive all of them. It needs an authenticated
+  in-app read; the Browser pane had no admin session and none was created. Safe subjects (zero sales newer than
+  `max(sales_reset_ids)`, so their balances cannot have moved): **19718, 19719, 19735**, expect **0**. Do it
+  after the toggle, and treat a non-zero as a diagnosis (post-migration sale vs missing filter), not a verdict.
+- **The owner approved "31 customers"; 34 were touched.** Both figures kept on the board rather than one
+  quietly replacing the other.
+- Escalated, not fixed: membership discount missing from the Telegram sale message (`telegram.ts`); Khmer
+  mojibake in `printReceipt.ts` `buildTextOnlyPdf`; `recordDetailRowRhythm.test.ts` locks a rhythm that blocks
+  refund-position parity between the receipt and the sale detail.
+# Part 601 — deployed-line reconciliation implementation (2026-09-05)
+
+Built `codex/business-os-reconcile` from production lineage
+`origin/rc/ee-integrate-2026-09-04` and preserved the divergent dirty `main`
+checkout. Implemented mobile hub/report density, awaiting-payment accounting,
+shift policy/history/amendments, sale-detail POS parity, and duplicate-product
+stock disposition with audit/undo. Focused tests and package gates are recorded
+in `docs/fleet/2026-09-05-reconciliation-ledger.md`.
+
+The archived legacy settlement SQL was recovered byte-for-byte and quarantined
+under `docs/fleet/evidence/`; no production write was attempted. A fresh
+read-only manifest and an owner decision about two partial payments are required
+before any operator-run repair can be generated.
+
+The final security pass also closed forged-batch, low-privilege shift access,
+concurrent shift amendment, stale sale-addition undo, stale product-merge undo,
+and folded-batch return-allocation gaps. Full local frontend/backend certification
+passed. Deployment and production data repair were intentionally not run.
+
+## Part 603 — scope reread corrects completion claims (2026-09-05)
+
+Ask: reread completed work; keep everything scoped, consistent, compact,
+responsive and clear. Two independent read-only reviews plus lead source/browser
+checks found that the requested true two-layer mobile interaction remains open.
+The ledger and Part 602 claim are corrected. Preserved the unfinished shift
+attribution/lifecycle draft in evidence and removed it from executable changes;
+it introduced checkout restrictions and incomplete ownership/restore semantics.
+
+Fixed branch-cache aliasing, old-scope first-render state, stale history/save
+responses, unsaved cash/time/note edits, history-control translation, storage
+lookup safety and date/time overflow. Focused shift tests, both typechecks,
+i18n and frontend build passed. Local real-component EN/KM visual checks at
+320/375px passed for the sampled date/history form; cash-only dismissal warns.
+
+Not done: true two-layer/header implementation, complete authenticated responsive
+matrix, production financial/data reconciliation. No deployment or remote write.
+Details and verification boundaries: `docs/fleet/2026-09-05-scope-review.md`.
+
+## Part 604 — shift, report and delivery follow-up (2026-09-05)
+
+Implemented and integrated native-currency/uncertainty-aware Telegram cash
+estimates, grouped expense details, safe message chunks, current-shift history,
+three missing report detail routes, canonical cost-floor parity, report/period
+stats lifecycle guards, driver fallback/Khmer text repair, and bilingual financial
+explanations. All 198 frontend files and 200 backend suites passed; both
+typechecks, i18n and frontend build passed. Independent reviews cleared their
+bounded findings. Worker source commits and remaining limits are recorded in
+`docs/fleet/2026-09-05-shift-cash-review.md`.
+
+The 133,700 KHR example is a test, not a live entry. No deployment, live Telegram
+send or remote D1 operation occurred. Historical completion still needs an owner
+payment ruling and authorized exact target/stock-provenance manifest. Original
+two-layer navigation and the full authenticated matrix are not declared complete.
+
+## Part 607 — historical settlement, membership and grouped history (2026-09-05)
+
+Ask: owner confirmed all reconciliation-linked historical balances are paid,
+including the live-added $370, without touching stock; requested grouped bulk
+history/undo, membership per-sale defaults, longer IDs, security and deployment.
+
+Changed: integrated isolated membership, atomic bulk status/replay and bounded
+request/security lanes. Added finance/replay backup coverage, lookup index and
+restore guards. Preserved the original shared dirty checkout and prior release.
+
+Found: a concurrent damaged-stock compensation race and an older-backup partial
+delete failure; both were fixed and independently reproduced as closed. Stale
+history caching, selection limits and lost-response retry were corrected too.
+
+Verified: 89 sales / 100 receivables settled with one history and 192 audit rows;
+218 relational items matched, including two source-restored lines. Concurrent
+shop stock activity was independently reconciled with zero unexplained residual.
+All 200 frontend files and the full chain, typechecks, i18n, build, focused
+concurrency/restore suites passed; final complete backend sweep/deploy continues.
+
+Not done at this entry: final code deployment/provenance (recorded subsequently
+in the release note), complete authenticated live role/page matrix, actual
+Telegram delivery receipt and the existing malformed-secret-name cleanup.
+No future auto-payment completion rule and no live shift-cash example were added.
+
+Part 607 release outcome: all 209 backend suites passed. Clean source
+`0ffc4bfcc4fd` deployed to `be276770-359d-4002-9d26-560fa5656d33` at 100% traffic.
+Only migrations 0120–0122 applied, with recorded money/stock controls identical.
+Cloudflare challenges blocked live API/asset verification; control-plane release
+is verified, but no authenticated production-flow or Telegram receipt claim is
+made. Final provenance and recovery are in the membership/bulk release note.
+
+## Part 608 — usability checkpoint deployed; historical shift closed (2026-09-05)
+
+Ask: accelerate with appropriate Sol agents, verify the priority usability slices,
+deploy a bounded checkpoint, retain every remaining task in progress, and close
+Roune Rath's September4 shift at23:44 Cambodia with133700KHR cash.
+
+Changed: integrated separately committed draft/session/layering, shift lifecycle,
+report/Telegram/date, sale picker/bulk/payment/replay and branch-scoped products
+slices. Native browser tests exposed Files closeguard and workerd compound-SQL
+limits; fixes60cd4f98/d6be072c were independently checked and main verified.
+Frontend registration3f675e84 keeps the full211-test wrapper below Windows length
+limits without dropping tests. Original dirty checkout and unrelated fees edits
+preserved. Main stayed sole integrator/deployer; reviewers did no production writes.
+
+Verified:223backend suites,211frontend individual files and actual npm wrapper,
+both package typechecks, i18n4943keys/517sources, Vite1046modules, clean dry-run.
+Bounded native stock commit/undo/redo/retry/race/permission matrix and real product,
+report, branch desktop/mobile checks recorded in usability ledger. Main built
+from isolated real npmci dependencies, clean source3f675e840266.
+
+Deployment: Workereab56650-5660-4e09-8d26-2a873f24ad05 at100%, control-plane
+deploymentf2f3ac90-d7ab-4ed3-afbb-586a6862816d created11:59:26UTC. MainDB0127
+highest, no pending. Remote query parser rejected0123 twice with full rollback;
+native file ingestion applied exact committed schema + strict bookkeeping,23
+then59 statements. Recorded sale/stock counts and totals identical pre/post.
+No importDB migration/secret sync. Recovery bookmarks and caveats in ledger.
+
+Historical operation: after user admin sign-in, actual UI close of shift1/user4
+stored2026-09-04T16:44:00.000Z,0USD/133700KHR,revision1,amendment1/Admin1.
+Main SQL/UI/screenshot agree; Sep5 shifts3/4 remain openrev0, six original
+fees4268–4273 still150000KHR. No duplicate expenses, no stock/payment mutation.
+Close invokes Telegram; actual destination delivery acknowledgment not observed.
+
+Not done: fixed22-sale subtotal repair (runtime deployed but operation unapplied,
+fresh14:03 subtotal0,total3462); operator UI/API access for guarded manifest apply;
+full VIS1; broader transfer/adjustment session parity, universal minimize, complete
+pagination/precision/security/visual matrices, leading-zero consolidation and
+nonblocking compactness. Direct public health/version probes blocked by client/
+edge; authenticated POS/popup works with empty browser error/warning log. Native
+goal remains paused and incomplete; this is a deployed checkpoint, not whole-goal
+completion. See docs/fleet/2026-09-05-production-usability.md for current matrix.
+
+## Part 609 — guarded subtotal repair deployed and applied (2026-09-05)
+
+Ask: continue toward a verified deployed checkpoint, use appropriately scoped Sol
+agents, preserve live business/stock, keep status and incomplete work visible.
+
+Main directed Archimedes UI, Noether native D1 verification, Sagan independent
+financial/security review and Halley VIS1 planning. Isolated commits integrated
+on codex/business-os-reconcile; original user dirty checkout/fees edits preserved.
+Read-only exact22 preview and immutable permission-gated UI now expose the prior
+guarded repair without SQL uploads or bypasses. Backup first, one audited atomic
+operation, stale revision rejection, shared confirmation, date display, bounded
+body/text and sales-cache refresh on apply/replay included.
+
+Important caught defect: native D1 reported changes2 per sale because of the
+revision trigger. Summing metadata produced44 and a false failure after22 actual
+updates. Fixed27a4f3e4 before production; native apply22/retry0/full rollback and
+protected fixtures passed independently. Main actual local UI preview/cancel/apply
+also preserved every protected hash. Frontend Khmer shared-label collision fixed
+a127e37a. No known P0-P2 repair blocker waived.
+
+Final gates at cleana127e37aded0ec7c88a3d0fa06d92bc3b5bda822:224/224backend suites,
+actual212-file frontend Windows wrapper, both typechecks,i18n4976/519,Vite1048,
+stamped dry-run. Main mobile320 EN/KMdark/desktop1440 plus live839px inspected.
+Worker ac5c708d-2ac6-4e76-b801-4497b38ab4d8 deployed14:50:29UTC at100%,
+deployment6ed0346f-32a4-4f45-b4e7-a0ce87a09533; source stamp and control-plane
+agree. No migration,secret sync,or baseline replacement. Release auth copy removed.
+
+Live14:54:47 Admin1 used normal authenticated preview/confirmation to repair only
+sales16842–16863 subtotal0->3462USD. Plan sep23-subtotal-46e9e6ed-fade-45e8-9ba8-8396c761e17c,
+one grouped non-undoable history245/audit3799,everyrevision1. Fresh52,002,774byte
+R2 backup business-os-cloudflare-20260905-145420Z.json exists before commit.
+All protected pre/post SHA256s identical: stock/costs/batches/movements/allocations,
+sale items,all other cohort sale/payment fields,receivables,six shift fees.
+Sep2 fivepaid/completed sales1992;Sep3 seventeen1470;discounts5+61 already existed.
+Full evidence/scope is docs/fleet/2026-09-05-subtotal-repair-evidence.json.
+
+Live reports: Sep2 revenue3877,COGS3326.98,finalprofit539.79. Sep3gross1531,
+discount61,net1470,COGS1236.54,totalprofit233.46 match supplied reference14.
+Timed expenses follow owner-selected system-entry time; no forced screenshot
+matching by changing expense data. Browser error log empty. Sep4shift1 remains
+closed23:44Cambodia/133700KHR; Sep5 shifts3/4 and original expenses unchanged.
+
+Remaining: VIS1 integration, broader transfer/adjustment sessions, universal
+minimize,full pagination/precision/security/reference/role matrix,barcode merges,
+nonblocking spacing. Today report summary16.98 vs expense row16.97 was observed
+and assigned Halley for next rounding slice; not hidden or marked solved. P3
+backup naming/client response validation and migration runner follow-ups retained.
+Telegram actual destination ACK and direct client/edge-blocked health/version
+not certified. Native goal remains paused/incomplete. No repeat settlement,
+historical shift close,or subtotal operation; guarded forward recovery only,
+never full DB restore over newer business data without separate authority.
+
+## Part 610 — report rounding/tablet checkpoint deployed (2026-09-05)
+
+Ask: continue quickly with scoped Sol agents, verified checkpoints, durable status,
+and no harm to the working business. Main re-read objective and live ledger.
+Archimedes implemented report-only decimal cent rounding; Halley independently
+verified the arithmetic and main tablet CSS. Noether verified clean224 backend
+suites and actual212-file frontend wrapper. Ramanujan independently implemented
+inactive VIS1 helpers; Sagan's adversarial review found a classifier edge case.
+
+Deployed clean c999e909f4fe91533df84365f1f8eda4015bef76 at15:35:48.077UTC,
+Worker cfdba0a4-c857-45b1-83ed-af7d1ddade2c at100%, CLI control-plane verified.
+Slices61237948 andc999e909 separately committed/pushed. Both typechecks,
+i18n4976/519,Vite1049,dry-run and main EN/KM320/839/1440 screenshots pass.
+Authenticated live report now summaryexpenses16.97=row16.97 for69000KHR/4065,
+finalprofit191.18 unchanged. Tablet840px padding16.8px/body840. Global upward
+price policy/KHR/BOTH unchanged; broader four-decimal migration remains partial.
+No production DB writes, migrations, secret sync, stock/payment changes, repeat
+settlement/subtotal repair/historical shift close. Temporary release auth removed.
+Original dirty checkout and unrelated integration fee files preserved.
+
+VIS1 foundation389244dc is pushed separately, NOT integrated/deployed. P2 SQL
+first duplicateJSON key vs JS last-key administrator classification needs a fix
+and parity regression before activation. Viewer cache partitioning, authoritative
+cashier ownership, validated mode, complete query scope/offline invalidation are
+also explicit gates. Other transfer/adjustment/minimize/pagination/security/4dp/
+barcode/full-reference tasks remain tracked, not complete. No whole-goal success
+claim; native goal stays paused/incomplete. Full evidence and recovery notes in
+docs/fleet/2026-09-05-production-usability.md.
+
+## Part 611 (Sep 14 2026, Claude Fable coordinator)  precision v1 release: takeover, refutation, fixes, gates, deploy
+
+Ask (owner): read CLAUDE_HANDOFF.md and AGENTS.md, verify the Codex checkpoint, finish
+the remaining integration and tests, deploy only after verification. Rulings taken by
+AskUserQuestion: apply 01580161 during the deploy with backup bookmark and pre/post
+assertions; include the N55N57 wave; reproduce and fix the return-cancel gap first;
+push the candidate branch and leave main; storefront pager keeps the selector, before
+Back; Codex paused, Claude sole writer; proceed automatically when green. Mid-way the
+owner made the session supervisor/manager/finalizer: it investigates, refutes and
+checks itself, distributes implementation to mixed-model subagents in isolated
+worktrees, and every release must add tests for the error classes seen before (blank
+page, runtime errors, glitches, slowness, wrong calculations, zombie code, orphans).
+
+Work, in commit order on codex/precision-final-candidate-20260914 after c27c7748:
+cbbec41e bf19f957 ace422a9 ac80f73b bad260dd dadccb08 (Worker harness: 22 loader
+gaps for the saleMoneyPrecision kernel, Miniflare cwd, v1 contracts in
+sale-add-items / delivery-add / amendments locks); e663de8b (N56/N57 portal locks;
+message over-claims N55, whose coverage is the pre-existing barcodeScannerState test);
+0ea7bcb4 fix(returns) sale returnable after a cancelled partial return + native
+sequence test; a1d55f12 feat(portal) page-size selector [20/50/100][Back][page /
+total][Next], persisted per viewer (reverses the 2026-09-07 removal by owner
+decision); 1defc523 fix(portal) blank storefront on blocked site data (pre-existing
+since 0d41b6f4: the store list sat outside the try) and the one-round-trip over-fill
+when stored size != bootstrap size (skeletons held, no prefix seeded  the bootstrap
+order promoted/brand/name is not the A-Z browse order); 7e082a62 fix(portal)
+translate-reload marker guarded; 2bc6d86d test(frontend) startupResilience (20),
+storefrontPagerScenarios (12), performanceBudgets (8); a34799f8 chore(worker) 44
+unreferenced imports removed + zombie-import gate (205 files, empty allowlist);
+a332a8cf test(worker) seeded money-invariant fuzz; 4b4b078d test(worker)
+orphan-record gate (200 relations / 170 tables, 11 writers, 2 permanent positive
+controls) + ops/scripts/audit/orphan-audit.sql; 139fcbf8 fix(returns) the SALE
+decides a return's money version.
+
+The refutation that blocked the release: the Fable adversarial backend lane (real
+routers on Miniflare/D1) showed that POST /api/returns with a body lacking
+money_precision_version  what every pre-release cached client sends  was accepted
+on a v1 sale, priced on the legacy gross path (3 x 10.01 line, 40.04 sale discount,
+payable 20.02: paid 30.03), written as a v0 row, after which every v1 quote on that
+sale answered money_precision_invalid_legacy_shape forever. Root: returnCreateAction
+validated the version only when present; returns.ts chose isMoneyV1 from the request.
+Fix (opus lane, isolated worktree): two locks on create (before canonicalisation with
+the idempotency receipt hoisted so replays still replay; write-adjacent on the sale
+row the handler loads) and one on edit, all 409 money_precision_review_needed, the
+code POST /api/sales already uses. Writer audit: only two INSERT INTO returns exist
+(customer create, supplier return without a sale); bulk cancel/restore, undo
+appliers, returnsStock and the name-snapshot writers touch no money or version. New
+native test test-customer-return-legacy-body-v1-sale-native.cjs proven red on the
+2bc6d86d source (200 !== 409, row 30.03 written) and green after. The coordinator
+re-ran the original attack probe against the fixed tree: S9a/S9b/S9c 409 with
+nothing paid, S9d v1 quote 200. Production could not have been hit: the v1 columns
+did not exist there until this release's migrations.
+
+Certification of 139fcbf8 in fresh detached worktrees: frontend tree identical to
+2bc6d86d, whose gate was 418/418 + verify:i18n + build/postbuild; build from the
+final tip passes (28 chunks / 804,175 bytes catalog closure, 36-chunk public
+preload, 261 chunks zero cycles). Worker: tsc clean; 390 runs (388 scripts + 2
+F57_NATIVE_D1 variants): 388 green, 2 red  test-sale-customer-safety-native and
+test-sale-return-money-precision-native, both logs ending in PASS lines with no
+failure text (silent workerd death under sweep contention); isolated PowerShell
+reruns exit 0 in 69 s and 13 s. Recorded as such, not counted green silently. The
+cf-gate loop prints RED(0) because $? is read after the counter assignment  a
+harness cosmetic; the exit codes come from the reruns.
+
+Production sequence (authorised): branch pushed (origin tip = 139fcbf8);
+d1-assert pre; wrangler migrations list showed exactly 01580161 pending (0157
+exists only on an unmerged stock-lot branch; production tail was 0156); npm run
+migrate:remote applied all four (ids 153156); d1-assert post identical
+fingerprints, columns and triggers present, legacy rows untouched, snapshots null;
+frontend built from the tip in the candidate worktree (three frontend/public/*.js
+line-ending-only diffs restored before stamping, content diff 0); npm run deploy
+from the clean tree -> Worker f5b89429-6109-4627-87ff-a868292e4225 at 100%,
+/api/runtime/version revision 139fcbf8faa4 sourceHash e07b68d574d2a4cf on both
+hosts; storefront and admin shells 200 with root and bootstrap; portal search
+pageSize 20/50/100 honoured and 500 capped to 100; bootstrap 50 products. The
+in-app browser was denied external navigation in this session, so the visual smoke
+is HTTP-level only.
+
+Findings documented, not fixed (owner rulings or later lanes): old cached clients
+get 409 money_precision_review_needed on new sales and returns  the offline queue
+keeps the row and the server message, stops draining, and the sale is re-keyed in
+the updated app; the code has no en/km entry so the server sentence shows; admin
+catalog preview shares the shopper page-size key and shows the selector;
+zero-result search hides the pager; PageSizeSelect lacks arrow-key roving; middle
+return of a sub-cent cohort can be refused by the payout guard; sale-id/return-id
+collision in inventory_movements.reference_id can false-409 return create;
+sale_amendments.sale_item_id dangles by design; trg_sale_items_ai mints a revision
+row for a missing sale; v0 zero-discount basket records -0; a v1 quote on a
+null-snapshot line answers product_merge_lineage_conflict (misleading code);
+noUnusedLocals blocked by 28 further unused locals; error boundary text is
+hard-coded English. Rollback of the Worker after v1 rows exist is application-only.
+Not certified here: physical iOS/PWA, camera, printer.
+
+Scratchpad evidence (session f12ec59a): final-139fcbf8-logs/ (tsc, per-script logs,
+summary.txt), d1-pre-final.txt, d1-post-final.txt, d1-migrate-remote.txt,
+deploy-139fcbf8.log, fe-build-139fcbf8.log, vb-logs/attack3-on-139fcbf8.log,
+release-ledger.md.
+
+## Part 612 (Sep 14 2026, Claude Fable coordinator) — iOS PWA program: one-tap scanner, four iOS lanes, Playwright suite, free/paid split, checkpoint deploy
+
+Owner asks, verbatim intent: scanner button opens the camera directly (no allow-and-open second step); iOS PWA made foolproof; Playwright/integration/system tests as runnable files, including the earlier blank-page/white-screen classes; explain the three background tasks; lanes must not conflict, duplicate or disorganize; free vs paid everywhere with deploy-time choice and auto fallback; cache/memory/security and same-device-other-account risks; nothing lost across compactions; no bloat.
+
+Lanes (isolated worktrees, one writer per file set, merged by the coordinator after refutation): scanner-one-tap (8e6371cb, c2185071); ios-a storage boundaries (494549a3, ba00dcee); ios-b layout (f77da6f8, 142356e2, f7d193e7, 108391bb); ios-c sw/print/admin-doc (6bc719df, cbbdd22b, 166fd63f); ios-d install/persistence (a2031b77, 64ff7ef6); plan-tier free/paid (810a2cab..f159e9ff, review fixes a8589ca0/4df59bc6/97dae6cb, gate fix 4b20bd68); Playwright harness (dbd7fc4a, 17 commits, scanner spec re-based 837211e0).
+
+Union defects caught only by running every test file after the merge: RootErrorBoundary `100vh` vs lane B's raw-vh allowlist (142356e2); `var(--app-vh, 1vh)` fallback vs the detector (f7d193e7, 108391bb); crash reporter duplicated between App.tsx and the new root boundary (ba00dcee, 16f7897c); Playwright scanner spec written against the two-step modal (837211e0). Cross-cutting review (bos-verify) of 142356e2 was NOT CERTIFIED at first; blocker and should-fixes landed (rewrite try/catch, install-hint preserve key, receipt preview window). Plan-tier adversarial review: CERTIFIED WITH EXCEPTIONS, three should-fixes applied, the rest recorded as follow-ups.
+
+Model note: claude-opus-5 returned 403 authentication_failed mid-session; the plan-tier reviewer and the Playwright lane died on it. The reviewer was relaunched on fable; the Playwright lane's work was fully committed and merged by the coordinator. A stray `wrangler dev --port 4319` from the dead lane was stopped.
+
+Gates on the committed tip 4b20bd68 in fresh worktree final-p3: Worker tsc clean, sweep 395/395 (five natives plus test-migration-wrangler-local green only on isolated rerun — teardown-crash class, recorded); frontend typecheck, check:source, verify:i18n (5807 keys), verify:public-runtime, build green; test:utils 421/422 on 97dae6cb with khmerRetailVocabulary red — the plan-tier lane's two Khmer plan hints used បាច់ for queue import chunks, which the dictated vocabulary forbids — fixed in 4b20bd68 (rows-at-a-time wording), then 422/422 on the tip. Playwright: run 1 (dbd7fc4a) 104 passed / 31 skipped / 6 failed (all scanner spec, fixed), run 2 (4b20bd68) 112 passed / 29 skipped / 0 failed, system tier 1 passed / 2 skipped by design.
+
+Deploy: branch pushed a8036506..4b20bd68 (80 sliced commits, main untouched); `npm run deploy` (paid `wrangler.toml`) from the clean worktree with dist stamped 4b20bd689a59 → Worker version d972a943-659e-4210-a1c9-58afc7436c0f, 211 assets; `/api/runtime/version` on admin.leangbeauty.com and leangbeauty.com both report revision 4b20bd689a59, sourceHash cc2ed1d498f88ed0, tier paid; both documents 200; no production D1 writes; free variant not deployed.
+
+## Part 613 (Sep 15 2026, Claude Fable coordinator) — Program 3: supplier mirror, reasons, tagged damaged rows, removal losses, invoice floats, shift edits; checkpoint deploy
+
+**Provenance.** Release tip **2e016e08** on `codex/precision-final-candidate-20260914` (base f04285be, the Program 2 docs commit), pushed to origin, deployed with the paid configuration as Worker **410bc7d2-2807-4974-b52e-300e91b0dca6**; `/api/runtime/version` reports revision `2e016e08d059`, `tier: paid`, on admin.leangbeauty.com and leangbeauty.com. `main` untouched. Docs commit on top: the commit that adds this Part. Production D1: none (migrations 0162 and 0163 are prepared and NOT applied; no remote D1 command was run).
+
+**How the program ran.** One coordinator session (this one) planned, refuted and merged; eight implementation lanes ran as sonnet subagents in isolated worktrees under the session scratchpad (`lane-p3-supplier`, `-reasons`, `-public`, `-contacts`, `-losses`, `-tag`, `-shift`, `-testflake`, plus `-writeoff` for the merge-time loss wiring), one writer per file set, each pushing a `p3/*` branch with one fix per commit. Every lane was certified by an independent bos-verify agent in a fresh worktree before merge; verdicts and defects are in the session ledger (`release-ledger.md`) and summarised here. The integration worktree `final-p3` merged the lanes `--no-ff` in this order: testflake d6c423d7, docs 05ab5efc, supplier 21413c20, reasons 5b38b873, public 62f6ef2b, tag 4530b475, losses 1fd28e8b, contacts ad86a9d9, shift 52ab29a4, losses-writeoff 36bf28a7, then the harness fix 14d365f1 and the shift follow-up 2e016e08. An ENOTFOUND API outage killed six agents mid-task; their committed work was intact and each was resumed from state.
+
+**Union defects caught at merge, not in any lane.** (1) p3/tag vs p3/supplier+reasons: five conflicted files resolved as recorded unions by a resolver script (both loader blocks in the transfer-lots harness; both `STOCK_RECEIPT_MOVEMENT_TYPES` and `isDamagedLotReference` imports in `stockRevert.ts`; the conditionTag parse block with the "Not Yet Paid" wording in `routes/inventory.ts`; seven hunks in `FastStockInModal.tsx` where a queued line carries both `reason` and `conditionTag`; the revert predicate in `StockChangeSection.tsx` taking `reference_id`). Then the tagged "Restock with tag" call hard-coded its reason instead of using the shared helper (fixed in the merge, test pin 3 → 4 wires), two Worker loaders lacked the `stockInSessionsQuery`/`stockReason` kernels, and the atomic session harness stubbed `stockCondition` so the reason-cap guard threw before refusing (real-load). (2) p3/tag+p3/supplier vs p3/contacts: two harnesses scrape the supplier purchase-totals SQL out of `routes/contacts.ts` and substitute `${supplierWhere}`; P3-10 renamed it `${purchasesWhere}`, so a literal `$` reached SQLite. Fixed as 14d365f1: both spellings resolve and the harness asserts no placeholder survives. (3) The contacts merge conflicted only at `contacts.ts:1804` (typed params from contacts, zeroed-lot comment from supplier; both kept).
+
+**Verifier findings acted on this program.** Supplier E1 (revert predicate must carry `reference_id`) and E2 (a new receipt on a zeroed lot inherited the old supplier; revert-of-revert lost attribution) fixed in c0a16cce; public review items 1–7 (internal readiness leaked on the anonymous config, promo image allowlist, canonical URL, 40-character promotion cap on every surface including the POS cart 7615d068, three click paths executed in a real browser); reasons: reveal-on-click through the shared TruncatedText e255028e, one 512-character cap on all four wires; tag: `readTaggedLotGroups` chunked past D1's 100-bound-parameter cap 9d4eb1bd; losses: dashboard analytics cost/profit gated for non-admins 7cfc413f, stats strip wired a34b4676, zero cost pinned as absent acf899d8, revenue_after_losses toned b2f2a52a, and the merge-time wiring so disposal and product-delete write-offs count (abab12a4, 60949d4b, 6e6ea6f7 — DISPOSE has no undo path, so its loss always counts once booked); shift: the `utcMs` fix f6dcc84e was applied at one site only — the verifier reproduced a false "overlaps the next shift segment" 400 on a UTC+8 host — closed at all seven raw-D1 comparison sites in 3e31a93b with a non-UTC-host case in `test-shift-security-pure.cjs` (red 400 shown before the fix, green after). Dormant in production because workerd runs UTC.
+
+**Gates on the release tip, fresh worktree `final-verify`.** Frontend: typecheck; verify:i18n OK (5839 pack keys, 630 source files); verify:public-runtime (3 files); test:utils 432 passed, 0 red; build ✓ with the startup verifier (neutral chunk policy, index closure 3 chunks, public preload closure 36 chunks with no admin/file/import code, 265 chunks zero cycles). Worker: tsc clean; sweep 403/403 (three natives exited red under sweep load — product-conflict-action-apply, product-conflict-action-remove, record-orphans — all rc=0 on isolated sequential reruns, the known Miniflare teardown class); dry-run paid/free both clean at 3800.42 KiB (gzip 821.20 KiB). Union checks on the merged tip before the fresh-worktree run: en/km key sets identical (5836 → 5839 after the write-off hint), retired key `bulk_merge_skipped_multiway` absent, every frontend test individually 428/428, Worker sweep 403 with exactly the two scrape reds fixed in 14d365f1.
+
+**Owner rulings recorded and defaults taken.** See progress.md top entry ("Design defaults taken this program") and the owner task register (September 15 section). Production actions that are the owner's: apply migrations 0162 and 0163 (code first, then 0163); merge the "j secrat" and "lang" supplier clusters from Contacts → Conflicts; fill legal name, registration and email in the portal editor.
+
+**Attribution note.** The three `p3/losses-writeoff` commits carry a `Claude Sonnet 5` co-author trailer; they were pushed before review and are not rewritten.
+
+## Part 614 (Sep 15 2026, Claude Fable coordinator) — Program 4: supplier auto-merge + 0164, damaged-return tag rule, performance wave 1; checkpoint deploy; migrations 0162–0164 applied
+
+**Provenance.** Release tip **38a3eb5e** on `codex/precision-final-candidate-20260914` (fast-forward of 4508a57c, the Program 3 docs commit; 34 commits), pushed to origin, deployed with the paid configuration as Worker **dfef9f7b-76e8-4868-bff1-d1916cd8c48e**; `/api/runtime/version` reports revision `38a3eb5e71bd`, hash `ae48cffc4ec96576`, `tier: paid`. `main` untouched. Production D1: migrations 0162 and 0163 applied earlier in the day (P4-1), 0164 applied after this deploy (P4-2). The owner's message that opened the program: iOS PWA lag; "Failed to load tagged stock"; past removed stock stays as recorded and the tag rules apply only to future choices, consistent with returns; "make it more efficient and debloat it. is it free vs paid worker issue"; "for migrations and merge. i want you to do it for me"; "for supplier prevent this issue from happening just merge directly if same".
+
+**How the program ran.** One coordinator session; four sonnet lanes in isolated scratchpad worktrees (`lane-p4-supplier`, `-returns`, `-worker-perf`, `-fe-perf`) pushing `p4/supplier-automerge`, `p4/returns-tag`, `p4/worker-perf`, `p4/fe-perf`. The host session died once mid-lanes; all four were resumed from their intact worktrees with nothing lost. Each lane was verified by the coordinator against its own claims before merge; the merges went into a detached integration worktree `final-p4` in the order returns-tag → supplier-automerge → fe-perf → worker-perf.
+
+**Migration 0164 defect caught before apply.** The lane pinned the "lang" cluster as ids 23–37 from a compaction summary; a read-only production query showed 24–32 are nine distinct suppliers (japen, kaka, UTB, Malaysia, naomi, autralia, france, srun, piset). Corrected to 33–37 with a name guard on every statement (`LOWER(TRIM(name of loser)) = LOWER(TRIM(name of keeper))`) and a verify script that seeds the neighbours (7db5f8fc). Lesson kept: re-read production id lists before pinning; verify scripts must seed neighbours.
+
+**Union defects caught at merge, not in any lane.** (1) km.json damaged-return hint used a non-canonical Khmer word for cost (99043794). (2) fastStockInReasons test pinned the pre-fold movement reason (9a2c875e). (3) actor-snapshot test pinned the hand-rolled damaged-lot INSERT that P4-3 replaced with the shared kernel (103e2c25). (4) P4-3 emitted `condition_tag`/`damaged_disposition: null` into every legacy return-create intent, changing the digest bytes an in-flight retry relies on; the keys now appear only when sent (38a3eb5e). (5) fe-perf committed a stale `public/sw.js` (checked out after the build); the regenerated file was committed (a2f61dca).
+
+**Free vs paid answer, with evidence.** Paid plan live, no CPU cap in play. The lag is 8–18 sequential D1 round trips per mutating action, each a cross-region hop (no `[placement]` before), plus `audit()` at three round trips on 135 awaited sites. Wave 1 fixes: audit as one `INSERT … SELECT`; `[placement] mode = "smart"` in both configs; deferred non-gating audits; folded batches; kv_write quota counter skipped on paid (free path keeps RETURNING); products list from the versioned cache; on the PWA, cache-first navigation with pre-paint statics, an eager/deferred precache split (30 assets / 2.99 MB eager), memoized context and POS cards, and no backdrop-blur on 17 sticky headers.
+
+**Gates on the release tip (`final-p4`).** Frontend: typecheck; verify:i18n (5841 keys); verify:public-runtime; test:utils 438/438; build with the startup verifier (265 chunks, zero cycles) stamped `38a3eb5e71bd`. Worker: tsc clean; sweep 409/409 zero red on 38a3eb5e. The earlier sweep on 103e2c25 showed four reds: actor-snapshot (already fixed in that tip), return-create-action (real, fixed in 38a3eb5e), sale-return-money-precision-native and session-cookie-race-native (rc=0 isolated; customer-return-create-d1-native also red once under the 26-file dependent loop, rc=0 isolated with and without the fix). Live check: login page renders on the new build; the only console error is the known signed-out bootstrap fingerprint pinned in `frontend/e2e/support/harness.ts`.
+
+**0164 apply record.** PRE: losers 14, keepers 2, controls 24–32 = 9 with 1244 batches / 267 invoices, keepers 1532 batches / 485 invoices, audit 0, tail 0163. Apply: 127 commands, 611 ms. POST: losers 0, keepers 2, controls 9 with names unchanged and 1244 / 267, keepers 1532 / 485, audit 14, orphan batches 0, tail 0164.
+
+**Attribution note.** The ten `p4/fe-perf` commits carry a `Claude Sonnet 5` co-author trailer; pushed before review, not rewritten.
+
+**Not yet.** Program 4 wave 2 list in progress.md (Worker N+1 and sequential paths; frontend sequential commits, close-before-refetch, remaining sticky-blur sites, memo row renderers, parallel gallery uploads, CustomersTab reload); re-measure iOS PWA lag on the phone after wave 2; native check of the Khmer for `contact_duplicate_will_use_existing`.
+
+## Part 615 (Sep 15 2026, Claude Fable coordinator) — Program 5: same-name merges applied to production (0165–0167), identity rule, removal-loss consistency, one-row date range, D1/R2/KV debloat; first apply failed on the D1 CPU budget
+
+**Provenance.** Release code tip **6bd39bd9** on `codex/precision-final-candidate-20260914` (fast-forward of 38a3eb5e, the Program 4 release), pushed and deployed with the paid configuration as Worker **e8f0a886-3b48-4d31-9ef0-d907e439b89b** (`/api/runtime/version` revision `6bd39bd9b8ca`, hash `829cbde050f0c023`, `tier: paid`). Branch tip **f1202597** adds only the 0165 rewrite (migration files are outside the Worker bundle). `main` untouched. Production D1: migrations **0165, 0166, 0167 applied** after the deploy. The owner's message that opened the program: the product merge had to be done in the backend data by the coordinator, with the stated barcode and cost rules; suppliers likewise; the Start/End range on one compact row; removed stock accounted for consistently as loss unless restocked with a tag; the "removed row has no cost" report was impossible and had to be fixed with tests; debloat D1, R2, KV and requests.
+
+**Lanes (eight, merged into an integration worktree, one fix per commit).** `p5/identity-rule` (68feb091 … 1f773beb): `productDetailRule.ts` shared by both packages — real barcode = digits ≥ 6 not all zeros, leading zeros fold, anything else is a wildcard that attaches to the same-name real-barcode row (highest live stock, then lowest id); non-transitive matching, applied to the products route, selected-conflict merges, stock-in commits, import and stock-action matching, dated counts and the frontend identity sites. `p5/data-merge` (a37070cb, 9f20a8f9): table-driven 0165 (product) and 0166 (customer) migrations with pre-image maps, audit rows, transfer-provenance exclusion mirroring the live merge route's refusal. `p5/losses` (fddadf7e … 3a4af640): valuation chain lot → product → same-name twin, bulk deletes counted, unvalued count on Dashboard/shift/Telegram, migration 0167 backfill. `p5/date-range-row` (cbcd73d1). `p5/regression-pack` (e5469fe4, 11fc1c39, 324e4abd, 15b8d2ea, 6f61c5fe). `p5/efficiency` (2945c5e5 … b8d9a63d, plus d28d0967/cb8024c6 after its own sweep showed 25 reds from fixture drift and one real `.then` on a non-Promise). `p4/worker-perf-2` + `p4/fe-perf-2` (P4-4b wave 2). `p4/stockin-batch` (f4711391, d7d6b545: one request per fast stock-in session). Union fix e32bc158 (orphan audit classification of the merge-map columns).
+
+**Gates on the committed tip in a fresh worktree.** Frontend typecheck, verify:i18n 5841, verify:public-runtime, test:utils 445/445, build 265 chunks zero cycles; Worker tsc clean, 416-file sweep, two load-only reds green isolated; orphan audit 202 relations OK.
+
+**The failed apply and the fix.** First `wrangler d1 migrations apply --remote` failed on 0165 with "D1 DB exceeded its CPU time limit and was reset [code: 7429]" and rolled back (verified: products 10357, tail 0164, no map tables). Per-statement timing on a replica of the day's production data: ~93 s — DELETE of the losers 28–38 s (migration 0010's `trg_products_ad_name_key` updates every same-name sibling per deleted row, which fires the FTS5 ×3 and revision triggers per sibling), branch_stock fold 24 s (correlated SUM over an unindexed map), product_batches repoint 19.5 s (migration 0155's `positive_lot_reject_parent_update_orphan_0155` rescans every positive `branch_batch_stock` row per updated lot), map INSERT 15.5 s (CTE chain re-evaluated from correlated subqueries). Rewrite f1202597: eligible rows / per-code keepers / per-name best keeper materialized once into helper tables and joined; the fold pre-aggregated per (keeper, branch) with a keeper index on the map; both triggers dropped around their one quadratic statement and recreated byte-identically, with the invariant evaluated once through a CHECK-constrained guard table that aborts the whole file on violation; `is_grouped_cached` recomputed from a materialized sibling count (the correlated form made the planner pick the `(is_active, is_grouped_cached)` index and rescan every active product per row); every helper dropped at the end. 3.6 s on the replica, identical POST, byte-identical rerun. Second apply: 0165 ✅ 0166 ✅ 0167 ✅.
+
+**Production PRE → POST.** products 10357 → 8478 (1879 losers, 1855 keepers, 1879 audit rows); customers 5039 → 5029 (10 → 9); sale_items 36683 / qty 59344 unchanged; branch_stock 20242 → 16486 rows, qty 24302 unchanged; batches 36140 unchanged; movements 23991 unchanged; references to losers 0 in sale_items / branch_stock / product_batches / inventory_movements; helper tables 0; guard triggers 2; `products_fts` 8478; stale `is_grouped_cached` 0; positive lot orphans 0; uncosted removals 17 → 10; tail 0167. Bookmarks: `00001644-0000000a-000050e7-a7934bb1195555274364f5d3287d2983` (before attempt 1), `00001645-0000001e-000050e7-69d70b49cd94f6ec5afb9674cefee431` (before attempt 2). Lesson recorded: a POST query with a correlated per-row COUNT over all products also trips 7429 — split assertions into cheap queries.
+
+**Exceptions to report.** (1) "dior addict lip glow new 075" ids 1616 (`03348901737289`) and 7161 (`3348901737289`) stay as two rows: both carry transfer-operation provenance that migration 0151's triggers refuse to reparent; every other transfer-evidenced product had no same-name twin. (2) The 10 uncosted removal rows left after 0167 (movements 47020–47028, Girlactik products 2624/2557/2549/2577/2556/2623; 47048, Morphe 9311) were imported 2026-08-29 with cost 0 and selling 0 and have no cost anywhere the chain can reach; they are shown as "no cost" rather than $0 and price themselves once the owner enters the product cost. (3) No logged-in visual check from the coordinator session; the one-row date range is pinned by test on the built tip.
+
+**Housekeeping.** Lane worktrees under the session scratchpad are junction-linked; unlink before `git worktree remove`. The production replica (`prod-20260915.sqlite`) predates the apply; rebuild before the next data rehearsal.
+## Part 616 (Sep 15–16 2026, Claude Fable coordinator) — Program 6: transfer-aware merge (0168) and name-snapshot repair (0169) applied, searchable pickers, receipt one continuous strip, storefront phone fixes + install prompt, dashboard rows, efficiency 3
+
+**Provenance.** Release code tip **c596674e** on `codex/precision-final-candidate-20260914` (fast-forward of 85f894ee, 37 commits), pushed and deployed with the paid configuration as Worker **482774b9-2e1c-4109-b87c-b3c7f72289bb** (`/api/runtime/version` revision `c596674e41ad`, hash `5021a1351c97b2f1`, `tier: paid`). `main` untouched. Production D1: migrations **0168 and 0169 applied** after the deploy; 0170 (indexes) and a cost-backfill migration were reserved and not written. The owner's messages that opened the program: transfer-aware merge for the dior pair and "for the 10 remaining you can do so"; everything linked after the merges (batches, suppliers, category, brand, sales, invoices, reports); searchable pickers everywhere, "don't do click to show options without the ability to search"; efficiency for the inventory list, stock-in sessions, dashboard internals, queue consumers and an index-versus-query cross-reference; the receipt printing with a blank top band and a second strip (two photos); the storefront rail, social icons, contact button, pager order, quick-filters hint and the missing add-to-home-screen prompt (one photo); then dashboard card rows ending on one line (two screenshots with red lines), the sales last row scrolling, and conflict actions auto-resolving with before/after.
+
+**Lanes (six merged, one fix per commit; one open).** `p6/transfer-merge` (a49cc4c3, 6ee54feb, 72d4ea09 → 920e27b2 after the trailer rewrite and the 0171→0169 rename): 0168 table-driven pairs, the two 0151 transfer-provenance triggers dropped and recreated byte-identically around their one blocked statement, the transfer member row rewritten to keeper/keeper, CHECK-guarded invariants; `foldDuplicateProductInto` transfer-aware on the live merge route and syncing name snapshots through `linkedProductNameSnapshotStatements`, the helper the rename path uses; 0169 name-snapshot backfill for the 0165 and 0168 losers. `p6/searchable-pickers` (44b56265 … 86bd7f0a). `p6/efficiency-3` (5e97329d … d0939aa5, 9dfc51f5). `p6/receipt-print` (6c3c8869, 0e3a31c3). `p6/storefront` (87dbb1cc … 4eea45aa, 553b8b67). `p6/dashboard-rows` (7e88d576, a26d9ecf, 979c5609). Open: `p6/conflict-actions` (P6-9) from c596674e.
+
+**Refutations during the program.** (1) The dashboard lane claimed the sales last row was "already fixed since 802eaf93"; 802eaf93 is live and the owner still saw it — the payment badge shrank and truncated (`min-w-0 max-w-[9rem] truncate`) so the row never overflowed into a scroll; fixed in 979c5609. (2) The storefront lane's rail fix added a gutter; the live DOM at 375 px showed every rail entry (`h-0.5 w-2.5`) computing to 44×44 because `public-portal.css` gives every `button[aria-label]` a 44 px minimum on coarse pointers — a 54×487 px column of blank circles, which is what the owner photographed; exempted for the rail and the header icon rows in 553b8b67. (3) The efficiency lane reported a zero-red sweep three times; the reads had no completion sentinel and two anchors were really broken by its portal fan-out (test-portal-stock-redaction-pure, test-stock-cards-catalog-wide-pure) — fixed in 9dfc51f5; every sweep now ends with a DONE sentinel before its result counts. (4) The receipt lane's first fix used `@page { size: 80mm auto }`, invalid CSS, which left the printer on its default page — the blank band and the second strip in the photos; replaced by an in-document measurement right before `print()` writing a valid explicit height.
+
+**Sonnet lane trailers.** Lane commits from the sonnet agents carried a "Claude Sonnet 5" trailer; all unpushed, rewritten to the Fable trailer with `filter-branch --msg-filter` on each lane before integration.
+
+**Gates on the committed tip in a fresh worktree.** Frontend typecheck, verify:i18n 5846, verify:public-runtime, test:utils 448/448, build 265 chunks zero cycles (on f7d1bb46, whose frontend tree equals c596674e's); Worker tsc clean, sweep on c596674e: 426 files, 0 red, completion sentinel seen. Migrations rehearsed on the post-merge production replica: 0168 421 ms (rerun a no-op), 0169 262 ms (rerun a no-op).
+
+**Production PRE → POST.** products 8478 → 8477; tail 0167 → 0169; dior 1616 (`03348901737289`, stock 0) and 7161 (`3348901737289`, stock 1) → one row, 7161 active with `3348901737289`, stock 1, 19 batches, 0 references to 1616; `transfer_operation_members` receipt 7 ordinal 0 = 1616/7161 → 7161/7161; `product_merge_map_0168` 0 → 1; guard triggers 2 → 2; stale name snapshots (loser name ≠ keeper name, 0165 + 0168 maps) sale_items 135 → 0, inventory_movements 56 → 0, other five tables 0. Time Travel bookmark before the apply: `00001666-00000000-000050e7-e79a8764b52b722d6a1c17bfe4ae5075`.
+
+**The 10 uncosted removal rows (P6-1b).** Movements 47020–47028 (Girlactik) and 47048 (Morphe) each trace to a synthetic import lot dated 2026-08-29 with unit cost 0 and supplier NULL; the product cost is 0, there is no costed same-name twin active or inactive, and the import source JSON already carried 0. Nothing in the data can price them, and a brand average would misstate financial history, so no backfill was written; they show as "no cost" and price themselves when a product cost is entered.
+
+**Follow-up checkpoint, P6-9.** P6-9 conflict-actions auto-resolution: the identity rule reached the cluster list and the bulk group review on September 15 but not the merge write gate itself (`readMergeIdentityDiff` in `cloudflare/src/routes/products.ts`, behind "Keep this" on every Products → Duplicates card, the atomic sweep and the preview), which still compared raw barcode keys and refused wildcard-vs-real pairs with "these products do not have the same normalized name and barcode" — the owner's report verbatim. Fixed with `barcodeIdentityMatches` (2ab355a5; two genuinely different real barcodes still block, negative-control test in test-merge-identity-fk-pure); the duplicate "Review selected actions" button was removed (67c26239). Contacts merges never had an identity gate. Follow-up commit **7d8e22d7** live as Worker **fad5bfda-69b8-4a87-97a0-02509b6562ad** (revision `7d8e22d73bde`, tier paid). Gates on 7d8e22d7 in the integration worktree: frontend chain typecheck, verify:i18n 5846, verify:public-runtime, test:utils 448/448, build 265 chunks zero cycles; Worker tsc clean, focused merge-identity tests green, the lane's own 426-file sweep on 2ab355a5 zero red with sentinel.
+
+**Exceptions to report.** No physical print of the receipt fix; no logged-in visual check from the coordinator session (the storefront was checked live at 375 px without login).
+
+**Housekeeping.** Lane worktrees under the session scratchpad are junction-linked; unlink before `git worktree remove`. The post-merge replica (`prod-20260915-post.sqlite`) predates 0168/0169; rebuild before the next data rehearsal.
+## Part 617 (Sep 16 2026, Claude Fable coordinator) — Program 7: receipt page-size fallback modes, duplicates-tab debloat
+
+**Provenance.** Release code tip **20be849b** on `codex/precision-final-candidate-20260914` (descends from 805824a9, the Program 6 follow-up docs tip), pushed and deployed with the paid configuration as Worker **fe65bbef-52b3-4bf9-beb5-9a1c24a0cf2a** (`/api/runtime/version` revision `20be849b9c12`, `tier: paid`). No migrations. The owner's message after the Program 6 status: "i'm still not sure, but can you guard it from multiple angles, consider if multiple options, can create multiple options just in case, 80mm, 80mmx50mm, the browser default ones, etc... so this way it is more full proof. the debloat, etc..."
+
+**Lanes (two, merged; one fix per commit; sonnet lanes, trailers added by the coordinator where the lane omitted them).** `p7/receipt-page-modes` (c7ebbf41 core geometry + tests, 464bff0a Worker enum guard + parity test, b1b2f7e5 Print Settings section + packs): a `pageSizeMode` print setting for continuous-roll paper — `measured` (default; the September 15 in-document measurement), `fixed` (chosen page length 50/100/150/200/297 mm or custom, paginating instead of clipping), `driver` (no `@page size`, the printer's registered form decides; remeasure skipped), `auto-longest` (explicit 3276 mm page, `page-break-after: avoid`); fixed sheets (80×50 mm, A4, Letter, custom) ignore the mode; geometry extracted into the pure `resolveReceiptPageGeometry`; diagnostics line shows the mode; a "Test print this mode" button added because only PDF test buttons existed and a PDF cannot exercise `@page`/driver behaviour. `p7/debloat` (ff75e5cd, 068920c4, 3c972cdb, 7d3fef34): the exact-pairs batch merge review in `ProductDuplicatesTab.tsx` / `SelectedConflictMergeReviewModal.tsx` proven unreachable (zero callers of `openSelectedMergeReview`, no persisted resume key) and removed with its `batch*` state, the client transport wrappers `previewSelectedConflictMerges` / `makeSelectedConflictMergeApplyBody` / `runSelectedConflictMergeBatch` and their test block, `csvImport.splitCsvLine`/`parseRequiredCsvNumber`, `multiSelect.countMultiValues`; pinned tests rewritten to the live group-review flow with a negative-control list. Kernel twins with byte-identical parity tests (`moneyPrecision`, `promotionRules`, `productDetailRule`) kept even where a frontend export has no importer.
+
+**Gates on the committed tip in the integration worktree.** Frontend typecheck, verify:i18n 5865, verify:public-runtime, test:utils 448/448, build 265 chunks zero cycles; Worker tsc clean, sweep 427 files with completion sentinel, one contention red (test-product-conflict-action-remove-native) green standalone.
+
+**Exceptions to report.** Still no physical print; the owner now has four modes to switch between in Print Settings → Page length handling if the measured strip misbehaves. Debloat candidates left as report items: `receiptAppliedConfig` serializers, `spreadsheetImport.listWorkbookSheetNames`, `saleRecords.saleRecordHasDetail`, the unwired `imageCompression` size ceiling/floor, `taxSettings` key constants.
+
+**Housekeeping.** Lane worktrees lane-p7-* removed after the merge (junctions unlinked first).
+
+---
+
+## Archived main-branch entries (Sep 4–9 2026 Codex status commits, merged into main on 2026-09-16; kept verbatim so nothing is lost — the sections above are authoritative)
+
+
 ## Part 598 — the Sep-4 checkpoint: three reds root-caused, a `-dirty` production stamp chased down, and five lanes that live only on one disk
 
 Session `business-os-v1-c3`, final reconciler. The user asked to "scan and verify what is done or what can be

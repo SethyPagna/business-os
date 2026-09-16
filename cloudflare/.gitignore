@@ -6,3 +6,5 @@ node_modules/
 .wrangler-auth.local
 .env
 .env.local
+dist-dry-run-paid/
+dist-dry-run-free/

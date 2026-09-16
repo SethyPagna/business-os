@@ -143,6 +143,44 @@ const adjust = (over: Partial<BulkPriceAdjustment>): BulkPriceAdjustment => ({
   console.log('PASS money is rounded, so repeated adjustments cannot accumulate dust')
 }
 
+{
+  const precise = [{ id: 11, selling_price_usd: 1.23, purchase_price_usd: 1.2345, purchase_price_khr: 5000.1234 }]
+  const out = buildProductBulkPriceAdjustments(precise, adjust({
+    amount: '.0001',
+    fields: ['selling_price_usd', 'purchase_price_usd', 'purchase_price_khr'],
+  }))
+  assert.deepEqual(out, [{
+    id: 11,
+    updates: { purchase_price_usd: 1.2346, purchase_price_khr: 5000.1235 },
+  }], 'sub-cent purchase-cost movement is retained while selling price remains a cent-policy no-op')
+  console.log('PASS purchase-cost relative adjustments retain four decimals independently of selling policy')
+}
+
+{
+  const historic = [{ id: 12, purchase_price_usd: 1.234567 }]
+  assert.deepEqual(
+    buildProductBulkPriceAdjustments(historic, adjust({ amount: '.000001', fields: ['purchase_price_usd'] })),
+    [],
+    'a sub-tick no-op must not rewrite an authoritative historical value merely to canonicalize it',
+  )
+  assert.deepEqual(
+    buildProductBulkPriceAdjustments([{ id: 13, purchase_price_usd: 0.0001 }], adjust({ direction: 'decrease', amount: '.00015', fields: ['purchase_price_usd'] })),
+    [{ id: 13, updates: { purchase_price_usd: 0 } }],
+    'a negative result clamps to zero after exact four-decimal cost arithmetic',
+  )
+  assert.deepEqual(
+    buildProductBulkPriceAdjustments([{ id: 14, purchase_price_usd: 0.000049 }], adjust({ amount: '.0001', fields: ['purchase_price_usd'], skipZeroPriced: true })),
+    [{ id: 14, updates: { purchase_price_usd: 0.0001 } }],
+    'skip-zero inspects the raw stored value, not its rounded four-decimal comparison value',
+  )
+  assert.deepEqual(
+    buildProductBulkPriceAdjustments([{ id: 15, purchase_price_usd: 0.000049 }], adjust({ direction: 'decrease', amount: '.0001', fields: ['purchase_price_usd'] })),
+    [{ id: 15, updates: { purchase_price_usd: 0 } }],
+    'an explicit decrease clears a positive sub-tick historical value even when both comparison values round to zero',
+  )
+  console.log('PASS purchase-cost sub-tick no-op preservation and negative clamp')
+}
+
 // --- no-op safety ---------------------------------------------------------
 
 {

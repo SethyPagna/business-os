@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import ChevronsLeft from 'lucide-react/dist/esm/icons/chevrons-left.js'
+import ChevronsRight from 'lucide-react/dist/esm/icons/chevrons-right.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect from './AppSelect'
+import DateEntryInput from './DateEntryInput.tsx'
+import { normalizeTimeEntry } from '../../utils/dateEntry.ts'
 import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './statsStripPresets.ts'
 
 // X1 (Part 395), redesigned Aug 30 per user direction (twice): a compact
 // trigger pill, and a panel laid out as two ENDPOINT BOXES
-// (Start | → | End), each holding a large editable MM/DD/YYYY date with its
+// (Start | → | End), each holding a large editable DD/MM/YYYY date with its
 // own month + year selects underneath -- replacing both the old chip strips
 // AND the first redesign's separate manual-input row + label/select rows.
 // The box whose date the next calendar click will set carries a blue ring
@@ -19,7 +24,7 @@ import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './stat
 // ✕ or an outside click.
 //
 // The trigger pill never spells out the words "Start Date"/"End Date"
-// (user, Aug 31): it always reads MM/DD/YYYY → MM/DD/YYYY -- the literal
+// (user, Aug 31): it always reads DD/MM/YYYY → DD/MM/YYYY -- the literal
 // display format as a placeholder when empty, the real dates once picked --
 // and appends each endpoint's own 24-hour HH:MM once a time is set.
 //
@@ -34,10 +39,11 @@ import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './stat
 // -- otherwise picking a month or year (a click outside rootRef) would slam
 // the whole panel shut before the navigation could take effect.
 //
-// Display format is MM/DD/YYYY on purpose: the stock mockup artwork shows
-// DD/MM placeholders, but mm/dd/yyyy-everywhere is a settled decision
-// (locale pinned en-US; re-swept Part 388/W2) -- flagged in progress.md
-// rather than silently diverging from it.
+// Display format is DD/MM/YYYY -- which is also what the stock mockup
+// artwork always showed. It was MM/DD/YYYY until Sep 4 2026 (user: "change
+// the whole app to dd-mm-yyy, just receipt id stays yyyy-mm-dd"). The note
+// that stood here recorded a deliberate divergence from that artwork; the
+// divergence is now closed rather than merely re-flagged.
 //
 // Dates are handled as ISO strings (YYYY-MM-DD) end to end and formatted by
 // string parts -- never `new Date('YYYY-MM-DD')` for display, which shifts a
@@ -50,6 +56,9 @@ export interface DateTimeRange {
   endTime: string
 }
 
+/** Explicit selection identity; manual dates may equal a relative preset. */
+export type DateTimeRangeSource = StatsPresetKey | 'custom'
+
 export const EMPTY_DATE_TIME_RANGE: DateTimeRange = { startDate: '', endDate: '', startTime: '', endTime: '' }
 
 export function isDateTimeRangeActive(range: DateTimeRange | null | undefined): boolean {
@@ -58,11 +67,19 @@ export function isDateTimeRangeActive(range: DateTimeRange | null | undefined): 
 
 interface DateTimeRangePickerProps {
   value: DateTimeRange
-  onChange: (range: DateTimeRange) => void
+  onChange: (range: DateTimeRange, source?: DateTimeRangeSource) => void
   t: (key: string) => string | undefined
   // Time row is optional per surface -- the Sales daily report wants it,
   // a plain list filter may not.
   showTime?: boolean
+  /** Hide only the decorative trigger icon on space-constrained surfaces. */
+  showCalendarIcon?: boolean
+  /** Keep both trigger endpoints fully visible at a smaller toolbar size. */
+  compactTriggerLabels?: boolean
+  /** Keep the picker's own presets unless its host already renders them. */
+  showQuickRanges?: boolean
+  /** Reports use continuous endpoints; other callers may use recurring hours. */
+  continuous?: boolean
   align?: 'left' | 'right'
   className?: string
   // Layout/shape utilities for the trigger button. Omitted => the default
@@ -91,49 +108,17 @@ export function todayDateTimeRange(now?: Date): DateTimeRange {
 
 function displayDate(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
-  return m ? `${m[2]}/${m[3]}/${m[1]}` : ''
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : ''
 }
 
-// Accepts MM/DD/YYYY (and M/D/YYYY) typed by hand; returns ISO or null.
-function parseManualDate(raw: string): string | null {
-  const trimmed = raw.trim()
-  if (!trimmed) return null
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed)
-  if (!m) return null
-  const month = Number(m[1])
-  const day = Number(m[2])
-  const year = Number(m[3])
-  if (month < 1 || month > 12 || day < 1 || year < 1970 || year > 2999) return null
-  if (day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null
-  return isoOf(year, month, day)
-}
+// The hand-typed date parser that used to live here (strict MM/DD/YYYY only)
+// moved to utils/dateEntry.ts and grew the keypad forms staff actually use --
+// 9032026, 932026, 20260903 -- so the range row reads them exactly like the
+// batch and stock-adjust dates. Same 1970-2999 window as before.
 
-// Accepts 24-hour time typed loosely -- "14:30", "1430", "930", "9", "9:5" --
-// and normalizes to "HH:MM" (00:00–23:59). Returns '' to clear on empty input,
-// or null when the text can't be read as a valid 24-hour time (so the caller
-// can snap the field back to its stored value rather than store garbage).
-function normalizeTime(raw: string): string | null {
-  const s = raw.trim()
-  if (!s) return ''
-  let hour: number
-  let minute: number
-  const colon = /^(\d{1,2}):(\d{1,2})$/.exec(s)
-  if (colon) {
-    hour = Number(colon[1])
-    minute = Number(colon[2])
-  } else if (/^\d{3,4}$/.test(s)) {
-    const p = s.padStart(4, '0')
-    hour = Number(p.slice(0, 2))
-    minute = Number(p.slice(2))
-  } else if (/^\d{1,2}$/.test(s)) {
-    hour = Number(s)
-    minute = 0
-  } else {
-    return null
-  }
-  if (hour > 23 || minute > 59) return null
-  return `${pad2(hour)}:${pad2(minute)}`
-}
+// The 24-hour time reader moved to utils/dateEntry.ts as normalizeTimeEntry,
+// so this row and the shift date+time fields read "930" the same way. Same
+// behaviour: '' clears, null means unreadable so the caller snaps back.
 
 function todayIso(): string {
   return statsPresetRange('today').startDate
@@ -148,29 +133,39 @@ export default function DateTimeRangePicker({
   onChange,
   t,
   showTime = true,
+  showCalendarIcon = false,
+  compactTriggerLabels = false,
+  showQuickRanges = true,
+  continuous = false,
   align = 'left',
   className = '',
   triggerClassName,
 }: DateTimeRangePickerProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const [panelPosition, setPanelPosition] = useState<{
+    left: number
+    top: number
+    width: number
+    maxHeight: number
+  } | null>(null)
   const today = todayIso()
   // Calendar view month/year -- follows the range start when one exists.
   const [viewYear, setViewYear] = useState(() => Number((value.startDate || today).slice(0, 4)))
   const [viewMonth, setViewMonth] = useState(() => Number((value.startDate || today).slice(5, 7)))
-  // Manual input text mirrors the value but is editable mid-keystroke.
-  const [startText, setStartText] = useState(() => displayDate(value.startDate))
-  const [endText, setEndText] = useState(() => displayDate(value.endDate))
+  // The mid-keystroke text now lives inside DateEntryInput (which owns the
+  // mask and the caret); the panel only tracks whether each endpoint's typed
+  // text was readable, so the endpoint box can paint its own red border.
   const [startInvalid, setStartInvalid] = useState(false)
   const [endInvalid, setEndInvalid] = useState(false)
+  const [rangeInvalid, setRangeInvalid] = useState(false)
   // Time text mirrors the value but stays editable mid-keystroke (like the
   // date fields) so a half-typed "14" never commits before the ":30".
   const [startTimeText, setStartTimeText] = useState(() => value.startTime)
   const [endTimeText, setEndTimeText] = useState(() => value.endTime)
 
   useEffect(() => {
-    setStartText(displayDate(value.startDate))
-    setEndText(displayDate(value.endDate))
     setStartInvalid(false)
     setEndInvalid(false)
     if (value.startDate) {
@@ -193,11 +188,47 @@ export default function DateTimeRangePicker({
       // choosing a month or year slams the whole picker shut before the
       // navigation lands.
       if (target && typeof target.closest === 'function' && target.closest('[data-app-select-menu]')) return
-      if (rootRef.current && !rootRef.current.contains(target as Node)) setOpen(false)
+      if (rootRef.current?.contains(target as Node) || panelRef.current?.contains(target as Node)) return
+      setOpen(false)
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
+
+  useEffect(() => {
+    if (!open) {
+      setPanelPosition(null)
+      return undefined
+    }
+    const position = () => {
+      const anchor = rootRef.current?.getBoundingClientRect()
+      if (!anchor) return
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const margin = 8
+      const gap = 8
+      const width = Math.max(0, Math.min(336, viewportWidth - margin * 2))
+      const compactViewport = viewportWidth < 640
+      const preferredLeft = compactViewport
+        ? anchor.left + anchor.width / 2 - width / 2
+        : align === 'right' ? anchor.right - width : anchor.left
+      const left = Math.min(Math.max(margin, preferredLeft), Math.max(margin, viewportWidth - width - margin))
+      const belowTop = anchor.bottom + gap
+      const belowHeight = Math.max(0, viewportHeight - belowTop - margin)
+      const aboveHeight = Math.max(0, anchor.top - gap - margin)
+      const placeBelow = belowHeight >= Math.min(320, aboveHeight) || belowHeight >= aboveHeight
+      const maxHeight = Math.max(96, placeBelow ? belowHeight : aboveHeight)
+      const top = placeBelow ? belowTop : Math.max(margin, anchor.top - gap - maxHeight)
+      setPanelPosition({ left, top, width, maxHeight })
+    }
+    position()
+    window.addEventListener('resize', position)
+    window.addEventListener('scroll', position, true)
+    return () => {
+      window.removeEventListener('resize', position)
+      window.removeEventListener('scroll', position, true)
+    }
+  }, [align, open])
 
   const apply = (patch: Partial<DateTimeRange>) => {
     // Keep start <= end whenever both ends exist -- swapping beats erroring.
@@ -207,7 +238,13 @@ export default function DateTimeRangePicker({
       next.startDate = next.endDate
       next.endDate = swapped
     }
-    onChange(next)
+    if (continuous && next.startDate && next.startDate === next.endDate &&
+      (next.endTime || '23:59') < (next.startTime || '00:00')) {
+      setRangeInvalid(true)
+      return
+    }
+    setRangeInvalid(false)
+    onChange(next, 'custom')
   }
 
   // Day clicks alternate start -> end -> start... via an explicit phase
@@ -231,25 +268,29 @@ export default function DateTimeRangePicker({
     setPickPhase('start')
   }
 
-  const commitManual = (which: 'start' | 'end', raw: string) => {
-    const iso = parseManualDate(raw)
+  // DateEntryInput has already normalised whatever was typed (9032026,
+  // 9/3/26, 2026-09-03, ...) into ISO 'YYYY-MM-DD', or '' for a cleared
+  // field, and reports unreadable text through onInvalidChange -- so this
+  // only has to decide what to apply.
+  const commitManual = (which: 'start' | 'end', iso: string) => {
     if (which === 'start') {
-      if (!raw.trim()) { setStartInvalid(false); if (value.startDate) apply({ startDate: '' }); return }
-      if (!iso) { setStartInvalid(true); return }
-      setStartInvalid(false)
-      // No-op when unchanged -- a blur re-committing the same text must never
+      if (!iso) { if (value.startDate) apply({ startDate: '' }); return }
+      // No-op when unchanged -- a blur re-committing the same date must never
       // fire a second apply that could race a same-tick day click.
       if (iso !== value.startDate) apply({ startDate: iso })
     } else {
-      if (!raw.trim()) { setEndInvalid(false); if (value.endDate) apply({ endDate: '' }); return }
-      if (!iso) { setEndInvalid(true); return }
-      setEndInvalid(false)
+      if (!iso) { if (value.endDate) apply({ endDate: '' }); return }
       if (iso !== value.endDate) apply({ endDate: iso })
     }
   }
 
   const commitTime = (which: 'start' | 'end', raw: string) => {
-    const norm = normalizeTime(raw)
+    // The shared normalizer returns both canonical HH:mm and minutes for the
+    // shift forms. This range picker needs the canonical string only. Keep a
+    // cleared field distinct from unreadable text: both have value:null in
+    // the parser, but clear commits '' while invalid input snaps back.
+    const result = normalizeTimeEntry(raw)
+    const norm = raw.trim() ? result.value : ''
     if (norm === null) {
       // Unparseable -- snap the field back to the stored value.
       if (which === 'start') setStartTimeText(value.startTime)
@@ -287,6 +328,8 @@ export default function DateTimeRangePicker({
     setViewYear(year)
   }
 
+  const stepViewYear = (delta: number) => setViewYear((year) => year + delta)
+
   const calendarCells = useMemo(() => {
     const first = new Date(Date.UTC(viewYear, viewMonth - 1, 1))
     // Monday-first offset: JS getUTCDay() is 0=Sun.
@@ -310,38 +353,49 @@ export default function DateTimeRangePicker({
   const quickRanges: Array<{ id: StatsPresetKey; label: string }> = [
     { id: 'all', label: quickRangeLabel('all_time', 'All time') },
     { id: 'today', label: quickRangeLabel('today', 'Today') },
+    { id: 'yesterday', label: quickRangeLabel('yesterday', 'Yesterday') },
     { id: '7d', label: quickRangeLabel('last_7_days', 'Last 7 days') },
-    { id: 'week', label: quickRangeLabel('this_week', 'This week') },
+    { id: '30d', label: quickRangeLabel('last_30_days', 'Last 30 days') },
     { id: 'month', label: quickRangeLabel('this_month', 'This month') },
-    { id: 'year', label: quickRangeLabel('this_year', 'This year') },
   ]
   const applyQuickRange = (preset: StatsPresetKey) => {
+    setRangeInvalid(false)
     const next = statsPresetRange(preset)
-    onChange(showTime ? next : { ...next, startTime: '', endTime: '' })
+    onChange(showTime ? next : { ...next, startTime: '', endTime: '' }, preset)
     const anchor = next.startDate || today
     setViewYear(Number(anchor.slice(0, 4)))
     setViewMonth(Number(anchor.slice(5, 7)))
     setPickPhase('start')
   }
 
-  // Trigger labels: always the literal MM/DD/YYYY format -- as a placeholder
+  // Trigger labels: always the literal DD/MM/YYYY format -- as a placeholder
   // when a side is empty, as the real date once picked -- never the words
   // "Start Date"/"End Date" (user, Aug 31). Each side carries its own 24-hour
   // HH:MM once any time is set (the unset side defaults to the day's edges,
   // matching the panel's old suffix).
   const showTimes = showTime && Boolean(value.startTime || value.endTime)
-  const startTriggerLabel = `${displayDate(value.startDate) || 'MM/DD/YYYY'}${showTimes ? ` ${value.startTime || '00:00'}` : ''}`
-  const endTriggerLabel = `${displayDate(value.endDate) || 'MM/DD/YYYY'}${showTimes ? ` ${value.endTime || '23:59'}` : ''}`
+  const startTriggerDate = displayDate(value.startDate) || 'DD/MM/YYYY'
+  const endTriggerDate = displayDate(value.endDate) || 'DD/MM/YYYY'
+  // Both endpoints stay on ONE line each -- date and time inline, never
+  // stacked (user, Sep 15: "i want them same compact one row"). Was a
+  // `grid` with the time in a second span underneath, which turned the
+  // whole trigger into two lines whenever a time was set. The clamp floor
+  // drops slightly when a time is shown so `dd/mm/yyyy HH:MM` still fits
+  // at the narrowest (375px) width without wrapping.
+  const triggerEndpoint = (date: string, time: string) => (
+    <span className={`inline-flex min-w-0 items-baseline justify-center gap-1 whitespace-nowrap tabular-nums leading-none ${compactTriggerLabels ? 'text-[clamp(10px,2.75vw,11px)]' : (showTimes ? 'text-[clamp(9px,2.6vw,14px)]' : 'text-[clamp(10px,3vw,14px)]')}`}>
+      <span>{date}</span>
+      {showTimes ? <span className="font-medium opacity-80">{time}</span> : null}
+    </span>
+  )
 
   // One endpoint box: START or END label, the date itself as a LARGE editable
-  // MM/DD/YYYY input (bumped from text-xs per user direction "the dates can
+  // DD/MM/YYYY input (bumped from text-xs per user direction "the dates can
   // be made larger"), and that endpoint's month + year selects underneath.
   // The box for the endpoint the next calendar click will set carries a blue
   // ring; mousedown anywhere in a box retargets the click sequence to it.
   const renderEndpointBox = (which: 'start' | 'end') => {
     const iso = which === 'start' ? value.startDate : value.endDate
-    const text = which === 'start' ? startText : endText
-    const setText = which === 'start' ? setStartText : setEndText
     const invalid = which === 'start' ? startInvalid : endInvalid
     const month1 = iso ? Number(iso.slice(5, 7)) : (which === 'start' ? viewMonth : Number((value.endDate || value.startDate || today).slice(5, 7)))
     const year = iso ? Number(iso.slice(0, 4)) : (which === 'start' ? viewYear : Number((value.endDate || value.startDate || today).slice(0, 4)))
@@ -358,15 +412,25 @@ export default function DateTimeRangePicker({
       >
         <div className="text-center text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
         {/* Kept compact on purpose -- the user's "make the dates larger"
-            was about the OUTSIDE trigger pill, not this panel. */}
-        <input
-          className={`w-full min-w-0 bg-transparent text-center text-sm font-semibold outline-none placeholder:font-normal placeholder:text-slate-400 ${invalid ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-slate-50'}`}
-          placeholder="MM/DD/YYYY"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          onBlur={(event) => commitManual(which, event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Enter') commitManual(which, (event.target as HTMLInputElement).value) }}
-          aria-label={which === 'start' ? (t('range_start') || 'Start date') : (t('range_end') || 'End date')}
+            was about the OUTSIDE trigger pill, not this panel.
+            The typed field is the shared DateEntryInput (Sep 3): a bare
+            digit run like 9032026 normalises to 09/03/2026 on Enter/blur,
+            exactly as on every batch and stock-adjust date. The box paints
+            its own red border from onInvalidChange, so the field's own
+            error affordance is suppressed (showError={false}) rather than
+            doubling it, and Enter stays inside the panel
+            (advanceOnCommit={false}) instead of jumping to the calendar. */}
+        <DateEntryInput
+          value={iso}
+          onChange={(next) => commitManual(which, next)}
+          onInvalidChange={(next) => (which === 'start' ? setStartInvalid(next) : setEndInvalid(next))}
+          showError={false}
+          advanceOnCommit={false}
+          bare
+          t={t}
+          className={`w-full bg-transparent text-center font-semibold outline-none placeholder:font-normal placeholder:text-slate-400 ${invalid ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-slate-50'}`}
+          placeholder="dd/mm/yyyy"
+          ariaLabel={which === 'start' ? (t('range_start') || 'Start date') : (t('range_end') || 'End date')}
         />
         {/* The month/year selects that used to sit here moved into the
             calendar's own header row (user, Aug 30: "the month and year
@@ -378,7 +442,7 @@ export default function DateTimeRangePicker({
   }
 
   return (
-    <div ref={rootRef} className={`relative ${className}`}>
+    <div ref={rootRef} className={`relative min-w-0 max-w-full ${className}`}>
       {/* Trigger pill: text-sm font-semibold base (was text-xs font-medium)
           -- the user asked for LARGER dates on the OUTSIDE pill specifically
           (Aug 30), while the panel inside stays compact.
@@ -397,21 +461,28 @@ export default function DateTimeRangePicker({
           if (!current) setPickPhase('start')
           return !current
         })}
-        className={`min-h-10 ${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3 py-1.5 sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[15rem]'} border text-sm font-semibold transition ${hasSelection
+        className={`min-h-10 min-w-0 max-w-full ${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3 py-1.5 sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[15rem]'} border text-sm font-semibold transition ${hasSelection
           ? 'border-blue-400 bg-blue-50 text-blue-800 shadow-sm dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100'
           : 'border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50/50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-600'}`}
         aria-expanded={open}
         aria-label={t('date_time_range') || 'Date and time range'}
       >
-        <CalendarDays className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" />
-        <span className={`truncate ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`}>{startTriggerLabel}</span>
-        <ArrowRight className="h-5 w-5 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} />
-        <span className={`truncate ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`}>{endTriggerLabel}</span>
+        {showCalendarIcon && <CalendarDays className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" />}
+        <span className={`grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`} data-date-range-trigger-values>
+          {triggerEndpoint(startTriggerDate, value.startTime || '00:00')}
+          <ArrowRight className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} aria-hidden="true" />
+          {triggerEndpoint(endTriggerDate, value.endTime || '23:59')}
+        </span>
       </button>
 
-      {open ? (
+      {open && panelPosition && typeof document !== 'undefined' ? createPortal(
         <div
-          className={`absolute top-full z-40 mt-2 w-[21rem] max-w-[92vw] rounded-lg border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-700 dark:bg-slate-900 ${align === 'right' ? 'right-0' : 'left-0'}`}
+          ref={panelRef}
+          data-date-time-range-panel
+          role="dialog"
+          aria-label={t('date_time_range') || 'Date and time range'}
+          style={panelPosition}
+          className="fixed z-[1080] overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-700 dark:bg-slate-900"
         >
           {/* Header: Clear (when anything is set) + the red close ✕. */}
           <div className="mb-2 flex items-center gap-2">
@@ -420,7 +491,7 @@ export default function DateTimeRangePicker({
               <button
                 type="button"
                 className="ml-auto text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline dark:text-slate-400 dark:hover:text-slate-200"
-                onClick={() => onChange({ ...EMPTY_DATE_TIME_RANGE })}
+                onClick={() => onChange({ ...EMPTY_DATE_TIME_RANGE }, 'all')}
               >
                 {t('clear') || 'Clear'}
               </button>
@@ -434,6 +505,26 @@ export default function DateTimeRangePicker({
               <X className="h-4 w-4" />
             </button>
           </div>
+
+          {/* Quick ranges lead the panel so the most common choices are
+              available before the manual Start / End fields. */}
+          {showQuickRanges ? <div className="mb-2 border-b border-slate-100 pb-2 dark:border-slate-700/60" data-date-time-range-presets>
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{quickRangeLabel('quick_range', 'Quick range')}</div>
+            <div className="flex flex-wrap gap-1">
+              {quickRanges.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => applyQuickRange(preset.id)}
+                  className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${activePreset === preset.id
+                    ? 'border-blue-500 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-500 dark:text-white'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-200'}`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div> : null}
 
           {/* Start | → | End endpoint boxes (see renderEndpointBox above). */}
           <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5">
@@ -457,6 +548,7 @@ export default function DateTimeRangePicker({
                 onBlur={(event) => commitTime('start', event.target.value)}
                 onKeyDown={(event) => { if (event.key === 'Enter') commitTime('start', (event.target as HTMLInputElement).value) }}
                 aria-label={t('start_time') || 'Start time'}
+                aria-invalid={rangeInvalid || undefined}
               />
               <span className="text-slate-400">—</span>
               <input
@@ -469,28 +561,44 @@ export default function DateTimeRangePicker({
                 onBlur={(event) => commitTime('end', event.target.value)}
                 onKeyDown={(event) => { if (event.key === 'Enter') commitTime('end', (event.target as HTMLInputElement).value) }}
                 aria-label={t('end_time') || 'End time'}
+                aria-invalid={rangeInvalid || undefined}
               />
               <span className="ml-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">24h</span>
             </div>
           ) : null}
 
+          {rangeInvalid ? <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-300">
+            {t('end_date') || 'End date'} / {t('end_time') || 'End time'} ≥ {t('start_date') || 'Start date'} / {t('start_time') || 'Start time'}
+          </p> : null}
+
           {/* Calendar range grid, Monday-first, with its own ‹ month › nav. */}
           <div className="mt-3 rounded-lg border border-slate-100 p-2 dark:border-slate-700/60">
-            <div className="mb-1 flex items-center justify-between">
+            <div className="mb-1 grid grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] items-center gap-0.5">
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => stepViewYear(-1)}
+                aria-label={`${quickRangeLabel('previous', 'Previous')} ${quickRangeLabel('year', 'year')}`}
+                data-date-range-nav="previous-year"
+              >
+                <ChevronsLeft className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
+              </button>
               <button
                 type="button"
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => stepViewMonth(-1)}
-                aria-label="Previous month"
+                aria-label={`${quickRangeLabel('previous', 'Previous')} ${quickRangeLabel('month', 'month')}`}
+                data-date-range-nav="previous-month"
               >
-                <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
+                <ChevronLeft className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
               </button>
               {/* Month + Year are SELECTS right here in the calendar header
                   (user, Aug 30) — changing either retargets the visible
                   month; day clicks keep setting whichever endpoint box is
                   ringed. Chevron-less/compact per the earlier direction. */}
-              <span className="flex items-center gap-1">
+              <span className="flex min-w-0 items-center justify-center gap-1">
                 <AppSelect
                   value={String(viewMonth)}
                   options={monthOptions}
@@ -513,9 +621,20 @@ export default function DateTimeRangePicker({
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => stepViewMonth(1)}
-                aria-label="Next month"
+                aria-label={`${quickRangeLabel('next', 'Next')} ${quickRangeLabel('month', 'month')}`}
+                data-date-range-nav="next-month"
               >
-                <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
+                <ChevronRight className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => stepViewYear(1)}
+                aria-label={`${quickRangeLabel('next', 'Next')} ${quickRangeLabel('year', 'year')}`}
+                data-date-range-nav="next-year"
+              >
+                <ChevronsRight className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
               </button>
             </div>
             <div className="grid grid-cols-7 text-center text-[10px] font-semibold text-slate-600 dark:text-slate-300">
@@ -547,27 +666,8 @@ export default function DateTimeRangePicker({
             </div>
           </div>
 
-          {/* Quick ranges live inside the opened date/time control—not as a
-              second toolbar outside it. They sit below the calendar so manual
-              endpoint selection remains the primary interaction. */}
-          <div className="mt-2 border-t border-slate-100 pt-2 dark:border-slate-700/60">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{quickRangeLabel('quick_range', 'Quick range')}</div>
-            <div className="flex flex-nowrap gap-1 overflow-x-auto pb-0.5 [scrollbar-width:thin]">
-              {quickRanges.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => applyQuickRange(preset.id)}
-                  className={`shrink-0 rounded-md border px-2 py-1 text-[11px] font-medium transition ${activePreset === preset.id
-                    ? 'border-blue-500 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-500 dark:text-white'
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-200'}`}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   )

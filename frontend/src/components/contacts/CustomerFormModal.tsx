@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Modal from '../shared/Modal'
+import { useFormDirty } from '../../utils/formDirty.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import {
   CONTACT_OPTION_LIMIT,
@@ -8,10 +9,12 @@ import {
   serializeContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
-import { generateCustomerMembershipNumber } from './customerMembershipNumber'
+import { CUSTOMER_MEMBERSHIP_PLACEHOLDER } from './customerMembershipNumber'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
+import { createSeparateContactDecision, resolveContactDuplicateSyncError, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -39,7 +42,8 @@ interface CustomerFormState extends CustomerRecord {
 
 interface CustomerFormModalProps {
   customer?: CustomerRecord | null
-  onSave: (payload: CustomerFormState & { address: string | null; confirmDuplicate?: boolean }) => void | Promise<void>
+  onSave: (payload: CustomerFormState & { address: string | null; duplicateDecision?: ContactDuplicateDecision }) => unknown | Promise<unknown>
+  onUseExisting: (match: ContactDuplicateMatch) => void | Promise<void>
   onClose: () => void
   t?: TranslateFn
 }
@@ -50,6 +54,7 @@ interface OptionEditorProps {
   total: number
   onChange: (option: ContactOption) => void
   onRemove: () => void
+  t?: TranslateFn
 }
 
 function tr(t: TranslateFn | undefined, key: string, fallback: string): string {
@@ -61,7 +66,7 @@ function parseContactOptions(raw: unknown): ContactOption[] {
   return parseStoredContactOptions(raw, { legacyField: 'address' })
 }
 
-function OptionEditor({ option, index, total, onChange, onRemove }: OptionEditorProps) {
+function OptionEditor({ option, index, total, onChange, onRemove, t }: OptionEditorProps) {
   const setField = (key: keyof ContactOption, value: string) => onChange({ ...option, [key]: value })
   const fieldId = (suffix: string) => `customer-option-${index}-${suffix}`
 
@@ -74,39 +79,39 @@ function OptionEditor({ option, index, total, onChange, onRemove }: OptionEditor
           name={fieldId('label')}
           autoComplete="off"
           className="input flex-1 text-xs py-1"
-          placeholder="Option label"
+          placeholder={tr(t, 'contact_option_label', 'Option label')}
           value={option.label}
           onChange={(event) => setField('label', event.target.value)}
         />
         {total > 1 ? (
           <button type="button" onClick={onRemove} className="rounded px-1.5 py-1 text-xs text-red-500 hover:text-red-700">
-            Remove
+            {tr(t, 'remove', 'Remove')}
           </button>
         ) : null}
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
-          <label htmlFor={fieldId('name')} className="mb-0.5 block text-xs text-gray-400">Name</label>
-          <input id={fieldId('name')} name={fieldId('name')} autoComplete="name" className="input text-xs py-1" placeholder="Contact name" value={option.name} onChange={(event) => setField('name', event.target.value)} />
+          <label htmlFor={fieldId('name')} className="mb-0.5 block text-xs text-gray-400">{tr(t, 'name', 'Name')}</label>
+          <input id={fieldId('name')} name={fieldId('name')} autoComplete="name" className="input text-xs py-1" placeholder={tr(t, 'contact_option_name', 'Contact name')} value={option.name} onChange={(event) => setField('name', event.target.value)} />
         </div>
         <div>
-          <label htmlFor={fieldId('phone')} className="mb-0.5 block text-xs text-gray-400">Phone</label>
-          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" className="input text-xs py-1" placeholder="Phone number" value={option.phone} onChange={(event) => setField('phone', event.target.value)} />
+          <label htmlFor={fieldId('phone')} className="mb-0.5 block text-xs text-gray-400">{tr(t, 'phone', 'Phone')}</label>
+          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" inputMode="tel" className="input text-xs py-1" placeholder={tr(t, 'phone_number', 'Phone number')} value={option.phone} onChange={(event) => setField('phone', formatPhoneInputElement(event.currentTarget))} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => setField('phone', phone))} onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (phone) => setField('phone', phone))} />
         </div>
       </div>
       <div>
-        <label htmlFor={fieldId('email')} className="mb-0.5 block text-xs text-gray-400">Email</label>
-        <input id={fieldId('email')} name={fieldId('email')} autoComplete="email" className="input text-xs py-1" type="email" placeholder="Email address" value={option.email} onChange={(event) => setField('email', event.target.value)} />
+        <label htmlFor={fieldId('email')} className="mb-0.5 block text-xs text-gray-400">{tr(t, 'email', 'Email')}</label>
+        <input id={fieldId('email')} name={fieldId('email')} autoComplete="email" className="input text-xs py-1" type="email" placeholder={tr(t, 'contact_option_email', 'Email address')} value={option.email} onChange={(event) => setField('email', event.target.value)} />
       </div>
       <div>
-        <label htmlFor={fieldId('address')} className="mb-0.5 block text-xs text-gray-400">Address</label>
-        <input id={fieldId('address')} name={fieldId('address')} autoComplete="street-address" className="input text-xs py-1" placeholder="Delivery or billing address" value={option.address} onChange={(event) => setField('address', event.target.value)} />
+        <label htmlFor={fieldId('address')} className="mb-0.5 block text-xs text-gray-400">{tr(t, 'address', 'Address')}</label>
+        <input id={fieldId('address')} name={fieldId('address')} autoComplete="street-address" className="input text-xs py-1" placeholder={tr(t, 'customer_option_address', 'Delivery or billing address')} value={option.address} onChange={(event) => setField('address', event.target.value)} />
       </div>
     </div>
   )
 }
 
-export default function CustomerFormModal({ customer, onSave, onClose, t }: CustomerFormModalProps) {
+export default function CustomerFormModal({ customer, onSave, onUseExisting, onClose, t }: CustomerFormModalProps) {
   const initial = customer
     ? {
       ...customer,
@@ -117,8 +122,10 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
       notes: String(customer.notes || ''),
       gender: String(customer.gender || ''),
     }
-    : { name: '', membership_number: generateCustomerMembershipNumber(), phone: '', email: '', notes: '', gender: '' }
+    : { name: '', membership_number: '', phone: '', email: '', notes: '', gender: '' }
   const [form, setForm] = useState<CustomerFormState>(initial)
+  // S4-21: dismissing this modal with edits raises the discard prompt.
+  const { dirty: formDirty } = useFormDirty(form, String(customer?.id ?? 'new'))
   const [options, setOptions] = useState(() => {
     const parsed = parseContactOptions(initial.address)
     return parsed.length ? parsed : [createContactOption()]
@@ -128,16 +135,26 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
   // Part 563: the review dialog is open (handleSubmit validated + opened it;
   // commitCustomer calls onSave on confirm).
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const duplicateMatches = useContactDuplicateFlag('customers', form.name, form.phone, customer?.id)
+  const [serverDuplicateCheck, setServerDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
+  const [pendingDuplicateCheck, setPendingDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
+  const duplicateCheck = useContactDuplicateFlag('customers', form.name, [form.phone, ...options.map((option) => option.phone)], customer?.id)
+  const activeDuplicateCheck = serverDuplicateCheck || duplicateCheck
+  const duplicateMatches = activeDuplicateCheck.matches
   const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
+  const pendingExactMatch = pendingDuplicateCheck?.matches.find((match) => match.severity === 'exact_match')
+  const membershipNumberReadOnly = !customer || Boolean(String(customer.membership_number || '').trim())
 
-  const setField = <Key extends keyof CustomerFormState>(key: Key, value: CustomerFormState[Key]) => setForm((current) => ({ ...current, [key]: value }))
-  const addOption = () => setOptions((current) => {
-    if (current.length >= CONTACT_OPTION_LIMIT) return current
-    return [...current, createContactOption()]
-  })
-  const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
-  const updateOption = (index: number, nextOption: ContactOption) => setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? nextOption : item)))
+  const clearServerDuplicateCheck = () => setServerDuplicateCheck(null)
+  const setField = <Key extends keyof CustomerFormState>(key: Key, value: CustomerFormState[Key]) => {
+    clearServerDuplicateCheck()
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+  const addOption = () => {
+    clearServerDuplicateCheck()
+    setOptions((current) => current.length >= CONTACT_OPTION_LIMIT ? current : [...current, createContactOption()])
+  }
+  const removeOption = (index: number) => { clearServerDuplicateCheck(); setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index)) }
+  const updateOption = (index: number, nextOption: ContactOption) => { clearServerDuplicateCheck(); setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? nextOption : item))) }
   // Part 563: validate, then open the review dialog. commitCustomer calls
   // onSave once confirmed. The old exact-duplicate window.confirm() is folded
   // INTO the review dialog (danger note when an exact match exists) so there is
@@ -150,7 +167,10 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
       setLocalError(tr(t, 'name_required', 'Name is required'))
       return
     }
-    if (!membershipNumber) {
+    // A new customer has no number yet -- the server mints the next one in
+    // the LC- sequence when this field arrives blank. Only an EXISTING
+    // customer, being edited, must still carry one.
+    if (customer && !membershipNumber) {
       setLocalError(tr(t, 'membership_number_required', 'Membership number is required'))
       return
     }
@@ -160,12 +180,13 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
       return
     }
     setLocalError('')
+    setPendingDuplicateCheck(exactMatch ? activeDuplicateCheck : null)
     setConfirmOpen(true)
   }
 
   const buildCustomerReviewItems = (): ConfirmReviewItem[] => {
     const items: ConfirmReviewItem[] = [
-      { label: tr(t, 'membership_number', 'Membership number'), value: String(form.membership_number || '').trim().toUpperCase() },
+      { label: tr(t, 'membership_number', 'Membership number'), value: String(form.membership_number || '').trim().toUpperCase() || tr(t, 'membership_number_auto', 'Assigned on save') },
     ]
     const phone = String(form.phone || '').trim()
     if (phone) items.push({ label: tr(t, 'phone_number', 'Phone Number'), value: phone })
@@ -181,20 +202,28 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
     const membershipNumber = String(form.membership_number || '').trim()
     setSaving(true)
     try {
-      await Promise.resolve(onSave({
+      const duplicateDecision = pendingDuplicateCheck ? createSeparateContactDecision(pendingDuplicateCheck) : null
+      const result = await Promise.resolve(onSave({
         ...form,
         name,
         membership_number: membershipNumber.toUpperCase(),
         address: serializeContactOptions(options),
-        confirmDuplicate: !!exactMatch,
+        ...(duplicateDecision ? { duplicateDecision } : {}),
       }))
+      const nextCheck = (result as { duplicateDecisionRequired?: ContactDuplicateCheck } | null)?.duplicateDecisionRequired
+      if (nextCheck) {
+        setServerDuplicateCheck(nextCheck)
+        setLocalError(tr(t, 'contact_duplicate_review_changed', 'Review the current possible duplicate records before saving.'))
+      } else if (duplicateDecision && (result as { success?: boolean } | null)?.success === true) {
+        resolveContactDuplicateSyncError(pendingDuplicateCheck)
+      }
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <Modal title={customer ? `${tr(t, 'edit_customer', 'Edit Customer')}` : tr(t, 'add_customer', 'Add Customer')} onClose={onClose}>
+    <Modal title={customer ? `${tr(t, 'edit_customer', 'Edit Customer')}` : tr(t, 'add_customer', 'Add Customer')} onClose={onClose} unsavedChanges={{ dirty: formDirty }}>
       <div className="space-y-3">
         <div>
           <label htmlFor="customer-form-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'name', 'Name')} *</label>
@@ -207,7 +236,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label htmlFor="customer-form-phone" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'phone_number', 'Phone Number')}</label>
-            <input id="customer-form-phone" name="customer_phone" autoComplete="tel" className="input" value={form.phone || ''} onChange={(event) => setField('phone', event.target.value)} />
+            <input id="customer-form-phone" name="customer_phone" autoComplete="tel" inputMode="tel" className="input" value={form.phone || ''} onChange={(event) => setField('phone', formatPhoneInputElement(event.currentTarget))} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => setField('phone', phone))} onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (phone) => setField('phone', phone))} />
           </div>
           <div>
             <label htmlFor="customer-form-email" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'email', 'Email')}</label>
@@ -217,29 +246,31 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
 
         <div>
           <label htmlFor="customer-form-membership" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {tr(t, 'membership_number', 'Membership number')} *
+            {tr(t, 'membership_number', 'Membership number')}{customer ? ' *' : ''}
           </label>
-          <div className="flex gap-2">
-            <input
-              id="customer-form-membership"
-              name="customer_membership_number"
-              autoComplete="off"
-              className="input min-w-0 flex-1"
-              value={form.membership_number || ''}
-              onChange={(event) => setField('membership_number', event.target.value.toUpperCase())}
-              placeholder="LCMN-00000000"
-            />
-            <button
-              type="button"
-              className="btn-secondary shrink-0 px-3 text-xs"
-              onClick={() => setField('membership_number', generateCustomerMembershipNumber(form.name))}
-            >
-              {tr(t, 'regenerate', 'Regenerate')}
-            </button>
-          </div>
+          {/* Minted by the server, not the browser: the LC- sequence gap-fills,
+              which only the database can know. A new customer sees the field
+              read-only until save. Existing stored numbers are preserved by the
+              backend; only a legacy existing record with no number stays editable. */}
+          <input
+            id="customer-form-membership"
+            name="customer_membership_number"
+            autoComplete="off"
+            className={`input w-full ${membershipNumberReadOnly ? 'cursor-default bg-gray-50 text-gray-600 dark:bg-zinc-800 dark:text-gray-300' : ''}`}
+            value={form.membership_number || ''}
+            onChange={(event) => setField('membership_number', event.target.value.toUpperCase())}
+            placeholder={customer ? CUSTOMER_MEMBERSHIP_PLACEHOLDER : tr(t, 'membership_number_auto', 'Assigned on save')}
+            readOnly={membershipNumberReadOnly}
+            aria-readonly={membershipNumberReadOnly}
+          />
+          {!customer ? (
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr(t, 'membership_number_auto_hint', 'The next available LC- number is assigned when you save.')}</p>
+          ) : membershipNumberReadOnly ? (
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr(t, 'membership_number_preserved_hint', 'This existing membership number is preserved and cannot be changed.')}</p>
+          ) : null}
         </div>
 
-        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="customer" />
+        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="customer" onUseExisting={onUseExisting} t={t} />
 
         <div>
           <label htmlFor="customer-form-gender" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'gender', 'Gender')}</label>
@@ -280,6 +311,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
                 total={options.length}
                 onChange={(nextOption) => updateOption(index, nextOption)}
                 onRemove={() => removeOption(index)}
+                t={t}
               />
             ))}
           </div>
@@ -311,9 +343,9 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
           title={customer ? tr(t, 'edit_customer', 'Edit Customer') : tr(t, 'add_customer', 'Add Customer')}
           message={String(form.name || '').trim()}
           items={buildCustomerReviewItems()}
-          note={exactMatch ? `"${exactMatch.name}" ${tr(t, 'customer_exact_duplicate_confirm', 'already has this exact name and phone number. Create a separate customer record anyway?')}` : undefined}
-          danger={!!exactMatch}
-          confirmLabel={customer ? tr(t, 'save', 'Save') : tr(t, 'add_customer', 'Add Customer')}
+          note={pendingExactMatch ? tr(t, 'contact_duplicate_possible_message', 'A contact already has this name and phone number. Use the existing record or create a separate one.') : undefined}
+          danger={!!pendingExactMatch}
+          confirmLabel={pendingExactMatch ? tr(t, 'contact_duplicate_create_separately', 'Create separately') : customer ? tr(t, 'save', 'Save') : tr(t, 'add_customer', 'Add Customer')}
           cancelLabel={tr(t, 'cancel', 'Cancel')}
           working={saving}
           workingLabel={tr(t, 'saving', 'Saving...')}

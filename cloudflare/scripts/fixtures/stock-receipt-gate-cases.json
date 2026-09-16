@@ -1,0 +1,30 @@
+{
+  "_why": "One case table, evaluated by BOTH implementations of the stock-in receipt gate: cloudflare/src/lib/stockReceiptGate.ts (the enforcement) and frontend/src/utils/stockReceiptFields.ts (the pre-submit check). cloudflare/scripts/test-stock-receipt-gate-pure.cjs and frontend/tests/stockReceiptFields.test.ts each run every case through their own side and assert the SAME code. A frontend that lets something through the backend refuses -- or refuses something the backend accepts -- fails here before a user ever meets the 400.",
+  "cases": [
+    { "name": "a remove is not a receipt and needs nothing", "input": { "isStockIn": false }, "code": "" },
+    { "name": "a set that lowers stock is not a receipt", "input": { "isStockIn": false, "supplierName": "", "unitCostUsd": null }, "code": "" },
+    { "name": "a receipt with supplier and a real cost passes", "input": { "isStockIn": true, "supplierName": "Bong Long", "unitCostUsd": 9.5 }, "code": "" },
+    { "name": "supplier missing", "input": { "isStockIn": true, "supplierName": "", "unitCostUsd": 9.5 }, "code": "supplier_required" },
+    { "name": "supplier is whitespace only", "input": { "isStockIn": true, "supplierName": "   ", "unitCostUsd": 9.5 }, "code": "supplier_required" },
+    { "name": "supplier absent entirely", "input": { "isStockIn": true, "unitCostUsd": 9.5 }, "code": "supplier_required" },
+    { "name": "cost left blank is rejected, never defaulted", "input": { "isStockIn": true, "supplierName": "Bong Long", "unitCostUsd": "" }, "code": "cost_required" },
+    { "name": "cost absent entirely is rejected", "input": { "isStockIn": true, "supplierName": "Bong Long" }, "code": "cost_required" },
+    { "name": "cost null is rejected", "input": { "isStockIn": true, "supplierName": "Bong Long", "unitCostUsd": null }, "code": "cost_required" },
+    { "name": "an unreadable cost is rejected, not coerced to zero", "input": { "isStockIn": true, "supplierName": "Bong Long", "unitCostUsd": "abc" }, "code": "cost_required" },
+    { "name": "a negative cost is refused rather than clamped", "input": { "isStockIn": true, "supplierName": "Bong Long", "unitCostUsd": -1 }, "code": "cost_negative" },
+    { "name": "zero cost without the free-goods flag is refused", "input": { "isStockIn": true, "supplierName": "Bong Long", "unitCostUsd": 0 }, "code": "free_goods_required" },
+    { "name": "zero cost typed as a string is still refused", "input": { "isStockIn": true, "supplierName": "Bong Long", "unitCostUsd": "0" }, "code": "free_goods_required" },
+    { "name": "zero cost with the free-goods flag passes", "input": { "isStockIn": true, "supplierName": "Bong Long", "unitCostUsd": 0, "freeGoods": true }, "code": "" },
+    { "name": "the free-goods flag does not excuse a missing supplier", "input": { "isStockIn": true, "supplierName": "", "unitCostUsd": 0, "freeGoods": true }, "code": "supplier_required" },
+    { "name": "the free-goods flag does not excuse a blank cost", "input": { "isStockIn": true, "supplierName": "Bong Long", "unitCostUsd": "", "freeGoods": true }, "code": "cost_required" },
+    { "name": "a top-up into an already-attributed lot inherits that lot's supplier", "input": { "isStockIn": true, "supplierName": "", "lotSupplierName": "Bong Long", "unitCostUsd": 3 }, "code": "" },
+    { "name": "an UNattributed lot excuses nothing -- the blank is exactly what the choice fills", "input": { "isStockIn": true, "lotSupplierName": "   ", "unitCostUsd": 3 }, "code": "supplier_required" },
+    { "name": "the lot's supplier does not excuse this receipt's own cost", "input": { "isStockIn": true, "lotSupplierName": "Bong Long" }, "code": "cost_required" },
+    { "name": "a surface that cannot see the lot's attribution defers the supplier half", "input": { "isStockIn": true, "lotAttributionDeferred": true, "unitCostUsd": 3 }, "code": "" },
+    { "name": "deferring the supplier does not defer this receipt's own cost", "input": { "isStockIn": true, "lotAttributionDeferred": true }, "code": "cost_required" },
+    { "name": "deferring the supplier does not make a zero cost free", "input": { "isStockIn": true, "lotAttributionDeferred": true, "unitCostUsd": 0 }, "code": "free_goods_required" },
+    { "name": "a correction restores a prior state and carries no receipt facts", "input": { "isStockIn": true, "attribution": "correction" }, "code": "" },
+    { "name": "an unknown attribution string is treated as a receipt, never as an exemption", "input": { "isStockIn": true, "attribution": "whatever" }, "code": "supplier_required" },
+    { "name": "attribution receipt is the explicit default", "input": { "isStockIn": true, "attribution": "receipt", "supplierName": "Bong Long", "unitCostUsd": 3 }, "code": "" }
+  ]
+}

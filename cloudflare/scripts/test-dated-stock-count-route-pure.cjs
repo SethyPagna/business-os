@@ -79,6 +79,10 @@ const relMap = {
   './batchCode.ts': () => loadReal('lib/batchCode.ts'),
   './datedStockCountImport': () => loadReal('lib/datedStockCountImport.ts'),
   './datedStockCountImport.ts': () => loadReal('lib/datedStockCountImport.ts'),
+  './importBranchAuthority': () => loadReal('lib/importBranchAuthority.ts'),
+  './importBranchAuthority.ts': () => loadReal('lib/importBranchAuthority.ts'),
+  './branchRoles': () => loadReal('lib/branchRoles.ts'),
+  './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
 }
 const originalCompile = Module.prototype._compile
 Module.prototype._compile = function (content, filename) {
@@ -117,8 +121,8 @@ async function testAsync(name, fn) {
 }
 
 function seed(rawDb) {
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Annex', 1, 0)").run()
+  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
+  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 0)").run()
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run()
   rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 0)').run()
 }
@@ -159,7 +163,7 @@ async function main() {
     assert.ok('plan' in built, JSON.stringify(built))
     assert.strictEqual(built.plan.movementsToCreate.length, 1)
     assert.strictEqual(built.plan.movementsToCreate[0].productName, 'Widget')
-    assert.strictEqual(built.plan.movementsToCreate[0].branchName, 'Main')
+    assert.strictEqual(built.plan.movementsToCreate[0].branchName, 'Shop')
   })
 
   await testAsync('buildDatedStockCountPlan 404s on an unknown productId, without touching branch lookups', async () => {
@@ -180,20 +184,36 @@ async function main() {
     assert.ok(/Branch 999/.test(built.error))
   })
 
+  for (const scenario of [
+    { name: 'non-canonical', mutate: (rawDb) => rawDb.prepare("UPDATE branches SET name = 'Main' WHERE id = 1").run() },
+    { name: 'inactive', mutate: (rawDb) => rawDb.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run() },
+    { name: 'ambiguous', mutate: (rawDb) => rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (3, ' shop ', 1, 0)").run() },
+  ]) {
+    await testAsync(`buildDatedStockCountPlan rejects a ${scenario.name} submitted branch identity`, async () => {
+      const { rawDb, db } = freshDb()
+      seed(rawDb)
+      scenario.mutate(rawDb)
+      const built = await buildDatedStockCountPlan(db, [{ date: '2026-08-16', productId: 1, branchId: 1, count: 5 }])
+      assert.ok('error' in built)
+      assert.strictEqual(built.status, 400)
+      assert.match(built.error, /canonical|ambiguous|inactive/i)
+    })
+  }
+
   await testAsync('buildDatedStockCountPlan finds and reconstructs baseline from a PRIOR run\'s own movement (rerun idempotency), ignoring an unrelated movement on the same row', async () => {
     const { rawDb, db } = freshDb()
     seed(rawDb)
     // A prior run of this same importer already created this movement.
     const priorId = rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
-       VALUES (1, 'Widget', 1, 'Main', 'add', 5, 'Dated stock count import', '2026-08-16 00:00:00')`
+       VALUES (1, 'Widget', 1, 'Shop', 'add', 5, 'Dated stock count import', '2026-08-16 00:00:00')`
     ).run().meta.last_row_id
     // An unrelated manual adjustment on the same product/branch/day, a
     // different reason -- must NOT be picked up as this importer's own
     // prior movement, and must not be deleted by a rerun.
     const unrelatedId = rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
-       VALUES (1, 'Widget', 1, 'Main', 'add', 2, 'Manual count', '2026-08-16 00:00:00')`
+       VALUES (1, 'Widget', 1, 'Shop', 'add', 2, 'Manual count', '2026-08-16 00:00:00')`
     ).run().meta.last_row_id
     rawDb.prepare('UPDATE branch_stock SET quantity = 7 WHERE product_id = 1 AND branch_id = 1').run()
     rawDb.prepare('UPDATE products SET stock_quantity = 7 WHERE id = 1').run()
@@ -246,7 +266,7 @@ async function main() {
 
     const priorId = rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
-       VALUES (1, 'Widget', 1, 'Main', 'add', 5, 'Dated stock count import', '2026-08-10 00:00:00')`
+       VALUES (1, 'Widget', 1, 'Shop', 'add', 5, 'Dated stock count import', '2026-08-10 00:00:00')`
     ).run().meta.last_row_id
     rawDb.prepare(
       `INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity) VALUES (@movementId, @batchId, 5)`,
@@ -267,7 +287,7 @@ async function main() {
     seed(rawDb)
     rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
-       VALUES (1, 'Widget', 1, 'Main', 'add', 5, 'Dated stock count import', '2026-08-10 00:00:00')`
+       VALUES (1, 'Widget', 1, 'Shop', 'add', 5, 'Dated stock count import', '2026-08-10 00:00:00')`
     ).run()
     rawDb.prepare('UPDATE branch_stock SET quantity = 5 WHERE product_id = 1 AND branch_id = 1').run()
 

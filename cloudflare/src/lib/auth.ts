@@ -163,7 +163,7 @@ export async function revokeSessionsForDevice(env: Env, userId: number, deviceId
 // Hono's setCookie() throws rather than silently truncating -- see
 // node_modules/hono/dist/utils/cookie.js). Session rows themselves can
 // legitimately live up to ALWAYS_SESSION_MS (10 years, see above) so
-// "Always stay signed in" doesn't force a re-login every year -- but the
+// "Always stay signed in" can exceed the browser retention ceiling, but the
 // *cookie* has to stay under the cap regardless of how long the
 // server-side session is valid for. 399 days (not the full 400) leaves a
 // day of margin against clock skew between this Worker and the browser.
@@ -171,7 +171,13 @@ const MAX_COOKIE_AGE_MS = 399 * 24 * 60 * 60 * 1000
 
 export function setSessionCookie<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, token: string, expiresAt: string): void {
   const requested = new Date(expiresAt)
-  const cookieExpires = requested.getTime() - Date.now() > MAX_COOKIE_AGE_MS
+  // The cookie is only a transport for an opaque token; user_sessions expiry
+  // remains the authentication authority. Keep it long enough for server-side
+  // sliding renewal without rewriting identity on ordinary responses. Only
+  // explicit login/OTP/OAuth/session-duration endpoints call this helper.
+  // Previously issued short-lived cookies retain their original browser expiry
+  // until one of those explicit auth operations replaces them.
+  const cookieExpires = requested.getTime() > Date.now()
     ? new Date(Date.now() + MAX_COOKIE_AGE_MS)
     : requested
   setCookie(c, SESSION_COOKIE_NAME, token, {
@@ -244,8 +250,8 @@ export async function getSessionUser<E extends { Bindings: Env } = { Bindings: E
 }
 
 // How much of a session's life has to be gone before it is renewed. Half is
-// a deliberate middle: renewing on every request would mean an UPDATE plus a
-// Set-Cookie on every single call, and renewing only near the very end
+// a deliberate middle: renewing on every request would mean an UPDATE on
+// every single call, and renewing only near the very end
 // leaves almost no margin for a client that is briefly offline.
 const SESSION_SLIDE_AFTER_FRACTION = 0.5
 
@@ -263,8 +269,11 @@ const SESSION_SLIDE_AFTER_FRACTION = 0.5
  * rather than "N days from login", which is what people already assume it
  * means and what the wording ("Keep me signed in for 30 days") implies.
  *
- * The original TTL is recovered from `expires_at - created_at` rather than
- * stored, so this needs no migration and no change to createSession.
+ * The existing renewal policy infers TTL from `expires_at - created_at`.
+ * Since created_at does not move, this inferred interval can grow after
+ * renewal. That pre-existing duration policy is intentionally unchanged here.
+ * The browser retains newly issued transport cookies for at most 399 days;
+ * longer/"always" sessions still need an explicit auth operation by that cap.
  *
  * Runs inside waitUntil, so it never adds latency to the request that
  * triggered it, and failure is harmless -- the session simply keeps its
@@ -292,6 +301,7 @@ async function slideSessionExpiry<E extends { Bindings: Env } = { Bindings: Env 
 
     const now = Date.now()
     const remaining = expiresAt - now
+    if (remaining <= 0) return
     if (remaining > ttlMs * (1 - SESSION_SLIDE_AFTER_FRACTION)) return
 
     // Never shorten, and never push past the cookie's own ceiling.
@@ -300,13 +310,16 @@ async function slideSessionExpiry<E extends { Bindings: Env } = { Bindings: Env 
     const nextExpiryIso = new Date(nextExpiry).toISOString()
 
     await db.prepare(
-      'UPDATE user_sessions SET expires_at = @expires_at WHERE token_hash = @token_hash AND revoked_at IS NULL',
-    ).run({ expires_at: nextExpiryIso, token_hash: tokenHash })
+      `UPDATE user_sessions SET expires_at = @expires_at
+       WHERE token_hash = @token_hash AND revoked_at IS NULL
+         AND expires_at = @observed_expiry
+         AND julianday(expires_at) > julianday('now')
+         AND julianday(@expires_at) > julianday(expires_at)`,
+    ).run({ expires_at: nextExpiryIso, token_hash: tokenHash, observed_expiry: session.expires_at })
 
-    // The cookie carries its own expiry, so it has to move too -- otherwise
-    // the browser drops it while the server-side row is still valid.
-    const token = getCookie(c, SESSION_COOKIE_NAME)
-    if (token) setSessionCookie(c, token, nextExpiryIso)
+    // NEVER attach Set-Cookie to ordinary authenticated responses. This
+    // request may finish after an explicit login established another actor;
+    // an old request cookie must not overwrite the browser's new identity.
   } catch (_) {
     // Best effort by design: see this function's own comment.
   }

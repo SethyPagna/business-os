@@ -34,11 +34,16 @@ interface ProductRecord {
   selling_price_khr?: unknown
   selling_price_usd?: unknown
   sku?: unknown
-  special_price_khr?: unknown
-  special_price_usd?: unknown
   stock_quantity?: unknown
   supplier?: unknown
   unit?: unknown
+  // The 2026-09-04 ruling: the tier this app used to call "VIP"
+  // (special_price_usd/khr) was always the WHOLESALE price, and migration
+  // 0111 copied those values into wholesale_price_usd/khr and zeroed the
+  // special_price_* columns. special_price_* is dead -- nothing reads or
+  // writes it -- so it is deliberately absent from this record shape.
+  wholesale_price_khr?: unknown
+  wholesale_price_usd?: unknown
   [key: string]: unknown
 }
 
@@ -54,7 +59,13 @@ export type ExportFieldGroup = 'basic' | 'pricing' | 'discount' | 'stock' | 'sup
 // usable identifying columns -- see ALWAYS_INCLUDED_COLUMNS below.
 export const EXPORT_FIELD_GROUPS: Array<{ key: ExportFieldGroup; columns: string[] }> = [
   { key: 'basic', columns: ['Name', 'SKU', 'Barcode', 'Category', 'Brand', 'Unit', 'Description', 'Created_At', 'Active', 'Is_Group', 'Parent_ID'] },
-  { key: 'pricing', columns: ['Selling_Price_USD', 'Selling_Price_KHR', 'Special_Price_USD', 'Special_Price_KHR', 'Cost_Price_USD', 'Cost_Price_KHR'] },
+  // 'pricing' used to list Special_Price_USD/KHR, which the row builder below
+  // NEVER emitted -- it emitted VIP_Price_USD/KHR. Because the group filter
+  // intersects the emitted keys against allowedColumns, that mismatch silently
+  // dropped the discounted-tier columns from every export that passed
+  // options.groups (i.e. every export made through the column chooser). The
+  // names here must stay in lockstep with the keys the row builder writes.
+  { key: 'pricing', columns: ['Selling_Price_USD', 'Selling_Price_KHR', 'Wholesale_Price_USD', 'Wholesale_Price_KHR', 'Cost_Price_USD', 'Cost_Price_KHR'] },
   { key: 'discount', columns: ['Discount_Enabled', 'Discount_Type', 'Discount_Percent', 'Discount_Amount_USD', 'Discount_Amount_KHR', 'Discount_Label', 'Discount_Badge_Color', 'Discount_Starts_At', 'Discount_Ends_At'] },
   { key: 'stock', columns: ['Stock_Quantity', 'Low_Stock_Threshold', 'Branch', 'Branch_Stock_JSON'] },
   { key: 'supplier', columns: ['Supplier'] },
@@ -118,8 +129,11 @@ export function buildProductExportRows(products: ProductRecord[] = [], options: 
       Created_At: String(product.created_at || ''),
       Selling_Price_USD: priceCsv(product.selling_price_usd),
       Selling_Price_KHR: priceCsv(product.selling_price_khr),
-      VIP_Price_USD: priceCsv(product.special_price_usd || 0),
-      VIP_Price_KHR: priceCsv(product.special_price_khr || 0),
+      // Was VIP_Price_* reading special_price_*. Per the 2026-09-04 ruling that
+      // tier was never a VIP price -- it is the wholesale price -- so the export
+      // now names it what it is and reads the live wholesale_price_* columns.
+      Wholesale_Price_USD: priceCsv(product.wholesale_price_usd || 0),
+      Wholesale_Price_KHR: priceCsv(product.wholesale_price_khr || 0),
       Discount_Enabled: product.discount_enabled ? 'Yes' : 'No',
       Discount_Type: String(product.discount_type || 'percent'),
       Discount_Percent: priceCsv(product.discount_percent || 0),

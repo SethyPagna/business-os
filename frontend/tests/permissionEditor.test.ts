@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import ts from 'typescript'
+import { isActionOverriddenOff } from '../src/utils/permissionActions.ts'
+import { normalizePermissionState } from '../src/utils/permissions.ts'
 
 const source = fs.readFileSync(new URL('../src/components/users/PermissionEditor.tsx', import.meta.url), 'utf8')
 const definitions = fs.readFileSync(new URL('../src/components/users/permissionDefinitions.ts', import.meta.url), 'utf8')
@@ -11,6 +14,37 @@ assert.match(source, /PERMISSION_SECTIONS/)
 assert.match(source, /from '\.\/permissionDefinitions'/)
 assert.match(source, /permission_sensitive_critical/)
 assert.match(source, /section\.permissions\.map/)
+assert.doesNotMatch(source, /<select\b/, 'permission choices use the shared dropdown, not a forbidden native select')
+assert.match(source, /<AppSelect[\s\S]*ariaLabel=\{translate\('perm_sales_customer_mode'/, 'customer mode uses an accessible shared AppSelect')
+const parsedEditor = ts.createSourceFile('PermissionEditor.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+let customerModeCallback = ''
+function findModeCallback(node: ts.Node): void {
+  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(parsedEditor) === 'AppSelect') {
+    const change = node.attributes.properties.find((prop) => ts.isJsxAttribute(prop) && prop.name.getText(parsedEditor) === 'onChange')
+    if (change && ts.isJsxAttribute(change) && change.initializer && ts.isJsxExpression(change.initializer) && change.initializer.expression) {
+      customerModeCallback = change.initializer.expression.getText(parsedEditor)
+    }
+  }
+  ts.forEachChild(node, findModeCallback)
+}
+findModeCallback(parsedEditor)
+assert.ok(customerModeCallback, 'the actual shared control has a mode callback')
+const modeCallbackJs = ts.transpileModule(`const callback = ${customerModeCallback}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+for (const nameOnly of [false, true]) {
+  const changes: unknown[] = []
+  const callback = new Function('perms', 'isActionOverriddenOff', 'toggleActionOverride', `${modeCallbackJs}; return callback`)(
+    nameOnly ? { 'sales:customer_reassign': false } : {}, isActionOverriddenOff, (...args: unknown[]) => changes.push(args),
+  )
+  callback(nameOnly ? 'name-only' : 'assignment')
+  assert.equal(changes.length, 0, 'reselecting the current AppSelect option must not invert permission')
+  callback(nameOnly ? 'assignment' : 'name-only')
+  assert.deepEqual(changes, [['sales', 'customer_reassign']], 'changing option flips only the narrowing override')
+}
+assert.match(
+  source,
+  /translate\(`\$\{section\.tKey\}_desc`, section\.description\)/,
+  'section descriptions must resolve their dynamic language-pack key before using the English fallback',
+)
 assert.match(definitions, /backup_restore/)
 assert.match(definitions, /drive_credentials/)
 assert.match(definitions, /business_identity/)
@@ -36,6 +70,16 @@ for (const key of requiredKeys) {
   assert.ok(km[key], `Khmer permission label missing: ${key}`)
 }
 
+for (const key of [
+  'perm_section_full_access_desc',
+  'perm_section_pos_desc',
+  'perm_section_sales_desc',
+]) {
+  assert.ok(en[key], `English permission-section description missing: ${key}`)
+  assert.ok(km[key], `Khmer permission-section description missing: ${key}`)
+  assert.notEqual(km[key], en[key], `Khmer permission-section description falls back to English: ${key}`)
+}
+
 console.log('PASS PermissionEditor exposes page/action-sensitive permission groups with English/Khmer labels')
 
 // Permissions step (4): the per-section Review Required tier picker.
@@ -45,10 +89,20 @@ console.log('PASS PermissionEditor exposes page/action-sensitive permission grou
 // parsePermissionState instead of collapsing it to Boolean(value), the
 // same bug class Users.tsx's normalizePermissionState was fixed for.
 assert.match(source, /from '\.\.\/\.\.\/utils\/permissions\.ts'/)
-assert.match(source, /REVIEW_TIER_KEYS/)
+assert.match(source, /normalizePermissionState/)
 assert.match(source, /permission\.tier/)
 assert.match(source, /setTier/)
-assert.match(source, /raw === 'review' && REVIEW_TIER_KEYS\.has\(key\)/)
+const ast = ts.createSourceFile('PermissionEditor.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+const parser = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'parsePermissionState')!
+const compiled = ts.transpileModule(parser.getText(ast), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
+const parseEditor = new Function('normalizePermissionState', `${compiled}; return parsePermissionState`)(normalizePermissionState)
+for (const raw of ['false', 'true', 1, [], {}, null]) {
+  for (const value of [{ all: raw, products: raw }, JSON.stringify({ all: raw, products: raw })]) {
+    assert.deepEqual(parseEditor(value), { all: false, products: false })
+  }
+}
+assert.deepEqual(parseEditor({ products: 'review', sales: 'view', pos: true }), { products: 'review', sales: 'view', pos: true })
+assert.deepEqual(parseEditor('[true]'), {})
 assert.match(source, /review_required/)
 assert.match(source, /label_full_access/)
 

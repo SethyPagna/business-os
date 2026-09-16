@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { isAdminControlUser } from '../../utils/permissions.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
-import { fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { resolveTaxEnabled } from '../../utils/taxSettings.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
@@ -34,6 +36,17 @@ import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parse
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import AppSelect from '../shared/AppSelect.tsx'
+import InfoHint from '../shared/InfoHint.tsx'
+// The one low-stock rule -- the switch/amount/scope this page writes are read
+// back by every badge, count, filter and alert through this module (and its
+// byte-identical Worker twin), including the validator both sides run.
+import {
+  DEFAULT_LOW_STOCK_THRESHOLD,
+  MAX_LOW_STOCK_THRESHOLD,
+  resolveLowStockConfig,
+  validateLowStockSettingsWrite,
+} from '../../utils/lowStockSettings.ts'
+import { useMobileSectionNavMode, writeMobileSectionNavMode, MOBILE_SECTION_NAV_SETTINGS_KEY, type MobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.ts'
@@ -44,7 +57,7 @@ import {
   sanitizePersistedMediaPath,
 } from '../../utils/mediaUploadState.ts'
 import type { UploadAction } from '../../utils/mediaUploadState.ts'
-import { getPaymentMethodImpact, replacePaymentMethod } from '../../api/settingsTransport.ts'
+import { backfillPaymentMethods, getPaymentMethodImpact, getUnregisteredPaymentMethods, replacePaymentMethod, type PaymentMethodRenameScope } from '../../api/settingsTransport.ts'
 import { getTelegramStatus, sendTelegramTest, sendTelegramTodaySummary, type TelegramStatus } from '../../api/telegramTransport.ts'
 
 type TranslateFn = (key: string) => string
@@ -169,7 +182,7 @@ const FALLBACK_COPY: Record<'en' | 'km', Record<string, string>> = {
     customColor: 'Custom color',
     autoLabel: 'auto',
     navigationTitle: 'Navigation Layout',
-    navigationHint: 'Choose the sidebar order and which 4 items stay pinned in the mobile bottom bar.',
+    navigationHint: 'Sidebar order, landing page and mobile navigation mode. The 4 pinned items show only in the Sections mode bottom bar.',
     desktopOrder: 'Sidebar order',
     mobilePinned: 'Pinned on mobile',
     moveUp: 'Up',
@@ -252,6 +265,15 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
 }
 
 const THEME_OPTION_KEYS = [['light', 'themeLight', 'Light'], ['dark', 'themeDark', 'Dark']]
+// Mobile hub navigation (Settings -> Appearance): 'pages' (default) is the
+// three-layer nav HubSectionNav renders on phones -- hub -> a list of
+// section cards -> the chosen section full-screen with a back header, one
+// OS/back-gesture step collapsing a layer at a time. 'sections' keeps the
+// same chip row phones already used before this changed.
+const MOBILE_SECTION_NAV_MODE_KEYS: Array<[MobileSectionNavMode, string, string]> = [
+  ['pages', 'mobile_section_nav_mode_pages', 'Pages'],
+  ['sections', 'sections', 'Sections'],
+]
 const LANGUAGE_OPTION_KEYS = [['en', 'englishLabel', 'English'], ['km', 'khmerLabel', 'Khmer']]
 const CARD_STYLE_OPTION_KEYS = [['sharp', 'sharp'], ['rounded', 'rounded'], ['pill', 'pill']]
 const DENSITY_OPTION_KEYS = [['comfortable', 'comfortable'], ['compact', 'compact'], ['spacious', 'spacious']]
@@ -482,7 +504,13 @@ export default function Settings() {
   const canEditSettings = getPermissionTier('settings') === 'full'
   const [pmList, setPmList] = useState<string[]>([])
   const [newPm, setNewPm] = useState('')
+  // Methods the shop has taken money through that are not in the list above.
+  // Held as state rather than derived, because only the server can know it --
+  // it is a DISTINCT over the sales table, not anything the browser has.
+  const [unregisteredPm, setUnregisteredPm] = useState<string[]>([])
+  const [pmBackfilling, setPmBackfilling] = useState(false)
   const [form, setForm] = useState<SettingsRecord>({})
+  const mobileSectionNavMode = useMobileSectionNavMode(form.ui_mobile_section_nav)
   const [previewNow, setPreviewNow] = useState(() => new Date())
   const [dragPinnedId, setDragPinnedId] = useState<string | null>(null)
   const [dragNavId, setDragNavId] = useState<string | null>(null)
@@ -590,24 +618,14 @@ export default function Settings() {
     return () => window.clearInterval(timer)
   }, [])
 
-  const isAdmin = useMemo(() => {
-    // Same semantics as Sales/Inventory/actionHistory admin checks, plus the
-    // role_permissions merge (a role-granted admin carries all:true on
-    // user.role_permissions while user.permissions stays "{}").
-    try {
-      const parse = (value: unknown): Record<string, unknown> =>
-        typeof value === 'string' ? JSON.parse(value || '{}') : ((value || {}) as Record<string, unknown>)
-      const merged = {
-        ...parse(user?.role_permissions),
-        ...parse(user?.permissions),
-      }
-      const roleCode = String(user?.role_code || '').toLowerCase()
-      const username = String(user?.username || '').toLowerCase()
-      return username === 'admin' || roleCode === 'admin' || merged.all === true
-    } catch {
-      return false
-    }
-  }, [user])
+  const isAdmin = isAdminControlUser(user)
+
+  // The low-stock alert switch/amount/scope, resolved through the one rule the
+  // rest of the app reads them by, so this form can never render a state the
+  // badges would disagree with (an absent switch is ON, an unparsable amount
+  // falls back to the constant default).
+  const lowStockConfig = useMemo(() => resolveLowStockConfig(form), [form])
+  const lowStockAlertEnabled = lowStockConfig.enabled
 
   useEffect(() => {
     if (!isAdmin) return
@@ -631,6 +649,9 @@ export default function Settings() {
     formDirtyRef.current = true
     setForm((current) => ({ ...current, [key]: value }))
   }
+  // The tax switch, read through the SAME helper the till and the Worker use,
+  // so the checkbox can never disagree with what is actually charged.
+  const taxEnabled = resolveTaxEnabled(form.tax_enabled, form.tax_rate)
   const getUploadState = useCallback(
     (key: string) => uploadStates[key] || createInitialUploadState(),
     [uploadStates],
@@ -660,7 +681,7 @@ export default function Settings() {
   const formatPreviewDateTime = (value: Date | string | number) => {
     const date = value instanceof Date ? value : new Date(value)
     if (Number.isNaN(date.getTime())) return '--'
-    return date.toLocaleString('en-US', {
+    return fmtDayFirst(date, {
       hour12: false,
       year: 'numeric',
       month: '2-digit',
@@ -778,17 +799,65 @@ export default function Settings() {
     }
   }
 
+  // A failure here is deliberately silent: this is an advisory strip, and an
+  // install whose Worker predates the endpoint must show the payment list
+  // exactly as it always did rather than an error the owner cannot act on.
+  const refreshUnregisteredPaymentMethods = useCallback(async () => {
+    try {
+      const result = await getUnregisteredPaymentMethods() as { missing?: unknown }
+      setUnregisteredPm(Array.isArray(result?.missing) ? result.missing.map((value) => String(value)) : [])
+    } catch {
+      setUnregisteredPm([])
+    }
+  }, [])
+
+  // Declared down here, not beside the other payment-methods effect near the
+  // top of the component: both `isAdmin` and the callback above are `const`s
+  // defined further down the body, and a dependency array is evaluated during
+  // render, so an effect placed above them would read them in the temporal
+  // dead zone and throw on first paint.
+  useEffect(() => {
+    if (!isAdmin) return
+    void refreshUnregisteredPaymentMethods()
+  }, [isAdmin, refreshUnregisteredPaymentMethods, settings.pos_payment_methods])
+
+  const addUsedPaymentMethods = async () => {
+    setPmBackfilling(true)
+    try {
+      const result = await backfillPaymentMethods() as { methods?: unknown; added?: unknown }
+      const added = Array.isArray(result?.added) ? result.added.map((value) => String(value)) : []
+      if (Array.isArray(result?.methods)) setPmList(normalizePaymentMethods(result.methods.map((value) => String(value))))
+      setUnregisteredPm([])
+      await loadSettings({ force: true })
+      notify(
+        added.length
+          ? `Added ${added.length} payment method${added.length === 1 ? '' : 's'} already used on sales.`
+          : 'Every method used on a sale was already in the list.',
+        'success',
+      )
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Failed to add the payment methods used on sales', 'error')
+    } finally {
+      setPmBackfilling(false)
+    }
+  }
+
   const renamePaymentMethod = async (from: string) => {
     const to = window.prompt(t('rename_payment_method') || 'Rename payment method', from)?.trim()
-    if (!to || to.toLocaleLowerCase() === from.toLocaleLowerCase()) return
+    if (!to || to === from) return
     try {
-      const impact = await getPaymentMethodImpact(from, to) as { linked_records?: number; target_exists?: boolean }
+      const impact = await getPaymentMethodImpact(from, to)
       const linked = Number(impact.linked_records || 0)
-      const scope = linked > 0 && window.confirm(
-        `${linked} linked sale/payment record${linked === 1 ? '' : 's'} use "${from}".${impact.target_exists ? ` "${to}" already exists, so the configured choices will merge.` : ''}\n\nOK: update those exact matches too.\nCancel: rename only the configured choice.\nAudit logs stay unchanged.`,
-      ) ? 'linked' : 'settings_only'
-      const result = await replacePaymentMethod({ from, to, scope }) as { methods?: string[] }
-      setPmList(normalizePaymentMethods(result.methods || pmList.map((method) => method.toLocaleLowerCase() === from.toLocaleLowerCase() ? to : method)))
+      const isCaseOnlyRename = to.toLocaleLowerCase() === from.toLocaleLowerCase()
+      const scope: PaymentMethodRenameScope = isCaseOnlyRename || linked > 0 ? 'linked' : 'settings_only'
+      if (scope === 'linked' && !window.confirm(
+        `${linked} current sale/payment record${linked === 1 ? '' : 's'} use "${from}".${impact.target_exists && !isCaseOnlyRename ? ` "${to}" already exists, so the configured choices will merge.` : ''}\n\nContinue to update current labels to "${to}"? Historical audit records stay unchanged.`,
+      )) return
+      const expectedUpdatedAt = typeof impact.settings_updated_at === 'string' && impact.settings_updated_at.trim()
+        ? impact.settings_updated_at
+        : undefined
+      const result = await replacePaymentMethod({ from, to, scope, expected_updated_at: expectedUpdatedAt })
+      setPmList(normalizePaymentMethods(result.methods))
       await loadSettings({ force: true })
       notify(scope === 'linked' ? 'Payment method and linked records updated.' : 'Payment method option updated; existing sales were preserved.', 'success')
     } catch (error) {
@@ -886,6 +955,23 @@ export default function Settings() {
       ...form,
       ui_app_favicon_image: sanitizePersistedMediaPath(form.ui_app_favicon_image, toStringValue(settings.ui_app_favicon_image)),
     }
+    // Frontend half of the low-stock write guard: the SAME function the Worker
+    // runs on POST /api/settings (lowStockSettings.ts twins), so a bad amount
+    // is named here against the field the owner just typed in instead of
+    // bouncing back as a 400 with the whole form unsaved. Not a clamp -- the
+    // wrong number is refused, never quietly turned into a plausible one.
+    const lowStockError = validateLowStockSettingsWrite(sanitizedForm)
+    if (lowStockError) {
+      finishSingleAction(settingsSaveInFlightRef)
+      setSavingSettings(false)
+      notify(
+        lowStockError === 'invalid_low_stock_threshold'
+          ? t('low_stock_threshold_invalid')
+          : t('low_stock_alert_invalid'),
+        'error',
+      )
+      return
+    }
     try {
       const result = await saveSettings(sanitizedForm, {
         reason: 'settings-saved',
@@ -921,9 +1007,9 @@ export default function Settings() {
       if (action === 'test') await sendTelegramTest()
       else await sendTelegramTodaySummary()
       setTelegramStatus(await getTelegramStatus().catch(() => telegramStatus))
-      notify(action === 'test' ? 'Telegram test message sent and commands connected.' : "Today's Telegram summary was sent.", 'success')
+      notify(action === 'test' ? (t('telegram_test_sent') || 'Telegram test message sent and commands connected.') : (t('telegram_summary_sent') || "Today's Telegram summary was sent."), 'success')
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Telegram action failed', 'error')
+      notify(error instanceof Error ? error.message : (t('telegram_action_failed') || 'Telegram action failed'), 'error')
     } finally {
       setTelegramAction(null)
     }
@@ -1138,7 +1224,51 @@ export default function Settings() {
               />
             </div>
           </div>
+          {/* The owner's tax switch (S4-30, 2026-09-04): "tax can turn on off
+              in settings which will show based on that, if off, doesn't show."
+              With the key absent it reads as ON only when a rate is set, which
+              is exactly today's behaviour, so an install that has never touched
+              this switch does not change. Turning it OFF stops tax being
+              charged and stops the tax line appearing; it does NOT erase the
+              tax already recorded on past sales, because that would leave those
+              receipts' own arithmetic wrong. */}
+          <label className="mt-4 flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="pr-3">
+              <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('tax_enabled') || 'Charge tax'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{t('tax_enabled_desc') || 'When off, no tax is added to a sale and no tax line appears on the receipt or the sale details. Tax already recorded on past sales is kept.'}</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={taxEnabled}
+              onChange={(event) => setValue('tax_enabled', event.target.checked ? 'true' : 'false')}
+            />
+          </label>
         </SettingsSection>
+        ) : null}
+
+        {canEditSettings && showSettingsSection('business') ? (
+          <SettingsSection title={t('settings_shift_registration_title') || 'Shift registration'} description={t('settings_shift_registration_desc') || 'Configure who must register the cash drawer each business day.'}>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{t('settings_shift_registration_title') || 'Shift registration'}</div>
+            <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{t('settings_shift_scope_desc') || 'Choose whether each account opens its own shift or one shared branch shift covers the whole shop.'}</p>
+            <fieldset className="mt-3 grid gap-2 sm:grid-cols-2">
+              <legend className="sr-only">{t('settings_shift_scope_legend') || 'Shift scope'}</legend>
+              {([
+                ['per_account', t('shift_scope_per_account') || 'Per account', t('shift_scope_per_account_hint') || 'Each staff account opens and closes its own daily shift.'],
+                ['shop_wide', t('shift_scope_shop_wide') || 'Shop-wide', t('shift_scope_shop_wide_hint') || 'One staff member opens the branch shift and any staff member can close it.'],
+              ] as const).map(([value, label, hint]) => (
+                <label key={value} className={`flex cursor-pointer gap-2 rounded-lg border p-3 ${String(form.shift_scope_mode || 'per_account') === value ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30' : 'border-gray-200 bg-white dark:border-zinc-700 dark:bg-zinc-900'}`}>
+                  <input type="radio" name="shift_scope_mode" value={value} checked={String(form.shift_scope_mode || 'per_account') === value} onChange={() => setValue('shift_scope_mode', value)} />
+                  <span><span className="block text-sm font-medium text-gray-800 dark:text-gray-100">{label}</span><span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{hint}</span></span>
+                </label>
+              ))}
+            </fieldset>
+            <label className="mt-3 flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900">
+              <span><span className="block text-sm font-medium text-gray-800 dark:text-gray-100">{t('settings_shift_exempt_admins') || 'Exempt administrators'}</span><span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{t('settings_shift_exempt_admins_desc') || 'Administrators can enter POS without opening a shift. Turn this off when administrators also operate a cash drawer.'}</span></span>
+              <input type="checkbox" checked={String(form.shift_admin_exempt ?? 'true') !== 'false'} onChange={(event) => setValue('shift_admin_exempt', event.target.checked ? 'true' : 'false')} />
+            </label>
+          </div>
+          </SettingsSection>
         ) : null}
 
         {isAdmin && showSettingsSection('business') ? (
@@ -1154,6 +1284,124 @@ export default function Settings() {
               onChange={(event) => setValue('pos_show_item_discount', event.target.checked ? 'true' : 'false')}
             />
           </label>
+          <div className="mt-3 max-w-md">
+            <label className="mb-2 flex items-center justify-between gap-3 text-sm">
+              <span>{t('sale_amendment_window_minutes') || 'Sale edit window (minutes)'}</span>
+              <input type="checkbox" checked={Number(form.sale_amendment_window_minutes || 0) > 0} onChange={(event) => setValue('sale_amendment_window_minutes', event.target.checked ? '120' : '0')} />
+            </label>
+            {field('sale_amendment_window_minutes', t('sale_amendment_window_minutes') || 'Sale edit window (minutes)', 'number', '0')}
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {t('sale_amendment_window_minutes_desc') || '0 keeps employee sale edits open at all times. A positive value limits edits to that many minutes after the sale.'}
+            </p>
+          </div>
+          {/* The "wholesale only > N" automation deferred by migration 0093.
+              Note the ?? 'false' default -- every other toggle on this page
+              defaults ON when unset, but an automation that changes what a
+              customer is charged has to be opted into deliberately, so an
+              existing shop that upgrades into this build keeps ringing up
+              exactly what it rang up yesterday until someone ticks this. */}
+          <label className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="pr-3">
+              <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('pos_wholesale_auto')}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{t('pos_wholesale_auto_desc')}</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={String(form.pos_wholesale_auto_enabled ?? 'false') === 'true'}
+              onChange={(event) => setValue('pos_wholesale_auto_enabled', event.target.checked ? 'true' : 'false')}
+            />
+          </label>
+          {/* Threshold is only meaningful while the automation is on, so it
+              is revealed rather than shown permanently greyed. */}
+          {String(form.pos_wholesale_auto_enabled ?? 'false') === 'true' ? (
+            <div>
+              <label htmlFor="settings-pos-wholesale-auto-min-qty" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {t('pos_wholesale_auto_min_qty')}
+              </label>
+              <input
+                id="settings-pos-wholesale-auto-min-qty"
+                name="pos_wholesale_auto_min_qty"
+                className="input max-w-xs"
+                type="number"
+                min="1"
+                step="1"
+                value={form.pos_wholesale_auto_min_qty || '10'}
+                onChange={(event) => setValue('pos_wholesale_auto_min_qty', event.target.value)}
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('pos_wholesale_auto_min_qty_desc')}</p>
+            </div>
+          ) : null}
+        </SettingsSection>
+        ) : null}
+
+        {/* The owner's low-quantity alert (Sep 6 2026). One row: the switch,
+            the amount it alerts at, and which products that amount applies to.
+            Every explanation is an InfoHint rather than a paragraph, and the
+            amount/scope grey out while the alert is off instead of vanishing,
+            so the row never changes height as it is toggled. The same three
+            values are read by the Dashboard card, the Products/Inventory/
+            Branches badges and filters, the POS grid, the bell and Telegram
+            (utils/lowStockSettings.ts and its Worker twin).
+
+            Gated on canEditSettings, not isAdmin: these three keys carry no
+            settings bucket of their own, so the Worker admits them on the
+            plain "settings" grant (routes/settings.ts's POST falls back to
+            hasPermission(user, 'settings')). Gating the row on isAdmin would
+            hide from a manager holding full Settings a control the API would
+            accept from them -- the same rule the Shift registration row
+            above already follows. isAdmin implies tier 'full', so an admin
+            keeps it. */}
+        {canEditSettings && showSettingsSection('business') ? (
+        <SettingsSection title={t('stock_alerts')}>
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+            <label className="flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 dark:border-gray-700 dark:bg-gray-800/70">
+              <input
+                type="checkbox"
+                checked={lowStockAlertEnabled}
+                onChange={(event) => setValue('low_stock_alert_enabled', event.target.checked ? 'true' : 'false')}
+              />
+              <span className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('low_stock_alert_enabled')}</span>
+              <InfoHint label={t('low_stock_alert_enabled')} text={t('low_stock_alert_enabled_hint')} />
+            </label>
+            <div className="min-w-0">
+              <label htmlFor="settings-low-stock-threshold" className="mb-1 flex items-center gap-1 text-xs font-medium text-gray-700 dark:text-gray-300">
+                {t('low_stock_threshold_default')}
+                <InfoHint label={t('low_stock_threshold_default')} text={t('low_stock_threshold_default_hint')} />
+              </label>
+              <input
+                id="settings-low-stock-threshold"
+                name="low_stock_threshold_default"
+                className="input h-10 w-24"
+                type="number"
+                min="0"
+                max={MAX_LOW_STOCK_THRESHOLD}
+                step="1"
+                disabled={!lowStockAlertEnabled}
+                value={form.low_stock_threshold_default ?? String(DEFAULT_LOW_STOCK_THRESHOLD)}
+                onChange={(event) => setValue('low_stock_threshold_default', event.target.value)}
+              />
+            </div>
+            <div className="min-w-0">
+              <label htmlFor="settings-low-stock-mode" className="mb-1 flex items-center gap-1 text-xs font-medium text-gray-700 dark:text-gray-300">
+                {t('low_stock_threshold_mode')}
+                <InfoHint label={t('low_stock_threshold_mode')} text={t('low_stock_threshold_mode_hint')} />
+              </label>
+              <AppSelect
+                id="settings-low-stock-mode"
+                name="low_stock_threshold_mode"
+                value={lowStockConfig.mode}
+                onChange={(nextValue) => setValue('low_stock_threshold_mode', nextValue)}
+                ariaLabel={t('low_stock_threshold_mode')}
+                disabled={!lowStockAlertEnabled}
+                buttonClassName="h-10"
+                menuClassName="min-w-[14rem]"
+                options={[
+                  { value: 'product', label: t('low_stock_threshold_mode_product') },
+                  { value: 'global', label: t('low_stock_threshold_mode_global') },
+                ]}
+              />
+            </div>
+          </div>
         </SettingsSection>
         ) : null}
 
@@ -1465,7 +1713,7 @@ export default function Settings() {
         ) : null}
 
         {isAdmin && showSettingsSection('appearance') ? (
-        <SettingsSection title={copy('navigationTitle', 'Navigation Layout')} description={copy('navigationHint', 'Choose the sidebar order and which 4 items stay pinned in the mobile bottom bar.')}>
+        <SettingsSection title={copy('navigationTitle', 'Navigation Layout')} description={copy('navigationHint', 'Sidebar order, landing page and mobile navigation mode. The 4 pinned items show only in the Sections mode bottom bar.')}>
 
           <div className="mb-4">
             <label htmlFor="settings-default-landing-page" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1549,6 +1797,33 @@ export default function Settings() {
             </div>
           </div>
 
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="flex items-center gap-1.5">
+              <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">{copy('mobile_section_nav_title', 'Mobile navigation')}</div>
+              <InfoHint label={copy('mobile_section_nav_title', 'Mobile navigation')} text={copy('mobile_section_nav_hint', 'Expand groups in the main menu and open a section directly, or keep the section tabs.')} />
+            </div>
+            <div className="flex gap-2">
+              {MOBILE_SECTION_NAV_MODE_KEYS.map(([modeValue, copyKey, defaultLabel]) => {
+                const currentMode = mobileSectionNavMode
+                const isActive = currentMode === modeValue
+                return (
+                  <button
+                    key={modeValue}
+                    type="button"
+                    onClick={() => {
+                      writeMobileSectionNavMode(modeValue)
+                      setValue(MOBILE_SECTION_NAV_SETTINGS_KEY, modeValue)
+                    }}
+                    aria-pressed={isActive}
+                    className={`min-h-11 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
+                  >
+                    {copy(copyKey, defaultLabel)}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           <div className="grid gap-2">
             {navItems.map((item, index) => {
               const isPinned = mobilePinned.includes(item.id)
@@ -1622,6 +1897,38 @@ export default function Settings() {
         {isAdmin && showSettingsSection('business') ? (
         <SettingsSection title={t('manage_payment_methods')} description={t('configure_payment_desc')}>
 
+          {/* User, Sep 4 2026: "the payment methods made and entered in sales
+              and so on did not get updated in the available payment methods".
+              New sales now register their own method server-side; this strip is
+              for the history taken before that. It names the methods and asks,
+              rather than quietly rewriting the shop's checkout list -- and it
+              renders nothing at all when there is nothing missing, so the
+              ordinary case is unchanged. */}
+          {unregisteredPm.length > 0 ? (
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800/50 dark:bg-amber-900/20">
+              <div className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                {t('payment_methods_used_not_listed') || 'Used on sales but not in this list'}
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {unregisteredPm.map((method) => (
+                  <span key={method} className="rounded-full border border-amber-300 bg-white px-2 py-0.5 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+                    {method}
+                  </span>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="btn-primary mt-2 text-xs"
+                disabled={pmBackfilling}
+                onClick={() => void addUsedPaymentMethods()}
+              >
+                {pmBackfilling
+                  ? (t('loading') || 'Saving')
+                  : (t('add_payment_methods_used') || 'Add them to checkout choices')}
+              </button>
+            </div>
+          ) : null}
+
           <div className="space-y-2 mb-3 max-h-48 overflow-auto">
             {pmList.map((paymentMethod, index) => (
               <div key={`${paymentMethod}-${index}`} className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
@@ -1687,7 +1994,7 @@ export default function Settings() {
               {[
                 ['notifications_inventory_enabled', 'notification_inventory_alerts', 'Inventory alerts', 'notification_inventory_alerts_desc', 'Low stock and out of stock warnings'],
                 ['notifications_expiry_enabled', 'notification_expiry_alerts', 'Expiry alerts', 'notification_expiry_alerts_desc', 'Products expiring soon or already expired'],
-                ['notifications_supplier_credit_enabled', 'notification_supplier_credit_alerts', 'Supplier credit alerts', 'notification_supplier_credit_alerts_desc', 'Unpaid supplier purchases coming due or overdue'],
+                ['notifications_supplier_credit_enabled', 'notification_supplier_credit_alerts', 'Not Yet Paid supplier purchase alerts', 'notification_supplier_credit_alerts_desc', 'Not Yet Paid supplier purchases coming due or overdue'],
                 ['notifications_sales_enabled', 'notification_sales_alerts', 'Sales alerts', 'notification_sales_alerts_desc', 'Awaiting payment and delivery follow-up'],
                 ['notifications_loyalty_enabled', 'notification_loyalty_alerts', 'Loyalty alerts', 'notification_loyalty_alerts_desc', 'Customers who reached your points target'],
                 ['notifications_portal_enabled', 'notification_portal_alerts', 'Customer portal alerts', 'notification_portal_alerts_desc', 'Other customer portal notices (pending Share & Reward submissions always appear, regardless of this setting)'],
@@ -1726,7 +2033,7 @@ export default function Settings() {
               </div>
               <div className="sm:col-span-2">
                 <label htmlFor="settings-notifications-supplier-credit-days" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  {t('notification_supplier_credit_days') || 'Supplier credit reminder window'}
+                  {t('notification_supplier_credit_days') || 'Not Yet Paid supplier reminder window'}
                 </label>
                 <input
                   id="settings-notifications-supplier-credit-days"
@@ -1740,7 +2047,7 @@ export default function Settings() {
                   onChange={(event) => setValue('notifications_supplier_credit_days', event.target.value)}
                 />
                 <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                  {t('notification_supplier_credit_days_desc') || 'Remind when an on-credit supplier purchase is due inside this many days (overdue ones always show).'}
+                  {t('notification_supplier_credit_days_desc') || 'Remind when a Not Yet Paid supplier purchase is due within this many days; overdue purchases always show.'}
                 </p>
               </div>
               <div className="sm:col-span-2">
@@ -1807,14 +2114,14 @@ export default function Settings() {
 
         {isAdmin && showSettingsSection('security') ? (
           <SettingsSection
-            title="Telegram automation"
-            description="Send business activity to one owner/manager Telegram chat. Every category is on by default; turn off any category you do not want."
+            title={t('telegram_automation_title') || 'Telegram automation'}
+            description={t('telegram_automation_desc') || 'Send business activity to one owner/manager Telegram chat. Every category is on by default; turn off any category you do not want.'}
           >
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 sm:col-span-2 dark:border-gray-700 dark:bg-gray-800/70">
                 <div className="pr-3">
-                  <div className="text-sm font-medium text-gray-800 dark:text-gray-100">Enable Telegram automation</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Turns every selected Telegram message on or off.</div>
+                  <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('telegram_automation_enable') || 'Enable Telegram automation'}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{t('telegram_automation_enable_desc') || 'Turns every selected Telegram message on or off.'}</div>
                 </div>
                 <input
                   type="checkbox"
@@ -1823,29 +2130,29 @@ export default function Settings() {
                 />
               </label>
               <div>
-                <label htmlFor="settings-telegram-chat-id" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Telegram chat ID</label>
+                <label htmlFor="settings-telegram-chat-id" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('telegram_chat_id_label') || 'Telegram chat ID'}</label>
                 <input
                   id="settings-telegram-chat-id"
                   name="telegram_chat_id"
                   className="input w-full"
                   autoComplete="off"
-                  placeholder="Example: -1001234567890"
+                  placeholder={t('telegram_chat_id_placeholder') || 'Example: -1001234567890'}
                   value={form.telegram_chat_id || ''}
                   onChange={(event) => setValue('telegram_chat_id', event.target.value)}
                 />
               </div>
               <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
-                <div className="text-sm font-medium text-gray-800 dark:text-gray-100">Bot token</div>
+                <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('telegram_bot_token_label') || 'Bot token'}</div>
                 <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {telegramStatus?.configured ? 'Configured securely on the server.' : 'Not configured on the server yet.'}
+                  {telegramStatus?.configured ? (t('telegram_bot_token_configured') || 'Configured securely on the server.') : (t('telegram_bot_token_not_configured') || 'Not configured on the server yet.')}
                 </div>
               </div>
               {[
-                ['telegram_sales_enabled', 'Sales & new receipts', 'Receipt number, status, totals, items, customer, and branch'],
-                ['telegram_status_enabled', 'Receipt status changes', 'Payment, delivery, completion, and cancellation changes'],
-                ['telegram_fees_enabled', 'Fees', 'New fee type, amount, date, label, and note'],
-                ['telegram_stock_in_enabled', 'Stock in', 'Product, quantity, branch, reason, and lot'],
-                ['telegram_stock_out_enabled', 'Stock out', 'Product, quantity, branch, and reason'],
+                ['telegram_sales_enabled', t('telegram_cat_sales') || 'Sales & new receipts', t('telegram_cat_sales_desc') || 'Receipt number, status, totals, items, customer, and branch'],
+                ['telegram_status_enabled', t('telegram_cat_status') || 'Receipt status changes', t('telegram_cat_status_desc') || 'Payment, delivery, completion, and cancellation changes'],
+                ['telegram_fees_enabled', t('fees') || 'Fees', t('telegram_cat_fees_desc') || 'New fee type, amount, date, label, and note'],
+                ['telegram_stock_in_enabled', t('stock_in') || 'Stock in', t('telegram_cat_stock_in_desc') || 'Product, quantity, branch, reason, and received date'],
+                ['telegram_stock_out_enabled', t('stock_out') || 'Stock out', t('telegram_cat_stock_out_desc') || 'Product, quantity, branch, and reason'],
               ].map(([key, label, description]) => (
                 <label key={key} className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
                   <div className="pr-3">
@@ -1861,17 +2168,17 @@ export default function Settings() {
               ))}
               <div className="sm:col-span-2 flex flex-wrap gap-2 pt-1">
                 <button type="button" className="btn-secondary text-sm" onClick={() => void runTelegramAction('test')} disabled={!canEditSettings || telegramAction !== null}>
-                  {telegramAction === 'test' ? 'Sending test...' : 'Send test message'}
+                  {telegramAction === 'test' ? (t('telegram_sending_test') || 'Sending test...') : (t('telegram_send_test') || 'Send test message')}
                 </button>
                 <button type="button" className="btn-secondary text-sm" onClick={() => void runTelegramAction('summary')} disabled={!canEditSettings || telegramAction !== null}>
-                  {telegramAction === 'summary' ? 'Sending summary...' : "Send today's summary"}
+                  {telegramAction === 'summary' ? (t('telegram_sending_summary') || 'Sending summary...') : (t('telegram_send_today_summary') || "Send today's summary")}
                 </button>
               </div>
               <p className="sm:col-span-2 text-xs text-gray-500 dark:text-gray-400">
-                Save the chat ID and switches first. The bot token is a server secret, so it is never displayed in the app. Start a chat with the bot or add it to the target group before sending a test.
+                {t('telegram_help_paragraph')}
               </p>
               <div className="sm:col-span-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-800/70 dark:text-gray-300">
-                <span className="font-medium">Owner / manager commands:</span> this same Telegram chat can use <code>/today</code>, <code>/sales</code>, <code>/fees</code>, <code>/inventory</code>, <code>/stock</code>, and <code>/help</code>. Keep this chat private to owners/managers; sending a test message automatically connects commands.
+                <span className="font-medium">{t('telegram_help_commands_label')}</span> {t('telegram_help_commands_desc')} <code>/today</code>, <code>/sales</code>, <code>/fees</code>, <code>/inventory</code>, <code>/stock</code>, {t('telegram_help_commands_and')} <code>/help</code>. {t('telegram_help_commands_note')}
               </div>
             </div>
           </SettingsSection>

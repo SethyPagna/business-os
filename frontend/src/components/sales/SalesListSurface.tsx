@@ -1,22 +1,36 @@
-import { Fragment, type RefObject } from 'react'
+import { Fragment, Children, isValidElement, useEffect, type ReactNode, type ComponentProps, type RefObject } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
-import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import StatusBadge from './StatusBadge.tsx'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
-import type { TableColumnDef } from '../shared/columnPreferences.ts'
+import { resolveDriverLabel } from '../../utils/salesDriverLabel.ts'
+import { SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS } from './salesListColumns.ts'
+import { useApp as useAppHook } from '../../AppContext.tsx'
+import type OriginalEntityLink from '../shared/EntityLink.tsx'
+import CopyableId from '../shared/CopyableId.tsx'
+import { ensureTextAffordances } from '../shared/textAffordances.ts'
 
-const SALES_OPTIONAL_COLUMNS: TableColumnDef[] = [
-  { key: 'cashier', label: 'Cashier' },
-  { key: 'branch', label: 'Branch' },
-  { key: 'items', label: 'Items' },
-]
+function copyText(node: ReactNode): string {
+  return Children.toArray(node).map((child) => typeof child === 'string' || typeof child === 'number'
+    ? String(child) : isValidElement<{ children?: ReactNode }>(child) ? copyText(child.props.children) : '').join('')
+}
+
+/** Sale metadata is plain information; hold or keyboard activation copies it. */
+export function SaleCopyValue({ children, className = '' }: ComponentProps<typeof OriginalEntityLink>) {
+  const { t } = useAppHook() as { t: (key: string) => string }
+  const label = t('copy') || 'Copy'
+  const copied = t('copied') || 'Copied'
+  useEffect(() => { ensureTextAffordances({ copy: label, copied }) }, [label, copied])
+  return <span data-copy-value={copyText(children)} data-copy-success={copied} role="button" tabIndex={0} aria-label={`${label}: ${copyText(children)}`} className={`select-text text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${className}`}>{children}</span>
+}
+const EntityLink = SaleCopyValue
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
+const useApp = useAppHook as unknown as () => { can: (section: string, action?: string) => boolean; navigateTo?: (page: string, anchor?: string) => void }
 
 interface SaleItem {
   id?: number | string
@@ -39,6 +53,18 @@ interface SaleRecord {
   // membership/address detail opens in SaleDetailModal on row click.
   customer_name?: string
   customer_phone?: string
+  customer_is_anonymous?: number | boolean | null
+  // N9: resolved server-side (delivery_contact_name falls back to the
+  // linked driver's live name in GET /sales) -- see utils/salesDriverLabel.ts.
+  linked_driver_name?: string | null
+  delivery_contact_name?: string | null
+  // N41: how many RECORDS this sale has -- every change anybody ever made to
+  // it, unioned server-side from the amendment ledger, audit_logs, the bulk
+  // operation receipts and the sale's own creation. GET /api/sales delivers it
+  // with the page (one statement per chunk, never a query per row). Never 0
+  // for a real sale: being rung up is itself the first record, so a missing
+  // value means "the server did not say", not "nothing ever happened".
+  records_count?: number | string | null
 }
 
 interface SalesGroup {
@@ -68,9 +94,16 @@ interface SalesListSurfaceProps {
   isSelectionScopePartiallySelected: (ids: number[]) => boolean
   loading: boolean
   revenue: number
-  /** Count of sales that contribute to `revenue` (cancelled + awaiting-payment
-   * excluded) — the reconciled headline count shown in the footer. */
+  /** Count of sales that contribute to `revenue` — every sale in the window
+   * except a cancelled one, matching the kernel's `recognizedExpr`. A credit
+   * sale is IN, because it is inside `revenue` too. This contract used to
+   * claim the credit cohort was left out, which described neither
+   * `isRevenueCountedSale` nor GET /api/sales/stats. */
   revenueCount: number
+  /** How much of `revenue` is still owed: the credit annotation (owner,
+   * Sep 6 2026). Printed POSITIVE beside the revenue, never with a minus and
+   * never as a deduction — these rows are already inside `revenue`. */
+  creditUsd: number
   /** Predicate: does this sale count toward the money shown? Used to make the
    * day-group header counts money-counting too, so they sum to the footer. */
   isCountedSale: (sale: SaleRecord) => boolean
@@ -110,6 +143,7 @@ export default function SalesListSurface({
   loading,
   revenue,
   revenueCount,
+  creditUsd,
   isCountedSale,
   salesSections,
   selectAllRef,
@@ -125,14 +159,19 @@ export default function SalesListSurface({
   toggleSelectAll,
   toggleSelectionScope,
 }: SalesListSurfaceProps) {
+  // Bulk selection is its own authority. Individual status/customer/amend
+  // grants must not make long-press multi-select available to an Employee.
+  // Legacy permission contract: const { can } = useApp()
+  const { can, navigateTo } = useApp()
+  selectionModeActive = selectionModeActive && can('sales', 'bulk')
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
   const mobileSkeletonCards = Array.from({ length: 4 }, (_, index) => index)
   // 11.1: the checkbox column only takes space in select mode; out of it
   // every first-column cell drops padding/content and auto layout collapses
   // the column.
   const selectCellPad = selectionModeActive ? 'px-3' : 'px-0'
-  const cols = useColumnPreferences('sales', SALES_OPTIONAL_COLUMNS)
-  const columnCount = 9 + cols.visibleCount
+  const cols = useColumnPreferences(SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS)
+  const columnCount = 8 + cols.visibleCount
   const chooserColumns = SALES_OPTIONAL_COLUMNS.map((column) => ({ ...column, label: t(column.key) || column.label }))
 
   return (
@@ -161,11 +200,11 @@ export default function SalesListSurface({
                 {cols.isVisible('cashier') ? <th className="hidden px-3 py-2 text-left font-semibold lg:table-cell">{t('cashier')}</th> : null}
                 <th className="px-3 py-2 text-left font-semibold">{t('payment_method')}</th>
                 {cols.isVisible('branch') ? <th className="hidden px-3 py-2 text-left font-semibold md:table-cell">{t('branch')}</th> : null}
+                {cols.isVisible('driver') ? <th className="hidden px-3 py-2 text-left font-semibold md:table-cell">{t('driver')}</th> : null}
                 <th className="px-3 py-2 text-right font-semibold">{t('total')}</th>
                 {cols.isVisible('items') ? <th className="hidden px-3 py-2 text-center font-semibold md:table-cell">{t('items')}</th> : null}
-                <th className="px-3 py-2 text-right font-semibold">{t('actions') || 'Actions'}</th>
-                <th className="hidden w-10 px-1 py-2 text-right lg:table-cell">
-                  <ColumnChooser columns={chooserColumns} isVisible={cols.isVisible} toggle={cols.toggle} reset={cols.reset} label={t('columns') || 'Columns'} resetLabel={t('reset') || 'Reset'} />
+                <th className="w-10 px-1 py-2 text-right">
+                  <ColumnChooser className="hidden lg:inline-block" columns={chooserColumns} isVisible={cols.isVisible} toggle={cols.toggle} reset={cols.reset} label={t('columns') || 'Columns'} resetLabel={t('reset') || 'Reset'} />
                 </th>
               </tr>
             </thead>
@@ -181,10 +220,10 @@ export default function SalesListSurface({
                     {cols.isVisible('cashier') ? <td className="hidden px-4 py-3 lg:table-cell"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
                     <td className="px-4 py-3"><div className="h-5 w-16 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
                     {cols.isVisible('branch') ? <td className="hidden px-4 py-3 md:table-cell"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
+                    {cols.isVisible('driver') ? <td className="hidden px-4 py-3 md:table-cell"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
                     <td className="px-4 py-3"><div className="ml-auto h-4 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
                     {cols.isVisible('items') ? <td className="hidden px-4 py-3 md:table-cell"><div className="mx-auto h-4 w-8 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
-                    <td className="px-4 py-3"><div className="mx-auto h-6 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
-                    <td className="hidden lg:table-cell" />
+                    <td className="w-10 px-1 py-3"><div className="ml-auto h-7 w-7 rounded bg-slate-200 dark:bg-slate-700" /></td>
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
@@ -199,22 +238,27 @@ export default function SalesListSurface({
                     <tr className="bg-slate-100/90 dark:bg-slate-800/80">
                       <td colSpan={columnCount} className="px-4 py-2">
                         <div className="flex items-center justify-between gap-3 text-xs">
-                          <label className="inline-flex min-w-0 items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                            {selectionModeActive ? (
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded"
-                              checked={isSelectionScopeFullySelected(section.ids)}
-                              ref={(node) => {
-                                if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                              }}
-                              onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                              aria-label={`Select ${section.label}`}
-                            />
-                            ) : null}
-                            <span>{section.label}</span>
-                            <span className="text-slate-400">{countedCount} sale{countedCount === 1 ? '' : 's'}</span>
-                          </label>
+                          {selectionModeActive ? (
+                            <label className="inline-flex min-w-0 items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded"
+                                checked={isSelectionScopeFullySelected(section.ids)}
+                                ref={(node) => {
+                                  if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                                }}
+                                onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                                aria-label={`Select ${section.label}`}
+                              />
+                              <span>{section.label}</span>
+                              <span className="text-slate-400">{countedCount} sale{countedCount === 1 ? '' : 's'}</span>
+                            </label>
+                          ) : (
+                            <div className="inline-flex min-w-0 items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                              <span>{section.label}</span>
+                              <span className="text-slate-400">{countedCount} sale{countedCount === 1 ? '' : 's'}</span>
+                            </div>
+                          )}
                           <button
                             type="button"
                             className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
@@ -256,6 +300,7 @@ export default function SalesListSurface({
                           const totalKhr = sale.total_khr || 0
                           const status = sale.sale_status || 'completed'
                           const branchLabel = getSaleBranchLabel(sale)
+                          const driverLabel = resolveDriverLabel(sale)
                           const rowSelected = selectedIds.has(Number(sale.id))
                           // Same long-press-to-select-mode pattern as Products/
                           // Inventory rows: out of select mode a plain click
@@ -272,8 +317,8 @@ export default function SalesListSurface({
                             toggleSelected(sale.id)
                           }
                           return (
+                            <Fragment key={sale.id}>
                             <tr
-                              key={sale.id}
                               className={`table-row cursor-pointer select-none hover:bg-blue-50 dark:hover:bg-blue-900/10 ${rowSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''} ${status === 'cancelled' ? 'opacity-60' : ''}`}
                               onClick={selectionModeActive ? handleRowClick : undefined}
                               {...(selectionModeActive ? {} : longPress)}
@@ -298,27 +343,28 @@ export default function SalesListSurface({
                                     row click opens the full detail (membership,
                                     address, line items). */}
                                 <div className="min-w-0 max-w-[12rem]">
-                                  <div className="truncate font-medium text-gray-800 dark:text-gray-200">{sale.customer_name?.trim() || (t('walk_in') || 'Walk-in')}</div>
-                                  {sale.customer_phone?.trim() ? <div className="truncate text-xs text-gray-400">{sale.customer_phone}</div> : null}
+                                  <div className="truncate font-medium text-gray-800 dark:text-gray-200">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'General') : sale.customer_name?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}</div>
+                                  {sale.customer_phone?.trim() ? <div className="truncate text-xs text-gray-400"><EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink></div> : null}
                                 </div>
                               </td>
                               <td className="px-3 py-1.5"><StatusBadge status={status} t={t} /></td>
                               {cols.isVisible('cashier') ? <td className="hidden px-3 py-1.5 text-gray-700 dark:text-gray-300 lg:table-cell">{sale.cashier_name || 'N/A'}</td> : null}
-                              <td className="px-3 py-1.5"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method || 'N/A'}</span></td>
-                              {cols.isVisible('branch') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{branchLabel || 'N/A'}</td> : null}
+                              <td className="px-3 py-1.5">{sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo}><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method}</span></EntityLink> : <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">N/A</span>}</td>
+                              {cols.isVisible('branch') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{branchLabel ? <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink> : 'N/A'}</td> : null}
+                              {/* Driver empty-state contract: {driverLabel || 'N/A'} */}
+                              {cols.isVisible('driver') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{driverLabel ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={driverLabel} navigate={navigateTo}>{driverLabel}</EntityLink> : 'N/A'}</td> : null}
                               <td className="px-3 py-1.5 text-right">
                                 <div className={`font-semibold ${status === 'cancelled' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{fmtUSD(totalUsd)}</div>
                                 {totalKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
                               </td>
                               {cols.isVisible('items') ? <td className="hidden px-3 py-1.5 text-center text-gray-500 md:table-cell">{items.length}</td> : null}
-                              <td className="px-2 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
+                              <td className="w-10 px-1 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
                                 <div className="flex flex-nowrap items-center justify-end gap-0.5">
-                                  <button type="button" onClick={() => setDetailSale(sale)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" aria-label={t('view') || 'View'} title={t('view') || 'View'}><Eye className="h-3.5 w-3.5" /></button>
                                   <button type="button" onClick={() => setSelectedSale(sale)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" aria-label={t('print') || 'Print'} title={t('print') || 'Print'}><Printer className="h-3.5 w-3.5" /></button>
                                 </div>
                               </td>
-                              <td className="hidden lg:table-cell" />
                             </tr>
+                            </Fragment>
                           )
                         })}
                       </Fragment>
@@ -331,6 +377,9 @@ export default function SalesListSurface({
         </div>
         <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
           {revenueCount} {t('sales')} | {fmtUSD(revenue)}
+          {/* The credit rides BESIDE the revenue, positive and unsigned: it is
+              part of the figure to its left, not something to take off it. */}
+          {creditUsd > 0 ? <> · {t('rpt_pending_credit') || 'Not Paid'} {fmtUSD(creditUsd)}</> : null}
         </div>
       </div>
 
@@ -375,22 +424,27 @@ export default function SalesListSurface({
             <div key={section.id} className="space-y-2">
               <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
                 <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  <label className="inline-flex min-w-0 items-center gap-2">
-                    {selectionModeActive ? (
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded"
-                      checked={isSelectionScopeFullySelected(section.ids)}
-                      ref={(node) => {
-                        if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                      }}
-                      onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                      aria-label={`Select ${section.label}`}
-                    />
-                    ) : null}
-                    <span>{section.label}</span>
-                    <span className="normal-case tracking-normal text-slate-400">{countedCount}</span>
-                  </label>
+                  {selectionModeActive ? (
+                    <label className="inline-flex min-w-0 items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded"
+                        checked={isSelectionScopeFullySelected(section.ids)}
+                        ref={(node) => {
+                          if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                        }}
+                        onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                        aria-label={`Select ${section.label}`}
+                      />
+                      <span>{section.label}</span>
+                      <span className="normal-case tracking-normal text-slate-400">{countedCount}</span>
+                    </label>
+                  ) : (
+                    <div className="inline-flex min-w-0 items-center gap-2">
+                      <span>{section.label}</span>
+                      <span className="normal-case tracking-normal text-slate-400">{countedCount}</span>
+                    </div>
+                  )}
                   <button type="button" className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSalesSection(section.id)}>
                     {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                     {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
@@ -425,6 +479,7 @@ export default function SalesListSurface({
                     const totalKhr = sale.total_khr || 0
                     const status = sale.sale_status || 'completed'
                     const branchLabel = getSaleBranchLabel(sale)
+                    const driverLabel = resolveDriverLabel(sale)
                     const cardSelected = selectedIds.has(Number(sale.id))
                     // Mobile mirror of the desktop rows' long-press pattern --
                     // the card and the row share one per-sale state slot, which
@@ -449,7 +504,7 @@ export default function SalesListSurface({
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
-                            <div className="mb-1 flex flex-wrap items-center gap-2">
+                            <div data-sales-card-primary-meta="" className="mb-1 flex min-w-0 flex-nowrap items-center gap-x-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap text-xs text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                               {selectionModeActive ? (
                               <input
                                 type="checkbox"
@@ -460,24 +515,43 @@ export default function SalesListSurface({
                                 aria-label={`Select ${sale.receipt_number}`}
                               />
                               ) : null}
-                              <span className="min-w-0 truncate font-mono text-sm font-semibold text-blue-600 dark:text-blue-400">{sale.receipt_number}</span>
-                              <span className="shrink-0 text-xs text-gray-400">{fmtTime(sale.created_at)}</span>
+                              {/* The card layout is the phone one (<768px). Keep
+                                  the complete receipt id as one nonshrinking
+                                  value; this metadata row owns horizontal scroll
+                                  when an unusually long id does not fit. */}
+                              <CopyableId value={sale.receipt_number || ''} copyLabel={t('copy_receipt_number') || 'Copy receipt number'} copiedLabel={t('copied') || 'Copied'} className="shrink-0 whitespace-nowrap font-mono text-sm font-semibold text-gray-900 dark:text-white" />
+                              <span className="shrink-0">{fmtTime(sale.created_at)}</span>
+                              {sale.cashier_name ? <span className="shrink-0 font-bold text-gray-700 dark:text-gray-200" aria-label={`${t('cashier') || 'Cashier'}: ${sale.cashier_name}`}>{sale.cashier_name}</span> : null}
                             </div>
                             {/* Y17: customer (name + phone) leads the meta line;
                                 tapping the card opens the full detail. */}
-                            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
-                              <span className="font-medium text-gray-700 dark:text-gray-300">{sale.customer_name?.trim() || (t('walk_in') || 'Walk-in')}</span>
-                              {sale.customer_phone?.trim() ? <span className="text-gray-400">{sale.customer_phone}</span> : null}
-                              {sale.cashier_name ? <span>| {sale.cashier_name}</span> : null}
-                              {branchLabel ? <span>| {branchLabel}</span> : null}
+                            <div className="mt-0.5 flex min-w-0 flex-nowrap items-center gap-x-2 overflow-x-auto overscroll-x-contain whitespace-nowrap text-xs text-gray-500 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                              <span className="font-medium text-gray-700 dark:text-gray-300">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'General') : sale.customer_name?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}</span>
+                              {sale.customer_phone?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo} className="text-gray-400">{sale.customer_phone}</EntityLink> : null}
+                              {/* U22: phone and delivery stay on one compact
+                                  contact line. The driver's actual name is the
+                                  useful fact here; the repeated "Driver" label
+                                  made this phone row read like another form.
+                                  Assistive text still identifies the value as
+                                  delivery information. */}
+                              {/* Mobile delivery contract: {driverLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('delivery')}: ${driverLabel}`}>{driverLabel}</span></> : null} */}
+                              {driverLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('delivery') || 'Delivery'}: ${driverLabel}`}><EntityLink page="contacts" anchor="hub:contacts:delivery" search={driverLabel} navigate={navigateTo}>{driverLabel}</EntityLink></span></> : null}
                             </div>
-                            {/* Third row on small screens (user, Aug 30):
-                                status + payment get their OWN line, and the
-                                payment badge truncates with "…" instead of
-                                ever touching the KHR figure at the right. */}
-                            <div className="mt-1 flex min-w-0 items-center gap-1.5">
-                              <StatusBadge status={status} t={t} />
-                              <span className="badge-blue min-w-0 max-w-[9rem] truncate text-xs">{sale.payment_method || 'N/A'}</span>
+                            {/* Third row on small screens: branch, status,
+                                payment and item count get their own line.
+                                Every child is shrink-0/whitespace-nowrap (no
+                                truncate/max-w) so the row itself overflows
+                                and scrolls horizontally instead of any one
+                                child shrinking and clipping to "…" -- same
+                                contract as the two meta rows above it
+                                (owner: still saw the payment badge get cut
+                                off on a phone even after this row gained
+                                overflow-x-auto, because the badge could
+                                still shrink inside the flex-nowrap row). */}
+                            <div data-sales-card-status-meta="" className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                              {branchLabel ? <span className="shrink-0" aria-label={`${t('branch') || 'Branch'}: ${branchLabel}`}><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink></span> : null}
+                              <span className="shrink-0"><StatusBadge status={status} t={t} /></span>
+                              {sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} className="shrink-0 whitespace-nowrap"><span className="badge-blue shrink-0 whitespace-nowrap text-xs">{sale.payment_method}</span></EntityLink> : <span className="badge-blue shrink-0 whitespace-nowrap text-xs">N/A</span>}
                               <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{items.length} {t('items')}</span>
                             </div>
                           </div>

@@ -32,7 +32,7 @@ const tsPath = path.join(tmpDir, 'permissions.ts')
 fs.writeFileSync(tsPath, fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'permissions.ts'), 'utf8'))
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
 execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath}`, { cwd: tmpDir, stdio: 'inherit' })
-const { hasPermission, getPermissionTier } = require(path.join(tmpDir, 'permissions.js'))
+const { hasPermission, getActionTier } = require(path.join(tmpDir, 'permissions.js'))
 
 // Lift the three real helpers out of routes/products.ts rather than
 // reimplementing them -- reimplementing the rule is how the original bug
@@ -64,8 +64,8 @@ const body = [
   .replace(/\): boolean/g, ')')
   .replace(/^export /gm, '')
 
-const factory = new Function('hasPermission', 'getPermissionTier', `${body}\nreturn { parseProductReadSurface, productSurfaceDenialReason, isImageOnlyRead }`)
-const { parseProductReadSurface, productSurfaceDenialReason, isImageOnlyRead } = factory(hasPermission, getPermissionTier)
+const factory = new Function('hasPermission', 'getActionTier', `${body}\nreturn { parseProductReadSurface, productSurfaceDenialReason, isImageOnlyRead }`)
+const { parseProductReadSurface, productSurfaceDenialReason, isImageOnlyRead } = factory(hasPermission, getActionTier)
 
 let passed = 0
 function check(name, fn) {
@@ -103,6 +103,17 @@ check('a real products grant is never restricted, on any surface', () => {
 })
 
 // ---- declaring a surface must not escalate ----
+check('effective view denial is scoped, and cannot unblind an image-only reader', () => {
+  const denied = role({ products: true, inventory: true, sales: true, 'products:view': false, 'inventory:view': false, 'sales:view': false })
+  for (const surface of ['products', 'inventory', 'pos']) assert.ok(productSurfaceDenialReason(denied, surface))
+  const image = { ...denied, permissions: JSON.stringify({ products_image_only: true, pos: true }) }
+  assert.equal(productSurfaceDenialReason(image, 'products'), null)
+  assert.equal(isImageOnlyRead(image, 'products'), true)
+  assert.equal(productSurfaceDenialReason(image, 'pos'), null)
+  assert.equal(isImageOnlyRead(image, 'pos'), false)
+  assert.ok(productSurfaceDenialReason(role({ sales: 'view' }), 'pos'), 'read-only Sales must not gain the historically Full-only POS catalog alternate')
+})
+
 check('claiming surface=pos without the pos permission is REFUSED, not silently downgraded', () => {
   const imageOnly = role({ products_image_only: true })
   assert.ok(productSurfaceDenialReason(imageOnly, 'pos'), 'an image-only user must not be able to read POS data by asking for it')

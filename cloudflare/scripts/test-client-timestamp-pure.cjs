@@ -73,7 +73,7 @@ check('garbage, empty and non-string values fall back to the server clock', () =
 check('wiring: the sales INSERT COALESCEs the sanitized client stamp, updated_at stays server-clock', () => {
   const salesRoute = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'sales.ts'), 'utf8')
   assert.match(salesRoute, /sanitizeClientCreatedAt\(body\.created_at\)/)
-  assert.match(salesRoute, /COALESCE\(@created_at, CURRENT_TIMESTAMP\), CURRENT_TIMESTAMP\)/)
+  assert.match(salesRoute, /COALESCE\(@created_at, CURRENT_TIMESTAMP\), CURRENT_TIMESTAMP\s+WHERE @customer_guard_id/)
 })
 
 check('wiring: the offline queue stamps payload.created_at at queue time', () => {

@@ -1,0 +1,725 @@
+warning: in the working copy of 'cloudflare/scripts/test-shift-sessions-pure.cjs', LF will be replaced by CRLF the next time Git touches it
+diff --git a/cloudflare/scripts/test-shift-sessions-pure.cjs b/cloudflare/scripts/test-shift-sessions-pure.cjs
+index 7f7a3770..1d0a6953 100644
+--- a/cloudflare/scripts/test-shift-sessions-pure.cjs
++++ b/cloudflare/scripts/test-shift-sessions-pure.cjs
+@@ -6,7 +6,11 @@ const path = require('node:path')
+ const Database = require('better-sqlite3')
+ const root = path.join(__dirname, '..')
+ const db = new Database(':memory:')
++db.pragma('foreign_keys = ON')
+ db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)')
++db.exec('CREATE TABLE system_flags (key TEXT PRIMARY KEY, value TEXT)')
++db.exec('CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT)')
++db.exec('CREATE TABLE fees (id INTEGER PRIMARY KEY AUTOINCREMENT)')
+ db.exec(fs.readFileSync(path.join(root, 'migrations', '0116_shift_sessions.sql'), 'utf8'))
+ db.exec(fs.readFileSync(path.join(root, 'migrations', '0118_shift_policy_and_amendments.sql'), 'utf8'))
+ 
+@@ -30,4 +34,27 @@ assert.throws(() => db.prepare('UPDATE shift_session_amendments SET reason=? WHE
+ assert.throws(() => db.prepare('DELETE FROM shift_session_amendments WHERE shift_session_id=?').run(shiftId), /immutable/)
+ const settings = Object.fromEntries(db.prepare("SELECT key,value FROM settings WHERE key LIKE 'shift_%'").all().map((r) => [r.key, r.value]))
+ assert.deepEqual(settings, { shift_admin_exempt: 'true', shift_scope_mode: 'per_account' })
+-console.log('OK shift schema: account/shop concurrency, branch separation, safe defaults, immutable history')
++
++db.exec(fs.readFileSync(path.join(root, 'migrations', '0119_shift_restore_guard.sql'), 'utf8'))
++db.exec(fs.readFileSync(path.join(root, 'migrations', '0120_shift_transaction_attribution.sql'), 'utf8'))
++
++insert.run({ ...base, code: 'S-7', scope: 'per_account', user: 11, branch: 3 })
++const linkedShiftId = db.prepare("SELECT id FROM shift_sessions WHERE shift_code='S-7'").get().id
++assert.equal(db.prepare("SELECT COUNT(*) AS n FROM shift_session_events WHERE shift_session_id=? AND event_type='open'").get(linkedShiftId).n, 1)
++db.prepare(`UPDATE shift_sessions SET closed_at=?, closing_counted_usd=?, closed_by_user_id=?, closed_by_user_name=?
++  WHERE id=?`).run('2026-09-05T09:00:00.000Z', 25, 11, 'Cashier 11', linkedShiftId)
++assert.equal(db.prepare("SELECT COUNT(*) AS n FROM shift_session_events WHERE shift_session_id=? AND event_type='close'").get(linkedShiftId).n, 1)
++db.prepare('UPDATE shift_sessions SET opening_note=? WHERE id=?').run('manager correction', linkedShiftId)
++assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shift_session_events WHERE shift_session_id=?').get(linkedShiftId).n, 2)
++assert.throws(() => db.prepare('UPDATE shift_session_events SET actor_name=? WHERE shift_session_id=?').run('rewrite', linkedShiftId), /immutable/)
++assert.throws(() => db.prepare('DELETE FROM shift_session_events WHERE shift_session_id=?').run(linkedShiftId), /immutable/)
++
++db.prepare('INSERT INTO sales (shift_session_id) VALUES (?)').run(linkedShiftId)
++db.prepare('INSERT INTO fees (shift_session_id) VALUES (?)').run(linkedShiftId)
++assert.throws(() => db.prepare('INSERT INTO sales (shift_session_id) VALUES (?)').run(999999), /FOREIGN KEY/)
++
++db.prepare("INSERT INTO system_flags (key,value) VALUES ('maintenance','{\"mode\":\"restore\"}')").run()
++assert.doesNotThrow(() => db.prepare('DELETE FROM shift_session_events WHERE shift_session_id=?').run(linkedShiftId))
++assert.doesNotThrow(() => db.prepare('DELETE FROM shift_session_amendments WHERE shift_session_id=?').run(shiftId))
++
++console.log('OK shift schema: scoped concurrency, durable transaction links, lifecycle events, restore-safe immutable history')
+diff --git a/cloudflare/src/lib/backup.ts b/cloudflare/src/lib/backup.ts
+index 8d9a5ae5..146a0070 100644
+--- a/cloudflare/src/lib/backup.ts
++++ b/cloudflare/src/lib/backup.ts
+@@ -154,6 +154,7 @@ export const BACKUP_TABLES = [
+   'ai_provider_configs',
+   'shift_sessions',
+   'shift_session_amendments',
++  'shift_session_events',
+   'sales',
+   'sale_items',
+   'sale_item_batch_allocations',
+diff --git a/cloudflare/src/routes/fees.ts b/cloudflare/src/routes/fees.ts
+index 822e52d6..cb6b358e 100644
+--- a/cloudflare/src/routes/fees.ts
++++ b/cloudflare/src/routes/fees.ts
+@@ -8,6 +8,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
+ import { maybeQueueForReview } from '../lib/reviewGate'
+ import { businessToday } from '../lib/businessDateWindow'
+ import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
++import { resolveTransactionShiftId } from '../lib/shiftAttribution'
+ import type { Env } from '../index'
+ 
+ // Standalone Fees page (migrations/0018_fees.sql) -- manual-entry fee
+@@ -53,6 +54,8 @@ type FeeRow = {
+   sale_id: number | null
+   branch_id: number | null
+   branch_name?: string | null
++  shift_session_id: number | null
++  shift_code?: string | null
+   delivery_contact_id: number | null
+   delivery_contact_name?: string | null
+   notes: string | null
+@@ -177,10 +180,12 @@ app.get('/', async (c) => {
+ 
+   const rows = await db.prepare(`
+     SELECT f.*, s.receipt_number AS sale_receipt_number, b.name AS branch_name,
++      sh.shift_code AS shift_code,
+       dc.name AS delivery_contact_name
+     FROM fees f
+     LEFT JOIN sales s ON s.id = f.sale_id
+     LEFT JOIN branches b ON b.id = f.branch_id
++    LEFT JOIN shift_sessions sh ON sh.id = f.shift_session_id
+     LEFT JOIN delivery_contacts dc ON dc.id = f.delivery_contact_id
+     ${where}
+     ORDER BY f.fee_date DESC, f.id DESC
+@@ -368,10 +373,12 @@ app.get('/:id', async (c) => {
+   if (!Number.isFinite(id)) return c.json({ error: 'Invalid fee id' }, 400)
+   const fee = await db.prepare(`
+     SELECT f.*, s.receipt_number AS sale_receipt_number, b.name AS branch_name,
++      sh.shift_code AS shift_code,
+       dc.name AS delivery_contact_name
+     FROM fees f
+     LEFT JOIN sales s ON s.id = f.sale_id
+     LEFT JOIN branches b ON b.id = f.branch_id
++    LEFT JOIN shift_sessions sh ON sh.id = f.shift_session_id
+     LEFT JOIN delivery_contacts dc ON dc.id = f.delivery_contact_id
+     WHERE f.id = @id
+   `).get<FeeRow>({ id })
+@@ -404,18 +411,32 @@ app.post('/', async (c) => {
+   }
+   const notes = normalizeText(body.notes, 2000)
+   const now = new Date().toISOString()
++  const normalizedSaleId = Number.isFinite(saleId as number) ? saleId : null
++  const normalizedBranchId = Number.isFinite(branchId as number) ? branchId : null
++  const linkedSale = normalizedSaleId == null ? null : await db.prepare(
++    'SELECT shift_session_id FROM sales WHERE id=@id',
++  ).get<{ shift_session_id: number | null }>({ id: normalizedSaleId })
++  const shiftSessionId = linkedSale?.shift_session_id ?? await resolveTransactionShiftId({
++    db,
++    user,
++    branchId: normalizedBranchId,
++    occurredAt: now,
++    required: false,
++  })
+ 
+   const result = await db.prepare(`
+-    INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, delivery_contact_id, notes, created_by, created_by_name, created_at, updated_at)
+-    VALUES (@feeType, @label, @amountUsd, @amountKhr, @feeDate, @saleId, @branchId, @deliveryContactId, @notes, @createdBy, @createdByName, @now, @now)
++    INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, shift_session_id, delivery_contact_id, notes, created_by, created_by_name, created_at, updated_at)
++    VALUES (@feeType, @label, @amountUsd, @amountKhr, @feeDate, @saleId, @branchId, @shiftSessionId, @deliveryContactId, @notes, @createdBy, @createdByName, @now, @now)
+   `).run({
+     feeType, label, amountUsd, amountKhr, feeDate,
+-    saleId: Number.isFinite(saleId as number) ? saleId : null,
+-    branchId: Number.isFinite(branchId as number) ? branchId : null,
++    saleId: normalizedSaleId,
++    branchId: normalizedBranchId,
++    shiftSessionId,
+     deliveryContactId, notes, createdBy: user.id, createdByName: user.username || null, now,
+   })
+ 
+-  const fee = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id: result.lastInsertRowid })
++  const fee = await db.prepare(`SELECT f.*, sh.shift_code AS shift_code FROM fees f
++    LEFT JOIN shift_sessions sh ON sh.id=f.shift_session_id WHERE f.id=@id`).get<FeeRow>({ id: result.lastInsertRowid })
+   await audit(c.env, user.id, user.username || null, 'create', 'fee', result.lastInsertRowid, { fee_type: feeType, amount_usd: amountUsd, amount_khr: amountKhr })
+   await broadcast(c.env, 'fees', { type: 'created', id: result.lastInsertRowid })
+   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
+diff --git a/cloudflare/src/routes/returns.ts b/cloudflare/src/routes/returns.ts
+index e7d967b2..17a8c94b 100644
+--- a/cloudflare/src/routes/returns.ts
++++ b/cloudflare/src/routes/returns.ts
+@@ -19,6 +19,7 @@ import {
+ } from '../lib/returnsStock'
+ import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
+ import { computeSaleTotals } from '../lib/saleTotals'
++import { resolveTransactionShiftId } from '../lib/shiftAttribution'
+ import type { Env } from '../index'
+ 
+ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+@@ -1196,9 +1197,16 @@ app.post('/', async (c) => {
+       const replacementClientRequestId = clientRequestId
+         ? `${clientRequestId.slice(0, 96)}:replacement`
+         : `return_${returnId}_replacement`
++      const replacementShiftSessionId = await resolveTransactionShiftId({
++        db,
++        user,
++        branchId: Number.isSafeInteger(Number(branchId)) && Number(branchId) > 0 ? Number(branchId) : null,
++        occurredAt: new Date().toISOString(),
++        required: false,
++      })
+       const replacementSaleInsert = await db.prepare(`
+         INSERT INTO sales (
+-          receipt_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name,
++          receipt_number, client_request_id, shift_session_id, cashier_id, cashier_name, branch_id, branch_name,
+           customer_id, customer_name, customer_phone, customer_address,
+           payment_method, payment_details, payment_currency, exchange_rate,
+           subtotal_usd, subtotal_khr, discount_usd, discount_khr, tax_usd, tax_khr,
+@@ -1207,7 +1215,7 @@ app.post('/', async (c) => {
+           is_delivery, loyalty_accrual, sale_status, notes, items, search_normalized,
+           source_return_id, updated_at
+         ) VALUES (
+-          @receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
++          @receipt_number, @client_request_id, @shift_session_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
+           @customer_id, @customer_name, @customer_phone, @customer_address,
+           @payment_method, @payment_details, 'USD', @exchange_rate,
+           @subtotal_usd, @subtotal_khr, 0, 0, 0, 0,
+@@ -1219,6 +1227,7 @@ app.post('/', async (c) => {
+       `).run({
+         receipt_number: replacementReceiptNumber,
+         client_request_id: replacementClientRequestId,
++        shift_session_id: replacementShiftSessionId,
+         cashier_id: user?.id ?? null,
+         cashier_name: user?.name || user?.username || null,
+         branch_id: branchId,
+diff --git a/cloudflare/src/routes/sales.ts b/cloudflare/src/routes/sales.ts
+index 549ef237..46a2a9a2 100644
+--- a/cloudflare/src/routes/sales.ts
++++ b/cloudflare/src/routes/sales.ts
+@@ -80,6 +80,7 @@ import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } f
+ import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
+ import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
+ import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
++import { resolveTransactionShiftId, ShiftAttributionError } from '../lib/shiftAttribution'
+ import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
+ import { formatSaleTelegramLines, sendTelegramEvent, telegramMoney } from '../lib/telegram'
+ import type { Env } from '../index'
+@@ -225,13 +226,14 @@ function normalizeClientRequestId(value: unknown): string | null {
+ 
+ app.post('/', async (c) => {
+   const db = getDb(c.env)
++  const user = c.get('user')
+   // Real gap: this endpoint only checked requireAuth (any logged-iwarning: in the working copy of 'cloudflare/src/lib/backup.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'cloudflare/src/routes/fees.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'cloudflare/src/routes/returns.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'cloudflare/src/routes/sales.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'cloudflare/src/routes/shifts.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/api/feesTransport.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/api/shiftTransport.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/components/pos/POS.tsx', LF will be replaced by CRLF the next time Git touches it
+n user).
+   // Sale creation happens from two places -- POS checkout (frontend gates
+   // page access on the 'pos' permission, see AppContext.tsx's
+   // PAGE_PERMISSIONS) and, potentially, a manual entry from the Sales page
+   // itself ('sales' permission) -- so either grant is accepted here rather
+   // than requiring both.
+-  if (!hasAnyPermission(c.get('user'), ['pos', 'sales'])) {
++  if (!hasAnyPermission(user, ['pos', 'sales'])) {
+     return c.json({ error: 'You do not have permission to perform this action' }, 403)
+   }
+   const body = await c.req.json<{
+@@ -239,6 +241,7 @@ app.post('/', async (c) => {
+     // Offline replays only: the sale's queue-time moment, honored with
+     // bounded trust (lib/clientTimestamp.ts). Online checkouts omit it.
+     created_at?: unknown
++    shift_session_id?: unknown
+     branch_id?: number
+     cashier_id?: number
+     cashier_name?: string
+@@ -675,10 +678,27 @@ app.post('/', async (c) => {
+   // ---- 4. Insert the sale header (single statement -- see lib/db.ts's
+   // batch() docs for why this can't be the same atomic unit as step 5) ----
+   const branchRow = body.branch_id ? await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]) : null
++  const saleBranchId = Number.isSafeInteger(Number(body.branch_id)) && Number(body.branch_id) > 0 ? Number(body.branch_id) : null
++  let shiftSessionId: number | null
++  try {
++    shiftSessionId = await resolveTransactionShiftId({
++      db,
++      user,
++      branchId: saleBranchId,
++      occurredAt: clientCreatedAt || new Date().toISOString(),
++      requestedShiftId: body.shift_session_id,
++      required: true,
++    })
++  } catch (error) {
++    if (error instanceof ShiftAttributionError) {
++      return c.json({ error: error.message, code: error.code }, 409)
++    }
++    throw error
++  }
+   const saleInsert = await db
+     .prepare(`
+       INSERT INTO sales (
+-        receipt_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name,
++        receipt_number, client_request_id, shift_session_id, cashier_id, cashier_name, branch_id, branch_name,
+         customer_id, customer_name, customer_phone, customer_address,
+         payment_method, payment_details, payment_currency, exchange_rate,
+         subtotal_usd, subtotal_khr, discount_usd, discount_khr, tax_usd, tax_khr, total_usd, total_khr,
+@@ -688,7 +708,7 @@ app.post('/', async (c) => {
+         delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
+         delivery_actual_cost_usd, delivery_actual_cost_khr,
+         loyalty_accrual, sale_status, search_normalized, created_at, updated_at
+-      ) VALUES (@receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
++      ) VALUES (@receipt_number, @client_request_id, @shift_session_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
+         @customer_id, @customer_name, @customer_phone, @customer_address,
+         @payment_method, @payment_details, @payment_currency, @exchange_rate,
+         @subtotal_usd, @subtotal_khr, @discount_usd, @discount_khr, @tax_usd, @tax_khr, @total_usd, @total_khr,
+@@ -703,6 +723,7 @@ app.post('/', async (c) => {
+       receipt_number: receiptNumber,
+       created_at: clientCreatedAt,
+       client_request_id: clientRequestId,
++      shift_session_id: shiftSessionId,
+       cashier_id: body.cashier_id || null,
+       cashier_name: body.cashier_name || null,
+       branch_id: body.branch_id || null,
+@@ -1509,14 +1530,15 @@ app.patch('/:id/status', async (c) => {
+   if (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) {
+     try {
+       const feeResult = await db.prepare(`
+-        INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
+-        VALUES ('expense', @label, @amount_usd, @amount_khr, date('now'), @sale_id, @branch_id, @notes, @created_by, @created_by_name)
++        INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, shift_session_id, notes, created_by, created_by_name)
++        VALUES ('expense', @label, @amount_usd, @amount_khr, date('now'), @sale_id, @branch_id, @shift_session_id, @notes, @created_by, @created_by_name)
+       `).run({
+         label: `Cancelled sale ${sale.receipt_number || id} -- lost fee`,
+         amount_usd: cancelFeeUsd,
+         amount_khr: cancelFeeKhr,
+         sale_id: Number(id),
+         branch_id: sale.branch_id ?? null,
++        shift_session_id: sale.shift_session_id ?? null,
+         notes: cancelFeeNote || `Fee lost to cancellation (${cancelReasonLabel(cancelReason!)})`,
+         created_by: user?.id ?? null,
+         created_by_name: user?.name ?? null,
+diff --git a/cloudflare/src/routes/shifts.ts b/cloudflare/src/routes/shifts.ts
+index f47a7bac..628b2d06 100644
+--- a/cloudflare/src/routes/shifts.ts
++++ b/cloudflare/src/routes/shifts.ts
+@@ -5,13 +5,13 @@ import { audit } from '../lib/audit'
+ import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
+ import { hasAnyPermission, hasPermission, isAdminControlUser } from '../lib/permissions'
+ import { sendTelegramShiftReport } from '../lib/telegram'
++import { readShiftPolicy, type ShiftPolicy, type ShiftScopeMode } from '../lib/shiftAttribution'
+ import type { Env } from '../index'
+ 
+ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+ app.use('*', requireAuth)
+ 
+-export type ShiftScopeMode = 'per_account' | 'shop_wide'
+-export type ShiftPolicy = { scope_mode: ShiftScopeMode; admin_exempt: boolean }
++export type { ShiftPolicy, ShiftScopeMode } from '../lib/shiftAttribution'
+ export type ShiftRow = {
+   id: number; shift_code: string; scope_mode: ShiftScopeMode; user_id: number; user_name: string | null
+   branch_id: number | null; branch_name: string | null; business_date: string; opened_at: string
+@@ -64,14 +64,6 @@ function shiftCode(nowIso: string): string {
+ export function canManageShifts(user: SessionUser): boolean {
+   return isAdminControlUser(user) || hasPermission(user, 'settings')
+ }
+-export async function readShiftPolicy(db: D1Compat): Promise<ShiftPolicy> {
+-  const rows = await db.prepare("SELECT key, value FROM settings WHERE key IN ('shift_scope_mode', 'shift_admin_exempt')").all<{ key: string; value: string }>()
+-  const values = Object.fromEntries(rows.map((row) => [row.key, row.value]))
+-  return {
+-    scope_mode: values.shift_scope_mode === 'shop_wide' ? 'shop_wide' : 'per_account',
+-    admin_exempt: values.shift_admin_exempt == null ? true : values.shift_admin_exempt !== 'false',
+-  }
+-}
+ async function readCurrent(db: D1Compat, policy: ShiftPolicy, userId: number, branchId: number | null) {
+   const accountClause = policy.scope_mode === 'per_account' ? 'AND user_id = @userId' : ''
+   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
+@@ -127,7 +119,10 @@ app.get('/:id/history', async (c) => {
+   const amendments = await db.prepare(`SELECT id, shift_session_id, actor_user_id, actor_name, reason,
+     before_json, after_json, created_at FROM shift_session_amendments
+     WHERE shift_session_id = @id ORDER BY created_at ASC, id ASC`).all({ id })
+-  return c.json({ shift, amendments })
++  const events = await db.prepare(`SELECT id, shift_session_id, event_type, actor_user_id, actor_name,
++    snapshot_json, occurred_at, recorded_at FROM shift_session_events
++    WHERE shift_session_id=@id ORDER BY occurred_at ASC, id ASC`).all({ id })
++  return c.json({ shift, amendments, events })
+ })
+ 
+ app.post('/open', async (c) => {
+diff --git a/frontend/src/api/feesTransport.ts b/frontend/src/api/feesTransport.ts
+index cbe409f9..b2ca0b00 100644
+--- a/frontend/src/api/feesTransport.ts
++++ b/frontend/src/api/feesTransport.ts
+@@ -24,6 +24,8 @@ export type FeeRecord = {
+   sale_receipt_number?: string | null
+   branch_id: number | null
+   branch_name?: string | null
++  shift_session_id: number | null
++  shift_code?: string | null
+   delivery_contact_id: number | null
+   delivery_contact_name?: string | null
+   notes: string | null
+diff --git a/frontend/src/api/shiftTransport.ts b/frontend/src/api/shiftTransport.ts
+index b2451bb2..15dac2ec 100644
+--- a/frontend/src/api/shiftTransport.ts
++++ b/frontend/src/api/shiftTransport.ts
+@@ -67,8 +67,19 @@ export type ShiftAmendment = {
+   created_at: string
+ }
+ 
++export type ShiftLifecycleEvent = {
++  id: number
++  shift_session_id: number
++  event_type: 'open' | 'close'
++  actor_user_id: number | null
++  actor_name: string | null
++  snapshot_json: string
++  occurred_at: string
++  recorded_at: string
++}
++
+ export type ShiftListResult = { shifts: Shift[]; scope: 'all' | 'own' }
+-export type ShiftHistoryResult = { shift: Shift; amendments: ShiftAmendment[] }
++export type ShiftHistoryResult = { shift: Shift; amendments: ShiftAmendment[]; events: ShiftLifecycleEvent[] }
+ 
+ function queryString(values: Record<string, string | number | null | undefined>): string {
+   const query = new URLSearchParams()
+diff --git a/frontend/src/components/pos/POS.tsx b/frontend/src/components/pos/POS.tsx
+index a5f6a0f9..6f96b10e 100644
+--- a/frontend/src/components/pos/POS.tsx
++++ b/frontend/src/components/pos/POS.tsx
+@@ -32,7 +32,7 @@ import {
+ } from '../../constants'
+ import ProductImage from './ProductImage'
+ import CartItem     from './CartItem'
+-import ShiftGate, { EndShiftButton } from './ShiftGate'
++import ShiftGate, { EndShiftButton, useSharedShift } from './ShiftGate'
+ import { SHIFT_BRANCH_CHANGED_EVENT } from './ShiftGate'
+ import PaginationControls, { POS_DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+ import ScanSearchButton from '../shared/ScanSearchButton'
+@@ -1967,6 +1967,7 @@ export default function POS() {
+   const primaryBranchName = primaryBranchFilterId == null
+     ? null
+     : (branches.find((branch) => Number(branch?.id) === Number(primaryBranchFilterId))?.name || null)
++  const { state: activeShiftState } = useSharedShift(primaryBranchFilterId, user?.id, settings?.shift_scope_mode)
+ 
+   // Which products currently carry active batch/expiry tracking, scoped to
+   // the branch filter -- refetched whenever it changes.
+@@ -2846,6 +2847,11 @@ export default function POS() {
+     const device = getClientDeviceInfo()
+     const saleData = {
+       client_request_id: clientRequestId,
++      // Persist the exact shift selected at checkout. Offline replay keeps
++      // this id alongside created_at; the Worker verifies branch, owner/scope,
++      // and timestamp before accepting it, so a later sync cannot drift onto
++      // whichever shift happens to be open at replay time.
++      shift_session_id: activeShiftState?.shift?.id ?? null,
+       cashier_id:   user?.id || null,
+       // Store the USERNAME as the cashier display (cashier_id is the real link).
+       // Keeps new sales consistent with historical ones and with the rename
+
+diff --git a/cloudflare/migrations/0120_shift_transaction_attribution.sql b/cloudflare/migrations/0120_shift_transaction_attribution.sql
+new file mode 100644
+--- /dev/null
++++ b/cloudflare/migrations/0120_shift_transaction_attribution.sql
+@@ -0,0 +1,103 @@
++-- Durable shift ownership for transactional rows plus an append-only record
++-- of the two lifecycle actions that create and close a shift.
++--
++-- Existing historical sales/fees stay NULL: assigning them from overlapping
++-- timestamps would invent ownership that the old schema never recorded.
++-- New writes resolve and validate the exact shift in Worker code.
++
++ALTER TABLE sales ADD COLUMN shift_session_id INTEGER REFERENCES shift_sessions(id) ON DELETE RESTRICT;
++ALTER TABLE fees ADD COLUMN shift_session_id INTEGER REFERENCES shift_sessions(id) ON DELETE RESTRICT;
++
++CREATE INDEX idx_sales_shift_session ON sales(shift_session_id) WHERE shift_session_id IS NOT NULL;
++CREATE INDEX idx_fees_shift_session ON fees(shift_session_id) WHERE shift_session_id IS NOT NULL;
++
++CREATE TABLE shift_session_events (
++  id INTEGER PRIMARY KEY AUTOINCREMENT,
++  shift_session_id INTEGER NOT NULL REFERENCES shift_sessions(id) ON DELETE RESTRICT,
++  event_type TEXT NOT NULL CHECK (event_type IN ('open', 'close')),
++  actor_user_id INTEGER,
++  actor_name TEXT,
++  snapshot_json TEXT NOT NULL,
++  occurred_at TEXT NOT NULL,
++  recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
++);
++
++CREATE INDEX idx_shift_session_events_shift_time
++  ON shift_session_events(shift_session_id, occurred_at, id);
++
++-- Triggers make lifecycle evidence atomic with the shift write. During an
++-- authorized restore they stay quiet so the backed-up event rows are restored
++-- exactly once instead of being regenerated from restored shift rows.
++CREATE TRIGGER shift_session_event_after_open
++AFTER INSERT ON shift_sessions
++WHEN NOT EXISTS (
++  SELECT 1 FROM system_flags
++  WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore'
++)
++BEGIN
++  INSERT INTO shift_session_events (
++    shift_session_id, event_type, actor_user_id, actor_name, snapshot_json, occurred_at
++  ) VALUES (
++    NEW.id, 'open', NEW.user_id, NEW.user_name,
++    json_object(
++      'shift_code', NEW.shift_code,
++      'scope_mode', NEW.scope_mode,
++      'user_id', NEW.user_id,
++      'user_name', NEW.user_name,
++      'branch_id', NEW.branch_id,
++      'branch_name', NEW.branch_name,
++      'business_date', NEW.business_date,
++      'opened_at', NEW.opened_at,
++      'opening_float_usd', NEW.opening_float_usd,
++      'opening_float_khr', NEW.opening_float_khr,
++      'opening_note', NEW.opening_note,
++      'opened_device_name', NEW.opened_device_name
++    ),
++    NEW.opened_at
++  );
++END;
++
++CREATE TRIGGER shift_session_event_after_close
++AFTER UPDATE OF closed_at ON shift_sessions
++WHEN OLD.closed_at IS NULL AND NEW.closed_at IS NOT NULL
++  AND NOT EXISTS (
++    SELECT 1 FROM system_flags
++    WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore'
++  )
++BEGIN
++  INSERT INTO shift_session_events (
++    shift_session_id, event_type, actor_user_id, actor_name, snapshot_json, occurred_at
++  ) VALUES (
++    NEW.id, 'close', NEW.closed_by_user_id, NEW.closed_by_user_name,
++    json_object(
++      'shift_code', NEW.shift_code,
++      'scope_mode', NEW.scope_mode,
++      'branch_id', NEW.branch_id,
++      'business_date', NEW.business_date,
++      'opened_at', NEW.opened_at,
++      'closed_at', NEW.closed_at,
++      'closing_counted_usd', NEW.closing_counted_usd,
++      'closing_counted_khr', NEW.closing_counted_khr,
++      'closing_note', NEW.closing_note,
++      'closed_device_name', NEW.closed_device_name,
++      'revision', NEW.revision
++    ),
++    NEW.closed_at
++  );
++END;
++
++CREATE TRIGGER shift_session_events_no_update
++BEFORE UPDATE ON shift_session_events
++BEGIN
++  SELECT RAISE(ABORT, 'shift session events are immutable');
++END;
++
++CREATE TRIGGER shift_session_events_no_delete
++BEFORE DELETE ON shift_session_events
++WHEN NOT EXISTS (
++  SELECT 1 FROM system_flags
++  WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore'
++)
++BEGIN
++  SELECT RAISE(ABORT, 'shift session events are immutable');
++END;
+
+diff --git a/cloudflare/scripts/test-shift-attribution-pure.cjs b/cloudflare/scripts/test-shift-attribution-pure.cjs
+new file mode 100644
+--- /dev/null
++++ b/cloudflare/scripts/test-shift-attribution-pure.cjs
+@@ -0,0 +1,96 @@
++// Focused server-parity checks for durable transaction -> shift ownership.
++const assert = require('node:assert/strict')
++const fs = require('node:fs')
++const path = require('node:path')
++const ts = require('typescript')
++const Database = require('better-sqlite3')
++
++function loadShiftAttribution() {
++  const relPath = 'src/lib/shiftAttribution.ts'
++  const src = fs.readFileSync(path.join(__dirname, '..', relPath), 'utf8')
++  const { outputText } = ts.transpileModule(src, {
++    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
++    fileName: path.basename(relPath),
++  })
++  const mod = { exports: {} }
++  const requireShim = (id) => {
++    if (id === './businessDateWindow') return { BUSINESS_UTC_OFFSET_MINUTES: 420 }
++    if (id === './permissions') return { isAdminControlUser: (user) => !!user.isAdmin }
++    return {}
++  }
++  new Function('exports', 'require', 'module', outputText)(mod.exports, requireShim, mod)
++  return mod.exports
++}
++
++class CompatDb {
++  constructor(sqlite) { this.sqlite = sqlite }
++  prepare(sql) {
++    const statement = this.sqlite.prepare(sql)
++    return {
++      get: async (params = {}) => statement.get(params),
++      all: async (params = {}) => statement.all(params),
++    }
++  }
++}
++
++const sqlite = new Database(':memory:')
++sqlite.exec(`
++  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
++  CREATE TABLE shift_sessions (
++    id INTEGER PRIMARY KEY, scope_mode TEXT NOT NULL, user_id INTEGER NOT NULL,
++    branch_id INTEGER, business_date TEXT NOT NULL, opened_at TEXT NOT NULL, closed_at TEXT
++  );
++  INSERT INTO settings VALUES ('shift_scope_mode','per_account'), ('shift_admin_exempt','true');
++  INSERT INTO shift_sessions VALUES
++    (1,'per_account',7,2,'2026-09-05','2026-09-05T01:00:00.000Z',NULL),
++    (2,'per_account',8,2,'2026-09-04','2026-09-04T01:00:00.000Z','2026-09-04T09:00:00.000Z'),
++    (3,'shop_wide',99,4,'2026-09-05','2026-09-05T00:30:00.000Z',NULL);
++`)
++
++const db = new CompatDb(sqlite)
++const { resolveTransactionShiftId, ShiftAttributionError } = loadShiftAttribution()
++let passed = 0
++async function check(name, fn) {
++  await fn()
++  passed += 1
++  console.log(`PASS ${name}`)
++}
++
++;(async () => {
++  await check('server resolves the caller current per-account shift', async () => {
++    assert.equal(await resolveTransactionShiftId({ db, user: { id: 7 }, branchId: 2, occurredAt: '2026-09-05T02:00:00.000Z', required: true }), 1)
++  })
++  await check('required write without caller shift is rejected', async () => {
++    await assert.rejects(
++      resolveTransactionShiftId({ db, user: { id: 9 }, branchId: 2, occurredAt: '2026-09-05T02:00:00.000Z', required: true }),
++      (error) => error instanceof ShiftAttributionError && error.code === 'shift_required',
++    )
++  })
++  await check('offline replay keeps an explicitly verified closed shift', async () => {
++    assert.equal(await resolveTransactionShiftId({
++      db, user: { id: 8 }, branchId: 2, occurredAt: '2026-09-04T05:00:00.000Z', requestedShiftId: 2, required: true,
++    }), 2)
++  })
++  await check('requested shift is rejected outside its time window or owner', async () => {
++    await assert.rejects(resolveTransactionShiftId({
++      db, user: { id: 8 }, branchId: 2, occurredAt: '2026-09-04T10:00:00.000Z', requestedShiftId: 2,
++    }), /does not own/)
++    await assert.rejects(resolveTransactionShiftId({
++      db, user: { id: 7 }, branchId: 2, occurredAt: '2026-09-04T05:00:00.000Z', requestedShiftId: 2,
++    }), /does not own/)
++  })
++  await check('shop-wide requested shift accepts another employee in its branch', async () => {
++    assert.equal(await resolveTransactionShiftId({
++      db, user: { id: 7 }, branchId: 4, occurredAt: '2026-09-05T02:00:00.000Z', requestedShiftId: 3,
++    }), 3)
++  })
++  await check('admin exemption intentionally leaves the transaction unlinked', async () => {
++    assert.equal(await resolveTransactionShiftId({
++      db, user: { id: 1, isAdmin: true }, branchId: null, occurredAt: '2026-09-05T02:00:00.000Z', required: true,
++    }), null)
++  })
++  console.log(`\n${passed} shift attribution checks passed`)
++})().catch((error) => {
++  console.error(error)
++  process.exitCode = 1
++})
+
+diff --git a/cloudflare/src/lib/shiftAttribution.ts b/cloudflare/src/lib/shiftAttribution.ts
+new file mode 100644
+--- /dev/null
++++ b/cloudflare/src/lib/shiftAttribution.ts
+@@ -0,0 +1,91 @@
++import type { SessionUser } from './auth'
++import { BUSINESS_UTC_OFFSET_MINUTES } from './businessDateWindow'
++import type { D1Compat } from './db'
++import { isAdminControlUser } from './permissions'
++
++export type ShiftScopeMode = 'per_account' | 'shop_wide'
++export type ShiftPolicy = { scope_mode: ShiftScopeMode; admin_exempt: boolean }
++
++export class ShiftAttributionError extends Error {
++  constructor(message: string, readonly code: 'invalid_shift' | 'shift_required') {
++    super(message)
++    this.name = 'ShiftAttributionError'
++  }
++}
++
++export async function readShiftPolicy(db: D1Compat): Promise<ShiftPolicy> {
++  const rows = await db.prepare("SELECT key, value FROM settings WHERE key IN ('shift_scope_mode', 'shift_admin_exempt')")
++    .all<{ key: string; value: string }>()
++  const values = Object.fromEntries(rows.map((row) => [row.key, row.value]))
++  return {
++    scope_mode: values.shift_scope_mode === 'shop_wide' ? 'shop_wide' : 'per_account',
++    admin_exempt: values.shift_admin_exempt == null ? true : values.shift_admin_exempt !== 'false',
++  }
++}
++
++function businessDateFor(iso: string): string {
++  return new Date(new Date(iso).getTime() + BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000).toISOString().slice(0, 10)
++}
++
++function optionalPositiveId(value: unknown): number | null {
++  if (value == null || String(value).trim() === '') return null
++  const id = Number(value)
++  return Number.isSafeInteger(id) && id > 0 ? id : null
++}
++
++type ResolveShiftInput = {
++  db: D1Compat
++  user: SessionUser
++  branchId: number | null
++  occurredAt: string
++  requestedShiftId?: unknown
++  required?: boolean
++}
++
++/**
++ * Resolve the shift that owns a new transaction.
++ *
++ * A client-supplied id is never trusted by itself: it must belong to the
++ * transaction branch, cover the transaction timestamp, and either be the
++ * caller's per-account shift or a shop-wide shift. This is what lets an
++ * offline POS sale keep its queue-time shift after that shift has closed,
++ * without attaching arbitrary historical rows by timestamp alone.
++ */
++export async function resolveTransactionShiftId(input: ResolveShiftInput): Promise<number | null> {
++  const { db, user, branchId, occurredAt } = input
++  const policy = await readShiftPolicy(db)
++  if (policy.admin_exempt && isAdminControlUser(user)) return null
++
++  const hasRequestedValue = input.requestedShiftId != null && String(input.requestedShiftId).trim() !== ''
++  const requestedShiftId = optionalPositiveId(input.requestedShiftId)
++  if (hasRequestedValue && requestedShiftId == null) {
++    throw new ShiftAttributionError('Invalid shift session.', 'invalid_shift')
++  }
++
++  if (requestedShiftId != null) {
++    const row = await db.prepare(`SELECT id FROM shift_sessions
++      WHERE id=@id
++        AND ((@branchId IS NULL AND branch_id IS NULL) OR branch_id=@branchId)
++        AND (scope_mode='shop_wide' OR user_id=@userId)
++        AND opened_at<=@occurredAt
++        AND (closed_at IS NULL OR closed_at>=@occurredAt)
++      LIMIT 1`).get<{ id: number }>({ id: requestedShiftId, branchId, userId: user.id, occurredAt })
++    if (!row) throw new ShiftAttributionError('The selected shift does not own this transaction.', 'invalid_shift')
++    return row.id
++  }
++
++  const accountClause = policy.scope_mode === 'per_account' ? 'AND user_id=@userId' : ''
++  const row = await db.prepare(`SELECT id FROM shift_sessions
++    WHERE scope_mode=@scopeMode ${accountClause}
++      AND business_date=@businessDate AND closed_at IS NULL
++      AND ((@branchId IS NULL AND branch_id IS NULL) OR branch_id=@branchId)
++    ORDER BY opened_at DESC, id DESC LIMIT 1`).get<{ id: number }>({
++      scopeMode: policy.scope_mode,
++      userId: user.id,
++      branchId,
++      businessDate: businessDateFor(occurredAt),
++    })
++  if (row) return row.id
++  if (input.required) throw new ShiftAttributionError('Register an open shift before recording this transaction.', 'shift_required')
++  return null
++}
+

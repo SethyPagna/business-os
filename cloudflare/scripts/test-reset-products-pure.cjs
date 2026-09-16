@@ -66,11 +66,30 @@ const coreDataInvariants = loadReal('lib/coreDataInvariants.ts', {
 const { PRODUCTS_RESET_TABLES } = coreDataInvariants
 assert.ok(Array.isArray(PRODUCTS_RESET_TABLES) && PRODUCTS_RESET_TABLES.length > 0, 'PRODUCTS_RESET_TABLES must be a real, non-empty exported list')
 
+// This suite exercises the real reset route and its real table lists. Factory
+// reset's post-delete default-data reseed has separate invariant coverage; a
+// small stub keeps this test focused on deletion order without requiring its
+// organization bootstrap fixtures.
+const resetCoreDataInvariants = {
+  ...coreDataInvariants,
+  dropAllCustomTables: async () => [],
+  ensureCoreDataInvariants: async () => ({ adminUserCreated: false, adminPassword: null }),
+}
+
 let deletedObjectKeys = []
 const permissions = loadReal('lib/permissions.ts')
 const media = loadReal('lib/media.ts')
 
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+const planTier = loadReal('lib/planTier.ts')
+
 const systemRoute = loadReal('routes/system.ts', {
+  // planTier.ts is pure (only `import type`) and holds the free-vs-paid
+  // image-delete cap the reset path now reads -- real, not an inert stub,
+  // which would make that cap undefined and slice(0, undefined) empty.
+  '../lib/planTier': planTier,
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
@@ -90,7 +109,7 @@ const systemRoute = loadReal('routes/system.ts', {
   // K4: the orphan-staging endpoint's engine lives in its own lib with its
   // own pure test -- stubbed here, this test is about the reset contract.
   '../lib/importRetention': { cleanOrphanImportStaging: async () => ({ applied: false, tables: {}, r2Keys: 0 }) },
-  '../lib/coreDataInvariants': coreDataInvariants,
+  '../lib/coreDataInvariants': resetCoreDataInvariants,
   '../lib/backup': {
     // Real prerequisite under test: every mode must call one of these
     // BEFORE touching any data, and abort cleanly if it throws. Tracked
@@ -118,9 +137,12 @@ const systemRoute = loadReal('routes/system.ts', {
 // than imported so this test fails if the route quietly starts clearing
 // something new without it being noticed.
 const ALL_RESET_CANDIDATE_TABLES = [
+  'product_conflict_action_group_members', 'product_remove_operations',
+  'product_conflict_action_groups', 'product_conflict_action_reviews',
+  'product_conflict_merge_run_cases', 'product_conflict_merge_runs',
   'product_images', 'rfid_tags', 'branch_batch_stock', 'product_batches', 'branch_stock', 'products',
   'inventory_movements', 'stock_row_moves', 'stock_transfers',
-  'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns', 'sale_items', 'sales',
+  'sale_record_events', 'return_mutation_receipts', 'return_create_receipts', 'return_create_guards', 'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns', 'sale_items', 'sales',
   'action_history',
 ]
 
@@ -156,7 +178,20 @@ function count(table) { return row(`SELECT COUNT(*) AS n FROM "${table}"`).n }
 function seed() {
   // Wipe every table this test touches so each check() starts clean,
   // regardless of run order.
+  exec(`INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{"mode":"reset","token":"test-seed"}')
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value;
+        DELETE FROM sale_record_events;
+        DELETE FROM return_mutation_receipts;
+        DELETE FROM return_create_receipts;
+        DELETE FROM return_create_guards;
+        DELETE FROM transfer_operation_members;
+        DELETE FROM transfer_operation_receipts;
+        DELETE FROM system_flags WHERE key='sale_record_events_reset_guard';`)
   const wipe = [
+    'product_conflict_action_group_members', 'product_remove_operations',
+    'product_conflict_action_groups', 'product_conflict_action_reviews',
+    'product_conflict_merge_run_cases', 'product_conflict_merge_runs',
+    'stock_session_members', 'stock_session_operations', 'stock_session_guards',
     'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns',
     'sale_items', 'sales', 'inventory_movements', 'stock_transfers', 'stock_row_moves',
     'rfid_tags', 'product_images', 'branch_batch_stock', 'product_batches', 'branch_stock',
@@ -167,21 +202,64 @@ function seed() {
 
   rawDbHandle.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
   rawDbHandle.prepare("INSERT INTO products (id, name, is_active, stock_quantity, image_path) VALUES (1, 'Eye Shadow Palette', 1, 10, '/uploads/product-1-main.jpg')").run()
+  rawDbHandle.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Duplicate Eye Shadow Palette', 1, 0)").run()
   rawDbHandle.prepare("INSERT INTO product_images (id, product_id, image_path) VALUES (1, 1, '/uploads/product-1-gallery-a.jpg')").run()
   rawDbHandle.prepare("INSERT INTO product_images (id, product_id, image_path) VALUES (2, 1, 'uploads/product-1-gallery-b.jpg')").run()
   rawDbHandle.prepare('INSERT INTO branch_stock (id, product_id, branch_id, quantity) VALUES (1, 1, 1, 10)').run()
   const batch = rawDbHandle.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code) VALUES (1, 1, 'BK-1', 'LOT-A')").run()
   rawDbHandle.prepare('INSERT INTO branch_batch_stock (id, batch_id, branch_id, quantity) VALUES (1, 1, 1, 10)').run()
   rawDbHandle.prepare("INSERT INTO rfid_tags (id, epc_id, product_id, branch_id, status) VALUES (1, 'EPC-1', 1, 1, 'active')").run()
+  rawDbHandle.prepare(`INSERT INTO product_conflict_merge_runs(
+    id,actor_id,request_id,request_digest,manifest_version,manifest_digest,request_json,status
+  ) VALUES('reset-conflict-run',1,'reset-conflict-request','request-digest',1,'manifest-digest','{}','interrupted')`).run()
+  rawDbHandle.prepare(`INSERT INTO product_conflict_merge_run_cases(
+    run_id,ordinal,case_key,keeper_product_id,merged_product_id,expected_state_digest,operation_id,status
+  ) VALUES('reset-conflict-run',0,'leadingzero:reset',1,2,'case-digest','reset-conflict-operation','planned')`).run()
+  rawDbHandle.prepare(`INSERT INTO product_conflict_action_reviews(
+    id,actor_id,request_id,request_digest,manifest_version,resolution_version,draft_digest,
+    status,requested_action_count,requested_group_count,requested_removal_count,
+    actionable_group_count,blocked_group_count,total_member_count,expires_at
+  ) VALUES('reset-action-review',1,'reset-action-request','request-digest',1,2,'draft-digest',
+    'draft',2,1,1,1,0,1,'2099-01-01T00:00:00.000Z')`).run()
+  rawDbHandle.prepare(`INSERT INTO product_conflict_action_groups(
+    review_id,ordinal,group_key,source_group_keys_json,member_ids_json,eligibility_basis,
+    eligibility_value,status,state_digest,detail_json
+  ) VALUES('reset-action-review',0,'name:reset','["name:reset"]','[1]','name',
+    'reset','actionable','group-state','{}')`).run()
+  rawDbHandle.prepare(`INSERT INTO product_conflict_action_group_members(
+    review_id,group_ordinal,member_ordinal,product_id,status,state_digest,snapshot_json
+  ) VALUES('reset-action-review',0,0,1,'reviewed','member-state','{}')`).run()
+  rawDbHandle.prepare(`INSERT INTO product_remove_operations(
+    operation_id,actor_id,requester_id,source,request_id,review_id,action_ordinal,
+    product_id,reason,state_digest,plan_digest,plan_json,status
+  ) VALUES('reset-remove-operation',1,1,'conflict_review','reset-remove-request',
+    'reset-action-review',1,2,'obsolete duplicate','remove-state','remove-plan','{}','reviewed')`).run()
 
   // Sales/returns/movements -- denormalized, must survive with a dangling
   // product_id, per this session's spec.
   rawDbHandle.prepare('INSERT INTO sales (id, branch_id) VALUES (1, 1)').run()
+  rawDbHandle.prepare(`INSERT INTO sale_record_events(
+    id,sale_id,source_kind,source_id,generation,kind,via,occurred_at,changes_json
+  ) VALUES('00000000-0000-4000-8000-000000000002',1,'sale_status','actor:1:request:reset-fixture',0,'status_changed','apply','2026-09-08T00:00:00.000Z',?)`)
+    .run([JSON.stringify([{ field: 'sale_status', before: { state: 'known_value', value: 'completed' }, after: { state: 'known_value', value: 'returned' } }])])
   rawDbHandle.prepare("INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd, batch_id) VALUES (1, 1, 1, 'Eye Shadow Palette', 2, 12.5, 1)").run()
   rawDbHandle.prepare("INSERT INTO returns (id, sale_id, branch_id) VALUES (1, 1, 1)").run()
+  rawDbHandle.prepare(`INSERT INTO return_mutation_receipts(
+    id,actor_id,return_id,sale_id,mutation_kind,request_id,request_digest,request_json,response_json,occurred_at
+  ) VALUES('00000000-0000-4000-8000-000000000003',1,1,1,'edit','reset-receipt',?,'{}',?,'2026-09-08T00:00:00.000Z')`)
+    .run(['d'.repeat(64), JSON.stringify({ id: 1, updated_at: '2026-09-08T00:00:00.000Z' })])
+  rawDbHandle.prepare(`INSERT INTO return_create_receipts(
+    id,actor_id,return_id,sale_id,request_id,request_digest,request_json,response_json,occurred_at
+  ) VALUES('00000000-0000-4000-8000-000000000004',1,1,1,'reset-create',?,'{"sale_id":1}',?,'2026-09-08T00:00:00.000Z')`)
+    .run(['e'.repeat(64), JSON.stringify({ id: 1, returnNumber: 'RET-1', replacementSaleId: null, replacementReceiptNumber: null })])
   rawDbHandle.prepare("INSERT INTO return_items (id, return_id, sale_item_id, product_id, product_name, quantity) VALUES (1, 1, 1, 1, 'Eye Shadow Palette', 1)").run()
   rawDbHandle.prepare("INSERT INTO sale_item_batch_allocations (id, sale_item_id, batch_id, branch_id, quantity, lot_code) VALUES (1, 1, 1, 1, 2, 'LOT-A')").run()
   rawDbHandle.prepare("INSERT INTO inventory_movements (id, product_id, product_name, branch_id, movement_type, quantity) VALUES (1, 1, 'Eye Shadow Palette', 1, 'sale', -2)").run()
+  rawDbHandle.prepare("INSERT INTO stock_session_operations (id, actor_id, request_id, mode, request_json) VALUES ('reset-fixture', 1, 'reset-fixture', 'stock_in', '{}')").run()
+  rawDbHandle.prepare("INSERT INTO stock_session_members (operation_id, line_id, command_kind, product_id, product_created, branch_id, batch_id, movement_id, quantity, unit_cost_usd) VALUES ('reset-fixture', 'line-1', 'receive', 1, 0, 1, 1, 1, 10, 2)").run()
+  rawDbHandle.prepare('INSERT INTO stock_session_guards (id, guard_value) VALUES (1, 1)').run()
+  rawDbHandle.prepare("INSERT INTO transfer_operation_receipts(id,actor_id,request_id,request_digest,request_json,status,operation_id,provenance_version) VALUES(1,1,'reset-transfer','digest','{}','planning','reset-transfer-operation',1)").run()
+  rawDbHandle.prepare("INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_branch_id,destination_branch_id,quantity,untracked_quantity,source_snapshot,destination_snapshot,allocations_json) VALUES(1,0,1,1,1,2,1,1,'{}','{}','[]')").run()
 
   // Untouched-by-products-reset control rows, to prove the "keep
   // everything else" half of the spec, not just the "delete products"
@@ -217,6 +295,7 @@ async function main() {
     assert.strictEqual(json.success, true, JSON.stringify(json))
 
     for (const table of PRODUCTS_RESET_TABLES) assert.strictEqual(count(table), 0, `${table} should be empty after mode='products'`)
+    assert.ok(count('stock_session_revisions') > 0, 'reset retains ABA revision tombstones')
   })
 
   await check('mode=products keeps sales, returns, movements, and batch allocations (dangling ids are fine, rows are not)', async () => {
@@ -226,6 +305,8 @@ async function main() {
     assert.strictEqual(count('sales'), 1, 'sales must survive a products reset')
     assert.strictEqual(count('sale_items'), 1, 'sale_items must survive a products reset')
     assert.strictEqual(count('returns'), 1, 'returns must survive a products reset')
+    assert.strictEqual(count('return_mutation_receipts'), 1, 'immutable return receipts must survive a products reset')
+    assert.strictEqual(count('return_create_receipts'), 1, 'immutable return-create receipts must survive a products reset')
     assert.strictEqual(count('return_items'), 1, 'return_items must survive a products reset')
     assert.strictEqual(count('sale_item_batch_allocations'), 1, 'batch allocations must survive a products reset')
     assert.strictEqual(count('inventory_movements'), 1, 'inventory_movements must survive a products reset')
@@ -244,25 +325,36 @@ async function main() {
     assert.strictEqual(count('branches'), 1, 'branches must be untouched by a products reset')
   })
 
+  await check('mode=sales preserves every selected-conflict product receipt', async () => {
+    seed()
+    await req('POST', '/reset-data', { mode: 'sales' })
+    assert.strictEqual(count('product_conflict_merge_runs'), 1)
+    assert.strictEqual(count('product_conflict_merge_run_cases'), 1)
+    assert.strictEqual(count('product_conflict_action_reviews'), 1)
+    assert.strictEqual(count('product_conflict_action_groups'), 1)
+    assert.strictEqual(count('product_conflict_action_group_members'), 1)
+    assert.strictEqual(count('product_remove_operations'), 1)
+  })
+
   await check('mode=products forces a backup BEFORE deleting anything, and aborts with zero rows changed if the backup fails', async () => {
     seed()
     backupShouldFail = true
     const beforeProducts = count('products')
-    assert.strictEqual(beforeProducts, 1, 'sanity')
+    assert.strictEqual(beforeProducts, 2, 'sanity')
 
     const { status, json } = await req('POST', '/reset-data', { mode: 'products' })
     assert.strictEqual(status, 500, JSON.stringify(json))
     assert.strictEqual(json.success, false, JSON.stringify(json))
     assert.ok(/backup/i.test(json.error || ''), `error message should mention the backup failure, got: ${json.error}`)
     assert.strictEqual(backupCallLog.length, 1, 'backup must have been attempted')
-    assert.strictEqual(count('products'), 1, 'products must be UNCHANGED when the pre-reset backup fails -- this is the whole point of the prerequisite')
+    assert.strictEqual(count('products'), 2, 'products must be UNCHANGED when the pre-reset backup fails -- this is the whole point of the prerequisite')
   })
 
   // The failure a scoped backup can introduce, guarded directly: a backup
   // that misses a table the reset then clears is a backup that cannot undo
   // the reset it was taken for. The route derives both lists from one
   // array precisely so these two can never drift.
-  await check('mode=products backs up EXACTLY the tables it is about to clear -- no table is deleted without being backed up first', async () => {
+  await check('mode=products backs up every table it clears, plus any required restore dependencies', async () => {
     for (const toggles of [{}, { includeMovements: true }, { includeSales: true }, { includeMovements: true, includeSales: true }]) {
       seed()
       const before = new Map()
@@ -312,6 +404,32 @@ async function main() {
     assert.ok(deletedObjectKeys.includes('uploads/product-1-gallery-b.jpg'), JSON.stringify(deletedObjectKeys))
   })
 
+  await check('mode=products with includeImages=true is REFUSED on the free plan instead of deleting part of the files', async () => {
+    // Each image delete is one external subrequest and Free allows 50 per
+    // invocation. Deleting the first 40 of 900 and returning 200 would tell
+    // the person the job was done while leaving the rest orphaned in R2 with
+    // no second pass coming -- the request that knew about them just ended.
+    seed()
+    planTier.__resetPlanTierCacheForTests()
+    const res = await app.request('/reset-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'products', includeImages: true }),
+    }, { ...fakeEnv, PLAN_TIER: 'free' }, fakeExecutionCtx)
+    const json = await res.json().catch(() => null)
+    planTier.__resetPlanTierCacheForTests()
+
+    assert.strictEqual(res.status, 400, JSON.stringify(json))
+    assert.strictEqual(json.code, 'reset_images_unavailable_free')
+    assert.strictEqual(deletedObjectKeys.length, 0, 'the refusal must land before anything is deleted')
+    // ...and nothing else was reset either: a gate that still wipes the
+    // products and only refuses the images would be worse than no gate.
+    assert.ok(count('products') > 0, 'the whole reset must be refused, not just its image half')
+    // POSITIVE CONTROL: the identical request on paid still deletes the 3
+    // seeded keys (the check directly above), so this is a tier gate, not a
+    // permanently-closed door.
+  })
+
   await check('mode=products, includeMovements=true also deletes movement/audit tables but keeps sales/returns/contacts', async () => {
     seed()
     const { status, json } = await req('POST', '/reset-data', { mode: 'products', includeMovements: true })
@@ -339,12 +457,15 @@ async function main() {
     assert.strictEqual(count('sale_items'), 0, 'sale_items should be cleared when includeSales=true')
     assert.strictEqual(count('returns'), 0, 'returns should be cleared when includeSales=true')
     assert.strictEqual(count('return_items'), 0, 'return_items should be cleared when includeSales=true')
+    assert.strictEqual(count('return_mutation_receipts'), 0, 'return mutation receipts should clear before their return parent')
+    assert.strictEqual(count('return_create_receipts'), 0, 'return create receipts should clear before their return parent')
     assert.strictEqual(count('sale_item_batch_allocations'), 0, 'sale_item_batch_allocations should be cleared when includeSales=true')
 
     // Movements/contacts are a SEPARATE toggle/always-kept set --
     // includeSales alone must not also clear these.
     assert.strictEqual(count('inventory_movements'), 1, 'inventory_movements must survive includeSales=true alone')
     assert.strictEqual(count('customers'), 1, 'customers must always survive mode=products regardless of toggles')
+    assert.strictEqual(count('sale_record_events'), 0, 'Sales Records must clear atomically with their sale')
   })
 
   await check('mode=products, both toggles true clears products, movements, AND sales/returns in one atomic call, but never contacts', async () => {
@@ -357,6 +478,9 @@ async function main() {
     assert.strictEqual(count('inventory_movements'), 0)
     assert.strictEqual(count('sales'), 0)
     assert.strictEqual(count('returns'), 0)
+    assert.strictEqual(count('sale_record_events'), 0)
+    assert.strictEqual(count('return_mutation_receipts'), 0)
+    assert.strictEqual(count('return_create_receipts'), 0)
     assert.strictEqual(count('customers'), 1, 'customers must never be touched by mode=products, even with both toggles on')
     assert.strictEqual(count('suppliers'), 1, 'suppliers must never be touched by mode=products, even with both toggles on')
   })
@@ -370,8 +494,11 @@ async function main() {
     const { status, json } = await req('POST', '/reset-data', { mode: 'sales', includeMovements: true, includeSales: true })
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
-    assert.strictEqual(count('products'), 1, 'mode=sales must never delete products, regardless of stray products-only fields')
+    assert.strictEqual(count('products'), 2, 'mode=sales must never delete products, regardless of stray products-only fields')
     assert.strictEqual(count('customers'), 1, 'mode=sales must never touch customers')
+    assert.strictEqual(count('sale_record_events'), 0, 'mode=sales clears immutable Sales Records under the reset guard')
+    assert.strictEqual(count('return_mutation_receipts'), 0, 'mode=sales clears immutable return receipts under the reset guard')
+    assert.strictEqual(count('return_create_receipts'), 0, 'mode=sales clears immutable return-create receipts under the reset guard')
   })
 
   await check('mode=sales now also forces a backup first (Part 248 fix -- previously only mode=products had this gate) and aborts with zero rows changed if it fails', async () => {
@@ -391,7 +518,7 @@ async function main() {
     const { status, json } = await req('POST', '/reset-data', { mode: 'all' })
     assert.strictEqual(status, 500, JSON.stringify(json))
     assert.strictEqual(json.success, false, JSON.stringify(json))
-    assert.strictEqual(count('products'), 1, 'products must be UNCHANGED when the pre-reset backup fails')
+    assert.strictEqual(count('products'), 2, 'products must be UNCHANGED when the pre-reset backup fails')
     assert.strictEqual(count('customers'), 1, 'customers must be UNCHANGED when the pre-reset backup fails')
   })
 
@@ -403,6 +530,35 @@ async function main() {
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
     assert.strictEqual(count('file_assets'), 0, 'file_assets should be empty after mode=all, matching the R2 uploads/ wipe it runs alongside')
+  })
+
+  await check('mode=all clears all selected-conflict receipts child-first', async () => {
+    seed()
+    const { status, json } = await req('POST', '/reset-data', { mode: 'all' })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(count('product_conflict_merge_run_cases'), 0)
+    assert.strictEqual(count('product_conflict_merge_runs'), 0)
+    assert.strictEqual(count('product_conflict_action_group_members'), 0)
+    assert.strictEqual(count('product_remove_operations'), 0)
+    assert.strictEqual(count('product_conflict_action_groups'), 0)
+    assert.strictEqual(count('product_conflict_action_reviews'), 0)
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'system.ts'), 'utf8')
+    const casesAt = source.indexOf("DELETE FROM product_conflict_merge_run_cases")
+    const runsAt = source.indexOf("DELETE FROM product_conflict_merge_runs")
+    const productsAt = source.indexOf("DELETE FROM product_batches", casesAt)
+    assert.ok(casesAt > -1 && casesAt < runsAt && runsAt < productsAt, 'mode=all is ordered case children, parent run, then product data')
+    const actionMembersAt = source.indexOf("DELETE FROM product_conflict_action_group_members")
+    const removalsAt = source.indexOf("DELETE FROM product_remove_operations", actionMembersAt)
+    const actionGroupsAt = source.indexOf("DELETE FROM product_conflict_action_groups", actionMembersAt)
+    const actionReviewsAt = source.indexOf("DELETE FROM product_conflict_action_reviews", actionMembersAt)
+    assert.ok(
+      actionMembersAt > -1
+      && actionMembersAt < actionGroupsAt
+      && removalsAt < actionReviewsAt
+      && actionGroupsAt < actionReviewsAt
+      && actionReviewsAt < productsAt,
+      'mode=all clears reviewed action children, then groups/reviews, before product data',
+    )
   })
 
   await check('mode=all clears every current import job ledger so a migration rerun starts clean', async () => {
@@ -427,6 +583,26 @@ async function main() {
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
     for (const table of ALL_IMPORT_RESET_TABLES) assert.strictEqual(count(table), 0, `${table} should be empty after mode=all`)
+  })
+
+  await check('factory reset clears immutable Sales Records and global conflict receipts before reseeding core data', async () => {
+    seed()
+    assert.strictEqual(count('sale_record_events'), 1, 'sanity: immutable event fixture exists')
+    assert.strictEqual(count('return_mutation_receipts'), 1, 'sanity: immutable return receipt fixture exists')
+    assert.strictEqual(count('return_create_receipts'), 1, 'sanity: immutable return-create receipt fixture exists')
+    const { status, json } = await req('POST', '/factory-reset', {})
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(json.success, true, JSON.stringify(json))
+    assert.strictEqual(count('sale_record_events'), 0)
+    for (const table of [
+      'product_conflict_action_group_members',
+      'product_remove_operations',
+      'product_conflict_action_groups',
+      'product_conflict_action_reviews',
+    ]) assert.strictEqual(count(table), 0, `${table} should be empty after factory reset`)
+    assert.strictEqual(count('return_mutation_receipts'), 0)
+    assert.strictEqual(count('return_create_receipts'), 0)
+    assert.strictEqual(count('system_flags'), 0, 'the short-lived reset guard cannot survive the atomic batch')
   })
 
   console.log(`\n${passed} PASS, 0 FAIL`)

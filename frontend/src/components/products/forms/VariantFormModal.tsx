@@ -1,12 +1,16 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../../AppContext.tsx'
 import Modal from '../../shared/Modal'
+import { useFormDirty } from '../../../utils/formDirty.ts'
 import { parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
-import { formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
+import { editableMoneyValue, formatPriceNumber, normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
 import { extractHistoryResultId } from '../../../utils/historyHelpers.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
+import SuggestionTextInput from '../../shared/SuggestionTextInput.tsx'
+import { loadSupplierNames } from '../../shared/SupplierPickerField.tsx'
+import { suggestionEmptyState } from '../../../utils/suggestionMatching.ts'
 import { normalizeProductGroupName } from '../../../utils/productGrouping.ts'
 
 const PRODUCT_VARIANT_MUTATION_TIMEOUT_MS = 12000
@@ -23,8 +27,8 @@ interface VariantParentProduct {
   cost_price_khr?: number | string | null
   selling_price_usd?: number | string | null
   selling_price_khr?: number | string | null
-  special_price_usd?: number | string | null
-  special_price_khr?: number | string | null
+  wholesale_price_usd?: number | string | null
+  wholesale_price_khr?: number | string | null
 }
 
 interface UnitOption {
@@ -53,8 +57,8 @@ interface VariantFormState {
   cost_price_khr: string
   selling_price_usd: string
   selling_price_khr: string
-  special_price_usd: string
-  special_price_khr: string
+  wholesale_price_usd: string
+  wholesale_price_khr: string
   stock_quantity: string
   branch_id: EntityId | ''
   unit: string
@@ -66,8 +70,8 @@ type NumericVariantField =
   | 'cost_price_khr'
   | 'selling_price_usd'
   | 'selling_price_khr'
-  | 'special_price_usd'
-  | 'special_price_khr'
+  | 'wholesale_price_usd'
+  | 'wholesale_price_khr'
   | 'stock_quantity'
 
 interface VariantMutationResponse {
@@ -137,12 +141,17 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
     barcode: '',
     description: '',
     supplier: parent.supplier || '',
-    cost_price_usd: formatPriceNumber(parent.cost_price_usd || 0),
-    cost_price_khr: formatPriceNumber(parent.cost_price_khr || 0),
+    cost_price_usd: editableMoneyValue(parent.cost_price_usd || 0),
+    cost_price_khr: editableMoneyValue(parent.cost_price_khr || 0),
     selling_price_usd: formatPriceNumber(parent.selling_price_usd || 0),
     selling_price_khr: formatPriceNumber(parent.selling_price_khr || 0),
-    special_price_usd: formatPriceNumber((parent.special_price_usd ?? parent.selling_price_usd) || 0),
-    special_price_khr: formatPriceNumber((parent.special_price_khr ?? parent.selling_price_khr) || 0),
+    // No `?? parent.selling_price` fallback. A parent with no wholesale price
+    // must seed a BLANK wholesale field, not the selling price: seeding it
+    // with selling meant every variant created from such a parent was saved
+    // carrying a "wholesale price" equal to its selling price, which the POS
+    // then offered as a tier that discounts nothing.
+    wholesale_price_usd: formatPriceNumber(parent.wholesale_price_usd || 0),
+    wholesale_price_khr: formatPriceNumber(parent.wholesale_price_khr || 0),
     stock_quantity: '0',
     branch_id: branches.find((branch) => branch.is_default)?.id || '',
     unit: parent.unit || 'pcs',
@@ -150,6 +159,28 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
+  // Sibling parity: Supplier here is the same "a supplier NAME on a product"
+  // field ProductForm carries, so it gets the same suggestions from the same
+  // permission-free names-only read. It used to be a bare text box -- the
+  // operator had to remember and re-type a name the app already knew.
+  // null until the read reports, so an empty list cannot be mistaken for
+  // "this catalog has no suppliers" (utils/suggestionMatching.ts).
+  const [supplierNames, setSupplierNames] = useState<string[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    loadSupplierNames()
+      .then((rows) => { if (alive) setSupplierNames(rows.map((row) => row.name)) })
+      .catch(() => { /* suggestions unavailable -- free text still works */ })
+    return () => { alive = false }
+  }, [])
+  const variantSupplierEmptyState = suggestionEmptyState(supplierNames !== null, (supplierNames || []).length)
+  const variantSupplierEmptyHint = variantSupplierEmptyState === 'unknown'
+    ? undefined
+    : variantSupplierEmptyState === 'none-yet'
+      ? tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')
+      : tr('suggestions_no_match', 'No match — type to add a new one.', 'រកមិនឃើញ — សូមវាយបញ្ចូលថ្មី។')
+  // S4-21: dismissing this modal with edits raises the discard prompt.
+  const { dirty: formDirty } = useFormDirty(form, String(parent?.id ?? 'new'))
   const saveInFlightRef = useRef(false)
   const { notify } = useApp()
 
@@ -205,11 +236,11 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
         // matching names are wrapped by the virtual group title in the UI.
         selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
         selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
-        special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd ?? form.selling_price_usd)),
-        special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr ?? form.selling_price_khr)),
+        wholesale_price_usd: normalizePriceValue(parseNumericInput(form.wholesale_price_usd)),
+        wholesale_price_khr: normalizePriceValue(parseNumericInput(form.wholesale_price_khr)),
         stock_quantity: parseNumericInput(form.stock_quantity),
-        cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd)),
-        cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr)),
+        cost_price_usd: normalizeInternalMoney(parseNumericInput(form.cost_price_usd)),
+        cost_price_khr: normalizeInternalMoney(parseNumericInput(form.cost_price_khr)),
         userId: user?.id,
         userName: user?.name,
       }), 'Create product variant')
@@ -235,10 +266,10 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
           stock_quantity: parseNumericInput(form.stock_quantity),
           selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
           selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
-          special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd ?? form.selling_price_usd)),
-          special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr ?? form.selling_price_khr)),
-          cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd)),
-          cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr)),
+          wholesale_price_usd: normalizePriceValue(parseNumericInput(form.wholesale_price_usd)),
+          wholesale_price_khr: normalizePriceValue(parseNumericInput(form.wholesale_price_khr)),
+          cost_price_usd: normalizeInternalMoney(parseNumericInput(form.cost_price_usd)),
+          cost_price_khr: normalizeInternalMoney(parseNumericInput(form.cost_price_khr)),
         },
       })
     } catch (error) {
@@ -254,17 +285,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
       title={`${t('add_variant_to') || 'Add Variant to:'} ${parent.name}`}
       onClose={onClose}
       size="lg"
-      headerExtra={(
-        <button
-          type="button"
-          className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden"
-          onClick={handleSave}
-          disabled={saving}
-        >
-          {saving ? (t('saving') || 'Saving...') : (t('save') || 'Save')}
-        </button>
-      )}
-    >
+      unsavedChanges={{ dirty: formDirty }}>
       <div className="space-y-4">
         <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
           {tr('variant_helper_text', 'Variants of the same product group can have different prices, barcodes, and suppliers.', 'វ៉ារីយ៉ង់ក្នុងក្រុមផលិតផលដូចគ្នា អាចមានតម្លៃ បារកូដ និងអ្នកផ្គត់ផ្គង់ខុសគ្នា។')}
@@ -307,21 +328,31 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             <label htmlFor="variant-form-supplier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {t('supplier') || 'Supplier'}
             </label>
-            <input id="variant-form-supplier" name="variant_supplier" className="input min-h-11 min-w-0" value={form.supplier} onChange={(event) => setField('supplier', event.target.value)} />
+            <SuggestionTextInput
+              id="variant-form-supplier"
+              name="variant_supplier"
+              value={form.supplier}
+              options={supplierNames || []}
+              onChange={(value) => setField('supplier', value)}
+              placeholder={tr('type_or_select_supplier', 'Type or select supplier...', 'វាយឈ្មោះ ឬជ្រើសរើសអ្នកផ្គត់ផ្គង់...')}
+              ariaLabel={t('supplier') || 'Supplier'}
+              emptyHint={variantSupplierEmptyHint}
+            />
           </div>
 
           <div className="min-w-0">
             <label htmlFor="variant-form-unit" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {t('unit') || 'Unit'}
             </label>
-            <AppSelect
+            <SuggestionTextInput
               id="variant-form-unit"
               name="variant_unit"
-              className="w-full min-w-0"
-              buttonClassName="min-h-11 w-full min-w-0"
+              className="min-w-0"
+              inputClassName="input min-h-11 w-full min-w-0"
               value={form.unit}
-              options={unitOptions}
+              options={unitOptions.map((option) => String(option.label ?? option.value))}
               onChange={(value) => setField('unit', value)}
+              placeholder={tr('type_or_select_unit', 'Type or select unit...', 'វាយ ឬជ្រើសរើសឯកតា...')}
               ariaLabel={t('unit') || 'Unit'}
             />
           </div>
@@ -344,7 +375,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
 
           <div className="min-w-0">
             <label htmlFor="variant-form-selling-price" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t('selling_price_usd') || `Selling Price (${usdSymbol})`}
+              {t('selling_price_usd') || `Selling price (${usdSymbol})`}
             </label>
             <input
               id="variant-form-selling-price"
@@ -359,34 +390,34 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
           </div>
 
           <div className="min-w-0">
-            <label htmlFor="variant-form-special-price" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {tr('special_price_usd_full', 'Special Price (USD)', 'តម្លៃពិសេស (USD)')}
+            <label htmlFor="variant-form-wholesale-price" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              {tr('wholesale_price_usd_full', 'Wholesale (USD)', 'បោះដុំ (USD)')}
             </label>
             <input
-              id="variant-form-special-price"
-              name="variant_special_price_usd"
+              id="variant-form-wholesale-price"
+              name="variant_wholesale_price_usd"
               className="input min-h-11 min-w-0"
               type="text"
               inputMode="decimal"
               autoComplete="off"
-              value={form.special_price_usd ?? ''}
-              onChange={(event) => setNumeric('special_price_usd', event.target.value)}
+              value={form.wholesale_price_usd ?? ''}
+              onChange={(event) => setNumeric('wholesale_price_usd', event.target.value)}
             />
           </div>
 
           <div className="min-w-0">
-            <label htmlFor="variant-form-special-price-khr" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {tr('special_price_khr_full', 'Special Price (KHR)', 'តម្លៃពិសេស (KHR)')}
+            <label htmlFor="variant-form-wholesale-price-khr" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              {tr('wholesale_price_khr_full', 'Wholesale (KHR)', 'បោះដុំ (KHR)')}
             </label>
             <input
-              id="variant-form-special-price-khr"
-              name="variant_special_price_khr"
+              id="variant-form-wholesale-price-khr"
+              name="variant_wholesale_price_khr"
               className="input min-h-11 min-w-0"
               type="text"
               inputMode="decimal"
               autoComplete="off"
-              value={form.special_price_khr ?? ''}
-              onChange={(event) => setNumeric('special_price_khr', event.target.value)}
+              value={form.wholesale_price_khr ?? ''}
+              onChange={(event) => setNumeric('wholesale_price_khr', event.target.value)}
             />
           </div>
 
@@ -425,7 +456,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
 
         {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx/
             CustomerFormModal.tsx's own fix. */}
-        <div className="sticky bottom-0 -mx-5 -mb-5 hidden gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800 sm:flex">
+        <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
           <button type="button" className="btn-primary min-h-11 flex-1" onClick={handleSave} disabled={saving}>
             {saving ? (t('saving') || 'Saving...') : (t('add_variant') || 'Add Variant')}
           </button>

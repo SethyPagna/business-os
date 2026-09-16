@@ -9,6 +9,7 @@ import FilterMenu from '../shared/FilterMenu'
 import SortChip from '../shared/SortChip'
 import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
 import Modal from '../shared/Modal'
+import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import PortalMenu, { type PortalMenuItem } from '../shared/PortalMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
@@ -16,7 +17,7 @@ import { fmtDate } from '../../utils/formatters'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { PERMISSION_DEFS } from './permissionDefinitions'
 import { ROLE_PRESETS } from './rolePresetDefaults'
-import { REVIEW_TIER_KEYS, type PermissionValue } from '../../utils/permissions.ts'
+import { isAdminControlUser, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -30,6 +31,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import DeviceApprovals from './DeviceApprovals.tsx'
+import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import {
   changeUserPassword as changeUserPasswordRequest,
   createRole as createRoleRequest,
@@ -188,37 +190,6 @@ function normalizeRoles(value: unknown): RoleRecord[] {
   return Array.isArray(value) ? value as RoleRecord[] : []
 }
 
-// Preserves the 'review' tier value for REVIEW_TIER_KEYS sections instead
-// of collapsing it to a plain boolean -- normalizePermissionState used to
-// run every value through Boolean(enabled), which silently turned a
-// hand-set 'review' string (e.g. on 'fees', set directly in the DB since
-// this editor didn't offer a tier picker yet) into `true` the moment a
-// role was opened for editing, so saving ANY unrelated change to that
-// role (renaming it, touching a different permission) would silently
-// upgrade Review Required to Full Access. Every other key keeps the old
-// strict-boolean behavior; only a REVIEW_TIER_KEYS key preserves the
-// literal string 'review', matching the backend's own strict
-// interpretation in getPermissionTier() (a 'review' string on any other
-// key is never valid and still collapses to boolean).
-function normalizePermissionState(value: unknown): PermissionState {
-  if (typeof value === 'string') {
-    try {
-      return normalizePermissionState(JSON.parse(value || '{}'))
-    } catch {
-      return {}
-    }
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.entries(value as Record<string, unknown>).reduce<PermissionState>((permissions, [key, enabled]) => {
-    if (enabled === 'review' && REVIEW_TIER_KEYS.has(key)) {
-      permissions[key] = 'review'
-    } else {
-      permissions[key] = Boolean(enabled)
-    }
-    return permissions
-  }, {})
-}
-
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
@@ -327,6 +298,7 @@ function UsersDesktopSkeletonRows() {
       <td className="px-4 py-3"><div className="mx-auto h-5 w-16 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
       <td className="px-4 py-3"><div className="mx-auto h-5 w-14 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
       <td className="px-4 py-3"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-3 py-3"><div className="mx-auto h-9 w-16 rounded-lg bg-slate-100 dark:bg-slate-800" /></td>
       <td className="px-2 py-3"><div className="ml-auto h-8 w-8 rounded-lg bg-slate-100 dark:bg-slate-800" /></td>
     </tr>
   ))
@@ -410,6 +382,12 @@ export default function Users() {
   // can't resurface the dialog the next time the modal is opened.
   useEffect(() => { if (modal !== 'editUser') setUserConfirmOpen(false) }, [modal])
   const [passwordSaving, setPasswordSaving] = useState(false)
+  // S4-21: three separate forms live on this page, so each declares its own
+  // dirtiness and each re-baselines on the record it is editing (one modal
+  // instance is reused for every user/role).
+  const { dirty: userFormDirty } = useFormDirty(userForm, String(selectedUser?.id ?? 'new'))
+  const { dirty: roleFormDirty } = useFormDirty(roleForm, String(selectedRole?.id ?? 'new'))
+  const { dirty: passwordFormDirty } = useFormDirty(passwordForm, String(selectedUser?.id ?? 'new'))
   const [deletingRoleId, setDeletingRoleId] = useState<EntityId | null>(null)
   const saveUserInFlightRef = useRef(false)
   const passwordInFlightRef = useRef(false)
@@ -436,9 +414,7 @@ export default function Users() {
    *     primary admin account (explicit user decision, Sep 1 2026). Server-side
    *     canManageTarget() enforces the same rule.
    */
-  const canManage = hasPermission('all')
-    || String(currentUser?.role_code || '').trim().toLowerCase() === 'admin'
-    || String(currentUser?.username || '').trim().toLowerCase() === 'admin'
+  const canManage = isAdminControlUser(currentUser)
   const canManageTargetUser = (targetUser: UserRecord | null | undefined): boolean => {
     return canManage && !!targetUser
   }
@@ -745,7 +721,7 @@ export default function Users() {
       .map((key) => {
         const perm = PERMISSION_DEFS.find((item) => item.key === key)
         const label = tr(perm?.tKey || key, perm?.label || key)
-        return value[key] === 'review' ? `${label} (${tr('review_required', 'Partial Access')})` : label
+        return value[key] === 'review' ? `${label} (${tr('review_required', 'Partial Access')})` : value[key] === 'view' ? `${label} (${tr('view_only', 'View only')})` : label
       })
       .join(', ')
   }
@@ -1136,7 +1112,7 @@ export default function Users() {
           sat crowded right up against Add User/Create role with barely
           any visual gap. Search box stays on its own line below so it
           always gets full width to breathe. */}
-      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
         <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pt-1">
           <ActionHistoryBar history={actionHistory} t={t} className="min-w-0 flex-1" showLabel />
           {tab === 'users' && canManage ? <button type="button" className="btn-primary inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-2 text-xs sm:text-sm" onClick={openCreateUser}><UserPlus className="h-4 w-4 shrink-0" /><span className="truncate">{t('add_user') || 'Add user'}</span></button> : null}
@@ -1185,7 +1161,7 @@ export default function Users() {
         <>
           <div className="card hidden flex-col overflow-hidden sm:flex">
             <div className="overflow-auto">
-              <table className="w-full min-w-[980px] text-sm table-bordered">
+              <table className="w-full min-w-[1080px] text-sm table-bordered">
                 <thead className="sticky top-0 z-10">
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('full_name', 'Name')}</th>
@@ -1196,6 +1172,7 @@ export default function Users() {
                     <th className="px-4 py-3 text-center font-semibold text-gray-600 dark:text-gray-400">{tr('status', 'Status')}</th>
                     <th className="px-4 py-3 text-center font-semibold text-gray-600 dark:text-gray-400">2FA</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('added_on', 'Added')}</th>
+                    <th className="px-3 py-3 text-center font-semibold text-gray-600 dark:text-gray-400">{tr('shift_history', 'Shift history')}</th>
                     <th className="w-10 px-2 py-3" />
                   </tr>
                 </thead>
@@ -1204,7 +1181,7 @@ export default function Users() {
                     <UsersDesktopSkeletonRows />
                   ) : filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-8 text-center text-gray-400">{t('no_data') || 'No data'}</td>
+                      <td colSpan={10} className="py-8 text-center text-gray-400">{t('no_data') || 'No data'}</td>
                     </tr>
                   ) : filteredUsers.map((user) => (
                     <tr key={user.id} className="table-row cursor-pointer" onClick={() => { setSelectedUser(user); setModal('userDetail') }}>
@@ -1226,6 +1203,9 @@ export default function Users() {
                       <td className="px-4 py-3 text-center"><span className={user.is_active ? 'badge-green' : 'badge-red'}>{user.is_active ? (t('active') || 'Active') : (t('inactive') || 'Inactive')}</span></td>
                       <td className="px-4 py-3 text-center">{user.otp_enabled ? <span className="badge-green text-xs">{tr('enabled', 'Enabled')}</span> : <span className="text-xs text-gray-400">{tr('off', 'Off')}</span>}</td>
                       <td className="px-4 py-3 text-xs text-gray-400">{fmtDate(user.created_at)}</td>
+                      <td className="px-3 py-2 text-center" onClick={(event) => event.stopPropagation()}>
+                        <ShiftHistoryPanel userId={user.id} compact label={tr('shift_code', 'Shift')} />
+                      </td>
                       <td className="px-2 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                         <ThreeDot
                           canManage={canManageTargetUser(user)}
@@ -1260,7 +1240,8 @@ export default function Users() {
                     <span className={user.is_active ? 'badge-green text-xs' : 'badge-red text-xs'}>{user.is_active ? (t('active') || 'Active') : (t('inactive') || 'Inactive')}</span>
                   </div>
                 </div>
-                <div onClick={(e) => e.stopPropagation()}>
+                <div className="flex shrink-0 flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
+                  <ShiftHistoryPanel userId={user.id} compact label={tr('shift_code', 'Shift')} />
                   <ThreeDot
                     canManage={canManageTargetUser(user)}
                     onDetails={() => { setSelectedUser(user); setModal('userDetail') }}
@@ -1299,7 +1280,7 @@ export default function Users() {
                       {permissionKeys.map((key) => (
                         <span key={key} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                           {PERMISSION_DEFS.find((item) => item.key === key)?.label || key}
-                          {getRolePermissionValue(role, key) === 'review' ? ` (${tr('review_required', 'Partial Access')})` : ''}
+                          {getRolePermissionValue(role, key) === 'review' ? ` (${tr('review_required', 'Partial Access')})` : getRolePermissionValue(role, key) === 'view' ? ` (${tr('view_only', 'View only')})` : ''}
                         </span>
                       ))}
                     </div>
@@ -1344,7 +1325,7 @@ export default function Users() {
       ) : null}
 
       {modal === 'editUser' ? (
-        <Modal title={selectedUser ? `${tr('edit_user', 'Edit User')}: ${selectedUser.name}` : tr('add_user', 'Add user')} onClose={() => setModal(null)} wide>
+        <Modal title={selectedUser ? `${tr('edit_user', 'Edit User')}: ${selectedUser.name}` : tr('add_user', 'Add user')} onClose={() => setModal(null)} wide unsavedChanges={{ dirty: userFormDirty }}>
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
@@ -1433,7 +1414,7 @@ export default function Users() {
       ) : null}
 
       {modal === 'resetPw' && selectedUser ? (
-        <Modal title={`${tr('change_password', 'Change password')}: ${selectedUser.name}`} onClose={() => setModal(null)}>
+        <Modal title={`${tr('change_password', 'Change password')}: ${selectedUser.name}`} onClose={() => setModal(null)} unsavedChanges={{ dirty: passwordFormDirty }}>
           <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void handleResetPassword() }}>
             <input
               type="text"
@@ -1518,7 +1499,7 @@ export default function Users() {
       ) : null}
 
       {modal === 'editRole' ? (
-        <Modal title={selectedRole ? `${tr('edit_role', 'Edit role')}: ${selectedRole.name}` : tr('create_role', 'Create role')} onClose={() => setModal(null)} wide>
+        <Modal title={selectedRole ? `${tr('edit_role', 'Edit role')}: ${selectedRole.name}` : tr('create_role', 'Create role')} onClose={() => setModal(null)} wide unsavedChanges={{ dirty: roleFormDirty }}>
           <div className="space-y-4">
             <div>
               <label htmlFor="role-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('role_name', 'Role name')}</label>

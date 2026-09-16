@@ -1,4 +1,5 @@
 import type { AppliedReceiptConfig, NormalizedReceiptTemplate, ReceiptPrintSettings } from '../types/receiptContracts'
+import { DEFAULT_RECEIPT_TEXT_CONTRAST, normalizeReceiptTextContrast } from './receiptTextContrast.ts'
 
 export const RECEIPT_PRINT_SETTINGS_STORAGE_KEY = 'bos_print_settings'
 
@@ -60,6 +61,7 @@ export const DEFAULT_RECEIPT_TEMPLATE: NormalizedReceiptTemplate = {
   delivery_fee_position: 'totals',
   discount_position: 'before_tax',
   show_emojis: false,
+  text_contrast: DEFAULT_RECEIPT_TEXT_CONTRAST,
   field_order: [
     'header', 'order_info', 'customer', 'delivery', 'items', 'subtotal',
     'discount', 'tax', 'delivery_fee', 'total', 'payment', 'change', 'footer',
@@ -88,7 +90,11 @@ export const DEFAULT_RECEIPT_PRINT_SETTINGS: ReceiptPrintSettings = {
   scale: '100',
   customWidth: '80',
   customHeight: '297',
+  pageSizeMode: 'measured',
+  fixedPageLengthMm: '100',
 }
+
+const RECEIPT_PAGE_SIZE_MODES = new Set(['measured', 'fixed', 'driver', 'auto-longest'])
 
 function parseObject(value: unknown): Record<string, unknown> {
   if (!value) return {}
@@ -143,6 +149,10 @@ export function normalizeReceiptTemplate(value: unknown): NormalizedReceiptTempl
   }
   merged.template_revision = RECEIPT_TEMPLATE_REVISION
 
+  // Any value other than the literal 'maximum' collapses to 'normal' -- a
+  // corrupted/pre-feature record must never render as anything but the
+  // default receipt colours.
+  merged.text_contrast = normalizeReceiptTextContrast(merged.text_contrast)
   return merged
 }
 
@@ -158,13 +168,28 @@ export function normalizeReceiptPrintSettings(value: unknown): ReceiptPrintSetti
     highContrastBold: storedHighContrast === undefined
       ? DEFAULT_RECEIPT_PRINT_SETTINGS.highContrastBold
       : storedHighContrast === true || storedHighContrast === 1 || String(storedHighContrast).toLowerCase() === 'true',
-    marginTop: String(parsed.marginTop || DEFAULT_RECEIPT_PRINT_SETTINGS.marginTop),
-    marginRight: String(parsed.marginRight || DEFAULT_RECEIPT_PRINT_SETTINGS.marginRight),
-    marginBottom: String(parsed.marginBottom || DEFAULT_RECEIPT_PRINT_SETTINGS.marginBottom),
-    marginLeft: String(parsed.marginLeft || DEFAULT_RECEIPT_PRINT_SETTINGS.marginLeft),
+    // Zero is a valid physical margin. Settings UI writes strings, but API,
+    // import and older clients may send numeric 0; `||` silently changed
+    // that to the 4mm default on the next normalize/save cycle.
+    marginTop: String(parsed.marginTop ?? DEFAULT_RECEIPT_PRINT_SETTINGS.marginTop),
+    marginRight: String(parsed.marginRight ?? DEFAULT_RECEIPT_PRINT_SETTINGS.marginRight),
+    marginBottom: String(parsed.marginBottom ?? DEFAULT_RECEIPT_PRINT_SETTINGS.marginBottom),
+    marginLeft: String(parsed.marginLeft ?? DEFAULT_RECEIPT_PRINT_SETTINGS.marginLeft),
     scale: String(parsed.scale || DEFAULT_RECEIPT_PRINT_SETTINGS.scale),
     customWidth: String(parsed.customWidth || DEFAULT_RECEIPT_PRINT_SETTINGS.customWidth),
     customHeight: String(parsed.customHeight || DEFAULT_RECEIPT_PRINT_SETTINGS.customHeight),
+    // A record saved before this field existed (or any unrecognized value)
+    // must resolve to 'measured' -- today's own in-document remeasure -- so
+    // an old saved settings blob keeps printing exactly as it did before.
+    pageSizeMode: RECEIPT_PAGE_SIZE_MODES.has(String(parsed.pageSizeMode))
+      ? (String(parsed.pageSizeMode) as ReceiptPrintSettings['pageSizeMode'])
+      : DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode,
+    fixedPageLengthMm: (() => {
+      const parsedLength = Number.parseFloat(String(parsed.fixedPageLengthMm ?? ''))
+      return Number.isFinite(parsedLength) && parsedLength > 0
+        ? String(parsedLength)
+        : DEFAULT_RECEIPT_PRINT_SETTINGS.fixedPageLengthMm
+    })(),
   }
 }
 

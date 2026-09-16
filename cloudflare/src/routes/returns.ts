@@ -1,24 +1,51 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { selectInChunks } from '../lib/sqlBinding'
-import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateRangeClause } from '../lib/businessDateWindow'
+import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { sendReturnTelegramEvent } from '../lib/telegram'
+import { sendReturnTelegramEvent, sendTelegramEvent, formatSaleTelegramLines } from '../lib/telegram'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion } from '../lib/cache'
+import { bumpVersion, bumpVersions } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
-import { receiveBatchStock, removeStockFromBatch, InsufficientBatchStockError, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement } from '../lib/productBatches'
+import { planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
-  normalizeStockAction, computeSettlement, assertReplacementsSameName,
-  createDamagedLot, reverseDamagedLots, applyReplacementStock, listOpenDamagedLots,
+  normalizeStockAction, resolveRefundUnitPrice, planReturnLot, ReturnLotRequiredError,
+  reverseDamagedLots, planReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
-  REPLACEMENT_OUT_MOVEMENT,
+  REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine,
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
+import { computeSaleTotals } from '../lib/saleTotals'
+import { applyReturnBulkAction, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
+import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
+import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
+// A replacement line is an ordinary sale line, so the warehouse may not
+// carry one -- the same rule, and the same message, POST /sales enforces.
+import { WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
+import { branchCanSell } from '../lib/branchRoles'
 import type { Env } from '../index'
+import { actorId, actorSnapshot } from '../lib/actorSnapshot'
+import { buildSaleCreationSnapshot } from '../lib/saleCreationSnapshot'
+// N21: sales.customer_address holds the DISPLAY address; the replacement sale
+// below copies the SOURCE sale's snapshot, which for a row written before that
+// fix is still the Contact Options JSON.
+import { contactDisplayAddress } from '../lib/contactOptions'
+import { isAnonymousCustomer } from '../lib/anonymousCustomer'
+import {
+  assertReturnCreateCapacity, assertReturnCreatePlanBounds, canonicalReturnCreateIntent,
+  projectedSaleStatusForReturnCreate, projectedSaleStatusForReturnCreateV1, replacementSaleIdSql, returnCreateGuardStatement,
+  returnCreateIdSql, type ReturnCreateResponse,
+} from '../lib/returnCreateAction'
+import {
+  buildCustomerReturnQuoteV1, CUSTOMER_RETURN_MAX_SALE_LINES,
+  type CustomerReturnPrior, type CustomerReturnQuoteV1, type CustomerReturnSaleLine,
+} from '../lib/customerReturnEntitlement'
+import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
+import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
+import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -43,12 +70,230 @@ app.use('*', requireAuth)
 app.use('*', async (c, next) => {
   const user = c.get('user')
   if (getPermissionTier(user, 'returns') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  // Read revocation is independent of create/edit authority. HEAD executes
+  // the GET handler in Hono and must have the same read gate.
+  if ((c.req.method === 'GET' || c.req.method === 'HEAD') && getActionTier(user, 'returns', 'view') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
   return next()
 })
+
+// The tender a replacement sale defaults to when the client names none. A
+// replacement is an ORDINARY sale -- the customer pays for it the ordinary
+// way -- so its payment method is one of the shop's real methods, not a
+// bespoke "Return Exchange" label standing in for money that never moved.
+// (Rows written before this carry that old label and an amount_paid of only
+// the price difference; lib/salesAnalytics.ts's collectedExpr keeps reading
+// them correctly.)
+const DEFAULT_REPLACEMENT_PAYMENT_METHOD = 'Cash'
+
+class ReplacementCustomerStateConflictError extends Error {
+  readonly code = 'customer_state_conflict'
+
+  constructor() {
+    super('The selected customer changed before the replacement sale was saved. Review the customer and try again.')
+    this.name = 'ReplacementCustomerStateConflictError'
+  }
+}
 
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
 const RETURN_REASON_PRESETS_KEY = 'return_reason_presets'
+const CUSTOMER_RETURN_MAX_PRIOR_ITEMS = 1_000
+const CUSTOMER_RETURN_AUTHORITY_MAX_BYTES = 1_500_000
+
+type CustomerReturnRequestedLine = { sale_item_id: number; quantity: number }
+type CustomerReturnQuoteAuthority = {
+  sale: Record<string, unknown>
+  sale_items: Record<string, unknown>[]
+  prior_returns: Record<string, unknown>[]
+  prior_items: Record<string, unknown>[]
+}
+
+export async function customerReturnQuotePlanFromDb(
+  db: ReturnType<typeof getDb>,
+  saleId: number,
+  requested: CustomerReturnRequestedLine[],
+  excludeReturnId: number | null = null,
+): Promise<{ quote: CustomerReturnQuoteV1; authority: CustomerReturnQuoteAuthority; authority_json: string;
+  lineage: Awaited<ReturnType<typeof resolveProductMergeLineage>> }> {
+  const sale = await db.prepare(`SELECT s.id,s.money_precision_version,s.calculated_total_usd,s.total_usd,
+    s.subtotal_usd,s.discount_usd,s.membership_discount_usd,s.tax_usd,
+    s.exchange_rate,s.is_delivery,s.delivery_fee_usd,s.delivery_fee_paid_by,s.sale_status,s.status_before_return,
+    COALESCE(v.revision,0) AS sale_revision
+    FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=@saleId`)
+    .get<Record<string, unknown>>({ saleId })
+  if (!sale) throw new SaleMoneyContractError('customer_return_sale_not_found')
+  if (String(sale.sale_status || 'completed') === 'cancelled') throw new SaleMoneyContractError('customer_return_sale_invalid')
+  const saleLines = await db.prepare(`SELECT id,sale_id,product_id,quantity,total_usd,total_khr,
+    base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
+    product_discount_usd,product_discount_khr,product_discount_type,product_discount_label,manual_discount_usd,manual_discount_khr,
+    manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json
+    FROM sale_items WHERE sale_id=@saleId ORDER BY id LIMIT @limit`)
+    .all<Record<string, unknown>>(
+      { saleId, limit: CUSTOMER_RETURN_MAX_SALE_LINES + 1 },
+    )
+  if (saleLines.length > CUSTOMER_RETURN_MAX_SALE_LINES) throw new SaleMoneyContractError('customer_return_sale_invalid')
+  let lineage: Awaited<ReturnType<typeof resolveProductMergeLineage>>
+  try {
+    lineage = await resolveProductMergeLineage(db, saleId, saleLines)
+  } catch (error) {
+    if (error instanceof ProductMergeLineageError) throw new SaleMoneyContractError(error.code)
+    throw error
+  }
+  const previousRows = await db.prepare(`SELECT r.id AS return_id,r.money_precision_version,r.calculated_refund_usd,
+    r.rounding_adjustment_usd,r.total_refund_usd,r.status AS return_status,r.updated_at AS return_updated_at,
+    ri.id AS return_item_id,ri.sale_item_id,ri.quantity,ri.total_usd,ri.refund_snapshot_json
+    FROM returns r LEFT JOIN return_items ri ON ri.return_id=r.id
+    WHERE r.sale_id=@saleId AND COALESCE(r.return_scope,'customer')='customer'
+      AND COALESCE(r.status,'completed')<>'cancelled'
+      AND (@excludeReturnId IS NULL OR r.id<>@excludeReturnId)
+    ORDER BY r.id,ri.id LIMIT @limit`)
+    .all<Record<string, unknown>>({ saleId, excludeReturnId, limit: CUSTOMER_RETURN_MAX_PRIOR_ITEMS + 1 })
+  if (previousRows.length > CUSTOMER_RETURN_MAX_PRIOR_ITEMS) throw new SaleMoneyContractError('customer_return_cohort_too_large')
+  const previousById = new Map<number, CustomerReturnPrior>()
+  const priorReturns = new Map<number, Record<string, unknown>>()
+  const priorItems: Record<string, unknown>[] = []
+  for (const row of previousRows) {
+    const id = Number(row.return_id)
+    let prior = previousById.get(id)
+    if (!prior) {
+      prior = {
+        id,
+        money_precision_version: Number(row.money_precision_version) as 1,
+        calculated_refund_usd: Number(row.calculated_refund_usd),
+        rounding_adjustment_usd: Number(row.rounding_adjustment_usd),
+        total_refund_usd: Number(row.total_refund_usd),
+        items: [],
+      }
+      previousById.set(id, prior)
+      priorReturns.set(id, {
+        id, money_precision_version: row.money_precision_version,
+        calculated_refund_usd: row.calculated_refund_usd, rounding_adjustment_usd: row.rounding_adjustment_usd,
+        total_refund_usd: row.total_refund_usd, status: row.return_status, updated_at: row.return_updated_at,
+      })
+    }
+    if (row.return_item_id != null) {
+      prior.items.push({
+        sale_item_id: row.sale_item_id == null ? null : Number(row.sale_item_id),
+        quantity: Number(row.quantity), total_usd: Number(row.total_usd),
+        refund_snapshot_json: row.refund_snapshot_json == null ? null : String(row.refund_snapshot_json),
+      })
+      priorItems.push({ id: row.return_item_id, return_id: id, sale_item_id: row.sale_item_id,
+        quantity: row.quantity, total_usd: row.total_usd, refund_snapshot_json: row.refund_snapshot_json })
+    }
+  }
+  const exchangeRate = Number(sale.exchange_rate)
+  const customerDeliveryFee = Number(sale.is_delivery) === 1 && String(sale.delivery_fee_paid_by || 'customer') === 'customer'
+    ? canonicalMoney4(sale.delivery_fee_usd ?? 0, true) : 0
+  const quote = buildCustomerReturnQuoteV1({
+    sale: {
+      sale_id: Number(sale.id), sale_revision: Number(sale.sale_revision),
+      money_precision_version: Number(sale.money_precision_version),
+      calculated_total_usd: sale.calculated_total_usd == null ? null : Number(sale.calculated_total_usd),
+      total_usd: Number(sale.total_usd), subtotal_usd: Number(sale.subtotal_usd),
+      discount_usd: Number(sale.discount_usd), membership_discount_usd: Number(sale.membership_discount_usd),
+      tax_usd: Number(sale.tax_usd), exchange_rate: exchangeRate,
+      customer_delivery_fee_usd: customerDeliveryFee,
+      lines: await Promise.all(saleLines.map(async (line) => ({
+        ...line as CustomerReturnSaleLine,
+        pricing_snapshot_digest: await sha256Hex(String(line.pricing_snapshot_json ?? '')),
+      }))),
+    },
+    requested,
+    previous: [...previousById.values()],
+    productIdentityBindings: lineage.bindings,
+  })
+  if (lineage.bindings.length) {
+    const coherent = await db.prepare(`SELECT CASE WHEN (${lineage.condition}) THEN 1 ELSE 0 END AS valid`)
+      .get<{ valid: number }>(lineage.params)
+    if (Number(coherent?.valid) !== 1) throw new SaleMoneyContractError('product_merge_lineage_conflict')
+  }
+  const authority: CustomerReturnQuoteAuthority = {
+    sale, sale_items: saleLines, prior_returns: [...priorReturns.values()], prior_items: priorItems,
+  }
+  const authorityJson = JSON.stringify(authority)
+  if (new TextEncoder().encode(authorityJson).byteLength > CUSTOMER_RETURN_AUTHORITY_MAX_BYTES) {
+    throw new SaleMoneyContractError('customer_return_authority_too_large')
+  }
+  return { quote, authority, authority_json: authorityJson, lineage }
+}
+
+export async function customerReturnQuoteFromDb(
+  db: ReturnType<typeof getDb>, saleId: number, requested: CustomerReturnRequestedLine[], excludeReturnId: number | null = null,
+): Promise<CustomerReturnQuoteV1> {
+  return (await customerReturnQuotePlanFromDb(db, saleId, requested, excludeReturnId)).quote
+}
+
+export function publicCustomerReturnQuote(quote: CustomerReturnQuoteV1) {
+  return {
+    money_precision_version: quote.money_precision_version,
+    sale_id: quote.sale_id,
+    sale_revision: quote.sale_revision,
+    calculated_refund_usd: quote.calculated_refund_usd,
+    rounding_adjustment_usd: quote.rounding_adjustment_usd,
+    total_refund_usd: quote.total_refund_usd,
+    total_refund_khr: quote.total_refund_khr,
+    items: quote.items.map(({ refund_snapshot_json: _snapshot, ...line }) => line),
+  }
+}
+
+function customerReturnAuthorityPredicate(param = '@customerReturnAuthorityJson'): string {
+  return `
+    EXISTS(SELECT 1 FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id
+      WHERE s.id=json_extract(${param},'$.sale.id')
+        AND s.money_precision_version IS json_extract(${param},'$.sale.money_precision_version')
+        AND s.calculated_total_usd IS json_extract(${param},'$.sale.calculated_total_usd')
+        AND s.total_usd IS json_extract(${param},'$.sale.total_usd')
+        AND s.subtotal_usd IS json_extract(${param},'$.sale.subtotal_usd')
+        AND s.discount_usd IS json_extract(${param},'$.sale.discount_usd')
+        AND s.membership_discount_usd IS json_extract(${param},'$.sale.membership_discount_usd')
+        AND s.tax_usd IS json_extract(${param},'$.sale.tax_usd')
+        AND s.exchange_rate IS json_extract(${param},'$.sale.exchange_rate')
+        AND s.is_delivery IS json_extract(${param},'$.sale.is_delivery')
+        AND s.delivery_fee_usd IS json_extract(${param},'$.sale.delivery_fee_usd')
+        AND s.delivery_fee_paid_by IS json_extract(${param},'$.sale.delivery_fee_paid_by')
+        AND s.sale_status IS json_extract(${param},'$.sale.sale_status')
+        AND s.status_before_return IS json_extract(${param},'$.sale.status_before_return')
+        AND COALESCE(v.revision,0)=json_extract(${param},'$.sale.sale_revision'))
+    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=json_extract(${param},'$.sale.id'))
+      =json_array_length(${param},'$.sale_items')
+    AND NOT EXISTS(SELECT 1 FROM json_each(${param},'$.sale_items') j WHERE NOT EXISTS(
+      SELECT 1 FROM sale_items si WHERE si.id=json_extract(j.value,'$.id')
+        AND si.sale_id=json_extract(${param},'$.sale.id')
+        AND si.product_id IS json_extract(j.value,'$.product_id') AND si.quantity IS json_extract(j.value,'$.quantity')
+        AND si.total_usd IS json_extract(j.value,'$.total_usd') AND si.total_khr IS json_extract(j.value,'$.total_khr')
+        AND si.base_price_usd IS json_extract(j.value,'$.base_price_usd') AND si.base_price_khr IS json_extract(j.value,'$.base_price_khr')
+        AND si.applied_price_usd IS json_extract(j.value,'$.applied_price_usd') AND si.applied_price_khr IS json_extract(j.value,'$.applied_price_khr')
+        AND si.product_discount_usd IS json_extract(j.value,'$.product_discount_usd') AND si.product_discount_khr IS json_extract(j.value,'$.product_discount_khr')
+        AND si.product_discount_type IS json_extract(j.value,'$.product_discount_type')
+        AND si.product_discount_label IS json_extract(j.value,'$.product_discount_label')
+        AND si.manual_discount_usd IS json_extract(j.value,'$.manual_discount_usd') AND si.manual_discount_khr IS json_extract(j.value,'$.manual_discount_khr')
+        AND si.manual_discount_type IS json_extract(j.value,'$.manual_discount_type') AND si.manual_discount_value IS json_extract(j.value,'$.manual_discount_value')
+        AND si.price_mode IS json_extract(j.value,'$.price_mode') AND si.pricing_snapshot_json IS json_extract(j.value,'$.pricing_snapshot_json')))
+    AND (SELECT COUNT(*) FROM returns r WHERE r.sale_id=json_extract(${param},'$.sale.id')
+      AND COALESCE(r.return_scope,'customer')='customer' AND COALESCE(r.status,'completed')<>'cancelled')
+      =json_array_length(${param},'$.prior_returns')
+    AND NOT EXISTS(SELECT 1 FROM json_each(${param},'$.prior_returns') j WHERE NOT EXISTS(
+      SELECT 1 FROM returns r WHERE r.id=json_extract(j.value,'$.id') AND r.sale_id=json_extract(${param},'$.sale.id')
+        AND r.money_precision_version IS json_extract(j.value,'$.money_precision_version')
+        AND r.calculated_refund_usd IS json_extract(j.value,'$.calculated_refund_usd')
+        AND r.rounding_adjustment_usd IS json_extract(j.value,'$.rounding_adjustment_usd')
+        AND r.total_refund_usd IS json_extract(j.value,'$.total_refund_usd')
+        AND r.status IS json_extract(j.value,'$.status') AND r.updated_at IS json_extract(j.value,'$.updated_at')
+        AND COALESCE(r.return_scope,'customer')='customer' AND COALESCE(r.status,'completed')<>'cancelled'))
+    AND (SELECT COUNT(*) FROM return_items ri JOIN returns r ON r.id=ri.return_id
+      WHERE r.sale_id=json_extract(${param},'$.sale.id') AND COALESCE(r.return_scope,'customer')='customer'
+        AND COALESCE(r.status,'completed')<>'cancelled')=json_array_length(${param},'$.prior_items')
+    AND NOT EXISTS(SELECT 1 FROM json_each(${param},'$.prior_items') j WHERE NOT EXISTS(
+      SELECT 1 FROM return_items ri JOIN returns r ON r.id=ri.return_id
+      WHERE ri.id=json_extract(j.value,'$.id') AND ri.return_id=json_extract(j.value,'$.return_id')
+        AND r.sale_id=json_extract(${param},'$.sale.id') AND COALESCE(r.return_scope,'customer')='customer'
+        AND COALESCE(r.status,'completed')<>'cancelled'
+        AND ri.sale_item_id IS json_extract(j.value,'$.sale_item_id') AND ri.quantity IS json_extract(j.value,'$.quantity')
+        AND ri.total_usd IS json_extract(j.value,'$.total_usd') AND ri.refund_snapshot_json IS json_extract(j.value,'$.refund_snapshot_json')))
+  `
+}
 
 type ReturnReasonPresets = {
   customer: string[]
@@ -110,17 +355,10 @@ async function loadReturnReasonPresets(env: Env): Promise<{ configured: boolean;
 //    routes/inventory.ts's own /adjust uses for a manual add. The resolved
 //    batch_id is stored on the return_items row itself (migration 0026) so
 //    a later PATCH /:id edit can reverse the *same* batch instead of
-//    guessing. Falls back to the old plain branch_stock bump only when no
-//    batch can be resolved -- no sale_item_id (a manual/no-sale return), or
-//    the sale predates the batch/lot system (sale_items.batch_id NULL,
-//    same as sale_items.batch_id already being nullable for the same
-//    reason). This does NOT implement the original backend's fuller
-//    sale_item_batch_allocations/return_item_batch_allocations tables (a
-//    sale line that itself FIFO-drained across *multiple* batches isn't
-//    split back across all of them on return -- it restocks the single
-//    batch sale_items.batch_id names) -- that finer-grained multi-batch
-//    allocation is still not ported, only the common single-batch-per-line
-//    case sales.ts's own POST / already produces.
+//    guessing. Multi-lot sale allocations are restored and recorded per lot.
+//    When provenance is unavailable, a distinct return-event lot records
+//    the return business date. Create and edit keep all stock, allocations,
+//    movements and the durable mutation receipt in one atomic batch.
 // 2. No returnsListCache (the original's 5s in-memory Map cache for GET
 //    /returns). A Worker isolate isn't guaranteed to live long enough for
 //    that cache to pay for itself, and D1 reads are already fast; dropped
@@ -151,6 +389,83 @@ function normalizeClientRequestId(value: unknown): string | null {
   return normalized.length > 120 ? normalized.slice(0, 120) : normalized
 }
 
+type PresentIntent = { present: false } | { present: true; value: string | number | boolean | null }
+
+function returnEditIntentField(source: Record<string, unknown>, key: string): PresentIntent {
+  if (!Object.prototype.hasOwnProperty.call(source, key)) return { present: false }
+  const raw = source[key]
+  if (raw == null) return { present: true, value: null }
+  if (typeof raw === 'string' || typeof raw === 'boolean') return { present: true, value: raw }
+  const numeric = Number(raw)
+  return { present: true, value: Number.isFinite(numeric) ? numeric : String(raw) }
+}
+
+function canonicalReturnEditIntent(returnId: number, expectedUpdatedAt: string, body: Record<string, unknown>): Record<string, unknown> {
+  const itemKeys = [
+    'sale_item_id', 'product_id', 'product_name', 'quantity',
+    'applied_price_usd', 'applied_price_khr', 'cost_price_usd', 'cost_price_khr',
+    'unit_cost_usd', 'unit_cost_khr', 'return_to_stock', 'stock_action', 'branch_id', 'batch_id',
+    // P4-3: a resubmit with the same client_request_id but a genuinely
+    // different tag/disposition choice must NOT replay the earlier cached
+    // response -- see resolveDamagedReturnChoice.
+    'condition_tag', 'damaged_disposition',
+  ] as const
+  const itemsPresent = Object.prototype.hasOwnProperty.call(body, 'items')
+  const rawItems = body.items
+  if (itemsPresent && !Array.isArray(rawItems)) throw new Error('items must be an array')
+  const items = Array.isArray(rawItems) ? rawItems.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`Return item ${index + 1} must be an object`)
+    const item = raw as Record<string, unknown>
+    return Object.fromEntries(itemKeys.map((key) => [key, returnEditIntentField(item, key)]))
+  }) : []
+  return {
+    return_id: returnId,
+    expected_updated_at: expectedUpdatedAt,
+    items: { present: itemsPresent, value: items },
+    reason: returnEditIntentField(body, 'reason'),
+    return_type: returnEditIntentField(body, 'return_type'),
+    notes: returnEditIntentField(body, 'notes'),
+    total_refund_usd: returnEditIntentField(body, 'total_refund_usd'),
+    total_refund_khr: returnEditIntentField(body, 'total_refund_khr'),
+    branch_id: returnEditIntentField(body, 'branch_id'),
+  }
+}
+
+function projectedSaleStatusForReturnEdit(
+  saleItems: Array<{ id: number; product_id: number | null; quantity: number }>,
+  returnLines: Array<{ sale_item_id?: number | null; product_id?: number | null; quantity: number }>,
+  statusBeforeReturn: string | null,
+): string {
+  const saleItemIds = new Set(saleItems.map((item) => Number(item.id)))
+  const returnedByItem = new Map<number, number>()
+  const fallbackByProduct = new Map<number, number>()
+  let hasAny = false
+  for (const line of returnLines) {
+    const quantity = Number(line.quantity) || 0
+    if (!(quantity > 0)) continue
+    hasAny = true
+    const saleItemId = Number(line.sale_item_id) || 0
+    if (saleItemId && saleItemIds.has(saleItemId)) {
+      returnedByItem.set(saleItemId, (returnedByItem.get(saleItemId) || 0) + quantity)
+      continue
+    }
+    const productId = Number(line.product_id) || 0
+    if (productId) fallbackByProduct.set(productId, (fallbackByProduct.get(productId) || 0) + quantity)
+  }
+  for (const item of saleItems) {
+    const productId = Number(item.product_id) || 0
+    let fallback = fallbackByProduct.get(productId) || 0
+    if (!(fallback > 0)) continue
+    const outstanding = Math.max(0, (Number(item.quantity) || 0) - (returnedByItem.get(item.id) || 0))
+    const allocated = Math.min(outstanding, fallback)
+    if (allocated > 0) returnedByItem.set(item.id, (returnedByItem.get(item.id) || 0) + allocated)
+    fallback -= allocated
+    fallbackByProduct.set(productId, fallback)
+  }
+  const fullyReturned = hasAny && saleItems.every((item) => (returnedByItem.get(item.id) || 0) >= (Number(item.quantity) || 0))
+  return fullyReturned ? 'returned' : hasAny ? 'partial_return' : (statusBeforeReturn || 'completed')
+}
+
 function normalizeScope(value: unknown, fallback: string = CUSTOMER_SCOPE): string {
   const scope = String(value || '').trim().toLowerCase()
   if (scope === 'all') return 'all'
@@ -172,7 +487,10 @@ type ReturnRow = Record<string, unknown> & {
   branch_id: number | null
   branch_name: string | null
   reason: string | null
+  status?: string | null
   updated_at: string | null
+  replacement_sale_id?: number | null
+  replacement_receipt_number?: string | null
 }
 
 type ReturnItemInput = {
@@ -182,15 +500,25 @@ type ReturnItemInput = {
   quantity: number
   applied_price_usd?: number
   applied_price_khr?: number
-  cost_price_usd?: number
-  cost_price_khr?: number
+  cost_price_usd?: number | null
+  cost_price_khr?: number | null
   unit_cost_usd?: number
   unit_cost_khr?: number
   return_to_stock?: boolean
   // 11.13: 'none' | 'restock' | 'damaged'; absent falls back to the
   // return_to_stock boolean's historical meaning (see normalizeStockAction).
   stock_action?: string
+  // P4-3: only meaningful when stock_action is 'damaged'. Both absent means
+  // the untouched legacy behavior (tag 'damaged', kept as a held row) --
+  // see resolveDamagedReturnChoice.
+  condition_tag?: string
+  damaged_disposition?: string
   branch_id?: number
+  // The lot the operator picked for this line's restock. Only sent when the
+  // original sale line cannot say which lot the units came from (see
+  // planReturnLot): a lot-tracked product with no answer either way is
+  // refused rather than restocked onto unspecified stock.
+  batch_id?: number
 }
 
 // Looks up which batch/lot (if any) each of the given sale_item_ids was
@@ -201,18 +529,40 @@ type ReturnItemInput = {
 // independently. Products import's cost_price backfill (lib/importEngine.
 // ts's classifySales) uses the same "batch-fetch once, Map lookup per row"
 // shape for the same reason: avoids one query per line item.
+// It reads the line's PRICE in the same pass: the refund a return pays is
+// whatever the original sale charged for those units, and the only place
+// that number lives is this row. Reading it here (rather than trusting the
+// posted applied_price_*) is what makes the refund unspoofable by a stale or
+// edited client payload, and immune to the product's price having moved
+// since the sale.
+type SaleLineInfo = {
+  batch_id: number | null
+  batch_label: string | null
+  batch_expiry_date: string | null
+  applied_price_usd: number | null
+  applied_price_khr: number | null
+}
+
 async function fetchSaleItemBatchInfo(
   db: ReturnType<typeof getDb>,
   saleItemIds: number[],
-): Promise<Map<number, { batch_id: number | null; batch_label: string | null; batch_expiry_date: string | null }>> {
-  const map = new Map<number, { batch_id: number | null; batch_label: string | null; batch_expiry_date: string | null }>()
+): Promise<Map<number, SaleLineInfo>> {
+  const map = new Map<number, SaleLineInfo>()
   const ids = [...new Set(saleItemIds)].filter((id) => Number.isFinite(id) && id > 0)
   if (!ids.length) return map
   // Chunked for D1's 100-bound-parameter ceiling (see lib/sqlBinding.ts).
   const rows = await selectInChunks(ids, 0, (chunk) => db
-    .prepare(`SELECT id, batch_id, batch_label, batch_expiry_date FROM sale_items WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<{ id: number; batch_id: number | null; batch_label: string | null; batch_expiry_date: string | null }>(chunk))
-  for (const row of rows) map.set(row.id, { batch_id: row.batch_id ?? null, batch_label: row.batch_label ?? null, batch_expiry_date: row.batch_expiry_date ?? null })
+    .prepare(`SELECT id, batch_id, batch_label, batch_expiry_date, applied_price_usd, applied_price_khr FROM sale_items WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number } & SaleLineInfo>(chunk))
+  for (const row of rows) {
+    map.set(row.id, {
+      batch_id: row.batch_id ?? null,
+      batch_label: row.batch_label ?? null,
+      batch_expiry_date: row.batch_expiry_date ?? null,
+      applied_price_usd: row.applied_price_usd ?? null,
+      applied_price_khr: row.applied_price_khr ?? null,
+    })
+  }
   return map
 }
 
@@ -303,6 +653,32 @@ async function recordReturnItemBatchAllocations(
   if (inserts.length) await db.batch(inserts)
 }
 
+// The SALE decides a return's money version -- never the request body. A
+// pre-v1 client (an offline queue, or a cached PWA shell that never reloaded)
+// posts a legacy return body with no money_precision_version. The legacy
+// branch prices such a body at gross line price x quantity: no sale-level
+// discount, no cumulative payout cap. Against a v1 sale that is wrong twice
+// over -- one whole-line return can be paid more than the sale's entire
+// payable, and the v0 row it writes then poisons the sale, because every later
+// v1 quote reads that legacy header and fails money_precision_invalid_legacy_shape
+// forever. Both create and edit therefore read the SALE's recorded version and
+// refuse with the same code POST /api/sales uses for a legacy body, so one
+// vocabulary covers "this client is too old to price this correctly".
+const MONEY_PRECISION_REVIEW_NEEDED = {
+  error: 'Keep this return and review it with the current app before recording it.',
+  code: 'money_precision_review_needed',
+} as const
+
+/** The sale's recorded money precision version, or null when there is no such
+ * sale (a manual return with no sale_id has no version to inherit). */
+async function saleMoneyPrecisionVersion(db: ReturnType<typeof getDb>, saleId: unknown): Promise<number | null> {
+  const id = Number(saleId)
+  if (!Number.isSafeInteger(id) || id <= 0) return null
+  const row = await db.prepare('SELECT money_precision_version FROM sales WHERE id=? LIMIT 1')
+    .get<{ money_precision_version: number | null }>([id])
+  return row ? Number(row.money_precision_version) || 0 : null
+}
+
 // Validate requested return quantities against what's actually returnable
 // (sold minus already-returned), mirroring assertReturnableItems in the
 // original. `excludeReturnId` lets an update re-validate without double
@@ -385,6 +761,16 @@ async function assertReturnableItems(
     }
   }
 }
+
+// The Returns list shows one row per return, never its lines, so a damaged
+// item was invisible there unless someone opened the return. This counts the
+// return's damaged lines in the list read itself -- the list carries a flag,
+// not a second round trip and not the whole item set. It matches
+// lib/returnsStock.ts's normalizeStockAction: an explicit 'damaged' only.
+const DAMAGED_ITEM_COUNT_SQL = `(
+      SELECT COUNT(*) FROM return_items dri
+      WHERE dri.return_id = r.id AND lower(COALESCE(dri.stock_action, '')) = 'damaged'
+    ) AS damaged_item_count`
 
 // GET /api/returns
 app.get('/', async (c) => {
@@ -484,7 +870,11 @@ app.get('/', async (c) => {
   }
 
   const returns = await db.prepare(`
-    SELECT r.* FROM returns r WHERE ${where.join(' AND ')}
+    SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is_anonymous, replacement_sale.receipt_number AS replacement_receipt_number,
+      ${DAMAGED_ITEM_COUNT_SQL}
+    FROM returns r
+    LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
+    WHERE ${where.join(' AND ')}
     ORDER BY r.created_at DESC LIMIT @limit
   `).all<ReturnRow>(params)
 
@@ -518,6 +908,102 @@ app.get('/damaged-lots', async (c) => {
   return c.json(lots)
 })
 
+// --- Receipt typeahead ------------------------------------------------------
+// The new-return flow used to pull 500 sales to the browser and Array.find()
+// the receipt out of them, so a receipt older than that window was simply
+// "not found" and nothing ever listed the candidates. This is the server-side
+// lookup behind the typeahead: matching receipts only, newest first, capped.
+//
+// Three number shapes have to match here:
+//   - the current bare `YYYYMMDD-HHMMSS`, including a partial-digit type-ahead
+//     ("2026090" or "0903-1430"),
+//   - the legacy `NNNNNN@YYYY-MM-DD` numbers still in production history,
+//   - and whatever the receipt lane's migration 0107 moves into
+//     sales.legacy_receipt_number.
+// The last of those may or may not exist when this Worker runs, so the column
+// is probed once instead of being assumed: a build of this route that runs
+// against a pre-0107 database must still answer, not 500 on "no such column".
+const LEGACY_RECEIPT_COLUMN = 'legacy_receipt_number'
+const LEGACY_COLUMN_RECHECK_MS = 60_000
+let legacyReceiptColumnState: { present: boolean; checkedAt: number } | null = null
+
+// Strip the separators the two formats use so a digits-only query
+// ("202609031430") still matches "20260903-143000" and "123456@2026-09-03".
+function receiptDigitsExpr(column: string): string {
+  return `REPLACE(REPLACE(REPLACE(COALESCE(${column}, ''), '-', ''), '@', ''), ':', '')`
+}
+
+export async function salesHasLegacyReceiptColumn(db: ReturnType<typeof getDb>): Promise<boolean> {
+  const now = Date.now()
+  // A `true` never becomes false again (columns are not dropped here), so it
+  // is cached for the isolate's life; a `false` is re-probed, because 0107 can
+  // land while this isolate is still warm.
+  if (legacyReceiptColumnState?.present) return true
+  if (legacyReceiptColumnState && now - legacyReceiptColumnState.checkedAt < LEGACY_COLUMN_RECHECK_MS) return false
+  try {
+    const rows = await db.prepare('PRAGMA table_info("sales")').all<{ name?: string }>()
+    const present = (Array.isArray(rows) ? rows : []).some((row) => String(row?.name || '') === LEGACY_RECEIPT_COLUMN)
+    legacyReceiptColumnState = { present, checkedAt: now }
+    return present
+  } catch {
+    // A probe failure must not take the lookup down with it -- answer without
+    // the legacy column rather than 500.
+    legacyReceiptColumnState = { present: false, checkedAt: now }
+    return false
+  }
+}
+
+// Exported for the pure test: builds exactly the SQL + bindings the route
+// runs, so both column shapes can be exercised against a real database.
+export function buildReceiptLookupQuery(input: { query: string; limit: number; hasLegacyColumn: boolean }): { sql: string; params: Record<string, unknown> } | null {
+  const raw = String(input.query ?? '').trim()
+  if (raw.length < 2) return null
+  const digits = raw.replace(/\D+/g, '')
+  const params: Record<string, unknown> = { like: `%${raw.toLowerCase()}%`, limit: input.limit }
+  const clauses = [`lower(COALESCE(s.receipt_number, '')) LIKE @like`]
+  if (digits.length >= 4) {
+    params.digitsLike = `%${digits}%`
+    clauses.push(`${receiptDigitsExpr('s.receipt_number')} LIKE @digitsLike`)
+  }
+  if (/^\d{1,15}$/.test(raw)) {
+    params.saleId = Number(raw)
+    clauses.push('s.id = @saleId')
+  }
+  if (input.hasLegacyColumn) {
+    clauses.push(`lower(COALESCE(s.${LEGACY_RECEIPT_COLUMN}, '')) LIKE @like`)
+    if (digits.length >= 4) clauses.push(`${receiptDigitsExpr(`s.${LEGACY_RECEIPT_COLUMN}`)} LIKE @digitsLike`)
+  }
+  const legacySelect = input.hasLegacyColumn ? `s.${LEGACY_RECEIPT_COLUMN}` : `NULL AS ${LEGACY_RECEIPT_COLUMN}`
+  const sql = `
+    SELECT s.id, s.receipt_number, ${legacySelect}, s.created_at, s.customer_name,
+           s.branch_id, s.branch_name, s.total_usd, s.total_khr, s.sale_status
+    FROM sales s
+    WHERE COALESCE(s.sale_status, 'completed') <> 'cancelled'
+      AND (${clauses.join(' OR ')})
+    ORDER BY s.created_at DESC, s.id DESC
+    LIMIT @limit
+  `
+  return { sql, params }
+}
+
+export const RECEIPT_LOOKUP_MAX_ROWS = 20
+
+// GET /api/returns/receipt-lookup?query=&limit= -- registered before /:id so
+// the param route does not swallow it. Gated by the returns-permission
+// middleware at the top of this file like every other route here: this is a
+// staff lookup, never a customer-facing one.
+app.get('/receipt-lookup', async (c) => {
+  const db = getDb(c.env)
+  const raw = String(c.req.query('query') || c.req.query('q') || '')
+  const requested = Number.parseInt(String(c.req.query('limit') || RECEIPT_LOOKUP_MAX_ROWS), 10)
+  const limit = Math.min(RECEIPT_LOOKUP_MAX_ROWS, Math.max(1, Number.isFinite(requested) ? requested : RECEIPT_LOOKUP_MAX_ROWS))
+  const hasLegacyColumn = await salesHasLegacyReceiptColumn(db)
+  const built = buildReceiptLookupQuery({ query: raw, limit, hasLegacyColumn })
+  if (!built) return c.json([])
+  const rows = await db.prepare(built.sql).all<Record<string, unknown>>(built.params)
+  return c.json(Array.isArray(rows) ? rows : [])
+})
+
 // GET /api/returns/report?startDate&endDate&branchId -- customer-return
 // (refund) totals over a range for the Reports hub: range totals, a per-day
 // series, and reason/type breakdowns. Scoped to customer returns
@@ -549,6 +1035,15 @@ app.get('/report', async (c) => {
   if (endDate) { clauses.push(localDateAtOrBefore('created_at')); params.endDate = endDate }
   if (query.branchId) { clauses.push('branch_id = @branchId'); params.branchId = query.branchId }
   const where = clauses.join(' AND ')
+  // RETURN-DATE ACTIVITY, not a revenue term. Every figure below is scoped
+  // by the date the RETURN was created, which answers "what did the returns
+  // desk do in this window". The kernel reverses a refund in the period of
+  // the SALE it belongs to, so these two totals differ whenever a return
+  // crosses a period boundary, and they are not interchangeable. Nothing may
+  // subtract this from a revenue, profit or collected figure -- doing so
+  // takes refunds off twice, on mismatched bases, and can drive a period
+  // below zero. The sale-basis reversal is SalesTotals.refund_usd.
+  //
   // Sum BOTH currencies (Part 553): refunds/compensation/loss can be recorded
   // in KHR, and a USD-only sum showed "$0.00" for real KHR returns (same class
   // of bug the fees report had). No conversion -- the UI shows "$X · Y៛".
@@ -602,7 +1097,7 @@ app.post('/reason-presets', async (c) => {
     INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
   `).run({ key: RETURN_REASON_PRESETS_KEY, value: JSON.stringify(presets) })
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'return_reason_presets', null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'return_reason_presets', null, {
     customerCount: presets.customer.length,
     supplierCount: presets.supplier.length,
   })
@@ -678,7 +1173,7 @@ app.post('/reasons/replace', async (c) => {
   }
   const results = await db.batch(statements)
   const linkedChanged = replaceScope === 'linked' ? Number(results[1]?.meta?.changes || 0) : 0
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'replace', 'return_reason', null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'replace', 'return_reason', null, {
     from, to, returnScope, scope: replaceScope, linkedChanged,
   })
   await Promise.all([bumpVersion(c.env, 'settings'), bumpVersion(c.env, 'returns')])
@@ -687,11 +1182,41 @@ app.post('/reasons/replace', async (c) => {
   return c.json({ success: true, configured: true, presets: nextPresets, scope: replaceScope, linkedChanged })
 })
 
+// Conditional grouped action: every selected row is revision checked, while
+// only rows whose chosen field still equals `source` move to `target`.
+// applyReturnBulkAction owns the atomic stock/snapshot/idempotency contract;
+// this route only translates typed business failures to HTTP responses.
+app.post('/bulk', async (c) => {
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+  try {
+    const result = await applyReturnBulkAction(c.env, c.get('user'), body)
+    c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
+    return c.json(result)
+  } catch (error) {
+    if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action' }, error.statusCode)
+    throw error
+  }
+})
+
+app.get('/capabilities', (c) => {
+  if (getActionTier(c.get('user'), 'returns', 'add') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  c.header('Cache-Control', 'no-store')
+  return c.json({ customer_return_create_version: 1, customer_return_edit_version: 0 })
+})
+
 // GET /api/returns/:id
 app.get('/:id', async (c) => {
   const db = getDb(c.env)
   const id = c.req.param('id')
-  const row = await db.prepare('SELECT * FROM returns WHERE id = ?').get<ReturnRow>([id])
+  const row = await db.prepare(`
+    SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is_anonymous, replacement_sale.receipt_number AS replacement_receipt_number,
+      ${DAMAGED_ITEM_COUNT_SQL}
+    FROM returns r
+    LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
+    WHERE r.id = ?
+  `).get<ReturnRow>([id])
   if (!row) return c.json({ error: 'Return not found' }, 404)
   const items = await db.prepare('SELECT * FROM return_items WHERE return_id = ?').all([id])
   const replacementItems = await db.prepare('SELECT * FROM return_replacement_items WHERE return_id = ?').all([id])
@@ -702,14 +1227,59 @@ app.get('/:id', async (c) => {
 // for any item with return_to_stock !== false, and rolling the parent
 // sale's sale_status to 'partial_return' or 'returned' once everything
 // sold on it has been accounted for.
+app.post('/quote', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'returns', 'add') === 'none' || getActionTier(user, 'returns', 'view') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const rawBody = await c.req.json<unknown>().catch(() => null)
+  const body = rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody)
+    ? rawBody as Record<string, unknown> : null
+  if (!body || Object.keys(body).some((key) => !['sale_id', 'items'].includes(key))) {
+    return c.json({ error: 'Choose a sale and between 1 and 50 return lines.', code: 'customer_return_quote_invalid' }, 400)
+  }
+  const saleId = body.sale_id
+  if (typeof saleId !== 'number' || !Number.isSafeInteger(saleId) || saleId <= 0 || !Array.isArray(body.items)
+    || body.items.length < 1 || body.items.length > 50) {
+    return c.json({ error: 'Choose a sale and between 1 and 50 return lines.', code: 'customer_return_quote_invalid' }, 400)
+  }
+  const requested: CustomerReturnRequestedLine[] = []
+  const seen = new Set<number>()
+  for (const raw of body.items) {
+    const item = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
+    if (Object.keys(item).some((key) => !['sale_item_id', 'quantity'].includes(key))) {
+      return c.json({ error: 'The return quote contains unsupported fields.', code: 'customer_return_quote_invalid' }, 400)
+    }
+    const saleItemId = item.sale_item_id
+    const quantity = item.quantity
+    if (typeof saleItemId !== 'number' || !Number.isSafeInteger(saleItemId) || saleItemId <= 0 || seen.has(saleItemId)
+      || typeof quantity !== 'number' || !Number.isFinite(quantity) || quantity <= 0) {
+      return c.json({ error: 'Each return quote line needs one unique sale item and a positive quantity.', code: 'customer_return_quote_invalid' }, 400)
+    }
+    seen.add(saleItemId)
+    requested.push({ sale_item_id: saleItemId, quantity })
+  }
+  c.header('Cache-Control', 'no-store')
+  try {
+    return c.json({ ...publicCustomerReturnQuote(await customerReturnQuoteFromDb(getDb(c.env), saleId, requested)),
+      customer_return_create_version: 1, customer_return_edit_version: 0 })
+  } catch (error) {
+    if (error instanceof SaleMoneyContractError) {
+      const conflict = /legacy|cohort|sale_invalid|not_found|cap|lineage/.test(error.message)
+      return c.json({ error: error.message, code: error.message, action: conflict ? 'review_required' : 'fix_request' }, conflict ? 409 : 400)
+    }
+    throw error
+  }
+})
+
 app.post('/', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
-  // Per-action override (Part 546): 'returns:add' switched off for this
-  // role blocks creating returns even though the tier admits them.
-  if (getActionTier(user, 'returns', 'add') === 'none') {
+  if (getActionTier(user, 'returns', 'add') === 'none' || getActionTier(user, 'returns', 'view') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
+  const authenticatedActorId = actorId(user)
+  if (!authenticatedActorId) return c.json({ error: 'Authenticated employee identity required' }, 403)
   const body = await c.req.json<{
     items: ReturnItemInput[]
     sale_id?: number
@@ -725,503 +1295,931 @@ app.post('/', async (c) => {
     exchange_rate?: number
     return_number?: string
     client_request_id?: string
-    // 11.12 Replace: lines handed to the customer from same-name stock.
     replacement_items?: Array<{ product_id: number; product_name?: string; branch_id?: number; batch_id?: number; quantity: number; applied_price_usd?: number; applied_price_khr?: number }>
-    settlement_mode?: string
+    replacement_payment_method?: string
+    money_precision_version?: unknown
+    expected_quote?: unknown
   }>()
 
-  const clientRequestId = normalizeClientRequestId(body.client_request_id)
-  if (!Array.isArray(body.items) || body.items.length === 0) return c.json({ error: 'Return items required' }, 400)
-  if (!body.reason) return c.json({ error: 'Reason is required' }, 400)
-  const replacementInputs = Array.isArray(body.replacement_items) ? body.replacement_items : []
-  for (const rep of replacementInputs) {
-    if (!rep?.product_id || !(Number(rep.quantity) > 0)) {
-      return c.json({ error: 'Each replacement line needs a product and a positive quantity' }, 400)
+  const rawRequestId = String(body.client_request_id ?? '').trim()
+  const clientRequestId = rawRequestId || null
+  if (!clientRequestId || new TextEncoder().encode(clientRequestId).byteLength > 120) {
+    return c.json({
+      error: 'This return was prepared by an older screen. Refresh before recording it.',
+      code: 'client_request_id_required', action: 'refresh_required',
+    }, 400)
+  }
+  // Read the idempotency receipt BEFORE the body is canonicalised so a replay
+  // of an already-recorded return still answers with what was recorded: the
+  // version gate below is about NEW writes, not about re-reading history.
+  const readReceipt = async () => db.prepare(`SELECT return_id,sale_id,request_digest,response_json
+    FROM return_create_receipts WHERE actor_id=? AND request_id=? LIMIT 1`)
+    .get<{ return_id: number; sale_id: number | null; request_digest: string; response_json: string }>([authenticatedActorId, clientRequestId])
+  const priorReceipt = await readReceipt()
+  // The sale decides. A body that is not explicitly v1 (absent, or 0) may not
+  // open a return against a v1 sale -- refused here, above canonicalisation, so
+  // an explicit 0 gets the same reviewable code as an absent one instead of the
+  // canonicaliser's generic 400.
+  if (!priorReceipt && body.money_precision_version !== 1
+    && (await saleMoneyPrecisionVersion(db, body.sale_id)) === 1) {
+    return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
+  }
+  let canonicalIntent: Record<string, unknown>
+  try {
+    canonicalIntent = canonicalReturnCreateIntent(body as Record<string, unknown>)
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
+  const requestJson = JSON.stringify(canonicalIntent)
+  const requestDigest = await sha256Hex(requestJson)
+  const requestedSaleId = Number(canonicalIntent.sale_id) || null
+  if (priorReceipt) {
+    if (priorReceipt.request_digest !== requestDigest || (priorReceipt.sale_id ?? null) !== requestedSaleId) {
+      return c.json({ error: 'client_request_id was already used for different return data.', code: 'idempotency_conflict' }, 409)
+    }
+    return c.json(JSON.parse(priorReceipt.response_json) as ReturnCreateResponse)
+  }
+  const occupiedRequest = await db.prepare("SELECT id FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
+    .get<{ id: number }>([clientRequestId])
+  if (occupiedRequest) {
+    return c.json({ error: 'client_request_id is already owned by another return.', code: 'idempotency_conflict' }, 409)
+  }
+
+  const isMoneyV1 = canonicalIntent.money_precision_version === 1
+  let customerReturnV1Plan: Awaited<ReturnType<typeof customerReturnQuotePlanFromDb>> | null = null
+  if (isMoneyV1) {
+    try {
+      customerReturnV1Plan = await customerReturnQuotePlanFromDb(db, requestedSaleId!,
+        (canonicalIntent.items as Array<{ sale_item_id: number; quantity: number }>).map(item => ({
+          sale_item_id: item.sale_item_id, quantity: item.quantity,
+        })))
+      if (JSON.stringify(publicCustomerReturnQuote(customerReturnV1Plan.quote)) !== JSON.stringify(canonicalIntent.expected_quote)) {
+        return c.json({ error: 'The refund quote changed. Review it before recording the return.',
+          code: 'customer_return_quote_stale', action: 'review_required' }, 409)
+      }
+    } catch (error) {
+      if (error instanceof SaleMoneyContractError) {
+        return c.json({ error: error.message, code: error.message, action: 'review_required' }, 409)
+      }
+      throw error
     }
   }
-  if (replacementInputs.length) {
-    // Replace is an even exchange from SAME-NAME stock (locked design
-    // note) -- a different product is a refund plus a new sale, and the
-    // name group is this app's product identity, so the gate is name_key.
+
+  const reason = String(canonicalIntent.reason)
+  let returnItems = body.items
+  const replacementInputs = Array.isArray(body.replacement_items) ? body.replacement_items : []
+  if (!isMoneyV1) {
     try {
-      await assertReplacementsSameName(
-        db,
-        body.items.map((i) => Number(i.product_id)).filter((pid) => Number.isFinite(pid) && pid > 0),
-        replacementInputs.map((rep) => Number(rep.product_id)),
-      )
+      await assertReturnableItems(db, requestedSaleId, body.items)
     } catch (error) {
       return c.json({ error: (error as Error).message }, 400)
     }
   }
 
-  if (clientRequestId) {
-    const existing = await db.prepare("SELECT id, return_number FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string }>([clientRequestId])
-    if (existing) return c.json({ id: existing.id, returnNumber: existing.return_number, duplicate: true })
-  }
-
-  try {
-    await assertReturnableItems(db, body.sale_id || null, body.items)
-  } catch (error) {
-    return c.json({ error: (error as Error).message }, 400)
-  }
-
-  // RET-YYYYMMDD-HHMMSS (Phnom Penh wall clock) -- same datetime-id shape
-  // as sales receipts (lib/receiptNumber.ts); client-supplied numbers win.
   const returnNumber = body.return_number?.trim() || await uniqueBusinessDateTimeNumber(
-    'RET',
-    async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM returns WHERE return_number = ? LIMIT 1').get([candidate])),
+    'RET', async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM returns WHERE return_number=? LIMIT 1').get([candidate])),
   )
-
-  let saleMeta: { receipt_number?: string; customer_id?: number; customer_name?: string; branch_id?: number; branch_name?: string; exchange_rate?: number } = {}
-  if (body.sale_id) {
-    const sale = await db.prepare('SELECT receipt_number, customer_id, customer_name, branch_id, branch_name, exchange_rate FROM sales WHERE id = ?').get<typeof saleMeta>([body.sale_id])
-    if (sale) saleMeta = sale
+  type SaleMeta = {
+    receipt_number: string | null; customer_id: number | null; customer_name: string | null
+    customer_phone: string | null; customer_address: string | null; branch_id: number | null
+    branch_name: string | null; exchange_rate: number | null; sale_status: string | null
+    status_before_return: string | null; write_revision: number
+    sale_money_precision_version: number | null
   }
-  const branchId = body.branch_id || saleMeta.branch_id || null
-  const branchName = branchId
-    ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([branchId]))?.name || saleMeta.branch_name || null
-    : saleMeta.branch_name || null
-
-  const productIds = [...new Set([
-    ...body.items.map((i) => Number(i.product_id)),
-    ...replacementInputs.map((rep) => Number(rep.product_id)),
-  ].filter((id) => Number.isFinite(id) && id > 0))]
-  const productMap = new Map<number, { id: number; name: string; cost_price_usd: number; cost_price_khr: number; selling_price_usd: number; selling_price_khr: number }>()
-  if (productIds.length > 0) {
-    const rows = await selectInChunks(productIds, 0, (chunk) => db.prepare(`SELECT id, name, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<typeof productMap extends Map<number, infer V> ? V : never>(chunk))
-    for (const row of rows) productMap.set(row.id, row)
-  }
-
-  // 11.12 settlement: value coming back vs value handed out, decided
-  // BEFORE any write. Even exchange (default) is only legal at a zero
-  // gap; a real gap needs the explicit price-difference mode, which is
-  // full-access only (locked note: "Non-default price adjustment
-  // requires full access and an explicit preview").
-  const replacementLines = replacementInputs.map((rep) => {
-    const meta = productMap.get(Number(rep.product_id))
-    const quantity = Number(rep.quantity) || 0
-    const priceUsd = rep.applied_price_usd != null ? toNumber(rep.applied_price_usd, 0) : (meta?.selling_price_usd || 0)
-    const priceKhr = rep.applied_price_khr != null ? toNumber(rep.applied_price_khr, 0) : (meta?.selling_price_khr || 0)
-    return {
-      productId: Number(rep.product_id),
-      productName: rep.product_name?.trim() || meta?.name || `product #${rep.product_id}`,
-      branchId: Number(rep.branch_id) || 0,
-      batchId: Number.isFinite(Number(rep.batch_id)) && Number(rep.batch_id) > 0 ? Number(rep.batch_id) : null,
-      quantity,
-      priceUsd,
-      priceKhr,
-      totalUsd: Number((priceUsd * quantity).toFixed(2)),
-      totalKhr: Math.round(priceKhr * quantity),
-      unitCostUsd: meta?.cost_price_usd || 0,
-      unitCostKhr: meta?.cost_price_khr || 0,
+  let saleMeta: SaleMeta | null = null
+  let soldLines: Array<{
+    id: number; product_id: number | null; product_name: string | null; quantity: number
+    branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
+  }> = []
+  let committedReturnLines: Array<{ sale_item_id: number | null; product_id: number | null; quantity: number }> = []
+  if (requestedSaleId) {
+    saleMeta = await db.prepare(`SELECT s.receipt_number,s.customer_id,s.customer_name,s.customer_phone,s.customer_address,
+      s.branch_id,s.branch_name,s.exchange_rate,s.sale_status,s.status_before_return,
+      s.money_precision_version AS sale_money_precision_version,
+      COALESCE(v.revision,0) AS write_revision
+      FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=?`)
+      .get<SaleMeta>([requestedSaleId]) || null
+    if (!saleMeta) return c.json({ error: 'Original sale not found' }, 400)
+    if (String(saleMeta.sale_status || 'completed') === 'cancelled') {
+      return c.json({ error: 'This sale is cancelled -- un-cancel it before recording a return.' }, 400)
     }
-  })
-  let settlementMode: string | null = null
-  let settlementDiffUsd = 0
-  let settlementDiffKhr = 0
-  if (replacementLines.length) {
-    const settlement = computeSettlement({
-      mode: body.settlement_mode,
-      returnedTotalUsd: body.items.reduce((sum, i) => sum + (toNumber(i.applied_price_usd, 0) * (Number(i.quantity) || 0)), 0),
-      returnedTotalKhr: body.items.reduce((sum, i) => sum + (toNumber(i.applied_price_khr, 0) * (Number(i.quantity) || 0)), 0),
-      replacementTotalUsd: replacementLines.reduce((sum, line) => sum + line.totalUsd, 0),
-      replacementTotalKhr: replacementLines.reduce((sum, line) => sum + line.totalKhr, 0),
+    // Second, write-adjacent lock on the same rule, read from the sale row this
+    // handler already loads: no legacy-priced return row is inserted for a v1
+    // sale, whatever path reached here.
+    if (!isMoneyV1 && Number(saleMeta.sale_money_precision_version) === 1) {
+      return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
+    }
+    soldLines = await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
+      .all<typeof soldLines[number]>([requestedSaleId])
+    const soldById = new Map(soldLines.map((line) => [Number(line.id), line]))
+    returnItems = body.items.map((item) => {
+      const sold = item.sale_item_id ? soldById.get(Number(item.sale_item_id)) : null
+      return sold ? {
+        ...item,
+        product_id: sold.product_id ?? item.product_id,
+        product_name: sold.product_name ?? item.product_name,
+        branch_id: sold.branch_id ?? item.branch_id,
+        cost_price_usd: isMoneyV1 ? sold.cost_price_usd : sold.cost_price_usd ?? item.cost_price_usd,
+        cost_price_khr: isMoneyV1 ? sold.cost_price_khr : sold.cost_price_khr ?? item.cost_price_khr,
+      } : item
     })
-    if (settlement.evenExchangeBlocked) {
-      return c.json({ error: `This is not an even exchange -- the replacement differs from the returned value by $${settlement.diffUsd.toFixed(2)}. Choose "settle the price difference" (full access), or adjust quantities/prices until the totals match.`, code: 'uneven_exchange' }, 400)
+    committedReturnLines = await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
+      FROM return_items ri JOIN returns r ON r.id=ri.return_id
+      WHERE r.sale_id=? AND COALESCE(r.status,'completed')!='cancelled'
+        AND COALESCE(r.return_scope,'customer')='customer' ORDER BY r.id,ri.id`)
+      .all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>([requestedSaleId])
+    if (!isMoneyV1) {
+      try {
+        assertReturnCreateCapacity(soldLines, committedReturnLines, returnItems)
+      } catch (error) {
+        return c.json({ error: (error as Error).message }, 400)
+      }
     }
-    // getActionTier, not getPermissionTier (Part 546): the
-    // 'returns:settle_difference' per-action override can switch this off
-    // for a role even at Full Access.
-    if (settlement.needsFullAccess && getActionTier(user, 'returns', 'settle_difference') !== 'full') {
-      return c.json({ error: 'Settling a price difference on a replacement requires Full Access to Returns.' }, 403)
+  }
+  // P4-3: validate every 'damaged' line's tag/disposition BEFORE any write
+  // statement is built -- nothing below this point has executed yet, so a
+  // 400 here leaves no partial state.
+  for (const item of returnItems) {
+    if (normalizeStockAction(item) !== 'damaged') continue
+    const choice = resolveDamagedReturnChoice(item)
+    if (!choice.ok) return c.json({ error: choice.error }, 400)
+  }
+  let projectedStatus: string | null = null
+  if (saleMeta) {
+    if (isMoneyV1) {
+      try {
+        projectedStatus = projectedSaleStatusForReturnCreateV1(soldLines, committedReturnLines, returnItems, saleMeta.status_before_return)
+      } catch (error) {
+        return c.json({ error: (error as Error).message, code: 'customer_return_quote_stale', action: 'review_required' }, 409)
+      }
+    } else {
+      projectedStatus = projectedSaleStatusForReturnCreate(soldLines, committedReturnLines, returnItems, saleMeta.status_before_return)
     }
-    settlementMode = settlement.mode
-    settlementDiffUsd = settlement.mode === 'price_difference' ? settlement.diffUsd : 0
-    settlementDiffKhr = settlement.mode === 'price_difference' ? settlement.diffKhr : 0
+  }
+  const beforeSaleStatus = saleMeta ? String(saleMeta.sale_status || 'completed') : null
+
+  const branchId = Number(body.branch_id || saleMeta?.branch_id || replacementInputs[0]?.branch_id) || null
+  let branch: { id: number; name: string | null; is_active: number | null } | null = null
+  if (branchId) {
+    branch = await db.prepare('SELECT id,name,is_active FROM branches WHERE id=? LIMIT 1')
+      .get<{ id: number; name: string | null; is_active: number | null }>([branchId]) || null
+  }
+  let branchName = branch?.name || saleMeta?.branch_name || null
+  if (replacementInputs.length) {
+    if (!branch || Number(branch.is_active || 0) !== 1 || !branchCanSell(branch.name)
+      || replacementInputs.some((line) => Number(line.branch_id || branchId) !== branchId)) {
+      return c.json({ error: WAREHOUSE_NOT_SELLABLE_ERROR }, 400)
+    }
+    branchName = branch.name
   }
 
-  // Insert the return header first (mirrors sales.ts's POST / -- a single
-  // statement can't share a D1 batch() with the item/stock writes below
-  // since we need its lastInsertRowid first; see lib/db.ts).
-  const returnInsert = await db.prepare(`
-    INSERT INTO returns (
-      return_number, client_request_id, sale_id, receipt_number, cashier_id, cashier_name,
-      customer_id, customer_name, branch_id, branch_name, return_scope, reason, return_type,
-      notes, total_refund_usd, total_refund_khr, exchange_rate, status,
-      settlement_mode, settlement_diff_usd, settlement_diff_khr, search_normalized
-    ) VALUES (@return_number, @client_request_id, @sale_id, @receipt_number, @cashier_id, @cashier_name,
-      @customer_id, @customer_name, @branch_id, @branch_name, @return_scope, @reason, @return_type,
-      @notes, @total_refund_usd, @total_refund_khr, @exchange_rate, 'completed',
-      @settlement_mode, @settlement_diff_usd, @settlement_diff_khr, @search_normalized)
-  `).run({
-    return_number: returnNumber,
-    client_request_id: clientRequestId,
-    sale_id: body.sale_id || null,
-    receipt_number: body.receipt_number || saleMeta.receipt_number || null,
-    cashier_id: user?.id ?? null,
-    cashier_name: user?.name ?? null,
-    customer_id: body.customer_id || saleMeta.customer_id || null,
-    customer_name: body.customer_name || saleMeta.customer_name || null,
-    branch_id: branchId,
-    branch_name: branchName,
-    return_scope: CUSTOMER_SCOPE,
-    reason: body.reason,
-    return_type: body.return_type || 'restock',
-    notes: body.notes || null,
-    // Write-time diacritic fold of this return's own searchable text fields
-    // (migration 0082), read additively by the returns search builder.
-    search_normalized: normalizeSearchText(
-      [returnNumber, body.receipt_number || saleMeta.receipt_number, user?.name, body.customer_name || saleMeta.customer_name, branchName, body.reason, body.return_type || 'restock', body.notes]
-        .filter(Boolean)
-        .join(' '),
-    ),
-    total_refund_usd: body.total_refund_usd || 0,
-    total_refund_khr: body.total_refund_khr || 0,
-    exchange_rate: body.exchange_rate || saleMeta.exchange_rate || 4100,
-    settlement_mode: settlementMode,
-    settlement_diff_usd: settlementDiffUsd,
-    settlement_diff_khr: settlementDiffKhr,
+  type ProductMeta = {
+    id: number; name: string; cost_price_usd: number; cost_price_khr: number
+    selling_price_usd: number; selling_price_khr: number; updated_at: string | null; is_active: number | null
+  }
+  const productIds = [...new Set([
+    ...returnItems.map((item) => Number(item.product_id)),
+    ...replacementInputs.map((item) => Number(item.product_id)),
+  ].filter((id) => Number.isSafeInteger(id) && id > 0))]
+  const productMap = new Map<number, ProductMeta>()
+  if (productIds.length) {
+    const rows = await selectInChunks(productIds, 0, (chunk) => db.prepare(`SELECT id,name,cost_price_usd,cost_price_khr,
+      selling_price_usd,selling_price_khr,updated_at,is_active FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<ProductMeta>(chunk))
+    for (const row of rows) productMap.set(Number(row.id), row)
+  }
+  if (replacementInputs.some((input) => Number(productMap.get(Number(input.product_id))?.is_active || 0) !== 1)) {
+    return c.json({ error: 'Each replacement line needs an active catalog product' }, 400)
+  }
+  const replacementLines = replacementInputs.map((input) => {
+    const productId = Number(input.product_id)
+    const meta = productMap.get(productId)
+    const quantity = Number(input.quantity)
+    if (!meta || !(quantity > 0)) throw new Error('Each replacement line needs an active product and positive quantity')
+    const lineBranchId = Number(input.branch_id || branchId)
+    const priceUsd = input.applied_price_usd != null ? toNumber(input.applied_price_usd) : toNumber(meta.selling_price_usd)
+    const priceKhr = input.applied_price_khr != null ? toNumber(input.applied_price_khr) : toNumber(meta.selling_price_khr)
+    return {
+      productId, productName: input.product_name?.trim() || meta.name, branchId: lineBranchId,
+      batchId: Number(input.batch_id) > 0 ? Number(input.batch_id) : null, quantity,
+      priceUsd, priceKhr, totalUsd: Number((priceUsd * quantity).toFixed(2)), totalKhr: Math.round(priceKhr * quantity),
+      unitCostUsd: toNumber(meta.cost_price_usd), unitCostKhr: toNumber(meta.cost_price_khr),
+    }
   })
-  const returnId = returnInsert.lastInsertRowid
 
-  // Compensation log (Part-77, write-path + batch-identity audits): every
-  // stock write that lands OUTSIDE the outer db.batch() below --
-  // receiveBatchStock restocks and applyReplacementStock drains are each
-  // their own atomic write -- so the catch can reverse exactly what was
-  // applied. Before this, the catch deleted the return's rows and left the
-  // stock moved: phantom inventory from the restocks, destroyed inventory
-  // from the replacement drains. Declared OUTSIDE the try so the catch can
-  // read them.
-  const appliedLotRestocks: Array<{ productId: number; batchId: number; branchId: number; quantity: number }> = []
-  const appliedReplacements: Array<{ productId: number; productName: string; branchId: number; batchId: number | null; quantity: number }> = []
+  const returnSaleItemIds = returnItems.map((item) => Number(item.sale_item_id)).filter((id) => Number.isSafeInteger(id) && id > 0)
+  const saleItemBatchInfo = await fetchSaleItemBatchInfo(db, returnSaleItemIds)
+  const saleItemAllocations = await fetchSaleItemAllocations(db, returnSaleItemIds)
+  const v1QuoteBySaleItem = new Map(customerReturnV1Plan?.quote.items.map(item => [item.sale_item_id, item]) || [])
+  const refundPrices = returnItems.map((item) => {
+    const exact = v1QuoteBySaleItem.get(Number(item.sale_item_id))
+    return exact ? { unitUsd: exact.applied_price_usd, unitKhr: exact.applied_price_khr } : resolveRefundUnitPrice({
+      saleLine: item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id)) || null : null,
+      postedUsd: toNumber(item.applied_price_usd), postedKhr: toNumber(item.applied_price_khr),
+    })
+  })
+  const totalRefundUsd = customerReturnV1Plan?.quote.total_refund_usd
+    ?? Number(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitUsd * Number(item.quantity), 0).toFixed(2))
+  const totalRefundKhr = customerReturnV1Plan?.quote.total_refund_khr
+    ?? Math.round(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitKhr * Number(item.quantity), 0))
+
+  const returnLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []
+  for (const item of returnItems) {
+    const quantity = Number(item.quantity)
+    const productId = Number(item.product_id)
+    const itemBranchId = Number(item.branch_id || branchId)
+    if (normalizeStockAction(item) !== 'restock' || !productId || !itemBranchId) {
+      returnLotPlans.push({ splits: [], plainQuantity: 0 })
+      continue
+    }
+    const plan = planReturnLot({
+      allocations: item.sale_item_id ? saleItemAllocations.get(Number(item.sale_item_id)) || [] : [],
+      saleLineBatchId: item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id))?.batch_id ?? null : null,
+      operatorBatchId: Number(item.batch_id) > 0 ? Number(item.batch_id) : null,
+      // Unattributed units receive their own dated return-event lot below.
+      quantity, lotTracked: false,
+    })
+    if (plan.requiresLotPick) {
+      const error = new ReturnLotRequiredError(item.product_name?.trim() || productMap.get(productId)?.name || `product #${productId}`, quantity)
+      return c.json({ error: error.message, code: error.code, product_id: productId }, 400)
+    }
+    returnLotPlans.push({ splits: plan.splits, plainQuantity: plan.plainQuantity })
+  }
+
+  type LotTake = { batchId: number; lotCode: string | null; expiryDate: string | null; quantity: number }
+  const replacementFifoTakes = new Map<number, LotTake[]>()
+  const replacementExplicitTakes = new Map<number, LotTake[]>()
+  const fifoLots = await readFifoLotAvailabilityForCart(db, replacementLines
+    .filter((line) => line.batchId == null)
+    .map((line) => ({ productId: line.productId, branchId: line.branchId })))
+  for (const [index, line] of replacementLines.entries()) {
+    if (line.batchId != null) continue
+    const lots = fifoLots.get(`${line.productId}:${line.branchId}`) || []
+    const { takes, uncovered } = allocateAcrossLots(lots, line.quantity)
+    if (uncovered > 0 && takes.length > 0) {
+      return c.json({
+        error: `Not enough lot stock to hand out ${line.quantity} of "${line.productName}": tracked lots cover only ${line.quantity - uncovered}.`,
+        code: 'replacement_lot_shortfall',
+      }, 409)
+    }
+    replacementFifoTakes.set(index, takes.map((take) => {
+      const lot = lots.find((candidate) => candidate.batchId === take.batchId)
+      return { ...take, lotCode: lot?.lotCode ?? null, expiryDate: lot?.expiryDate ?? null }
+    }))
+    for (const take of takes) {
+      const lot = lots.find((candidate) => candidate.batchId === take.batchId)
+      if (lot) lot.available -= take.quantity
+    }
+  }
+  // Perf-2: this used to run one product_batches SELECT per replacement
+  // line with an explicit batch chosen. Read every explicit batch id once
+  // (IN-chunked for D1's bound-param cap) and re-check id+variant_product_id
+  // in JS -- same match, same 'does not belong to this replacement product'
+  // refusal, one or a handful of round trips instead of one per line.
+  const explicitBatchIds = [...new Set(replacementLines
+    .filter((line) => line.batchId != null)
+    .map((line) => line.batchId as number))]
+  const explicitLotById = new Map<number, { lot_code: string | null; expiry_date: string | null; variant_product_id: number }>()
+  if (explicitBatchIds.length) {
+    const rows = await selectInChunks(explicitBatchIds, 0, (chunk) => db.prepare(
+      `SELECT id,lot_code,expiry_date,variant_product_id FROM product_batches WHERE id IN (${chunk.map(() => '?').join(',')}) AND is_active=1`,
+    ).all<{ id: number; lot_code: string | null; expiry_date: string | null; variant_product_id: number }>(chunk))
+    for (const row of rows) explicitLotById.set(Number(row.id), row)
+  }
+  for (const [index, line] of replacementLines.entries()) {
+    if (line.batchId == null) continue
+    const lot = explicitLotById.get(line.batchId)
+    if (!lot || Number(lot.variant_product_id) !== line.productId) {
+      return c.json({ error: 'Selected received date does not belong to this replacement product' }, 400)
+    }
+    replacementExplicitTakes.set(index, [{ batchId: line.batchId, lotCode: lot.lot_code, expiryDate: lot.expiry_date, quantity: line.quantity }])
+  }
+
+  const occurredAt = new Date().toISOString()
+  const receiptId = crypto.randomUUID()
+  const operationId = crypto.randomUUID()
+  const replacementIdentityDigest = await sha256Hex(`${authenticatedActorId}:${clientRequestId}`)
+  const replacementClientRequestId = `return-replacement:${replacementIdentityDigest}`
+  let replacementReceiptNumber: string | null = null
+  let replacementCreationSnapshot: string | null = null
+  let replacementTotals: ReturnType<typeof computeSaleTotals> | null = null
+  let replacementNotice: Parameters<typeof formatSaleTelegramLines>[0] | null = null
+  let replacementCustomerId: number | null = null
+  let replacementCustomerName: string | null = null
+  let replacementCustomerPhone: string | null = null
+  let replacementCustomerAddress: string | null = null
+  let replacementMembershipNumber: string | null = null
+  let replacementCustomerGuard: {
+    customer_id: number; exists: number; is_anonymous: number; membership_number: string
+  } | null = null
+  const replacementPaymentMethod = String(body.replacement_payment_method || '').trim() || DEFAULT_REPLACEMENT_PAYMENT_METHOD
+  if (replacementLines.length) {
+    replacementReceiptNumber = await uniqueBusinessDateTimeNumber('', async (candidate) => !!(await db.prepare('SELECT 1 FROM sales WHERE receipt_number=? LIMIT 1').get([candidate])))
+    const subtotalUsd = Number(replacementLines.reduce((sum, line) => sum + line.totalUsd, 0).toFixed(2))
+    const exchangeRate = toNumber(body.exchange_rate || saleMeta?.exchange_rate, 4100)
+    replacementTotals = computeSaleTotals({
+      subtotalUsd, discountUsd: 0, membershipDiscountUsd: 0, taxUsd: 0, deliveryFeeUsd: 0,
+      deliveryFeePaidBy: 'customer', isDelivery: false, exchangeRate,
+      rawAmountPaidUsd: subtotalUsd, rawAmountPaidKhr: 0,
+    })
+    const candidateCustomerId = Number(body.customer_id || saleMeta?.customer_id) || null
+    const candidateCustomer = candidateCustomerId
+      ? await db.prepare('SELECT id,membership_number,is_anonymous FROM customers WHERE id=?')
+        .get<{ id: number; membership_number: string | null; is_anonymous: number | null }>([candidateCustomerId])
+      : null
+    if (candidateCustomerId) {
+      replacementCustomerGuard = {
+        customer_id: candidateCustomerId, exists: candidateCustomer ? 1 : 0,
+        is_anonymous: Number(candidateCustomer?.is_anonymous || 0),
+        membership_number: candidateCustomer?.membership_number || '',
+      }
+    }
+    const candidateIsAnonymous = isAnonymousCustomer(candidateCustomer)
+    replacementCustomerId = candidateCustomer && !candidateIsAnonymous ? candidateCustomerId : null
+    replacementCustomerName = candidateIsAnonymous ? null : body.customer_name || saleMeta?.customer_name || null
+    replacementCustomerPhone = candidateIsAnonymous ? null : saleMeta?.customer_phone || null
+    replacementCustomerAddress = candidateIsAnonymous ? null : contactDisplayAddress(saleMeta?.customer_address) || null
+    replacementMembershipNumber = candidateCustomer && !candidateIsAnonymous ? candidateCustomer.membership_number || null : null
+    const paymentDetails = subtotalUsd > 0 ? [{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 }] : []
+    replacementCreationSnapshot = buildSaleCreationSnapshot({
+      origin: 'return_replacement', recordedAt: occurredAt, saleAt: occurredAt,
+      receiptNumber: replacementReceiptNumber, actor: user, cashierId: authenticatedActorId,
+      cashierName: actorSnapshot(user), saleStatus: 'completed',
+      items: replacementLines.map((line) => ({ product_id: line.productId, product_name: line.productName, quantity: line.quantity, applied_price_usd: line.priceUsd, total_usd: line.totalUsd })),
+      totalUsd: replacementTotals.totalUsd, paymentMethod: replacementPaymentMethod, paymentDetails,
+      amountPaidUsd: replacementTotals.amountPaidUsd, amountPaidKhr: replacementTotals.amountPaidKhr,
+      changeUsd: 0, changeKhr: 0, isDelivery: false, deliveryFeeUsd: 0,
+      customerSnapshot: replacementCustomerId || String(replacementCustomerName || '').trim() ? { id: replacementCustomerId, name: replacementCustomerName } : null,
+      membershipSnapshot: replacementMembershipNumber ? { number: replacementMembershipNumber, discountUsd: 0, discountKhr: 0, pointsRedeemed: 0 } : null,
+    })
+    replacementNotice = {
+      status: 'completed', createdAt: occurredAt, receiptNumber: replacementReceiptNumber,
+      cashier: actorSnapshot(user), customer: replacementCustomerName, phone: replacementCustomerPhone,
+      branch: branchName, items: replacementLines.map((line) => ({ name: line.productName, quantity: line.quantity, unitPriceUsd: line.priceUsd, basePriceUsd: null, lineTotalUsd: line.totalUsd })),
+      exchangeRate, isDelivery: false, deliveryFeeUsd: 0, deliveryPaidBy: null, driver: null,
+      subtotalUsd, discountUsd: 0, taxUsd: 0, totalUsd: replacementTotals.totalUsd,
+      totalKhr: replacementTotals.totalKhr, paidUsd: replacementTotals.amountPaidUsd,
+      paidKhr: replacementTotals.amountPaidKhr, changeUsd: 0, changeKhr: 0, paymentMethod: replacementPaymentMethod,
+    }
+  }
+
+  const pairKey = (productId: number, branch: number) => `${productId}:${branch}`
+  const branchDeltas = new Map<string, { product_id: number; branch_id: number; delta: number }>()
+  const batchDeltas = new Map<string, { batch_id: number; product_id: number; branch_id: number; delta: number; requires_active: number }>()
+  const addBranchDelta = (productId: number, lineBranchId: number, delta: number) => {
+    const key = pairKey(productId, lineBranchId)
+    const current = branchDeltas.get(key) || { product_id: productId, branch_id: lineBranchId, delta: 0 }
+    current.delta += delta
+    branchDeltas.set(key, current)
+  }
+  const addBatchDelta = (batchId: number, productId: number, lineBranchId: number, delta: number, requiresActive = false) => {
+    const key = `${batchId}:${lineBranchId}`
+    const current = batchDeltas.get(key) || { batch_id: batchId, product_id: productId, branch_id: lineBranchId, delta: 0, requires_active: 0 }
+    current.delta += delta
+    if (requiresActive) current.requires_active = 1
+    batchDeltas.set(key, current)
+  }
+  for (const [index, item] of returnItems.entries()) {
+    if (normalizeStockAction(item) !== 'restock' || !item.product_id || !(item.branch_id || branchId)) continue
+    const productId = Number(item.product_id); const lineBranchId = Number(item.branch_id || branchId); const quantity = Number(item.quantity)
+    addBranchDelta(productId, lineBranchId, quantity)
+    for (const split of returnLotPlans[index].splits) addBatchDelta(split.batchId, productId, lineBranchId, split.quantity)
+  }
+  for (const [index, line] of replacementLines.entries()) {
+    addBranchDelta(line.productId, line.branchId, -line.quantity)
+    for (const take of [...(replacementFifoTakes.get(index) || []), ...(replacementExplicitTakes.get(index) || [])]) {
+      addBatchDelta(take.batchId, line.productId, line.branchId, -take.quantity, true)
+    }
+  }
+  // Perf-2: branchDeltas/batchDeltas hold one entry per distinct
+  // product+branch (or batch+branch) touched by this return -- each row's
+  // snapshot read is independent of every other's, so both maps read in
+  // one Promise.all fan-out (one round trip per map) instead of one
+  // sequential await per entry.
+  const branchDeltaEntries = [...branchDeltas.values()]
+  const branchRows = await Promise.all(branchDeltaEntries.map((value) =>
+    db.prepare('SELECT quantity FROM branch_stock WHERE product_id=? AND branch_id=?')
+      .get<{ quantity: number }>([value.product_id, value.branch_id]),
+  ))
+  const branchSnapshots = branchDeltaEntries.map((value, index) => {
+    const row = branchRows[index]
+    return { ...value, before: Number(row?.quantity) || 0, after: (Number(row?.quantity) || 0) + value.delta }
+  })
+  const batchDeltaEntries = [...batchDeltas.values()]
+  const batchRows = await Promise.all(batchDeltaEntries.map((value) =>
+    db.prepare(`SELECT pb.variant_product_id AS product_id,pb.is_active,pb.lot_code,pb.expiry_date,COALESCE(bbs.quantity,0) quantity
+      FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=? WHERE pb.id=?`)
+      .get<{ product_id: number; is_active: number; lot_code: string | null; expiry_date: string | null; quantity: number }>([value.branch_id, value.batch_id]),
+  ))
+  const batchSnapshots = []
+  for (let index = 0; index < batchDeltaEntries.length; index += 1) {
+    const value = batchDeltaEntries[index]
+    const row = batchRows[index]
+    if (!row || Number(row.product_id) !== value.product_id || (value.requires_active === 1 && Number(row.is_active) !== 1)) {
+      return c.json({ error: 'A selected received date is no longer active for this product', code: 'write_conflict' }, 409)
+    }
+    const before = Number(row.quantity) || 0
+    if (before + value.delta < 0) return c.json({ error: 'Replacement stock changed. Reload and try again.', code: 'write_conflict' }, 409)
+    batchSnapshots.push({
+      ...value, is_active: Number(row.is_active), lot_code: row.lot_code || '', expiry_date: row.expiry_date || '',
+      before, after: before + value.delta,
+    })
+  }
+  if (branchSnapshots.some((row) => row.after < 0)) {
+    return c.json({ error: 'Replacement stock changed. Reload and try again.', code: 'write_conflict' }, 409)
+  }
+
+  const guardState = {
+    sale: saleMeta ? { id: requestedSaleId, revision: saleMeta.write_revision, status: beforeSaleStatus, status_before_return: saleMeta.status_before_return || '' } : null,
+    branch: branch ? { id: branch.id, name: branch.name || '', is_active: Number(branch.is_active || 0) } : null,
+    products: productIds.map((id) => {
+      const product = productMap.get(id)
+      return {
+        id, updated_at: product?.updated_at || '', name: product?.name || '', is_active: Number(product?.is_active || 0),
+        requires_active: replacementLines.some((line) => line.productId === id) ? 1 : 0,
+        cost_price_usd: Number(product?.cost_price_usd) || 0, cost_price_khr: Number(product?.cost_price_khr) || 0,
+        selling_price_usd: Number(product?.selling_price_usd) || 0, selling_price_khr: Number(product?.selling_price_khr) || 0,
+      }
+    }),
+    customer: replacementCustomerGuard,
+    branch_stock: branchSnapshots,
+    batch_stock: batchSnapshots,
+  }
+  const guardJson = JSON.stringify(guardState)
+  const commonGuardParams = {
+    guardJson, receiptId, actorId: authenticatedActorId, requestId: clientRequestId,
+    requestDigest, returnNumber, replacementClientRequestId,
+    replacementReceiptNumber,
+    customerReturnAuthorityJson: customerReturnV1Plan?.authority_json ?? null,
+    ...(customerReturnV1Plan?.lineage.params ?? {}),
+  }
+  const precondition = `
+    NOT EXISTS(SELECT 1 FROM return_create_receipts WHERE actor_id=@actorId AND request_id=@requestId)
+    AND NOT EXISTS(SELECT 1 FROM returns WHERE client_request_id=@requestId OR return_number=@returnNumber)
+    AND (@replacementReceiptNumber IS NULL OR NOT EXISTS(
+      SELECT 1 FROM sales WHERE client_request_id=@replacementClientRequestId OR receipt_number=@replacementReceiptNumber
+    ))
+    AND (json_type(@guardJson,'$.sale')='null' OR EXISTS(
+      SELECT 1 FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id
+      WHERE s.id=json_extract(@guardJson,'$.sale.id')
+        AND COALESCE(v.revision,0)=json_extract(@guardJson,'$.sale.revision')
+        AND COALESCE(s.sale_status,'completed')=json_extract(@guardJson,'$.sale.status')
+        AND COALESCE(s.status_before_return,'')=json_extract(@guardJson,'$.sale.status_before_return')
+    ))
+    AND (json_type(@guardJson,'$.branch')='null' OR EXISTS(
+      SELECT 1 FROM branches b WHERE b.id=json_extract(@guardJson,'$.branch.id')
+        AND COALESCE(b.name,'')=json_extract(@guardJson,'$.branch.name')
+        AND COALESCE(b.is_active,0)=json_extract(@guardJson,'$.branch.is_active')
+    ))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@guardJson,'$.products') j
+      WHERE NOT EXISTS(SELECT 1 FROM products p WHERE p.id=json_extract(j.value,'$.id')
+        AND COALESCE(p.updated_at,'')=json_extract(j.value,'$.updated_at')
+        AND COALESCE(p.name,'')=json_extract(j.value,'$.name')
+        AND COALESCE(p.is_active,0)=json_extract(j.value,'$.is_active')
+        AND (json_extract(j.value,'$.requires_active')=0 OR COALESCE(p.is_active,0)=1)
+        AND COALESCE(p.cost_price_usd,0)=json_extract(j.value,'$.cost_price_usd')
+        AND COALESCE(p.cost_price_khr,0)=json_extract(j.value,'$.cost_price_khr')
+        AND COALESCE(p.selling_price_usd,0)=json_extract(j.value,'$.selling_price_usd')
+        AND COALESCE(p.selling_price_khr,0)=json_extract(j.value,'$.selling_price_khr')))
+    AND (json_type(@guardJson,'$.customer')='null' OR (
+      (json_extract(@guardJson,'$.customer.exists')=0 AND NOT EXISTS(
+        SELECT 1 FROM customers c WHERE c.id=json_extract(@guardJson,'$.customer.customer_id')
+      )) OR (json_extract(@guardJson,'$.customer.exists')=1 AND EXISTS(
+        SELECT 1 FROM customers c WHERE c.id=json_extract(@guardJson,'$.customer.customer_id')
+          AND COALESCE(c.is_anonymous,0)=json_extract(@guardJson,'$.customer.is_anonymous')
+          AND COALESCE(c.membership_number,'')=json_extract(@guardJson,'$.customer.membership_number')
+      ))
+    ))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@guardJson,'$.branch_stock') j
+      WHERE COALESCE((SELECT quantity FROM branch_stock WHERE product_id=json_extract(j.value,'$.product_id')
+        AND branch_id=json_extract(j.value,'$.branch_id')),0)!=json_extract(j.value,'$.before'))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@guardJson,'$.batch_stock') j
+      WHERE NOT EXISTS(SELECT 1 FROM product_batches pb LEFT JOIN branch_batch_stock bbs
+        ON bbs.batch_id=pb.id AND bbs.branch_id=json_extract(j.value,'$.branch_id')
+        WHERE pb.id=json_extract(j.value,'$.batch_id') AND pb.variant_product_id=json_extract(j.value,'$.product_id')
+          AND COALESCE(pb.is_active,0)=json_extract(j.value,'$.is_active')
+          AND (json_extract(j.value,'$.requires_active')=0 OR COALESCE(pb.is_active,0)=1)
+          AND COALESCE(pb.lot_code,'')=json_extract(j.value,'$.lot_code')
+          AND COALESCE(pb.expiry_date,'')=json_extract(j.value,'$.expiry_date')
+          AND COALESCE(bbs.quantity,0)=json_extract(j.value,'$.before')))
+    AND (@customerReturnAuthorityJson IS NULL OR ((${customerReturnAuthorityPredicate()})
+      AND (${customerReturnV1Plan?.lineage.condition ?? '1=1'})))
+  `
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
+    returnCreateGuardStatement(operationId, 'precondition', precondition, commonGuardParams),
+  ]
+  const returnIdExpression = returnCreateIdSql()
+  const replacementSaleExpression = replacementSaleIdSql()
+  statements.push({
+    sql: `INSERT INTO returns(
+      return_number,client_request_id,sale_id,receipt_number,cashier_id,cashier_name,
+      customer_id,customer_name,branch_id,branch_name,return_scope,reason,return_type,
+      notes,total_refund_usd,total_refund_khr,exchange_rate,status,search_normalized,
+      money_precision_version,calculated_refund_usd,rounding_adjustment_usd
+    ) VALUES(
+      @return_number,@returnClientRequestId,@sale_id,@receipt_number,@cashier_id,@cashier_name,
+      @customer_id,@customer_name,@branch_id,@branch_name,'customer',@reason,@return_type,
+      @notes,@total_refund_usd,@total_refund_khr,@exchange_rate,'completed',@search_normalized,
+      @money_precision_version,@calculated_refund_usd,@rounding_adjustment_usd
+    )`,
+    params: {
+      return_number: returnNumber, returnClientRequestId: clientRequestId, sale_id: requestedSaleId,
+      receipt_number: body.receipt_number || saleMeta?.receipt_number || null,
+      cashier_id: authenticatedActorId, cashier_name: actorSnapshot(user),
+      customer_id: body.customer_id || saleMeta?.customer_id || null,
+      customer_name: body.customer_name || saleMeta?.customer_name || null,
+      branch_id: branchId, branch_name: branchName, reason,
+      return_type: String(canonicalIntent.return_type), notes: canonicalIntent.notes,
+      total_refund_usd: totalRefundUsd, total_refund_khr: totalRefundKhr,
+      exchange_rate: customerReturnV1Plan
+        ? Number(customerReturnV1Plan.authority.sale.exchange_rate)
+        : toNumber(body.exchange_rate || saleMeta?.exchange_rate, 4100),
+      money_precision_version: isMoneyV1 ? 1 : 0,
+      calculated_refund_usd: customerReturnV1Plan?.quote.calculated_refund_usd ?? null,
+      rounding_adjustment_usd: customerReturnV1Plan?.quote.rounding_adjustment_usd ?? 0,
+      search_normalized: normalizeSearchText([
+        returnNumber, body.receipt_number || saleMeta?.receipt_number, actorSnapshot(user),
+        body.customer_name || saleMeta?.customer_name, branchName, reason, canonicalIntent.return_type, canonicalIntent.notes,
+      ].filter(Boolean).join(' ')),
+    },
+  })
+
+  if (replacementLines.length && replacementTotals && replacementReceiptNumber) {
+    const subtotalUsd = Number(replacementLines.reduce((sum, line) => sum + line.totalUsd, 0).toFixed(2))
+    const exchangeRate = toNumber(body.exchange_rate || saleMeta?.exchange_rate, 4100)
+    const originalReceipt = body.receipt_number || saleMeta?.receipt_number || null
+    const note = `Replacement for return ${returnNumber}${originalReceipt ? ` / receipt ${originalReceipt}` : ''}`
+    const paymentDetails = subtotalUsd > 0 ? [{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 }] : []
+    statements.push({
+      sql: `INSERT INTO sales(
+        receipt_number,client_request_id,cashier_id,cashier_name,branch_id,branch_name,
+        customer_id,customer_name,customer_phone,customer_address,payment_method,payment_details,
+        payment_currency,exchange_rate,subtotal_usd,subtotal_khr,discount_usd,discount_khr,tax_usd,tax_khr,
+        total_usd,total_khr,amount_paid_usd,amount_paid_khr,change_usd,change_khr,
+        membership_discount_usd,membership_discount_khr,membership_points_redeemed,is_delivery,
+        loyalty_accrual,sale_status,notes,items,search_normalized,source_return_id,creation_snapshot_json,updated_at
+      ) VALUES(
+        @receipt_number,@replacementClientRequestId,@cashier_id,@cashier_name,@branch_id,@branch_name,
+        @customer_id,@customer_name,@customer_phone,@customer_address,@payment_method,@payment_details,
+        'USD',@exchange_rate,@subtotal_usd,@subtotal_khr,0,0,0,0,@total_usd,@total_khr,@amount_paid_usd,
+        @amount_paid_khr,0,0,0,0,0,0,1,'completed',@notes,@items,@search_normalized,
+        ${returnIdExpression},@creation_snapshot_json,@occurredAt
+      )`,
+      params: {
+        receipt_number: replacementReceiptNumber, replacementClientRequestId,
+        cashier_id: authenticatedActorId, cashier_name: actorSnapshot(user), branch_id: branchId, branch_name: branchName,
+        customer_id: replacementCustomerId,
+        customer_name: replacementCustomerName,
+        customer_phone: replacementCustomerPhone,
+        customer_address: replacementCustomerAddress,
+        payment_method: replacementPaymentMethod, payment_details: JSON.stringify(paymentDetails), exchange_rate: exchangeRate,
+        subtotal_usd: subtotalUsd, subtotal_khr: replacementTotals.totalKhr,
+        total_usd: replacementTotals.totalUsd, total_khr: replacementTotals.totalKhr,
+        amount_paid_usd: replacementTotals.amountPaidUsd, amount_paid_khr: replacementTotals.amountPaidKhr,
+        notes: note, occurredAt, creation_snapshot_json: replacementCreationSnapshot,
+        items: JSON.stringify(replacementLines.map((line) => ({
+          product_id: line.productId, product_name: line.productName, quantity: line.quantity,
+          applied_price_usd: line.priceUsd, applied_price_khr: line.priceKhr,
+          total_usd: line.totalUsd, total_khr: line.totalKhr, branch_id: line.branchId, batch_id: line.batchId,
+        }))),
+        search_normalized: normalizeSearchText([
+          replacementReceiptNumber, returnNumber, originalReceipt, actorSnapshot(user),
+          replacementCustomerName, branchName, ...replacementLines.map((line) => line.productName),
+        ].filter(Boolean).join(' ')),
+        returnClientRequestId: clientRequestId,
+      },
+    })
+    statements.push({
+      sql: `UPDATE returns SET replacement_sale_id=${replacementSaleExpression},updated_at=@occurredAt
+            WHERE id=${returnIdExpression}`,
+      params: { replacementClientRequestId, returnClientRequestId: clientRequestId, occurredAt },
+    })
+  }
+
+  const touchedProducts = new Set<number>()
+  let returnAllocationCount = 0
+  let movementCount = 0
+  for (const [index, item] of returnItems.entries()) {
+    const quantity = Number(item.quantity)
+    const productId = Number(item.product_id) || null
+    const itemBranchId = Number(item.branch_id || branchId) || null
+    const productName = item.product_name?.trim() || (productId ? productMap.get(productId)?.name : null) || null
+    const stockAction = normalizeStockAction(item)
+    const unitCostUsd = isMoneyV1
+      ? item.cost_price_usd == null ? null : Number(item.cost_price_usd)
+      : toNumber(item.cost_price_usd ?? item.unit_cost_usd)
+    const unitCostKhr = isMoneyV1
+      ? item.cost_price_khr == null ? null : Number(item.cost_price_khr)
+      : toNumber(item.cost_price_khr ?? item.unit_cost_khr)
+    const plan = returnLotPlans[index] || { splits: [], plainQuantity: 0 }
+    const returnReceivedDate = new Date(Date.parse(occurredAt) + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const fallbackReceive = plan.plainQuantity > 0 && productId && itemBranchId ? planReceiveBatchStock({
+      productId, branchId: itemBranchId, quantity: plan.plainQuantity, receivedDate: returnReceivedDate,
+      provenanceKey: `return:${clientRequestId}:${index}`, notes: 'Received from customer return; original received date unavailable',
+    }) : null
+    const fallbackParams = fallbackReceive ? { returnBatchKey: fallbackReceive.batchKey } : {}
+    const fallbackBatchSql = '(SELECT id FROM product_batches WHERE variant_product_id=@product_id AND batch_key=@returnBatchKey)'
+    const recordedBatchSql = fallbackReceive && !plan.splits.length ? fallbackBatchSql : '@batch_id'
+    if (stockAction === 'restock' && productId && itemBranchId) {
+      for (const split of plan.splits) {
+        const receive = planReceiveBatchStock({ productId, branchId: itemBranchId, quantity: split.quantity, batchId: split.batchId })
+        statements.push(...receive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
+      }
+      if (fallbackReceive) statements.push(...fallbackReceive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
+      touchedProducts.add(productId)
+    }
+    const originalBatchId = item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id))?.batch_id ?? null : null
+    if (stockAction === 'damaged' && productId && itemBranchId) {
+      // Already 400'd above (resolveDamagedReturnChoice) if this were invalid.
+      const choice = resolveDamagedReturnChoice(item)
+      if (choice.ok) {
+        const damagedStatements = planDamagedReturnLine({
+          productId, productName, branchId: itemBranchId, batchId: originalBatchId,
+          returnIdSql: returnIdExpression, quantity, reason,
+          userId: authenticatedActorId, userName: actorSnapshot(user),
+          tag: choice.tag, disposition: choice.disposition,
+          unitCostUsd, unitCostKhr,
+        })
+        statements.push(...damagedStatements.map((statement) => ({
+          sql: statement.sql,
+          params: { ...(statement.params as Record<string, unknown>), returnClientRequestId: clientRequestId },
+        })))
+        movementCount += choice.disposition === 'remove' ? 2 : 1
+      }
+    }
+    const splits = plan.splits
+    const recordedBatchId = splits.length === 1 && splits[0].quantity === quantity ? splits[0].batchId : null
+    const refund = refundPrices[index]
+    const exactRefund = v1QuoteBySaleItem.get(Number(item.sale_item_id))
+    statements.push({
+      sql: `INSERT INTO return_items(return_id,sale_item_id,product_id,product_name,quantity,applied_price_usd,applied_price_khr,
+        cost_price_usd,cost_price_khr,total_usd,total_khr,return_to_stock,stock_action,branch_id,batch_id,refund_snapshot_json)
+        VALUES(${returnIdExpression},@sale_item_id,@product_id,@product_name,@quantity,@applied_price_usd,@applied_price_khr,
+        @cost_price_usd,@cost_price_khr,@total_usd,@total_khr,@return_to_stock,@stock_action,@branch_id,${recordedBatchSql},@refund_snapshot_json)`,
+      params: {
+        returnClientRequestId: clientRequestId, sale_item_id: item.sale_item_id || null, product_id: productId,
+        product_name: productName, quantity, applied_price_usd: refund.unitUsd, applied_price_khr: refund.unitKhr,
+        cost_price_usd: unitCostUsd, cost_price_khr: unitCostKhr,
+        total_usd: exactRefund?.total_usd ?? Number((refund.unitUsd * quantity).toFixed(2)),
+        total_khr: exactRefund?.total_khr ?? Math.round(refund.unitKhr * quantity),
+        refund_snapshot_json: exactRefund?.refund_snapshot_json ?? null,
+        return_to_stock: stockAction === 'restock' ? 1 : 0, stock_action: stockAction,
+        branch_id: itemBranchId, batch_id: recordedBatchId, ...fallbackParams,
+      },
+    })
+    for (const split of splits) {
+      statements.push({
+        sql: `INSERT INTO return_item_batch_allocations(return_item_id,sale_item_id,batch_id,branch_id,quantity)
+          VALUES((SELECT id FROM return_items WHERE return_id=${returnIdExpression} ORDER BY id DESC LIMIT 1),
+            @sale_item_id,@batch_id,@branch_id,@quantity)`,
+        params: { returnClientRequestId: clientRequestId, sale_item_id: item.sale_item_id || null, batch_id: split.batchId, branch_id: itemBranchId, quantity: split.quantity },
+      })
+      returnAllocationCount += 1
+    }
+    if (fallbackReceive) {
+      statements.push({
+        sql: `INSERT INTO return_item_batch_allocations(return_item_id,sale_item_id,batch_id,branch_id,quantity)
+          VALUES((SELECT id FROM return_items WHERE return_id=${returnIdExpression} ORDER BY id DESC LIMIT 1),
+            @sale_item_id,${fallbackBatchSql},@branch_id,@quantity)`,
+        params: { returnClientRequestId: clientRequestId, sale_item_id: item.sale_item_id || null,
+          product_id: productId, branch_id: itemBranchId, quantity: plan.plainQuantity, ...fallbackParams },
+      })
+      returnAllocationCount += 1
+    }
+    if (stockAction === 'restock' && productId && itemBranchId) {
+      statements.push({
+        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+          VALUES(@product_id,@product_name,@branch_id,'return',@quantity,@unit_cost_usd,@unit_cost_khr,@reason,${returnIdExpression},@user_id,@user_name,${recordedBatchSql})`,
+        params: {
+          returnClientRequestId: clientRequestId, product_id: productId, product_name: productName, branch_id: itemBranchId,
+          quantity, unit_cost_usd: unitCostUsd, unit_cost_khr: unitCostKhr,
+          reason: `Return: ${reason}`, user_id: authenticatedActorId, user_name: actorSnapshot(user), batch_id: recordedBatchId, ...fallbackParams,
+        },
+      })
+      movementCount += 1
+    }
+  }
+
+  let saleAllocationCount = 0
+  for (const [index, line] of replacementLines.entries()) {
+    const replacementPlan = planReplacementStock({
+      ...line, returnIdSql: returnIdExpression, returnNumber,
+      userId: authenticatedActorId, userName: actorSnapshot(user),
+    })
+    statements.push(...replacementPlan.statements.map((statement) => ({
+      sql: statement.sql,
+      params: { ...(statement.params as Record<string, unknown>), returnClientRequestId: clientRequestId },
+    })))
+    movementCount += 1
+    for (const take of replacementFifoTakes.get(index) || []) {
+      const decrement = decrementBatchStockStrictStatement(take.batchId, line.branchId, take.quantity)
+      statements.push({ sql: decrement.sql, params: decrement.params })
+    }
+    const takes = [...(replacementFifoTakes.get(index) || []), ...(replacementExplicitTakes.get(index) || [])]
+    const recordedBatchId = takes.length === 1 && takes[0].quantity === line.quantity ? takes[0].batchId : null
+    statements.push({
+      sql: `INSERT INTO sale_items(sale_id,product_id,product_name,quantity,applied_price_usd,applied_price_khr,
+        cost_price_usd,cost_price_khr,total_usd,total_khr,branch_id,price_mode,base_price_usd,base_price_khr,batch_id)
+        VALUES(${replacementSaleExpression},@product_id,@product_name,@quantity,@applied_price_usd,@applied_price_khr,
+        @cost_price_usd,@cost_price_khr,@total_usd,@total_khr,@branch_id,'selling',@base_price_usd,@base_price_khr,@batch_id)`,
+      params: {
+        replacementClientRequestId, product_id: line.productId, product_name: line.productName, quantity: line.quantity,
+        applied_price_usd: line.priceUsd, applied_price_khr: line.priceKhr,
+        cost_price_usd: line.unitCostUsd, cost_price_khr: line.unitCostKhr,
+        total_usd: line.totalUsd, total_khr: line.totalKhr, branch_id: line.branchId,
+        base_price_usd: line.priceUsd, base_price_khr: line.priceKhr, batch_id: recordedBatchId,
+      },
+    })
+    statements.push({
+      sql: `INSERT INTO return_replacement_items(return_id,sale_item_id,product_id,product_name,branch_id,batch_id,quantity,applied_price_usd,applied_price_khr,total_usd,total_khr)
+        VALUES(${returnIdExpression},(SELECT id FROM sale_items WHERE sale_id=${replacementSaleExpression} ORDER BY id DESC LIMIT 1),
+          @product_id,@product_name,@branch_id,@batch_id,@quantity,@applied_price_usd,@applied_price_khr,@total_usd,@total_khr)`,
+      params: {
+        returnClientRequestId: clientRequestId, replacementClientRequestId,
+        product_id: line.productId, product_name: line.productName, branch_id: line.branchId, batch_id: line.batchId,
+        quantity: line.quantity, applied_price_usd: line.priceUsd, applied_price_khr: line.priceKhr,
+        total_usd: line.totalUsd, total_khr: line.totalKhr,
+      },
+    })
+    for (const take of takes) {
+      statements.push({
+        sql: `INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,lot_code,expiry_date,released_quantity,released_at)
+          VALUES((SELECT id FROM sale_items WHERE sale_id=${replacementSaleExpression} ORDER BY id DESC LIMIT 1),
+            @batch_id,@branch_id,@quantity,@lot_code,@expiry_date,0,NULL)`,
+        params: {
+          replacementClientRequestId, batch_id: take.batchId, branch_id: line.branchId,
+          quantity: take.quantity, lot_code: take.lotCode, expiry_date: take.expiryDate,
+        },
+      })
+      saleAllocationCount += 1
+    }
+    touchedProducts.add(line.productId)
+  }
+  for (const productId of touchedProducts) statements.push({
+    sql: `UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@productId),
+          updated_at=CURRENT_TIMESTAMP WHERE id=@productId`, params: { productId },
+  })
+
+  let eventBytes = 0
+  if (saleMeta && projectedStatus && projectedStatus !== beforeSaleStatus) {
+    statements.push({
+      sql: `UPDATE sales SET status_before_return=CASE
+        WHEN COALESCE(sale_status,'completed') NOT IN ('returned','partial_return') THEN COALESCE(sale_status,'completed')
+        ELSE status_before_return END,sale_status=@status,updated_at=@occurredAt WHERE id=@saleId`,
+      params: { status: projectedStatus, occurredAt, saleId: requestedSaleId },
+    })
+    const event = buildSaleRecordEventsInsert([{
+      saleId: requestedSaleId!, sourceKind: 'return_create', sourceId: receiptId,
+      generation: 0, kind: 'status_changed', via: 'apply', subject: returnNumber,
+      actorId: authenticatedActorId, actorUsername: actorSnapshot(user), occurredAt,
+      changes: [{
+        field: 'sale_status', before: { state: 'known_value', value: beforeSaleStatus! },
+        after: { state: 'known_value', value: projectedStatus },
+      }],
+    }])!
+    statements.push(event.statement)
+    eventBytes = event.eventsBytes
+  }
+  const auditDetails = JSON.stringify({
+    source_kind: 'return_create', source_id: receiptId, generation: 0,
+    sale_id: requestedSaleId, return_number: returnNumber,
+    return_items: returnItems.length, replacement_items: replacementLines.length,
+    event_recorded: eventBytes > 0,
+  })
+  statements.push({
+    sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+      VALUES(@userId,@userName,'create','return_create',@receiptId,@details,'returns',${returnIdExpression},@details)`,
+    params: { userId: authenticatedActorId, userName: actorSnapshot(user), receiptId, details: auditDetails, returnClientRequestId: clientRequestId },
+  })
+  statements.push({
+    sql: `INSERT INTO return_create_receipts(
+      id,actor_id,return_id,sale_id,request_id,request_digest,request_json,response_json,occurred_at
+    ) VALUES(
+      @receiptId,@actorId,${returnIdExpression},@saleId,@requestId,@requestDigest,@requestJson,
+      json_object('id',${returnIdExpression},'returnNumber',@returnNumber,
+        'replacementSaleId',${replacementLines.length ? replacementSaleExpression : 'NULL'},
+        'replacementReceiptNumber',@replacementReceiptNumber),@occurredAt
+    )`,
+    params: {
+      receiptId, actorId: authenticatedActorId, returnClientRequestId: clientRequestId,
+      replacementClientRequestId, saleId: requestedSaleId, requestId: clientRequestId,
+      requestDigest, requestJson, returnNumber, replacementReceiptNumber, occurredAt,
+    },
+  })
+
+  const expected = {
+    return_items: returnItems.length, return_allocations: returnAllocationCount,
+    replacement_items: replacementLines.length, sale_allocations: saleAllocationCount,
+    movements: movementCount, event: eventBytes > 0 ? 1 : 0,
+    status: projectedStatus, branch_stock: branchSnapshots, batch_stock: batchSnapshots,
+    v1_header: customerReturnV1Plan ? {
+      money_precision_version: 1,
+      calculated_refund_usd: customerReturnV1Plan.quote.calculated_refund_usd,
+      rounding_adjustment_usd: customerReturnV1Plan.quote.rounding_adjustment_usd,
+      total_refund_usd: customerReturnV1Plan.quote.total_refund_usd,
+      total_refund_khr: customerReturnV1Plan.quote.total_refund_khr,
+    } : null,
+    v1_items: customerReturnV1Plan?.quote.items.map(item => ({ sale_item_id: item.sale_item_id,
+      quantity: item.quantity, applied_price_usd: item.applied_price_usd, applied_price_khr: item.applied_price_khr,
+      total_usd: item.total_usd, total_khr: item.total_khr, refund_snapshot_json: item.refund_snapshot_json })) || [],
+  }
+  const expectedJson = JSON.stringify(expected)
+  const postcondition = `
+    EXISTS(SELECT 1 FROM return_create_receipts WHERE id=@receiptId AND actor_id=@actorId
+      AND request_id=@requestId AND request_digest=@requestDigest)
+    AND (SELECT COUNT(*) FROM return_items WHERE return_id=${returnIdExpression})=json_extract(@expectedJson,'$.return_items')
+    AND (SELECT COUNT(*) FROM return_item_batch_allocations WHERE return_item_id IN(
+      SELECT id FROM return_items WHERE return_id=${returnIdExpression}))=json_extract(@expectedJson,'$.return_allocations')
+    AND (SELECT COUNT(*) FROM return_replacement_items WHERE return_id=${returnIdExpression})=json_extract(@expectedJson,'$.replacement_items')
+    AND (SELECT COUNT(*) FROM sale_item_batch_allocations WHERE sale_item_id IN(
+      SELECT id FROM sale_items WHERE sale_id=${replacementLines.length ? replacementSaleExpression : 'NULL'}))=json_extract(@expectedJson,'$.sale_allocations')
+    AND (SELECT COUNT(*) FROM inventory_movements WHERE reference_id=${returnIdExpression}
+      AND movement_type IN ('return','${DAMAGE_IN_MOVEMENT}','${REPLACEMENT_OUT_MOVEMENT}','${TAGGED_DISPOSAL_MOVEMENT_TYPE}'))=json_extract(@expectedJson,'$.movements')
+    AND (SELECT COUNT(*) FROM sale_record_events WHERE source_kind='return_create' AND source_id=@receiptId
+      AND generation=0)=json_extract(@expectedJson,'$.event')
+    AND EXISTS(SELECT 1 FROM audit_logs WHERE entity='return_create' AND entity_id=@receiptId)
+    AND (json_type(@expectedJson,'$.v1_header')='null' OR EXISTS(SELECT 1 FROM returns r
+      WHERE r.id=${returnIdExpression}
+        AND r.money_precision_version=json_extract(@expectedJson,'$.v1_header.money_precision_version')
+        AND r.calculated_refund_usd=json_extract(@expectedJson,'$.v1_header.calculated_refund_usd')
+        AND r.rounding_adjustment_usd=json_extract(@expectedJson,'$.v1_header.rounding_adjustment_usd')
+        AND r.total_refund_usd=json_extract(@expectedJson,'$.v1_header.total_refund_usd')
+        AND r.total_refund_khr=json_extract(@expectedJson,'$.v1_header.total_refund_khr')))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@expectedJson,'$.v1_items') j WHERE NOT EXISTS(
+      SELECT 1 FROM return_items ri WHERE ri.return_id=${returnIdExpression}
+        AND ri.sale_item_id=json_extract(j.value,'$.sale_item_id') AND ri.quantity=json_extract(j.value,'$.quantity')
+        AND ri.applied_price_usd=json_extract(j.value,'$.applied_price_usd')
+        AND ri.applied_price_khr=json_extract(j.value,'$.applied_price_khr')
+        AND ri.total_usd=json_extract(j.value,'$.total_usd') AND ri.total_khr=json_extract(j.value,'$.total_khr')
+        AND ri.refund_snapshot_json=json_extract(j.value,'$.refund_snapshot_json')))
+    AND (json_type(@expectedJson,'$.status')='null' OR COALESCE((SELECT sale_status FROM sales WHERE id=@saleId),'completed')=json_extract(@expectedJson,'$.status'))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@expectedJson,'$.branch_stock') j
+      WHERE COALESCE((SELECT quantity FROM branch_stock WHERE product_id=json_extract(j.value,'$.product_id')
+        AND branch_id=json_extract(j.value,'$.branch_id')),0)!=json_extract(j.value,'$.after'))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@expectedJson,'$.batch_stock') j
+      WHERE COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=json_extract(j.value,'$.batch_id')
+        AND branch_id=json_extract(j.value,'$.branch_id')),0)!=json_extract(j.value,'$.after'))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@expectedJson,'$.branch_stock') j
+      WHERE COALESCE((SELECT stock_quantity FROM products WHERE id=json_extract(j.value,'$.product_id')),0)
+        !=COALESCE((SELECT SUM(quantity) FROM branch_stock WHERE product_id=json_extract(j.value,'$.product_id')),0))
+  `
+  statements.push(returnCreateGuardStatement(operationId, 'postcondition', postcondition, {
+    ...commonGuardParams, expectedJson, saleId: requestedSaleId, returnClientRequestId: clientRequestId,
+  }))
+  statements.push({ sql: 'DELETE FROM return_create_guards WHERE operation_id=@operationId', params: { operationId } })
 
   try {
-    const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
-    const touchedProductIds = new Set<number>()
-
-    // Resolve once, up front, which batch (if any) each returned line's
-    // sale_item_id was originally sold from -- see fetchSaleItemBatchInfo's
-    // own comment for why this is a batch-fetch-once/Map-lookup shape.
-    const returnSaleItemIds = body.items.map((i) => i.sale_item_id).filter((id): id is number => Number.isFinite(id) && Number(id) > 0)
-    const saleItemBatchInfo = await fetchSaleItemBatchInfo(db, returnSaleItemIds)
-    // Z0: multi-lot lines (sale_items.batch_id NULL) restock across their
-    // recorded allocations instead of the plain branch_stock bump.
-    const saleItemAllocations = await fetchSaleItemAllocations(db, returnSaleItemIds)
-    // K2b: the per-lot split each returned line restocked into, collected in
-    // body-item order and written to return_item_batch_allocations after the
-    // outer batch() below assigns the return_items their ids.
-    const perItemBatchSplits: ReturnBatchSplit[][] = []
-
-    // Insert-return-items statements share the outer db.batch() below, but
-    // a batch-aware restock (receiveBatchStock) runs its own separate
-    // atomic write -- same non-atomic-across-both-steps tradeoff
-    // routes/inventory.ts's /adjust already accepts for the same helper.
-    // Awaited inline per item, before the outer batch(), so the resolved
-    // batch_id is known in time to store on each return_items row.
-    for (const item of body.items) {
-      const quantity = Number(item.quantity) || 0
-      const totalUsd = (item.applied_price_usd || 0) * quantity
-      const totalKhr = (item.applied_price_khr || 0) * quantity
-      const stockAction = normalizeStockAction(item)
-      const returnToStock = stockAction === 'restock'
-      const itemBranchId = item.branch_id || branchId || null
-      const productMeta = item.product_id ? productMap.get(item.product_id) : undefined
-      const safeProductName = (item.product_name && item.product_name.trim()) || productMeta?.name || (item.product_id ? `product #${item.product_id}` : 'Product')
-      let costUsd = item.cost_price_usd || 0
-      let costKhr = item.cost_price_khr || 0
-      if (!costUsd && productMeta) costUsd = productMeta.cost_price_usd || 0
-      if (!costKhr && productMeta) costKhr = productMeta.cost_price_khr || 0
-
-      const itemSplits: ReturnBatchSplit[] = []
-      let resolvedBatchId: number | null = null
-      if (returnToStock && item.product_id && itemBranchId) {
-        const originalBatchId = item.sale_item_id ? (saleItemBatchInfo.get(item.sale_item_id)?.batch_id ?? null) : null
-        // Z0: the same lots the sale drew from, last-drawn first. A
-        // single-lot line has one entry (== originalBatchId); a multi-lot
-        // line (batch_id NULL) splits across several here.
-        const allocs = item.sale_item_id ? (saleItemAllocations.get(item.sale_item_id) || []) : []
-        let restockRemaining = quantity
-        if (allocs.length) {
-          for (let index = allocs.length - 1; index >= 0 && restockRemaining > 0; index -= 1) {
-            const alloc = allocs[index]
-            const give = Math.min(alloc.outstanding, restockRemaining)
-            if (give <= 0) continue
-            try {
-              const received = await receiveBatchStock(db, { productId: item.product_id, branchId: itemBranchId, quantity: give, batchId: alloc.batch_id })
-              if (resolvedBatchId == null) resolvedBatchId = received.batchId
-              itemSplits.push({ batchId: received.batchId, branchId: itemBranchId, quantity: give, saleItemId: item.sale_item_id ?? null })
-              appliedLotRestocks.push({ productId: item.product_id, batchId: received.batchId, branchId: itemBranchId, quantity: give })
-              restockRemaining -= give
-            } catch (_err) {
-              // That lot no longer belongs to this product (rare -- a merge
-              // since the sale). Leave the units for the fallback bump below.
-            }
-          }
-        } else if (originalBatchId != null) {
-          try {
-            const received = await receiveBatchStock(db, {
-              productId: item.product_id,
-              branchId: itemBranchId,
-              quantity,
-              batchId: originalBatchId,
-            })
-            resolvedBatchId = received.batchId
-            itemSplits.push({ batchId: received.batchId, branchId: itemBranchId, quantity, saleItemId: item.sale_item_id ?? null })
-            appliedLotRestocks.push({ productId: item.product_id, batchId: received.batchId, branchId: itemBranchId, quantity })
-            restockRemaining = 0
-          } catch (_err) {
-            // The exact batch this item was sold from no longer belongs to
-            // this product (rare -- e.g. a merge-duplicates run since the
-            // sale). Fall through to the plain branch_stock bump below
-            // rather than fail the whole return over a batch-ledger
-            // nicety.
-            resolvedBatchId = null
-          }
-        }
-        // Any units not attributable to a lot (legacy stock, or a lot that
-        // vanished) land on the plain branch_stock aggregate, as before.
-        if (restockRemaining > 0) {
-          statements.push({
-            sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)
-                  ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + @quantity`,
-            params: { product_id: item.product_id, branch_id: itemBranchId, quantity: restockRemaining },
-          })
-        }
-        statements.push({
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-                VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
-          params: {
-            product_id: item.product_id,
-            product_name: safeProductName,
-            branch_id: itemBranchId,
-            quantity,
-            unit_cost_usd: costUsd,
-            unit_cost_khr: costKhr,
-            reason: `Return: ${body.reason}`,
-            reference_id: returnId,
-            user_id: user?.id ?? null,
-            user_name: user?.name ?? null,
-            // 0084: attributable only when the WHOLE restock landed on one
-            // lot; a multi-lot split or a plain-bump remainder stays NULL
-            // (the per-lot detail is in return_item_batch_allocations).
-            batch_id: itemSplits.length === 1 && itemSplits[0].quantity === quantity ? itemSplits[0].batchId : null,
-          },
-        })
-        touchedProductIds.add(item.product_id)
-      }
-
-      // 11.13(c): restock as DAMAGED -- a traceable lot tied to this
-      // return/branch/(original sale batch), NEVER sellable branch_stock,
-      // plus its damage entry in the product's movement trail.
-      if (stockAction === 'damaged' && item.product_id && itemBranchId) {
-        const originalBatchId = item.sale_item_id ? (saleItemBatchInfo.get(item.sale_item_id)?.batch_id ?? null) : null
-        await createDamagedLot(db, {
-          productId: item.product_id,
-          productName: safeProductName,
-          branchId: itemBranchId,
-          batchId: originalBatchId,
-          returnId,
-          quantity,
-          reason: body.reason,
-          userId: user?.id ?? null,
-          userName: user?.name ?? null,
-        })
-        statements.push({
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-                VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_IN_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
-          params: {
-            product_id: item.product_id,
-            product_name: safeProductName,
-            branch_id: itemBranchId,
-            quantity,
-            unit_cost_usd: costUsd,
-            unit_cost_khr: costKhr,
-            reason: `Return (damaged): ${body.reason}`,
-            reference_id: returnId,
-            user_id: user?.id ?? null,
-            user_name: user?.name ?? null,
-            // 0084: the ORIGINAL sale lot these units belonged to -- the
-            // same attribution the damaged lot itself records.
-            batch_id: originalBatchId,
-          },
-        })
-      }
-
-      statements.push({
-        sql: `INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, stock_action, branch_id, batch_id)
-              VALUES (@return_id, @sale_item_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr, @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @return_to_stock, @stock_action, @branch_id, @batch_id)`,
-        params: {
-          return_id: returnId,
-          stock_action: stockAction,
-          sale_item_id: item.sale_item_id || null,
-          product_id: item.product_id || null,
-          product_name: safeProductName,
-          quantity,
-          applied_price_usd: item.applied_price_usd || 0,
-          applied_price_khr: item.applied_price_khr || 0,
-          cost_price_usd: costUsd,
-          cost_price_khr: costKhr,
-          total_usd: totalUsd,
-          total_khr: totalKhr,
-          return_to_stock: returnToStock ? 1 : 0,
-          branch_id: itemBranchId,
-          batch_id: resolvedBatchId,
-        },
-      })
-      // Parallel to body.items order: one entry per returned line (empty for
-      // non-restock lines), so recordReturnItemBatchAllocations can line each
-      // split up with the return_items row it just inserted.
-      perItemBatchSplits.push(itemSplits)
-    }
-
-    // 11.12: hand out the replacement lines -- stock leaves the POS way
-    // (explicit batch drains that exact lot; otherwise a validated plain
-    // branch_stock decrement). Same non-atomic-across-steps tradeoff as
-    // receiveBatchStock above; a failure lands in the catch below, which
-    // deletes this return's rows.
-    for (const line of replacementLines) {
-      const lineBranchId = line.branchId || Number(branchId) || 0
-      if (!lineBranchId) throw new Error(`Replacement line for ${line.productName} needs a branch`)
-      await applyReplacementStock(db, {
-        productId: line.productId,
-        productName: line.productName,
-        branchId: lineBranchId,
-        batchId: line.batchId,
-        quantity: line.quantity,
-        unitCostUsd: line.unitCostUsd,
-        unitCostKhr: line.unitCostKhr,
-        returnId,
-        returnNumber,
-        userId: user?.id ?? null,
-        userName: user?.name ?? null,
-      })
-      appliedReplacements.push({ productId: line.productId, productName: line.productName, branchId: lineBranchId, batchId: line.batchId, quantity: line.quantity })
-      statements.push({
-        sql: `INSERT INTO return_replacement_items (return_id, product_id, product_name, branch_id, batch_id, quantity, applied_price_usd, applied_price_khr, total_usd, total_khr)
-              VALUES (@return_id, @product_id, @product_name, @branch_id, @batch_id, @quantity, @applied_price_usd, @applied_price_khr, @total_usd, @total_khr)`,
-        params: {
-          return_id: returnId,
-          product_id: line.productId,
-          product_name: line.productName,
-          branch_id: lineBranchId,
-          batch_id: line.batchId,
-          quantity: line.quantity,
-          applied_price_usd: line.priceUsd,
-          applied_price_khr: line.priceKhr,
-          total_usd: line.totalUsd,
-          total_khr: line.totalKhr,
-        },
-      })
-      touchedProductIds.add(line.productId)
-    }
-
-    // receiveBatchStock already keeps branch_stock/products.stock_quantity
-    // in lockstep for the batch-resolved items above -- only re-derive the
-    // aggregate here for products that took the plain-bump fallback path.
-    for (const productId of touchedProductIds) {
-      statements.push({
-        sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-        params: { productId },
-      })
-    }
-
-    await db.batch(statements)
-
-    // Now that the return_items rows have ids, persist which exact lot(s)
-    // each sellable restock went into -- the trail a later edit reverses by.
-    await recordReturnItemBatchAllocations(db, returnId, perItemBatchSplits)
-
-    if (body.sale_id) {
-      const saleItems = await db.prepare('SELECT product_id, quantity FROM sale_items WHERE sale_id = ?').all<{ product_id: number; quantity: number }>([body.sale_id])
-      const returnedRows = await db.prepare(`
-        SELECT ri.product_id, SUM(ri.quantity) AS total_qty
-        FROM return_items ri JOIN returns r ON r.id = ri.return_id
-        WHERE r.sale_id = ? AND COALESCE(r.status, 'completed') != 'cancelled' AND COALESCE(r.return_scope, 'customer') = 'customer'
-        GROUP BY ri.product_id
-      `).all<{ product_id: number; total_qty: number }>([body.sale_id])
-      const returnedMap = new Map(returnedRows.map((r) => [r.product_id, r.total_qty]))
-      const fullyReturned = saleItems.every((si) => (returnedMap.get(si.product_id) || 0) >= si.quantity)
-      await db.prepare("UPDATE sales SET sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run([fullyReturned ? 'returned' : 'partial_return', body.sale_id])
-    }
+    assertReturnCreatePlanBounds(statements, canonicalIntent, eventBytes)
   } catch (error) {
-    // Reverse the stock FIRST, then delete the rows (Part-77): the restocks
-    // and replacement drains above each committed as their own write, so
-    // deleting the return's rows alone left the stock moved -- phantom
-    // inventory from restocks, destroyed inventory from replacements.
-    // Best-effort per write, LOUDLY reported: a reversal can legitimately
-    // fail (e.g. a concurrent sale already consumed the restocked units) and
-    // that must reach the operator and the audit log, never be swallowed.
-    const unreversed: string[] = []
-    for (const restock of [...appliedLotRestocks].reverse()) {
-      try {
-        await removeStockFromBatch(db, { batchId: restock.batchId, productId: restock.productId, branchId: restock.branchId, quantity: restock.quantity })
-      } catch (_) {
-        unreversed.push(`restock of ${restock.quantity} into lot #${restock.batchId} (product #${restock.productId}, branch #${restock.branchId})`)
-      }
-    }
-    for (const line of [...appliedReplacements].reverse()) {
-      try {
-        if (line.batchId != null) {
-          await receiveBatchStock(db, { productId: line.productId, branchId: line.branchId, quantity: line.quantity, batchId: line.batchId })
-        } else {
-          await db.prepare(`
-            INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + @quantity
-          `).run({ product_id: line.productId, branch_id: line.branchId, quantity: line.quantity })
-          await db.prepare(
-            'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId), updated_at = CURRENT_TIMESTAMP WHERE id = @productId',
-          ).run({ productId: line.productId })
-        }
-      } catch (_) {
-        unreversed.push(`replacement drain of ${line.quantity} of "${line.productName}" (branch #${line.branchId})`)
-      }
-    }
-    // Movement rows the pre-batch writes recorded against this (about to be
-    // deleted) return -- type-scoped so an unrelated entity sharing the
-    // numeric reference_id is never touched.
+    return c.json({ error: (error as Error).message, code: 'return_too_large' }, 400)
+  }
+  try {
+    await db.batch(statements)
+  } catch (error) {
     try {
-      await db.prepare(`DELETE FROM inventory_movements WHERE reference_id = ? AND movement_type IN ('return', '${REPLACEMENT_OUT_MOVEMENT}', '${DAMAGE_IN_MOVEMENT}')`).run([returnId])
-    } catch (_) {}
-    await db.prepare('DELETE FROM return_item_batch_allocations WHERE return_item_id IN (SELECT id FROM return_items WHERE return_id = ?)').run([returnId])
-    // return_items was missing from this cleanup entirely -- a failure AFTER
-    // the outer batch (allocation recording, sale-status update) left its
-    // rows orphaned under a deleted returns row.
-    await db.prepare('DELETE FROM return_items WHERE return_id = ?').run([returnId])
-    await db.prepare('DELETE FROM returns WHERE id = ?').run([returnId])
-    await db.prepare('DELETE FROM damaged_stock_lots WHERE return_id = ?').run([returnId])
-    await db.prepare('DELETE FROM return_replacement_items WHERE return_id = ?').run([returnId])
-    if (unreversed.length) {
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'return_rollback_incomplete', 'return', returnId, { unreversed })
+      const receipt = await readReceipt()
+      if (receipt) {
+        if (receipt.request_digest === requestDigest && (receipt.sale_id ?? null) === requestedSaleId) {
+          return c.json(JSON.parse(receipt.response_json) as ReturnCreateResponse)
+        }
+        return c.json({ error: 'client_request_id was already used for different return data.', code: 'idempotency_conflict' }, 409)
+      }
+      return c.json({ error: 'The sale or stock changed while this return was being recorded. Reload and try again.', code: 'write_conflict', action: 'reload_required' }, 409)
+    } catch (_) {
+      return c.json({
+        error: 'The result could not be confirmed. Keep this return open and retry the same request.',
+        code: 'unknown_outcome', action: 'retry_same_request',
+      }, 503)
     }
-    return c.json({
-      error: `Failed to record return items: ${(error as Error).message}`
-        + (unreversed.length
-          ? ` -- WARNING: ${unreversed.length} stock write(s) could not be reversed (recorded in the audit log; run Verify Integrity): ${unreversed.join('; ')}`
-          : ''),
-    }, 500)
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'return', returnId, { returnNumber, saleId: body.sale_id || null, reason: body.reason })
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: returnId }))
+  let committed: Awaited<ReturnType<typeof readReceipt>>
+  try {
+    committed = await readReceipt()
+  } catch {
+    return c.json({
+      error: 'The result could not be confirmed. Keep this return open and retry the same request.',
+      code: 'unknown_outcome', action: 'retry_same_request',
+    }, 503)
+  }
+  if (!committed || committed.request_digest !== requestDigest) {
+    return c.json({ error: 'The result could not be confirmed. Retry the same request.', code: 'unknown_outcome', action: 'retry_same_request' }, 503)
+  }
+  const response = JSON.parse(committed.response_json) as ReturnCreateResponse
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: response.id }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env, 'products'),
-    bumpVersion(c.env, 'returns'),
-    bumpVersion(c.env, 'sales'),
-  ]))
-  c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: returnId }))
-  // Telegram: the return as a receipt summary (RET / INV / customer / lines
-  // with refund and resulting on-hand / refund total) -- lib/telegram.ts
-  // reads the recorded lines back, so this passes only the header.
-  c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, returnId, {
-    kind: 'customer', returnNumber, receiptNumber: body.receipt_number || saleMeta.receipt_number || null,
-    party: body.customer_name || saleMeta.customer_name || null, branch: branchName, reason: body.reason || null,
-    returnType: body.return_type || 'restock', refundUsd: body.total_refund_usd || 0, refundKhr: body.total_refund_khr || 0,
-    by: user?.name || user?.username || null,
+  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: response.id }))
+  c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, response.id, {
+    kind: 'customer', returnNumber, receiptNumber: body.receipt_number || saleMeta?.receipt_number || null,
+    party: body.customer_name || saleMeta?.customer_name || null, branch: branchName, reason,
+    returnType: String(canonicalIntent.return_type), refundUsd: totalRefundUsd, refundKhr: totalRefundKhr,
+    by: actorSnapshot(user),
   }).catch((error) => console.error('[telegram] return notification failed', error)))
-  c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: body.sale_id || null }))
-  return c.json({ id: returnId, returnNumber })
+  if (replacementNotice) c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
+    type: 'sales', lines: formatSaleTelegramLines(replacementNotice),
+  }).catch((error) => console.error('[telegram] replacement sale notification failed', error)))
+  c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: requestedSaleId }))
+  return c.json(response)
 })
 
 // POST /api/returns/supplier -- "process" a supplier return: pull stock out
@@ -1316,7 +2314,7 @@ app.post('/supplier', async (c) => {
     return_number: returnNumber,
     client_request_id: clientRequestId,
     cashier_id: user?.id ?? null,
-    cashier_name: user?.name ?? null,
+    cashier_name: actorSnapshot(user),
     branch_id: body.branch_id || null,
     branch_name: branchName,
     return_scope: SUPPLIER_SCOPE,
@@ -1329,7 +2327,7 @@ app.post('/supplier', async (c) => {
     // Write-time diacritic fold of this supplier return's own searchable text
     // fields (migration 0082), read additively by the returns search builder.
     search_normalized: normalizeSearchText(
-      [returnNumber, user?.name, branchName, body.reason, 'supplier_return', body.notes, body.supplier_name, settlement]
+      [returnNumber, actorSnapshot(user), branchName, body.reason, 'supplier_return', body.notes, body.supplier_name, settlement]
         .filter(Boolean)
         .join(' '),
     ),
@@ -1350,6 +2348,7 @@ app.post('/supplier', async (c) => {
   try {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
     const touchedProductIds = new Set<number>()
+    const supplierPerItemBatchSplits: ReturnBatchSplit[][] = []
     // Draw the deducted units out of the product's active lots FIFO, same as a
     // sale of a no-lot line, so a supplier return of a batch-tracked product
     // keeps branch_batch_stock in step with branch_stock instead of leaving the
@@ -1438,6 +2437,12 @@ app.post('/supplier', async (c) => {
           statements.push(decrementBatchStockStrictStatement(take.batchId, itemBranchId, take.quantity))
         }
       }
+      supplierPerItemBatchSplits.push(supplierReturnTakes.map((take) => ({
+        batchId: take.batchId,
+        branchId: itemBranchId,
+        quantity: take.quantity,
+        saleItemId: null,
+      })))
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
               VALUES (@product_id, @product_name, @branch_id, 'supplier_return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
@@ -1451,12 +2456,28 @@ app.post('/supplier', async (c) => {
           reason: `Supplier return (${settlement}): ${body.reason}`,
           reference_id: returnId,
           user_id: user?.id ?? null,
-          user_name: user?.name ?? null,
+          user_name: actorSnapshot(user),
           // 0084: attributable only when one lot covered the whole deduction.
           batch_id: supplierReturnTakes.length === 1 && supplierReturnTakes[0].quantity === qty ? supplierReturnTakes[0].batchId : null,
         },
       })
       if (item.product_id) touchedProductIds.add(item.product_id)
+    }
+    for (const [itemIndex, splits] of supplierPerItemBatchSplits.entries()) {
+      for (const split of splits) {
+        statements.push({
+          sql: `INSERT INTO return_item_batch_allocations (return_item_id, sale_item_id, batch_id, branch_id, quantity)
+                SELECT id, NULL, @batch_id, @branch_id, @quantity
+                FROM return_items WHERE return_id = @return_id ORDER BY id ASC LIMIT 1 OFFSET @item_index`,
+          params: {
+            return_id: returnId,
+            item_index: itemIndex,
+            batch_id: split.batchId,
+            branch_id: split.branchId,
+            quantity: split.quantity,
+          },
+        })
+      }
     }
     for (const productId of touchedProductIds) {
       statements.push({
@@ -1474,20 +2495,16 @@ app.post('/supplier', async (c) => {
     return c.json({ error: `Failed to record supplier return items: ${(error as Error).message}` }, status)
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'supplier_return', returnId, { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'supplier_return', returnId, { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'supplier_return', id: returnId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env, 'products'),
-    bumpVersion(c.env, 'returns'),
-    bumpVersion(c.env, 'sales'),
-  ]))
+  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
   // Telegram: supplier return = stock out with the settlement money.
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, returnId, {
     kind: 'supplier', returnNumber, party: body.supplier_name || null,
     branch: body.branch_id ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]))?.name || null : null,
     reason: body.reason || null, settlement, compensationUsd: supplierCompensationUsd, compensationKhr: supplierCompensationKhr,
-    lossUsd: supplierLossUsd, lossKhr: supplierLossKhr, by: user?.name || user?.username || null,
+    lossUsd: supplierLossUsd, lossKhr: supplierLossKhr, by: actorSnapshot(user),
   }).catch((error) => console.error('[telegram] supplier return notification failed', error)))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: returnId }))
   return c.json({ id: returnId, returnNumber })
@@ -1528,24 +2545,87 @@ app.patch('/:id', async (c) => {
     total_refund_usd?: number
     total_refund_khr?: number
     branch_id?: number
+    client_request_id?: string
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
 
-  const existing = await db.prepare('SELECT * FROM returns WHERE id = ?').get<ReturnRow>([id])
+  const returnId = Number(id)
+  if (!Number.isSafeInteger(returnId) || returnId <= 0) return c.json({ error: 'Return not found' }, 404)
+  const requestId = normalizeClientRequestId(body.client_request_id)
+  if (!requestId) {
+    return c.json({
+      error: 'This return edit was created by an older app version. Refresh and review it before submitting.',
+      code: 'client_request_id_required', action: 'refresh_required',
+    }, 400)
+  }
+  const expectedUpdatedAt = getExpectedUpdatedAt(body)
+  if (!expectedUpdatedAt) {
+    return c.json({
+      error: 'Refresh this return before editing it.',
+      code: 'expected_updated_at_required', action: 'refresh_required',
+    }, 400)
+  }
+  const authenticatedActorId = actorId(user)
+  if (!authenticatedActorId) return c.json({ error: 'Authenticated account id is required.' }, 401)
+  let canonicalIntent: Record<string, unknown>
+  try {
+    canonicalIntent = canonicalReturnEditIntent(returnId, expectedUpdatedAt, body)
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
+  const requestJson = JSON.stringify(canonicalIntent)
+  if (new TextEncoder().encode(requestJson).byteLength > 131072) {
+    return c.json({ error: 'Return edit is too large. Submit fewer items.', code: 'request_too_large' }, 400)
+  }
+  const requestDigest = await sha256Hex(requestJson)
+  const previousReceipt = await db.prepare(`
+    SELECT return_id,request_digest,response_json FROM return_mutation_receipts
+    WHERE actor_id=@actor AND mutation_kind='edit' AND request_id=@request
+  `).get<{ return_id: number; request_digest: string; response_json: string }>({ actor: authenticatedActorId, request: requestId })
+  if (previousReceipt) {
+    if (Number(previousReceipt.return_id) !== returnId || previousReceipt.request_digest !== requestDigest) {
+      return c.json({ error: 'client_request_id was already used with different return edit data.', code: 'idempotency_conflict' }, 409)
+    }
+    return c.json(JSON.parse(previousReceipt.response_json) as { id: number; updated_at: string })
+  }
+
+  const existing = await db.prepare(`SELECT r.*,date(r.created_at,'+7 hours') AS received_business_date,COALESCE(v.revision,0) AS write_revision
+    FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id=?`).get<ReturnRow & { write_revision: number; received_business_date: string | null }>([id])
   if (!existing) return c.json({ error: 'Return not found' }, 404)
   if (normalizeScope(existing.return_scope, CUSTOMER_SCOPE) !== CUSTOMER_SCOPE) {
     return c.json({ error: 'Supplier returns cannot be edited from this form yet.' }, 400)
   }
+  if (Number(existing.money_precision_version) === 1) {
+    return c.json({ error: 'Exact net-entitlement returns cannot be edited until the v1 edit flow is available.',
+      code: 'customer_return_edit_v1_not_supported', action: 'review_required' }, 409)
+  }
+  // The sale decides here too. A v0 return row attached to a v1 sale can only
+  // be a legacy-shaped row recorded before that rule was enforced; the edit
+  // path below re-derives the refund on the legacy gross-price basis and writes
+  // total_refund_* back, which would restate exact money as legacy money.
+  if ((await saleMoneyPrecisionVersion(db, existing.sale_id)) === 1) {
+    return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
+  }
 
-  const existingItems = await db.prepare('SELECT * FROM return_items WHERE return_id = ?').all<{
+  const existingItems = await db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all<{
     id: number; product_id: number | null; product_name: string | null; quantity: number
     return_to_stock: number; stock_action: string | null; branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
     batch_id: number | null
   }>([id])
   const newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : existingItems
+  if (existingItems.length > 50 || newItems.length > 50) {
+    return c.json({ error: 'Edit at most 50 return items at a time.', code: 'return_edit_too_large' }, 400)
+  }
+  // P4-3: same fail-fast validation the create path runs, before anything
+  // below reverses the return's existing stock effect.
+  for (const item of newItems) {
+    if (normalizeStockAction(item) !== 'damaged') continue
+    const choice = resolveDamagedReturnChoice(item)
+    if (!choice.ok) return c.json({ error: choice.error }, 400)
+  }
 
   try {
-    assertUpdatedAtMatch('return', existing, getExpectedUpdatedAt(body))
+    assertUpdatedAtMatch('return', existing, expectedUpdatedAt)
     await assertReturnableItems(db, existing.sale_id, newItems, Number(id))
   } catch (error) {
     if (error instanceof WriteConflictError) {
@@ -1559,53 +2639,124 @@ app.patch('/:id', async (c) => {
     ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]))?.name || null
     : existing.branch_name
 
-  // 11.12 settlement gate -- HOISTED above every stock write (Part-77,
-  // write-path audit): this check used to run AFTER the reversal and
-  // re-apply loops had already committed their per-lot writes, so its mere
-  // 400 refusal left the return's stock reversed-and-reapplied while the
-  // return_items rows (whose rewrite lives in the batch that never ran)
-  // still described the OLD state -- a validation error that corrupted
-  // stock. It depends only on the new items and the existing replacement
-  // rows, so nothing forces it to run late.
-  const existingReplacements = await db.prepare('SELECT total_usd, total_khr FROM return_replacement_items WHERE return_id = ?').all<{ total_usd: number; total_khr: number }>([id])
-  let settlementDiffUsd = toNumber((existing as Record<string, unknown>).settlement_diff_usd, 0)
-  let settlementDiffKhr = toNumber((existing as Record<string, unknown>).settlement_diff_khr, 0)
-  if (existingReplacements.length) {
-    const settlement = computeSettlement({
-      mode: (existing as Record<string, unknown>).settlement_mode,
-      returnedTotalUsd: newItems.reduce((sum, i) => sum + (toNumber(i.applied_price_usd, 0) * (Number(i.quantity) || 0)), 0),
-      returnedTotalKhr: newItems.reduce((sum, i) => sum + (toNumber(i.applied_price_khr, 0) * (Number(i.quantity) || 0)), 0),
-      replacementTotalUsd: existingReplacements.reduce((sum, row) => sum + toNumber(row.total_usd, 0), 0),
-      replacementTotalKhr: existingReplacements.reduce((sum, row) => sum + toNumber(row.total_khr, 0), 0),
-    })
-    if (settlement.evenExchangeBlocked) {
-      return c.json({ error: `This edit breaks the even exchange -- the replacement now differs from the returned value by $${settlement.diffUsd.toFixed(2)}. Keep the totals equal, or record a new return settled as a price difference instead.`, code: 'uneven_exchange' }, 400)
+  // No settlement gate any more: a return is only a return and a replacement
+  // is only a sale, so editing the returned side cannot "break an exchange".
+  // The linked replacement sale is untouched by this edit -- it is a separate
+  // sale with its own receipt, and a sale is corrected in Sales, not here.
+  // The historical settlement_mode/settlement_diff_* on rows written under
+  // the old model are left exactly as they were found (the UPDATE below no
+  // longer names those columns), so an old return still reads correctly.
+  //
+  // What DOES stand in the old gate's place is the same pre-write pass POST /
+  // runs: resolve each line's refund from the original sale line, and decide
+  // the lot every restocked line goes back into. Both live up here, above the
+  // damaged-lot reversal and every stock statement, so a line with no lot is
+  // refused having touched nothing -- the Part-77 discipline the settlement
+  // gate used to hold this slot for.
+  const editSaleItemIds = newItems.map((i) => i.sale_item_id).filter((sid): sid is number => Number.isFinite(sid) && Number(sid) > 0)
+  const saleItemBatchInfoForEdit = await fetchSaleItemBatchInfo(db, editSaleItemIds)
+  const saleItemAllocationsForEdit = await fetchSaleItemAllocations(db, editSaleItemIds)
+
+  // The refund per line: the ORIGINAL sale line's price, always -- an edit is
+  // not a chance to restate what the customer paid. A manual return (no sale
+  // line) has only the posted price to go on.
+  const editRefundPrices = newItems.map((item) => resolveRefundUnitPrice({
+    saleLine: item.sale_item_id ? saleItemBatchInfoForEdit.get(Number(item.sale_item_id)) ?? null : null,
+    postedUsd: toNumber(item.applied_price_usd, 0),
+    postedKhr: toNumber(item.applied_price_khr, 0),
+  }))
+
+  const editLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []
+  for (const item of newItems) {
+    const quantity = Number(item.quantity) || 0
+    const productId = Number(item.product_id) || 0
+    const itemBranchId = item.branch_id || existing.branch_id || null
+    if (normalizeStockAction(item) !== 'restock' || !productId || !itemBranchId) {
+      editLotPlans.push({ splits: [], plainQuantity: 0 })
+      continue
     }
-    settlementDiffUsd = settlement.mode === 'price_difference' ? settlement.diffUsd : 0
-    settlementDiffKhr = settlement.mode === 'price_difference' ? settlement.diffKhr : 0
+    const operatorBatchId = Number.isFinite(Number(item.batch_id)) && Number(item.batch_id) > 0 ? Number(item.batch_id) : null
+    const plan = planReturnLot({
+      allocations: item.sale_item_id ? (saleItemAllocationsForEdit.get(item.sale_item_id) || []) : [],
+      saleLineBatchId: item.sale_item_id ? (saleItemBatchInfoForEdit.get(item.sale_item_id)?.batch_id ?? null) : null,
+      operatorBatchId,
+      quantity,
+      lotTracked: false,
+    })
+    if (plan.requiresLotPick) {
+      const fallbackName = (await db.prepare('SELECT name FROM products WHERE id = ?').get<{ name: string }>([productId]))?.name
+      const name = (item.product_name && item.product_name.trim()) || fallbackName || `product #${productId}`
+      const error = new ReturnLotRequiredError(name, quantity)
+      return c.json({ error: error.message, code: error.code, product_id: productId }, 400)
+    }
+    editLotPlans.push({ splits: plan.splits, plainQuantity: plan.plainQuantity })
+  }
+
+  type LinkedSaleState = {
+    id: number; sale_status: string | null; status_before_return: string | null
+    receipt_number: string | null; write_revision: number
+  }
+  let linkedSale: LinkedSaleState | null = null
+  let projectedSaleStatus: string | null = null
+  if (existing.sale_id) {
+    linkedSale = await db.prepare(`SELECT s.id,s.sale_status,s.status_before_return,s.receipt_number,
+      COALESCE(v.revision,0) AS write_revision
+      FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=?`)
+      .get<LinkedSaleState>([existing.sale_id]) || null
+    if (!linkedSale) return c.json({ error: 'Original sale not found' }, 400)
+    const soldLines = await db.prepare('SELECT id,product_id,quantity FROM sale_items WHERE sale_id=? ORDER BY id')
+      .all<{ id: number; product_id: number | null; quantity: number }>([existing.sale_id])
+    const siblingLines = await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
+      FROM return_items ri JOIN returns r ON r.id=ri.return_id
+      WHERE r.sale_id=@sale AND r.id<>@return
+        AND COALESCE(r.status,'completed')!='cancelled'
+        AND COALESCE(r.return_scope,'customer')='customer'
+      ORDER BY r.id,ri.id`).all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>({ sale: existing.sale_id, return: returnId })
+    const proposedLines = String(existing.status || 'completed') === 'cancelled' ? [] : newItems.map((item) => ({
+      sale_item_id: item.sale_item_id ?? null,
+      product_id: item.product_id ?? null,
+      quantity: Number(item.quantity) || 0,
+    }))
+    projectedSaleStatus = projectedSaleStatusForReturnEdit(
+      soldLines,
+      [...siblingLines, ...proposedLines],
+      linkedSale.status_before_return,
+    )
   }
 
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
   const touchedProductIds = new Set<number>()
+  const receiptId = crypto.randomUUID()
+  const mutationStamp = new Date().toISOString()
+  const fixedResponse = { id: returnId, updated_at: mutationStamp }
+  let saleEventProvenance: { source_kind: 'return_edit'; source_id: string; generation: 0; sale_id: number } | null = null
 
-  // Compensation log (Part-77, same shape as POST /'s -- Part 523): every
-  // stock write that lands OUTSIDE the final atomic batch, so a failure
-  // anywhere in the edit can put the stock back exactly where it started.
-  const editReversedRestocks: Array<{ productId: number; batchId: number; branchId: number; quantity: number }> = []
-  const editReappliedRestocks: Array<{ productId: number; batchId: number; branchId: number; quantity: number }> = []
+  // Damaged stock reversals are planned with every sellable-stock change.
   let editReversedDamaged: Awaited<ReturnType<typeof reverseDamagedLots>> = []
-  let editCreatedDamaged = false
-  // Written inside the guarded stretch, read after it (the allocation
-  // recording runs post-batch) -- declared here so both can see it.
-  const perItemBatchSplits: ReturnBatchSplit[][] = []
 
   // 11.13: this return's damaged lots come back out before the re-apply.
   // A lot POS already drew from can't be un-damaged (that stock left the
   // building) -- ConsumedDamagedStockError blocks the edit outright.
   try {
-    const reversedLots = await reverseDamagedLots(db, id)
-    editReversedDamaged = reversedLots
-    for (const lot of reversedLots) {
+    const damagedLots = await db.prepare(`SELECT product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,
+      reason,created_by_user_id,created_by_user_name FROM damaged_stock_lots WHERE return_id=@returnId ORDER BY id`)
+      .all<{
+        product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null
+        quantity: number; quantity_remaining: number; reason: string | null
+        created_by_user_id: number | string | null; created_by_user_name: string | null
+      }>({ returnId: id })
+    for (const lot of damagedLots) {
+      if (Number(lot.quantity_remaining) < Number(lot.quantity)) {
+        throw new ConsumedDamagedStockError(String(lot.product_name || `product #${lot.product_id}`), Number(lot.quantity) - Number(lot.quantity_remaining))
+      }
+    }
+    editReversedDamaged = damagedLots.map((lot) => ({
+      product_id: lot.product_id, product_name: lot.product_name, branch_id: lot.branch_id,
+      batch_id: lot.batch_id ?? null, quantity: Number(lot.quantity), reason: lot.reason ?? null,
+      created_by_user_id: lot.created_by_user_id ?? null, created_by_user_name: lot.created_by_user_name ?? null,
+    }))
+    if (damagedLots.length) statements.push({ sql: 'DELETE FROM damaged_stock_lots WHERE return_id=@returnId', params: { returnId: id } })
+    for (const lot of editReversedDamaged) {
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
               VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_REVERSAL_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
@@ -1617,7 +2768,7 @@ app.patch('/:id', async (c) => {
           reason: `Return #${existing.return_number} updated - reversing damaged stock`,
           reference_id: id,
           user_id: user?.id ?? null,
-          user_name: user?.name ?? null,
+          user_name: actorSnapshot(user),
           // 0084: the original sale lot the damaged units belonged to.
           batch_id: lot.batch_id,
         },
@@ -1628,21 +2779,15 @@ app.patch('/:id', async (c) => {
     throw error
   }
 
-  // Everything from here through the atomic batch runs under ONE catch that
-  // compensates the per-lot writes (they commit individually) -- see the
-  // catch below. Interior deliberately not re-indented: the diff stays
-  // reviewable and the block boundaries are these two comments.
+  // Every reversal and restock below joins the guarded atomic edit batch.
   try {
 
   // Reverse the stock effect of every existing item that had been restocked.
   // Per-lot aware: a return that recorded its restock split into
   // return_item_batch_allocations (POST / and this edit both write it now)
-  // reverses each EXACT lot it put stock into via removeStockFromBatch;
-  // anything not covered by a recorded lot -- the plain-bump remainder, a lot
-  // that has since been sold down, or a legacy return created before per-lot
-  // recording -- falls back to the generic branch_stock aggregate. A legacy
-  // return with only a single return_items.batch_id still reverses that one
-  // lot, exactly as before.
+  // reverses each exact lot with strict transaction-time availability guards.
+  // Old aggregate-only returns may reverse only the actual unlotted residual;
+  // consumed/merged lot stock fails closed instead of taking unrelated units.
   const existingItemIds = existingItems.map((it) => Number(it.id)).filter((n) => Number.isFinite(n) && n > 0)
   const existingReturnAllocations = await fetchReturnItemBatchAllocations(db, existingItemIds)
   for (const item of existingItems) {
@@ -1659,33 +2804,31 @@ app.patch('/:id', async (c) => {
       for (const alloc of recordedAllocs) {
         const give = Math.min(alloc.quantity, plainRemainder)
         if (give <= 0) continue
-        try {
-          await removeStockFromBatch(db, { batchId: alloc.batch_id, productId, branchId: branchIdForItem, quantity: give })
+          statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+            WHERE pb.id=@batchId AND pb.variant_product_id=@productId AND bbs.branch_id=@branchId AND bbs.quantity>=@quantity)`,
+            { batchId: alloc.batch_id, productId, branchId: branchIdForItem, quantity: give }))
+          statements.push(...planRemoveStockFromBatch({ batchId: alloc.batch_id, productId, branchId: branchIdForItem, quantity: give }).statements
+            .map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
           reversalLots.push({ batchId: alloc.batch_id, quantity: give })
-          editReversedRestocks.push({ productId, batchId: alloc.batch_id, branchId: branchIdForItem, quantity: give })
           plainRemainder -= give
-        } catch (err) {
-          // That lot was sold/moved down since, or no longer belongs here;
-          // removeStockFromBatch throws before writing, so leave these units
-          // for the aggregate decrement below.
-          void err
-        }
       }
     } else if (item.batch_id != null) {
       // Legacy return (no recorded split): reverse its single recorded lot.
-      try {
-        await removeStockFromBatch(db, { batchId: item.batch_id, productId, branchId: branchIdForItem, quantity: plainRemainder })
+        statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+          WHERE pb.id=@batchId AND pb.variant_product_id=@productId AND bbs.branch_id=@branchId AND bbs.quantity>=@quantity)`,
+          { batchId: item.batch_id, productId, branchId: branchIdForItem, quantity: plainRemainder }))
+        statements.push(...planRemoveStockFromBatch({ batchId: item.batch_id, productId, branchId: branchIdForItem, quantity: plainRemainder }).statements
+          .map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
         reversalLots.push({ batchId: item.batch_id, quantity: plainRemainder })
-        editReversedRestocks.push({ productId, batchId: item.batch_id, branchId: branchIdForItem, quantity: plainRemainder })
         plainRemainder = 0
-      } catch (err) {
-        void err
-      }
     }
     if (plainRemainder > 0) {
+      statements.push(bulkAssertion(`COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@productId AND branch_id=@branchId),0)
+        - COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+          WHERE pb.variant_product_id=@productId AND bbs.branch_id=@branchId),0) >= @quantity`,
+        { productId, branchId: branchIdForItem, quantity: plainRemainder }))
       statements.push({
-        sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, branch_stock.quantity - @quantity)`,
+        sql: `UPDATE branch_stock SET quantity=quantity-@quantity WHERE product_id=@product_id AND branch_id=@branch_id`,
         params: { product_id: productId, branch_id: branchIdForItem, quantity: plainRemainder },
       })
     }
@@ -1702,7 +2845,7 @@ app.patch('/:id', async (c) => {
         reason: `Return #${existing.return_number} updated - reversing previous restock`,
         reference_id: id,
         user_id: user?.id ?? null,
-        user_name: user?.name ?? null,
+        user_name: actorSnapshot(user),
         // 0084: attributable only when one lot covered the whole reversal.
         batch_id: reversalLots.length === 1 && reversalLots[0].quantity === (Number(item.quantity) || 0) ? reversalLots[0].batchId : null,
       },
@@ -1715,20 +2858,14 @@ app.patch('/:id', async (c) => {
   statements.push({ sql: 'DELETE FROM return_item_batch_allocations WHERE return_item_id IN (SELECT id FROM return_items WHERE return_id = @return_id)', params: { return_id: id } })
   statements.push({ sql: 'DELETE FROM return_items WHERE return_id = @return_id', params: { return_id: id } })
 
-  // Same batch resolution as POST / above: prefer the exact batch(es) each
-  // line's sale_item_id was sold from -- single-lot via sale_items.batch_id,
-  // multi-lot via sale_item_batch_allocations -- so an edited restock lands
-  // back on the same lots and records its split, exactly like a fresh create.
-  const editSaleItemIds = newItems.map((i) => i.sale_item_id).filter((sid): sid is number => Number.isFinite(sid) && Number(sid) > 0)
-  const saleItemBatchInfoForEdit = await fetchSaleItemBatchInfo(db, editSaleItemIds)
-  const saleItemAllocationsForEdit = await fetchSaleItemAllocations(db, editSaleItemIds)
-
   let totalRefundUsd = 0
   let totalRefundKhr = 0
-  for (const item of newItems) {
+  for (const [itemIndex, item] of newItems.entries()) {
     const quantity = Number(item.quantity) || 0
-    const totalUsd = (item.applied_price_usd || 0) * quantity
-    const totalKhr = (item.applied_price_khr || 0) * quantity
+    const refundUnitUsd = editRefundPrices[itemIndex]?.unitUsd ?? 0
+    const refundUnitKhr = editRefundPrices[itemIndex]?.unitKhr ?? 0
+    const totalUsd = Number((refundUnitUsd * quantity).toFixed(2))
+    const totalKhr = Math.round(refundUnitKhr * quantity)
     const stockAction = normalizeStockAction(item)
     const returnToStock = stockAction === 'restock'
     const itemBranchId = item.branch_id || existing.branch_id || null
@@ -1737,86 +2874,53 @@ app.patch('/:id', async (c) => {
 
     const itemSplits: ReturnBatchSplit[] = []
     let resolvedBatchId: number | null = null
+    const plan = editLotPlans[itemIndex] || { splits: [], plainQuantity: 0 }
+    const fallbackReceive = returnToStock && item.product_id && itemBranchId && plan.plainQuantity > 0 ? planReceiveBatchStock({
+      productId: item.product_id, branchId: itemBranchId, quantity: plan.plainQuantity,
+      receivedDate: existing.received_business_date || new Date(Date.parse(mutationStamp) + 7 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      provenanceKey: `return-edit:${id}:${itemIndex}`, notes: 'Received from customer return; original received date unavailable',
+    }) : null
+    const fallbackParams = fallbackReceive ? { returnBatchKey: fallbackReceive.batchKey } : {}
+    const fallbackBatchSql = '(SELECT id FROM product_batches WHERE variant_product_id=@product_id AND batch_key=@returnBatchKey)'
+    const recordedBatchSql = fallbackReceive && !plan.splits.length ? fallbackBatchSql : '@batch_id'
     if (returnToStock && item.product_id && itemBranchId) {
-      const originalBatchId = item.sale_item_id ? (saleItemBatchInfoForEdit.get(item.sale_item_id)?.batch_id ?? null) : null
-      // Multi-lot line: split the restock across the same lots the sale drew
-      // from (last-drawn first), same as POST /. Single-lot: one lot.
-      const allocs = item.sale_item_id ? (saleItemAllocationsForEdit.get(item.sale_item_id) || []) : []
-      let restockRemaining = quantity
-      if (allocs.length) {
-        for (let index = allocs.length - 1; index >= 0 && restockRemaining > 0; index -= 1) {
-          const alloc = allocs[index]
-          const give = Math.min(alloc.outstanding, restockRemaining)
-          if (give <= 0) continue
-          try {
-            const received = await receiveBatchStock(db, { productId: item.product_id, branchId: itemBranchId, quantity: give, batchId: alloc.batch_id })
-            if (resolvedBatchId == null) resolvedBatchId = received.batchId
-            itemSplits.push({ batchId: received.batchId, branchId: itemBranchId, quantity: give, saleItemId: item.sale_item_id ?? null })
-            editReappliedRestocks.push({ productId: item.product_id, batchId: received.batchId, branchId: itemBranchId, quantity: give })
-            restockRemaining -= give
-          } catch (_err) {
-            // Lot gone/merged since the sale -- leave for the aggregate bump.
-          }
-        }
-      } else if (originalBatchId != null) {
-        try {
-          const received = await receiveBatchStock(db, { productId: item.product_id, branchId: itemBranchId, quantity, batchId: originalBatchId })
-          resolvedBatchId = received.batchId
-          itemSplits.push({ batchId: received.batchId, branchId: itemBranchId, quantity, saleItemId: item.sale_item_id ?? null })
-          editReappliedRestocks.push({ productId: item.product_id, batchId: received.batchId, branchId: itemBranchId, quantity })
-          restockRemaining = 0
-        } catch (_err) {
-          resolvedBatchId = null
-        }
+      // The lots were decided above, before any write: the sale's own lots
+      // (last-drawn first), the operator's pick, or a refusal. Nothing here
+      // invents a destination.
+      for (const split of plan.splits) {
+        statements.push(bulkAssertion('EXISTS(SELECT 1 FROM product_batches WHERE id=@batchId AND variant_product_id=@productId)',
+          { batchId: split.batchId, productId: item.product_id }))
+        const received = planReceiveBatchStock({ productId: item.product_id, branchId: itemBranchId, quantity: split.quantity, batchId: split.batchId })
+        statements.push(...received.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
+        if (plan.splits.length === 1 && split.quantity === quantity) resolvedBatchId = split.batchId
+        itemSplits.push({ batchId: split.batchId, branchId: itemBranchId, quantity: split.quantity, saleItemId: item.sale_item_id ?? null })
       }
-      // Units not attributable to a lot land on the plain branch_stock total.
-      if (restockRemaining > 0) {
-        statements.push({
-          sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)
-                ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + @quantity`,
-          params: { product_id: item.product_id, branch_id: itemBranchId, quantity: restockRemaining },
-        })
-      }
+      if (fallbackReceive) statements.push(...fallbackReceive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
       touchedProductIds.add(item.product_id)
     }
 
     if (stockAction === 'damaged' && item.product_id && itemBranchId) {
       const originalBatchId = item.sale_item_id ? (saleItemBatchInfoForEdit.get(item.sale_item_id)?.batch_id ?? null) : null
-      editCreatedDamaged = true
-      await createDamagedLot(db, {
-        productId: item.product_id,
-        productName: item.product_name || null,
-        branchId: itemBranchId,
-        batchId: originalBatchId,
-        returnId: id,
-        quantity,
+      const choice = resolveDamagedReturnChoice(item)
+      if (!choice.ok) return c.json({ error: choice.error }, 400)
+      const damagedStatements = planDamagedReturnLine({
+        productId: item.product_id, productName: item.product_name || null,
+        branchId: itemBranchId, batchId: originalBatchId,
+        returnIdSql: '@return_id', quantity,
         reason: String(body.reason || existing.reason || '') || null,
-        userId: user?.id ?? null,
-        userName: user?.name ?? null,
+        userId: user?.id ?? null, userName: actorSnapshot(user),
+        tag: choice.tag, disposition: choice.disposition,
+        unitCostUsd: item.cost_price_usd ?? null, unitCostKhr: item.cost_price_khr ?? null,
       })
-      statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_IN_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
-        params: {
-          product_id: item.product_id,
-          product_name: item.product_name || null,
-          branch_id: itemBranchId,
-          quantity,
-          unit_cost_usd: item.cost_price_usd || 0,
-          unit_cost_khr: item.cost_price_khr || 0,
-          reason: `Return #${existing.return_number} updated (damaged): ${body.reason || existing.reason}`,
-          reference_id: id,
-          user_id: user?.id ?? null,
-          user_name: user?.name ?? null,
-          // 0084: the original sale lot, same as the create path.
-          batch_id: originalBatchId,
-        },
-      })
+      statements.push(...damagedStatements.map((statement) => ({
+        sql: statement.sql,
+        params: { ...(statement.params as Record<string, unknown>), return_id: id },
+      })))
     }
 
     statements.push({
       sql: `INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, stock_action, branch_id, batch_id)
-            VALUES (@return_id, @sale_item_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr, @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @return_to_stock, @stock_action, @branch_id, @batch_id)`,
+            VALUES (@return_id, @sale_item_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr, @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @return_to_stock, @stock_action, @branch_id, ${recordedBatchSql})`,
       params: {
         return_id: id,
         stock_action: stockAction,
@@ -1824,22 +2928,46 @@ app.patch('/:id', async (c) => {
         product_id: item.product_id || null,
         product_name: item.product_name || null,
         quantity,
-        applied_price_usd: item.applied_price_usd || 0,
-        applied_price_khr: item.applied_price_khr || 0,
+        applied_price_usd: refundUnitUsd,
+        applied_price_khr: refundUnitKhr,
         cost_price_usd: item.cost_price_usd || 0,
         cost_price_khr: item.cost_price_khr || 0,
         total_usd: totalUsd,
         total_khr: totalKhr,
         return_to_stock: returnToStock ? 1 : 0,
         branch_id: itemBranchId,
-        batch_id: resolvedBatchId,
+        batch_id: resolvedBatchId, ...fallbackParams,
       },
     })
 
+    // Allocation rows must follow their own return_item immediately. The
+    // newest-id subquery is evaluated before any later item insert, so two
+    // edited lines with multiple lots cannot bind every split to the last
+    // line in the request.
+    for (const split of itemSplits) {
+      statements.push({
+        sql: `INSERT INTO return_item_batch_allocations (return_item_id, sale_item_id, batch_id, branch_id, quantity)
+              VALUES ((SELECT id FROM return_items WHERE return_id=@return_id ORDER BY id DESC LIMIT 1), @sale_item_id, @batch_id, @branch_id, @quantity)`,
+        params: {
+          return_id: id,
+          sale_item_id: split.saleItemId ?? null,
+          batch_id: split.batchId,
+          branch_id: split.branchId ?? null,
+          quantity: split.quantity,
+        },
+      })
+    }
+
+    if (fallbackReceive) statements.push({
+      sql: `INSERT INTO return_item_batch_allocations(return_item_id,sale_item_id,batch_id,branch_id,quantity)
+        VALUES((SELECT id FROM return_items WHERE return_id=@return_id ORDER BY id DESC LIMIT 1),@sale_item_id,${fallbackBatchSql},@branch_id,@quantity)`,
+      params: { return_id: id, sale_item_id: item.sale_item_id || null, product_id: item.product_id,
+        branch_id: itemBranchId, quantity: plan.plainQuantity, ...fallbackParams },
+    })
     if (returnToStock && item.product_id && itemBranchId) {
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, ${recordedBatchSql})`,
         params: {
           product_id: item.product_id,
           product_name: item.product_name || null,
@@ -1850,18 +2978,13 @@ app.patch('/:id', async (c) => {
           reason: `Return #${existing.return_number} updated: ${body.reason || existing.reason}`,
           reference_id: id,
           user_id: user?.id ?? null,
-          user_name: user?.name ?? null,
+          user_name: actorSnapshot(user),
           // 0084: same single-lot-covers-all rule as the create path.
-          batch_id: itemSplits.length === 1 && itemSplits[0].quantity === quantity ? itemSplits[0].batchId : null,
+          batch_id: itemSplits.length === 1 && itemSplits[0].quantity === quantity ? itemSplits[0].batchId : null, ...fallbackParams,
         },
       })
     }
-    // Parallel to newItems order -- recorded against the re-inserted
-    // return_items after the batch below, same as the create path.
-    perItemBatchSplits.push(itemSplits)
   }
-
-  // (11.12 settlement gate hoisted above the stock work -- see its comment.)
 
   for (const productId of touchedProductIds) {
     statements.push({
@@ -1873,117 +2996,129 @@ app.patch('/:id', async (c) => {
   statements.push({
     sql: `UPDATE returns SET reason=@reason, return_type=@return_type, notes=@notes,
           total_refund_usd=@total_refund_usd, total_refund_khr=@total_refund_khr,
-          settlement_diff_usd=@settlement_diff_usd, settlement_diff_khr=@settlement_diff_khr,
-          branch_id=@branch_id, branch_name=@branch_name, updated_at=CURRENT_TIMESTAMP WHERE id=@id`,
+          branch_id=@branch_id, branch_name=@branch_name, updated_at=@updated_at WHERE id=@id`,
     params: {
       reason: body.reason || existing.reason,
       return_type: body.return_type || existing.return_type,
       notes: body.notes !== undefined ? body.notes : existing.notes,
-      total_refund_usd: body.total_refund_usd !== undefined ? body.total_refund_usd : totalRefundUsd,
-      total_refund_khr: body.total_refund_khr !== undefined ? body.total_refund_khr : totalRefundKhr,
-      settlement_diff_usd: settlementDiffUsd,
-      settlement_diff_khr: settlementDiffKhr,
+      // The refund is derived from the sale lines, not accepted from the
+      // client: a posted total is exactly the "restate what was paid" the
+      // line-level resolution above exists to prevent.
+      total_refund_usd: Number(totalRefundUsd.toFixed(2)),
+      total_refund_khr: Math.round(totalRefundKhr),
       branch_id: body.branch_id || existing.branch_id,
       branch_name: branchName,
+      updated_at: mutationStamp,
       id,
     },
   })
 
+  const expectedReturnRevision = Number(existing.write_revision)
+  statements.unshift(
+    { sql: 'DELETE FROM return_bulk_guards', params: {} },
+    { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+    {
+      sql: `INSERT INTO return_bulk_guards(guard_value)
+            SELECT CASE WHEN (
+              NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+              AND EXISTS(SELECT 1 FROM returns WHERE id=@id)
+              AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision
+            ) THEN 1 ELSE 0 END`,
+      params: { id: returnId, revision: expectedReturnRevision },
+    },
+  )
+  let eventBytes = 0
+  if (linkedSale) {
+    statements.splice(3, 0,
+      saleRevisionGuard(linkedSale.id, Number(linkedSale.write_revision)),
+      bulkAssertion(`
+        COALESCE((SELECT sale_status FROM sales WHERE id=@sale),'completed')=@status
+        AND COALESCE((SELECT status_before_return FROM sales WHERE id=@sale),'')=@beforeReturn
+      `, {
+        sale: linkedSale.id,
+        status: String(linkedSale.sale_status || 'completed'),
+        beforeReturn: String(linkedSale.status_before_return || ''),
+      }),
+    )
+    const beforeStatus = String(linkedSale.sale_status || 'completed')
+    if (projectedSaleStatus && projectedSaleStatus !== beforeStatus) {
+      statements.push({
+        sql: `UPDATE sales SET
+          status_before_return=CASE WHEN COALESCE(sale_status,'completed') NOT IN ('returned','partial_return') THEN COALESCE(sale_status,'completed') ELSE status_before_return END,
+          sale_status=@status,updated_at=@updatedAt WHERE id=@sale`,
+        params: { status: projectedSaleStatus, updatedAt: mutationStamp, sale: linkedSale.id },
+      })
+      const event = buildSaleRecordEventsInsert([{
+        saleId: linkedSale.id,
+        sourceKind: 'return_edit', sourceId: receiptId, generation: 0,
+        kind: 'status_changed', via: 'apply',
+        subject: existing.return_number == null ? null : String(existing.return_number),
+        actorId: authenticatedActorId, actorUsername: actorSnapshot(user), occurredAt: mutationStamp,
+        changes: [{
+          field: 'sale_status',
+          before: { state: 'known_value', value: beforeStatus },
+          after: { state: 'known_value', value: projectedSaleStatus },
+        }],
+      }])!
+      eventBytes = event.eventsBytes
+      statements.push(event.statement)
+      saleEventProvenance = { source_kind: 'return_edit', source_id: receiptId, generation: 0, sale_id: linkedSale.id }
+    }
+  }
+  statements.push(
+    { sql: 'DELETE FROM return_bulk_guards', params: {} },
+    { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+  )
+  statements.push({
+    sql: `INSERT INTO return_mutation_receipts(
+      id,actor_id,return_id,sale_id,mutation_kind,request_id,request_digest,request_json,response_json,occurred_at
+    ) VALUES(@receipt,@actor,@returnId,@saleId,'edit',@request,@digest,@requestJson,@responseJson,@occurredAt)`,
+    params: {
+      receipt: receiptId, actor: authenticatedActorId, returnId,
+      saleId: existing.sale_id || null, request: requestId, digest: requestDigest,
+      requestJson, responseJson: JSON.stringify(fixedResponse), occurredAt: mutationStamp,
+    },
+  })
+  assertSaleRecordBatchBounds(statements.length, canonicalIntent, eventBytes)
+
   await db.batch(statements)
 
   } catch (error) {
-    // Put the stock back exactly where the edit found it (Part-77, same
-    // discipline as POST /'s catch -- Part 523). Everything in `statements`
-    // rolled back atomically with the failed batch (incl. the return_items
-    // rewrite, so the OLD rows are intact); only the per-lot writes above
-    // committed on their own. Best-effort per write and LOUDLY reported --
-    // anything unreversible reaches the audit log and the 500 message.
-    const unreversed: string[] = []
-    for (const applied of [...editReappliedRestocks].reverse()) {
-      try {
-        await removeStockFromBatch(db, { batchId: applied.batchId, productId: applied.productId, branchId: applied.branchId, quantity: applied.quantity })
-      } catch (_) {
-        unreversed.push(`re-applied restock of ${applied.quantity} into lot #${applied.batchId} (product #${applied.productId})`)
+    // All lot, branch, return-item and receipt writes share db.batch; a
+    // conflict/storage failure rolls them all back before retry inspection.
+    const retry = await db.prepare(`SELECT return_id,request_digest,response_json FROM return_mutation_receipts
+      WHERE actor_id=@actor AND mutation_kind='edit' AND request_id=@request`)
+      .get<{ return_id: number; request_digest: string; response_json: string }>({ actor: authenticatedActorId, request: requestId })
+    if (retry) {
+      if (Number(retry.return_id) === returnId && retry.request_digest === requestDigest) {
+        return c.json(JSON.parse(retry.response_json) as { id: number; updated_at: string })
       }
+      return c.json({ error: 'client_request_id was already used with different return edit data.', code: 'idempotency_conflict' }, 409)
     }
-    for (const reversed of [...editReversedRestocks].reverse()) {
-      try {
-        await receiveBatchStock(db, { productId: reversed.productId, branchId: reversed.branchId, quantity: reversed.quantity, batchId: reversed.batchId })
-      } catch (_) {
-        unreversed.push(`reversal of ${reversed.quantity} out of lot #${reversed.batchId} (product #${reversed.productId})`)
-      }
+    if (error instanceof SaleRecordEventError) {
+      return c.json({ error: error.message, code: 'return_edit_too_large' }, 400)
     }
-    if (editCreatedDamaged) {
-      // The fresh rows are unconsumed by construction, so this delete-them
-      // reversal cannot hit ConsumedDamagedStockError.
-      try {
-        await reverseDamagedLots(db, id)
-      } catch (_) {
-        unreversed.push('newly created damaged lots')
-      }
-    }
-    for (const lot of editReversedDamaged) {
-      try {
-        await createDamagedLot(db, {
-          productId: lot.product_id,
-          productName: lot.product_name,
-          branchId: lot.branch_id,
-          batchId: lot.batch_id,
-          returnId: id,
-          quantity: lot.quantity,
-          reason: lot.reason,
-          userId: lot.created_by_user_id,
-          userName: lot.created_by_user_name,
-        })
-      } catch (_) {
-        unreversed.push(`original damaged lot of ${lot.quantity} (product #${lot.product_id})`)
-      }
-    }
-    if (unreversed.length) {
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'return_rollback_incomplete', 'return', id, { via: 'edit', unreversed })
+    if (/return_bulk_guards|sale_bulk_guards|CHECK constraint failed: guard_value/i.test((error as Error).message)) {
+      return c.json({ error: 'Return or linked sale changed. Refresh before retrying.', code: 'write_conflict', conflict: true }, 409)
     }
     return c.json({
-      error: `Failed to update return: ${(error as Error).message}`
-        + (unreversed.length
-          ? ` -- WARNING: ${unreversed.length} stock write(s) could not be reversed (recorded in the audit log; run Verify Integrity): ${unreversed.join('; ')}`
-          : ''),
+      error: `Failed to update return: ${(error as Error).message}`,
     }, 500)
   }
 
-  // Record the fresh per-lot split for the re-inserted return_items, same as
-  // POST / -- so a subsequent edit reverses the right lots again.
-  await recordReturnItemBatchAllocations(db, id, perItemBatchSplits)
-
-  if (existing.sale_id) {
-    const saleItems = await db.prepare('SELECT product_id, quantity FROM sale_items WHERE sale_id = ?').all<{ product_id: number; quantity: number }>([existing.sale_id])
-    const returnedRows = await db.prepare(`
-      SELECT ri.product_id, SUM(ri.quantity) AS total_qty
-      FROM return_items ri JOIN returns r ON r.id = ri.return_id
-      WHERE r.sale_id = ? AND COALESCE(r.status, 'completed') != 'cancelled' AND COALESCE(r.return_scope, 'customer') = 'customer'
-      GROUP BY ri.product_id
-    `).all<{ product_id: number; total_qty: number }>([existing.sale_id])
-    const returnedMap = new Map(returnedRows.map((r) => [r.product_id, r.total_qty]))
-    const hasAny = returnedRows.length > 0
-    const fullyReturned = saleItems.every((si) => (returnedMap.get(si.product_id) || 0) >= si.quantity)
-    const newStatus = fullyReturned ? 'returned' : hasAny ? 'partial_return' : 'completed'
-    await db.prepare("UPDATE sales SET sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run([newStatus, existing.sale_id])
-  }
-
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'return', id, { reason: body.reason })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'return', id, {
+    reason: body.reason,
+    ...(saleEventProvenance ? { record_event: saleEventProvenance } : {}),
+  })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return_edit', id: Number(id) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env, 'products'),
-    bumpVersion(c.env, 'returns'),
-    bumpVersion(c.env, 'sales'),
-  ]))
+  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'update', id: Number(id) }))
   if (existing.sale_id) {
     c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: existing.sale_id }))
   }
 
-  const updated = await db.prepare('SELECT id, updated_at FROM returns WHERE id = ?').get<{ id: number; updated_at: string }>([id])
-  return c.json(updated || { id: Number(id) })
+  return c.json(fixedResponse)
 })
 
 export default app

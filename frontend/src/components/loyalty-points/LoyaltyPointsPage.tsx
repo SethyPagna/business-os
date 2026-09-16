@@ -19,7 +19,7 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { fmtTime } from '../../utils/formatters.ts'
-import { getCustomers as getLoyaltyCustomers } from '../../api/contactReadTransport.ts'
+import { getCustomerPointSummaries } from '../../api/contactsTransport.ts'
 import { awardCustomerPoints } from '../../api/contactWriteTransport.ts'
 
 type LocaleCopy = Record<string, string>
@@ -37,6 +37,8 @@ type LoyaltySettingsForm = {
   customer_portal_show_point_value: boolean
   customer_portal_membership_info_text: string
   customer_portal_submission_reward_points: string
+  /** The master switch for the whole programme (see the toggle's own note). */
+  loyalty_points_enabled: boolean
 }
 
 type CustomerPointRow = {
@@ -117,6 +119,9 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     redeemValueUsd: 'Value per redemption unit (USD)',
     redeemValueKhr: 'Value per redemption unit (KHR)',
     showPointValue: 'Show point value on customer portal',
+    membershipPointsEnabled: 'Membership points',
+    membershipPointsEnabledHint: 'Default points earning for each new order; the POS switch overrides it for that order only. When off, redemption stays disabled. Existing points are kept.',
+    membershipPointsOff: 'Default earning is off',
     infoText: 'Customer-facing membership note',
     infoTextHint: 'This note appears in the customer portal membership panel under the point summary and redemption rules.',
     submissionRewardPoints: 'Default reward points per approved share',
@@ -178,6 +183,9 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     redeemValueUsd: 'តម្លៃក្នុងមួយឯកតាប្តូរ (USD)',
     redeemValueKhr: 'តម្លៃក្នុងមួយឯកតាប្តូរ (KHR)',
     showPointValue: 'បង្ហាញតម្លៃពិន្ទុនៅ Customer Portal',
+    membershipPointsEnabled: 'ពិន្ទុសមាជិក',
+    membershipPointsEnabledHint: 'កំណត់លំនាំដើមនៃការគិតពិន្ទុសម្រាប់ការលក់ថ្មី។ អ្នកអាចប្តូរបានសម្រាប់ការបញ្ជាទិញនីមួយៗនៅ POS។ ពេលបិទ មិនអាចប្តូរពិន្ទុបានទេ។ ពិន្ទុចាស់ត្រូវបានរក្សាទុក។',
+    membershipPointsOff: 'ការគិតពិន្ទុតាមលំនាំដើមត្រូវបានបិទ',
     infoText: 'សារពន្យល់សម្រាប់អតិថិជន',
     submissionRewardPoints: 'ពិន្ទុលំនាំដើមសម្រាប់ការអនុម័តការចែករំលែក',
     validationUsd: 'តម្លៃប្តូរជា USD ត្រូវប្រើជាចំនួនគត់ប៉ុណ្ណោះ។',
@@ -232,6 +240,16 @@ const LOYALTY_SECTION_OPTIONS = [
   { value: 'review', labelKey: 'sectionReview', label: 'Review Queue', hintKey: 'sectionReviewHint', hint: 'Approve, reject, and award points for customer share submissions.' },
 ]
 const LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS = 12000
+// The board shows ten rows, so ten rows are what the server is asked for.
+// This page used to load the ENTIRE customers table (every column, plus a
+// loyalty aggregation over every row -- the heaviest read in the system)
+// on mount, purely to sort ten membership holders by balance in the
+// browser. GET /customers/points-summary does the same ranking where the
+// data already is; the client-side sort/slice below stays as a safeguard.
+const LOYALTY_TOP_CUSTOMERS = 10
+// Scan ceiling for that ranking: membership holders only, so this is the
+// number of members considered, not the size of the customer table.
+const LOYALTY_POINTS_SCAN_LIMIT = 2000
 const LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 
 function getPortalTransport(): Promise<PortalTransportModule> {
@@ -275,7 +293,7 @@ function formatReviewDateTime(value: unknown): string {
   if (!value) return '-'
   const raw = String(value)
   const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-  // mm/dd/yyyy + 24-hour in Phnom Penh business time (fmtTime). A bare
+  // dd/mm/yyyy + 24-hour in Phnom Penh business time (fmtTime). A bare
   // toLocaleString() rendered the viewer's locale + timezone (dd/mm, 12-hour).
   return Number.isNaN(date.getTime()) ? String(value) : fmtTime(raw)
 }
@@ -314,6 +332,7 @@ export default function LoyaltyPointsPage() {
     customer_portal_show_point_value: true,
     customer_portal_membership_info_text: '',
     customer_portal_submission_reward_points: '5',
+    loyalty_points_enabled: true,
   })
   const [saving, setSaving] = useState(false)
   const [membershipNumber, setMembershipNumber] = useState('')
@@ -359,6 +378,12 @@ export default function LoyaltyPointsPage() {
       customer_portal_show_point_value: String(settings.customer_portal_show_point_value ?? 'true') === 'true',
       customer_portal_membership_info_text: String(settings.customer_portal_membership_info_text || ''),
       customer_portal_submission_reward_points: String(settings.customer_portal_submission_reward_points || '5'),
+      // Absent reads as ON, so a shop that has never touched this switch is
+      // unchanged. Only the four explicit off-spellings turn it off, matching
+      // the Worker's own read of the same key.
+      loyalty_points_enabled: !['0', 'false', 'no', 'off'].includes(
+        String(settings.loyalty_points_enabled ?? 'true').trim().toLowerCase(),
+      ),
     })
   }, [settings])
 
@@ -366,7 +391,12 @@ export default function LoyaltyPointsPage() {
     const requestId = beginTrackedRequest(customerPointsRequestRef)
     setCustomerPointsLoading(true)
     try {
-      const rows = await withLoaderTimeout(() => getLoyaltyCustomers(), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS)
+      const rows = await withLoaderTimeout(() => getCustomerPointSummaries({
+        membership_only: 1,
+        sort: 'points',
+        top: LOYALTY_TOP_CUSTOMERS,
+        limit: LOYALTY_POINTS_SCAN_LIMIT,
+      }), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(customerPointsRequestRef, requestId)) return null
       const nextRows = toCustomerPointRows(rows)
       setCustomerPoints(nextRows)
@@ -454,11 +484,15 @@ export default function LoyaltyPointsPage() {
       : `${copy('pointsPerUsd', 'Points per USD')}: ${form.customer_portal_points_per_usd || '1'}`
   }, [basis, form.customer_portal_points_per_khr, form.customer_portal_points_per_usd])
 
+  // The server already filters to membership holders and ranks by balance
+  // (points-summary's membership_only / sort=points / top). This repeats
+  // both so the board is still correct if it is ever fed an unranked list
+  // -- e.g. an older Worker that does not know the new params.
   const topPointCustomers = useMemo(() => (
     customerPoints
       .filter((row) => String(row?.membership_number || '').trim())
       .sort((a, b) => Number(b.points_balance || 0) - Number(a.points_balance || 0))
-      .slice(0, 10)
+      .slice(0, LOYALTY_TOP_CUSTOMERS)
   ), [customerPoints])
 
   function setValue<K extends keyof LoyaltySettingsForm>(key: K, value: LoyaltySettingsForm[K]): void {
@@ -479,6 +513,7 @@ export default function LoyaltyPointsPage() {
         customer_portal_show_point_value: form.customer_portal_show_point_value ? 'true' : 'false',
         customer_portal_membership_info_text: form.customer_portal_membership_info_text || '',
         customer_portal_submission_reward_points: String(rewardPoints),
+        loyalty_points_enabled: form.loyalty_points_enabled ? 'true' : 'false',
       })
       notify(copy('saved', 'Point rules saved.'))
     } catch (error) {
@@ -589,7 +624,36 @@ export default function LoyaltyPointsPage() {
                 </button>
               </div>
 
+              {/* Default for each new order. POS may override earning for that
+                  draft only; redemption retains its existing settings gate.
+                  Existing balances and sale history are never rewritten. */}
+              <label htmlFor="loyalty-points-enabled" className="mt-4 flex items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 dark:border-gray-700">
+                <div className="pr-3">
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {copy('membershipPointsEnabled', 'Membership points')}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {copy(
+                      'membershipPointsEnabledHint',
+                      'Default points earning for each new order; the POS switch overrides it for that order only. When off, redemption stays disabled. Existing points are kept.',
+                    )}
+                  </div>
+                </div>
+                <input
+                  id="loyalty-points-enabled"
+                  name="loyalty_points_enabled"
+                  type="checkbox"
+                  checked={!!form.loyalty_points_enabled}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setValue('loyalty_points_enabled', event.target.checked)}
+                />
+              </label>
+
               <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                {!form.loyalty_points_enabled ? (
+                  <span className="rounded-full border border-gray-300 bg-gray-100 px-3 py-1 text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                    {copy('membershipPointsOff', 'Default earning is off')}
+                  </span>
+                ) : null}
                 <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/20 dark:text-amber-300">
                   {policySummary}
                 </span>

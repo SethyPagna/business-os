@@ -53,15 +53,11 @@ runTest('the leading columns are sized from the shared constants, not hand-writt
 })
 
 runTest('the image column fits the thumbnail without excess indentation', () => {
-  // "too much indentation when only need a bit spacing from group image".
+  // The compact 48px square plus px-2 on both sides is exactly 4rem. The
+  // earlier larger/self-stretching footprints made row height depend on the
+  // image slot and left an unnecessarily wide title rail.
   const imageWidth = Number(surface.match(/const IMAGE_COL_WIDTH = '([\d.]+)rem'/)![1])
-  // The desktop thumbnail is h-14 w-14 = 3.5rem (enlarged Aug 29), and its
-  // cell adds px-2 (0.5rem each side = 1rem). The column must therefore be
-  // AT LEAST 4.5rem or the fixed-width thumbnail overflows into the name
-  // rail; and no more than ~a little over that, or the extra reads as the
-  // reported left-rail indentation.
-  assert.ok(imageWidth >= 4.5, `the column must fit the 3.5rem thumbnail + its 1rem px-2 gutter (>= 4.5rem), got ${imageWidth}rem`)
-  assert.ok(imageWidth <= 5.5, `the column reserved ${imageWidth}rem for a 3.5rem thumbnail -- that gap is the reported indentation`)
+  assert.strictEqual(imageWidth, 4, `the column must fit the 3rem thumbnail + its 1rem px-2 gutter exactly, got ${imageWidth}rem`)
 })
 
 runTest("the full-width rows use REAL cells in the table's own columns, never a colSpan=8 with its own padding", () => {
@@ -99,17 +95,22 @@ runTest('the category band sits on the IMAGE rail, one column left of the group 
   assert.strictEqual(categorySpan - groupSpan, 1, 'the category band must cover exactly one more column (the image column) than the group header')
 })
 
-runTest('the column percentages sum to 100%, so table-fixed has nothing to redistribute', () => {
-  // Measured in a browser against the built stylesheet: at 90% the two
-  // fixed leading columns rendered 51px/89px on a 1400px table having
-  // asked for 32px/56px, and the left rail moved with the window (149px
-  // at 1400, 98px at 820). At 100% they render exactly as asked and the
-  // rail is 98px at both widths.
+runTest('desktop columns fit the available width and overflow remains reachable', () => {
+  // Name and Details flex with the table while the four numeric columns stay
+  // compact. This keeps Stock/Qty in the default viewport at xl widths.
   const colgroup = surface.slice(surface.indexOf('<colgroup>'), surface.indexOf('</colgroup>'))
-  const percentages = [...colgroup.matchAll(/w-\[(\d+)%\]/g)].map((match) => Number(match[1]))
-  assert.strictEqual(percentages.length, 6, `expected 6 percentage columns beside the 2 fixed ones, found ${percentages.length}`)
-  const total = percentages.reduce((sum, value) => sum + value, 0)
-  assert.strictEqual(total, 100, `the percentage columns sum to ${total}% -- the missing ${100 - total}% gets spread across the fixed columns too, which is the indentation that keeps coming back`)
+  // Name auto, Details bounded and immediately adjacent -- unchanged. The
+  // bound itself moved 10.5rem -> 15rem: both 10.5rem and 12.5rem sat under
+  // the two branch chips once Noto Sans Khmer widened them, so they wrapped
+  // and every row in the report grew (see the colgroup comment). The five
+  // bounded widths now sum to 44.5rem, still inside the 58rem table minimum
+  // asserted three lines below.
+  assert.match(colgroup, /<col \/>\s*(?:\{\/\*[\s\S]*?\*\/\}\s*)?<col style=\{\{ width: '15rem' \}\} \/>/)
+  assert.strictEqual((colgroup.match(/<col style=\{\{ width: '[\d.]+rem' \}\} \/>/g) || []).length, 5)
+  assert.match(surface, /<div className="relative overflow-x-auto">/)
+  assert.match(surface, /<table className="w-full min-w-\[58rem\] table-fixed/)
+  assert.match(surface, /card hidden min-w-0 max-w-full overflow-hidden xl:flex/)
+  assert.match(surface, /min-w-0 max-w-full space-y-2 xl:hidden/)
 })
 
 runTest('a product row uses the shared gutter for its name, so it lands on the same rail', () => {

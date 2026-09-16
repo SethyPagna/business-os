@@ -1,10 +1,31 @@
 import { useEffect, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
+import { useFormDirty } from '../../utils/formDirty.ts'
+import {
+  clearWorkDraft,
+  flushPendingWorkDraft,
+  readWorkDraft,
+  scheduleWorkDraftWrite,
+  scopedWorkDraftKey,
+} from '../../utils/workDrafts.ts'
+import { useModalClose } from '../shared/modalCloseContext.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
-import { normalizePriceValue } from '../../utils/pricing.ts'
-import { getFeeLabels, type FeeLabelSuggestion, type FeeRecord, type FeeType } from '../../api/feesTransport.ts'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
+import { nativeChangeAmounts, roundMoney2 } from '../../utils/moneyPrecision.ts'
+import {
+  discardPendingFeeCreate,
+  getFeeLabels,
+  getPendingFeeCreate,
+  type FeeCreateBody,
+  type FeeLabelSuggestion,
+  type FeeRecord,
+  type FeeType,
+  type PendingFeeCreate,
+} from '../../api/feesTransport.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
+import { branchCanSell } from '../../utils/branchRoles.ts'
 
 // Add/edit form for a single fee record.
 //
@@ -31,6 +52,8 @@ type SaleSearchRow = {
   customer_name?: string | null
   total_usd?: number | null
   created_at?: string | null
+  branch_id?: number | string | null
+  branch_name?: string | null
 }
 
 function formatSaleOptionLabel(sale: SaleSearchRow): string {
@@ -118,28 +141,134 @@ export function feeToFormState(fee?: FeeRecord | null): FeeFormState {
   }
 }
 
+/** Physical expense denominations, not selling-price or internal cost policy.
+ * Unchanged historical fields are omitted from PUT, whose absence semantics
+ * preserve their stored precision. Frozen create retries never enter here. */
+export function feeFormMoney(form: Pick<FeeFormState, 'amount_usd' | 'amount_khr'>, fee?: Pick<FeeRecord, 'amount_usd' | 'amount_khr'> | null) {
+  try {
+    const usd = form.amount_usd.trim() || '0', khr = form.amount_khr.trim() || '0'
+    if (usd.startsWith('-') || khr.startsWith('-')) throw new Error('negative_amount')
+    const roundedUsd = roundMoney2(usd)
+    const roundedKhr = nativeChangeAmounts({ paidUsd: 0, paidKhr: khr, payableUsd: 0, exchangeRate: 1, changeExchangeRate: 1 }).changeKhr
+    const unchangedUsd = !!fee && Number(usd) === fee.amount_usd
+    const unchangedKhr = !!fee && Number(khr) === fee.amount_khr
+    return { valid: true, amountUsd: unchangedUsd ? fee!.amount_usd : roundedUsd,
+      amountKhr: unchangedKhr ? fee!.amount_khr : roundedKhr, unchangedUsd, unchangedKhr }
+  } catch {
+    return { valid: false, amountUsd: 0, amountKhr: 0, unchangedUsd: false, unchangedKhr: false }
+  }
+}
+
 type FeeFormProps = {
   fee?: FeeRecord | null
+  actorId?: number | string | null
   /** Distinct labels already used on saved fees — offered as suggestions so
    *  a recurring reason ("Boost", "ទឹកភ្លើង") is picked, not retyped. */
   labelSuggestions?: string[]
   onSave: (payload: {
+    fee_money_version?: 1
     fee_type: FeeType
     label: string | null
-    amount_usd: number
-    amount_khr: number
+    amount_usd?: number
+    amount_khr?: number
     fee_date: string
     sale_id: number | null
     branch_id: number | null
     notes: string | null
   }) => Promise<void> | void
   onClose: () => void
+  onInteractionLockChange?: (locked: boolean) => void
 }
 
-export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }: FeeFormProps) {
+// S4-21: the registry key for this form's unsaved work, exported so the
+// modal hosting the form asks about the SAME entry the form registers.
+export function feeFormWorkKey(feeId?: string | number | null): string {
+  return `fee-form-${feeId ?? 'new'}`
+}
+
+export function feeFormDraftBaseKey(feeId?: string | number | null): string {
+  return `fee_${feeId ?? 'new'}`
+}
+
+function restoreFeeForm(base: FeeFormState, draft?: Partial<FeeFormState> | null): FeeFormState {
+  if (!draft || typeof draft !== 'object') return base
+  const feeType = FEE_TYPE_OPTIONS.some((option) => option.value === draft.fee_type)
+    ? draft.fee_type as FeeType
+    : base.fee_type
+  const text = <K extends keyof FeeFormState>(key: K): FeeFormState[K] => (
+    typeof draft[key] === 'string' ? draft[key] : base[key]
+  ) as FeeFormState[K]
+  return {
+    fee_type: feeType,
+    label: text('label'),
+    amount_usd: text('amount_usd'),
+    amount_khr: text('amount_khr'),
+    fee_date: text('fee_date'),
+    sale_id: text('sale_id'),
+    branch_id: text('branch_id'),
+    notes: text('notes'),
+  }
+}
+
+export function feeCreateBodyToFormState(body: FeeCreateBody): FeeFormState {
+  return {
+    fee_type: body.fee_type,
+    label: body.label || '',
+    amount_usd: body.amount_usd ? String(body.amount_usd) : '',
+    amount_khr: body.amount_khr ? String(body.amount_khr) : '',
+    fee_date: body.fee_date,
+    sale_id: body.sale_id == null ? '' : String(body.sale_id),
+    branch_id: body.branch_id == null ? '' : String(body.branch_id),
+    notes: body.notes || '',
+  }
+}
+
+export function feeFormInteractionLocked(saving: boolean, pending: PendingFeeCreate | null): boolean {
+  return saving || pending != null
+}
+
+export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, onClose, onInteractionLockChange }: FeeFormProps) {
   const { t } = useApp()
-  const [form, setForm] = useState<FeeFormState>(() => feeToFormState(fee))
+  const draftKey = scopedWorkDraftKey(feeFormDraftBaseKey(fee?.id))
+  const initialPendingRef = useRef<PendingFeeCreate | null>(fee ? null : getPendingFeeCreate(actorId))
+  const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<FeeFormState>>> | undefined>(undefined)
+  if (restoredDraftRef.current === undefined) {
+    restoredDraftRef.current = readWorkDraft<Partial<FeeFormState>>(draftKey, {
+      notOlderThanMs: fee?.updated_at ? Date.parse(fee.updated_at) || 0 : 0,
+    })
+  }
+  const [form, setForm] = useState<FeeFormState>(() => initialPendingRef.current
+    ? feeCreateBodyToFormState(initialPendingRef.current.body)
+    : restoreFeeForm(feeToFormState(fee), restoredDraftRef.current?.data))
   const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
+  const [pendingCreate, setPendingCreate] = useState<PendingFeeCreate | null>(initialPendingRef.current)
+  const interactionLocked = feeFormInteractionLocked(saving, pendingCreate)
+  useEffect(() => {
+    onInteractionLockChange?.(interactionLocked)
+    return () => onInteractionLockChange?.(false)
+  }, [interactionLocked, onInteractionLockChange])
+  // One declaration; the ✕ above, the navigation guard, beforeunload, the
+  // sidebar dot and the update gate all read it. Latched off on a real
+  // save so closing after saving never prompts.
+  const { dirty } = useFormDirty(form, String(fee?.id ?? 'new'))
+  const savedRef = useRef(false)
+  const dirtyRef = useRef(false)
+  dirtyRef.current = (dirty || !!restoredDraftRef.current || !!pendingCreate) && !savedRef.current
+  const requestClose = useModalClose(onClose)
+  useEffect(() => registerDirtyWork({
+    key: feeFormWorkKey(fee?.id),
+    pageId: 'sales',
+    label: `${t('expense') || 'Expense'}${form.label ? ` — ${form.label}` : ''}`,
+    isDirty: () => dirtyRef.current,
+    discard: () => clearWorkDraft(draftKey),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [draftKey, fee?.id])
+  useEffect(() => () => { flushPendingWorkDraft(draftKey) }, [draftKey])
+  useEffect(() => {
+    if (!dirtyRef.current) return
+    return scheduleWorkDraftWrite(draftKey, form)
+  }, [draftKey, form])
   const [touched, setTouched] = useState(false)
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
   // Saved labels from the server (every distinct label ever used, with its
@@ -167,13 +296,16 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
   const [saleResolving, setSaleResolving] = useState(false)
   const saleSearchSeq = useRef(0)
 
-  // On edit, resolve the fee's existing sale_id to a real display row
+  // Resolve the current sale_id to a real display row. This uses form state,
+  // rather than only the server prop, so a restored add/edit draft displays
+  // the linked sale it will submit.
   // (receipt number / customer / total) instead of just showing a bare
   // number -- uses the new `id` exact-match filter on GET /api/sales.
   useEffect(() => {
     let cancelled = false
-    const saleId = fee?.sale_id
-    if (saleId == null) return
+    const saleId = form.sale_id.trim()
+    if (!saleId || String(selectedSale?.id || '') === saleId) return
+    setSelectedSale(null)
     setSaleResolving(true)
     loadSaleModule()
       .then((mod) => mod.getSales({ id: String(saleId), limit: 1 }))
@@ -189,8 +321,7 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
       })
       .finally(() => { if (!cancelled) setSaleResolving(false) })
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only ever re-resolve for the fee this form opened with
-  }, [fee?.sale_id])
+  }, [form.sale_id, selectedSale?.id])
 
   // Debounced as-you-type sale search, same 300ms pattern other
   // search-as-you-type pickers in this app use.
@@ -205,7 +336,7 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
         .then((result) => {
           if (saleSearchSeq.current !== seq) return
           const rows = (Array.isArray(result) ? result : (result as { sales?: unknown[] })?.sales || []) as SaleSearchRow[]
-          setSaleResults(rows)
+          setSaleResults(rows.filter((sale) => sale.branch_id != null && branchCanSell(sale.branch_name)))
         })
         .catch(() => { if (saleSearchSeq.current === seq) setSaleResults([]) })
         .finally(() => { if (saleSearchSeq.current === seq) setSaleSearching(false) })
@@ -216,6 +347,7 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
   const pickSale = (sale: SaleSearchRow) => {
     setSelectedSale(sale)
     set('sale_id', String(sale.id))
+    if (sale.branch_id != null) set('branch_id', String(sale.branch_id))
     setSaleQuery('')
     setSaleResults([])
     setSaleDropdownOpen(false)
@@ -234,60 +366,83 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
       .then((mod) => mod.getBranches())
       .then((rows) => {
         if (cancelled) return
-        setBranches(((rows || []) as FeeBranchOption[]).filter((row) => row.is_active !== false))
+        const shops = ((rows || []) as FeeBranchOption[])
+          .filter((row) => row.is_active !== false && branchCanSell(row.name))
+        setBranches(shops)
+        if (!fee && shops.length === 1) {
+          setForm((current) => current.branch_id ? current : { ...current, branch_id: String(shops[0].id) })
+        }
       })
       .catch(() => {
-        // Branch is optional on a fee record -- if the list fails to load,
-        // fall back to no branch options rather than blocking the form;
-        // an existing fee's already-set branch still round-trips via id.
+        // The Worker remains the authority and refuses a save without the
+        // active Shop. Keep the form open if the lookup fails.
         if (!cancelled) setBranches([])
       })
     return () => { cancelled = true }
   }, [])
 
   const set = <K extends keyof FeeFormState>(key: K, value: FeeFormState[K]) => {
+    if (interactionLocked) return
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  const amountUsd = normalizePriceValue(form.amount_usd, 0)
-  const amountKhr = normalizePriceValue(form.amount_khr, 0)
+  const money = feeFormMoney(form, fee)
+  const { amountUsd, amountKhr } = money
   // At least one currency amount must be a real, positive number -- a
   // fee with both amounts at 0 isn't a meaningful record.
-  const amountsInvalid = amountUsd <= 0 && amountKhr <= 0
+  const amountsInvalid = !money.valid || (amountUsd <= 0 && amountKhr <= 0)
   const dateInvalid = !form.fee_date.trim()
 
-  // Keep the fee's already-set branch selectable even if it's since been
-  // deactivated -- same "don't silently drop an existing value" reasoning
-  // as NewSupplierReturnModal.tsx's branch handling.
   const branchOptions = (() => {
     const options = branches.map((b) => ({ value: String(b.id), label: b.name || String(b.id) }))
-    if (fee?.branch_id != null && !options.some((opt) => opt.value === String(fee.branch_id))) {
-      options.push({ value: String(fee.branch_id), label: fee.branch_name || `#${fee.branch_id}` })
-    }
-    return [{ value: '', label: t('no_branch') || 'No branch' }, ...options]
+    return [{ value: '', label: t('select_branch') || 'Select Shop' }, ...options]
   })()
 
   const handleSave = async () => {
+    if (savingRef.current) return
     setTouched(true)
-    if (amountsInvalid || dateInvalid) return
+    if (!pendingCreate && (amountsInvalid || dateInvalid || !form.branch_id.trim())) return
     const saleId = form.sale_id.trim() ? Number(form.sale_id.trim()) : null
     const branchId = form.branch_id.trim() ? Number(form.branch_id.trim()) : null
     try {
+      savingRef.current = true
       setSaving(true)
-      await onSave({
+      await onSave(pendingCreate ? pendingCreate.body : {
+        fee_money_version: 1,
         fee_type: form.fee_type,
         label: form.label.trim() || null,
-        amount_usd: amountUsd,
-        amount_khr: amountKhr,
+        ...(!money.unchangedUsd ? { amount_usd: amountUsd } : {}),
+        ...(!money.unchangedKhr ? { amount_khr: amountKhr } : {}),
         fee_date: form.fee_date,
         sale_id: Number.isFinite(saleId as number) ? saleId : null,
         branch_id: Number.isFinite(branchId as number) ? branchId : null,
         notes: form.notes.trim() || null,
       })
+      // Saved for real -- latch before closing so the close below cannot
+      // raise the discard prompt.
+      savedRef.current = true
+      dirtyRef.current = false
+      restoredDraftRef.current = null
+      clearWorkDraft(draftKey)
       onClose()
+    } catch {
+      if (!fee) {
+        const pending = getPendingFeeCreate(actorId)
+        setPendingCreate(pending)
+        if (pending) setForm(feeCreateBodyToFormState(pending.body))
+      }
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
+  }
+
+  const discardPending = () => {
+    if (!pendingCreate || savingRef.current || !actorId) return
+    const warning = `${t('write_outcome_unknown') || 'The previous save may already have succeeded.'} ${t('discard_changes') || 'Discard changes'}?`
+    if (!window.confirm(warning)) return
+    discardPendingFeeCreate(actorId, pendingCreate.client_request_id)
+    setPendingCreate(null)
   }
 
   return (
@@ -298,6 +453,13 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
         void handleSave()
       }}
     >
+      {pendingCreate ? (
+        <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+          <p className="font-semibold">{t('write_outcome_unknown_title') || 'Save outcome unknown'}</p>
+          <p className="mt-1 text-xs">{t('write_outcome_unknown') || 'The previous save may already have succeeded. Retry the exact original request or discard it before making changes.'}</p>
+        </div>
+      ) : null}
+      <fieldset disabled={interactionLocked} className="space-y-4 disabled:opacity-70">
       {/* Type + label genuinely share one row (the old comment claimed this
           while the JSX still stacked them). The label input suggests every
           label already saved on a fee, so recurring reasons are reusable
@@ -363,7 +525,7 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
             className="input"
             type="number"
             min="0"
-            step="0.01"
+            step="any"
             inputMode="decimal"
             value={form.amount_usd}
             onChange={(event) => set('amount_usd', event.target.value)}
@@ -380,7 +542,7 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
             className="input"
             type="number"
             min="0"
-            step="1"
+            step="any"
             inputMode="decimal"
             value={form.amount_khr}
             onChange={(event) => set('amount_khr', event.target.value)}
@@ -395,41 +557,79 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
         </p>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label htmlFor="fee-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t('fee_date') || 'Date'} *
-          </label>
-          <input
-            id="fee-date"
-            className="input"
-            type="date"
-            value={form.fee_date}
-            onChange={(event) => set('fee_date', event.target.value)}
-            onBlur={() => setTouched(true)}
-            aria-invalid={touched && dateInvalid ? 'true' : 'false'}
-          />
-        </div>
-        <div>
-          <label htmlFor="fee-sale-id" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t('fee_matched_sale_id') || 'Matched Sale ID (optional)'}
-          </label>
-          <input
-            id="fee-sale-id"
-            className="input"
-            type="number"
-            min="1"
-            inputMode="numeric"
-            value={form.sale_id}
-            onChange={(event) => set('sale_id', event.target.value)}
-            placeholder={t('fee_sale_id_placeholder') || 'e.g. 1042'}
-          />
-        </div>
+      <div>
+        <label htmlFor="fee-sale-search" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+          {t('fee_matched_sale_id') || 'Linked sale (optional)'}
+        </label>
+        {selectedSale ? (
+          <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm dark:border-emerald-700 dark:bg-emerald-950/30">
+            <div className="min-w-0">
+              <div className="truncate font-semibold text-emerald-900 dark:text-emerald-100">{formatSaleOptionLabel(selectedSale)}</div>
+              <div className="text-xs text-emerald-700 dark:text-emerald-300">Sale ID #{selectedSale.id}{selectedSale.branch_name ? ` · ${selectedSale.branch_name}` : ''}</div>
+            </div>
+            <button
+              type="button"
+              className="min-h-11 shrink-0 rounded-lg px-3 text-sm font-medium text-emerald-800 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-900/40"
+              onClick={clearSale}
+            >
+              {t('remove') || 'Remove'}
+            </button>
+          </div>
+        ) : (
+          <div className="relative">
+            <SearchInput
+              id="fee-sale-search"
+              value={saleQuery}
+              onChange={(value) => { setSaleQuery(value); setSaleDropdownOpen(true) }}
+              onFocus={() => setSaleDropdownOpen(true)}
+              onBlur={() => window.setTimeout(() => setSaleDropdownOpen(false), 120)}
+              placeholder={t('fee_sale_search_placeholder') || 'Search receipt, customer, phone, product, SKU or barcode'}
+              ariaLabel={t('fee_sale_search_placeholder') || 'Search for a sale to link'}
+              className="w-full"
+            />
+            {saleDropdownOpen && saleQuery.trim() ? (
+              <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 shadow-xl dark:border-gray-700 dark:bg-gray-900" role="listbox">
+                {saleSearching || saleResolving ? (
+                  <div className="px-3 py-2 text-sm text-gray-500">{t('loading') || 'Loading...'}</div>
+                ) : saleResults.length ? saleResults.map((sale) => (
+                  <button
+                    key={sale.id}
+                    type="button"
+                    role="option"
+                    aria-selected="false"
+                    className="min-h-11 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => pickSale(sale)}
+                  >
+                    <span className="block font-medium">{formatSaleOptionLabel(sale)}</span>
+                    <span className="block text-xs text-gray-500">Sale ID #{sale.id}{sale.branch_name ? ` · ${sale.branch_name}` : ''}</span>
+                  </button>
+                )) : (
+                  <div className="px-3 py-2 text-sm text-gray-500">{t('no_results') || 'No Shop sales found'}</div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor="fee-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+          {t('fee_date') || 'Date'} *
+        </label>
+        <DateEntryInput
+          id="fee-date"
+          t={t}
+          ariaLabel={t('fee_date') || 'Date'}
+          value={form.fee_date}
+          onChange={(iso) => { set('fee_date', iso); setTouched(true) }}
+          onInvalidChange={(invalid) => { if (invalid) setTouched(true) }}
+        />
       </div>
 
       <div>
         <label htmlFor="fee-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t('branch') || 'Branch'}
+          {t('branch') || 'Shop'} *
         </label>
         <AppSelect
           id="fee-branch"
@@ -439,6 +639,9 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
           options={branchOptions}
           onChange={(value) => set('branch_id', value as string)}
         />
+        {touched && !form.branch_id.trim() ? (
+          <p className="mt-1 text-xs text-red-500">{t('select_branch') || 'Select the Shop branch.'}</p>
+        ) : null}
       </div>
 
       <div>
@@ -455,6 +658,7 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
           maxLength={2000}
         />
       </div>
+      </fieldset>
 
       {/* Sticky footer: pinned to the bottom of Modal.tsx's scrollable area
           (.modal-scroll) so Save/Cancel stay reachable without scrolling to
@@ -463,11 +667,23 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
           against the bottom edge; px-5 pb-5 pt-4 puts it back inside the bar. */}
       <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
         <button className="btn-primary flex-1" type="submit" disabled={saving}>
-          {saving ? (t('saving') || 'Saving...') : (t('save_fee') || 'Save Expense')}
+          {saving
+            ? (t('saving') || 'Saving...')
+            : pendingCreate
+              ? (t('retry_original_request') || 'Retry original request')
+              : (t('save_fee') || 'Save Expense')}
         </button>
-        <button className="btn-secondary" type="button" onClick={onClose}>
-          {t('cancel') || 'Cancel'}
-        </button>
+        {pendingCreate ? (
+          <button className="btn-secondary" type="button" disabled={saving} onClick={discardPending}>
+            {t('discard_retry') || 'Discard retry'}
+          </button>
+        ) : (
+          /* Cancel is a dismissal: through the modal's guard, not straight
+             to onClose (S4-21). */
+          <button className="btn-secondary" type="button" disabled={saving} onClick={requestClose}>
+            {t('cancel') || 'Cancel'}
+          </button>
+        )}
       </div>
     </form>
   )

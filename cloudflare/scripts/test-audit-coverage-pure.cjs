@@ -56,12 +56,70 @@ for (const file of files) {
 }
 
 // Rule 1 -- the general law: every route file that registers a mutation
-// handler must contain at least one audit( call. No exemption list: the two
-// deliberate non-audit paths live in files that audit elsewhere, so they do
-// not need one.
+// handler must contain at least one audit( call. Shifts is the one stronger
+// contract: its mutation and guarded audit INSERT share the same D1 batch, so
+// it is checked path-by-path below instead of being weakened to an async call.
+// POS has the same stronger same-batch contract for its sole mutation and is
+// likewise checked by an exact route-specific contract below.
 for (const { file, src } of withMutations) {
+  if (file === 'shifts.ts' || file === 'pos.ts') continue
   ok(src.includes('audit('), `${file} registers mutations and calls audit(`)
 }
+
+// POS currently has exactly one mutation: the address-presets CAS. Its
+// guarded settings write and audit INSERT share one D1 batch, and the audit
+// SELECT is conditioned on the newly generated revision. Counting mutation
+// registrations keeps this a narrow recognition of that route: adding any
+// second POS mutation fails until its audit behavior is explicitly covered.
+const pos = fs.readFileSync(path.join(routesDir, 'pos.ts'), 'utf8')
+const posMutations = [...pos.matchAll(/\bapp\.(post|patch|put|delete)\(/g)]
+ok(posMutations.length === 1 && posMutations[0][1] === 'put',
+  'pos.ts has only the explicitly covered address-presets mutation')
+const posAddressRoute = pos.slice(pos.indexOf("app.put('/address-presets'"), pos.indexOf('export default app'))
+ok(/db\.batch\(\[[\s\S]*INSERT INTO settings[\s\S]*INSERT INTO audit_logs/.test(posAddressRoute),
+  'pos.ts commits the address-presets CAS and audit in one batch')
+ok(/INSERT INTO audit_logs[\s\S]*WHERE EXISTS\(SELECT 1 FROM settings WHERE key=@key AND json_extract\(value,'\$\.revision'\)=@revision\)/.test(posAddressRoute),
+  'pos.ts audit is guarded by the winning address-presets revision')
+ok(/if \(changes !== 1\)[\s\S]*code: 'write_conflict'/.test(posAddressRoute),
+  'pos.ts reports a losing address-presets CAS as a write conflict')
+
+// Shifts deliberately does not call the generic async audit helper. Every
+// lifecycle write and its `WHERE changes()=1` audit INSERT must commit or roll
+// back together. These checks name every registered mutation route so adding
+// a generic exemption cannot silently leave a new shift write unaudited. The
+// executable route rollback/concurrency assertions remain in the focused
+// shift suites; this file pins the cross-route coverage census.
+const shifts = fs.readFileSync(path.join(routesDir, 'shifts.ts'), 'utf8')
+const section = (start, end) => {
+  const from = shifts.indexOf(start)
+  const to = end ? shifts.indexOf(end, from + start.length) : shifts.length
+  return from >= 0 && to > from ? shifts.slice(from, to) : ''
+}
+const continuationWriter = section('async function writeContinuation', 'function currentResponse')
+const openRoute = section("app.post('/open'", 'async function writeClose')
+const closeWriter = section('async function writeClose', "app.post('/close'")
+const currentCloseRoute = section("app.post('/close'", "app.post('/:id/close'")
+const historicCloseRoute = section("app.post('/:id/close'", "app.post('/:id/cancel'")
+const cancelRoute = section("app.post('/:id/cancel'", "app.post('/:id/reopen'")
+const reopenRoute = section("app.post('/:id/reopen'", "app.patch('/:id'")
+const amendRoute = section("app.patch('/:id'", 'export default app')
+
+ok(/INSERT INTO audit_logs[\s\S]*WHERE changes\(\)=1/.test(section('function transitionAuditSql', 'function openAuditSql')),
+  'shifts.ts transition audit is guarded by the winning mutation')
+ok(/db\.batch\(\[[\s\S]*continuationAuditSql\(\)/.test(continuationWriter),
+  'shifts.ts continuation/reopen writes audit in the same batch')
+ok(/writeContinuation\([\s\S]*auditAction: 'shift\.open_after_cancel'/.test(openRoute)
+  && /db\.batch\(\[[\s\S]*openAuditSql\(\)/.test(openRoute),
+  'shifts.ts opening paths use same-batch root and continuation audits')
+ok(/db\.batch\(\[[\s\S]*transitionAuditSql\(\)/.test(closeWriter)
+  && currentCloseRoute.includes('writeClose(db') && historicCloseRoute.includes('writeClose(db'),
+  'shifts.ts current and historic close share the atomic audited writer')
+ok(/db\.batch\(\[[\s\S]*transitionAuditSql\(\)/.test(cancelRoute),
+  'shifts.ts cancellation writes audit in the same batch')
+ok(/writeContinuation\([\s\S]*auditAction: 'shift\.reopen'/.test(reopenRoute),
+  'shifts.ts reopen uses the atomic audited continuation writer')
+ok(/db\.batch\(\[[\s\S]*transitionAuditSql\(\)/.test(amendRoute),
+  'shifts.ts amendment writes audit in the same batch')
 
 // Rule 2 -- the read-only four are actually read-only (no mutation handlers
 // AND no direct writes). If one of these grows a write path, this fails and
@@ -79,8 +137,8 @@ for (const file of EXPECTED_READ_ONLY) {
 // Rule 3 -- the specific new coverage, pinned by shape so a refactor that
 // drops the call (or its key detail) fails loudly.
 const backups = fs.readFileSync(path.join(routesDir, 'backups.ts'), 'utf8')
-ok(/audit\([^)]*'create',\s*'backup'/.test(backups), 'backups.ts audits backup creation')
-ok(/audit\([^)]*'restore',\s*'backup'/.test(backups), 'backups.ts audits the destructive restore')
+ok(/audit\((?:[^()]|\([^()]*\))*'create',\s*'backup'/.test(backups), 'backups.ts audits backup creation')
+ok(/audit\((?:[^()]|\([^()]*\))*'restore',\s*'backup'/.test(backups), 'backups.ts audits the destructive restore')
 // The call gained a progress callback (slice C, Part 543) -- match the
 // call-site prefix, and assert it was actually FOUND so a future rename
 // can't turn this into a vacuous indexOf(-1) comparison.
@@ -90,20 +148,20 @@ ok(backups.indexOf("'restore', 'backup'") > restoreCallAt,
   'backups.ts restore audit sits after the restore actually ran')
 
 const filesRoute = fs.readFileSync(path.join(routesDir, 'files.ts'), 'utf8')
-ok(/audit\([^)]*'upload',\s*'file'/.test(filesRoute), 'files.ts audits uploads')
-ok(/audit\([^)]*'rename',\s*'file'/.test(filesRoute), 'files.ts audits renames with from/to')
+ok(/audit\((?:[^()]|\([^()]*\))*'upload',\s*'file'/.test(filesRoute), 'files.ts audits uploads')
+ok(/audit\((?:[^()]|\([^()]*\))*'rename',\s*'file'/.test(filesRoute), 'files.ts audits renames with from/to')
 ok(/from:\s*existing\.original_name/.test(filesRoute), 'files.ts rename audit carries the before value')
-ok(/audit\([^)]*'delete',\s*'file'/.test(filesRoute), 'files.ts audits deletes')
+ok(/audit\((?:[^()]|\([^()]*\))*'delete',\s*'file'/.test(filesRoute), 'files.ts audits deletes')
 ok(/forced:\s*usageCount > 0/.test(filesRoute), 'files.ts delete audit records the CONFIRM DELETE override')
 
 const notes = fs.readFileSync(path.join(routesDir, 'notes.ts'), 'utf8')
-ok(/audit\([^)]*'create',\s*'note',[^)]*,\s*null\)/.test(notes), 'notes.ts audits create with NO content in details')
+ok(/audit\((?:[^()]|\([^()]*\))*'create',\s*'note',(?:[^()]|\([^()]*\))*,\s*null\)/.test(notes), 'notes.ts audits create with NO content in details')
 
 const telegram = fs.readFileSync(path.join(routesDir, 'telegram.ts'), 'utf8')
-ok(/audit\([^)]*'test',\s*'telegram'/.test(telegram), 'telegram.ts audits the test message')
-ok(/audit\([^)]*'send',\s*'telegram_summary'/.test(telegram), 'telegram.ts audits manual daily summaries')
-ok(/audit\([^)]*'connect',\s*'telegram_webhook'/.test(telegram), 'telegram.ts audits command webhook setup')
-ok(/audit\([^)]*'delete',\s*'note',[^)]*,\s*null\)/.test(notes), 'notes.ts audits delete with NO content in details')
+ok(/audit\((?:[^()]|\([^()]*\))*'test',\s*'telegram'/.test(telegram), 'telegram.ts audits the test message')
+ok(/audit\((?:[^()]|\([^()]*\))*'send',\s*'telegram_summary'/.test(telegram), 'telegram.ts audits manual daily summaries')
+ok(/audit\((?:[^()]|\([^()]*\))*'connect',\s*'telegram_webhook'/.test(telegram), 'telegram.ts audits command webhook setup')
+ok(/audit\((?:[^()]|\([^()]*\))*'delete',\s*'note',(?:[^()]|\([^()]*\))*,\s*null\)/.test(notes), 'notes.ts audits delete with NO content in details')
 const notesPutBody = notes.slice(notes.indexOf("app.put('/:id'"), notes.indexOf("app.patch('/reorder'"))
 ok(notesPutBody.length > 0 && !notesPutBody.includes('audit('),
   'notes.ts autosave PUT is deliberately unaudited (per-keystroke flood guard)')
@@ -112,7 +170,7 @@ const sync = fs.readFileSync(path.join(routesDir, 'sync.ts'), 'utf8')
 const outboxBody = sync.slice(sync.indexOf("app.post('/outbox'"), sync.indexOf("app.post('/files/chunks/init'"))
 ok(outboxBody.length > 0 && !outboxBody.includes('audit('),
   'sync.ts outbox is deliberately unaudited (replayed routes audit; no double-log)')
-ok(/audit\([^)]*'upload',\s*'file'/.test(sync), 'sync.ts audits the chunked-upload complete')
+ok(/audit\((?:[^()]|\([^()]*\))*'upload',\s*'file'/.test(sync), 'sync.ts audits the chunked-upload complete')
 ok(/via:\s*'offline_sync'/.test(sync), 'sync.ts chunked-upload audit is marked offline_sync')
 
 console.log(`\nAll ${checks} audit-coverage checks passed.`)

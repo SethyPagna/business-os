@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { neutralPrimitiveChunk } from '../build/chunkBoundaries.ts'
 
 const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const appContext = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
@@ -183,7 +184,17 @@ assert.match(pageActivity, /from '\.\.\/\.\.\/app\/AppContextCore\.tsx'/, 'page 
 assert.doesNotMatch(appContextCore, /api\/http|websocket|lang\/en\.json|lang\/km\.json|AppProvider|startHealthCheck/, 'context core should remain provider-only and avoid admin startup imports')
 assert.match(quickPreferenceToggles, /from '\.\.\/\.\.\/app\/AppContextCore\.tsx'/, 'quick preference controls should read the tiny context core instead of importing the full admin AppContext graph')
 assert.doesNotMatch(quickPreferenceToggles, /from '\.\.\/\.\.\/AppContext\.tsx'/, 'quick preference controls should not drag full AppContext into the route startup graph')
-assert.match(appContext, /export \{ isBrokenLocalizedString, useApp, useSync, useT \}/, 'admin AppContext should re-export context hooks for existing route imports while the public route uses the core directly')
+// The names, not the exact list: a hook added to the core (Sep 6 2026:
+// useLowStockConfig) has to be re-exported here too, and pinning the list
+// verbatim made that addition read as a regression in the startup graph,
+// which is what this file is actually about.
+for (const hook of ['isBrokenLocalizedString', 'useApp', 'useSync', 'useT']) {
+  assert.match(
+    appContext,
+    new RegExp('export \\{[^}]*\\b' + hook + '\\b[^}]*\\}'),
+    `admin AppContext should re-export ${hook} for existing route imports while the public route uses the core directly`,
+  )
+}
 assert.match(appContext, /function getInitialAdminPage\(publicMode: boolean\): string \{[\s\S]*getAdminPageFromPath\(window\.location\.pathname\) \|\| 'dashboard'[\s\S]*\}/, 'direct admin URLs should initialize the active page without briefly mounting Dashboard first')
 assert.match(appContext, /const \[page,\s+setPage\]\s+= useState\(\(\) => getInitialAdminPage\(publicMode\)\)/, 'initial active page state should come from the current URL')
 assert.match(appContext, /const \[authReady, setAuthReady\] = useState\(\(\) => \{[\s\S]*if \(hasStoredSession && canProbeServerSession\) return false[\s\S]*if \(canProbeServerSession\) return false[\s\S]*\}\)/, 'cookie-only authenticated startup should wait for bootstrap instead of briefly mounting the login route')
@@ -225,10 +236,10 @@ assert.doesNotMatch(httpApi, /window\.addEventListener\('online'[\s\S]{0,160}pin
 assert.doesNotMatch(httpApi, /window\.addEventListener\('focus'[\s\S]{0,160}pingServerHealth/, 'HTTP module should not duplicate web-api focus recovery listeners')
 assert.doesNotMatch(httpApi, /document\.addEventListener\('visibilitychange'[\s\S]{0,220}pingServerHealth/, 'HTTP module should not duplicate web-api visibility recovery listeners')
 assert.doesNotMatch(httpApi, /if \(typeof window !== 'undefined'\) \{\s*window\.addEventListener\('online'/, 'signed-out startup should not register health online/focus lifecycle listeners at module load')
-assert.match(httpApi, /let localPromise: Promise<T \| null> \| null = null[\s\S]*const startLocalRead = \(\): Promise<T \| null> => \{[\s\S]*Promise\.resolve\(\)[\s\S]*\.then\(\(\) => localFn\(\)\)/, 'server read fallback should lazy-start local storage only through the fallback helper')
+assert.match(httpApi, /let localPromise: Promise<T \| null> \| null = null[\s\S]*const startLocalRead = \(\): Promise<T \| null> => \{[\s\S]*Promise\.resolve\(\)[\s\S]*return localFn\(signal\)/, 'server read fallback should lazy-start local storage only through the fallback helper and pass its caller cancellation signal')
 assert.match(httpApi, /const HEALTHY_SERVER_LOCAL_FALLBACK_MS = 350/, 'healthy live server reads should quickly show confirmed local data while the server refresh continues')
 assert.match(httpApi, /fallbackTimer = window\.setTimeout\(async \(\) => \{[\s\S]*const localResult = await startLocalRead\(\)[\s\S]*\}, fallbackDelayMs\)/, 'local fallback should not import Dexie until the selected fallback timer actually fires')
-assert.match(httpApi, /raceServerReadWithLocalFallback\(channel, promise, localFn, t0, '', HEALTHY_SERVER_LOCAL_FALLBACK_MS\)/, 'fresh healthy server reads should use the tuned local fallback delay')
+assert.match(httpApi, /raceServerReadWithLocalFallback\(channel, promise, localFn, token, t0, '', HEALTHY_SERVER_LOCAL_FALLBACK_MS, callerSignal\)/, 'fresh healthy server reads should retain invalidation ownership, tuned local fallback delay and caller cancellation signal')
 assert.doesNotMatch(httpApi, /const localPromise = Promise\.resolve\(\)\s*\.then\(\(\) => localFn\(\)\)/, 'healthy server reads should not eagerly start the local fallback promise')
 assert.match(websocketApi, /let wsLifecycleListenersRegistered = false/, 'websocket lifecycle listeners should be one-shot and not module-load work')
 assert.match(websocketApi, /export function connectWS\(\): void \{\s*ensureWebSocketLifecycleListeners\(\)/, 'websocket lifecycle listeners should install only when an authenticated websocket connection starts')
@@ -242,9 +253,16 @@ assert.match(app, /const NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS = 30000/, 'n
 assert.match(app, /const NOTIFICATION_CENTER_IDLE_TIMEOUT_MS = 45000/, 'deferred notification center should still wake during a long-lived session')
 assert.match(app, /const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 180000/, 'global import tracker chunk should stay out of short-session first-load windows unless import activity wakes it')
 assert.match(app, /const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 60000/, 'deferred import tracker should still wake during a long-lived session')
-assert.match(serviceWorker, /function isHashedBuildAsset\(pathname\)[\s\S]*pathname\.startsWith\('\/assets\/'\)/, 'hashed build chunks should be recognized as safe cache-first static assets')
-assert.match(serviceWorker, /async function cacheFirstStatic\(request, event\)[\s\S]*const cached = await cache\.match\(request\)[\s\S]*if \(cached\)[\s\S]*return cached/, 'hashed build chunks should use cache-first service-worker reads so repeat visits do not pay tunnel latency')
-assert.match(serviceWorker, /event\.respondWith\(isHashedBuildAsset\(url\.pathname\)[\s\S]*\? cacheFirstStatic\(request, event\)[\s\S]*: networkFirstStatic\(request\)\)/, 'only hashed build chunks should switch to cache-first while mutable runtime assets stay network-first')
+// P4-4b: cache-first now covers EVERY cacheable static path, not just
+// hashed build chunks -- the unhashed set (manifest/icons/runtime-noise-
+// guard.js/theme-bootstrap.js) was needlessly paying the round trip on
+// networkFirstStatic even though STATIC_CACHE is scoped per BUILD_HASH
+// exactly like the hashed chunks, so there was nothing it was protecting
+// against. isHashedBuildAsset/networkFirstStatic no longer exist.
+assert.match(serviceWorker, /async function cacheFirstStatic\(request, event\)[\s\S]*const cached = await cache\.match\(request\)[\s\S]*if \(cached\)[\s\S]*return cached/, 'cacheable static assets should use cache-first service-worker reads so repeat visits do not pay tunnel latency')
+assert.match(serviceWorker, /if \(!isCacheableStaticPath\(url\.pathname\)\)[\s\S]{0,20}return[;\s]*\n[\s\S]{0,700}event\.respondWith\(cacheFirstStatic\(request, event\)\)/, 'every cacheable static path -- hashed chunks and the unhashed manifest/icon/runtime-guard set alike -- should go through cacheFirstStatic')
+assert.doesNotMatch(serviceWorker, /function isHashedBuildAsset/, 'the hashed/unhashed split is gone now that both use the same cache-first strategy')
+assert.doesNotMatch(serviceWorker, /function networkFirstStatic/, 'networkFirstStatic is dead now that its only caller was removed')
 assert.match(app, /function scheduleInitialPendingSyncRefresh\(refresh: \(\) => void\): CancelWarmup/, 'pending-sync startup refresh should use a cancellable idle scheduler')
 assert.match(app, /window\.requestIdleCallback\(run, \{ timeout: PENDING_SYNC_IDLE_TIMEOUT_MS \}\)/, 'pending-sync startup refresh should prefer idle time')
 assert.match(app, /if \(!user \|\| typeof window === 'undefined'\) \{[\s\S]*return undefined[\s\S]*const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh\(refreshPendingSync\)/, 'sync banner should not import API methods or register listeners during logged-out first shell render')
@@ -340,7 +358,7 @@ assert.match(catalogPreviewSurface, /import '..\/..\/styles\/public-portal\.css'
 assert.match(publicPortalCss, /business-os-portal-translate-widget[\s\S]*portal-contact-value[\s\S]*portal-nav-tab-active/, 'public portal stylesheet should own portal contact, navigation, and translate-widget rules')
 assert.doesNotMatch(mainCss, /portal-contact-value|portal-nav-tab-active|business-os-portal-translate-widget/, 'global startup CSS should not include public portal route-only rules')
 assert.match(viteConfig, /modulePreload:\s*false/, 'Vite generic modulepreload injection should stay disabled so public startup does not import the helper from the app-auth chunk')
-assert.match(viteConfig, /includes\('vite\/preload-helper'\)[\s\S]*return 'vendor'/, 'Vite preload helper should stay in the neutral vendor chunk instead of the admin auth chunk')
+assert.equal(neutralPrimitiveChunk('\0vite/preload-helper.js'), 'app-routing', 'Vite preload helper should share the neutral routing runtime without loading unrelated vendor libraries')
 assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 45_000/, 'offline queue and snapshot maintenance should stay out of the first-load network window')
 assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 60_000/, 'initial offline maintenance should still run during a long-lived authenticated session')
 assert.match(webApi, /const BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS = 2200/, 'bootstrap storage cleanup and persistence should be delayed past first paint')
@@ -544,7 +562,14 @@ assert.doesNotMatch(catalogPage, /from '\.\/portalContentI18n\.ts'/, 'public cat
 assert.match(catalogPage, /import\('\.\/portalLanguagePacks\.ts'\)/, 'public catalog should lazy-load first-party language packs only for non-English language intent')
 assert.match(catalogPage, /import\('\.\/portalContentI18n\.ts'\)/, 'public catalog should lazy-load content localization only for non-English language intent')
 assert.match(catalogPagination, /<PaginationControls/, 'public catalog pagination should use the shared responsive control')
-assert.match(catalogPagination, /editablePageSizeInput=\{false\}/, 'public catalog pagination should keep the mobile selector compact')
+assert.match(catalogPagination, /layout="centered"/, 'public catalog pagination should use the compact centered pager')
+// Reversed by the owner on 2026-09-14: the shopper-facing size selector is
+// back on the centred pager, so forwarding it is required rather than
+// forbidden. It adds no startup weight -- PaginationControls already imports
+// PageSizeSelect statically for every admin list, and the storefront pager
+// travels in the product-grid chunk, not the shell.
+assert.match(catalogPagination, /\n\s+onPageSizeChange=\{onPageSizeChange\}/, 'public catalog pagination should forward the shopper page-size handler')
+assert.doesNotMatch(catalogPagination, /\n\s+editablePageSizeInput=/, 'the storefront must not offer a free-text page size')
 assert.match(paginationControls, /flex flex-col gap-2[^"]*sm:flex-row/, 'shared pagination should stack on narrow mobile cards and return to one row on larger screens')
 assert.match(viteConfig, /ResetData\.tsx'\)\) return 'backup-reset-tools'/, 'destructive Backup reset panels should have an action-only chunk')
 assert.match(viteConfig, /OtpModal\.tsx'\)\) return 'settings-otp-modal'/, 'Settings OTP setup/disable modal should have an action-only chunk')
@@ -577,7 +602,8 @@ assert.match(viteConfig, /CatalogEditorSurface\.tsx'\)[\s\S]*CatalogImageField\.
 assert.doesNotMatch(viteConfig, /ActionHistoryBar\.tsx'\)\) return 'shared-action-history'/, 'ActionHistoryBar should not create a dedicated first-route action-history asset')
 assert.match(viteConfig, /QuickPreferenceToggles\.tsx'\)\) return 'shared-ui'[\s\S]*PaginationControls\.tsx'\)\) return 'shared-ui'[\s\S]*FilterMenu\.tsx'\)\) return 'shared-ui'[\s\S]*SectionSwitcher\.tsx'\)\) return 'shared-ui'[\s\S]*PageHeader\.tsx'\)\) return 'shared-page-header'[\s\S]*Modal\.tsx'\)\) return 'shared-modal'[\s\S]*if \(normalized\.includes\('\/src\/components\/shared\/'\)\) return 'app-shared'/, 'tiny preference controls should ride the existing shared UI request while later-route shared controls split before the generic app-shared startup chunk')
 assert.doesNotMatch(exportMenu, /import PortalMenu from '\.\/PortalMenu'/, 'ExportMenu should not statically import the portal menu positioning code during startup')
-assert.match(exportMenu, /import\('\.\/PortalMenu'\)\.then\(\(module\) => module\.default\)/, 'ExportMenu should load PortalMenu only on pointer/focus/click intent')
+assert.match(exportMenu, /import \{ useIntentLoadedPortalMenu \} from '\.\/LazyPortalMenu\.tsx'/, 'ExportMenu should share the trigger-stable PortalMenu intent loader')
+assert.match(exportMenu, /onPointerEnter=\{PortalMenu \? undefined : preload\}[\s\S]*onFocus=\{PortalMenu \? undefined : preload\}[\s\S]*onClick=\{PortalMenu \? undefined : requestOpen\}/, 'ExportMenu should prefetch without mounting and mount only after explicit open intent')
 assert.match(exportMenu, /defaultOpen=\{openOnLoad\}/, 'ExportMenu first click should open the menu after the PortalMenu chunk loads')
 assert.doesNotMatch(filterMenu, /import PortalMenu from '\.\/PortalMenu'/, 'FilterMenu should not statically import the portal menu positioning code during route startup')
 assert.match(filterMenu, /import LazyPortalMenu from '\.\/LazyPortalMenu'/, 'FilterMenu should route menu positioning through the intent-loaded wrapper')
@@ -596,7 +622,7 @@ assert.doesNotMatch(filterMenu, /ActiveFilterChips/, 'FilterMenu must not surfac
 assert.match(filterMenu, /if \(label\.toLowerCase\(\) === 'back'\) return fallback/, 'FilterMenu should replace accidental Back labels with section-specific labels')
 assert.match(appSelect, /data-app-select-button="true"/, 'AppSelect should expose a stable rounded trigger hook for live visual checks')
 assert.match(appSelect, /data-app-select-selected="true"/, 'AppSelect should expose the selected value for live visual checks')
-assert.match(appSelect, /max-h-\[min\(18rem,calc\(100vh-1rem\)\)\]/, 'AppSelect menus should be viewport-bounded instead of tall square native popups')
+assert.match(appSelect, /max-h-\[min\(18rem,calc\(100\*var\(--app-vh\)_-_1rem\)\)\]/, 'AppSelect menus should be viewport-bounded through the shared --app-vh helper (raw 100vh measures the larger "chrome hidden" viewport on iOS) instead of tall square native popups')
 assert.doesNotMatch(productsHeaderActions, /import PortalMenu from '\.\.\/\.\.\/shared\/PortalMenu'/, 'Products header actions should not load PortalMenu before a manage/export click')
 assert.match(productsHeaderActions, /import LazyPortalMenu from '\.\.\/\.\.\/shared\/LazyPortalMenu'/, 'Products header actions should load PortalMenu through LazyPortalMenu')
 assert.doesNotMatch(productRowParts, /import \{ ThreeDotPortal \} from '\.\.\/\.\.\/shared\/PortalMenu'/, 'Product row actions should not statically load PortalMenu for every first route paint')
@@ -673,8 +699,15 @@ assert.match(pos, /function getProductReadTransport\(\): Promise<typeof import\(
 assert.match(pos, /function getLookupTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/lookupTransport\.ts'\)> \{[\s\S]*import\('\.\.\/\.\.\/api\/lookupTransport\.ts'\)[\s\S]*const \{ getCategories \} = await getLookupTransport\(\)/, 'POS category options should use the narrow lookup transport instead of the full window.api registry')
 assert.match(pos, /let contactReadTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)> \| null = null[\s\S]*function getContactReadTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)>/, 'POS contact reads should lazy-load the narrow contact read transport after the delayed option gate')
 assert.match(pos, /let contactWriteTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/contactWriteTransport\.ts'\)> \| null = null[\s\S]*function getContactWriteTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactWriteTransport\.ts'\)>/, 'POS quick contact creates should lazy-load the narrow contact write transport on add intent')
-assert.match(pos, /let portalTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/portalTransport\.ts'\)> \| null = null[\s\S]*function getPortalTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/portalTransport\.ts'\)>/, 'POS membership lookup should lazy-load the narrow portal transport on membership intent')
-assert.match(pos, /let saleWriteTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/saleWriteTransport\.ts'\)> \| null = null[\s\S]*function getSaleWriteTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/saleWriteTransport\.ts'\)>/, 'POS checkout should lazy-load the narrow sale write transport only on Done intent')
+assert.match(pos, /async function lookupPosMembership\(membershipNumber: string\): Promise<MembershipInfo \| null> \{\s*const \{ lookupCustomerMembership \} = await getContactReadTransport\(\)\s*return lookupCustomerMembership\(membershipNumber\)/, 'POS membership intent should lazy-load the focused authenticated contact read transport')
+assert.match(pos, /function getContactReadTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)> \{\s*if \(!contactReadTransportPromise\) contactReadTransportPromise = import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)/, 'membership reads should share the lazy contact transport promise without an eager import')
+assert.doesNotMatch(pos, /portalTransport\.ts|lookupPortalMembership|from ['"]\.\.\/\.\.\/api\/contactReadTransport\.ts['"]/, 'POS membership lookup must not load the public portal transport or eagerly import contact reads')
+const membershipLookupTransport = contactReadTransport.match(/export function lookupCustomerMembership\(membershipNumber: string\): Promise<unknown> \{[\s\S]*?\n\}/)?.[0] || ''
+assert.match(membershipLookupTransport, /return apiFetch\('GET', `\/api\/customers\/membership\/\$\{encodeURIComponent\(membershipNumber\.trim\(\)\)\}`\)/, 'membership lookup must use authenticated apiFetch and encode the exact membership ID path segment')
+assert.doesNotMatch(membershipLookupTransport, /readContacts|readLocalContacts|mirror|[Cc]ache|\.catch\(|try\s*\{/, 'membership balances must not use contact-list caches, local mirrors, or swallow authorization and network failures')
+assert.match(pos, /let saleWriteTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)> \| null = null[\s\S]*function getSaleWriteTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)>/, 'v1 checkout/recovery lazy-loads the exact direct transport, never legacy offline enrichment')
+assert.match(pos, /saleWriteTransportPromise = import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)/, 'the versioned transport remains an intent-time dynamic import')
+assert.doesNotMatch(pos, /^import\s+[^\n]*from ['"]\.\.\/\.\.\/api\/salesTransport\.ts['"]/m, 'the direct transport must not become an eager route import')
 assert.doesNotMatch(pos, /api\.getProductBootstrap|api\.searchProducts|api\.getProductFilters|api\.getCategories|api\.getCustomers|api\.getDeliveryContacts|api\.lookupPortalMembership|api\.createCustomer|api\.createDeliveryContact|api\.createSale|getPosApi|missingPosApiMethod/, 'POS product, category, customer, delivery, membership reads, quick contact creates, and sale checkout should not wake app-api-methods during catalog, option, add, or checkout flows')
 assert.doesNotMatch(contactReadTransport, /import .*['"]\.\/(?:localMirrors|lazyLocalDb)\.ts['"]/, 'POS contact reads should not statically import mirror or IndexedDB helpers')
 assert.match(contactReadTransport, /await import\('\.\/lazyLocalDb\.ts'\)/, 'POS contact read offline fallback should load IndexedDB only after network failure')
@@ -765,8 +798,14 @@ assert.match(inventory, /function loadUserReadTransport\(\): Promise<UserReadTra
 assert.match(inventory, /function loadBranchTransport\(\): Promise<BranchTransportModule>[\s\S]*function loadDashboardTransport\(\): Promise<DashboardTransportModule>[\s\S]*function loadRfidTransport\(\): Promise<RfidTransportModule>/, 'Inventory route should own narrow lazy loaders for branch, dashboard, and RFID transport paths')
 assert.match(inventory, /function loadInventoryExportModule\(\): Promise<InventoryExportModule>[\s\S]*import\('\.\/inventoryExport\.ts'\)/, 'Inventory route should lazy-load export assembly only when an export action is requested')
 assert.doesNotMatch(inventory, /from '\.\/inventoryExport\.ts'/, 'Inventory route should not statically import the export assembly chunk')
-assert.match(inventoryExport, /export async function exportInventoryPackage/, 'Inventory export chunk should own package report assembly')
-assert.match(inventoryExport, /buildStandaloneReportHtml/, 'Inventory export chunk should own standalone HTML report generation')
+// The package/summary/stats exports were retired with the Inventory products
+// slice (Part 562); the assertions that used to pin exportInventoryPackage and
+// buildStandaloneReportHtml here were the only thing still "using" them, which
+// is the opposite of what a chunk-shape gate is for. What the chunk must own
+// now is the movements row builder and nothing heavier.
+assert.match(inventoryExport, /export function collectInventoryMovementRows/, 'Inventory export chunk should own the movements row builder Inventory.tsx feeds to the shared export dialog')
+assert.doesNotMatch(inventoryExport, /export (?:async )?function (?:exportInventory|collectInventorySummaryRows|collectInventoryStatsRows)/, 'Inventory export chunk should not reintroduce the retired summary/stats/package exports no UI can reach')
+assert.doesNotMatch(inventoryExport, /buildStandaloneReportHtml|buildReportPackageFiles|downloadZipFilesAsync|import\('\.\.\/\.\.\/utils\/exportPackage'\)/, 'Inventory export chunk should no longer pull the HTML report and zip package assembly')
 assert.match(viteConfig, /'assets\/inventory-export-',/, 'Inventory export chunk should be excluded from eager modulepreload')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/components\/inventory\/inventoryExport\.ts'\)\) return 'inventory-export'/, 'Inventory export assembly should have a named intent chunk')
 assert.doesNotMatch(inventory, /window\.api|\(window as Window & \{ api\?:/, 'Inventory route should not wake the broad window.api registry for reads, stats, or stock mutations')
@@ -838,7 +877,9 @@ assert.doesNotMatch(apiMethods, /from '\.\/localMirrors\.ts'/, 'legacy API regis
 assert.match(apiMethods, /export const searchProducts = async \(params = \{\}\) => \{[\s\S]*loadProductReadTransport\(\)[\s\S]*searchProductsRequest\(params\)/, 'legacy product search should delegate through lazy product read transport')
 assert.doesNotMatch(apiMethods, /function buildOfflineSaleReceiptNumber|async function queueOfflineSale|async function syncPendingSalesQueue/, 'legacy API registry should not keep a duplicate offline-sale queue implementation')
 assert.match(lazyPortalMenu, /import\('\.\/PortalMenu'\)\.then\(\(module\) => module\.default\)/, 'LazyPortalMenu should dynamically import PortalMenu')
-assert.match(lazyPortalMenu, /onClickCapture=\{\(event\) => \{[\s\S]*loadPortalMenu\(true\)/, 'LazyPortalMenu should open the menu from the first click after the chunk loads')
+assert.match(lazyPortalMenu, /if \(openRequestedRef\.current\) setPortalMenu\(\(\) => component\)/, 'prefetch completion should mount PortalMenu only after explicit open intent')
+assert.match(lazyPortalMenu, /onMouseEnter=\{preload\}[\s\S]*onFocus=\{preload\}[\s\S]*onClickCapture=\{\(event\) => \{[\s\S]*requestOpen\(\)/, 'LazyPortalMenu should preserve hover/focus prefetch and open from the first click')
+assert.match(lazyPortalMenu, /\.catch\(\(error\) => \{[\s\S]*promiseRef\.current = null/, 'a failed lazy import should clear the promise so the next intent can retry')
 assert.match(portalMenu, /defaultOpen\?: boolean[\s\S]*const \[open, setOpen\] = useState\(defaultOpen\)/, 'PortalMenu should support first-click lazy mount opening')
 assert.match(portalMenu, /useEffect\(\(\) => \{[\s\S]*if \(!defaultOpen\) return[\s\S]*setOpen\(true\)[\s\S]*setTimeout\(reposition, 0\)[\s\S]*\}, \[defaultOpen, reposition\]\)/, 'PortalMenu should honor delayed defaultOpen changes from LazyPortalMenu first-click loads')
 assert.match(app, /catalog: asPageModule\(\(\) => import\('\.\/components\/catalog\/CatalogPage\.tsx'\)\)/, 'catalog should remain route-lazy so deferred preload still loads on navigation')
@@ -941,9 +982,9 @@ assert.doesNotMatch(sales, /SALES_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\
 assert.match(sales, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Sales should have an explicit post-ready action-history gate')
 assert.match(sales, /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user \}\)/, 'Sales should not fetch server action history during first route load')
 assert.match(sales, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/, 'Sales should enable history immediately after the first sales data load settles')
-assert.match(sales, /const pendingLoadRef = useRef<\{ silent: boolean \} \| null>\(null\)/, 'Sales should retain one trailing load when filters change during an in-flight request')
+assert.match(sales, /type PendingSalesLoad = \{ silent: boolean \}[\s\S]*const pendingLoadRef = useRef<PendingSalesLoad \| null>\(null\)/, 'Sales should retain one trailing load when filters change during an in-flight request')
 assert.match(sales, /if \(loadPromiseRef\.current\) \{[\s\S]{0,350}pendingLoadRef\.current = pending[\s\S]{0,100}return loadPromiseRef\.current/, 'Sales should queue the latest filter/search request instead of dropping it behind the current request')
-assert.match(sales, /const pending = pendingLoadRef\.current[\s\S]{0,350}queueMicrotask\([\s\S]{0,250}latestLoadRef\.current \|\| loadSales/, 'Sales should dispatch the queued request with the latest callback after the current request settles')
+assert.match(sales, /const pending = resolvePendingSalesLoad\(pendingLoadRef\.current, completedSuccessfully\)[\s\S]{0,350}queueMicrotask\([\s\S]{0,250}latestLoadRef\.current \|\| loadSales/, 'Sales should dispatch the queued request with the latest callback only after the current request succeeds')
 assert.match(salesTransport, /`sales:stats:\$\{query\}`/, 'Sales aggregate cache keys must include the active search/date/status query')
 assert.match(sales, /const salesStatsRequestRef = useRef\(0\)[\s\S]*beginTrackedRequest\(salesStatsRequestRef\)[\s\S]*isTrackedRequestCurrent\(salesStatsRequestRef, requestId\)/, 'Sales aggregate responses must not let a slower previous filter overwrite the latest result')
 assert.doesNotMatch(returns, /RETURNS_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Returns background history should not add a fixed post-load delay')
@@ -993,9 +1034,17 @@ assert.match(
 
 assert.match(contactsShared, /LoadingWatchdog/, 'shared contact table should use retryable loading watchdog UI')
 assert.match(customers, /CustomerFormModal/, 'customer list should lazy-load the customer form modal')
-assert.match(customerFormModal, /generateCustomerMembershipNumber/, 'customer form should consume shared membership number generation')
-assert.match(customerMembershipNumber, /const CUSTOMER_MEMBERSHIP_PREFIX = 'LCMN'/, 'customer membership helper should keep the LCMN prefix')
-assert.match(customerFormModal, /Regenerate/, 'customer form should let staff regenerate membership numbers')
+// Membership numbers are minted by the SERVER (cloudflare/src/lib/
+// membershipNumber.ts): new IDs gap-fill the house `LC-#####` sequence,
+// checked for collisions against the database. The form
+// used to pre-fill a browser-invented random LCMN- number, which -- because
+// the create route only mints when the submitted field is blank -- always won
+// over the server allocator. It must never compose one again.
+assert.doesNotMatch(customerFormModal, /generateCustomerMembershipNumber/, 'the customer form must not compose a membership number in the browser')
+assert.doesNotMatch(customerMembershipNumber, /export function generateCustomerMembershipNumber/, 'the membership helper must not mint numbers -- display and validation only')
+assert.match(customerMembershipNumber, /const CUSTOMER_MEMBERSHIP_PREFIX = 'LC'/, 'customer membership helper should retain legacy LC- display compatibility')
+assert.match(customerFormModal, /CUSTOMER_MEMBERSHIP_PLACEHOLDER/, 'customer form should show a display-only membership placeholder')
+assert.match(customerFormModal, /membership_number_auto_hint/, 'the add-customer form should say the number is assigned on save')
 assert.match(loaders, /const DEFAULT_LOADER_TIMEOUT_MS = 20_000/, 'loader timeout should give slow pages enough time before failing first render')
 assert.match(appContext, /RUNTIME_RECOVERY_SESSION_KEY/, 'runtime mismatch recovery should guard against reload loops')
 assert.match(appContext, /window\.location\.replace\(url\.toString\(\)\)/, 'runtime mismatch should heal through a hard reload once')
@@ -1249,27 +1298,47 @@ assert.match(
 )
 assert.match(
   actionHistory,
-  /withLoaderTimeout\(\s*async \(\) => \(await loadActionHistoryTransport\(\)\)\.getActionHistory\(scope, Math\.max\(3, limit\), \{[\s\S]*'Action history',\s*ACTION_HISTORY_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*async \(\) => \{\s*const api = await loadActionHistoryTransport\(\)\s*assertActorReadScope\(authority\)\s*return api\.getActionHistory\(scope, Math\.max\(3, limit\), \{[\s\S]*'Action history',\s*ACTION_HISTORY_LOAD_TIMEOUT_MS,\s*\)/,
   'action history server reads should timeout slow history requests',
 )
 assert.match(
   actionHistory,
-  /if \(!isTrackedRequestCurrent\(historyRequestRef, requestId\)\) return[\s\S]*const record = result as \{ items\?: ServerHistoryItem\[\] \} \| null[\s\S]*const items = Array\.isArray\(record\?\.items\) \? record\.items : \[\][\s\S]*setServerItems\(items\)/,
-  'action history should ignore stale history responses before updating rows',
+  /if \(!isActorReadScopeCurrent\(authority\) \|\| !isTrackedRequestCurrent\(historyRequestRef, requestId\) \|\| actorScopeRef.current !== requestScope\) return[\s\S]*const record = result as \{ items\?: ServerHistoryItem\[\] \} \| null[\s\S]*const items = Array\.isArray\(record\?\.items\) \? record\.items : \[\][\s\S]*setServerItems\(items\)/,
+  'action history should ignore superseded requests and previous-actor responses before updating rows or cache',
 )
 assert.match(
   actionHistory,
-  /if \(!isAdmin \|\| userFilter === 'all'\) writeCachedServerItems\(scope, items\)/,
+  /const requestScope = actorScope[\s\S]*const requestId = beginTrackedRequest\(historyRequestRef\)/,
+  'history reads must capture both actor scope and request generation before starting',
+)
+assert.match(
+  actionHistory,
+  /function cacheKeyFor\(scope: string, authority: ActorReadScope\): string \{\s*return actorReadStorageKey\(`\$\{ACTION_HISTORY_CACHE_PREFIX\}\$\{scope\}`, authority\)/,
+  'instant-paint history cache keys must include opaque actor/session/server authority',
+)
+assert.match(
+  actionHistory,
+  /useState<ServerHistoryItem\[\]>\(\(\) => enabled \? readCachedServerItems\(actorScope, readScope\) : \[\]\)/,
+  'enabled history should hydrate the current authority cache synchronously before the delayed refresh',
+)
+assert.match(
+  actionHistory,
+  /if \(cachedScopeRef.current === actorScope\) return[\s\S]*setUndoStack\(\[\]\)[\s\S]*setRedoStack\(\[\]\)[\s\S]*setServerItems\(enabled \? readCachedServerItems\(actorScope, readScope\) : \[\]\)/,
+  'an actor/scope change must replace cached history and remove the previous actor undo closures',
+)
+assert.match(
+  actionHistory,
+  /if \(!isAdmin \|\| userFilter === 'all'\) writeCachedServerItems\(actorScope, items, authority\)/,
   'action history should cache only the unfiltered default view so a per-user admin filter never leaks into the next mount\'s instant-paint cache',
 )
 assert.match(
   actionHistory,
-  /withLoaderTimeout\(\s*async \(\) => \(await loadActionHistoryTransport\(\)\)\.getActionHistoryUsers\(\),\s*'Action history users',\s*ACTION_HISTORY_USERS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*async \(\) => \{\s*const api = await loadActionHistoryTransport\(\)\s*assertActorReadScope\(authority\)\s*return api\.getActionHistoryUsers\(\)\s*\},\s*'Action history users',\s*ACTION_HISTORY_USERS_TIMEOUT_MS,\s*\)/,
   'action history admin user options should timeout slow user reads',
 )
 assert.match(
   actionHistory,
-  /if \(!isTrackedRequestCurrent\(usersRequestRef, requestId\)\) return[\s\S]*setUserOptions\(Array\.isArray\(rows\) \? rows : \[\]\)/,
+  /if \(actorScopeRef.current !== actorScope \|\| !isActorReadScopeCurrent\(authority\) \|\| !isTrackedRequestCurrent\(usersRequestRef, requestId\)\) return[\s\S]*setUserOptions\(Array\.isArray\(rows\) \? rows : \[\]\)/,
   'action history should ignore stale user option responses before updating options',
 )
 assert.doesNotMatch(
@@ -1309,7 +1378,7 @@ assert.match(
 )
 assert.match(
   dashboard,
-  /import \{ getAnalytics, getDashboard, getDashboardStartup \} from '\.\.\/\.\.\/api\/dashboardTransport\.ts'/,
+  /import \{ getAnalytics, getDashboard, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardStockAlertState \} from '\.\.\/\.\.\/api\/dashboardTransport\.ts'/,
   'dashboard should use its narrow transport instead of the full app-api-methods registry',
 )
 assert.doesNotMatch(
@@ -1354,7 +1423,7 @@ assert.doesNotMatch(
 )
 assert.match(
   dashboard,
-  /withLoaderTimeout\(\(\) => getDashboardApi\(\)\.getDashboard\(\), label, DASHBOARD_SUMMARY_TIMEOUT_MS\)/,
+  /withLoaderTimeout\([\s\S]{0,180}getDashboardApi\(\)\.getDashboard\(\{ startDate: start, endDate: end, granularity \}\)[\s\S]{0,80}DASHBOARD_SUMMARY_TIMEOUT_MS/,
   'dashboard summary should timeout slow summary reads',
 )
 assert.match(
@@ -1424,8 +1493,8 @@ assert.match(
 assert.doesNotMatch(branches, /BRANCHES_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Branches background history should not add a fixed post-load delay')
 assert.match(
   branches,
-  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user \}\)/,
-  'Branches should not fetch server action history during first route load',
+  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user, scope: 'branches' \}\)/,
+  'Branches should load its server-owned transfer history scope only after first route load',
 )
 assert.match(
   branches,
@@ -1498,15 +1567,16 @@ assert.match(
   /const SALES_USER_OPTIONS_TIMEOUT_MS = 8000/,
   'sales user filter options should use an explicit timeout',
 )
+const salesReadImport = sales.match(/import\s*\{([^}]+)\}\s*from ['"]\.\.\/\.\.\/api\/salesTransport\.ts['"]/)?.[1]
+const salesReadBindings = (salesReadImport || '').split(',').map(binding => binding.trim())
+for (const binding of ['getSales as fetchSales', 'getSalesStats as fetchSalesStats', 'getSalesStatsStrip']) {
+  assert.ok(salesReadBindings.includes(binding), `sales route-start ${binding} must come from the focused sales transport; additional bulk imports must not hide a missing read`)
+}
+assert.match(sales, /import\s*\{\s*getUsers as fetchUsers\s*\}\s*from ['"]\.\.\/\.\.\/api\/userReadTransport\.ts['"]/, 'sales user filter reads must keep the focused user transport')
 assert.match(
   sales,
-  /import \{ getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip \} from '\.\.\/\.\.\/api\/salesTransport\.ts'[\s\S]*import \{ getUsers as fetchUsers \} from '\.\.\/\.\.\/api\/userReadTransport\.ts'/,
-  'sales route-start reads should use focused sales and user transports instead of app-api-methods',
-)
-assert.match(
-  sales,
-  /withLoaderTimeout\(\(\) => fetchSales\(params\), 'Sales', 20000\)/,
-  'sales list should timeout slow reads through the focused sales transport',
+  /withLoaderTimeout\([\s\S]{0,160}fetchSales\(params, \{ signal: controller\.signal \}\)[\s\S]{0,120}'Sales',[\s\S]{0,80}SALES_LIST_REQUEST_TIMEOUT_MS/,
+  'sales list should share one deadline with the focused transport and pass its abort signal',
 )
 assert.match(
   sales,
@@ -1700,10 +1770,16 @@ assert.match(
   /const defaultTransferDestinationBySourceId = useMemo\(\(\) => \{/,
   'inventory should precompute default transfer destinations instead of scanning branches for every transfer draft',
 )
-assert.match(
+// The export chunk no longer resolves branch labels at all: InventoryExportScope
+// went with the retired summary/stats/package exports, and the surviving
+// movements row builder reads group.branchSummary, which Inventory already
+// resolved through branchesById. So the indexed-map property is asserted where
+// it now lives (above, on Inventory) rather than through a scope callback the
+// export chunk no longer receives.
+assert.doesNotMatch(
   inventoryExport,
-  /scope\.getBranchLabel\(scope\.branchFilter, scope\.branchFilter\)/,
-  'inventory export chunk should resolve branch labels through the indexed branch map supplied by Inventory',
+  /InventoryExportScope|getBranchLabel/,
+  'inventory export chunk should not take a scope object back, branch labels are resolved before the rows reach it',
 )
 assert.match(
   inventory,
@@ -1817,8 +1893,23 @@ assert.match(
 )
 assert.match(
   newReturnModal,
-  /function loadSalesTransport\(\): Promise<SalesTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)[\s\S]*async function searchReturnSales\(options: \{ limit: number \}\): Promise<SaleRow\[]>[\s\S]*getSales\(options\)/,
-  'customer return sale search should use the focused sales transport instead of the broad API registry',
+  /function loadSalesTransport\(\): Promise<SalesTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)[\s\S]*async function loadSaleById\(saleId: number \| string\): Promise<SaleRow \| null>[\s\S]*getSales\(\{ id: saleId \}\)/,
+  'customer return sale read should use the focused sales transport, by exact id, instead of the broad API registry',
+)
+assert.match(
+  newReturnModal,
+  /async function lookupReceiptSuggestions\(query: string, limit: number\): Promise<ReceiptSuggestion\[]>[\s\S]*lookupReturnReceipts\(\{ query, limit \}\)/,
+  'the receipt typeahead should go through the focused returns-read transport too',
+)
+assert.match(
+  newReturnModal,
+  /const RECEIPT_SUGGEST_TIMEOUT_MS = 8000/,
+  'the receipt typeahead should use an explicit timeout',
+)
+assert.match(
+  newReturnModal,
+  /const RECEIPT_SUGGEST_DEBOUNCE_MS = 250/,
+  'the receipt typeahead should be debounced rather than firing a request per keystroke',
 )
 assert.match(
   newReturnModal,
@@ -1827,8 +1918,13 @@ assert.match(
 )
 assert.match(
   newReturnModal,
-  /withLoaderTimeout\(\s*\(\) => searchReturnSales\(\{ limit: 500 \}\),\s*'Return sale search',\s*RETURN_SALE_SEARCH_TIMEOUT_MS,\s*\)/,
-  'customer return sale search should timeout slow sales reads',
+  /withLoaderTimeout\(\s*\(\) => loadSaleById\(saleId\),\s*'Return sale search',\s*RETURN_SALE_SEARCH_TIMEOUT_MS,\s*\)/,
+  'customer return sale read should timeout slow sales reads',
+)
+assert.match(
+  newReturnModal,
+  /withLoaderTimeout\(\s*\(\) => lookupReceiptSuggestions\(query, RECEIPT_SUGGEST_LIMIT\),\s*'Receipt lookup',\s*RECEIPT_SUGGEST_TIMEOUT_MS,\s*\)/,
+  'the receipt typeahead should timeout slow lookups',
 )
 assert.match(
   newReturnModal,
@@ -1852,12 +1948,12 @@ assert.match(
 )
 assert.match(
   editReturnModal,
-  /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)[\s\S]*async function updateReturnRequest\(id: number \| string, payload: ReturnUpdatePayload\): Promise<unknown>[\s\S]*updateReturn\(id, payload\)/,
+  /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)[\s\S]*async function prepareReturnRequest\(id: number \| string, payload: ReturnUpdatePayload\): Promise<PreparedReturnUpdateRequest>[\s\S]*prepareReturnUpdateRequest\(id, payload\)[\s\S]*async function updateReturnRequest\(id: number \| string, payload: PreparedReturnUpdateRequest\): Promise<unknown>[\s\S]*submitReturnUpdateRequest\(id, payload\)/,
   'customer return update should use the focused returns transport instead of the broad API registry',
 )
 assert.match(
   editReturnModal,
-  /const payload: ReturnUpdatePayload = \{[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(ret\.id, payload\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/,
+  /const payload: ReturnUpdatePayload = \{[\s\S]*const prepared = activePendingRequest\?\.body \|\| freezeDirectMutationBody\(await prepareReturnRequest\(ret\.id,[\s\S]*savePendingDirectMutation\('return-edit'[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(ret\.id, prepared\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/,
   'customer return update should timeout slow return writes through the focused returns transport',
 )
 assert.doesNotMatch(
@@ -1886,8 +1982,8 @@ assert.match(
 )
 assert.match(
   loyaltyPointsPage,
-  /import \{ getCustomers as getLoyaltyCustomers \} from '\.\.\/\.\.\/api\/contactReadTransport\.ts'/,
-  'loyalty customer points should use the focused contact read transport instead of the broad window.api registry',
+  /import \{ getCustomerPointSummaries \} from '\.\.\/\.\.\/api\/contactsTransport\.ts'/,
+  'loyalty customer points should use the focused points-summary transport -- never the whole customers list, never the broad window.api registry',
 )
 assert.match(
   loyaltyPointsPage,
@@ -1901,8 +1997,8 @@ assert.doesNotMatch(
 )
 assert.match(
   loyaltyPointsPage,
-  /withLoaderTimeout\(\(\) => getLoyaltyCustomers\(\), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS\)/,
-  'loyalty customer points should timeout slow customer reads',
+  /withLoaderTimeout\(\(\) => getCustomerPointSummaries\(\{[\s\S]*?membership_only: 1,[\s\S]*?sort: 'points',[\s\S]*?top: LOYALTY_TOP_CUSTOMERS,[\s\S]*?\}\), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS\)/,
+  'loyalty customer points should ask the server for the ten-row board under an explicit timeout, not download every customer',
 )
 assert.match(
   loyaltyPointsPage,
@@ -1961,7 +2057,7 @@ assert.match(
 )
 assert.match(
   returns,
-  /withLoaderTimeout\(\s*\(\) => updateReturnRequest\(snapshot\.id as number \| string, \{[\s\S]*\}\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/,
+  /const submitReturnHistoryRequest = useCallback\(async \(returnId:[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(returnId, body\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)[\s\S]*const restoreReturnSnapshot = useCallback[\s\S]*const current = await fetchReturnDetail\(snapshot\.id\)[\s\S]*expected_updated_at: currentUpdatedAt,[\s\S]*savePendingHistoryRequest\(snapshot\.id as number \| string, body, historyContext\)[\s\S]*await submitReturnHistoryRequest\(snapshot\.id as number \| string, body\)/,
   'return history undo/redo restore should timeout slow return writes',
 )
 assert.doesNotMatch(
@@ -1989,16 +2085,13 @@ assert.match(
   /const returnScopeSummary = useMemo\(\(\) => \{[\s\S]{0,200}for \(const ret of searchFiltered\)[\s\S]{0,200}summary\.supplierRows\.push\(ret\)[\s\S]{0,100}summary\.customerRows\.push\(ret\)/,
   'returns stats should split customer/supplier rows and totals in one pass, from the search-only (not type-filtered) view so switching the type filter does not zero out the other stat tiles',
 )
-// Sort moved onto the SortChip (unified listSort), so the badge counts only
-// true filters now -- direction is no longer one of them, and neither is
-// scope (customer vs supplier is a mandatory one-of-two VIEW with no
-// neutral, so being on the supplier view must not light up "Filters (1)").
-// year/month moved into the always-visible StatsRangeRow (no longer in-menu
-// filters), so the badge now counts only the true menu filters: type + group.
+// Scope (customer vs supplier) is a mandatory view with no neutral option,
+// while type, grouping, and sort all expose a default plus deviations inside
+// FilterMenu. The badge must count exactly those three behavioral deviations.
 assert.match(
   returns,
-  /countActiveFlags\(\[typeFilter !== 'all', returnGroupMode !== 'time'\]\)/,
-  'returns active filter count should avoid temporary filtered boolean arrays',
+  /const activeFilterCount = useMemo\(\s*\(\) => countActiveFlags\(\[\s*typeFilter !== 'all',\s*returnGroupMode !== 'time',\s*returnSortSpec\.field !== 'date' \|\| returnSortSpec\.direction !== 'desc',\s*\]\),\s*\[returnGroupMode, returnSortSpec\.direction, returnSortSpec\.field, typeFilter\],\s*\)/,
+  'returns active filter count should cover type, grouping, and non-default sort without counting the mandatory scope view',
 )
 assert.doesNotMatch(
   returns,
@@ -2085,10 +2178,22 @@ assert.match(
   /if \(publicView\) \{[\s\S]*getCatalogApi\(\)\.getPortalBootstrap\(\)[\s\S]*const meta = bootstrapResult\?\.meta \|\| null[\s\S]*const catalogPage = bootstrapResult\?\.catalog \|\| null/,
   'public catalog first-load should use the single bootstrap payload for config, metadata, and first products',
 )
+// Still one request for a first visit -- but the skip is now a QUESTION, not
+// a constant: bootstrapPageSizeMatchesViewer returns true whenever the
+// viewer has no stored 20/50/100 choice, which is every first visit and
+// everyone who never touched the pager. A viewer who DID choose gets one
+// search instead of the skip, because the bootstrap page was cut at the
+// store's size and is not the page they asked for -- that is the one request
+// that answers them, not a duplicate of one that already did.
 assert.match(
   catalogPage,
-  /skipNextBootstrappedProductSearchRef\.current = true[\s\S]*if \(publicView && skipNextBootstrappedProductSearchRef\.current\) \{[\s\S]*skipNextBootstrappedProductSearchRef\.current = false[\s\S]*return undefined/,
+  /skipNextBootstrappedProductSearchRef\.current = bootstrapPageSizeMatchesViewer\([\s\S]*if \(publicView && skipNextBootstrappedProductSearchRef\.current\) \{[\s\S]*skipNextBootstrappedProductSearchRef\.current = false[\s\S]*return undefined/,
   'public catalog should not duplicate the bootstrapped first product page with an immediate search request',
+)
+assert.match(
+  catalogPagination,
+  /if \(!viewerPageSize\) return true/,
+  'a viewer with no stored page size must keep the single-request first load',
 )
 assert.doesNotMatch(
   catalogPage,
@@ -2225,8 +2330,8 @@ assert.match(
 )
 assert.match(
   receipt,
-  /const exportReceiptVariant = async \(printTools: ReceiptPrintModule[\s\S]*printTools\.downloadReceiptImage[\s\S]*printTools\.printReceipt[\s\S]*printTools\.openReceiptPdf[\s\S]*const printTools = await loadReceiptPrintModule\(\)[\s\S]*exportReceiptVariant\(printTools/,
-  'receipt export actions should use the lazy-loaded print tools for image, print, and PDF flows',
+  /const exportReceiptVariant = async \(printTools: ReceiptPrintModule[\s\S]*printTools\.downloadReceiptImage[\s\S]*printTools\.printReceipt[\s\S]*const printTools = await loadReceiptPrintModule\(\)[\s\S]*exportReceiptVariant\(printTools/,
+  'receipt export actions should use the lazy-loaded print tools for the image and print flows',
 )
 assert.match(
   usersPage,
@@ -2526,8 +2631,10 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.testSyncServer\(url\),\s*'Test sync server',\s*SERVER_SYNC_TEST_TIMEOUT_MS,\s*\)/,
   'server connection test should timeout slow sync test actions',
 )
-assert.match(serverPage, /const timer = setInterval\(fetchServerLog, 3000\)/, 'server diagnostics refresh should still poll after startup')
-assert.doesNotMatch(serverPage, /fetchServerLog\(\)\s*const timer = setInterval\(fetchServerLog, 3000\)/, 'server diagnostics should not issue a duplicate immediate debug log read during first route load')
+// 15s (not the old 3s): this is an occasional diagnostics read, not a feed
+// anything depends on staying seconds-fresh -- see the interval's own comment.
+assert.match(serverPage, /const timer = setInterval\(fetchServerLog, 15000\)/, 'server diagnostics refresh should still poll after startup, at the debloated 15s interval')
+assert.doesNotMatch(serverPage, /fetchServerLog\(\)\s*const timer = setInterval\(fetchServerLog, 15000\)/, 'server diagnostics should not issue a duplicate immediate debug log read during first route load')
 assert.match(serverPage, /const SERVER_ONLINE_CHECK_READY_DELAY_MS = 250/, 'server online count should wait briefly after first route-ready work without adding a fake 1.8s delay')
 assert.match(serverPage, /window\.setTimeout\(check, SERVER_ONLINE_CHECK_READY_DELAY_MS\)[\s\S]*setInterval\(check, 10000\)/, 'server online count should not issue a duplicate health probe during first route load')
 // SETTINGS_OTP_STATUS_TIMEOUT_MS / getSettingsApi().otpStatus: removed along
@@ -3073,7 +3180,7 @@ assert.match(
 )
 assert.match(
   filesPage,
-  /withLoaderTimeout\(\(\) => filesApi\.getFiles\(\{[\s\S]{0,180}includeMeta: true,[\s\S]{0,80}\}\), 'Files library', FILES_LIBRARY_LOAD_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => filesApi\.getFiles\(\{[\s\S]{0,180}includeMeta: true,[\s\S]{0,140}\}, \{[\s\S]{0,80}searchGroup: 'files:library-assets'/,
   'files page library should timeout slow file reads',
 )
 assert.doesNotMatch(
@@ -3290,7 +3397,7 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => lookupPosPortalMembership\(membershipNumber\),\s*label,\s*POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => lookupPosMembership\(membershipNumber\),\s*label,\s*POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
   'POS membership lookup should timeout slow membership reads',
 )
 assert.match(
@@ -3308,18 +3415,16 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => createPosSale\(saleData\),\s*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => createPosSale\(frozen, checkoutScope\),\s*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/,
   'POS checkout should timeout slow sale creation',
 )
+const membershipLoadHandler = pos.match(/const loadMembershipInfo = useCallback\(async \([\s\S]*?\}, \[posCopy\]\)/)?.[0] || ''
+assert.match(membershipLoadHandler, /catch \(error\) \{\s*if \(!isTrackedRequestCurrent\(membershipRequestRef, requestId\)\) return null\s*setMembershipInfo\(null\)\s*setMembershipError\(getErrorMessage\(error, posCopy\('Membership lookup failed'\)\)\)\s*return null/, 'failed authenticated membership lookup must clear the stale balance, show the error, and return no member while ignoring superseded requests')
+assert.doesNotMatch(membershipLoadHandler, /membershipInfoRef|return membershipInfo\b|setMembershipError\(''\)[\s\S]*catch[\s\S]*setMembershipError\(''\)/, 'authorization and network failures must not reuse an earlier membership balance or report success')
 assert.match(
   pos,
-  /membershipInfoRef\.current\?\.customer\?\.membership_number[\s\S]{0,260}return membershipInfoRef\.current/,
-  'POS membership lookup should keep the last confirmed membership panel visible through a transient same-member refresh failure',
-)
-assert.match(
-  pos,
-  /withLoaderTimeout\(\s*\(\) => loadPosCustomers\(\),\s*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
-  'POS customer option reads should timeout slow customer requests',
+  /withLoaderTimeout\(\s*\(\) => searchPosCustomers\(search\),\s*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
+  'POS customer option reads should be a bounded server search under a timeout, never a whole-table download',
 )
 assert.match(
   pos,
@@ -3348,8 +3453,16 @@ assert.match(
 )
 assert.match(
   pos,
-  /if \(!isActive \|\| !contactOptionsReady\) return[\s\S]*!customerOptionsLoadedRef\.current[\s\S]*loadCustomers\('POS customer options on demand'\)[\s\S]*!deliveryOptionsLoadedRef\.current[\s\S]*loadDeliveryContacts\('POS delivery options on demand'\)/,
-  'POS should keep customer and delivery reads off the catalog path and avoid refetching loaded option lists',
+  /if \(!isActive \|\| !contactOptionsReady\) return[\s\S]*!deliveryOptionsLoadedRef\.current[\s\S]*loadDeliveryContacts\('POS delivery options on demand'\)/,
+  'POS should keep delivery reads off the catalog path and avoid refetching a loaded option list',
+)
+// Customers are NOT a load-once option list any more: the picker asks the
+// server the same question the cashier is typing, debounced, so the till
+// never downloads the customer table (see POS_CUSTOMER_SEARCH_DEBOUNCE_MS).
+assert.match(
+  pos,
+  /if \(!isActive \|\| !contactOptionsReady\) return undefined\s*\n\s*if \(!showCustomer && !showAddCustomer\) return undefined[\s\S]*setTimeout\([\s\S]*loadCustomers\('POS customer search', search\)[\s\S]*\}, delay\)/,
+  'POS customer reads should stay behind an open customer section and a debounced search term',
 )
 assert.match(
   pos,
@@ -3384,15 +3497,32 @@ assert.doesNotMatch(
   /const qty = \(\(\) => \{[\s\S]*branchFilterId != null[\s\S]*branch_stock/,
   'POS branch filtering should not rescan branch_stock inside a quantity IIFE',
 )
+// POS no longer answers this itself: the same walk decides the cart line's
+// branch and the option sheet's, and it had to learn that a sale may not be
+// rung at the warehouse, so it moved into the shared pure module. The cost
+// characteristic being pinned here is unchanged -- ONE pass over
+// branch_stock, no map, no sort -- it is just pinned where the code now is.
+const productSheetState = fs.readFileSync(new URL('../src/components/pos/productSheetState.ts', import.meta.url), 'utf8')
 assert.match(
   pos,
-  /const pickBestBranchId = useCallback\(\(product: ProductRecord\) => \{[\s\S]*let bestBranchId: number \| null = null[\s\S]*for \(const entry of product\?\.branch_stock \|\| \[\]\)[\s\S]*if \(preferredBranchId != null && branchId === preferredBranchId\) return branchId[\s\S]*if \(qty > bestQuantity\)/,
-  'POS branch selection should choose a branch in one pass without mapping and sorting stock rows',
+  /const pickBestBranchId = useCallback\(\s*\n?\s*\(product: ProductRecord\) => resolveSaleBranch\(/,
+  'POS branch selection should delegate to the shared resolver rather than carry a second copy of the walk',
+)
+// Scope the check to the resolver's own body: an unbounded [\s\S]* runs to
+// the end of the module and would answer for code that is not this walk.
+const resolveSaleBranchBody = productSheetState
+  .split('export function resolveSaleBranch(')[1]
+  ?.split('\n}')[0] ?? ''
+assert.ok(resolveSaleBranchBody, 'productSheetState must still export resolveSaleBranch')
+assert.match(
+  resolveSaleBranchBody,
+  /let best: number \| null = null[\s\S]*for \(const entry of Array\.isArray\(product\?\.branch_stock\)[\s\S]*if \(quantity > bestQuantity\)/,
+  'branch selection should choose a branch in one pass without mapping and sorting stock rows',
 )
 assert.doesNotMatch(
-  pos,
-  /const pickBestBranchId = useCallback\(\(product: ProductRecord\) => \{[\s\S]*stockRows\.sort/,
-  'POS branch selection should not sort branch_stock rows just to find the largest quantity',
+  resolveSaleBranchBody,
+  /\.sort\(|\.map\(/,
+  'branch selection should not sort or map branch_stock rows just to find the largest quantity',
 )
 assert.match(
   pos,

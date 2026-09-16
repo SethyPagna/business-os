@@ -77,18 +77,19 @@ await runTest('same product name with different sku/price/supplier still merges 
   assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
 })
 
-await runTest('same product name and a different COST plans a separate child row', () => {
-  // Cost is what was actually spent. It is a detail precisely so it can
-  // never be silently replaced by another row's figure.
+await runTest('same product name and a different COST merges into the existing row', () => {
+  // Cost stopped being a detail on Sep 4 2026: only a different barcode
+  // forks a child row, so a re-buy at a new price adds stock to the row
+  // that is already there instead of duplicating the article.
   const analysis = analyzeProductImportRows([
     { name: 'Serum', cost_price_usd: '9', stock_quantity: '2' },
   ], [
     { id: 10, name: 'Serum', cost_price_usd: 6, created_at: '2026-01-01' },
   ])
 
-  assert.equal(analysis.rows[0]._planned_action, 'create_variant')
-  assert.equal(analysis.rows[0]._parent_id, 10)
-  assert.equal(analysis.summary.variantCount, 1)
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
+  assert.equal(analysis.rows[0]._target_product_id, 10)
+  assert.equal(analysis.summary.variantCount, 0)
 })
 
 await runTest('same name + same barcode + same cost merges even when the SELLING price differs', () => {
@@ -137,20 +138,24 @@ await runTest('different product name with same SKU or barcode becomes editable 
   assert.deepEqual(analysis.conflicts[0].conflictFields, ['sku', 'barcode'])
 })
 
-await runTest('same product name with same barcode still exposes identifier handling', () => {
-  // Different cost keeps these apart (cost is a detail), so the shared
-  // barcode still has to be surfaced as an identifier conflict rather than
-  // silently duplicated onto two rows.
+await runTest('same product name with same barcode merges, differing cost and supplier notwithstanding', () => {
+  // Same name AND same barcode is the same row under the Sep-4-2026 rule.
+  // Cost no longer splits it and supplier never did, so there is nothing to
+  // fork and no identifier conflict to resolve -- the barcode is not being
+  // claimed by a second row, it is the thing that matched.
   const analysis = analyzeProductImportRows([
     { name: 'Serum', barcode: 'BC-1', cost_price_usd: '9', supplier: 'Supplier B', stock_quantity: '2' },
   ], [
     { id: 20, name: 'Serum', barcode: 'BC-1', cost_price_usd: 6, supplier: 'Supplier A', created_at: '2026-01-01' },
   ])
 
-  assert.equal(analysis.rows[0]._planned_action, 'create_variant')
-  assert.equal(analysis.rows[0]._identifier_conflict_mode, 'clear_imported')
-  assert.equal(analysis.conflicts[0].conflictType, 'same_name_identifier')
-  assert.deepEqual(analysis.conflicts[0].conflictFields, ['barcode'])
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
+  assert.equal(analysis.rows[0]._target_product_id, 20)
+  assert.equal(analysis.rows[0]._identifier_conflict_mode, '', 'nothing to clear: the barcode is what matched, not a second row claiming it')
+  // Every merge is still surfaced for review -- it changes a product that
+  // already exists -- but it is surfaced as a merge, not as a fork.
+  assert.equal(analysis.conflicts[0].plannedAction, 'merge_stock')
+  assert.equal(analysis.summary.variantCount, 0)
 })
 
 await runTest('same-file duplicate barcode rows become review conflicts', () => {
@@ -210,7 +215,7 @@ await runTest('duplicate imported same-name rows avoid unsafe temporary row ids'
   assert.equal(analysis.rows.some((row) => String(row._target_product_id || '').startsWith('row:')), false)
 })
 
-await runTest('a differing DETAIL (barcode or cost) still plans a separate child row', () => {
+await runTest('a differing barcode forks a child row; a differing cost does not', () => {
   const analysis = analyzeProductImportRows([
     { name: 'Cream', barcode: 'BC-1', selling_price_usd: '3', stock_quantity: '1' },
     { name: 'Cream', barcode: 'BC-2', selling_price_usd: '3', stock_quantity: '1' },
@@ -218,8 +223,8 @@ await runTest('a differing DETAIL (barcode or cost) still plans a separate child
   ], [])
   const actions = analysis.rows.map((row) => row._planned_action)
   assert.equal(actions[0], 'new')
-  assert.notEqual(actions[1], 'merge_stock', 'a different barcode must not merge -- barcode is a detail')
-  assert.notEqual(actions[2], 'merge_stock', 'a different cost must not merge -- cost is a detail')
+  assert.notEqual(actions[1], 'merge_stock', 'a different barcode must not merge -- the barcode is the only detail')
+  assert.equal(actions[2], 'merge_stock', 'same barcode, new cost: one row, cost averaged (Sep 4 2026 rule)')
 })
 
 await runTest('same imported name groups rows into detail subgroups for review', () => {
@@ -375,16 +380,68 @@ await runTest('analyzeProductImportText surfaces both a duplicate-header and a b
   assert.equal(analysis.warnings.some((warning) => /Column 4 has no header/.test(warning)), true)
 })
 
-await runTest('VIP price: reads the vip_price_* header, honours the legacy special_price_* header, and defaults blank to 0 not the selling price', () => {
+await runTest('Wholesale price: reads wholesale_price_*, lands the legacy vip_price_*/special_price_* headers there too, prefers the explicit header, and defaults blank to 0 not the selling price', () => {
   const analysis = analyzeProductImportRows([
-    { name: 'Vip New', selling_price_usd: '12', vip_price_usd: '8', stock_quantity: '1' },
-    { name: 'Vip Legacy', selling_price_usd: '12', special_price_usd: '7', stock_quantity: '1' },
-    { name: 'Vip Blank', selling_price_usd: '12', stock_quantity: '1' },
+    { name: 'Wholesale New', selling_price_usd: '12', wholesale_price_usd: '9', stock_quantity: '1' },
+    { name: 'Vip Legacy', selling_price_usd: '12', vip_price_usd: '8', stock_quantity: '1' },
+    { name: 'Special Legacy', selling_price_usd: '12', special_price_usd: '7', stock_quantity: '1' },
+    { name: 'Both Headers', selling_price_usd: '12', wholesale_price_usd: '9', vip_price_usd: '8', special_price_usd: '7', stock_quantity: '1' },
+    { name: 'Wholesale Blank', selling_price_usd: '12', stock_quantity: '1' },
   ], [])
   const byName = (name: string) => analysis.rows.find((row) => String(row.name) === name)
-  assert.equal(Number(byName('Vip New')!.special_price_usd), 8, 'the new vip_price_usd header maps into special_price_usd')
-  assert.equal(Number(byName('Vip Legacy')!.special_price_usd), 7, 'the legacy special_price_usd header still works')
-  assert.equal(Number(byName('Vip Blank')!.special_price_usd), 0, 'a blank VIP price is 0, NOT the selling price (12) -- defaulting to selling was destroying real VIP prices on re-save')
+  assert.equal(Number(byName('Wholesale New')!.wholesale_price_usd), 9, 'the canonical wholesale_price_usd header maps into wholesale_price_usd')
+  // Migration 0111's ruling: that column always held wholesale numbers, so an
+  // old sheet headed "VIP price" is a wholesale sheet -- dropping it would lose
+  // the data on every re-import of a file exported before the rename.
+  assert.equal(Number(byName('Vip Legacy')!.wholesale_price_usd), 8, 'the legacy vip_price_usd header lands in wholesale_price_usd')
+  assert.equal(Number(byName('Special Legacy')!.wholesale_price_usd), 7, 'the legacy special_price_usd header lands in wholesale_price_usd')
+  assert.equal(Number(byName('Both Headers')!.wholesale_price_usd), 9, 'an explicit wholesale_price_usd header wins over both legacy spellings')
+  assert.equal(Number(byName('Wholesale Blank')!.wholesale_price_usd), 0, 'a blank wholesale price is 0, NOT the selling price (12) -- defaulting to selling was destroying real prices on re-save')
+})
+
+await runTest('a padded sheet barcode merges into the bare stored barcode', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Padded Serum', barcode: '0748485110011', stock_quantity: '4' },
+  ], [
+    { id: 9, name: 'Padded Serum', barcode: '748485110011', stock_quantity: 1 },
+  ])
+
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
+  assert.equal(analysis.rows[0]._target_product_id, 9)
+  assert.equal(analysis.summary.newCount, 0)
+})
+
+await runTest('a padded barcode owned by another product stays a visible barcode conflict', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Other Serum', barcode: '0748485110011', stock_quantity: '4' },
+  ], [
+    { id: 9, name: 'Padded Serum', barcode: '748485110011', stock_quantity: 1 },
+  ])
+
+  assert.equal(analysis.conflicts.length, 1)
+  assert.equal(analysis.conflicts[0].conflictFields.includes('barcode'), true)
+})
+
+await runTest('same-file padding twins share one detail signature', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Twin Serum', barcode: '0748485110011', stock_quantity: '2' },
+    { name: 'Twin Serum', barcode: '748485110011', stock_quantity: '3' },
+  ], [])
+
+  assert.equal(analysis.rows[0]._detail_signature, analysis.rows[1]._detail_signature)
+  assert.notEqual(analysis.rows[1]._planned_action, 'create_variant')
+})
+
+await runTest('valid UPC-E does not collide with a seven-digit internal code', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Internal Code Serum', barcode: '01234565', stock_quantity: '2' },
+  ], [
+    { id: 9, name: 'Internal Code Serum', barcode: '1234565', stock_quantity: 1 },
+  ])
+
+  assert.equal(analysis.rows[0]._planned_action, 'create_variant')
+  assert.equal(analysis.rows[0]._target_product_id, null)
+  assert.equal(analysis.conflicts[0].conflictFields.includes('barcode'), false)
 })
 
 if (failed > 0) {

@@ -1,6 +1,7 @@
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { getCurrentUserContext } from './actorQuery.ts'
+import { assertActorSessionDispatchAllowed, captureActorReadScope } from './actorReadScope.ts'
 import {
   apiFetch,
   getSyncServerUrl,
@@ -19,6 +20,19 @@ type FileListResponse = {
   page_size?: unknown
   hasMore?: unknown
   has_more?: unknown
+  physicalStorage?: unknown
+  physical_storage?: unknown
+}
+
+export type PhysicalFileStorageSummary = {
+  totalBytes: number
+  fileCount: number
+  countsByType: {
+    image: number
+    video: number
+    document: number
+    file: number
+  }
 }
 
 type FileListMeta = {
@@ -27,13 +41,25 @@ type FileListMeta = {
   page: number
   pageSize: number
   hasMore: boolean
+  physicalStorage: PhysicalFileStorageSummary | null
 }
 
 type FileListParams = QueryParams & {
   includeMeta?: boolean
+  // Response-shape control used by existing callers. Keep this separate from
+  // `includeStorageMeta`: callers that need the paginated response must not
+  // accidentally receive a bare items array while skipping storage totals.
+  includeStorageMeta?: boolean
   page?: number
   pageSize?: number
   limit?: number
+}
+
+type FileListRequestOptions = {
+  // The Library assets page owns this group. Pickers and the rewire chooser
+  // deliberately omit it so a keystroke in one surface cannot abort a read
+  // another surface still needs.
+  searchGroup?: string
 }
 
 export type UploadProgress = {
@@ -83,12 +109,29 @@ function normalizeFileListResult(result: unknown, params: FileListParams): unkno
   const items = Array.isArray(response?.items) ? response.items : (Array.isArray(result) ? result : [])
   if (!params.includeMeta) return items
 
+  const rawPhysical = response?.physicalStorage || response?.physical_storage
+  const physical = rawPhysical && typeof rawPhysical === 'object'
+    ? rawPhysical as Record<string, unknown>
+    : null
+  const rawCounts = physical?.countsByType && typeof physical.countsByType === 'object'
+    ? physical.countsByType as Record<string, unknown>
+    : {}
   return {
     items,
     total: Number(response?.total || items.length || 0),
     page: Number(response?.page || params.page || 1),
     pageSize: Number(response?.pageSize || response?.page_size || params.pageSize || params.limit || items.length || 0),
     hasMore: Boolean(response?.hasMore || response?.has_more),
+    physicalStorage: physical ? {
+      totalBytes: Math.max(0, Number(physical.totalBytes ?? physical.total_bytes) || 0),
+      fileCount: Math.max(0, Number(physical.fileCount ?? physical.file_count) || 0),
+      countsByType: {
+        image: Math.max(0, Number(rawCounts.image) || 0),
+        video: Math.max(0, Number(rawCounts.video) || 0),
+        document: Math.max(0, Number(rawCounts.document) || 0),
+        file: Math.max(0, Number(rawCounts.file) || 0),
+      },
+    } : null,
   }
 }
 
@@ -116,22 +159,24 @@ function parseJsonResponse(text: string): { data?: unknown; error?: string; mess
   }
 }
 
-export async function getFiles(params: FileListParams = {}): Promise<unknown[] | FileListMeta> {
+export async function getFiles(params: FileListParams = {}, options: FileListRequestOptions = {}): Promise<unknown[] | FileListMeta> {
   const query = buildQueryString(params)
   const result = await route(
     `files:get:${query}`,
-    () => apiFetch('GET', appendQuery('/api/files', query)),
+    (signal) => apiFetch('GET', appendQuery('/api/files', query), undefined, undefined, { signal }),
     // The media library has no offline mirror. Returning [] on a failed
     // server read makes a real error look like an empty successful library,
     // which clears the visible upload list until a manual refresh. Let the
     // caller keep its current list and show the actual error instead.
     null,
+    { searchGroup: options.searchGroup },
   )
   if (result == null) throw new Error('Files library is unavailable')
   return normalizeFileListResult(result, params)
 }
 
 export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<unknown> {
+  const scope = captureActorReadScope('files')
   const { file, signal, onProgress, compressOptions } = payload
   if (!(file instanceof File)) throw new Error('Choose a file first')
   requireLiveServerWrite('files:upload', {
@@ -206,6 +251,7 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
       signal.addEventListener('abort', abortListener, { once: true })
     }
 
+    try { assertActorSessionDispatchAllowed(scope) } catch (error) { finish(reject, error); return }
     xhr.send(form)
   })
 }
@@ -227,13 +273,14 @@ export function deleteFileAsset(id: string | number, payload: Record<string, unk
 // comment), so this never breaks an existing product image, avatar, or
 // portal-setting reference to the file.
 // 8.1 (Part 418): the drill-in behind the list's usage counts -- which
-// products/gallery rows/avatars/settings reference this asset, by name.
+// products/gallery rows/avatars/promotions/settings reference this asset, by name.
 export type FileUsageDetail = {
   id: number
   public_path: string
   covers: Array<{ id: number; name: string | null; barcode: string | null }>
   gallery: Array<{ product_id: number; name: string | null; sort_order: number | null }>
   avatars: Array<{ id: number; name: string | null; username: string | null }>
+  promotions?: Array<{ id: number; title: string | null; is_active: number | null }>
   settings: string[]
 }
 
@@ -271,6 +318,7 @@ export function renameFileAsset(id: string | number, originalName: string): Prom
 }
 
 export async function uploadUserAvatar({ filePath, fileName, file }: AvatarUploadPayload): Promise<unknown> {
+  const scope = captureActorReadScope('users')
   if (file instanceof File) {
     const { userId, userName } = getCurrentUserContext()
     const asset = await uploadFileAsset({ file, userId, userName }) as { public_path?: string } | null
@@ -294,6 +342,7 @@ export async function uploadUserAvatar({ filePath, fileName, file }: AvatarUploa
   form.append('image', compressed, compressed.name || fileName || 'avatar.jpg')
 
   const base = getSyncServerUrl().replace(/\/$/, '')
+  assertActorSessionDispatchAllowed(scope)
   const res = await fetch(`${base}/api/users/avatar-upload`, {
     method: 'POST',
     headers: { 'bypass-tunnel-reminder': 'true' },

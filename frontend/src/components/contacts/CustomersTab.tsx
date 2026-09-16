@@ -10,6 +10,8 @@ import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
+import List from 'lucide-react/dist/esm/icons/list.js'
+import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
@@ -40,11 +42,12 @@ import {
   serializeContactOptions as serializeStoredContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
-import { generateCustomerMembershipNumber } from './customerMembershipNumber'
+import { readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateMatch } from './contactDuplicates'
+import { effectivePermissions, type PermissionUser } from '../../utils/permissions.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
-type ContactModal = 'form' | 'import' | 'detail' | 'purchases' | null
+type ContactModal = 'form' | 'import' | 'gender-restoration' | 'detail' | 'purchases' | null
 type SortDirection = 'asc' | 'desc'
 type CustomerGroupMode = 'time' | 'alphabet'
 type CustomerPayload = Partial<CustomerRow> & {
@@ -59,6 +62,14 @@ type CustomerPayload = Partial<CustomerRow> & {
   // contacts.ts's CUSTOMERS.columns comment for the full reasoning.
   created_at?: string | null
   __rename_cascade?: 'carry' | 'record_only'
+  // Set on every create call that replays a snapshot verbatim (redo of a
+  // create, undo of a delete -- single or bulk): tells contacts.ts's POST
+  // route that a colliding membership_number is a gap-fill race (the slot
+  // this customer used to own may have been re-minted to someone else in
+  // the undo window), not a manual-entry typo, so it should mint a fresh
+  // number instead of the flat 400 a normal Add Customer submit still gets.
+  // See membershipNumber.ts's header for the full decision.
+  isUndoRestore?: boolean
 }
 
 interface CustomerMutationResult {
@@ -68,7 +79,7 @@ interface CustomerMutationResult {
   data?: { id?: unknown } | null
 }
 
-interface AppUser {
+interface AppUser extends NonNullable<PermissionUser> {
   id?: string | number | null
   name?: string | null
 }
@@ -210,6 +221,31 @@ function getApiListPayload(value: unknown): ApiListResponse | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as ApiListResponse : null
 }
 
+// P4-4b item 6: handleSave's edit path used to call load({ silent: true })
+// after every update -- a full re-search of the current
+// filtered/sorted/paginated page (plus the loyalty-points and portal-
+// account joins load() runs per row) just to reflect one row changing.
+// updateCustomer's PUT response already IS that one row (`SELECT * FROM
+// customers WHERE id = @id`, see routes/contacts.ts), so this patches it
+// into place instead. It deliberately spreads the response OVER the
+// existing row rather than replacing it outright: the write response is a
+// bare table row and carries none of the computed fields load() joins in
+// (points_balance/points_earned/points_redeemed/points_rewarded/
+// points_deducted, portal_account) -- those keys are simply absent from
+// `patch`, so the spread leaves the previously-loaded values in place
+// instead of clobbering them with `undefined`. Returns null (asking the
+// caller to fall back to a full load) when the id isn't present in the
+// currently-loaded page at all, since there's no row to patch.
+function patchCustomerRow(rows: CustomerRow[], id: number | string, patch: Record<string, unknown>): CustomerRow[] | null {
+  let matched = false
+  const next = rows.map((row) => {
+    if (Number(row.id) !== Number(id)) return row
+    matched = true
+    return { ...row, ...patch }
+  })
+  return matched ? next : null
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
@@ -232,10 +268,23 @@ function tr(t: TranslateFn, key: string, fallback: string): string {
 }
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'customers-contact-import')
+const CustomerGenderRestorationModal = lazyRetry(() => import('./CustomerGenderRestorationModal'), 'customers-gender-restoration')
 const CustomerFormModal = lazyRetry(() => import('./CustomerFormModal'), 'customers-form-modal')
 const CustomerPurchasesReportModal = lazyRetry(() => import('./CustomerPurchasesReportModal'), 'customers-purchases-report')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'customers-export-options')
+// The customer accounts-receivable ledger (migration 0094) -- the customer-side
+// mirror of the supplier AP ledger, and the customer half of
+// docs/DATA-VISIBILITY-AND-CREDIT-AUDIT.md's "who owes the shop" view. It was
+// written, tested and inventoried but never mounted, so nothing in the app
+// could reach it. Its own lazy chunk, fetched only when the Invoices section
+// is opened, the same way SuppliersTab mounts SupplierInvoicesSection.
+const ArInvoicesSection = lazyRetry(() => import('./ArInvoicesSection'), 'customers-ar-invoices')
 const CUSTOMER_MUTATION_TIMEOUT_MS = 12000
+
+// Top-level section of the Customers tab: the customer directory (rows) OR the
+// receivables ledger -- one shown at a time, never stacked in the same scroll,
+// matching the Suppliers tab's Directory / Invoices chips.
+type CustomerSection = 'directory' | 'invoices'
 
 function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabProps) {
   const { can, user } = useApp()
@@ -248,9 +297,26 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   // 'block'.
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
+  const canBulkContacts = can('contacts', 'bulk')
+  const canBulkContactsRef = useRef(canBulkContacts)
+  canBulkContactsRef.current = canBulkContacts
+  const canImportContacts = canBulkContacts && can('contacts', 'import')
+  const canImportContactsRef = useRef(canImportContacts)
+  canImportContactsRef.current = canImportContacts
   // Client-side export gated by the modeled 'contacts:export' action, matching
   // the Suppliers/Delivery tabs and the Products precedent.
   const canExportContacts = can('contacts', 'export')
+  const canViewFinancialHistory = can('contacts', 'financial_history')
+  // This evidence-backed repair is intentionally narrower than Import:
+  // administrator identity AND the Full contacts tier are both required.
+  // Review-tier edit can change names only, so can('contacts','edit') alone
+  // is not sufficient for this gender-only bulk restoration.
+  const permission = effectivePermissions(user)
+  const canRestoreCustomerGender = permission.isAdmin
+    && permission.getPermissionTier('contacts') === 'full'
+    && permission.can('contacts', 'edit')
+  const canRestoreCustomerGenderRef = useRef(canRestoreCustomerGender)
+  canRestoreCustomerGenderRef.current = canRestoreCustomerGender
 
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -260,6 +326,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   const saveInFlightRef = useRef(false)
   const deleteInFlightRef = useRef(false)
   const bulkDeleteInFlightRef = useRef(false)
+  const [section, setSection] = useState<CustomerSection>('directory')
   const [customers, setCustomers] = useState<CustomerRow[]>([])
   const [search, setSearch] = useState('')
   const appliedInitialSearchRef = useRef<string | undefined>(undefined)
@@ -269,6 +336,11 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     setSearch(initialSearch)
   }, [initialSearch])
   const [modal, setModal] = useState<ContactModal>(null)
+  useEffect(() => {
+    if (canViewFinancialHistory) return
+    setSection('directory')
+    setModal((current) => current === 'purchases' ? 'detail' : current)
+  }, [canViewFinancialHistory])
   const [selected, setSelected] = useState<CustomerRow | null>(null)
   const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
   const renameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
@@ -401,7 +473,26 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     [collapsedSections, filteredSections],
   )
 
-  const { selectedIds, setSelectedIds, toggleOne, selectAllProp, selectionModeActive, getRowLongPressState } = useContactSelection(visibleCustomers)
+  const contactSelection = useContactSelection(visibleCustomers)
+  const { setSelectedIds, getRowLongPressState } = contactSelection
+  const selectedIds = canBulkContacts ? contactSelection.selectedIds : new Set<number>()
+  const selectionModeActive = canBulkContacts && contactSelection.selectionModeActive
+  const toggleOne = (id: unknown) => {
+    if (!canBulkContactsRef.current) return
+    contactSelection.toggleOne(id)
+  }
+  const selectAllProp = {
+    ...contactSelection.selectAllProp,
+    onChange: (checked: boolean) => {
+      if (!canBulkContactsRef.current) return
+      contactSelection.selectAllProp.onChange(checked)
+    },
+  }
+  useEffect(() => {
+    if (canImportContacts) return
+    setSelectedIds((current) => current.size ? new Set<number>() : current)
+    setModal((current) => current === 'import' ? null : current)
+  }, [canImportContacts, setSelectedIds])
   // H1+X5 (Part 402): exports go through the shared options dialog.
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
@@ -497,6 +588,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   const isSectionFullySelected = (ids: Array<number | string> = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
   const isSectionPartiallySelected = (ids: Array<number | string> = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
   const toggleSectionSelection = (ids: Array<number | string>, checked: boolean) => {
+    if (!canBulkContactsRef.current) return
     ids.forEach((id) => {
       const numericId = Number(id)
       const isSelected = selectedIds.has(numericId)
@@ -522,6 +614,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     userId: user?.id,
     userName: user?.name,
     __rename_cascade: 'carry',
+    // Every caller of buildCustomerPayload replays an original snapshot
+    // (undo/redo, not a fresh manual entry) -- see the type's own comment.
+    // Harmless on the update call sites (PUT ignores it); on the create
+    // call sites it lets a gap-fill race on the replayed membership_number
+    // fall back to a fresh mint instead of a dead-end 400.
+    isUndoRestore: true,
   }), [user?.id, user?.name])
 
   const runCustomerMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<CustomerMutationResult> => (
@@ -637,7 +735,9 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       notify(tr(t, 'name_required', 'Name required'), 'error')
       return
     }
-    if (!String(form.membership_number || '').trim()) {
+    // Creating: a blank number is correct -- the server mints the next one in
+    // the LC- house sequence. Editing: an existing customer must keep one.
+    if (selected && !String(form.membership_number || '').trim()) {
       finishSingleAction(saveInFlightRef)
       notify(tr(t, 'membership_number_required', 'Membership number is required'), 'error')
       return
@@ -720,11 +820,52 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       }
       setModal(null)
       setSelected(null)
-      await load({ silent: true, label: 'Customers after save' })
+      // P4-4b item 6: an edit's PUT response already IS the updated row, so
+      // patch it into place instead of re-running the whole filtered/
+      // sorted/paginated search (with its loyalty-points/portal-account
+      // joins) just to reflect one row changing. A create's correct
+      // position on that same server-sorted/paginated list can't be
+      // determined from the response alone (it may land on a different
+      // page or sort slot entirely), so creates still take the full load()
+      // -- same "patch only when the target position is already known"
+      // rule productStockAdjustPatchNotRefetch.test.ts pins for Products.tsx.
+      // Falls back to the full load() if the id somehow isn't present in
+      // the currently-loaded page (patchCustomerRow returns null).
+      if (selected && result && typeof result === 'object') {
+        const patched = patchCustomerRow(customers, selected.id, result as Record<string, unknown>)
+        if (patched) {
+          setCustomers(patched)
+        } else {
+          await load({ silent: true, label: 'Customers after save' })
+        }
+      } else {
+        await load({ silent: true, label: 'Customers after save' })
+      }
+      return { success: true }
     } catch (error: unknown) {
+      const duplicateCheck = readContactDuplicateDecisionError(error)
+      if (duplicateCheck) return { duplicateDecisionRequired: duplicateCheck }
       notify(getErrorMessage(error, 'Failed'), 'error')
+      return { success: false }
     } finally {
       finishSingleAction(saveInFlightRef)
+    }
+  }
+
+  const handleUseExisting = async (match: ContactDuplicateMatch) => {
+    try {
+      const data = await withLoaderTimeout(
+        () => getCustomerApi().getCustomers({ ids: [String(match.id)] }),
+        'Load existing customer',
+        12000,
+      )
+      const existing = normalizeCustomerRows(data).find((customer) => Number(customer.id) === Number(match.id))
+      if (!existing) throw new Error('The existing customer could not be loaded')
+      setSelected(existing)
+      setModal('detail')
+      resolveContactDuplicateSyncError(match)
+    } catch (error) {
+      notify(getErrorMessage(error, tr(t, 'contact_duplicate_existing_load_failed', 'Could not load the existing record. Try again.')), 'error')
     }
   }
 
@@ -768,7 +909,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
+    if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
     if (!confirm(`Delete ${selectedIds.size} customer(s)?`)) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
@@ -793,6 +934,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
         actionHistory.pushAction({
           label: `Delete ${deletedCount} customer${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
+            if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot: CustomerRow) => {
               const result = await runCustomerMutation(() => getCustomerApi().createCustomer({
                 name: snapshot.name || '',
@@ -803,6 +945,10 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                 notes: snapshot.notes || '',
                 userId: user?.id,
                 userName: user?.name,
+                // See CustomerPayload's isUndoRestore comment: this replays
+                // each deleted customer's own membership_number verbatim, so
+                // a gap-fill race on that freed slot must re-mint, not 400.
+                isUndoRestore: true,
               }), 'Restore deleted customers')
               return { restoredId: Number(result?.id || result?.data?.id || 0) }
             })
@@ -811,6 +957,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             await load({ silent: true, label: 'Customers restore deleted' })
           },
           redo: async () => {
+            if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
             const redoRun = await runConcurrentTasks(idsToDelete, async (id: number) => (
               runCustomerMutation(() => getCustomerApi().deleteCustomer(id), 'Redo bulk customer delete')
@@ -831,8 +978,43 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     }
   }
 
+  const sectionChips: Array<{ key: CustomerSection; label: string; icon: typeof List }> = [
+    { key: 'directory', label: tr(t, 'customer_directory', 'Directory'), icon: List },
+    ...(canViewFinancialHistory ? [{ key: 'invoices' as const, label: tr(t, 'invoices', 'Invoices'), icon: Receipt }] : []),
+  ]
+
   return (
     <div className="flex flex-col gap-3">
+      {/* Top-level section chips: the customer Directory (rows) OR the
+          receivables ledger, one shown at a time -- the same compact one-row
+          chip shape the Suppliers tab uses for Directory / Invoices, so the
+          two contact tabs read the same way. */}
+      <div className="flex items-center gap-2 overflow-x-auto">
+        <div className="inline-flex flex-nowrap rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
+          {sectionChips.map((chip) => {
+            const Icon = chip.icon
+            const isActive = section === chip.key
+            return (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => setSection(chip.key)}
+                aria-pressed={isActive}
+                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${isActive ? 'bg-white text-blue-600 shadow dark:bg-gray-900 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+              >
+                <Icon className="h-3.5 w-3.5" /> {chip.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {canViewFinancialHistory && section === 'invoices' ? (
+        <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{tr(t, 'loading', 'Loading...')}</div>}>
+          <ArInvoicesSection t={t} />
+        </Suspense>
+      ) : (
+      <>
       {/* Manage (Import + Export folded into one dropdown, same pattern
           Products.tsx uses) / History / Add Customer -- History before
           Manage per the ordering used on Products. Used to be four equal-
@@ -841,6 +1023,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           button's label at narrow widths. */}
       <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} summaryMode="compact" t={t} className="min-w-0 flex-1" showLabel dense />
+        {(canImportContacts || canExportContacts || canRestoreCustomerGender) ? (
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName="min-w-0 flex-1"
@@ -857,7 +1040,13 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             </button>
           )}
           items={([
-            { label: tr(t, 'import_contacts', 'Import'), onClick: () => setModal('import'), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+            ...(canImportContacts ? [{ label: tr(t, 'import_contacts', 'Import'), onClick: () => { if (!canImportContactsRef.current) return; setModal('import') }, color: 'blue' as const, icon: <Download className="h-4 w-4 shrink-0" /> }] : []),
+            ...(canRestoreCustomerGender ? [{
+              label: tr(t, 'customer_gender_restore', 'Restore customer gender'),
+              onClick: () => { if (!canRestoreCustomerGenderRef.current) return; setModal('gender-restoration') },
+              color: 'orange' as const,
+              icon: <Settings2 className="h-4 w-4 shrink-0" />,
+            }] : []),
             ...(canExportContacts ? [{
               label: tr(t, 'export', 'Export'),
               color: 'green',
@@ -884,6 +1073,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             }] : []),
           ] as PortalMenuItem[])}
         />
+        ) : null}
         <button
           className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
           onClick={() => { setSelected(null); setModal('form') }}
@@ -904,7 +1094,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           while scrolling a long list) pins. No separate select-all row to
           include here: ContactTable renders its own selectAll control
           inside the table header via the `selectAll` prop below. */}
-      <div className="sticky top-2 z-30 -mx-1 flex min-w-0 items-center gap-2 bg-gray-50/95 pb-2 pt-1 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 flex min-w-0 items-center gap-2 bg-gray-50 pb-2 pt-1 dark:bg-gray-900 sm:mx-0">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <SearchInput
             id="customer-search"
@@ -926,7 +1116,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
               {tr(t, 'retry', 'Retry')}
             </button>
           ) : null}
-          {selectedIds.size > 0 && canBulkDeleteContacts ? (
+          {canBulkContacts && selectedIds.size > 0 && canBulkDeleteContacts ? (
             <button
               className="btn-secondary whitespace-nowrap text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:cursor-not-allowed disabled:opacity-60"
               onClick={handleBulkDelete}
@@ -1026,7 +1216,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           })
           const rowLongPressState = getRowLongPressState(Number(customerRow.id))
           const rowLongPress = createLongPressHandlers(rowLongPressState, {
-            disabled: selectionModeActive,
+            disabled: !canBulkContacts || selectionModeActive,
             onLongPress: () => {
               if (!selectedIds.has(Number(customerRow.id))) toggleOne(customerRow.id)
             },
@@ -1036,7 +1226,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             <tr
               key={customerRow.id}
               className={`table-row cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(customerRow.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
-              {...(selectionModeActive ? {} : rowLongPress)}
+              {...(canBulkContacts && !selectionModeActive ? rowLongPress : {})}
               onClickCapture={(event) => {
                 // Swallow the ghost click that follows a fired long-press so
                 // entering select mode doesn't also open the detail panel.
@@ -1133,7 +1323,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           })
           const cardLongPressState = getRowLongPressState(Number(customerRow.id))
           const cardLongPress = createLongPressHandlers(cardLongPressState, {
-            disabled: selectionModeActive,
+            disabled: !canBulkContacts || selectionModeActive,
             onLongPress: () => {
               if (!selectedIds.has(Number(customerRow.id))) toggleOne(customerRow.id)
             },
@@ -1150,7 +1340,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
               key={customerRow.id}
               className={`card flex cursor-pointer select-none items-center gap-3 p-3 ${selectedIds.has(Number(customerRow.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}
               onClick={() => handleContactCellClick(customerRow)}
-              {...(selectionModeActive ? {} : cardLongPress)}
+              {...(canBulkContacts && !selectionModeActive ? cardLongPress : {})}
               onClickCapture={(event) => {
                 if (consumeLongPressClick(cardLongPressState)) {
                   event.preventDefault()
@@ -1190,15 +1380,37 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           )
         }}
       />
+      </>
+      )}
 
       {modal === 'form' ? (
         <Suspense fallback={null}>
-          <CustomerFormModal customer={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} />
+          <CustomerFormModal customer={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} />
         </Suspense>
       ) : null}
-      {modal === 'import' ? (
+      {canImportContacts && modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="customer" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Customers after import' })} />
+        </Suspense>
+      ) : null}
+      {canRestoreCustomerGender && modal === 'gender-restoration' ? (
+        <Suspense fallback={null}>
+          <CustomerGenderRestorationModal
+            t={t}
+            notify={notify}
+            user={user}
+            onClose={() => {
+              setModal(null)
+              void Promise.all([
+                load({ silent: true, label: 'Customers after gender restoration' }),
+                actionHistory.refreshServerItems(),
+              ])
+            }}
+            onDone={() => Promise.all([
+              load({ silent: true, label: 'Customers after gender restoration' }),
+              actionHistory.refreshServerItems(),
+            ]).then(() => undefined)}
+          />
         </Suspense>
       ) : null}
       {modal === 'detail' && selected ? (
@@ -1223,7 +1435,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           onDelete={canDeleteContact ? () => handleDelete(selected) : undefined}
           onClose={() => { setModal(null); setSelected(null) }}
           t={t}
-          extraButtons={[{ label: tr(t, 'customer_purchases', 'Purchases'), onClick: () => setModal('purchases') }]}
+          extraButtons={canViewFinancialHistory ? [{ label: tr(t, 'customer_purchases', 'Purchases'), onClick: () => setModal('purchases') }] : []}
         />
       ) : null}
       {exportDialog ? (
@@ -1242,7 +1454,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       ) : null}
       {/* X4: per-customer purchase totals -- the customer leg of the
           per-contact drills (suppliers: D5; couriers: X3). */}
-      {modal === 'purchases' && selected ? (
+      {canViewFinancialHistory && modal === 'purchases' && selected ? (
         <Suspense fallback={null}>
           <CustomerPurchasesReportModal
             customerId={selected.id as number}

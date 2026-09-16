@@ -279,7 +279,7 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
   }
 
   return (
-    <Modal title={tr('inventory_import_title', 'Import Inventory', 'នាំចូលស្តុក')} onClose={onClose} draggable>
+    <Modal title={tr('inventory_import_title', 'Import Inventory', 'នាំចូលស្តុក')} onClose={onClose} draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
       {reviewJob ? (
         <ServerImportReviewScreen
           jobId={reviewJob.id}
@@ -308,7 +308,7 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
           {(['add', 'remove', 'set'] as InventoryImportAction[]).map((action) => {
             const labels: Record<InventoryImportAction, { title: string; hint: string }> = {
               add: {
-                title: tr('inventory_action_add_title', 'Add stock', 'បន្ថែមស្តុក'),
+                title: tr('inventory_action_add_title', 'Add stock', 'បញ្ចូលស្តុក'),
                 hint: tr('inventory_action_add_hint', 'Stock coming in -- new items or more of what you have.', 'ស្តុកចូល'),
               },
               remove: {

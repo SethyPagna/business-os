@@ -17,12 +17,18 @@
 // that into a 501 and leaves the row `open` rather than marking it
 // approved without the real change having happened.
 
-import { getDb, toDbBool } from './db'
+import { getDb } from './db'
 import { audit } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
-import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct } from './productWrites'
+import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct, readProductMoneyPlan } from './productWrites'
 import { branchUpdateStatements } from './branchWrites'
+import { assertCanonicalBranchSetMutationAllowed } from './canonicalBranchIdentity'
+import { getActionTier } from './permissions'
+import { omitUnchangedProductImageFields, productImageFieldsChanged, productImageFieldsChangedResolved, resolveProductImageFields } from './productImagePermission'
+import { parseProductRemovePendingPointer, parseProductRemovePlan, productRemoveApprovalStatements, productRemovePlanDigest,
+  ProductRemoveError, type ProductRemoveOperationRow } from './productDelete'
+import type { SessionUser } from './auth'
 import type { PendingActionRow } from './pendingActions'
 import type { Env } from '../index'
 
@@ -38,6 +44,7 @@ export interface ReviewerInfo {
   name: string | null
 }
 
+export type ReviewApplyOutcome = { pendingActionMarkedAtomically: boolean }
 type Applier = (env: Env, row: PendingActionRow, reviewer: ReviewerInfo) => Promise<void>
 
 const appliers = new Map<string, Applier>()
@@ -48,6 +55,46 @@ function applierKey(section: string, actionType: string, entityType: string): st
 
 function registerApplier(section: string, actionType: string, entityType: string, fn: Applier): void {
   appliers.set(applierKey(section, actionType, entityType), fn)
+}
+
+export class ReviewRequesterPermissionError extends Error {
+  readonly code = 'request_permission_revoked'
+  constructor(message: string) {
+    super(message)
+    this.name = 'ReviewRequesterPermissionError'
+  }
+}
+
+async function loadPendingRequester(env: Env, requestedBy: number | null): Promise<SessionUser | null> {
+  if (requestedBy == null) return null
+  const row = await getDb(env).prepare(`
+    SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
+           r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name
+    FROM users u
+    LEFT JOIN roles r ON r.id = u.role_id
+    WHERE u.id = @id AND u.is_active = 1 AND u.deleted_at IS NULL
+  `).get<SessionUser>({ id: requestedBy })
+  return row ?? null
+}
+
+async function assertPendingProductImagePermission(env: Env, row: PendingActionRow): Promise<void> {
+  const requester = await loadPendingRequester(env, row.requested_by)
+  if (!requester || getActionTier(requester, 'products', 'image') === 'none') {
+    throw new ReviewRequesterPermissionError('The requester no longer has permission to change product images.')
+  }
+}
+
+async function currentProductImages(env: Env, id: number): Promise<{ image_path: string | null; image_gallery: string[] } | null> {
+  const db = getDb(env)
+  const product = await db.prepare('SELECT image_path FROM products WHERE id = @id')
+    .get<{ image_path: string | null }>({ id })
+  if (!product) return null
+  const gallery = await db.prepare(`
+    SELECT image_path FROM product_images
+    WHERE product_id = @id
+    ORDER BY sort_order ASC, id ASC
+  `).all<{ image_path: string }>({ id })
+  return { image_path: product.image_path, image_gallery: gallery.map((entry) => entry.image_path) }
 }
 
 // --- fees / delete / fee -----------------------------------------------
@@ -84,8 +131,13 @@ registerApplier('fees', 'delete', 'fee', async (env, row, reviewer) => {
 // request body the requester originally sent, unchanged since queueing.
 registerApplier('products', 'create', 'product', async (env, row, reviewer) => {
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+  readProductMoneyPlan(body)
+  await resolveProductImageFields(getDb(env), body)
   const name = String(body.name || '').trim()
   if (!name) throw new Error('Pending product create is missing a name')
+  const changesImages = productImageFieldsChanged(body)
+  if (changesImages) await assertPendingProductImagePermission(env, row)
+  else omitUnchangedProductImageFields(body)
   const id = await insertRow(env, 'products', body, { name, is_active: body.is_active == null ? 1 : body.is_active })
 
   const rawBranchId = Number.parseInt(String(body.branch_id ?? ''), 10)
@@ -125,8 +177,29 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer) => {
   const id = row.entity_id
   if (id == null) throw new Error('Pending product update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+  readProductMoneyPlan(body)
+  const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
+    || Object.prototype.hasOwnProperty.call(body, 'image_gallery')
+  if (submittedImageFields) {
+    const current = await currentProductImages(env, id)
+    if (!current) return
+    const changesImages = await productImageFieldsChangedResolved(getDb(env), body, current)
+    if (changesImages) {
+      await assertPendingProductImagePermission(env, row)
+      await resolveProductImageFields(getDb(env), body)
+    } else {
+      omitUnchangedProductImageFields(body)
+    }
+  }
   const changes = await updateRow(env, 'products', id, body)
-  if (!changes) return
+  const appliedGroupRename = readProductMoneyPlan(body)?.group_rename
+  if (appliedGroupRename) await audit(env, reviewer.id, reviewer.name, 'rename', 'product_group', id,
+    { from: appliedGroupRename.from, to: appliedGroupRename.to, rows: appliedGroupRename.members.length })
+  if (!changes && !('image_gallery' in body)) return
+  if (!changes) {
+    const existing = await getDb(env).prepare('SELECT id FROM products WHERE id = @id').get<{ id: number }>({ id })
+    if (!existing) return
+  }
   if ('image_gallery' in body) {
     await syncProductImageGallery(env, id, body.image_gallery)
   }
@@ -191,101 +264,101 @@ registerApplier('inventory', 'update', 'inventory_reason', async (env, row, revi
   await broadcast(env, 'inventory', { action: 'reasons_update' })
 })
 
-// --- branches / create / branch -----------------------------------
-// Mirrors routes/branches.ts's own POST / direct-write branch: the same
-// is_default reassignment + insert, in one atomic db.batch(). No live-state
-// dependency (there's nothing that could have changed since queueing that
-// would make "insert this branch" unsafe), so this replays exactly as-is.
+// Historical create requests must not bypass the fixed two-branch contract
+// when a reviewer approves them after this rule is deployed.
 registerApplier('branches', 'create', 'branch', async (env, row, reviewer) => {
-  const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
-  const name = String(body.name || '').trim()
-  if (!name) throw new Error('Pending branch create is missing a name')
-  const db = getDb(env)
-  // toDbBool, not plain `value ? 1 : 0` -- see its own comment in lib/db.ts.
-  // Was a local re-approximation here that disagreed with routes/
-  // branches.ts's real toDbBool on a string "false"/"0" payload (JS
-  // truthiness treats those strings as truthy); not reachable through
-  // BranchForm.tsx today (it only ever sends real 0/1), but a direct API
-  // call or a future form change could have hit it silently, so switched
-  // to the shared function rather than leave two implementations able to
-  // drift -- same audit that found the products/create/product
-  // branch_stock gap logged in progress.md.
-  const defaultFlag = toDbBool(body.is_default, 0)
-  const activeFlag = toDbBool(body.is_active, 1)
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
-  if (defaultFlag) statements.push({ sql: 'UPDATE branches SET is_default = 0' })
-  statements.push({
-    sql: `INSERT INTO branches (name, location, phone, manager, notes, is_default, is_active, updated_at)
-          VALUES (@name, @location, @phone, @manager, @notes, @is_default, @is_active, CURRENT_TIMESTAMP)`,
-    params: {
-      name,
-      location: body.location || null,
-      phone: body.phone || null,
-      manager: body.manager || null,
-      notes: body.notes || null,
-      is_default: defaultFlag,
-      is_active: activeFlag,
-    },
-  })
-  await db.batch(statements)
-  const created = await db.prepare('SELECT id FROM branches WHERE name = ? ORDER BY id DESC LIMIT 1').get<{ id: number }>([name])
-  await audit(env, reviewer.id, reviewer.name, 'create', 'branch', created?.id ?? null, { name })
-  await broadcast(env, 'branches', { action: 'create', id: created?.id ?? null })
+  void env
+  void row
+  void reviewer
+  assertCanonicalBranchSetMutationAllowed()
 })
 
 // --- branches / update / branch -----------------------------------
-// Mirrors routes/branches.ts's own PUT /:id direct-write branch. A missing
-// row (deleted by some other path since this was queued) is treated as a
-// safe no-op, same reasoning as the fees/products appliers above.
+// Mirrors routes/branches.ts's metadata-only PUT. The current identity is
+// read immediately before the shared atomic guard/write batch.
 registerApplier('branches', 'update', 'branch', async (env, row, reviewer) => {
   const id = row.entity_id
   if (id == null) throw new Error('Pending branch update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
   const db = getDb(env)
-  const current = await db.prepare('SELECT id FROM branches WHERE id = @id').get<{ id: number }>({ id })
-  if (!current) return
-  // Route and review-approved writes share the same cascade: a branch rename
-  // must update all id-linked display snapshots in both paths.
-  await db.batch(branchUpdateStatements(id, body))
-  await audit(env, reviewer.id, reviewer.name, 'update', 'branch', id, { name: body.name })
+  const current = await db.prepare('SELECT id, name, is_active FROM branches WHERE id = @id')
+    .get<{ id: number; name: string; is_active: number }>({ id })
+  if (!current) throw new Error('The branch this pending action targeted no longer exists.')
+  await db.batch(branchUpdateStatements(id, body, current))
+  await audit(env, reviewer.id, reviewer.name, 'update', 'branch', id, { name: current.name })
   await broadcast(env, 'branches', { action: 'update', id })
 })
 
 // --- branches / delete / branch -----------------------------------
-// Mirrors routes/branches.ts's own DELETE /:id direct-write branch -- but,
-// unlike every other applier in this file, it does NOT just trust the
-// payload was safe when it was queued. routes/branches.ts's own delete
-// handler explicitly re-runs these same two checks (not-default, no-stock)
-// itself before queueing, but time can pass before a reviewer approves it,
-// and either check can flip false in the meantime (the branch gets made
-// default, or stock gets transferred back into it). Re-running both here
-// against the CURRENT row -- not the state captured at request time -- and
-// throwing rather than silently deleting is what makes this safe to queue
-// at all; a thrown Error here leaves the pending_actions row 'open'
-// (routes/reviewQueue.ts's approve handler doesn't mark it approved on a
-// thrown error), so the reviewer sees a clear failure instead of a branch
-// silently vanishing while it still holds stock.
+// Historical delete requests are refused at approval time as well.
 registerApplier('branches', 'delete', 'branch', async (env, row, reviewer) => {
-  const id = row.entity_id
-  if (id == null) throw new Error('Pending branch delete is missing its entity id')
-  const db = getDb(env)
-  const branch = await db.prepare('SELECT id, name, is_default FROM branches WHERE id = @id').get<{ id: number; name: string; is_default: number }>({ id })
-  if (!branch) return
-  if (branch.is_default) throw new Error(`Cannot delete "${branch.name}" -- it has since become the default branch. Make another branch the default first, then re-approve.`)
-  const stockCheck = await db.prepare('SELECT SUM(quantity) AS total FROM branch_stock WHERE branch_id = @id AND quantity > 0').get<{ total: number | null }>({ id })
-  if (stockCheck && Number(stockCheck.total) > 0) {
-    throw new Error(`Cannot delete "${branch.name}" -- it now contains ${Math.round(Number(stockCheck.total))} unit(s) of stock. Transfer it out first, then re-approve.`)
-  }
-  await db.batch([
-    { sql: 'DELETE FROM branch_stock WHERE branch_id = @id', params: { id } },
-    { sql: 'DELETE FROM branches WHERE id = @id', params: { id } },
-  ])
-  await audit(env, reviewer.id, reviewer.name, 'delete', 'branch', id, { name: branch.name })
-  await broadcast(env, 'branches', { action: 'delete', id })
+  void env
+  void row
+  void reviewer
+  assertCanonicalBranchSetMutationAllowed()
 })
 
-export async function applyApprovedPendingAction(env: Env, row: PendingActionRow, reviewer: ReviewerInfo): Promise<void> {
+export function productRemovePendingPointer(row: Pick<PendingActionRow, 'payload_json'>): { operation_id: string; plan_digest: string } | null {
+  try { return parseProductRemovePendingPointer(JSON.parse(row.payload_json || 'null')) }
+  catch { return null }
+}
+
+async function applyApprovedProductRemove(
+  env: Env,
+  row: PendingActionRow,
+  reviewer: ReviewerInfo,
+  reviewerUser: SessionUser | undefined,
+): Promise<ReviewApplyOutcome> {
+  const pointer = productRemovePendingPointer(row)
+  if (!pointer) throw new Error('Invalid product removal approval pointer.')
+  // This guard deliberately precedes the operation/idempotency lookup.
+  if (!reviewerUser || getActionTier(reviewerUser, 'products', 'delete') !== 'full') {
+    throw new ReviewRequesterPermissionError('The reviewer does not have full permission to remove products.')
+  }
+  const requester = await loadPendingRequester(env, row.requested_by)
+  if (!requester || getActionTier(requester, 'products', 'delete') === 'none') {
+    throw new ReviewRequesterPermissionError('The requester no longer has permission to remove products.')
+  }
+  const db = getDb(env)
+  const operation = await db.prepare(`SELECT * FROM product_remove_operations
+    WHERE operation_id=@operation AND pending_action_id=@pending`).get<ProductRemoveOperationRow>({ operation: pointer.operation_id, pending: row.id })
+  if (!operation || operation.plan_digest !== pointer.plan_digest || operation.product_id !== row.entity_id
+    || operation.requester_id !== row.requested_by || operation.status !== 'approval_pending') {
+    throw new ProductRemoveError('review_state_conflict', 'The saved product removal approval no longer matches its receipt.')
+  }
+  let plan
+  try { plan = parseProductRemovePlan(JSON.parse(operation.plan_json || 'null')) }
+  catch { throw new ProductRemoveError('review_state_conflict', 'The saved product removal plan is invalid.') }
+  if (plan.product_id !== operation.product_id || plan.reason !== operation.reason
+    || plan.state_digest !== operation.state_digest || await productRemovePlanDigest(plan) !== operation.plan_digest) {
+    throw new ProductRemoveError('review_state_conflict', 'The saved product removal plan no longer matches its receipt.')
+  }
+  const transitionStamp = new Date().toISOString()
+  try {
+    await db.batch(productRemoveApprovalStatements({ operation, plan, pendingActionId: row.id,
+      reviewer: reviewerUser, transitionStamp }))
+  } catch (error) {
+    if (/malformed JSON|product_remove_.*guard|constraint/i.test(String(error))) {
+      throw new ProductRemoveError('review_state_conflict', 'The product changed after review. Nothing was approved or removed.')
+    }
+    throw error
+  }
+  await bumpVersion(env, 'products')
+  await broadcast(env, 'products', { action: 'delete', id: plan.product_id })
+  await broadcast(env, 'inventory', { action: 'update' })
+  void reviewer
+  return { pendingActionMarkedAtomically: true }
+}
+
+export async function applyApprovedPendingAction(
+  env: Env,
+  row: PendingActionRow,
+  reviewer: ReviewerInfo,
+  reviewerUser?: SessionUser,
+): Promise<ReviewApplyOutcome> {
+  if (productRemovePendingPointer(row)) return applyApprovedProductRemove(env, row, reviewer, reviewerUser)
   const fn = appliers.get(applierKey(row.section, row.action_type, row.entity_type))
   if (!fn) throw new NoReviewApplierError(row.section, row.action_type, row.entity_type)
   await fn(env, row, reviewer)
+  return { pendingActionMarkedAtomically: false }
 }

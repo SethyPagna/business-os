@@ -9,24 +9,165 @@
 // to change its import path.
 
 import { getDb } from './db'
+import { tableColumnSet } from './schemaProbe'
 import { sanitizeMediaList } from './media'
 import { dateToBatchCode } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import type { Env } from '../index'
+import { roundMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
+
+export const PRODUCT_MONEY_VERSION = 'product_money_policy_version'
+export const PRODUCT_MONEY_PLAN = '_product_money_write_plan'
+const PRODUCT_MONEY_FIELDS_V1 = ['cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr'] as const
+const PRODUCT_MONEY_FIELDS_V2 = [...PRODUCT_MONEY_FIELDS_V1, 'purchase_price_usd', 'purchase_price_khr'] as const
+const LATEST_PRODUCT_MONEY_POLICY_VERSION = 2 as const
+type ProductMoneyField = typeof PRODUCT_MONEY_FIELDS_V2[number]
+type MoneyBefore = Record<ProductMoneyField, number | null> & { updated_at: string | null; name: string | null }
+type MoneyPlan = { version: 1 | 2; kind: 'create' | 'update'; product_id: number | null; before: Partial<MoneyBefore> | null; after: Partial<Record<ProductMoneyField, number | null>>; group_rename: { from: string; to: string; members: Record<string, unknown>[]; target_members: Record<string, unknown>[] } | null }
+export class ProductMoneyWriteError extends Error {
+  constructor(readonly code: string, message: string, readonly status = 409) { super(message); this.name = 'ProductMoneyWriteError' }
+}
+function invalidMoneyPlan(): never {
+  throw new ProductMoneyWriteError('product_money_plan_invalid', 'The saved product price plan is invalid. Submit a new product edit.')
+}
+const owns = (object: object, key: string) => Object.prototype.hasOwnProperty.call(object, key)
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+const groupSnapshotBytes = (source: unknown[], target: unknown[]) => new TextEncoder().encode(JSON.stringify([source, target])).byteLength
+function moneyInput(value: unknown): number | null {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return null
+  if ((typeof value !== 'number' && typeof value !== 'string') || !Number.isFinite(Number(value)) || Number(value) < 0) {
+    throw new ProductMoneyWriteError('product_money_invalid', 'Prices must be finite non-negative numbers.', 400)
+  }
+  return Number(value)
+}
+function moneyFields(version: MoneyPlan['version']): readonly ProductMoneyField[] {
+  return version === 1 ? PRODUCT_MONEY_FIELDS_V1 : PRODUCT_MONEY_FIELDS_V2
+}
+function nextMoney(field: ProductMoneyField, value: unknown, before?: number | null): number | null {
+  const parsed = moneyInput(value)
+  // A no-op must not reprice an authoritative historical value, even >4dp.
+  if (parsed === before && (parsed === null || typeof value === 'number')) return before ?? null
+  if (parsed == null) return null
+  try {
+    if (parsed === before && before != null && subtractDecimalSum(value as string, [before]) === '0') return before
+    // USD has cents. KHR catalog money is retained at nearest4, not forced
+    // into USD cents or a new physical-cash denomination convention.
+    return field === 'selling_price_usd' || field === 'wholesale_price_usd'
+      ? sellingPriceCeilCent(value as string | number) : roundMoney4(value as string | number)
+  } catch { throw new ProductMoneyWriteError('product_money_invalid', 'The price is outside the supported range.', 400) }
+}
+export function readProductMoneyPlan(body: Record<string, unknown>): MoneyPlan | null {
+  if (!isRecord(body)) return invalidMoneyPlan()
+  if (!owns(body, PRODUCT_MONEY_VERSION) && !owns(body, PRODUCT_MONEY_PLAN)) return null // historical queue/operation
+  const version = body[PRODUCT_MONEY_VERSION]
+  if (version !== 1 && version !== 2) return invalidMoneyPlan()
+  const raw = body[PRODUCT_MONEY_PLAN]
+  if (!isRecord(raw) || raw.version !== version || (raw.kind !== 'create' && raw.kind !== 'update') || !isRecord(raw.after)) return invalidMoneyPlan()
+  const fields = moneyFields(version)
+  // Version 1 predates purchase-price ownership. It remains readable only
+  // in its exact six-field shape; purchase fields may never hitch a ride
+  // outside that frozen plan and bypass its before-image guard.
+  if (version === 1 && (owns(body, 'purchase_price_usd') || owns(body, 'purchase_price_khr'))) return invalidMoneyPlan()
+  if (Object.keys(raw).sort().join(',') !== 'after,before,group_rename,kind,product_id,version') return invalidMoneyPlan()
+  if (raw.kind === 'create' ? raw.product_id !== null || raw.before !== null : !Number.isSafeInteger(raw.product_id) || Number(raw.product_id) <= 0 || !isRecord(raw.before)) return invalidMoneyPlan()
+  if (raw.kind === 'update') {
+    const before = raw.before as Record<string, unknown>
+    if (Object.keys(before).sort().join(',') !== [...fields, 'updated_at', 'name'].sort().join(',')) return invalidMoneyPlan()
+    if (before.name !== null && typeof before.name !== 'string') return invalidMoneyPlan()
+    if (!owns(before, 'updated_at') || (before.updated_at !== null && typeof before.updated_at !== 'string')) return invalidMoneyPlan()
+    for (const field of fields) if (!owns(before, field) || (before[field] !== null && (typeof before[field] !== 'number' || !Number.isFinite(before[field])))) return invalidMoneyPlan()
+  }
+  if (Object.keys(raw.after).some(field => !fields.includes(field as ProductMoneyField))) return invalidMoneyPlan()
+  if (raw.group_rename !== null) {
+    const group = raw.group_rename
+    if (raw.kind !== 'update' || !isRecord(group) || Object.keys(group).sort().join(',') !== 'from,members,target_members,to'
+      || typeof group.from !== 'string' || !group.from || typeof group.to !== 'string' || !group.to
+      || group.from !== String((raw.before as MoneyBefore).name || '').trim()
+      || group.to !== String(body.name || '').trim() || group.from.toLowerCase() === group.to.toLowerCase()
+      || Object.keys(raw.after).length) return invalidMoneyPlan()
+    if (!Array.isArray(group.members) || !group.members.length || !Array.isArray(group.target_members)
+      || group.members.length + group.target_members.length > 500 || groupSnapshotBytes(group.members, group.target_members) > 500_000) return invalidMoneyPlan()
+    const ids = new Set<number>()
+    for (const [members, key] of [[group.members, group.from.toLowerCase()], [group.target_members, group.to.toLowerCase()]] as const) for (const member of members) {
+      if (!isRecord(member) || !Number.isSafeInteger(member.id) || Number(member.id) <= 0 || ids.has(Number(member.id))
+        || member.is_active !== 1 || member.name_key !== key
+        || Object.entries(member).some(([key, value]) => !/^[a-z_][a-z_0-9]*$/i.test(key)
+          || (value !== null && typeof value !== 'string' && (typeof value !== 'number' || !Number.isFinite(value))))) return invalidMoneyPlan()
+      ids.add(Number(member.id))
+    }
+    if (!group.members.some(member => isRecord(member) && member.id === raw.product_id)) return invalidMoneyPlan()
+  }
+  for (const field of fields) {
+    if (owns(body, field) !== owns(raw.after, field)) return invalidMoneyPlan()
+    if (!owns(raw.after, field)) continue
+    const after = raw.after[field]
+    if (after !== null && (typeof after !== 'number' || !Number.isFinite(after) || after < 0)) return invalidMoneyPlan()
+    if (body[field] !== after || nextMoney(field, after, raw.kind === 'update' ? (raw.before as MoneyBefore)[field] : undefined) !== after) return invalidMoneyPlan()
+  }
+  return raw as unknown as MoneyPlan
+}
+/** New HTTP requests only. Never call this when replaying an old queued plan. */
+export async function prepareProductMoneyWrite(env: Env, body: Record<string, unknown>, productId: number | null, expectedUpdatedAt?: string | null): Promise<void> {
+  if (!isRecord(body)) throw new ProductMoneyWriteError('product_money_version_invalid', 'A product edit must be an object.', 400)
+  if (owns(body, PRODUCT_MONEY_PLAN) || owns(body, PRODUCT_MONEY_VERSION)) {
+    throw new ProductMoneyWriteError('product_money_version_invalid', 'Unsupported product price policy or client-supplied price plan.', 400)
+  }
+  const fields = PRODUCT_MONEY_FIELDS_V2.filter(field => owns(body, field))
+  let before: MoneyBefore | null = null
+  let groupRename = false
+  if (productId != null) {
+    const current = await getDb(env).prepare(`SELECT ${PRODUCT_MONEY_FIELDS_V2.join(',')}, updated_at, name FROM products WHERE id=@id`).get<MoneyBefore & { name: string | null }>({ id: productId })
+    if (!current) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product no longer exists.')
+    const { name } = current
+    before = current
+    if (expectedUpdatedAt && String(current.updated_at || '').trim() !== expectedUpdatedAt) {
+      throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the editor loaded. Refresh and submit a new edit.')
+    }
+    groupRename = body.__rename_scope === 'group' && body.name !== undefined && String(name || '').trim().toLowerCase() !== String(body.name).trim().toLowerCase()
+  }
+  const after: MoneyPlan['after'] = {}
+  for (const field of fields) after[field] = nextMoney(field, body[field], before?.[field])
+  if (groupRename) {
+    if (fields.some(field => after[field] !== before![field])) {
+      throw new ProductMoneyWriteError('product_money_group_rename_requires_separate_save', 'Save changed prices separately from a product-group rename.', 400)
+    }
+    for (const field of fields) { delete body[field]; delete after[field] }
+  }
+  for (const field of Object.keys(after) as ProductMoneyField[]) body[field] = after[field]
+  let group: MoneyPlan['group_rename'] = null
+  if (groupRename) {
+    const from = String(before!.name || '').trim()
+    const to = String(body.name).trim()
+    const members = await getDb(env).prepare('SELECT * FROM products WHERE name_key=@key AND is_active=1 ORDER BY id LIMIT 501').all<Record<string, unknown>>({ key: from.toLowerCase() })
+    const target_members = await getDb(env).prepare('SELECT * FROM products WHERE name_key=@key AND is_active=1 ORDER BY id LIMIT 501').all<Record<string, unknown>>({ key: to.toLowerCase() })
+    if (members.length + target_members.length > 500 || groupSnapshotBytes(members, target_members) > 500_000) throw new ProductMoneyWriteError('product_group_plan_too_large', 'The product group is too large for a guarded rename.', 400)
+    group = { from, to, members, target_members }
+  }
+  body[PRODUCT_MONEY_VERSION] = LATEST_PRODUCT_MONEY_POLICY_VERSION
+  body[PRODUCT_MONEY_PLAN] = { version: LATEST_PRODUCT_MONEY_POLICY_VERSION, kind: productId == null ? 'create' : 'update', product_id: productId, before, after,
+    group_rename: group } satisfies MoneyPlan
+  readProductMoneyPlan(body)
+}
+
+export function hasProductMoneyPolicy(body: unknown): boolean {
+  return isRecord(body) && (owns(body, PRODUCT_MONEY_VERSION) || owns(body, PRODUCT_MONEY_PLAN))
+}
 
 export const PRODUCT_SKIP_KEYS = new Set([
   'id', 'expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at',
   'client_request_id', 'device_name', 'device_tz', 'client_time',
+  PRODUCT_MONEY_VERSION, PRODUCT_MONEY_PLAN,
 ])
 
 export function nowIso() {
   return new Date().toISOString()
 }
 
+// Memoized per isolate by schemaProbe.ts -- was a fresh PRAGMA table_info()
+// on every product write that needed to know which columns exist.
 export async function tableColumns(env: Env, table: string): Promise<Set<string>> {
-  const rows = await env.DB.prepare(`PRAGMA table_info("${table}")`).all<{ name: string }>()
-  return new Set((rows.results || []).map((row) => row.name))
+  return tableColumnSet(getDb(env), table)
 }
 
 // This app doesn't support negative stock -- see routes/products.ts's own
@@ -88,13 +229,43 @@ function applySearchNormalizedColumns(payload: Record<string, unknown>, body: Re
   }
 }
 
-export async function insertRow(env: Env, table: string, body: Record<string, unknown>, required: Record<string, unknown> = {}) {
-  const columns = await tableColumns(env, table)
+export function buildInsertPayload(
+  body: Record<string, unknown>,
+  columns: Set<string>,
+  required: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const moneyPlan = readProductMoneyPlan(body)
+  if (moneyPlan && moneyPlan.kind !== 'create') invalidMoneyPlan()
   const payload = { ...cleanPayload(body, columns), ...required }
   applySearchNormalizedColumns(payload, body, columns, true)
   if (columns.has('created_at') && payload.created_at == null) payload.created_at = nowIso()
   if (columns.has('updated_at') && payload.updated_at == null) payload.updated_at = nowIso()
-  const keys = Object.keys(payload).filter((key) => columns.has(key))
+  return Object.fromEntries(Object.entries(payload).filter(([key]) => columns.has(key)))
+}
+
+// Side-effect-free counterpart to insertRow. Stock sessions append this
+// statement to the operation's single D1 batch instead of creating a product
+// before the receipt is known to be durable.
+export function planInsertRow(
+  table: 'products',
+  body: Record<string, unknown>,
+  columns: Set<string>,
+  required: Record<string, unknown> = {},
+): { sql: string; params: Record<string, unknown> } {
+  const payload = buildInsertPayload(body, columns, required)
+  const keys = Object.keys(payload)
+  if (!keys.length) throw new Error(`No writable ${table} fields were supplied`)
+  const params = Object.fromEntries(keys.map((key, index) => [`value${index}`, payload[key]]))
+  return {
+    sql: `INSERT INTO "${table}" (${keys.map((key) => `"${key}"`).join(', ')}) VALUES (${keys.map((_key, index) => `@value${index}`).join(', ')})`,
+    params,
+  }
+}
+
+export async function insertRow(env: Env, table: string, body: Record<string, unknown>, required: Record<string, unknown> = {}) {
+  const columns = await tableColumns(env, table)
+  const payload = buildInsertPayload(body, columns, required)
+  const keys = Object.keys(payload)
   // sql-bound-params: bounded by construction -- one parameter per COLUMN
   // of a single row, capped by the table's schema, not by any row count.
   const placeholders = keys.map(() => '?').join(', ')
@@ -105,6 +276,8 @@ export async function insertRow(env: Env, table: string, body: Record<string, un
 }
 
 export async function updateRow(env: Env, table: string, id: string | number, body: Record<string, unknown>) {
+  const moneyPlan = readProductMoneyPlan(body)
+  if (moneyPlan && (table !== 'products' || moneyPlan.kind !== 'update' || moneyPlan.product_id !== Number(id))) invalidMoneyPlan()
   const columns = await tableColumns(env, table)
   const payload = cleanPayload(body, columns)
   applySearchNormalizedColumns(payload, body, columns, false)
@@ -112,9 +285,40 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   const keys = Object.keys(payload).filter((key) => columns.has(key))
   if (!keys.length) return 0
   const assignments = keys.map((key) => `"${key}" = ?`).join(', ')
-  const result = await env.DB.prepare(`UPDATE "${table}" SET ${assignments} WHERE id = ?`)
-    .bind(...keys.map((key) => payload[key]), id)
-    .run()
+  const beforeKeys = moneyPlan ? [...moneyFields(moneyPlan.version), 'updated_at', 'name'] as const : []
+  const guard = moneyPlan ? beforeKeys.map(field => ` AND "${field}" IS ?`).join('') : ''
+  const statement = env.DB.prepare(`UPDATE "${table}" SET ${assignments} WHERE id = ?${guard}`)
+    .bind(...keys.map((key) => payload[key]), id, ...(moneyPlan ? beforeKeys.map(field => moneyPlan.before![field]) : []))
+  let result
+  if (moneyPlan?.group_rename) {
+    // No rename or audit happens before target admission. A failed target CAS
+    // aborts the same batch before touching any sibling, including name-only races.
+    const group = moneyPlan.group_rename
+    const groupColumns = Object.keys(group.members[0])
+    if (groupColumns.length !== columns.size || groupColumns.some(key => !columns.has(key))
+      || [...group.members, ...group.target_members].some(member => Object.keys(member).sort().join(',') !== [...groupColumns].sort().join(','))) invalidMoneyPlan()
+    const guardGroup = (name: string, members: Record<string, unknown>[]) => env.DB.prepare(`SELECT CASE WHEN
+      (SELECT COUNT(*) FROM products WHERE name_key=? AND is_active=1)=?
+      AND NOT EXISTS (SELECT 1 FROM json_each(?) expected WHERE NOT EXISTS (
+        SELECT 1 FROM products p WHERE ${groupColumns.map(key => `p."${key}" IS json_extract(expected.value,'$.${key}')`).join(' AND ')}
+      )) THEN 1 ELSE json('product_money_state_conflict') END`)
+      .bind(name.toLowerCase(), members.length, JSON.stringify(members))
+    try {
+      const results = await env.DB.batch([
+        guardGroup(group.from, group.members),
+        guardGroup(group.to, group.target_members),
+        statement,
+        env.DB.prepare(`SELECT CASE WHEN changes() > 0 THEN 1 ELSE json('product_money_state_conflict') END`),
+        env.DB.prepare(`UPDATE products SET name = ?, updated_at = ? WHERE name_key = ? AND is_active = 1 AND id != ?`)
+          .bind(group.to, payload.updated_at, group.from.toLowerCase(), id),
+      ])
+      result = results[2]
+    } catch (error) {
+      if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed before the group rename. Submit a new edit.')
+      throw error
+    }
+  } else result = await statement.run()
+  if (moneyPlan && !result.meta?.changes) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the price plan was prepared. Submit a new edit.')
   return result.meta?.changes || 0
 }
 
@@ -269,25 +473,43 @@ export async function seedInitialBatchForNewProduct(
   const addedOn = new Date().toISOString().slice(0, 10)
   const batchKey = `initial:${id}`
   // batch_key stays `initial:<id>` (not the date code) so this insert
-  // remains idempotent regardless of what day it's retried on -- the
-  // ON CONFLICT DO NOTHING below only works because this key can't
-  // collide with anything else. lot_code (the operator-facing display)
+  // remains idempotent regardless of what day it's retried on. A retry may
+  // find this stable lot inactive (for example, after it was emptied), so
+  // the conflict branch explicitly reactivates the existing parent without
+  // replacing its original received date or display identity. lot_code
+  // (the operator-facing display)
   // is still the same date-derived code every other batch now gets (see
   // batchCode.ts's dateToBatchCode), so this default batch reads no
   // differently from one created through Receive Stock on day one.
-  await db.prepare(`
-    INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number)
-    VALUES (@productId, @batchKey, @lotCode, datetime('now'), 1, @notes, 1)
-    ON CONFLICT(variant_product_id, batch_key) DO NOTHING
-  `).run({ productId: id, batchKey, lotCode: dateToBatchCode(addedOn), notes: 'Default batch created with product' })
-  if (chosenBranchId == null) return
-  const batch = await db.prepare('SELECT id FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey').get<{ id: number }>({ productId: id, batchKey })
-  if (!batch) return
-  await db.prepare(`
-    INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
-    VALUES (@batchId, @branchId, @quantity)
-    ON CONFLICT(batch_id, branch_id) DO NOTHING
-  `).run({ batchId: batch.id, branchId: chosenBranchId, quantity: Math.max(0, Number(chosenBranchQty) || 0) })
+  const params = {
+    productId: id,
+    batchKey,
+    lotCode: dateToBatchCode(addedOn),
+    notes: 'Default received date created with product',
+    branchId: chosenBranchId,
+    quantity: Math.max(0, Number(chosenBranchQty) || 0),
+  }
+  const statements = [{
+    sql: `INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number)
+      VALUES (@productId, @batchKey, @lotCode, datetime('now'), 1, @notes, 1)
+      ON CONFLICT(variant_product_id, batch_key) DO UPDATE SET is_active = 1`,
+    params,
+  }]
+  if (chosenBranchId != null) {
+    statements.push({
+      // Resolve the stable id inside the same transaction that performs
+      // the activation above. This closes the read/activation/write race:
+      // a positive branch_batch_stock row is never written beneath an
+      // inactive initial lot, while retries remain quantity-idempotent.
+      sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
+        SELECT id, @branchId, @quantity
+        FROM product_batches
+        WHERE variant_product_id = @productId AND batch_key = @batchKey AND is_active = 1
+        ON CONFLICT(batch_id, branch_id) DO NOTHING`,
+      params,
+    })
+  }
+  await db.batch(statements)
 }
 
 // ---------------------------------------------------------------------------
@@ -335,13 +557,15 @@ export const IMAGE_ONLY_BASE_FIELDS = [
  */
 export const IMAGE_ONLY_OPTIONAL_FIELDS: Record<string, readonly string[]> = {
   products_image_only_show_price: ['selling_price_usd', 'selling_price_khr'],
-  // VIP price is its own grant, separate from selling price (Aug 28): an org
-  // can let this role check the shelf price while keeping VIP terms private,
-  // or grant both for the "view everything, touch nothing" arrangement.
-  products_image_only_show_vip: ['special_price_usd', 'special_price_khr'],
-  // Wholesale price is its own grant too (same reasoning as VIP above): an org
-  // can expose the shelf price while keeping wholesale terms private, or grant
-  // any combination of the three tiers to the image-only role independently.
+  // products_image_only_show_vip (special_price_usd/khr) is GONE. The
+  // 2026-09-04 ruling established that the "VIP" tier was the wholesale price
+  // under a wrong name and deleted it; migration 0111 moved its values into
+  // wholesale_price_* and zeroed special_price_*, so the grant would now only
+  // expose two permanently-empty columns. Nothing is stranded by the removal:
+  // 0 users and 0 roles held the permission when it was checked in production.
+  // Wholesale price is its own grant, separate from selling price (Aug 28): an
+  // org can expose the shelf price while keeping wholesale terms private, or
+  // grant both for the "view everything, touch nothing" arrangement.
   products_image_only_show_wholesale: ['wholesale_price_usd', 'wholesale_price_khr'],
   products_image_only_show_barcode: ['barcode'],
   products_image_only_show_category: ['category'],

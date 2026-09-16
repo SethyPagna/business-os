@@ -1,7 +1,7 @@
 // The action/delta kernel for the unified "Add / Sale / Reconciliation"
 // import (progress.md item 2.1). One import mode, two OPTIONS, one column
 // set: name, barcode, shop, warehouse, date, action, selling_price,
-// vip_price, cost_price, batch. The whole point is that the SYSTEM decides
+// wholesale_price, cost_price, batch. The whole point is that the SYSTEM decides
 // create / add / sale from the numbers and the date -- "no guessing and
 // comparing stock current with import" -- and the `action` column only
 // disambiguates a same-day mix or names a specific POS sale.
@@ -51,7 +51,7 @@ export interface StockActionRow {
   action: string
   costPriceUsd?: number | null
   sellingPriceUsd?: number | null
-  vipPriceUsd?: number | null
+  wholesalePriceUsd?: number | null
   batchLabel?: string | null
   /** True when name+barcode matched no existing product. */
   isNewProduct?: boolean
@@ -235,7 +235,7 @@ export function resolveRowStockAction(
  * which cost, is being drawn down? Per the user this is flagged with a
  * reason and held behind the Confirm Action gate, not resolved by a guess.
  *
- * Pricing that only differs in SELLING / VIP price is NOT a conflict: those
+ * Pricing that only differs in SELLING / WHOLESALE price is NOT a conflict: those
  * both resolve to the selling price for a sale, so they never force a
  * choice. Only cost + batch multiplicity does.
  *

@@ -7,11 +7,21 @@
 //
 //   held(status) = how many units of a line are PHYSICALLY OUT of stock
 //                  while the sale sits in that status
-//     completed / awaiting_delivery / partial_return / returned:
+//     completed / awaiting_payment / awaiting_delivery / partial_return /
+//     returned:
 //         quantity - alreadyReturned   (the returns flow restocks returned
 //                                       units the moment each return is
 //                                       recorded, whatever the label says)
-//     awaiting_payment / cancelled:  0
+//     cancelled:  0
+//
+// S4-3/S4-4: awaiting_payment joined the holding group. An unpaid order has
+// still taken the goods off the shelf -- they are promised to that buyer and
+// cannot be sold to anyone else -- so `cancelled` is now the only live
+// status that holds nothing. WHICH statuses hold is stated once, in
+// salesStatus.ts's STOCK_DEDUCTED_STATUSES; the early return below is only
+// for the statuses that hold NOTHING. The two are one rule with two gates,
+// and scripts/test-sale-stock-holding-parity-pure.cjs drives every status
+// through both so a future edit cannot move one and forget the other.
 //
 // and every transition moves exactly held(new) - held(old), per line, on
 // branch stock, the product total, AND the line's batch. That closes the
@@ -31,7 +41,7 @@
 // to the status the sale was in when cancelled.
 
 import { RETURN_STATUSES, STOCK_DEDUCTED_STATUSES } from './salesStatus'
-import { decrementBatchStockStrictStatement, incrementBatchStockStatement } from './productBatches'
+import { decrementBatchStockStrictStatement, restoreBatchStockStatements } from './productBatches'
 
 export const CANCEL_REASONS = ['mistake', 'buyer_refused', 'other'] as const
 export type CancelReason = (typeof CANCEL_REASONS)[number]
@@ -49,7 +59,9 @@ export function cancelReasonLabel(reason: CancelReason): string {
 
 export function heldQuantity(status: string, quantity: number, returnedQuantity: number): number {
   const normalized = status || 'completed'
-  if (normalized === 'cancelled' || normalized === 'awaiting_payment') return 0
+  // Only the statuses that hold NOTHING belong here. Anything that holds is
+  // decided by STOCK_DEDUCTED_STATUSES below -- never by a second list.
+  if (normalized === 'cancelled') return 0
   if (STOCK_DEDUCTED_STATUSES.has(normalized) || RETURN_STATUSES.has(normalized)) {
     return Math.max(0, (Number(quantity) || 0) - Math.max(0, Number(returnedQuantity) || 0))
   }
@@ -158,8 +170,53 @@ export type SaleStockTransitionPlan = {
   deductions: Array<{ product_id: number; branch_id: number; quantity: number }>
   restoredUnits: number
   deductedUnits: number
+  // S4-2: units this transition WOULD have moved but deliberately did not,
+  // because the caller passed skipStock (admin-only "Don't touch stock").
+  // Non-zero only in that mode; it is what the audit trail records so a
+  // deliberately-skipped sale is never mistaken for a lost deduction.
+  skippedUnits: number
 }
 
+// S4-2 "Don't touch stock" (admin only, lock-gated in the UI, enforced
+// server-side in routes/sales.ts).
+//
+// WHY IT EXISTS. The Sep-2 2026 reconciliation rewrote every product's
+// quantity to the physically-counted truth, and that count ALREADY assumes
+// the migrated old-system sales are completed. Flipping such a sale
+// awaiting_payment -> completed therefore deducted units a second time --
+// on Sep 3 a bulk flip of 7 migrated sales took 9 units that were already
+// accounted for. For those sales the correct stock delta is zero, and no
+// amount of held() arithmetic can know that: it is a fact about where the
+// data came from, not about the lifecycle.
+//
+// S4-3 narrowed that particular transition to a no-op (awaiting_payment now
+// holds, so the delta is 0), but it did NOT make this flag redundant -- it
+// made it more necessary. A migrated sale must never move stock in EITHER
+// direction, and the transitions that still move units for everyone else
+// (cancel, un-cancel, and every amendment) would move them for a migrated
+// sale too. The flag is the only thing that knows the units were never in
+// the ledger to begin with, which is why it is sticky and lives on the
+// sale rather than on one action.
+//
+// WHAT skipStock DOES. The transition still happens in every other respect
+// (status, payment fields, cancellation record, audit, notifications); the
+// stock ledger is simply not touched -- no branch_stock, no
+// products.stock_quantity, no branch_batch_stock, no allocation release,
+// and above all NO inventory_movements row. Zero statements, not
+// compensating ones: an inventory_movements row asserts that units
+// physically moved, and none did.
+//
+// WHY IT MUST BE STICKY (routes/sales.ts persists sales.stock_skipped=1 and
+// re-applies it to every later transition of that sale). held() is a state
+// machine over the sale's status, and it assumes the system itself put the
+// units out. Once a sale reaches `completed` without the system deducting
+// anything, held(completed) is a lie for that sale: a later cancel would
+// compute delta = 0 - qty and ADD units that were never taken -- inventing
+// stock, the exact failure this feature exists to stop. So a stock-skipped
+// sale is permanently outside the stock ledger and every subsequent
+// transition of it moves zero. Real returns against it still restock
+// normally: routes/returns.ts works from the return record (goods actually
+// came back over the counter), not from held().
 export function planSaleStockTransition(input: {
   saleId: number | string
   oldStatus: string
@@ -169,11 +226,16 @@ export function planSaleStockTransition(input: {
   reason: string
   userId: number | string | null
   userName: string | null
+  // Admin-only, verified by the route BEFORE this is set (see
+  // isAdminControlUser there) -- the kernel never decides permission.
+  skipStock?: boolean
 }): SaleStockTransitionPlan {
   const statements: StockStatement[] = []
   const deductionMap = new Map<string, { product_id: number; branch_id: number; quantity: number }>()
   let restoredUnits = 0
   let deductedUnits = 0
+  let skippedUnits = 0
+  const skipStock = input.skipStock === true
 
   for (const item of input.items) {
     if (!item.product_id || !item.branch_id) continue
@@ -183,8 +245,18 @@ export function planSaleStockTransition(input: {
     const delta = after - before
     if (delta === 0) continue
 
+    if (skipStock) {
+      // Count what was NOT moved, emit nothing at all, and leave
+      // restoredUnits/deductedUnits at zero so the audit trail cannot
+      // read as if stock had moved.
+      skippedUnits += Math.abs(delta)
+      continue
+    }
+
     if (delta > 0) {
-      // Taking stock (e.g. un-cancel, or awaiting_payment -> completed).
+      // Taking stock (un-cancel back into a holding status). Since S4-3
+      // awaiting_payment -> completed moves NOTHING: both hold, so the
+      // delta is 0 and the units left the shelf when the order was taken.
       deductedUnits += delta
       const key = `${item.product_id}:${item.branch_id}`
       const existing = deductionMap.get(key)
@@ -257,7 +329,9 @@ export function planSaleStockTransition(input: {
         },
       })
     } else {
-      // Giving stock back (cancellation, or completed -> awaiting_payment).
+      // Giving stock back. Since S4-3 that means cancellation (the only
+      // status holding nothing) -- completed -> awaiting_payment no longer
+      // restores, because an unpaid order still holds its units.
       const restore = -delta
       restoredUnits += restore
       statements.push({
@@ -283,7 +357,7 @@ export function planSaleStockTransition(input: {
           const outstanding = Math.max(0, (Number(alloc.quantity) || 0) - (Number(alloc.released_quantity) || 0))
           const give = Math.min(outstanding, remaining)
           if (give <= 0) continue
-          statements.push(incrementBatchStockStatement(alloc.batch_id, item.branch_id, give))
+          statements.push(...restoreBatchStockStatements(alloc.batch_id, item.branch_id, give))
           restoredLots.push({ batchId: alloc.batch_id, quantity: give })
           statements.push({
             sql: `UPDATE sale_item_batch_allocations
@@ -295,7 +369,7 @@ export function planSaleStockTransition(input: {
           remaining -= give
         }
       } else if (item.batch_id) {
-        statements.push(incrementBatchStockStatement(item.batch_id, item.branch_id, restore))
+        statements.push(...restoreBatchStockStatements(item.batch_id, item.branch_id, restore))
         restoredLots.push({ batchId: item.batch_id, quantity: restore })
         statements.push({
           sql: `UPDATE sale_item_batch_allocations SET released_at = datetime('now'), released_quantity = quantity
@@ -327,5 +401,5 @@ export function planSaleStockTransition(input: {
     }
   }
 
-  return { statements, deductions: [...deductionMap.values()], restoredUnits, deductedUnits }
+  return { statements, deductions: [...deductionMap.values()], restoredUnits, deductedUnits, skippedUnits }
 }

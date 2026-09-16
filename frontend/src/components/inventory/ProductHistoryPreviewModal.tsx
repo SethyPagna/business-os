@@ -1,6 +1,15 @@
 import History from 'lucide-react/dist/esm/icons/history.js'
 import Modal from '../shared/Modal'
 import { translateMovementType } from './movementGroups'
+// N13: the same row model the Stock Change ledger and the movement drill
+// use. This preview used to DROP the branch span and silently omit the
+// actor and reason when they were absent, so one movement read three ways.
+// The same model also answers WHICH RECORD a movement belongs to, so a sale
+// row here names its receipt exactly as the Stock Change ledger and the
+// movement drill do -- this line used to read "13:22 · james · " with nothing
+// on it identifying the sale.
+import { buildHistoryRowModel, formatHistoryReference } from '../../utils/historyRowModel.ts'
+import TruncatedText from '../shared/TruncatedText.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 type TimeFormatter = (value: unknown) => string
@@ -54,7 +63,7 @@ export default function ProductHistoryPreviewModal({ state, onClose, onRetry, on
     : T('view_stock_history', 'Stock history')
 
   return (
-    <Modal title={title} onClose={onClose} size="sm">
+    <Modal title={title} onClose={onClose} size="sm" unsavedChanges="read-only">
       {loading ? (
         <div className="py-8 text-center text-sm text-gray-400">{T('loading', 'Loading...')}</div>
       ) : error ? (
@@ -74,10 +83,20 @@ export default function ProductHistoryPreviewModal({ state, onClose, onRetry, on
           {T('no_stock_history', 'No stock movements recorded for this product yet.')}
         </div>
       ) : (
-        <div className="max-h-[50vh] space-y-1.5 overflow-y-auto pr-1">
+        <div className="max-h-[calc(50*var(--app-vh))] space-y-1.5 overflow-y-auto pr-1">
           {movements.map((movement, index) => {
             const qty = Number(movement.quantity || 0)
             const signed = qty > 0 ? `+${qty}` : String(qty)
+            const model = buildHistoryRowModel(movement)
+            // The receipt sits between the actor and the free-text reason,
+            // the same order the ledger's Reason cell uses; a row with no
+            // record (add / remove / transfer) drops the segment entirely
+            // rather than printing an empty one.
+            const receipt = formatHistoryReference(model.reference, {
+              sale: T('sale', 'Sale'),
+              return: T('return', 'Return'),
+            })
+            const factLine = [fmtTime(movement.created_at), model.actor, receipt, model.reason].filter(Boolean).join(' · ')
             return (
               <div
                 key={String(movement.id ?? index)}
@@ -88,15 +107,12 @@ export default function ProductHistoryPreviewModal({ state, onClose, onRetry, on
                     <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeClass(movement)}`}>
                       {translateMovementType(movement.movement_type, t)}
                     </span>
-                    {movement.branch_name ? (
-                      <span className="truncate text-gray-500 dark:text-gray-400">{movement.branch_name}</span>
-                    ) : null}
+                    <span className="truncate text-gray-500 dark:text-gray-400" title={model.branch}>{model.branch}</span>
                   </div>
-                  <div className="mt-0.5 truncate text-[11px] text-gray-400">
-                    {fmtTime(movement.created_at)}
-                    {movement.user_name ? ` \u00b7 ${movement.user_name}` : ''}
-                    {movement.reason ? ` \u00b7 ${movement.reason}` : ''}
-                  </div>
+                  {/* Through TruncatedText, like the ledger's own receipt
+                      line: this line now carries a receipt id, and a `title`
+                      on a clipped span is unreachable by tap. */}
+                  <TruncatedText text={factLine} className="mt-0.5 text-[11px] text-gray-400" />
                 </div>
                 <div className={`flex-shrink-0 text-sm font-bold ${qty > 0 ? 'text-green-600' : qty < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                   {signed} {product?.unit || ''}

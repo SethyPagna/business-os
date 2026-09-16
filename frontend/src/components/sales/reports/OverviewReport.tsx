@@ -1,0 +1,343 @@
+// Overview ("All") -- the one-page income statement for the selected range:
+//
+//   Gross sales - discounts -> NET SALES - refunds -> REVENUE
+//   REVENUE + tax/delivery -> COLLECTED TOTAL
+//   REVENUE - COGS + delivery collected - delivery paid -> GROSS PROFIT
+//                  - operating expenses -> TOTAL PROFIT
+//   Delivery: charged / actually paid / waived / net   (memo, no operator)
+//   Credit (positive memo already included above)      (yellow, below the total)
+//
+// with the previous period beside it when "Compare" is on, and the breakdown
+// folds (payments, couriers, returns by reason, expenses by type) under it.
+// Every figure is a kernel figure from GET /api/reports/overview;
+// buildIncomeStatement only arranges. The group order and labels come from the
+// model (STATEMENT_GROUPS) so the two per-row statement folds in By period and
+// the grouped views stay in step with this page.
+import { Fragment, useMemo, useRef, useState } from 'react'
+import Download from 'lucide-react/dist/esm/icons/download.js'
+import Printer from 'lucide-react/dist/esm/icons/printer.js'
+import { getReportOverview } from '../../../api/reportsTransport.ts'
+import { downloadCSV } from '../../../utils/csv.ts'
+import { openPrintExport } from '../../../utils/exportOptions.ts'
+import InfoHint from '../../shared/InfoHint.tsx'
+import { FEE_TYPE_OPTIONS } from '../../fees/FeeForm.tsx'
+import { Chip, DenseTable, Fold, OverflowMenu, Skeleton } from '../../shared/kit'
+import ReceiptSheet, { type ReceiptBlock } from './ReceiptSheet.tsx'
+import ReportFrame, { useReportData } from './ReportFrame.tsx'
+import ReportTable, { type ReportColumn } from './ReportTable.tsx'
+import {
+  buildIncomeStatement,
+  delta,
+  formatSignedPct,
+  normalizeTotals,
+  num,
+  pct,
+  receiptLineKind,
+  reportFileName,
+  reportQueryParams,
+  STATEMENT_GROUPS,
+  isTheoreticalGroup,
+  statementGroupLabel,
+  statementNoteText,
+  statementOperator,
+  type StatementGroup,
+  type StatementLine,
+} from './reportModel.ts'
+import { exportMenuItems, rangeSubtitle, tableLabels, type ReportViewProps } from './reportTypes.ts'
+
+interface ReturnsTotals { count: number; refund_usd: number; refund_khr: number }
+interface ExpenseTotals { count: number; amount_usd: number; amount_khr: number }
+interface PaymentRow { key: string; payment_method: string; tx_count: number; revenue_usd: number; pending_revenue_usd: number; collected_usd: number }
+interface CourierRow {
+  delivery_contact_id: number | null
+  delivery_contact_name: string
+  deliveries: number
+  charged_fee_usd: number
+  absorbed_fee_usd: number
+  actual_cost_usd: number
+  actual_cost_count: number
+  margin_usd: number
+  last_delivery_at: string | null
+}
+interface ReasonRow { reason: string; count: number; refund_usd: number; refund_khr: number }
+interface TypeRow { fee_type: string; count: number; amount_usd: number; amount_khr: number }
+interface OverviewResponse {
+  is_admin?: boolean
+  previous_range?: { startDate: string; endDate: string } | null
+  sales?: { totals: unknown; previous: unknown; payment_methods: PaymentRow[]; couriers: CourierRow[] }
+  returns?: { totals: ReturnsTotals; previous: ReturnsTotals | null; by_reason: ReasonRow[] }
+  expenses?: { totals: ExpenseTotals; previous: ExpenseTotals | null; by_type: TypeRow[] }
+}
+type Breakdown = 'payments' | 'couriers' | 'reasons' | 'types'
+
+// Credit is already part of revenue and profit. Its highlighted memo sits last
+// so the amount still owed is visible once without becoming another arithmetic term.
+
+export default function OverviewReport(p: ReportViewProps) {
+  const { tr, t, fmtMoney, options, style, filters, view } = p
+  const params = useMemo(() => ({ ...reportQueryParams(filters, view), compare: options.compare ? '1' : '' }), [filters, view, options.compare])
+  const depsKey = JSON.stringify(params)
+  const state = useReportData<OverviewResponse>(() => getReportOverview(params) as Promise<OverviewResponse>, depsKey)
+  const data = state.data
+  const compare = options.compare && !!data?.previous_range
+
+  const sales = useMemo(() => normalizeTotals(data?.sales?.totals), [data])
+  const prevSales = useMemo(() => (compare ? normalizeTotals(data?.sales?.previous) : null), [data, compare])
+  const returns = data?.returns?.totals || null
+  const prevReturns = compare ? data?.returns?.previous || null : null
+  const expenses = data?.expenses?.totals || null
+  const prevExpenses = compare ? data?.expenses?.previous || null : null
+
+  const lines = useMemo(
+    () =>
+      buildIncomeStatement({
+        sales,
+        prevSales,
+        expenses: expenses ? { usd: num(expenses.amount_usd), khr: num(expenses.amount_khr) } : null,
+        prevExpenses: prevExpenses ? { usd: num(prevExpenses.amount_usd), khr: num(prevExpenses.amount_khr) } : null,
+        profitMode: options.profitMode,
+        khrToUsd: p.khrToUsd,
+      }),
+    [sales, prevSales, expenses, prevExpenses, options.profitMode, p.khrToUsd],
+  )
+
+  const groupLabel = (g: StatementGroup) => statementGroupLabel(g, tr)
+  const lineLabel = (l: StatementLine) => tr(l.labelKey, l.fallback)
+  const changeOf = (l: StatementLine) => (l.prevUsd == null ? null : delta(l.usd, l.prevUsd))
+  const noteText = (l: StatementLine) => (l.note ? statementNoteText(l.note, tr) : null)
+
+  // ---- exports ----
+  // The CSV and the print sheet carry the SAME rows as the screen, including
+  // the operator and any "not available" / coverage note: a bridge exported as
+  // bare numbers loses exactly the thing that makes it a bridge.
+  const csvRows = () =>
+    lines.map((l) => ({
+      Group: groupLabel(l.group),
+      Op: statementOperator(l.kind),
+      Line: lineLabel(l),
+      Amount_USD: l.usd,
+      Note: noteText(l) || '',
+      ...(compare ? { Previous_USD: l.prevUsd ?? '', Change_Pct: changeOf(l)?.pct ?? '' } : {}),
+    }))
+  const exportCsv = () => downloadCSV(reportFileName('overview', filters, 'csv'), csvRows())
+  const exportPrint = () => {
+    const headers = compare ? ['Group', 'Op', 'Line', 'Amount_USD', 'Note', 'Previous_USD', 'Change_Pct'] : ['Group', 'Op', 'Line', 'Amount_USD', 'Note']
+    openPrintExport({ title: `${tr('reports', 'Reports')} · ${tr(view.labelKey, view.fallback)}`, subtitle: rangeSubtitle(filters, tr), headers, rows: csvRows() })
+  }
+
+  // ---- breakdown folds ----
+  const [open, setOpen] = useState<Breakdown | null>(null)
+  const anchorRef = useRef<HTMLElement | null>(null)
+  const chipRefs = useRef<Partial<Record<Breakdown, HTMLElement | null>>>({})
+  const openFold = (id: Breakdown) => {
+    anchorRef.current = chipRefs.current[id] || null
+    setOpen((cur) => (cur === id ? null : id))
+  }
+  const payments = data?.sales?.payment_methods || []
+  const couriers = data?.sales?.couriers || []
+  const reasons = data?.returns?.by_reason || []
+  const types = data?.expenses?.by_type || []
+  const chips: Array<{ id: Breakdown; label: string; count: number }> = [
+    data?.sales ? { id: 'payments', label: tr('rpt_payments', 'Payment methods'), count: payments.length } : null,
+    data?.sales && couriers.length ? { id: 'couriers', label: tr('rpt_couriers', 'Couriers'), count: couriers.length } : null,
+    data?.returns ? { id: 'reasons', label: tr('by_reason', 'By reason'), count: reasons.length } : null,
+    data?.expenses ? { id: 'types', label: `${tr('fees', 'Expenses')} · ${tr('by_type', 'By type')}`, count: types.length } : null,
+  ].filter((c): c is { id: Breakdown; label: string; count: number } => !!c)
+  const labels = tableLabels(tr)
+  const feeTypeLabel = (type: string) => {
+    const def = FEE_TYPE_OPTIONS.find((o) => o.value === type)
+    return def ? tr(def.labelKey, def.fallback) : type || tr('unknown', 'Unknown')
+  }
+
+  const paymentColumns: Array<ReportColumn<PaymentRow>> = [
+    { key: 'payment_method', label: tr('payment_method', 'Payment method'), primary: true, value: (r) => r.payment_method || tr('unknown', 'Unknown') },
+    { key: 'tx_count', label: tr('sales', 'Sales'), kind: 'int', value: (r) => r.tx_count },
+    { key: 'revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.revenue_usd, emphasis: true },
+    { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
+    { key: 'collected_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_usd },
+    { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.revenue_usd, payments.reduce((s, p) => s + p.revenue_usd, 0)), defaultVisible: false },
+  ]
+  const courierColumns: Array<ReportColumn<CourierRow>> = [
+    { key: 'name', label: tr('rpt_courier', 'Courier'), primary: true, value: (r) => r.delivery_contact_name || tr('unknown', 'Unknown') },
+    { key: 'deliveries', label: tr('rpt_deliveries', 'Deliveries'), kind: 'int', value: (r) => r.deliveries },
+    { key: 'charged_fee_usd', label: tr('rpt_delivery_charged', 'Delivery fee charged'), kind: 'money', value: (r) => r.charged_fee_usd },
+    { key: 'absorbed_fee_usd', label: tr('rpt_store_delivery', 'Store-paid delivery fee'), kind: 'money', value: (r) => r.absorbed_fee_usd },
+    { key: 'actual_cost_usd', label: tr('rpt_delivery_cost', 'Actual delivery cost'), kind: 'money', value: (r) => r.actual_cost_usd },
+    { key: 'margin_usd', label: tr('rpt_delivery_margin', 'Delivery profit'), kind: 'money', value: (r) => r.margin_usd, emphasis: true },
+    { key: 'last_delivery_at', label: tr('rpt_last_delivery', 'Last delivery'), kind: 'datetime', value: (r) => r.last_delivery_at, defaultVisible: false },
+  ]
+  const reasonColumns: Array<ReportColumn<ReasonRow>> = [
+    { key: 'reason', label: tr('reason', 'Reason'), primary: true, value: (r) => r.reason || '—' },
+    { key: 'count', label: tr('rpt_count', 'Count'), kind: 'int', value: (r) => r.count },
+    { key: 'refund', label: tr('refunds', 'Refunds'), kind: 'money', value: (r) => r.refund_usd, khr: (r) => r.refund_khr, emphasis: true },
+  ]
+  const typeColumns: Array<ReportColumn<TypeRow>> = [
+    { key: 'fee_type', label: tr('type', 'Type'), primary: true, value: (r) => feeTypeLabel(r.fee_type) },
+    { key: 'count', label: tr('rpt_count', 'Count'), kind: 'int', value: (r) => r.count },
+    { key: 'amount', label: tr('amount', 'Amount'), kind: 'money', value: (r) => r.amount_usd, khr: (r) => r.amount_khr, emphasis: true },
+  ]
+
+  // Excel style: the old-POS profit ledger the owner supplied as the layout
+  // reference (Sep 5 2026, screenshot #13) -- a label column and TWO amount
+  // columns. Detail lines (+ / - / memo) indent and put their figure in the
+  // INNER column; every total sits alone in the OUTER column, so the outer
+  // column reads as the statement and the inner one as "how it was made up".
+  // The group caption rows are gone for the arithmetic groups (their totals
+  // name them); the two memo groups keep a caption because nothing else
+  // introduces them. The Credit row keeps a tint so it reads as a memo rather
+  // than another subtraction or total.
+  const cols = compare ? 5 : 3
+  const captioned = (g: StatementGroup) => g === 'delivery'
+  const statementBody = state.loading && !data ? (
+    <Skeleton rows={8} variant={style === 'receipt' ? 'text' : 'table'} />
+  ) : lines.length === 0 ? null : style === 'receipt' ? (
+    <ReceiptSheet
+      centered={!p.compact}
+      blocks={STATEMENT_GROUPS.filter((g) => lines.some((l) => l.group === g)).map<ReceiptBlock>((g) => ({
+        key: g,
+        title: g === 'pending' ? undefined : groupLabel(g),
+        highlight: isTheoreticalGroup(g),
+        lines: lines
+          .filter((l) => l.group === g)
+          .map((l) => {
+            const ch = changeOf(l)
+            // The data note wins the slot: "no cost recorded on 812 lines"
+            // outranks a percentage change on a figure that is not measured.
+            const note = noteText(l) || (ch && ch.pct != null ? formatSignedPct(ch.pct) : undefined)
+            return { key: l.key, label: lineLabel(l), value: fmtMoney(l.usd, l.khr), kind: receiptLineKind(l.kind), note, tone: l.tone }
+          }),
+      }))}
+    />
+  ) : (
+    <DenseTable fit>
+      <thead>
+        <tr>
+          <th>{tr('rpt_line', 'Line')}</th>
+          <th className="!text-right">{tr('rpt_detail', 'Detail')}</th>
+          <th className="!text-right">{tr('amount', 'Amount')}</th>
+          {compare ? (
+            <>
+              <th className="!text-right">{tr('rpt_prev_period', 'Previous period')}</th>
+              <th className="!text-right">{tr('rpt_change', 'Change')}</th>
+            </>
+          ) : null}
+        </tr>
+      </thead>
+      <tbody>
+        {STATEMENT_GROUPS.filter((g) => lines.some((l) => l.group === g)).map((g) => {
+          const highlight = isTheoreticalGroup(g)
+          return (
+            <Fragment key={g}>
+              {captioned(g) ? (
+                <tr className={highlight ? '' : '!bg-[var(--ui-surface-2)]'} data-statement-group={g}>
+                  <td colSpan={cols} className={['text-[length:var(--ui-size-meta)] font-medium', highlight ? 'text-[var(--ui-warn-ink)]' : 'text-[var(--ui-ink-2)]'].join(' ')}>
+                    {groupLabel(g)}
+                  </td>
+                </tr>
+              ) : null}
+              {lines
+                .filter((l) => l.group === g)
+                .map((l) => {
+                  const ch = changeOf(l)
+                  const note = noteText(l)
+                  const total = l.kind === 'total'
+                  const amount = fmtMoney(l.usd, l.khr)
+                  return (
+                    <tr
+                      key={l.key}
+                      className={total ? 'font-semibold' : ''}
+                      data-statement-group={g}
+                      data-statement-kind={l.kind}
+                    >
+                      <td className={total ? '' : 'pl-[calc(var(--ui-cell-px,12px)+1rem)] text-[var(--ui-ink-2)]'}>
+                        <span className="inline-flex items-center gap-1">
+                          {total ? null : <span className="w-3 text-[var(--ui-ink-3)]">{statementOperator(l.kind)}</span>}
+                          {lineLabel(l)}
+                          {l.hintKey ? <InfoHint text={tr(l.hintKey, l.hintFallback || '')} label={lineLabel(l)} /> : null}
+                        </span>
+                        {/* The data note is a BLOCK under the label, never inline: with
+                            `fit` the table hugs max-content, and an inline note ("no
+                            courier cost recorded on 11,834 deliveries") widened the Line
+                            column past the 34rem statement box and pushed Amount behind
+                            the scroller (a2, Sep 6 2026, measured at 1280 on All time).
+                            A block's max-width caps what it contributes. */}
+                        {note ? <div className="max-w-[16rem] whitespace-normal text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">({note})</div> : null}
+                      </td>
+                      <td className="text-right whitespace-nowrap text-[var(--ui-ink-2)]">{total ? '' : amount}</td>
+                      <td className={[
+                        'text-right whitespace-nowrap',
+                        l.tone === 'positive' ? 'text-green-700 dark:text-green-400' : '',
+                        l.tone === 'negative' ? 'text-red-600 dark:text-red-400' : '',
+                      ].join(' ').trim()}>
+                        {total ? (
+                          l.headline
+                            ? <span className={[
+                              'inline-block rounded-[var(--ui-radius-sm)] bg-[var(--ui-ink)] px-1.5 py-0.5',
+                              // The badge is an opaque child, so it must carry the
+                              // semantic foreground itself; the tone on the td
+                              // cannot win over a child text utility. These pairs
+                              // stay legible against the ink badge in both themes.
+                              l.tone === 'positive' ? 'text-green-300 dark:text-green-700'
+                                : l.tone === 'negative' ? 'text-red-300 dark:text-red-700'
+                                  : 'text-[var(--ui-surface)]',
+                            ].join(' ')}>{amount}</span>
+                            : amount
+                        ) : ''}
+                      </td>
+                      {compare ? (
+                        <>
+                          <td className="text-right whitespace-nowrap text-[var(--ui-ink-2)]">{l.prevUsd == null ? '—' : fmtMoney(l.prevUsd)}</td>
+                          <td className="text-right whitespace-nowrap text-[var(--ui-ink-2)]">{ch ? (ch.pct == null ? fmtMoney(ch.abs) : `${fmtMoney(ch.abs)} (${formatSignedPct(ch.pct)})`) : '—'}</td>
+                        </>
+                      ) : null}
+                    </tr>
+                  )
+                })}
+            </Fragment>
+          )
+        })}
+      </tbody>
+    </DenseTable>
+  )
+
+  return (
+    <>
+      {chips.length ? (
+        <div className="reports-overview-tabs" aria-label={tr('details', 'Details')}>
+          {chips.map((c) => (
+            <span key={c.id} ref={(el) => { chipRefs.current[c.id] = el }}>
+              <Chip selected={open === c.id} count={c.count} onClick={() => openFold(c.id)}>
+                {c.label}
+              </Chip>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <ReportFrame
+        title={tr(view.labelKey, view.fallback)}
+        titleControl={p.titleControl}
+        hint={{
+          label: tr(view.labelKey, view.fallback),
+          text: tr('rpt_hint_overview', 'Revenue = net sales of recognized sales minus refunds; tax and delivery are excluded. Cost and profit are visible to admins only.'),
+        }}
+        menuAction={p.canExport() ? <OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, p.canExport, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} /> : null}
+        error={state.error}
+        onRetry={state.reload}
+        retryLabel={tr('retry', 'Retry')}
+      >
+        <div className="reports-overview-statement">{statementBody}</div>
+        {!state.loading && !state.error && !sales && !returns && !expenses ? <p className="text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">{labels.empty}</p> : null}
+      </ReportFrame>
+      <Fold className="reports-fold-panel" open={open != null} onClose={() => setOpen(null)} anchorRef={anchorRef} size="lg" title={chips.find((c) => c.id === open)?.label || ''}>
+        <div className="p-2">
+          {open === 'payments' ? <ReportTable surfaceKey="reports-overview-payments" columns={paymentColumns} rows={payments} rowKey={(r) => r.key} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
+          {open === 'couriers' ? <ReportTable surfaceKey="reports-overview-couriers" columns={courierColumns} rows={couriers} rowKey={(r) => String(r.delivery_contact_id ?? r.delivery_contact_name)} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
+          {open === 'reasons' ? <ReportTable surfaceKey="reports-overview-reasons" columns={reasonColumns} rows={reasons} rowKey={(r) => r.reason || '—'} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
+          {open === 'types' ? <ReportTable surfaceKey="reports-overview-types" columns={typeColumns} rows={types} rowKey={(r) => r.fee_type || '—'} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
+        </div>
+      </Fold>
+      {/* t is threaded for status labels in sibling views; keep the prop contract identical. */}
+      <span hidden>{typeof t === 'function' ? '' : null}</span>
+    </>
+  )
+}

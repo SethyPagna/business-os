@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import type { ComponentType, DragEvent } from 'react'
-import { lazyRetry } from '../../../utils/lazyImport.ts'
+import type { ComponentType, Dispatch, DragEvent, SetStateAction } from 'react'
+import { lazyRetry, preloadLazy } from '../../../utils/lazyImport.ts'
 import { registerDirtyWork } from '../../../utils/dirtyWork.ts'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
@@ -9,16 +9,27 @@ import Trash2Icon from 'lucide-react/dist/esm/icons/trash-2.js'
 import LockIcon from 'lucide-react/dist/esm/icons/lock.js'
 import AlertTriangleIcon from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../../shared/Modal'
+import { ModalCloseContext } from '../../shared/modalCloseContext.ts'
+import MinimizeButton from '../../shared/MinimizeButton.tsx'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
+import DateEntryInput from '../../shared/DateEntryInput.tsx'
+import SuggestionTextInput, { type SuggestionOption } from '../../shared/SuggestionTextInput.tsx'
+import { suggestionEmptyState } from '../../../utils/suggestionMatching.ts'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
-import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
+import { calculateProductDiscount, editableMoneyValue, formatPriceNumber, normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
-import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
+import ConfirmDialog, { ConfirmDialogLayerContext, type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
-import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, scopedWorkDraftKey } from '../../../utils/workDrafts.ts'
-import { searchProducts as searchProductsForMatch } from '../../../api/methods.ts'
-import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.ts'
+import {
+  PRODUCT_MATCH_DEBOUNCE_MS,
+  buildProductNameSuggestions,
+  productMatchQueries,
+  shouldSearchProductMatches,
+} from '../helpers/productNameSuggestions.ts'
+import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey } from '../../../utils/workDrafts.ts'
+import { searchProducts as searchProductsForMatch, getProductFilters } from '../../../api/methods.ts'
+import { buildCacheBustedMediaPath, canonicalizePersistedMediaPath } from '../../../utils/mediaUpload.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -26,8 +37,29 @@ import {
   withLoaderTimeout,
 } from '../../../utils/loaders.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES, MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
+import { effectivePermissions, isAdminControlUser } from '../../../utils/permissions.ts'
 
-const BarcodeScannerModal = lazyRetry(() => import('../scanning/BarcodeScannerModal'), 'product-form-barcode-scanner-modal')
+// The server's "same name + same barcode (leading zeros folded) is the same
+// product -- merge into it instead of creating a twin" 409, unpacked into the
+// row it is pointing at. classifyCreateMatches asks this same question on the
+// client, so this 409 should now only be reachable on a genuine race.
+// Returns null for any other failure, so an unrelated error can never be
+// mistaken for an invitation to merge two products together.
+function duplicateCollisionFrom(error: unknown): { id: number; name: string | null } | null {
+  const err = error as { code?: unknown; duplicate?: { id?: unknown; name?: unknown } } | null
+  if (String(err?.code || '') !== 'duplicate_product') return null
+  const id = Number(err?.duplicate?.id)
+  if (!Number.isInteger(id) || id <= 0) return null
+  return { id, name: err?.duplicate?.name == null ? null : String(err.duplicate.name) }
+}
+
+const importBarcodeScannerModal = () => import('../scanning/BarcodeScannerModal')
+const BarcodeScannerModal = lazyRetry(importBarcodeScannerModal, 'product-form-barcode-scanner-modal')
+// The scanner opens its camera as soon as it mounts (one tap, no Start
+// button), so this chunk is warmed from the pointer/hover/focus that precedes
+// the click rather than fetched inside the click's gesture window. Same module
+// as ScanSearchButton's scanner, so either entry point warms both.
+const preloadBarcodeScannerModal = preloadLazy(importBarcodeScannerModal)
 const PRODUCT_SUPPLIERS_TIMEOUT_MS = 8000
 const PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 
@@ -37,23 +69,32 @@ type ProductFormTab = 'basic' | 'pricing' | 'stock' | 'expiry'
 type ScannerField = 'barcode'
 type Translate = (key: string) => string
 
-interface CategoryOption {
+// `source` is set by GET /api/categories and /api/units: 'lookup' for a real
+// row in the lookup table, 'products' for a name that only exists because
+// products carry it (cloudflare/src/lib/lookupSuggestions.ts). Both are
+// suggestible; only 'lookup' rows are manageable, and only a 'lookup' unit
+// may become a new product's DEFAULT unit -- see initialForm below.
+export type LookupSuggestionSource = 'lookup' | 'products'
+
+export interface CategoryOption {
   id: EntityId
   name: string
+  source?: LookupSuggestionSource
 }
 
-interface UnitOption {
+export interface UnitOption {
   id: EntityId
   name: string
+  source?: LookupSuggestionSource
 }
 
-interface BranchOption {
+export interface BranchOption {
   id: EntityId
   name: string
   is_default?: boolean | number | null
 }
 
-interface ProductUser {
+export interface ProductUser {
   id?: EntityId
   name?: string
   username?: string
@@ -62,18 +103,18 @@ interface ProductUser {
   role_permissions?: unknown
 }
 
-interface GroupCandidate {
+export interface GroupCandidate {
   id?: EntityId | null
   name?: string | null
 }
 
+// Exactly the two columns /api/suppliers?fields=names returns.
 interface SupplierOption {
   id: EntityId
   name?: string | null
-  company?: string | null
 }
 
-interface ProductFormState extends GroupCandidate {
+export interface ProductFormState extends GroupCandidate {
   name?: string
   barcode?: string
   category?: string
@@ -81,8 +122,6 @@ interface ProductFormState extends GroupCandidate {
   description?: string
   selling_price_usd?: EditableNumber
   selling_price_khr?: EditableNumber
-  special_price_usd?: EditableNumber
-  special_price_khr?: EditableNumber
   wholesale_price_usd?: EditableNumber
   wholesale_price_khr?: EditableNumber
   discount_enabled?: number | boolean
@@ -97,6 +136,7 @@ interface ProductFormState extends GroupCandidate {
   cost_price_usd?: EditableNumber
   cost_price_khr?: EditableNumber
   stock_quantity?: EditableNumber
+  received_date?: string | null
   low_stock_threshold?: EditableNumber
   out_of_stock_threshold?: EditableNumber
   expiry_date?: string | null
@@ -113,8 +153,6 @@ interface ProductFormState extends GroupCandidate {
 interface ProductSavePayload extends ProductFormState {
   selling_price_usd: number
   selling_price_khr: number
-  special_price_usd: number
-  special_price_khr: number
   wholesale_price_usd: number
   wholesale_price_khr: number
   discount_enabled: 0 | 1
@@ -129,6 +167,7 @@ interface ProductSavePayload extends ProductFormState {
   cost_price_usd: number
   cost_price_khr: number
   stock_quantity: number
+  received_date?: string | null
   low_stock_threshold: number
   out_of_stock_threshold: number
   expiry_date: string | null
@@ -161,7 +200,8 @@ interface FilePickerModalProps {
   // Only offered in create mode; the label is the typed name so the chip
   // reads "Add product — Dior 999", not a bare generic.
   onMinimize?: (label: string) => void
-  onSelect: (publicPath: string) => void
+  onSelect: (publicPath: string, asset?: { updated_at?: string }) => void
+  layer?: 'default' | 'nested'
 }
 
 interface ProductFormProps {
@@ -173,6 +213,7 @@ interface ProductFormProps {
   groupCandidates?: GroupCandidate[]
   onSave: (payload?: ProductSavePayload) => unknown | Promise<unknown>
   onClose: () => void
+  onReviewIdentityCollision?: (productIds: readonly [number, number]) => void
   // Optional -- only supplied by callers that already have a delete flow
   // wired (Products.tsx routes this through its DeleteConfirmModal, same
   // as every other delete entry point on that page). Omitted entirely
@@ -181,10 +222,32 @@ interface ProductFormProps {
   // prop is present AND `product` is set, so a fresh "Add product" form
   // never shows it.
   onDelete?: () => void
-  // F3 slice 2: when supplied (create mode only), the modal shows a −
-  // minimize control that parks the in-progress add-product flow as a
-  // top-bar chip via the shared minimizedWork registry. Omitted for edit.
-  onMinimize?: (label: string) => void
+  // When supplied, the modal shows a − minimize control and passes the host
+  // the exact actor-scoped draft/entity identity it just flushed. The host
+  // owns declarative parking, permission metadata and current-row restore.
+  onMinimize?: (label: string, detail?: { draftKey: string; productId: EntityId | null }) => void
+  // S4-12: values a CREATE starts pre-filled with, layered over this form's
+  // own blank defaults (so the defaults below stay the single source of
+  // truth for every field the caller does not seed). Used by the
+  // create-products session header, which captures brand/supplier/branch
+  // once and hands them to every item entered afterwards. Ignored in edit
+  // mode -- an existing product's own row always wins.
+  createDefaults?: Partial<ProductFormState>
+  // Create forms are not one global draft. Callers name the workflow/session
+  // item so a scanner miss, a create-products item, and standalone Add Product
+  // cannot restore or clear one another's work. Existing products continue to
+  // use their stable entity id regardless of caller.
+  draftScope?: string
+  /** Session-local warning only; catalog identity stays governed by classifyCreateMatches. */
+  sessionDuplicateCheck?: (candidate: { name?: unknown; barcode?: unknown }) => boolean
+  // Session shells keep their parent mounted while this form floats above it.
+  // The shared Modal's nested layer prevents the newer surface from falling
+  // behind the parent; ordinary standalone create/edit callers omit it.
+  modalLayer?: 'default' | 'nested'
+  // Stock-session item forms expose the receipt date as a child override.
+  // Ordinary catalog create/edit callers omit this so receipt-only metadata
+  // never leaks into the product API payload.
+  showReceivedDate?: boolean
   t: Translate
   usdSymbol: string
   khrSymbol: string
@@ -198,72 +261,14 @@ interface PickImageFilesOptions {
   capture?: string
 }
 
+type ProductFormDraftPayload = {
+  form: Partial<ProductFormState>
+  imageList: string[]
+}
+
 interface NumericInputOptions {
   allowDecimal?: boolean
   allowNegative?: boolean
-}
-
-interface SuggestionTextInputProps {
-  id: string
-  name: string
-  value: string
-  options: string[]
-  onChange: (value: string) => void
-  placeholder?: string
-  ariaLabel: string
-}
-
-// Free-text catalog field with the same interaction model as Supplier:
-// operators may type a brand/category/unit that does not exist yet, while
-// existing values remain one-tap suggestions. This deliberately avoids a
-// select-only control because catalog detail values are not closed enums.
-function SuggestionTextInput({ id, name, value, options, onChange, placeholder, ariaLabel }: SuggestionTextInputProps) {
-  const [open, setOpen] = useState(false)
-  const normalized = String(value || '').trim().toLowerCase()
-  const matches = useMemo(() => {
-    const seen = new Set<string>()
-    const unique: string[] = []
-    for (const raw of options || []) {
-      const option = String(raw || '').trim()
-      const key = option.toLowerCase()
-      if (!option || seen.has(key)) continue
-      seen.add(key)
-      if (!normalized || key.includes(normalized)) unique.push(option)
-    }
-    return unique
-  }, [normalized, options])
-
-  return (
-    <div className="relative">
-      <input
-        id={id}
-        name={name}
-        className="input min-h-11 w-full min-w-0"
-        value={value}
-        onFocus={() => setOpen(true)}
-        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
-        onChange={(event) => { onChange(event.target.value); setOpen(true) }}
-        placeholder={placeholder}
-        aria-label={ariaLabel}
-        autoComplete="off"
-      />
-      {open && matches.length ? (
-        <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-44 overflow-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-zinc-600 dark:bg-zinc-800">
-          {matches.map((option) => (
-            <button
-              key={option.toLowerCase()}
-              type="button"
-              className="block min-h-11 w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-blue-50 dark:text-gray-200 dark:hover:bg-blue-900/20"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => { onChange(option); setOpen(false) }}
-            >
-              {option}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  )
 }
 
 const FilePickerModal = lazyRetry(async () => ({
@@ -292,22 +297,8 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-function hasAllPermission(value: unknown): boolean {
-  if (value && typeof value === 'object') return (value as { all?: unknown }).all === true
-  if (typeof value !== 'string' || !value.trim()) return false
-  try {
-    const parsed = JSON.parse(value) as { all?: unknown }
-    return parsed?.all === true
-  } catch {
-    return false
-  }
-}
-
-function isAdminProductUser(user?: ProductUser | null): boolean {
-  return String(user?.username || '').trim().toLowerCase() === 'admin'
-    || String(user?.role_code || '').trim().toLowerCase() === 'admin'
-    || hasAllPermission(user?.permissions)
-    || hasAllPermission(user?.role_permissions)
+function canManageProductImages(user?: ProductUser | null): boolean {
+  return effectivePermissions(user).can('products', 'image')
 }
 
 function normalizeGallery(product?: ProductFormState | null, limit = MAX_PRODUCT_GALLERY_IMAGES): string[] {
@@ -317,13 +308,28 @@ function normalizeGallery(product?: ProductFormState | null, limit = MAX_PRODUCT
   const seen = new Set<string>()
   const list: string[] = []
   for (const entry of source) {
-    const value = String(entry || '').trim()
+    const value = canonicalizePersistedMediaPath(entry)
     if (!value || seen.has(value)) continue
     seen.add(value)
     list.push(value)
     if (list.length >= limit) break
   }
   return list
+}
+
+export function normalizeProductFormDraft(value: unknown): { form: Partial<ProductFormState>; imageList?: string[] } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { form: {} }
+  const record = value as Record<string, unknown>
+  if (record.form && typeof record.form === 'object' && !Array.isArray(record.form)) {
+    return {
+      form: record.form as Partial<ProductFormState>,
+      imageList: Array.isArray(record.imageList)
+        ? normalizeGallery({ image_gallery: record.imageList }, ADMIN_MAX_PRODUCT_GALLERY_IMAGES)
+        : undefined,
+    }
+  }
+  const form = record as Partial<ProductFormState>
+  return { form, imageList: normalizeGallery(form, ADMIN_MAX_PRODUCT_GALLERY_IMAGES) }
 }
 
 // Mirrors cloudflare/src/lib/importImageMatch.ts's buildImageDisplayName --
@@ -347,8 +353,73 @@ function buildGalleryImageName(productName: string, position: number, total: num
 }
 
 function editablePrice(value: unknown, fallback = 0): string {
-  if (value === '' || value === null || typeof value === 'undefined') return formatPriceNumber(fallback)
-  return formatPriceNumber(value)
+  if (value === '' || value === null || typeof value === 'undefined') return editableMoneyValue(fallback)
+  return editableMoneyValue(value)
+}
+
+export function productFormDraftBaseKey(productId: unknown, draftScope = 'standalone-create'): string {
+  const id = String(productId ?? '').trim()
+  if (id) return `product_${id}`
+  const scope = String(draftScope || 'standalone-create').trim() || 'standalone-create'
+  return `product_new_${scope}`
+}
+
+// Before create flows were isolated, standalone ProductForm drafts used the
+// actor-scoped `product_new` base key. Only standalone create can safely claim
+// that history: session/stock-in callers must never inspect the ambiguous key.
+export function legacyStandaloneProductDraftBaseKey(productId: unknown, draftScope = 'standalone-create'): string | null {
+  if (String(productId ?? '').trim()) return null
+  const scope = String(draftScope || 'standalone-create').trim() || 'standalone-create'
+  return scope === 'standalone-create' ? 'product_new' : null
+}
+
+// ProductForm receives reference data and mapped product objects from a busy
+// catalog page. Those references may change during background refreshes even
+// though the operator is still editing the same entity/session item. React
+// state therefore hydrates only when the caller's stable key changes.
+export function useStableHydratedState<T>(initialState: T, hydrationKey: string): [T, Dispatch<SetStateAction<T>>] {
+  const [state, setState] = useState<T>(initialState)
+  const hydratedKeyRef = useRef(hydrationKey)
+  useEffect(() => {
+    if (hydratedKeyRef.current === hydrationKey) return
+    hydratedKeyRef.current = hydrationKey
+    setState(initialState)
+  }, [hydrationKey, initialState])
+  return [state, setState]
+}
+
+export async function clearAfterSuccessfulProductSave(
+  save: () => unknown | Promise<unknown>,
+  clear: () => void,
+  close: () => void,
+): Promise<void> {
+  await Promise.resolve(save())
+  clear()
+  close()
+}
+
+function editableInitialForm(initialForm: ProductFormState): ProductFormState {
+  return {
+    ...initialForm,
+    selling_price_usd: editablePrice(initialForm.selling_price_usd),
+    selling_price_khr: editablePrice(initialForm.selling_price_khr),
+    // Wholesale is independent from selling price; never borrow its value.
+    wholesale_price_usd: editablePrice(initialForm.wholesale_price_usd),
+    wholesale_price_khr: editablePrice(initialForm.wholesale_price_khr),
+    discount_enabled: Number(initialForm.discount_enabled || 0),
+    discount_type: initialForm.discount_type || 'percent',
+    discount_percent: editablePrice(initialForm.discount_percent || 0),
+    discount_amount_usd: editablePrice(initialForm.discount_amount_usd || 0),
+    discount_amount_khr: editablePrice(initialForm.discount_amount_khr || 0),
+    discount_label: initialForm.discount_label || '',
+    discount_badge_color: initialForm.discount_badge_color || '#e11d48',
+    discount_starts_at: initialForm.discount_starts_at || '',
+    discount_ends_at: initialForm.discount_ends_at || '',
+    expiry_date: initialForm.expiry_date || '',
+    expiry_alert_days: editablePrice(initialForm.expiry_alert_days ?? 30),
+    cost_price_usd: editablePrice(initialForm.cost_price_usd),
+    cost_price_khr: editablePrice(initialForm.cost_price_khr),
+  }
 }
 
 function pickImageFiles(maxCount = 1, options: PickImageFilesOptions = {}): Promise<File[]> {
@@ -407,12 +478,23 @@ export default function ProductForm({
   categories,
   units,
   branches,
-  brandOptions = [],
+  // NO `= []` default: an empty array and "this host never supplied a list"
+  // have to stay distinguishable. FastStockInModal renders this form with no
+  // brandOptions at all, and with a default they looked identical -- the
+  // Brand field then claimed "Nothing saved yet" over 205 real brands
+  // instead of fetching them. See ensureBrandSuggestions below.
+  brandOptions,
   groupCandidates = [],
   onSave,
   onDelete,
   onClose,
+  onReviewIdentityCollision,
   onMinimize,
+  createDefaults,
+  draftScope,
+  sessionDuplicateCheck,
+  modalLayer = 'default',
+  showReceivedDate = false,
   t,
   usdSymbol,
   khrSymbol,
@@ -424,10 +506,15 @@ export default function ProductForm({
     || branches[0]?.id?.toString()
     || ''
   const currentProductId = Number(product?.id || 0)
-  const imageLimit = isAdminProductUser(user) ? ADMIN_MAX_PRODUCT_GALLERY_IMAGES : MAX_PRODUCT_GALLERY_IMAGES
+  const isCreateMode = !product?.id
+  const isEditMode = !isCreateMode
+  const imageLimit = isAdminControlUser(user) ? ADMIN_MAX_PRODUCT_GALLERY_IMAGES : MAX_PRODUCT_GALLERY_IMAGES
+  const draftKey = scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope))
+  const legacyDraftBaseKey = legacyStandaloneProductDraftBaseKey(product?.id, draftScope)
+  const legacyDraftKey = legacyDraftBaseKey ? scopedWorkDraftKey(legacyDraftBaseKey) : null
 
   const initialForm = useMemo<ProductFormState>(() => {
-    if (product) {
+    if (product?.id) {
       return { ...product }
     }
     return {
@@ -438,8 +525,6 @@ export default function ProductForm({
       description: '',
       selling_price_usd: 0,
       selling_price_khr: 0,
-      special_price_usd: 0,
-      special_price_khr: 0,
       wholesale_price_usd: 0,
       wholesale_price_khr: 0,
       discount_enabled: 0,
@@ -454,29 +539,57 @@ export default function ProductForm({
       cost_price_usd: 0,
       cost_price_khr: 0,
       stock_quantity: 0,
+      ...(showReceivedDate ? { received_date: '' } : {}),
       low_stock_threshold: 10,
       out_of_stock_threshold: 0,
       expiry_date: '',
       expiry_alert_days: 30,
-      unit: units[0]?.name || 'pcs',
+      // The default unit must come from the MANAGED list, not from whatever
+      // unit string happens to sort first among the ones products carry: the
+      // units read now returns both (see LookupSuggestionSource above), and
+      // an unmanaged 'btl' silently becoming every new product's default
+      // would be a behaviour change nobody asked for.
+      //
+      // Checked BOTH ways because a caller may narrow the rows before handing
+      // them over: FastStockInModal's normalizeLookupOptions keeps only
+      // {id, name} and drops `source`, so the synthetic 'used:' id is the
+      // tell that survives there. A row with neither marker (offline mirror,
+      // older payloads) counts as managed -- exactly the pre-union behaviour.
+      unit: units.find((option) => option.source !== 'products' && !String(option.id).startsWith('used:'))?.name || 'pcs',
       supplier: '',
       tag_label: '',
       image_path: '',
       image_gallery: [],
       branch_id: defaultBranchId,
+      // S4-12: seeded LAST so a create-products session's brand/supplier/
+      // branch override the blanks above, while every other field keeps the
+      // one set of defaults defined here.
+      ...(createDefaults || {}),
+      // Backward-compatible support for a caller that supplies a no-id seed:
+      // it is still CREATE mode and must retain all normal create defaults.
+      ...(product || {}),
     }
-  }, [product, units, defaultBranchId])
+  }, [product, units, defaultBranchId, createDefaults, showReceivedDate])
 
-  const [form, setForm] = useState<ProductFormState>(initialForm)
+  const hydratedInitialForm = useMemo(() => editableInitialForm(initialForm), [initialForm])
+  const [form, setForm] = useStableHydratedState<ProductFormState>(hydratedInitialForm, draftKey)
   // Always retain/display a pre-existing admin gallery. The ordinary-user
   // limit controls additions; it must not truncate positions 4-5 merely
   // because someone edited an unrelated product field.
   const [imageList, setImageList] = useState(() => normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES))
+  const formRef = useRef(form)
+  const imageListRef = useRef(imageList)
+  formRef.current = form
+  imageListRef.current = imageList
+  const [imageRenderVersions, setImageRenderVersions] = useState<Record<string, string>>({})
+  const imageHydrationKeyRef = useRef(draftKey)
   const [activeTab, setActiveTab] = useState<ProductFormTab>(initialTab || 'basic')
-  const lastTabResetKeyRef = useRef<string>(`${currentProductId}:${initialTab || 'basic'}`)
+  const lastTabResetKeyRef = useRef<string>(`${draftKey}:${initialTab || 'basic'}`)
   const [supplierList, setSupplierList] = useState<SupplierOption[]>([])
+  // Distinguishes "the names read came back and there are none" from "it has
+  // not come back yet"; only the first may say "Nothing saved yet".
+  const [supplierListLoaded, setSupplierListLoaded] = useState(false)
   const [supplierReferenceVersion, setSupplierReferenceVersion] = useState(0)
-  const [supplierDrop, setSupplierDrop] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [scannerField, setScannerField] = useState<ScannerField | ''>('')
   const [scannerLaunchingField, setScannerLaunchingField] = useState<ScannerField | ''>('')
@@ -486,7 +599,9 @@ export default function ProductForm({
   // see reorderImage/moveImage above.
   const [dragImageIndex, setDragImageIndex] = useState<number | null>(null)
   const supplierRequestRef = useRef(0)
+  const restoredLegacyDraftKeyRef = useRef<string | null>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
+  const productFormContentRef = useRef<HTMLDivElement>(null)
   // Locked-name-of-a-grouped-product feature (this session). isGroupedProduct
   // is computed off the SAVED name this form loaded with (initialForm.name),
   // not the live-edited form.name -- the lock question is "does this
@@ -555,6 +670,7 @@ export default function ProductForm({
   const [nameUnlocked, setNameUnlocked] = useState(false)
   const [nameUnlockConfirmOpen, setNameUnlockConfirmOpen] = useState(false)
   const nameLocked = isGroupedProduct && !nameUnlocked
+  const canManageImages = canManageProductImages(user)
   const aliveRef = useRef(true)
   const imageUploadInFlightRef = useRef(false)
   const saveInFlightRef = useRef(false)
@@ -566,9 +682,84 @@ export default function ProductForm({
     return isKhmer ? fallbackKm : fallbackEn
   }
 
+  // Category/Unit arrive from GET /api/categories and /api/units, which now
+  // return the lookup table UNION the values products actually carry (see
+  // cloudflare/src/lib/lookupSuggestions.ts). Before that union, production's
+  // empty `categories` table meant this list was empty on a catalog with 42
+  // categories in use -- the owner's report.
   const categorySuggestionOptions = useMemo(() => categories.map((category) => String(category.name || '').trim()).filter(Boolean), [categories])
   const unitSuggestionOptions = useMemo(() => units.map((unit) => String(unit.name || '').trim()).filter(Boolean), [units])
-  const brandSuggestionOptions = useMemo(() => (brandOptions || []).map((brand) => String(brand || '').trim()).filter(Boolean), [brandOptions])
+  // Brand has no lookup table to union, so the union is the caller's:
+  // buildProductBrandOptions merges the brands products carry with the
+  // curated settings library, and Products.tsx / CreateProductsSessionModal
+  // hand the result down. A host that hands nothing down is NOT a host whose
+  // catalog has no brands -- FastStockInModal is owned by another lane and
+  // simply never plumbed the prop -- so the field fetches the products-in-use
+  // half itself rather than sitting empty. Lazy: the read only happens if the
+  // list is actually opened.
+  const brandOptionsProvided = Array.isArray(brandOptions)
+  const [fallbackBrands, setFallbackBrands] = useState<string[] | null>(null)
+  const [brandFallbackLoading, setBrandFallbackLoading] = useState(false)
+  const brandFallbackRequestedRef = useRef(false)
+  const ensureBrandSuggestions = () => {
+    if (brandOptionsProvided || brandFallbackRequestedRef.current) return
+    brandFallbackRequestedRef.current = true
+    setBrandFallbackLoading(true)
+    void getProductFilters({})
+      .then((payload) => {
+        if (!aliveRef.current) return
+        const rows = (payload as { brands?: unknown[] } | null)?.brands
+        setFallbackBrands(Array.isArray(rows) ? rows.map((brand) => String(brand || '').trim()).filter(Boolean) : [])
+      })
+      // A failed read leaves the source UNREPORTED (null), not "empty": the
+      // field must not tell the operator their catalog has no brands because
+      // one request 403'd or timed out. Free text keeps working either way,
+      // and releasing the once-only guard lets the NEXT focus try again --
+      // a dropped request must not silence this field for the whole form.
+      .catch(() => { brandFallbackRequestedRef.current = false })
+      .finally(() => { if (aliveRef.current) setBrandFallbackLoading(false) })
+  }
+  const brandSuggestionOptions = useMemo(
+    () => (brandOptionsProvided ? brandOptions || [] : fallbackBrands || [])
+      .map((brand) => String(brand || '').trim())
+      .filter(Boolean),
+    [brandOptionsProvided, brandOptions, fallbackBrands],
+  )
+  // Supplier rows are name-only, because the read behind them is: this form
+  // asks /api/suppliers?fields=names, which cloudflare/src/routes/contacts.ts
+  // answers with SELECT id, name -- deliberately, since that is the ONLY shape
+  // of the endpoint reachable without the contacts_suppliers permission, and a
+  // product form must work for a stock clerk who does not have it. A company
+  // second line therefore has nothing to render from here; it was mapped once
+  // and never appeared. The contact id still rides along on the row key, so a
+  // pick can be told from typing. Free text stays legal: this form records a
+  // supplier NAME on the product, it does not link a contact.
+  const supplierSuggestionOptions = useMemo<SuggestionOption[]>(
+    () => supplierList
+      .map((supplier) => ({
+        value: String(supplier.name || '').trim(),
+        key: `supplier-${supplier.id}`,
+      }))
+      .filter((option) => option.value !== ''),
+    [supplierList],
+  )
+
+  // Whether each field's option SOURCE has reported, which is what decides
+  // whether an empty list has anything honest to say (see suggestionEmptyState).
+  // A prop-fed list can only prove it by being non-empty: Products.tsx passes
+  // [] until loadAuxOptions resolves, and "Nothing saved yet" over 42 real
+  // categories is exactly the lie this lane exists to remove.
+  const categorySuggestionsSourced = categorySuggestionOptions.length > 0
+  const unitSuggestionsSourced = unitSuggestionOptions.length > 0
+  const brandSuggestionsSourced = brandOptionsProvided ? brandSuggestionOptions.length > 0 : fallbackBrands !== null
+  const supplierSuggestionsSourced = supplierListLoaded
+  function emptyHintFor(sourced: boolean, optionCount: number): string | undefined {
+    const state = suggestionEmptyState(sourced, optionCount)
+    if (state === 'unknown') return undefined
+    return state === 'none-yet'
+      ? tr('suggestions_none_yet', 'Nothing saved yet — type a new one.', 'មិនទាន់មានទេ — សូមវាយបញ្ចូលថ្មី។')
+      : tr('suggestions_no_match', 'No match — type to add a new one.', 'រកមិនឃើញ — សូមវាយបញ្ចូលថ្មី។')
+  }
 
   const initialBranchOptions = useMemo<AppSelectOption[]>(() => {
     const currentBranchId = form.branch_id ? String(form.branch_id) : ''
@@ -583,53 +774,21 @@ export default function ProductForm({
   }, [branches, form.branch_id])
 
   useEffect(() => {
-    setForm({
-      ...initialForm,
-      selling_price_usd: editablePrice(initialForm.selling_price_usd),
-      selling_price_khr: editablePrice(initialForm.selling_price_khr),
-      // VIP price is its OWN optional field. It must NOT default to the
-      // selling price: the API was omitting these two columns, so the
-      // `?? selling` fallback silently loaded the selling price into the
-      // VIP field, and the save below then wrote it back -- overwriting a
-      // real VIP price (e.g. 8) with the selling price (12) on every edit.
-      // A product with no VIP price loads blank/0 and stays that way.
-      special_price_usd: editablePrice(initialForm.special_price_usd),
-      special_price_khr: editablePrice(initialForm.special_price_khr),
-      // Wholesale price is its own optional field, same rule as VIP above:
-      // loads blank/0 when unset and stays that way, never borrowing the
-      // selling price.
-      wholesale_price_usd: editablePrice(initialForm.wholesale_price_usd),
-      wholesale_price_khr: editablePrice(initialForm.wholesale_price_khr),
-      discount_enabled: Number(initialForm.discount_enabled || 0),
-      discount_type: initialForm.discount_type || 'percent',
-      discount_percent: editablePrice(initialForm.discount_percent || 0),
-      discount_amount_usd: editablePrice(initialForm.discount_amount_usd || 0),
-      discount_amount_khr: editablePrice(initialForm.discount_amount_khr || 0),
-      discount_label: initialForm.discount_label || '',
-      discount_badge_color: initialForm.discount_badge_color || '#e11d48',
-      discount_starts_at: initialForm.discount_starts_at || '',
-      discount_ends_at: initialForm.discount_ends_at || '',
-      expiry_date: initialForm.expiry_date || '',
-      expiry_alert_days: editablePrice(initialForm.expiry_alert_days ?? 30),
-      cost_price_usd: editablePrice(initialForm.cost_price_usd),
-      cost_price_khr: editablePrice(initialForm.cost_price_khr),
-    })
-    setImageList(normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES))
-    // Defense-in-depth on top of the Products.tsx memoization fix (see
-    // that file's comment on `modalProduct`): only reset the active tab
-    // when this is genuinely a different product (or the caller asked
-    // for a specific initialTab again), not on every re-run of this
-    // effect. Without this guard, any future caller that passes an
-    // unstable `product`/`initialForm` reference would reintroduce the
-    // same "silently snaps back to Basic Info" bug this session fixed.
-    const resetKey = `${currentProductId}:${initialTab || 'basic'}`
+    if (imageHydrationKeyRef.current !== draftKey) {
+      imageHydrationKeyRef.current = draftKey
+      const nextImages = normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES)
+      imageListRef.current = nextImages
+      setImageList(nextImages)
+      setImageRenderVersions({})
+    }
+    const resetKey = `${draftKey}:${initialTab || 'basic'}`
     if (lastTabResetKeyRef.current !== resetKey) {
       lastTabResetKeyRef.current = resetKey
       setActiveTab(initialTab || 'basic')
       setNameUnlocked(false)
       setNameUnlockConfirmOpen(false)
     }
-  }, [initialForm, initialTab, currentProductId, imageLimit])
+  }, [draftKey, initialForm, initialTab])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -661,6 +820,7 @@ export default function ProductForm({
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(supplierRequestRef, requestId)) return
         setSupplierList(Array.isArray(data) ? data as SupplierOption[] : [])
+        setSupplierListLoaded(true)
       } catch {
         if (!aliveRef.current || !isTrackedRequestCurrent(supplierRequestRef, requestId)) return
       }
@@ -672,10 +832,10 @@ export default function ProductForm({
   }, [supplierReferenceVersion])
 
   useEffect(() => {
-    if (!product && !form.branch_id && defaultBranchId) {
+    if (!isEditMode && !form.branch_id && defaultBranchId) {
       setForm((current) => ({ ...current, branch_id: defaultBranchId }))
     }
-  }, [product, form.branch_id, defaultBranchId])
+  }, [isEditMode, form.branch_id, defaultBranchId, setForm])
 
   // N2: any field edit marks this open form dirty; the registration below
   // makes page navigation stop and ask instead of silently dropping it.
@@ -685,14 +845,24 @@ export default function ProductForm({
     setForm((current) => ({ ...current, [key]: value }))
   }
 
+  function clearCurrentProductDraft(): void {
+    formDirtyRef.current = false
+    clearWorkDraft(draftKey)
+    // Do not erase an ambiguous deployed-version draft merely because a newer
+    // standalone draft exists. It belongs to this form only after fallback
+    // restoration actually selected it.
+    if (restoredLegacyDraftKeyRef.current) {
+      clearWorkDraft(restoredLegacyDraftKeyRef.current)
+      restoredLegacyDraftKeyRef.current = null
+    }
+  }
+
   // Part 388 "Canva-level" persistence: the in-progress form autosaves to
   // localStorage (debounced) and comes back after a crash, reload, or
   // accidental close. The draft is cleared on a successful save and on an
   // explicit Discard & Leave; a draft older than the product's own
   // updated_at is dropped rather than resurrecting stale edits over newer
   // server data.
-  const draftKey = scopedWorkDraftKey(`product_${product?.id ?? 'new'}`)
-
   // D6 rename gate: a promise the save flow awaits while the shared
   // before->after dialog asks what happens to attached rows.
   const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
@@ -711,6 +881,10 @@ export default function ProductForm({
   // Part 563: the final "confirm / double-check" gate the save flow awaits
   // before writing, using the shared ConfirmDialog. Same promise-based pattern
   // as askRenameChoice above -- saveForm opens it and blocks on the choice.
+  // Saving a rename/re-barcode into an existing twin is a merge decision, and
+  // it goes through the SAME flow (and the same stock question) the Conflicts
+  // review uses -- one answer to "the other row also has stock", everywhere.
+  const [identityCollision, setIdentityCollision] = useState<{ id: number; name: string | null } | null>(null)
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
   const saveConfirmResolveRef = useRef<((ok: boolean) => void) | null>(null)
   const askSaveConfirm = () => new Promise<boolean>((resolve) => {
@@ -726,7 +900,7 @@ export default function ProductForm({
   // Compact review rows for the save confirm dialog.
   const saveReviewItems = (): ConfirmReviewItem[] => {
     const items: ConfirmReviewItem[] = [
-      { label: tr('label_selling_price', 'Selling Price'), value: `${usdSymbol}${Number(form.selling_price_usd || 0).toFixed(2)}` },
+      { label: tr('label_selling_price', 'Selling price'), value: `${usdSymbol}${Number(form.selling_price_usd || 0).toFixed(2)}` },
       { label: tr('label_cost', 'Cost'), value: `${usdSymbol}${Number(form.cost_price_usd || 0).toFixed(2)}` },
     ]
     const barcode = String(form.barcode || '').trim()
@@ -739,8 +913,8 @@ export default function ProductForm({
   // structured verdict modal offers go-back / group-by-name / separate-name
   // choices where they actually differ. Same-name rows always wrap together
   // under the virtual group title; there is no stored parent/child link.
-  const isCreateMode = !product?.id
   const [createMatches, setCreateMatches] = useState<CreateMatchCandidate[]>([])
+  const [createMatchLookupState, setCreateMatchLookupState] = useState<'idle' | 'loading' | 'resolved' | 'failed'>('idle')
   const [createVerdictOpen, setCreateVerdictOpen] = useState(false)
   const createVerdictResolveRef = useRef<((choice: 'back' | 'group' | 'new') => void) | null>(null)
   const createMatchSeqRef = useRef(0)
@@ -749,21 +923,27 @@ export default function ProductForm({
     () => classifyCreateMatches({
       name: form.name,
       barcode: form.barcode,
+      // cost is deliberately NOT passed: it is not part of product identity
       selling_price_usd: parseNumericInput(form.selling_price_usd),
-      cost_price_usd: parseNumericInput(form.cost_price_usd),
-      cost_price_khr: parseNumericInput(form.cost_price_khr),
     }, createMatches),
-    [form.name, form.barcode, form.selling_price_usd, form.cost_price_usd, form.cost_price_khr, createMatches],
+    [form.name, form.barcode, form.selling_price_usd, createMatches],
   )
+  const createSessionDuplicate = isCreateMode && Boolean(sessionDuplicateCheck?.({ name: form.name, barcode: form.barcode }))
   useEffect(() => {
     if (!isCreateMode) return
+    const seq = ++createMatchSeqRef.current
     const name = String(form.name || '').trim()
     const barcode = String(form.barcode || '').trim()
-    if (name.length < 2 && !barcode) { setCreateMatches([]); return }
-    const seq = ++createMatchSeqRef.current
+    // The min-length and debounce live in helpers/productNameSuggestions.ts
+    // because the Name field's suggestion list is fed by THIS lookup: one
+    // gate, so the dropdown and the identity hint can never disagree about
+    // when the catalog has been asked.
+    if (!shouldSearchProductMatches(name, barcode)) { setCreateMatches([]); setCreateMatchLookupState('idle'); return }
+    setCreateMatches([])
+    setCreateMatchLookupState('loading')
     const timer = window.setTimeout(async () => {
       try {
-        const queries = [name, barcode].filter((query) => query.length >= 2)
+        const queries = productMatchQueries(name, barcode)
         const results: CreateMatchCandidate[] = []
         for (const query of queries) {
           const payload = await searchProductsForMatch({ query, pageSize: 10 }) as { items?: CreateMatchCandidate[] }
@@ -777,11 +957,19 @@ export default function ProductForm({
           seen.add(key)
           return true
         }))
-      } catch { /* live match is advisory -- a failed search never blocks typing */ }
-    }, 350)
+        setCreateMatchLookupState('resolved')
+      } catch {
+        if (seq === createMatchSeqRef.current) setCreateMatchLookupState('failed')
+      }
+    }, PRODUCT_MATCH_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCreateMode, form.name, form.barcode])
+  // S4-21: ONE key, used both to register this form's dirtiness and to tell
+  // the modal chrome which registry entry its ✕ must consult. Two literals
+  // would drift and the ✕ would silently stop guarding.
+  const dirtyWorkKey = `product-form-${draftKey}`
+
   const askCreateVerdict = () => new Promise<'back' | 'group' | 'new'>((resolve) => {
     createVerdictResolveRef.current = resolve
     setCreateVerdictOpen(true)
@@ -795,20 +983,31 @@ export default function ProductForm({
 
   useEffect(() => {
     formDirtyRef.current = false
+    restoredLegacyDraftKeyRef.current = null
     // F3 slice 1: same restore, through the ONE shared store (which also
     // reads Part 388's original { form } field for existing drafts).
     {
       const serverEditedAt = (product as Record<string, unknown> | null)?.updated_at ? Date.parse(String((product as Record<string, unknown>).updated_at)) : 0
-      const draft = readWorkDraft<Partial<ProductFormState>>(draftKey, { notOlderThanMs: serverEditedAt || 0 })
-      if (draft?.data) {
-        setForm((current) => ({ ...current, ...draft.data }))
+      const draft = readWorkDraft<Partial<ProductFormState> | ProductFormDraftPayload>(draftKey, { notOlderThanMs: serverEditedAt || 0 })
+      const legacyDraft = !draft && legacyDraftKey
+        ? readWorkDraft<Partial<ProductFormState> | ProductFormDraftPayload>(legacyDraftKey, { notOlderThanMs: serverEditedAt || 0 })
+        : null
+      const restoredDraft = draft || legacyDraft
+      if (restoredDraft?.data) {
+        const restored = normalizeProductFormDraft(restoredDraft.data)
+        setForm((current) => ({ ...current, ...restored.form }))
+        if (canManageImages && restored.imageList) {
+          imageListRef.current = restored.imageList
+          setImageList(restored.imageList)
+        }
         formDirtyRef.current = true
+        restoredLegacyDraftKeyRef.current = legacyDraft?.data ? legacyDraftKey : null
         // (no notify prop here -- the restored values themselves are the signal)
       }
     }
     const productLabel = String(product?.name || form.name || '').trim()
     return registerDirtyWork({
-      key: `product-form-${product?.id ?? 'new'}`,
+      key: dirtyWorkKey,
       pageId: 'products',
       label: `${t('product_form') || 'Product form'}${productLabel ? ` — ${productLabel}` : ''}`,
       isDirty: () => formDirtyRef.current,
@@ -816,52 +1015,72 @@ export default function ProductForm({
       // identity validation -- auto-submitting from a navigation prompt
       // would surface those errors in a page the user is trying to leave.
       // The guard offers Discard & Leave / Stay for this entry.
-      discard: () => clearWorkDraft(draftKey),
+      discard: clearCurrentProductDraft,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [product?.id])
+  }, [draftKey])
+
+  useEffect(() => () => {
+    // Runs only when this form unmounts or switches entity/session key. It is
+    // declared before the debounced writer so React flushes the pending value
+    // before that writer's ordinary cleanup can cancel it.
+    flushPendingWorkDraft(draftKey)
+  }, [draftKey])
 
   useEffect(() => {
     if (!formDirtyRef.current) return
-    return scheduleWorkDraftWrite(draftKey, form)
+    return scheduleWorkDraftWrite<ProductFormDraftPayload>(draftKey, {
+      form,
+      imageList: normalizeGallery({ image_gallery: imageList }, ADMIN_MAX_PRODUCT_GALLERY_IMAGES),
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, draftKey])
+  }, [form, imageList, draftKey])
+
+  function updateImageList(
+    change: (current: string[]) => string[],
+    options: { persistImmediately?: boolean } = {},
+  ): string[] {
+    const current = imageListRef.current
+    const next = normalizeGallery({ image_gallery: change(current) }, ADMIN_MAX_PRODUCT_GALLERY_IMAGES)
+    if (next.length === current.length && next.every((path, index) => path === current[index])) return current
+    imageListRef.current = next
+    formDirtyRef.current = true
+    setImageList(next)
+    if (options.persistImmediately) {
+      scheduleWorkDraftWrite<ProductFormDraftPayload>(draftKey, { form: formRef.current, imageList: next })
+      flushPendingWorkDraft(draftKey)
+    }
+    return next
+  }
 
   function setNumericField(key: keyof ProductFormState, value: unknown, options?: NumericInputOptions): void {
     setField(key, sanitizeNumericInput(value, options))
   }
 
   async function addImages(): Promise<void> {
-    if (saving || imageUploading) return
+    if (!canManageImages || saving || imageUploading) return
     await uploadPickedImages({})
   }
 
   async function addPhoto(): Promise<void> {
-    if (saving || imageUploading) return
+    if (!canManageImages || saving || imageUploading) return
     await uploadPickedImages({ capture: 'environment' })
   }
 
   async function uploadPickedImages(options: PickImageFilesOptions = {}): Promise<void> {
-    if (imageUploading || imageUploadInFlightRef.current) return
+    if (!canManageImages || imageUploading || imageUploadInFlightRef.current) return
     imageUploadInFlightRef.current = true
+    setImageUploading(true)
     try {
-      const remaining = Math.max(0, imageLimit - imageList.length)
-      if (!remaining) {
-        imageUploadInFlightRef.current = false
-        return
-      }
+      const remaining = Math.max(0, imageLimit - imageListRef.current.length)
+      if (!remaining) return
       const files = await pickImageFiles(remaining, options)
-      if (!files.length) {
-        imageUploadInFlightRef.current = false
-        return
-      }
-      setImageUploading(true)
-      const stagedImages: string[] = []
+      if (!files.length) return
       const productNameForNaming = String(form.name || '').trim()
       // Position/total are computed against the gallery's final size (existing
       // images already on the product + every file in this batch), not just
       // this batch alone -- see buildGalleryImageName above.
-      const existingCount = imageList.length
+      const existingCount = imageListRef.current.length
       const totalAfterBatch = Math.min(imageLimit, existingCount + files.length)
       for (const [index, file] of files.entries()) {
         const uploaded = await withLoaderTimeout(
@@ -877,26 +1096,29 @@ export default function ProductForm({
           PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,
         )
         const rawPath = uploaded?.public_path || uploaded?.path || uploaded?.asset?.public_path || uploaded?.data?.path || ''
-        const publicPath = buildCacheBustedMediaPath(rawPath, uploaded?.cache_version || uploaded?.asset?.updated_at || uploaded?.asset?.created_at || '')
-        if (publicPath) stagedImages.push(publicPath)
+        const publicPath = canonicalizePersistedMediaPath(rawPath)
+        if (!publicPath) throw new Error(tr('image_upload_missing_path', 'Image upload completed without a stored file path.', 'ការបង្ហោះរូបភាពបានបញ្ចប់ ប៉ុន្តែមិនមានទីតាំងឯកសារដែលបានរក្សាទុកទេ។'))
+        const renderVersion = String(uploaded?.cache_version || uploaded?.asset?.updated_at || uploaded?.asset?.created_at || '').trim()
+        if (aliveRef.current && renderVersion) setImageRenderVersions((current) => ({ ...current, [publicPath]: renderVersion }))
+        // Persist every successful file before starting the next one. A later
+        // failure can report honestly without orphaning earlier uploads from
+        // the restorable product draft.
+        updateImageList(
+          (current) => current.includes(publicPath) || current.length >= imageLimit ? current : [...current, publicPath],
+          { persistImmediately: true },
+        )
       }
-      setImageList((current) => {
-        const next = [...current]
-        stagedImages.forEach((url) => {
-          if (!next.includes(url) && next.length < imageLimit) next.push(url)
-        })
-        return next
-      })
     } catch (error) {
       alert(getErrorMessage(error, tr('image_upload_failed', 'Image upload failed', 'ការបង្ហោះរូបភាពបានបរាជ័យ')))
     } finally {
       imageUploadInFlightRef.current = false
-      setImageUploading(false)
+      if (aliveRef.current) setImageUploading(false)
     }
   }
 
   function removeImage(index: number): void {
-    setImageList((current) => current.filter((_, idx) => idx !== index))
+    if (!canManageImages) return
+    updateImageList((current) => current.filter((_, idx) => idx !== index))
   }
 
   // Drag-to-reorder for the gallery grid (Part 242), mirrored off the same
@@ -907,7 +1129,8 @@ export default function ProductForm({
   // most mobile touchscreens) an equivalent left/right-arrow way to do the
   // same reorder without a mouse.
   function reorderImage(fromIndex: number, toIndex: number): void {
-    setImageList((current) => {
+    if (!canManageImages) return
+    updateImageList((current) => {
       if (fromIndex === toIndex || fromIndex < 0 || fromIndex >= current.length || toIndex < 0 || toIndex >= current.length) return current
       const next = [...current]
       const [moved] = next.splice(fromIndex, 1)
@@ -921,7 +1144,8 @@ export default function ProductForm({
   }
 
   function setPrimaryImage(index: number): void {
-    setImageList((current) => {
+    if (!canManageImages) return
+    updateImageList((current) => {
       if (index < 0 || index >= current.length) return current
       const next = [...current]
       const [primary] = next.splice(index, 1)
@@ -936,7 +1160,7 @@ export default function ProductForm({
     // (e.g. a future keyboard-submit path) that doesn't go through the
     // disabled button. See the button's own comment for the bug this
     // closes: saving mid-upload used the stale pre-upload imageList.
-    if (saving || saveInFlightRef.current || imageUploading) return
+    if (saving || saveInFlightRef.current || imageUploading || imageUploadInFlightRef.current) return
     if (!String(form.name || '').trim()) {
       alert(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'))
       return
@@ -952,6 +1176,10 @@ export default function ProductForm({
         'This barcode looks like scientific notation (an Excel export artifact). Edit it or clear it — it cannot be saved as-is.',
         'បាកូដនេះមើលទៅដូចជាទម្រង់វិទ្យាសាស្ត្រ (កំហុសពីការនាំចេញ Excel)។ កែ ឬលុបវាចេញ — មិនអាចរក្សាទុកបែបនេះបានទេ។',
       ))
+      return
+    }
+    if (createSessionDuplicate) {
+      alert(tr('create_products_session_duplicate', 'Duplicate: You added this item already.', 'ស្ទួន៖ អ្នកបានបន្ថែមទំនិញនេះរួចហើយ។'))
       return
     }
     // F1: the page-by-page confirm -- a matching name/barcode stops the
@@ -972,7 +1200,7 @@ export default function ProductForm({
         createMatchAckRef.current = ackKey
       }
     }
-    if (!product && branches.length > 0 && !form.branch_id) {
+    if (isCreateMode && branches.length > 0 && !form.branch_id) {
       alert(tr('branch_required_alert', 'Please choose a branch for this product.', 'សូមជ្រើសរើសសាខាសម្រាប់ផលិតផលនេះ។'))
       return
     }
@@ -990,29 +1218,31 @@ export default function ProductForm({
     void _ignoredSku
     void _ignoredParentId
     void _ignoredIsGroup
+    const savableImageList = canManageImages
+      ? imageListRef.current
+      : normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES)
     const payload: ProductSavePayload = {
       ...manualForm,
       selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
       selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
       // No `?? selling` fallback -- see the load above. Whatever is in the
-      // VIP field (0 if the user left it blank) is what gets saved, so an
-      // untouched VIP price is never clobbered with the selling price.
-      special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd)),
-      special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr)),
+      // wholesale field (0 if the user left it blank) is what gets saved, so
+      // an untouched wholesale price is never clobbered with the selling one.
       wholesale_price_usd: normalizePriceValue(parseNumericInput(form.wholesale_price_usd)),
       wholesale_price_khr: normalizePriceValue(parseNumericInput(form.wholesale_price_khr)),
       discount_enabled: form.discount_enabled ? 1 : 0,
       discount_type: form.discount_type === 'fixed' ? 'fixed' : 'percent',
-      discount_percent: normalizePriceValue(parseNumericInput(form.discount_percent)),
-      discount_amount_usd: normalizePriceValue(parseNumericInput(form.discount_amount_usd)),
-      discount_amount_khr: normalizePriceValue(parseNumericInput(form.discount_amount_khr)),
+      discount_percent: parseNumericInput(form.discount_percent),
+      discount_amount_usd: normalizeInternalMoney(parseNumericInput(form.discount_amount_usd)),
+      discount_amount_khr: normalizeInternalMoney(parseNumericInput(form.discount_amount_khr)),
       discount_label: String(form.discount_label || '').trim(),
       discount_badge_color: /^#[0-9a-f]{6}$/i.test(String(form.discount_badge_color || '')) ? String(form.discount_badge_color) : '#e11d48',
       discount_starts_at: form.discount_starts_at || null,
       discount_ends_at: form.discount_ends_at || null,
-      cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd)),
-      cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr)),
+      cost_price_usd: normalizeInternalMoney(parseNumericInput(form.cost_price_usd)),
+      cost_price_khr: normalizeInternalMoney(parseNumericInput(form.cost_price_khr)),
       stock_quantity: parseNumericInput(form.stock_quantity),
+      ...(showReceivedDate ? { received_date: form.received_date || null } : {}),
       low_stock_threshold: parseNumericInput(form.low_stock_threshold, 10),
       out_of_stock_threshold: parseNumericInput(form.out_of_stock_threshold),
       expiry_date: form.expiry_date || null,
@@ -1020,8 +1250,8 @@ export default function ProductForm({
       // Positions 4-5 may be an existing admin-created gallery. They are
       // preserved on ordinary edits; all add paths above still stop at the
       // caller's 3/5 action limit.
-      image_gallery: imageList.slice(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES),
-      image_path: imageList[0] || '',
+      image_gallery: savableImageList.map((path) => canonicalizePersistedMediaPath(path)).filter(Boolean).slice(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES),
+      image_path: canonicalizePersistedMediaPath(savableImageList[0]),
     }
     // D6: renaming an EXISTING product that shares its name with siblings
     // asks whether the whole group carries (9.1's regroup) or only this
@@ -1063,11 +1293,26 @@ export default function ProductForm({
     if (!confirmedSave) { saveInFlightRef.current = false; return }
     setSaving(true)
     try {
-      await Promise.resolve(onSave(payload))
-      // Saved for real -- the autosaved draft is now history (Part 388).
-      formDirtyRef.current = false
-      clearWorkDraft(draftKey)
+      await clearAfterSuccessfulProductSave(
+        () => onSave(payload),
+        () => {
+          // Saved for real -- the autosaved draft is now history (Part 388).
+          clearCurrentProductDraft()
+        },
+        // ProductForm owns the successful close. Its hosts only persist or
+        // queue the payload; none may unmount this form before the dirty latch
+        // and exact draft are cleared above.
+        onClose,
+      )
     } catch (error) {
+      // The rejected identity edit was never persisted. The ordinary exact-
+      // identity pair endpoint would therefore reject the original row again.
+      // Offer a reviewed identity resolution; retain this unsaved draft.
+      const collision = duplicateCollisionFrom(error)
+      if (collision && product?.id && onReviewIdentityCollision) {
+        setIdentityCollision(collision)
+        return
+      }
       alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
     } finally {
       saveInFlightRef.current = false
@@ -1101,48 +1346,72 @@ export default function ProductForm({
     { id: 'expiry', label: tr('expiry', 'Expiry', 'ផុតកំណត់') },
   ]
 
-  const supplierMatches = form.supplier
-    ? supplierList.filter((supplier) => String(supplier.name || '').toLowerCase().includes(String(form.supplier || '').toLowerCase()))
-    : []
+  // The name suggestions are built from the SAME debounced existing-product
+  // lookup that already feeds the identity hint under the field -- no second
+  // read. The row currently being edited is excluded (offering a product its
+  // own name back is noise), and picking a row fills the NAME ONLY: it never
+  // loads or switches to that product, per the owner's no-auto-pick rule.
+  const nameSuggestionOptions = useMemo(
+    () => (isCreateMode && !nameLocked ? buildProductNameSuggestions(createMatches, { excludeId: product?.id }) : []),
+    [isCreateMode, nameLocked, createMatches, product?.id],
+  )
+  const preserveAndMinimize = onMinimize ? () => {
+    if (imageUploading || imageUploadInFlightRef.current) return
+    // The shared unsaved prompt may offer Minimize only through an explicit
+    // preservation capability. Finish this form's pending debounce before the
+    // parent parks/closes it; an already-fired debounce is already durable.
+    flushPendingWorkDraft(draftKey)
+    const typedName = String(form.name || product?.name || '').trim()
+    const actionLabel = isEditMode
+      ? tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')
+      : tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')
+    onMinimize(`${actionLabel}${typedName ? ` — ${typedName}` : ''}`, {
+      draftKey,
+      productId: product?.id ?? null,
+    })
+  } : undefined
+  const childSurfaceOpen = Boolean(
+    filePickerOpen || scannerField || renameRequest || identityCollision || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
+  )
+  useEffect(() => {
+    const dialog = productFormContentRef.current?.closest('[role="dialog"]')
+    if (!dialog || !childSurfaceOpen) return
+    dialog.setAttribute('inert', '')
+    dialog.setAttribute('aria-hidden', 'true')
+    return () => { dialog.removeAttribute('inert'); dialog.removeAttribute('aria-hidden') }
+  }, [childSurfaceOpen])
 
   return (
+    <ConfirmDialogLayerContext.Provider value={modalLayer}>
     <Modal
-      title={product ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product.name}` : tr('add_product', 'Add Product', 'បន្ថែមផលិតផល')}
+      title={isEditMode ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product?.name || ''}` : tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}
       onClose={onClose}
+      onMinimize={preserveAndMinimize}
+      closeDisabled={imageUploading}
+      layer={modalLayer}
       wide
       headerExtra={(
         <>
-          {/* On compact PWA/iOS viewports the persistent footer can fall
-              behind browser chrome or the app navigation. Save is therefore
-              also available in the fixed modal header; Close remains Cancel. */}
-          <button
-            type="button"
-            className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden"
-            onClick={saveForm}
-            disabled={saving || imageUploading}
-          >
-            {saving ? (t('saving') || 'Saving...') : imageUploading ? (tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')) : t('save')}
-          </button>
-          {onMinimize ? (
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => {
-                if (saving) return
-                const typedName = String(form.name || '').trim()
-                onMinimize(`${tr('add_product', 'Add Product', 'បន្ថែមផលិតផល')}${typedName ? ` — ${typedName}` : ''}`)
-              }}
-              aria-label={tr('minimize', 'Minimize', 'បង្រួម')}
-              title={tr('minimize_hint', 'Minimize — continue later from the chip', 'បង្រួម — បន្តពេលក្រោយពីស្លាក')}
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-gray-700"
-            >
-              <span className="text-base leading-none">−</span>
-            </button>
+          {/* S4-20: the header no longer carries a phone-sized Save. It used
+              to, because "on compact PWA/iOS viewports the persistent footer
+              can fall behind browser chrome" -- a real problem, but the fix
+              belongs in the footer, not in a second Save button beside the
+              ✕ where a mis-tap saves instead of closing. The footer is
+              `sticky bottom-0` inside a panel bounded by .modal-panel-safe
+              (100dvh minus the safe-area insets, styles/main.css), so it now
+              sits at the end of the form and stays on screen at every
+              breakpoint. Only the minimize control remains up here. */}
+          {preserveAndMinimize ? (
+            <MinimizeButton
+              disabled={saving || imageUploading}
+              tr={tr}
+              onMinimize={preserveAndMinimize}
+            />
           ) : null}
         </>
       )}
-    >
-      <div className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
+      unsavedChanges={{ workKey: dirtyWorkKey }}>
+      <div ref={productFormContentRef} className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
         <div className="flex gap-1 overflow-x-auto">
           {tabs.map((tab) => (
             <button
@@ -1186,7 +1455,7 @@ export default function ProductForm({
                   'រូបភាពជាកម្មសិទ្ធិរបស់ក្រុមទាំងមូល មិនមែនជួរនេះទេ។ សូមបន្ថែម ឬប្តូរពីចំណងជើងក្រុមខាងលើ។ ដាក់ឈ្មោះផ្សេងឲ្យជួរនេះ ដើម្បីធ្វើឲ្យវាក្លាយជាផលិតផលដាច់ដោយឡែក ដែលមានរូបភាពផ្ទាល់ខ្លួន។',
                 )}
               </p>
-            ) : (
+            ) : canManageImages ? (
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn-secondary min-h-11 text-sm" onClick={addImages} disabled={saving || imageUploading}>
                 {imageUploading ? tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...') : tr('choose_file', 'Choose File', 'ជ្រើសរើសឯកសារ')}
@@ -1198,6 +1467,10 @@ export default function ProductForm({
                 {tr('open_files', 'Open Files', 'បើកឯកសារ') || tr('files', 'Files', 'ឯកសារ')}
               </button>
             </div>
+            ) : (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                {tr('no_permission', 'You do not have permission to manage product images.', 'អ្នកមិនមានសិទ្ធិគ្រប់គ្រងរូបភាពផលិតផលទេ។')}
+              </p>
             )}
             {imageList.length && !imagesOwnedByGroupLead ? (
               <>
@@ -1211,7 +1484,7 @@ export default function ProductForm({
                     <div
                       key={`${image}-${index}`}
                       className={`group relative overflow-hidden rounded-xl border bg-slate-50 ${dragImageIndex === index ? 'border-blue-400 ring-2 ring-blue-200' : 'border-slate-200'}`}
-                      draggable={imageList.length > 1}
+                      draggable={canManageImages && imageList.length > 1}
                       onDragStart={(event: DragEvent<HTMLDivElement>) => {
                         setDragImageIndex(index)
                         event.dataTransfer.effectAllowed = 'move'
@@ -1224,13 +1497,13 @@ export default function ProductForm({
                       }}
                       onDragEnd={() => setDragImageIndex(null)}
                     >
-                      <img src={image} alt={`product-${index + 1}`} className="h-20 w-full object-cover sm:h-24" />
+                      <img src={buildCacheBustedMediaPath(image, imageRenderVersions[image]) || image} alt={`product-${index + 1}`} className="h-20 w-full object-cover sm:h-24" />
                       {index === 0 ? (
                         <span className="absolute left-1 top-1 rounded bg-blue-600/90 px-1 py-0.5 text-[9px] font-medium text-white">
                           {tr('primary', 'Primary', 'រូបសំខាន់')}
                         </span>
                       ) : null}
-                      {imageList.length > 1 ? (
+                      {canManageImages && imageList.length > 1 ? (
                         <div className="absolute right-1 top-1 flex gap-0.5">
                           <button
                             type="button"
@@ -1252,14 +1525,14 @@ export default function ProductForm({
                           </button>
                         </div>
                       ) : null}
-                      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/55 px-1.5 py-1 text-[10px] text-white">
+                      {canManageImages ? <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/55 px-1.5 py-1 text-[10px] text-white">
                         <button type="button" className="rounded px-1 py-0.5 hover:bg-white/20" onClick={() => setPrimaryImage(index)}>
                           {index === 0 ? tr('primary', 'Primary', 'រូបសំខាន់') : tr('set_primary', 'Set primary', 'កំណត់ជារូបសំខាន់')}
                         </button>
                         <button type="button" className="rounded px-1 py-0.5 hover:bg-white/20" onClick={() => removeImage(index)}>
                           {tr('remove', 'Remove', 'លុប')}
                         </button>
-                      </div>
+                      </div> : null}
                     </div>
                   ))}
                 </div>
@@ -1271,17 +1544,40 @@ export default function ProductForm({
             <div className="min-w-0 sm:col-span-2 lg:col-span-4">
               <label htmlFor="product-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('name')} *</label>
               <div className="relative">
-                <input
-                  id="product-name"
-                  name="product_name"
-                  ref={nameInputRef}
-                  className={`input min-h-11 min-w-0 ${nameLocked ? 'cursor-pointer bg-gray-50 pr-11 dark:bg-zinc-800/60' : ''}`}
-                  value={form.name || ''}
-                  onChange={(event) => setField('name', event.target.value)}
-                  readOnly={nameLocked}
-                  onClick={() => { if (nameLocked) setNameUnlockConfirmOpen(true) }}
-                  onFocus={(event) => { if (nameLocked) { event.currentTarget.blur(); setNameUnlockConfirmOpen(true) } }}
-                />
+                {nameLocked ? (
+                  // A grouped product's name is a lock, not a text field: it
+                  // asks for confirmation before it may be edited at all, so
+                  // it gets no suggestion list (there is nothing to type).
+                  <input
+                    id="product-name"
+                    name="product_name"
+                    ref={nameInputRef}
+                    className="input min-h-11 min-w-0 cursor-pointer bg-gray-50 pr-11 dark:bg-zinc-800/60"
+                    value={form.name || ''}
+                    onChange={(event) => setField('name', event.target.value)}
+                    readOnly
+                    onClick={() => setNameUnlockConfirmOpen(true)}
+                    onFocus={(event) => { event.currentTarget.blur(); setNameUnlockConfirmOpen(true) }}
+                  />
+                ) : (
+                  // Suggestions are the EXISTING products this name already
+                  // matches (name + barcode + brand on the row, so the
+                  // operator recognises a duplicate before creating one).
+                  // filter="none": the server searched by name AND barcode,
+                  // so re-filtering here would drop every barcode hit.
+                  // Picking fills the name text only -- no auto-add, no
+                  // switch to editing that product.
+                  <SuggestionTextInput
+                    id="product-name"
+                    name="product_name"
+                    inputRef={nameInputRef}
+                    value={form.name || ''}
+                    options={nameSuggestionOptions}
+                    filter="none"
+                    onChange={(value) => setField('name', value)}
+                    ariaLabel={t('name') || 'Name'}
+                  />
+                )}
                 {nameLocked ? (
                   <button
                     type="button"
@@ -1297,16 +1593,24 @@ export default function ProductForm({
               {/* F1: while a NEW product is typed, say out loud what the
                   identity rule will do with this name/barcode -- before the
                   save button is anywhere near being pressed. */}
-              {isCreateMode && createVerdict.kind ? (
+              {createSessionDuplicate ? (
+                <p className="mt-1 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+                  {tr('create_products_session_duplicate', 'Duplicate: You added this item already.', 'ស្ទួន៖ អ្នកបានបន្ថែមទំនិញនេះរួចហើយ។')}
+                </p>
+              ) : isCreateMode && createVerdict.kind ? (
                 <p className={`mt-1 rounded-lg border px-2.5 py-1.5 text-xs ${createVerdict.kind === 'exact_twin'
                   ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300'
                   : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300'}`}>
                   {createVerdict.kind === 'exact_twin'
-                    ? tr('create_match_twin_hint', 'This exact product already exists (same name, barcode, and cost) — it cannot be created twice.', 'ផលិតផលនេះមានរួចហើយ (ឈ្មោះ បាកូដ និងថ្លៃដើមដូចគ្នា) — មិនអាចបង្កើតម្តងទៀតបានទេ។')
+                    ? tr('create_match_twin_hint', 'This product already exists (same name and barcode; leading zeros are ignored) — it cannot be created twice.', 'ផលិតផលនេះមានរួចហើយ (ឈ្មោះ និងបាកូដដូចគ្នា; សូន្យនៅខាងដើមមិនរាប់បញ្ចូល) — មិនអាចបង្កើតម្តងទៀតបានទេ។')
                     : createVerdict.kind === 'name_match'
                       ? tr('create_match_name_hint', 'This name already exists ({n} rows) — saving adds this as a new row of that group.', 'ឈ្មោះនេះមានរួចហើយ ({n} ជួរ) — ការរក្សាទុកនឹងបន្ថែមជាជួរថ្មីនៃក្រុមនោះ។').replace('{n}', String(createVerdict.groupRows.length))
                       : tr('create_match_barcode_hint', 'This barcode is already on "{name}".', 'បាកូដនេះមាននៅលើ "{name}" រួចហើយ។').replace('{name}', createVerdict.canonicalName)}
                   {createVerdict.priceMatches ? ` · ${tr('create_match_price_hint', 'same price too', 'តម្លៃដូចគ្នាដែរ')}` : ''}
+                </p>
+              ) : isCreateMode && createMatchLookupState === 'resolved' ? (
+                <p className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                  {tr('available', 'Available', 'អាចប្រើបាន')}
                 </p>
               ) : null}
               {/* Group membership is automatic and name-based. There is no
@@ -1376,6 +1680,10 @@ export default function ProductForm({
                   type="button"
                   className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
                   onClick={() => openScanner('barcode')}
+                  onPointerDown={preloadBarcodeScannerModal}
+                  onTouchStart={preloadBarcodeScannerModal}
+                  onMouseEnter={preloadBarcodeScannerModal}
+                  onFocus={preloadBarcodeScannerModal}
                   title={scannerLaunchingField === 'barcode' ? scanningLabel : scanBarcodeLabel}
                   aria-label={scanBarcodeLabel}
                   disabled={saving || !!scannerLaunchingField}
@@ -1394,18 +1702,27 @@ export default function ProductForm({
                 onChange={(value) => setField('category', value)}
                 placeholder={tr('type_or_select_category', 'Type or select category...', 'វាយ ឬជ្រើសរើសប្រភេទ...')}
                 ariaLabel={tr('category', 'Category', 'ប្រភេទ')}
+                emptyHint={emptyHintFor(categorySuggestionsSourced, categorySuggestionOptions.length)}
               />
             </div>
             <div className="min-w-0">
               <label htmlFor="product-brand" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('brand', 'Brand', 'ម៉ាក')}</label>
+              {/* onRequestOptions is the whole point of the fallback: a host
+                  that supplies brandOptions never fires a request, and one
+                  that supplies none (FastStockInModal) fetches the brands
+                  products carry the first time this list is opened. */}
               <SuggestionTextInput
                 id="product-brand"
                 name="product_brand"
                 value={form.brand || ''}
                 options={brandSuggestionOptions}
+                loading={brandFallbackLoading}
+                loadingLabel={tr('loading', 'Loading...', 'កំពុងផ្ទុក...')}
+                onRequestOptions={ensureBrandSuggestions}
                 onChange={(value) => setField('brand', value)}
                 placeholder={tr('type_or_select_brand', 'Type or select brand...', 'វាយ ឬជ្រើសរើសម៉ាក...')}
                 ariaLabel={tr('brand', 'Brand', 'ម៉ាក')}
+                emptyHint={emptyHintFor(brandSuggestionsSourced, brandSuggestionOptions.length)}
               />
             </div>
             <div className="min-w-0">
@@ -1418,40 +1735,27 @@ export default function ProductForm({
                 onChange={(value) => setField('unit', value)}
                 placeholder={tr('type_or_select_unit', 'Type or select unit...', 'វាយ ឬជ្រើសរើសឯកតា...')}
                 ariaLabel={t('unit') || 'Unit'}
+                emptyHint={emptyHintFor(unitSuggestionsSourced, unitSuggestionOptions.length)}
               />
             </div>
-            <div className="relative min-w-0">
+            <div className="min-w-0">
               <label htmlFor="product-supplier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('supplier', 'Supplier', 'អ្នកផ្គត់ផ្គង់')}</label>
-              <input
+              {/* Was a private copy of this control whose match list was
+                  `form.supplier ? filter(...) : []` -- so focusing the empty
+                  field produced no dropdown at all and the operator had to
+                  guess a first letter before the app would admit it knew any
+                  suppliers. The shared component treats an empty query as
+                  "show everything", exactly like Category/Brand/Unit. */}
+              <SuggestionTextInput
                 id="product-supplier"
                 name="product_supplier"
-                className="input min-h-11 min-w-0"
                 value={form.supplier || ''}
-                onFocus={() => setSupplierDrop(true)}
-                onChange={(event) => {
-                  setField('supplier', event.target.value)
-                  setSupplierDrop(true)
-                }}
+                options={supplierSuggestionOptions}
+                onChange={(value) => setField('supplier', value)}
                 placeholder={tr('type_or_select_supplier', 'Type or select supplier...', 'វាយឈ្មោះ ឬជ្រើសរើសអ្នកផ្គត់ផ្គង់...')}
+                ariaLabel={tr('supplier', 'Supplier', 'អ្នកផ្គត់ផ្គង់')}
+                emptyHint={emptyHintFor(supplierSuggestionsSourced, supplierSuggestionOptions.length)}
               />
-              {supplierDrop && supplierMatches.length ? (
-                <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-40 overflow-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-zinc-600 dark:bg-zinc-800">
-                  {supplierMatches.map((supplier) => (
-                    <button
-                      key={supplier.id}
-                      type="button"
-                      className="flex min-h-11 w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                      onClick={() => {
-                        setField('supplier', supplier.name)
-                        setSupplierDrop(false)
-                      }}
-                    >
-                      <span className="font-medium text-gray-800 dark:text-gray-200">{supplier.name}</span>
-                      {supplier.company ? <span className="text-xs text-gray-400">{supplier.company}</span> : null}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
             </div>
             <div className="min-w-0 sm:col-span-2 lg:col-span-4">
               <label htmlFor="product-description" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('description')}</label>
@@ -1479,7 +1783,7 @@ export default function ProductForm({
                   setField('cost_price_usd', value)
                   if (!String(form.cost_price_khr ?? '').trim()) {
                     const converted = parseNumericInput(value) * exchangeRate
-                    setField('cost_price_khr', value === '' ? '' : formatPriceNumber(converted))
+                    setField('cost_price_khr', value === '' ? '' : editableMoneyValue(converted))
                   }
                 }}
               onKhrChange={(value) => {
@@ -1494,12 +1798,12 @@ export default function ProductForm({
 
           <div className="min-w-0 rounded-xl border border-green-100 bg-green-50 p-3 dark:border-green-800 dark:bg-green-900/10">
             <div className="mb-2">
-              <p className="text-sm font-bold text-green-700 dark:text-green-400">{tr('selling_price_to_customer', 'Selling Price', 'តម្លៃលក់')}</p>
+              <p className="text-sm font-bold text-green-700 dark:text-green-400">{tr('selling_price_to_customer', 'Selling price', 'តម្លៃលក់')}</p>
               <p className="text-xs text-green-600 dark:text-green-500">{tr('what_customers_pay_pos', 'What customers pay at point of sale', 'តម្លៃដែលអតិថិជនបង់នៅកន្លែងលក់')}</p>
             </div>
             <DualPriceInput
-              labelUsd={tr('selling_price_usd_full', 'Selling Price (USD)', 'តម្លៃលក់ (USD)')}
-              labelKhr={tr('selling_price_khr_full', 'Selling Price (KHR)', 'តម្លៃលក់ (KHR)')}
+                labelUsd={tr('selling_price_usd_full', 'Selling price (USD)', 'តម្លៃលក់ (USD)')}
+                labelKhr={tr('selling_price_khr_full', 'Selling price (KHR)', 'តម្លៃលក់ (KHR)')}
               valueUsd={form.selling_price_usd}
               valueKhr={form.selling_price_khr}
                 onUsdChange={(value) => {
@@ -1517,35 +1821,16 @@ export default function ProductForm({
             />
           </div>
 
-          <div className="min-w-0 rounded-xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/10">
-            <div className="mb-2">
-              <p className="text-sm font-bold text-blue-700 dark:text-blue-400">{tr('special_price', 'Special Price', 'តម្លៃពិសេស')}</p>
-              <p className="text-xs text-blue-600 dark:text-blue-500">{tr('special_price_hint', 'Internal alternate selling price for staff-only situations or quick POS selection.', 'តម្លៃលក់ជម្រើសខាងក្នុង សម្រាប់ស្ថានភាពបុគ្គលិក ឬជ្រើសរហ័សនៅ POS។')}</p>
-            </div>
-            <DualPriceInput
-              labelUsd={tr('special_price_usd_full', 'Special Price (USD)', 'តម្លៃពិសេស (USD)')}
-              labelKhr={tr('special_price_khr_full', 'Special Price (KHR)', 'តម្លៃពិសេស (KHR)')}
-              valueUsd={form.special_price_usd}
-              valueKhr={form.special_price_khr}
-                onUsdChange={(value) => {
-                  setField('special_price_usd', value)
-                  if (!String(form.special_price_khr ?? '').trim()) {
-                    const converted = normalizePriceValue(parseNumericInput(value) * exchangeRate)
-                    setField('special_price_khr', value === '' ? '' : formatPriceNumber(converted))
-                  }
-                }}
-              onKhrChange={(value) => setField('special_price_khr', value)}
-              usdSymbol={usdSymbol}
-              khrSymbol={khrSymbol}
-              exchangeRate={exchangeRate}
-              t={t}
-            />
-          </div>
-
+          {/* The "Special Price"/VIP block that stood here is deleted. The
+              2026-09-04 ruling established that this tier was never a VIP
+              price -- it was the wholesale price under the wrong name -- so
+              migration 0111 moved the numbers into wholesale_price_* and the
+              form now offers the one tier that exists. Keeping both boxes
+              would have re-created the ambiguity the ruling settled. */}
           <div className="min-w-0 rounded-xl border border-indigo-100 bg-indigo-50 p-3 dark:border-indigo-800 dark:bg-indigo-900/10">
             <div className="mb-2">
-              <p className="text-sm font-bold text-indigo-700 dark:text-indigo-400">{tr('wholesale_price', 'Wholesale', 'បោះដុំ')}</p>
-              <p className="text-xs text-indigo-600 dark:text-indigo-500">{tr('wholesale_price_hint', 'Bulk / wholesale price, selectable at POS like the VIP tier.', 'តម្លៃបោះដុំ អាចជ្រើសនៅ POS ដូចតម្លៃ VIP។')}</p>
+              <p className="text-sm font-bold text-indigo-700 dark:text-indigo-400">{tr('wholesale_price', 'Wholesale price', 'តម្លៃបោះដុំ')}</p>
+              <p className="text-xs text-indigo-600 dark:text-indigo-500">{tr('wholesale_price_hint', "The shop's bulk price. Selectable at the POS, and applied on its own above a quantity when that setting is on.", 'តម្លៃបោះដុំរបស់ហាង។ អាចជ្រើសនៅ POS និងប្រើដោយខ្លួនឯងពេលបរិមាណលើសកម្រិត ប្រសិនបើបានបើកការកំណត់នោះ។')}</p>
             </div>
             <DualPriceInput
               labelUsd={tr('wholesale_price_usd_full', 'Wholesale (USD)', 'បោះដុំ (USD)')}
@@ -1606,16 +1891,16 @@ export default function ProductForm({
               <input
                 id="product-stock-quantity"
                 name="product_stock_quantity"
-                className={`input min-h-11 min-w-0${product ? ' cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-900 dark:text-gray-400' : ''}`}
+                className={`input min-h-11 min-w-0${isEditMode ? ' cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-900 dark:text-gray-400' : ''}`}
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
-                readOnly={!!product}
-                aria-readonly={!!product}
+                readOnly={isEditMode}
+                aria-readonly={isEditMode}
                 value={form.stock_quantity ?? ''}
-                onChange={(event) => { if (!product) setNumericField('stock_quantity', event.target.value) }}
+                onChange={(event) => { if (isCreateMode) setNumericField('stock_quantity', event.target.value) }}
               />
-              {product ? (
+              {isEditMode ? (
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   {tr(
                     'product_stock_quantity_locked_hint',
@@ -1625,7 +1910,7 @@ export default function ProductForm({
                 </p>
               ) : null}
             </div>
-            {!product && branches.length > 0 ? (
+            {isCreateMode && branches.length > 0 ? (
               <div className="min-w-0 lg:col-span-2">
                 <label htmlFor="product-initial-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('assign_initial_branch', 'Assign Initial Stock to Branch *', 'កំណត់ស្តុកដំបូងទៅសាខា *')}</label>
                 <AppSelect
@@ -1637,6 +1922,22 @@ export default function ProductForm({
                   ariaLabel={tr('assign_initial_branch', 'Assign Initial Stock to Branch', 'កំណត់ស្តុកដំបូងទៅសាខា')}
                   className="w-full min-w-0"
                   buttonClassName="input min-h-11 w-full min-w-0"
+                />
+              </div>
+            ) : null}
+            {isCreateMode && showReceivedDate ? (
+              <div className="min-w-0">
+                <label htmlFor="product-received-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {tr('received_date', 'Received date', 'កាលបរិច្ឆេទទទួល')}
+                </label>
+                <DateEntryInput
+                  id="product-received-date"
+                  name="product_received_date"
+                  className="min-h-11 min-w-0"
+                  t={t}
+                  ariaLabel={tr('received_date', 'Received date', 'កាលបរិច្ឆេទទទួល')}
+                  value={form.received_date || ''}
+                  onChange={(iso) => setField('received_date', iso)}
                 />
               </div>
             ) : null}
@@ -1672,13 +1973,16 @@ export default function ProductForm({
               <label htmlFor="product-expiry-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 {tr('product_expiry_date', 'Expiry date', 'កាលបរិច្ឆេទផុតកំណត់')}
               </label>
-              <input
+              {/* Typed, not a native picker (Sep 3) -- same keypad rule as
+                  the batch and stock-adjust dates. */}
+              <DateEntryInput
                 id="product-expiry-date"
                 name="product_expiry_date"
-                className="input min-h-11 min-w-0"
-                type="date"
+                className="min-h-11 min-w-0"
+                t={t}
+                ariaLabel={tr('product_expiry_date', 'Expiry date', 'កាលបរិច្ឆេទផុតកំណត់')}
                 value={form.expiry_date || ''}
-                onChange={(event) => setField('expiry_date', event.target.value)}
+                onChange={(iso) => setField('expiry_date', iso)}
               />
             </div>
             <div>
@@ -1699,7 +2003,7 @@ export default function ProductForm({
             </> : null}
           </div>
 
-          {activeTab === 'stock' && product && branches.length > 0 ? (
+          {activeTab === 'stock' && isEditMode && branches.length > 0 ? (
             <div>
               <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">{tr('branch', 'Branch', 'សាខា')}</p>
               <div className="space-y-2">
@@ -1728,7 +2032,7 @@ export default function ProductForm({
           cancels the modal's own p-5 padding so the bar spans full width
           and sits flush against the bottom edge; px-5 pb-5 pt-4 puts it
           back inside the bar. */}
-      <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 hidden gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800 sm:flex">
+      <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
         {/* Disabled while imageUploading, not just `saving`: previously a
             fast Save click during an in-flight image upload would save the
             product with the pre-upload imageList (the just-picked file
@@ -1741,9 +2045,13 @@ export default function ProductForm({
         <button type="button" className="btn-primary min-h-11 flex-1" onClick={saveForm} disabled={saving || imageUploading}>
           {saving ? (t('saving') || 'Saving...') : imageUploading ? (tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')) : t('save')}
         </button>
-        <button type="button" className="btn-secondary min-h-11" onClick={onClose} disabled={saving}>
-          {t('cancel')}
-        </button>
+        <ModalCloseContext.Consumer>
+          {(requestClose) => (
+            <button type="button" className="btn-secondary min-h-11" onClick={requestClose || onClose} disabled={saving || imageUploading}>
+              {t('cancel')}
+            </button>
+          )}
+        </ModalCloseContext.Consumer>
         {/* Delete lives in this same row now (was only reachable from the
             separate read-only detail sheet before) -- deliberately NOT
             flex-1 like Save, and icon-only with no text label, so its tap
@@ -1753,12 +2061,12 @@ export default function ProductForm({
             DeleteConfirmModal (impact summary + explicit confirm), so no
             second confirmation is added here -- this button only opens
             that flow, it never deletes directly itself. */}
-        {product && onDelete ? (
+        {isEditMode && onDelete ? (
           <button
             type="button"
             className="btn-danger min-h-11 shrink-0 px-2.5"
             onClick={onDelete}
-            disabled={saving}
+            disabled={saving || imageUploading}
             aria-label={t('delete') || 'Delete'}
             title={t('delete') || 'Delete'}
           >
@@ -1766,15 +2074,25 @@ export default function ProductForm({
           </button>
         ) : null}
       </div>
-      {(filePickerOpen || scannerField) ? (
+      {((filePickerOpen && canManageImages) || scannerField) ? (
         <Suspense fallback={null}>
-          {filePickerOpen ? (
+          {filePickerOpen && canManageImages ? (
             <FilePickerModal
               open={filePickerOpen}
               mediaType="image"
               title={tr('choose_product_image', 'Choose product image', 'ជ្រើសរើសរូបភាពផលិតផល')}
+              layer={modalLayer}
               onClose={() => setFilePickerOpen(false)}
-              onSelect={(publicPath) => setImageList((current) => current.includes(publicPath) || current.length >= imageLimit ? current : [...current, publicPath])}
+              onSelect={(publicPath, asset) => {
+                const canonicalPath = canonicalizePersistedMediaPath(publicPath)
+                if (!canonicalPath) return
+                const renderVersion = String(asset?.updated_at || '').trim()
+                if (renderVersion) setImageRenderVersions((current) => ({ ...current, [canonicalPath]: renderVersion }))
+                updateImageList(
+                  (current) => current.includes(canonicalPath) || current.length >= imageLimit ? current : [...current, canonicalPath],
+                  { persistImmediately: true },
+                )
+              }}
             />
           ) : null}
           {scannerField ? (
@@ -1796,15 +2114,34 @@ export default function ProductForm({
           the form root, independent of activeTab, next to the other
           root-level dialog (create verdict). Locked by
           tests/productFormContract.test.ts. */}
-      <RenameCascadeModal request={renameRequest} busy={saving} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
+      <RenameCascadeModal request={renameRequest} busy={saving} layer={modalLayer} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
+      {/* Saving into an existing twin offers the merge here; a twin that still
+          holds stock is asked merge-or-write-off before anything is written. */}
+      {identityCollision && product?.id && onReviewIdentityCollision ? (
+        <Modal title={t('product_collision_review_title') || 'Review product identity'} onClose={() => setIdentityCollision(null)} size="sm" layer={modalLayer} unsavedChanges="read-only">
+          <p className="text-sm">{t('product_collision_review_description') || 'This edit matches another saved product. Review both saved rows and choose the barcode to keep. Your unsaved edits are not applied by the review.'}</p>
+          <p className="mt-2 text-sm font-medium">{identityCollision.name || `#${identityCollision.id}`}</p>
+          <div className="mt-4 flex justify-end gap-2">
+            <button type="button" className="btn-secondary" onClick={() => setIdentityCollision(null)}>{t('cancel') || 'Cancel'}</button>
+            <button type="button" className="btn-primary" disabled={imageUploading || !preserveAndMinimize} onClick={() => {
+              if (imageUploading || imageUploadInFlightRef.current || !preserveAndMinimize) return
+              const productIds = [Number(product.id), identityCollision.id] as const
+              preserveAndMinimize()
+              setIdentityCollision(null)
+              onReviewIdentityCollision(productIds)
+            }}>{t('selected_conflict_group_review_action') || 'Review selected actions'}</button>
+          </div>
+        </Modal>
+      ) : null}
       {saveConfirmOpen ? (
         <ConfirmDialog
           t={t}
-          title={isCreateMode ? tr('add_product', 'Add Product') : tr('save_changes', 'Save Changes')}
-          message={String(form.name || '').trim() || (isCreateMode ? tr('add_product', 'Add Product') : tr('save_changes', 'Save Changes'))}
+          title={isCreateMode ? tr('add_product', 'Create Products') : tr('save_changes', 'Save Changes')}
+          message={String(form.name || '').trim() || (isCreateMode ? tr('add_product', 'Create Products') : tr('save_changes', 'Save Changes'))}
           items={saveReviewItems()}
-          confirmLabel={isCreateMode ? tr('add_product', 'Add Product') : tr('save', 'Save')}
+          confirmLabel={isCreateMode ? tr('add_product', 'Create Products') : tr('save', 'Save')}
           working={saving}
+          layer={modalLayer}
           workingLabel={tr('saving', 'Saving...')}
           onConfirm={() => resolveSaveConfirm(true)}
           onClose={() => resolveSaveConfirm(false)}
@@ -1819,7 +2156,8 @@ export default function ProductForm({
               : tr('create_match_barcode_title', 'Barcode already in use', 'បាកូដកំពុងប្រើរួចហើយ')}
           onClose={() => resolveCreateVerdict('back')}
           size="sm"
-        >
+          layer={modalLayer}
+          unsavedChanges="read-only">
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
             <div className={`flex items-start gap-3 rounded-lg border p-3 ${createVerdict.kind === 'exact_twin'
               ? 'border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/30'
@@ -1828,7 +2166,7 @@ export default function ProductForm({
               <div className={`space-y-1 ${createVerdict.kind === 'exact_twin' ? 'text-red-800 dark:text-red-300' : 'text-amber-800 dark:text-amber-300'}`}>
                 <p>
                   {createVerdict.kind === 'exact_twin'
-                    ? tr('create_match_twin_body', 'An identical product already exists — same name, barcode, and cost. Go back and adjust, or open the existing product instead.', 'ផលិតផលដូចគ្នាបេះបិទមានរួចហើយ — ឈ្មោះ បាកូដ និងថ្លៃដើមដូចគ្នា។ ត្រឡប់ក្រោយ ហើយកែសម្រួល ឬបើកផលិតផលដែលមានស្រាប់ជំនួសវិញ។')
+                    ? tr('create_match_twin_body', 'The same product already exists — same name and barcode (leading zeros are ignored; a different cost does not make a new row). Go back and adjust, or open the existing product instead.', 'ផលិតផលដូចគ្នានេះមានរួចហើយ — ឈ្មោះ និងបាកូដដូចគ្នា (សូន្យនៅខាងដើមមិនរាប់បញ្ចូល; ថ្លៃដើមខុសគ្នាមិនបង្កើតជួរថ្មីទេ)។ ត្រឡប់ក្រោយ ហើយកែសម្រួល ឬបើកផលិតផលដែលមានស្រាប់ជំនួសវិញ។')
                     : createVerdict.kind === 'name_match'
                       ? tr('create_match_name_body', 'A product with this exact name already exists. Saving adds another ordinary row under the same automatic group title.', 'ផលិតផលដែលមានឈ្មោះដូចគ្នាបេះបិទមានរួចហើយ។ ការរក្សាទុកនឹងបន្ថែមជួរផលិតផលធម្មតាមួយទៀតក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា។')
                       : tr('create_match_barcode_body', 'This barcode already belongs to "{name}". Use that same name to wrap this row under the same automatic group title, or keep your different name as a separate product.', 'បាកូដនេះជារបស់ "{name}" រួចហើយ។ ប្រើឈ្មោះដូចគ្នា ដើម្បីឲ្យជួរនេះត្រូវបានរុំក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា ឬរក្សាឈ្មោះផ្សេងរបស់អ្នកជាផលិតផលដាច់ដោយឡែក។').replace('{name}', createVerdict.canonicalName)}
@@ -1881,7 +2219,7 @@ export default function ProductForm({
         </Modal>
       ) : null}
       {nameUnlockConfirmOpen ? (
-        <Modal title={tr('unlock_name_confirm_title', 'Unlock product name?', 'ដោះសោឈ្មោះផលិតផល?')} onClose={() => setNameUnlockConfirmOpen(false)} size="sm">
+        <Modal title={tr('unlock_name_confirm_title', 'Unlock product name?', 'ដោះសោឈ្មោះផលិតផល?')} onClose={() => setNameUnlockConfirmOpen(false)} size="sm" layer={modalLayer} unsavedChanges="read-only">
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
             <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/30">
               <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -1919,5 +2257,6 @@ export default function ProductForm({
         </Modal>
       ) : null}
     </Modal>
+    </ConfirmDialogLayerContext.Provider>
   )
 }

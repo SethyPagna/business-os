@@ -1,30 +1,28 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import Download from 'lucide-react/dist/esm/icons/download.js'
+import { customerDisplayName } from '../../utils/customerIdentity.ts'
 import { toggleMultiValue, isMultiActive, matchesMulti } from '../../utils/multiSelect'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
-import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
-import { fmtTime } from '../../utils/formatters'
+import { fmtClock24, parseServerTimestampMs } from '../../utils/formatters'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
-import SortChip from '../shared/SortChip'
 import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
-import InfoHint from '../shared/InfoHint.tsx'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
-import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
+import { toggleIdSet } from '../../utils/groupedRecords.ts'
+import { groupByBusinessDay } from '../../utils/businessDayGroups.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { exportColumnLabel } from '../../utils/exportOptions.ts'
 import {
@@ -36,19 +34,45 @@ import {
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import {
+  directMutationOutcomeIsUnknown,
+  freezeDirectMutationBody,
+  loadPendingDirectMutationSlot,
+  pendingDirectMutationForScope,
+  savePendingDirectMutationSlot,
+  type DirectMutationHistoryContext,
+  type PendingDirectMutation,
+} from '../../utils/directMutationRequest.ts'
+import {
+  RESTORE_WORK_EVENT,
+  canRestoreMinimizedWork,
+  consumePendingRestore,
+  markRestoreHandled,
+  minimizeWork,
+  removeMinimizedWork,
+  reparkDeniedRestore,
+  type MinimizedWorkEntry,
+} from '../../utils/minimizedWork.ts'
+import {
+  createLatestReturnDetailRestoreRunner,
   getReturn as fetchReturnDetail,
   getReturns as fetchReturns,
   getReturnsReport,
 } from '../../api/returnsReadTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
-import StatsRangeRow from '../shared/StatsRangeRow.tsx'
-import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
+import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
+import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
+import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
+import SectionExportAction from '../shared/SectionExportAction.tsx'
+import PagerActionRow from '../shared/PagerActionRow.tsx'
 import ReturnsListSurface from './ReturnsListSurface'
+import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
+import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
 const ReturnDetailModal = lazyRetry(() => import('./ReturnDetailModal'), 'returns-detail-modal')
 const EditReturnModal = lazyRetry(() => import('./EditReturnModal'), 'returns-edit-modal')
 const NewReturnModal = lazyRetry(() => import('./NewReturnModal'), 'returns-new-modal')
 const NewSupplierReturnModal = lazyRetry(() => import('./NewSupplierReturnModal'), 'returns-new-supplier-modal')
 const ReturnReasonManagerModal = lazyRetry(() => import('./ReturnReasonManagerModal'), 'returns-reason-manager-modal')
+const ReturnsBulkActionModal = lazyRetry(() => import('./ReturnsBulkActionModal'), 'returns-bulk-action-modal')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'returns-export-options')
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
@@ -67,6 +91,10 @@ let returnsWriteTransportPromise: Promise<ReturnsWriteTransportModule> | null = 
 function loadReturnsWriteTransport(): Promise<ReturnsWriteTransportModule> {
   if (!returnsWriteTransportPromise) returnsWriteTransportPromise = import('../../api/returnsTransport.ts')
   return returnsWriteTransportPromise
+}
+
+function returnDetailWorkKey(id: number | string): string {
+  return `return-detail-${id}`
 }
 
 type ReturnScope = typeof CUSTOMER_SCOPE | typeof SUPPLIER_SCOPE
@@ -99,6 +127,7 @@ interface ReturnRow extends Record<string, unknown> {
   receipt_number?: string | null
   cashier_name?: string | null
   customer_name?: string | null
+  customer_is_anonymous?: number | boolean
   supplier_name?: string | null
   reason?: string | null
   notes?: string | null
@@ -128,7 +157,6 @@ interface ReturnHistoryPayload extends Record<string, unknown> {
   total_refund_usd: number | string
   total_refund_khr: number | string
   branch_id: number | string | null
-  updated_at: string | null
   items: Array<{
     sale_item_id: number | string | null
     product_id: number | string | null
@@ -143,9 +171,14 @@ interface ReturnHistoryPayload extends Record<string, unknown> {
   }>
 }
 
-async function updateReturnRequest(id: number | string, payload: ReturnHistoryPayload): Promise<unknown> {
-  const { updateReturn } = await loadReturnsWriteTransport()
-  return updateReturn(id, payload)
+async function prepareReturnRequest(id: number | string, payload: ReturnHistoryPayload): Promise<PreparedReturnUpdateRequest> {
+  const { prepareReturnUpdateRequest } = await loadReturnsWriteTransport()
+  return prepareReturnUpdateRequest(id, payload)
+}
+
+async function updateReturnRequest(id: number | string, payload: PreparedReturnUpdateRequest): Promise<unknown> {
+  const { submitReturnUpdateRequest } = await loadReturnsWriteTransport()
+  return submitReturnUpdateRequest(id, payload)
 }
 
 interface ReturnMutation {
@@ -158,9 +191,11 @@ interface ReturnMutation {
 
 interface ReturnGroup {
   id: string
+  actionKey?: string
   label: string
   ids: number[]
   items: ReturnRow[]
+  synthetic?: boolean
 }
 
 interface ReturnSection {
@@ -264,7 +299,7 @@ function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn): Array<Record
     Scope: normalizeScope(ret.return_scope),
     Date: ret.created_at || '',
     Receipt: ret.receipt_number || '',
-    Customer: ret.customer_name || '',
+    Customer: normalizeScope(ret.return_scope) === SUPPLIER_SCOPE ? '' : customerDisplayName(ret, tr('walk_in', 'General')),
     Supplier: ret.supplier_name || '',
     Reason: ret.reason || '',
     Type: getReturnTypeLabel(ret, tr),
@@ -278,6 +313,19 @@ function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn): Array<Record
 
 function getInitialReturnPageSize(): number {
   return 50
+}
+
+function sortReturnRowsByTime(items: ReturnRow[], direction: SortDirection): ReturnRow[] {
+  const multiplier = direction === 'asc' ? 1 : -1
+  return [...items].sort((left, right) => {
+    const leftParsed = parseServerTimestampMs(left.created_at)
+    const rightParsed = parseServerTimestampMs(right.created_at)
+    const leftTime = Number.isFinite(leftParsed) ? leftParsed : 0
+    const rightTime = Number.isFinite(rightParsed) ? rightParsed : 0
+    const timeDelta = (leftTime - rightTime) * multiplier
+    if (timeDelta !== 0) return timeDelta
+    return (Number(left.id) - Number(right.id)) * multiplier
+  })
 }
 
 // The "Add Return" button's icon: a return arrow (Undo2) with a small "+"
@@ -306,6 +354,9 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // returned 403 on click. Creating a return is deliberately NOT gated here:
   // that tier is allowed to create directly, and the route has no extra check.
   const canEditReturn = can('returns', 'edit')
+  const canViewReturns = can('returns', 'view')
+  const canBulkReturns = can('returns', 'bulk')
+  const canExportReturns = can('returns', 'export')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const cleanFallback = useCallback((fallbackEn: string, fallbackKm?: string): string => {
     const candidate = fallbackKm || fallbackEn
@@ -328,14 +379,14 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // stats strip AND the returns list — no separate year/month period control.
   // Starts all-time. Quick choices (Today / 7 days / week / month / year)
   // live inside the shared date/time picker so there is one range control.
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [typeFilter, setTypeFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   // 11.1/11.2 (B6): same selection model as Products/Inventory/Sales --
   // checkboxes only exist while something is selected; long-press a
   // row/card to enter select mode; the desktop column-header checkbox is
   // select-all. Ends automatically once the last item is deselected.
-  const selectionModeActive = selectedIds.size > 0
+  const selectionModeActive = canBulkReturns && selectedIds.size > 0
   const returnLongPressStateByRowIdRef = useRef<Map<number, LongPressState>>(new Map())
   const getReturnLongPressState = useCallback((rowId: number): LongPressState => {
     const existing = returnLongPressStateByRowIdRef.current.get(rowId)
@@ -348,6 +399,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const [showCustomerForm, setShowCustomerForm] = useState(false)
   const [showSupplierForm, setShowSupplierForm] = useState(false)
   const [showReasonManager, setShowReasonManager] = useState(false)
+  const [bulkActionSnapshot, setBulkActionSnapshot] = useState<{ rows: ReturnRow[]; scope: ReturnScope } | null>(null)
   const [editRet, setEditRet] = useState<ReturnRow | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -368,21 +420,80 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const loadedOnceRef = useRef(false)
   const returnsRequestRef = useRef(0)
   const editRequestRef = useRef(0)
+  const detailRequestRef = useRef(0)
+  const returnDetailRestoreRunnerRef = useRef<ReturnType<typeof createLatestReturnDetailRestoreRunner> | null>(null)
+  if (!returnDetailRestoreRunnerRef.current) {
+    returnDetailRestoreRunnerRef.current = createLatestReturnDetailRestoreRunner()
+  }
+  const canRef = useRef(can)
+  canRef.current = can
+  const canViewReturnsRef = useRef(canViewReturns)
+  canViewReturnsRef.current = canViewReturns
   const historyRestoreInFlightRef = useRef(false)
+  const [historyRestoreSaving, setHistoryRestoreSaving] = useState(false)
+  const bulkActionInFlightRef = useRef(false)
+  const bulkRetryMemory = useRef<{ key: string; request: ReturnBulkPayload | null } | null>(null)
+  const [bulkActionSaving, setBulkActionSaving] = useState(false)
   const loadPromiseRef = useRef<Promise<void> | null>(null)
   const loadWatchdogRef = useRef<number | null>(null)
   const selectAllRef = useRef<HTMLInputElement | null>(null)
   const actionHistory = useActionHistory({ limit: 8, notify, scope: 'returns', enabled: historyReady, user })
+  const bulkRetryKey = `returns.bulk.retry:${user?.id || 'anonymous'}`
+  const [bulkRetryRevision, setBulkRetryRevision] = useState(0)
+  useEffect(() => {
+    if (canBulkReturns) return
+    setSelectedIds(new Set())
+    setBulkActionSnapshot(null)
+  }, [canBulkReturns])
+  const initialPendingHistoryRequest = loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>('return-history', user?.id)
+  const [pendingHistoryRequest, setPendingHistoryRequest] = useState<PendingDirectMutation<PreparedReturnUpdateRequest> | null>(initialPendingHistoryRequest)
+  const pendingHistoryRequestRef = useRef<PendingDirectMutation<PreparedReturnUpdateRequest> | null>(initialPendingHistoryRequest)
+  useEffect(() => {
+    const pending = loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>('return-history', user?.id)
+    pendingHistoryRequestRef.current = pending
+    setPendingHistoryRequest(pending)
+  }, [user?.id])
+  const currentPendingHistoryRequest = useCallback(() => (
+    pendingDirectMutationForScope(pendingHistoryRequestRef.current, user?.id)
+      || loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>('return-history', user?.id)
+  ), [user?.id])
+  const activePendingHistoryRequest = pendingDirectMutationForScope(pendingHistoryRequest, user?.id)
+    || currentPendingHistoryRequest()
+  const savePendingHistoryRequest = useCallback((
+    returnId: number | string,
+    body: PreparedReturnUpdateRequest | null,
+    history: DirectMutationHistoryContext | null = null,
+  ) => {
+    const pending = savePendingDirectMutationSlot('return-history', user?.id, returnId, body, undefined, history)
+    pendingHistoryRequestRef.current = pending
+    setPendingHistoryRequest(pending)
+  }, [user?.id])
+  const pendingBulkRequest = useMemo(() => {
+    if (bulkRetryMemory.current?.key === bulkRetryKey) return bulkRetryMemory.current.request
+    void bulkRetryRevision
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(bulkRetryKey) || 'null') as ReturnBulkPayload | null
+      bulkRetryMemory.current = { key: bulkRetryKey, request: saved }
+      return saved
+    } catch { return null }
+  }, [bulkRetryKey, bulkRetryRevision])
+  const savePendingBulkRequest = useCallback((request: ReturnBulkPayload | null) => {
+    bulkRetryMemory.current = { key: bulkRetryKey, request }
+    try {
+      if (request) sessionStorage.setItem(bulkRetryKey, JSON.stringify(request))
+      else sessionStorage.removeItem(bulkRetryKey)
+    } catch {
+      // Privacy modes can disable sessionStorage. The in-flight request is
+      // still guarded server-side; only cross-refresh retry recovery is lost.
+    }
+    setBulkRetryRevision((current) => current + 1)
+  }, [bulkRetryKey])
   // Same fix as Sales.tsx's debouncedSearch (see that file's comment for
   // the full "two different cadences" bug this replaces) -- found here
   // while rewriting routes/returns.ts's search in this same session, same
   // useDeferredValue-for-local-filter + separate-hand-rolled-350ms-debounce-
   // for-the-fetch pattern, not something specific to Sales.
   const debouncedSearch = useDebouncedValue(search, 180)
-  // Day-based grouping always now that the date scope is a Start→End window
-  // filtered server-side (the year/month client grouping retired with the
-  // year/month filter).
-  const timeMode = 'day' as const
   const returnsDateRange = useMemo(() => {
     const startDate = String(stripRange.startDate || '').trim()
     const endDate = String(stripRange.endDate || '').trim()
@@ -494,7 +605,18 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   useEffect(() => {
     const refreshOpen = (current: ReturnRow | null): ReturnRow | null => {
       if (!current) return current
-      return rows.find((row) => Number(row.id) === Number(current.id)) || current
+      const fresh = rows.find((row) => Number(row.id) === Number(current.id))
+      if (!fresh) return current
+      // MERGE, don't replace: list rows carry no items (GET /api/returns only
+      // hydrates them for a caller that asks), so replacing an open, hydrated
+      // detail with its list row would empty the items table again the next
+      // time anything refreshes the list underneath it.
+      return {
+        ...current,
+        ...fresh,
+        items: fresh.items ?? current.items,
+        replacement_items: fresh.replacement_items ?? current.replacement_items,
+      }
     }
     setDetailRet(refreshOpen)
     setEditRet(refreshOpen)
@@ -549,7 +671,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       value === 'restock' ? tr('restocked', 'Restocked')
         : value === 'writeoff' ? tr('written_off', 'Written Off')
           : value === 'refund' ? tr('refund_only', 'Refund Only')
-            : value === 'credit' ? tr('supplier_credit', 'Credit')
+            : value === 'credit' ? tr('supplier_credit', 'Supplier balance')
               : value || '—'
     )
     if (scope === SUPPLIER_SCOPE) {
@@ -604,6 +726,136 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     ]
   }, [fmtUSD, scope, stripData, tr])
 
+  // Opening a return showed "No item details available" for EVERY record,
+  // whatever it actually held: the list these rows come from is fetched
+  // without includeItems, so ret.items / ret.replacement_items are simply
+  // absent, and the detail modal was handed that row directly. The edit flow
+  // already re-fetches by id for the same reason (handleOpenEdit below); the
+  // view flow now does too -- open instantly on the list row so the modal is
+  // never a blank wait, then fill the line items in.
+  const openReturnDetail = useCallback(async (ret: ReturnRow): Promise<void> => {
+    returnDetailRestoreRunnerRef.current?.invalidate()
+    removeMinimizedWork(returnDetailWorkKey(ret.id))
+    setDetailRet(ret)
+    const requestId = beginTrackedRequest(detailRequestRef)
+    try {
+      const fresh = await withLoaderTimeout(
+        () => fetchReturnDetail(ret.id),
+        'Return details',
+        RETURNS_DETAIL_TIMEOUT_MS,
+      )
+      if (!fresh || !isTrackedRequestCurrent(detailRequestRef, requestId)) return
+      setDetailRet((current) => (current && Number(current.id) === Number(ret.id)
+        ? { ...current, ...(fresh as ReturnRow) }
+        : current))
+    } catch {
+      // Leave the list row on screen: every field except the line items is
+      // already on it, so a failed hydrate must not blank the modal.
+    }
+  }, [])
+
+  const returnDetailRestoreAllowed = useCallback((entry: MinimizedWorkEntry): boolean => (
+    canViewReturnsRef.current && canRestoreMinimizedWork(entry, (permissionKey, actionKey) => (
+      canRef.current(permissionKey, actionKey)
+    ))
+  ), [])
+
+  const reparkInvalidatedReturnDetail = useCallback((entry: MinimizedWorkEntry): void => {
+    if (entry.kind !== 'return_detail') return
+    minimizeWork({
+      key: entry.key,
+      kind: 'return_detail',
+      pageId: entry.pageId,
+      anchor: entry.anchor,
+      label: entry.label,
+      payload: entry.payload,
+      draftKey: entry.draftKey,
+      requiredPermission: entry.requiredPermission,
+    })
+  }, [])
+
+  const restoreReturnDetail = useCallback(async (entry: MinimizedWorkEntry): Promise<void> => {
+    const returnId = Number(entry.payload?.returnId)
+    if (!Number.isFinite(returnId) || returnId <= 0) {
+      reparkDeniedRestore(entry)
+      notify(tr('failed_to_load_data', 'Failed to load data', 'មិនអាចផ្ទុកទិន្នន័យបានទេ'), 'warning')
+      return
+    }
+    await returnDetailRestoreRunnerRef.current!.restore<ReturnRow>({
+      readFresh: (signal) => withLoaderTimeout(
+        () => fetchReturnDetail(returnId, { fresh: true, signal }) as Promise<ReturnRow | null>,
+        'Return details',
+        RETURNS_DETAIL_TIMEOUT_MS,
+      ),
+      isAllowed: () => returnDetailRestoreAllowed(entry),
+      commit: (fresh) => {
+        // The runner rechecks the current permission immediately before this
+        // commit boundary. Open and consume are intentionally adjacent.
+        setDetailRet(fresh)
+        markRestoreHandled('return_detail')
+      },
+      onDenied: () => {
+        reparkDeniedRestore(entry)
+        notify(tr('access_denied', 'Access denied', 'គ្មានសិទ្ធិចូលប្រើ'), 'warning')
+      },
+      onFailure: () => {
+        reparkDeniedRestore(entry)
+        notify(tr('failed_to_load_data', 'Failed to load data', 'មិនអាចផ្ទុកទិន្នន័យបានទេ'), 'warning')
+      },
+      onInvalidate: (reason) => {
+        // A newer restore has already installed its own pending entry, so it
+        // must not be consumed while the older chip is put back. Direct
+        // close/minimize/unmount invalidation, by contrast, clears this
+        // attempt's pending replay before reparking it.
+        if (reason === 'superseded') reparkInvalidatedReturnDetail(entry)
+        else reparkDeniedRestore(entry)
+      },
+    })
+  }, [notify, reparkInvalidatedReturnDetail, returnDetailRestoreAllowed, tr])
+
+  useEffect(() => {
+    const pending = consumePendingRestore('return_detail')
+    if (pending) {
+      void restoreReturnDetail(pending)
+    }
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'return_detail') return
+      const entry = detail.entry as MinimizedWorkEntry | undefined
+      if (!entry) return
+      void restoreReturnDetail(entry)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [restoreReturnDetail])
+
+  useEffect(() => () => {
+    returnDetailRestoreRunnerRef.current?.invalidate()
+  }, [])
+
+  const closeReturnDetail = useCallback((): void => {
+    returnDetailRestoreRunnerRef.current?.invalidate()
+    invalidateTrackedRequest(detailRequestRef)
+    setDetailRet(null)
+  }, [])
+
+  const minimizeReturnDetail = useCallback((ret: ReturnRow): void => {
+    returnDetailRestoreRunnerRef.current?.invalidate()
+    invalidateTrackedRequest(detailRequestRef)
+    const returnId = Number(ret.id)
+    if (!Number.isFinite(returnId) || returnId <= 0) return
+    minimizeWork({
+      key: returnDetailWorkKey(returnId),
+      kind: 'return_detail',
+      pageId: 'sales',
+      anchor: 'hub:sales:returns',
+      label: `${tr('return', 'Return', 'ការប្រគល់មកវិញ')} — ${ret.return_number || `#${returnId}`}`,
+      payload: { returnId },
+      requiredPermission: { permissionKey: 'returns', actionKey: 'view' },
+    })
+    setDetailRet(null)
+  }, [tr])
+
   const handleOpenEdit = async (ret: ReturnRow): Promise<void> => {
     const requestId = beginTrackedRequest(editRequestRef)
     const retScope = normalizeScope(ret?.return_scope)
@@ -635,7 +887,6 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       total_refund_usd: snapshot.total_refund_usd || 0,
       total_refund_khr: snapshot.total_refund_khr || 0,
       branch_id: snapshot.branch_id || null,
-      updated_at: snapshot.updated_at || null,
       items: (Array.isArray(snapshot.items) ? snapshot.items : []).map((item) => ({
         sale_item_id: item.sale_item_id || null,
         product_id: item.product_id || null,
@@ -666,23 +917,77 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     }
   }, [])
 
-  const restoreReturnSnapshot = useCallback(async (snapshot: ReturnRow, historyReason?: string): Promise<void> => {
-    if (!snapshot?.id) throw new Error('Return snapshot is unavailable.')
-    if (!beginSingleAction(historyRestoreInFlightRef)) return
+  const submitReturnHistoryRequest = useCallback(async (returnId: number | string, body: PreparedReturnUpdateRequest): Promise<unknown> => {
     try {
-      await withLoaderTimeout(
-        () => updateReturnRequest(snapshot.id as number | string, {
-          ...buildReturnHistoryPayload(snapshot),
-          notes: historyReason || snapshot.notes || '',
-        }),
+      const result = await withLoaderTimeout(
+        () => updateReturnRequest(returnId, body),
         'Restore return snapshot',
         RETURNS_HISTORY_RESTORE_TIMEOUT_MS,
       )
+      savePendingHistoryRequest(returnId, null)
       await loadReturns(true)
+      return result
+    } catch (error) {
+      if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') savePendingHistoryRequest(returnId, null)
+      throw error
+    }
+  }, [loadReturns, savePendingHistoryRequest])
+
+  const restoreReturnSnapshot = useCallback(async (
+    snapshot: ReturnRow,
+    historyReason?: string,
+    historyContext: DirectMutationHistoryContext | null = null,
+  ): Promise<void> => {
+    if (!snapshot?.id) throw new Error('Return snapshot is unavailable.')
+    const storedPending = currentPendingHistoryRequest()
+    const storedHistoryMatches = !!historyContext
+      && storedPending?.history?.entryId === historyContext.entryId
+      && storedPending.history.direction === historyContext.direction
+    if (storedPending && !storedHistoryMatches) throw new Error(tr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'))
+    if (!beginSingleAction(historyRestoreInFlightRef)) return
+    setHistoryRestoreSaving(true)
+    try {
+      let body: PreparedReturnUpdateRequest
+      if (storedHistoryMatches) {
+        body = storedPending!.body
+      } else {
+        const current = await fetchReturnDetail(snapshot.id) as ReturnRow | null
+        const currentUpdatedAt = String(current?.updated_at || '').trim()
+        if (!currentUpdatedAt) throw new Error('Refresh the return before replaying this action.')
+        body = freezeDirectMutationBody(await prepareReturnRequest(snapshot.id as number | string, {
+          ...buildReturnHistoryPayload(snapshot),
+          notes: historyReason || snapshot.notes || '',
+          expected_updated_at: currentUpdatedAt,
+        }))
+        savePendingHistoryRequest(snapshot.id as number | string, body, historyContext)
+      }
+      await submitReturnHistoryRequest(snapshot.id as number | string, body)
     } finally {
       finishSingleAction(historyRestoreInFlightRef)
+      setHistoryRestoreSaving(false)
     }
-  }, [buildReturnHistoryPayload, loadReturns])
+  }, [buildReturnHistoryPayload, currentPendingHistoryRequest, savePendingHistoryRequest, submitReturnHistoryRequest, tr])
+
+  const retryPendingReturnHistoryRequest = async (): Promise<void> => {
+    const pending = currentPendingHistoryRequest()
+    if (!pending) return
+    const history = pending.history
+    if (history) {
+      const source = history.direction === 'undo' ? actionHistory.undoItems : actionHistory.redoItems
+      if (source.some((entry) => String(entry.id) === history.entryId)) {
+        await actionHistory[history.direction](history.entryId)
+        return
+      }
+    }
+    if (!beginSingleAction(historyRestoreInFlightRef)) return
+    setHistoryRestoreSaving(true)
+    try {
+      await submitReturnHistoryRequest(pending.entityId, pending.body)
+    } finally {
+      finishSingleAction(historyRestoreInFlightRef)
+      setHistoryRestoreSaving(false)
+    }
+  }
 
   const handleReturnMutationSuccess = useCallback(async (mutation: ReturnMutation): Promise<void> => {
     const kind = String(mutation?.kind || '')
@@ -698,13 +1003,15 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
 
     if (kind === 'edit' && previousSnapshot?.id && latestSnapshot?.id) {
       const returnLabel = latestSnapshot.return_number || previousSnapshot.return_number || `#${latestSnapshot.id}`
+      const entryId = crypto.randomUUID()
       actionHistory.pushAction({
+        id: entryId,
         label: `Edit return ${returnLabel}`,
         entity: 'return',
         entity_id: latestSnapshot.id,
         scope: 'returns',
-        undo: () => restoreReturnSnapshot(previousSnapshot, 'Undo return edit'),
-        redo: () => restoreReturnSnapshot(latestSnapshot, 'Redo return edit'),
+        undo: () => restoreReturnSnapshot(previousSnapshot, 'Undo return edit', { entryId, direction: 'undo' }),
+        redo: () => restoreReturnSnapshot(latestSnapshot, 'Redo return edit', { entryId, direction: 'redo' }),
       })
       return
     }
@@ -794,33 +1101,77 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     return RETURN_SORT_FIELD_DEFS.map((field) => ({ ...field, label: labels[field.id] || field.id }))
   }, [tr])
 
-  const buildSortedReturnSection = useCallback((items: ReturnRow[]): ReturnSection[] => {
-    const label = returnSortFields.find((field) => field.id === returnSortSpec.field)?.label || ''
-    const ids = items.map((ret) => Number(ret?.id)).filter((id) => Number.isFinite(id))
-    return [{
-      id: 'sorted',
-      label,
-      ids,
-      items,
-      groups: [{ id: 'sorted:all', actionKey: 'all', label, ids, items, sortTime: 0, synthetic: true }],
-    }] as unknown as ReturnSection[]
-  }, [returnSortFields, returnSortSpec.field])
+  const buildReturnSections = useCallback((items: ReturnRow[]): ReturnSection[] => {
+    // The generic grouped-record helper derives day boundaries from the
+    // viewer's device timezone. Returns are business records, so establish
+    // their day sections with the same Asia/Phnom_Penh formatter used by the
+    // row's fmtClock24 value. Sort by the original instant first; the business
+    // grouper preserves that day and within-day order.
+    const orderedByTime = sortReturnRowsByTime(items, returnSortDirection)
+    return groupByBusinessDay(orderedByTime, (ret) => ret.created_at).map((day) => {
+      const sectionId = `business-day:${day.key}`
+      const sortedItems = returnSortSpec.field === 'date'
+        ? day.rows
+        : sortRecords(day.rows, returnSortSpec, returnSortFields)
+      const ids = sortedItems.map((ret) => Number(ret.id)).filter(Number.isFinite)
+      if (returnGroupMode === 'time') {
+        return {
+          id: sectionId,
+          label: day.key,
+          ids,
+          items: sortedItems,
+          groups: [{
+            id: `${sectionId}:all`,
+            actionKey: 'all',
+            label: day.key,
+            ids,
+            items: sortedItems,
+            synthetic: true,
+          }],
+        } as ReturnSection
+      }
 
-  const allReturnSections = useMemo<ReturnSection[]>(() => returnSortSpec.field !== 'date'
-    ? buildSortedReturnSection(sortRecords(filtered, returnSortSpec, returnSortFields))
-    : buildTimeActionSections(filtered, {
-      getDate: (ret) => ret?.created_at,
-      getItemId: (ret) => Number(ret?.id),
-      getActionKey: (ret) => getReturnTypeKey(ret),
-      getActionLabel: (ret) => getReturnTypeLabel(ret, tr),
-      // Date narrowing happens server-side via returnsDateRange now, so the
-      // client grouper only buckets by day (year/month 'all').
-      year: 'all',
-      month: 'all',
-      timeMode,
-      groupMode: returnGroupMode,
-      sortDirection: returnSortDirection,
-    }), [buildSortedReturnSection, filtered, returnGroupMode, returnSortDirection, returnSortFields, returnSortSpec, timeMode, tr])
+      const byAction = new Map<string, ReturnRow[]>()
+      for (const ret of day.rows) {
+        const actionKey = getReturnTypeKey(ret)
+        byAction.set(actionKey, [...(byAction.get(actionKey) || []), ret])
+      }
+      const groups = [...byAction.entries()].map(([actionKey, actionItems]) => {
+        const groupItems = returnSortSpec.field === 'date'
+          ? actionItems
+          : sortRecords(actionItems, returnSortSpec, returnSortFields)
+        return {
+          id: `${sectionId}:${actionKey}`,
+          actionKey,
+          label: getReturnTypeLabel(actionItems[0], tr),
+          ids: groupItems.map((ret) => Number(ret.id)).filter(Number.isFinite),
+          items: groupItems,
+          sortTime: Math.max(...actionItems.map((ret) => {
+            const parsed = parseServerTimestampMs(ret.created_at)
+            return Number.isFinite(parsed) ? parsed : 0
+          })),
+        }
+      }).sort((left, right) => {
+        const delta = returnSortDirection === 'asc'
+          ? left.sortTime - right.sortTime
+          : right.sortTime - left.sortTime
+        return delta || left.label.localeCompare(right.label)
+      }).map(({ sortTime: _sortTime, ...group }) => group)
+
+      return {
+        id: sectionId,
+        label: day.key,
+        ids,
+        items: sortedItems,
+        groups,
+      } as ReturnSection
+    })
+  }, [returnGroupMode, returnSortDirection, returnSortFields, returnSortSpec, tr])
+
+  const allReturnSections = useMemo<ReturnSection[]>(
+    () => buildReturnSections(filtered),
+    [buildReturnSections, filtered],
+  )
 
   useEffect(() => {
     setReturnPage(1)
@@ -836,20 +1187,10 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     [allVisibleReturns, returnPage, returnPageSize],
   )
 
-  const returnSections = useMemo<ReturnSection[]>(() => returnSortSpec.field !== 'date'
-    // Already flat-sorted upstream; the page slice keeps that order.
-    ? buildSortedReturnSection(pagedReturns)
-    : buildTimeActionSections(pagedReturns, {
-      getDate: (ret) => ret?.created_at,
-      getItemId: (ret) => Number(ret?.id),
-      getActionKey: (ret) => getReturnTypeKey(ret),
-      getActionLabel: (ret) => getReturnTypeLabel(ret, tr),
-      year: 'all',
-      month: 'all',
-      timeMode,
-      groupMode: returnGroupMode,
-      sortDirection: returnSortDirection,
-    }), [buildSortedReturnSection, pagedReturns, returnGroupMode, returnSortDirection, returnSortSpec.field, timeMode, tr])
+  const returnSections = useMemo<ReturnSection[]>(
+    () => buildReturnSections(pagedReturns),
+    [buildReturnSections, pagedReturns],
+  )
 
   const visibleReturns = useMemo(
     () => returnSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -876,29 +1217,64 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     [selectedIds, visibleReturns],
   )
 
+  const applyBulkAction = useCallback(async (request: ReturnBulkPayload): Promise<ReturnBulkResult> => {
+    if (!canBulkReturns) throw new Error(tr('permission_denied', 'You do not have permission to perform this action.'))
+    if (!beginSingleAction(bulkActionInFlightRef)) throw new Error(tr('return_bulk_in_progress', 'A return bulk action is already running.'))
+    setBulkActionSaving(true)
+    savePendingBulkRequest(request)
+    try {
+      const { bulkUpdateReturns } = await loadReturnsWriteTransport()
+      const result = await withLoaderTimeout(
+        () => bulkUpdateReturns(request),
+        'Bulk return action',
+        RETURNS_HISTORY_RESTORE_TIMEOUT_MS,
+      )
+      savePendingBulkRequest(null)
+      setSelectedIds(new Set())
+      await loadReturns(true)
+      await actionHistory.refreshServerItems()
+      notify(tr('return_bulk_result', 'Updated {changed} returns; {unchanged} unchanged.', 'បានកែប្រែការត្រឡប់ {changed}; មិនផ្លាស់ប្តូរ {unchanged}។')
+        .replace('{changed}', String(result.changedCount))
+        .replace('{unchanged}', String(result.unchangedCount)), 'success')
+      return result
+    } catch (error) {
+      // The same stable request stays in session storage when the outcome is
+      // unknown. A retry therefore receives the server's original receipt
+      // instead of applying stock/refund effects twice.
+      notify(error instanceof Error ? error.message : String(error || ''), 'error')
+      throw error
+    } finally {
+      finishSingleAction(bulkActionInFlightRef)
+      setBulkActionSaving(false)
+    }
+  }, [actionHistory, canBulkReturns, loadReturns, notify, savePendingBulkRequest, tr])
+
   useEffect(() => {
     if (!selectAllRef.current) return
     selectAllRef.current.indeterminate = selectedIds.size > 0 && selectedIds.size < visibleIds.length
   }, [selectedIds.size, visibleIds.length])
 
   const toggleSelected = useCallback((returnId: ReturnRow['id']) => {
+    if (!canBulkReturns) return
     const numericId = Number(returnId)
     if (!Number.isFinite(numericId)) return
     setSelectedIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
-  }, [])
+  }, [canBulkReturns])
 
   const toggleSelectAll = useCallback((checked: boolean) => {
+    if (!canBulkReturns) return
     if (!checked) {
       setSelectedIds(new Set())
       return
     }
     setSelectedIds(new Set(visibleIds))
-  }, [visibleIds])
+  }, [canBulkReturns, visibleIds])
 
   const toggleSelectionScope = useCallback((ids: unknown[], checked: boolean) => {
+    if (!canBulkReturns) return
     const normalized = normalizeFiniteIds(ids)
     setSelectedIds((current) => toggleIdSet(current, normalized, checked))
-  }, [])
+  }, [canBulkReturns])
 
   const toggleReturnSection = useCallback((sectionId: string) => {
     setCollapsedReturnSections((current) => {
@@ -944,12 +1320,16 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // chooser remembered per page + CSV/Excel/PDF) instead of a fixed xlsx.
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   const exportVisible = useCallback(async (rowsToExport: ReturnRow[] = visibleReturns, prefix = 'returns-visible') => {
+    if (!canExportReturns) {
+      notify(tr('permission_denied', 'You do not have permission to perform this action.'), 'error')
+      return
+    }
     if (!rowsToExport.length) {
       notify(tr('no_data_to_export', 'No data to export'), 'error')
       return
     }
     setExportDialog({ rows: exportReturnRows(rowsToExport, tr), baseName: prefix })
-  }, [notify, tr, visibleReturns])
+  }, [canExportReturns, notify, tr, visibleReturns])
 
   const exportSelected = useCallback(async () => {
     if (!selectedReturns.length) return
@@ -998,19 +1378,43 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           { id: 'time-action', label: tr('group_by_time_action', 'Time + type'), active: returnGroupMode === 'time+action', onClick: () => setReturnGroupMode('time+action') },
         ],
       },
+      {
+        id: 'sort',
+        label: tr('sort', 'Sort', 'តម្រៀប'),
+        options: returnSortFields.flatMap((field) => {
+          const descendingLabel = field.id === 'date'
+            ? tr('sort_newest_first', 'Newest first', 'ថ្មីៗមុន')
+            : field.kind === 'text'
+              ? `${field.label}: Z → A`
+              : `${field.label}: ${isKhmer ? 'ច្រើន → តិច' : 'high → low'}`
+          const ascendingLabel = field.id === 'date'
+            ? tr('sort_oldest_first', 'Oldest first', 'ចាស់ៗមុន')
+            : field.kind === 'text'
+              ? `${field.label}: A → Z`
+              : `${field.label}: ${isKhmer ? 'តិច → ច្រើន' : 'low → high'}`
+          return [
+            { id: `${field.id}-desc`, label: descendingLabel, active: returnSortSpec.field === field.id && returnSortSpec.direction === 'desc', onClick: () => setReturnSortSpec({ field: field.id, direction: 'desc' }) },
+            { id: `${field.id}-asc`, label: ascendingLabel, active: returnSortSpec.field === field.id && returnSortSpec.direction === 'asc', onClick: () => setReturnSortSpec({ field: field.id, direction: 'asc' }) },
+          ]
+        }),
+      },
       // The period filter is gone from this menu: the Start→End range row above
       // the search bar (stripRange) is the single date scope now and drives the
       // list directly, so a second date control here would only disagree.
     ]
-  }, [isReturnsFilterMenuOpen, returnGroupMode, scope, tr, typeFilter, typeOptions])
+  }, [isKhmer, isReturnsFilterMenuOpen, returnGroupMode, returnSortFields, returnSortSpec, scope, tr, typeFilter, typeOptions])
 
   // Scope (customer vs supplier) is a VIEW, not a filter: it's a mandatory
   // one-of-two with no neutral "all", so being on the supplier view must
   // not light up "Filters (1)" -- and Clear must not teleport the user
   // back to the customer view (see FilterMenu onClear below).
   const activeFilterCount = useMemo(
-    () => countActiveFlags([typeFilter !== 'all', returnGroupMode !== 'time']),
-    [returnGroupMode, typeFilter],
+    () => countActiveFlags([
+      typeFilter !== 'all',
+      returnGroupMode !== 'time',
+      returnSortSpec.field !== 'date' || returnSortSpec.direction !== 'desc',
+    ]),
+    [returnGroupMode, returnSortSpec.direction, returnSortSpec.field, typeFilter],
   )
   const showReturnActionGroups = returnGroupMode === 'time+action'
 
@@ -1041,10 +1445,37 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
-      {selectedReturns.length > 0 ? (
+      {activePendingHistoryRequest ? (
+        <div data-needs-reconciliation={activePendingHistoryRequest.needsReconciliation || undefined} className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+          <span className="min-w-0 flex-1">{activePendingHistoryRequest.needsReconciliation
+            ? tr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.')
+            : tr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
+          <button type="button" className="btn-secondary" disabled={historyRestoreSaving} onClick={() => {
+            void retryPendingReturnHistoryRequest()
+              .catch((error) => notify(String((error as { message?: unknown })?.message || error), 'error'))
+          }}>{tr('retry_original_request', 'Retry original request')}</button>
+          <button type="button" className="btn-secondary" disabled={historyRestoreSaving} onClick={() => {
+            if (window.confirm(tr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) {
+              try { savePendingHistoryRequest(activePendingHistoryRequest.entityId, null) }
+              catch (error) { notify(String((error as { message?: unknown })?.message || error), 'error') }
+            }
+          }}>{tr('discard_retry', 'Discard retry')}</button>
+        </div>
+      ) : null}
+      {canBulkReturns && pendingBulkRequest ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+          <span className="min-w-0 flex-1">{tr('return_bulk_pending', 'A previous bulk action has an unknown outcome. Retry that exact request or discard it after checking Returns and History.', 'សកម្មភាពជាក្រុមមុនមានលទ្ធផលមិនទាន់ច្បាស់។ សូមសាកល្បងសំណើដដែលឡើងវិញ ឬបោះបង់បន្ទាប់ពីពិនិត្យការត្រឡប់ និងប្រវត្តិ។')}</span>
+          <button type="button" className="btn-secondary" disabled={bulkActionSaving} onClick={() => { void applyBulkAction(pendingBulkRequest).catch(() => {}) }}>{tr('retry_original_request', 'Retry original request', 'សាកល្បងសំណើដើមឡើងវិញ')}</button>
+          <button type="button" className="btn-secondary" onClick={() => {
+            if (window.confirm(tr('discard_bulk_retry_warning', 'Discard this retry? The previous action may already have succeeded. Check Returns and History first.', 'បោះបង់ការសាកល្បងនេះ? សកម្មភាពមុនអាចបានជោគជ័យរួចហើយ។'))) savePendingBulkRequest(null)
+          }} disabled={bulkActionSaving}>{tr('discard_retry', 'Discard retry', 'បោះបង់ការសាកល្បង')}</button>
+        </div>
+      ) : null}
+      {canBulkReturns && selectedReturns.length > 0 ? (
         <div className="bulk-toolbar mb-3 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm">
           <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedReturns.length} {tr('selected', 'Selected')}</span>
-          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={exportSelected}>{tr('export_selected', 'Export selected')}</button>
+          <button type="button" className="btn-secondary px-3 py-1 text-xs" disabled={!!pendingBulkRequest || selectedReturns.length > RETURN_BULK_LIMIT} onClick={() => setBulkActionSnapshot({ rows: selectedReturns.map((row) => ({ ...row })), scope })}>{tr('change_selected', 'Change selected', 'កែប្រែការជ្រើសរើស')}</button>
+          {selectedReturns.length > RETURN_BULK_LIMIT ? <span className="text-xs font-medium text-red-600 dark:text-red-300">{tr('return_bulk_limit', `Select at most ${RETURN_BULK_LIMIT} returns.`, `ជ្រើសរើសការត្រឡប់មិនលើស ${RETURN_BULK_LIMIT}។`)}</span> : null}
           <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
             {tr('clear', 'Clear')}
           </button>
@@ -1061,47 +1492,42 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         cards={stripCards}
         loading={stripLoading}
         t={t}
-        // Export + History are SECONDARY controls (Part 548): Returns has
-        // only 2-3 stat cards, so when the strip is open they merge into
-        // the STATS row's spare width rather than the date row ("if stats
-        // are not many like only two ... just merge with the stats").
+        range={stripRange}
+        onRangeChange={setStripRange}
+        showTime={false}
+        showPresets
+        iconOnly
+        compactRange
+        // Compact phone actions leave the flexible space to the full date;
+        // Export moves to the existing mobile title host while History and
+        // Add Return retain fixed icon slots in this range row.
         rangeActions={(
           <>
-            <ExportMenu label={tr('export', 'Export')} items={exportItems} triggerClassName="h-8 px-2.5 text-xs" />
-            {canEditReturn ? (
-              <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 py-0 text-xs" onClick={() => setShowReasonManager(true)} title={tr('manage_return_reasons', 'Manage return reasons')}>
-                <Settings2 className="h-3.5 w-3.5" />
-                <span>{tr('reasons', 'Reasons')}</span>
-              </button>
+            {canExportReturns ? (
+              <SectionExportAction>
+                <ExportMenu
+                  label={tr('export', 'Export')}
+                  items={exportItems}
+                  iconOnly
+                  triggerClassName={toolbarIconButtonClassName}
+                />
+              </SectionExportAction>
             ) : null}
-            {/* dense: pin History to a true 32px so it matches the h-8 Export
-                button beside it on the Stats row (btn-secondary's 40px
-                min-height would otherwise make it taller). */}
-            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" dense />
+            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} align="right" className="h-8 w-8 shrink-0" dense />
+            {scope === SUPPLIER_SCOPE ? (
+              <button onClick={() => setShowSupplierForm(true)} className="btn-primary inline-flex h-10 min-h-10 w-10 shrink-0 items-center justify-center gap-1 px-0 text-xs sm:w-auto sm:px-2" aria-label={tr('add_supplier_return', 'Add Supplier Return')} title={tr('add_supplier_return', 'Add Supplier Return')}>
+                <ReturnPlusIcon className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">{tr('supplier_return', 'Supplier Return').replace(/^ការ/u, '')}</span>
+              </button>
+            ) : (
+              <button onClick={() => setShowCustomerForm(true)} className="btn-primary inline-flex h-10 min-h-10 w-10 shrink-0 items-center justify-center gap-1 px-0 text-xs sm:w-auto sm:px-2" aria-label={tr('add_return', 'Add Return')} title={tr('add_return', 'Add Return')}>
+                <ReturnPlusIcon className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">{tr('return', 'Return').replace(/^ការ/u, '')}</span>
+              </button>
+            )}
           </>
         )}
-        actions={(
-          // The PRIMARY add action: explicit, always-visible label ("make
-          // add button clear... add return", Part 548 — the label used to
-          // vanish below the sm breakpoint, leaving a bare icon).
-          // Icon = the composite return+"+" glyph (ReturnPlusIcon); the visible
-          // word is the short noun ("Return" / "Supplier Return"), mirroring the
-          // Products "Add product" button which shows just "Product" beside its
-          // PackagePlus. The full "Add …" phrasing stays as the aria-label/title.
-          scope === SUPPLIER_SCOPE ? (
-            <button onClick={() => setShowSupplierForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('add_supplier_return', 'Add Supplier Return')} title={tr('add_supplier_return', 'Add Supplier Return')}>
-              <ReturnPlusIcon className="h-4 w-4" />
-              <span>{tr('supplier_return', 'Supplier Return')}</span>
-            </button>
-          ) : (
-            <button onClick={() => setShowCustomerForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('add_return', 'Add Return')} title={tr('add_return', 'Add Return')}>
-              <ReturnPlusIcon className="h-4 w-4" />
-              <span>{tr('return', 'Return')}</span>
-            </button>
-          )
-        )}
       />
-
 
       {/* Search + filter pin to the top of the page's scroll container while
           scrolling -- same `sticky top-2` treatment as Products/Inventory/
@@ -1111,19 +1537,14 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           lives per-section inside ReturnsListSurface, and the "N selected"
           banner above the stat cards already has its own fixed position
           above them -- so only the search+filter row needs the wrapper. */}
-      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
-        {/* The Start→End range that scopes the stats strip above now leads
-            this pinned toolbar as its own row, directly above the search bar
-            (user, Aug 31: "fish out the start date and end date from the stats
-            button ... right above the search bar row"). Same range state
-            (stripRange) still feeds the strip's cards. */}
-        <StatsRangeRow className="pt-1" range={stripRange} onRangeChange={setStripRange} t={t} />
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="sticky top-2 z-30 -mx-1 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
+        <div className="flex min-w-0 flex-nowrap items-center gap-2">
           <SearchInput
             id="returns-search"
             name="returns_search"
             value={search}
             onChange={setSearch}
+            className="min-w-0 flex-1"
             placeholder={tr('search_returns_placeholder', 'Search divide by comma, any order: return ID, return number, receipt, customer, product name, barcode/sku, brand')}
           />
           {/* Placeholder above already advertises barcode/sku as a
@@ -1131,12 +1552,6 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
               POS.tsx expose a camera-scan shortcut for. Added here (and to
               Sales.tsx) to match; same onDetected={setSearch} wiring. */}
           <ScanSearchButton onDetected={setSearch} t={(key: string) => t(key) || key} />
-          <SortChip
-            spec={returnSortSpec}
-            fields={returnSortFields}
-            onChange={setReturnSortSpec}
-            label={tr('sort', 'Sort')}
-          />
           <FilterMenu
             label={tr('filters', 'Filters')}
             activeCount={activeFilterCount}
@@ -1152,17 +1567,27 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         </div>
       </div>
 
-      {/* The "tap a record" hint used to sit on its own row above the pager
-          (two rows of vertical space for one idea); merged onto the pager's
-          own row instead -- hint on the left, pager on the right -- so the
-          page keeps the same footprint (user, Sep 3: "same row as the page
-          back and forth ... so left of screen ... try not to push anothing
-          up or down"). */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="min-w-0 truncate text-xs text-gray-400">{tr('tap_to_view_details', 'Tap a record to view details.')}</p>
+      {/* The first centered pager sits directly below the search/filter row;
+          the list follows immediately so neither control is displaced by
+          secondary explanatory copy. */}
+      <PagerActionRow
+        className="mb-3"
+        leading={(
+          <ShiftHistoryModal
+            label={tr('shift_code', 'Shift')}
+            buttonClassName="btn-secondary inline-flex h-10 min-h-10 w-10 items-center justify-center overflow-hidden px-0 py-0 text-[10px]"
+          />
+        )}
+        trailing={canEditReturn ? (
+          <button type="button" className="btn-secondary inline-flex h-8 min-h-8 w-8 items-center justify-center p-0" onClick={() => setShowReasonManager(true)} aria-label={tr('manage_return_reasons', 'Manage return reasons')} title={tr('manage_return_reasons', 'Manage return reasons')}>
+            <Settings2 className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      >
         <PaginationControls
           compact
           rangeAsPageSize
+          compactCentered
           page={returnPage}
           pageSize={returnPageSize}
           totalItems={allVisibleReturns.length}
@@ -1173,14 +1598,13 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             setReturnPageSize(size)
             setReturnPage(1)
           }}
-          className="shrink-0"
         />
-      </div>
+      </PagerActionRow>
       <ReturnsListSurface
         collapsedReturnSections={collapsedReturnSections}
         CUSTOMER_SCOPE={CUSTOMER_SCOPE}
         filtered={filtered as ReturnsListSurfaceProps['filtered']}
-        fmtTime={fmtTime}
+        fmtTime={fmtClock24}
         isSelectionScopeFullySelected={isSelectionScopeFullySelected}
         isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
         loading={loading}
@@ -1191,9 +1615,10 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         scope={scope}
         selectAllRef={selectAllRef as ReturnsListSurfaceProps['selectAllRef']}
         selectedIds={selectedIds}
+        selectionEnabled={canBulkReturns}
         selectionModeActive={selectionModeActive}
         getReturnLongPressState={getReturnLongPressState}
-        setDetailRet={(ret) => setDetailRet(ret as ReturnRow)}
+        setDetailRet={(ret) => { void openReturnDetail(ret as ReturnRow) }}
         showReturnActionGroups={showReturnActionGroups}
         SUPPLIER_SCOPE={SUPPLIER_SCOPE}
         t={t}
@@ -1206,10 +1631,10 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       />
 
       <div className="mt-3 flex justify-center">
-        <PaginationControls compact rangeAsPageSize page={returnPage} pageSize={returnPageSize} totalItems={allVisibleReturns.length} label={tr('returns_count', 'returns')} t={t} onPageChange={setReturnPage} onPageSizeChange={(size) => { setReturnPageSize(size); setReturnPage(1) }} />
+        <PaginationControls compact rangeAsPageSize compactCentered page={returnPage} pageSize={returnPageSize} totalItems={allVisibleReturns.length} label={tr('returns_count', 'returns')} t={t} onPageChange={setReturnPage} onPageSizeChange={(size) => { setReturnPageSize(size); setReturnPage(1) }} />
       </div>
 
-      {exportDialog ? (
+      {canExportReturns && exportDialog ? (
         <Suspense fallback={null}>
           <ExportOptionsDialog
             title={t('export_options_title') || 'Export options'}
@@ -1228,7 +1653,8 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         <Suspense fallback={null}>
           <ReturnDetailModal
             ret={detailRet}
-            onClose={() => setDetailRet(null)}
+            onClose={closeReturnDetail}
+            onMinimize={() => minimizeReturnDetail(detailRet)}
             onEdit={canEditReturn && normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE ? () => handleOpenEdit(detailRet) : undefined}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
@@ -1282,6 +1708,18 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             onChanged={() => { void loadReturns(true) }}
             notify={notify}
             t={t}
+            tr={tr}
+          />
+        </Suspense>
+      ) : null}
+      {canBulkReturns && bulkActionSnapshot?.rows.length ? (
+        <Suspense fallback={null}>
+          <ReturnsBulkActionModal
+            rows={bulkActionSnapshot.rows}
+            scope={bulkActionSnapshot.scope}
+            tr={tr}
+            onClose={() => setBulkActionSnapshot(null)}
+            onApply={applyBulkAction}
           />
         </Suspense>
       ) : null}

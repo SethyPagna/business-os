@@ -46,7 +46,7 @@ export default function ExportRangeDialog({
   }
 
   return (
-    <Modal title={title || tr('export', 'Export')} onClose={onClose} size="sm">
+    <Modal title={title || tr('export', 'Export')} onClose={onClose} size="sm" unsavedChanges="read-only">
       <div className="space-y-3">
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">

@@ -1,3 +1,4 @@
+import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, SVGProps } from 'react'
 import Gift from 'lucide-react/dist/esm/icons/gift.js'
@@ -12,9 +13,15 @@ import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import CalendarClock from 'lucide-react/dist/esm/icons/calendar-clock.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import { useFormDirty } from '../../utils/formDirty.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
+import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import HubSectionNav, { type HubSectionDef } from '../shared/HubSectionNav.tsx'
 import { fmtDate } from '../../utils/formatters.ts'
 import {
   getPromotionRules,
@@ -31,6 +38,8 @@ import { calculateProductDiscount, isProductDiscountActive } from '../../utils/p
 // Same minimal-context cast pattern as FeesPage/LoyaltyPointsPage --
 // AppContext's useApp is untyped, each page names just what it reads.
 type PromotionsAppContext = {
+  navigateTo: (pageId: string, anchor?: string) => void
+  hasPermission: (key: string) => boolean
   t: (key: string, fallback?: string) => string
   notify: (message: string, type?: string) => void
   fmtUSD: (value: number) => string
@@ -167,23 +176,23 @@ function ruleTypeIcon(ruleType: string): ComponentType<SVGProps<SVGSVGElement>> 
 type PromotionsSection = 'rules' | 'discounts' | 'loyalty'
 
 export default function PromotionsPage() {
-  const { t, notify, fmtUSD, getPermissionTier, can } = useApp()
+  const { t, notify, fmtUSD, getPermissionTier, can, hasPermission, navigateTo } = useApp()
   // G2 section gates: the page door admits either grant (see
   // AppContext.canAccessPage); each section still needs its own.
-  const canPromotions = getPermissionTier('promotions') !== 'none'
+  const canPromotions = can('promotions', 'view')
   // Part 557 slice 4: 'promotions' is a view-tier section. A View-only grant
   // reads the rule list but every write (new/edit/delete rule) is hidden here
   // and refused by the backend (writes keep requireKey('promotions')). Full only.
-  const canManagePromotions = can('promotions', 'manage')
+  const canManagePromotions = canPromotions && can('promotions', 'manage')
   // The Discounts sub-section edits PER-PRODUCT discounts via updateProduct(),
   // which the backend gates on 'products' (not 'promotions'). It was coupled to
   // canPromotions, so a promotions user without products access saw a discount
   // editor whose every save 403'd -- a fake control this view-tier slice would
   // otherwise widen to view users. Gate it on its REAL capability instead: the
   // products tier (review or full can write; review queues for approval).
-  const canManageDiscounts = getPermissionTier('products') !== 'none'
-  const canLoyalty = getPermissionTier('customer_portal') !== 'none'
-  const [activeSection, setActiveSection] = useState<PromotionsSection>(canPromotions ? 'rules' : 'loyalty')
+  const canManageDiscounts = can('products', 'view')
+  const canLoyalty = can('customer_portal', 'view')
+  const [activeSection, setActiveSection] = useHubSection<PromotionsSection>('promotions', canPromotions ? 'rules' : 'loyalty', getHubDestinations('promotions', { getPermissionTier, hasPermission, can }).map((item) => item.id), navigateTo)
   const [rules, setRules] = useState<PromotionRuleRow[]>([])
   const [rulesLoading, setRulesLoading] = useState(true)
   const [rulesError, setRulesError] = useState('')
@@ -198,6 +207,17 @@ export default function PromotionsPage() {
   const [productResults, setProductResults] = useState<ProductLite[]>([])
   const [discountDraft, setDiscountDraft] = useState<DiscountDraft | null>(null)
   const [savingDiscount, setSavingDiscount] = useState(false)
+
+  // S4-21: both editors are whole-object drafts, so dirtiness is "differs
+  // from the draft as it opened". The reset key goes null between openings,
+  // which is what re-baselines the snapshot on the next one.
+  const ruleDirty = useFormDirty(draft, draft ? String(draft.id ?? "new") : null)
+  const discountDirty = useFormDirty(discountDraft, discountDraft ? String(discountDraft.product.id) : null)
+  const ruleGuard = useCloseGuard({ dirty: ruleDirty.dirty }, () => setDraft(null))
+  const discountGuard = useCloseGuard({ dirty: discountDirty.dirty }, () => setDiscountDraft(null))
+  // Backdrop and Cancel both land here.
+  const requestCloseRule = () => { if (!savingRule) ruleGuard.requestClose() }
+  const requestCloseDiscount = () => { if (!savingDiscount) discountGuard.requestClose() }
 
   // Product picker inside the rule editor.
   const [pickerQuery, setPickerQuery] = useState('')
@@ -445,19 +465,14 @@ export default function PromotionsPage() {
     </div>
   )
 
-  type SectionChip = { key: PromotionsSection; label: string; icon: ComponentType<SVGProps<SVGSVGElement>>; activeColor: string }
-  const sectionChips: SectionChip[] = [
-    ...(canPromotions ? [
-      { key: 'rules' as const, label: t('promo_tab_rules') || 'Rules', icon: BadgePercent, activeColor: 'text-rose-600 dark:text-rose-400' },
-    ] : []),
-    // Discounts self-gates on 'products' (its real backend gate), not the
-    // promotions grant -- see canManageDiscounts above.
-    ...(canManageDiscounts ? [
-      { key: 'discounts' as const, label: t('promo_tab_discounts') || 'Discounts', icon: Percent, activeColor: 'text-indigo-600 dark:text-indigo-400' },
-    ] : []),
-    ...(canLoyalty ? [
-      { key: 'loyalty' as const, label: t('loyalty_points') || 'Loyalty Points', icon: Gift, activeColor: 'text-amber-600 dark:text-amber-400' },
-    ] : []),
+  // Discounts self-gates on 'products' (its real backend gate), not the
+  // promotions grant -- see canManageDiscounts above. Each section is always
+  // present in the list (HubSectionNav filters `hidden` ones out) so the
+  // gating stays legible in one place instead of three conditional spreads.
+  const sections: HubSectionDef[] = [
+    { id: 'rules', label: t('promo_tab_rules') || 'Rules', icon: BadgePercent, hidden: !canPromotions, description: t('hub_desc_promotions_rules') || undefined },
+    { id: 'discounts', label: t('promo_tab_discounts') || 'Discounts', icon: Percent, hidden: !canManageDiscounts, description: t('hub_desc_promotions_discounts') || undefined },
+    { id: 'loyalty', label: t('loyalty_points') || 'Loyalty Points', icon: Gift, hidden: !canLoyalty, description: t('hub_desc_promotions_loyalty') || undefined },
   ]
 
   return (
@@ -467,36 +482,21 @@ export default function PromotionsPage() {
     // unreachable (reported: Promotions/Loyalty could not scroll).
     <div className="page-scroll p-4">
       <div className="mx-auto max-w-5xl space-y-4">
-        {/* Header: identity only. The distinct areas live in the section-chip
-            row below, one shown at a time -- never stacked in one scroll. */}
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-300">
-            <BadgePercent className="h-5 w-5" />
-          </div>
-          <h1 className="text-xl font-semibold">{t('promotions') || 'Promotions'}</h1>
-        </div>
-
-        {sectionChips.length > 1 ? (
-          <div className="inline-flex max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-gray-100 p-0.5 [touch-action:pan-x] dark:bg-gray-800">
-            {sectionChips.map((chip) => {
-              const Icon = chip.icon
-              const isActive = activeSection === chip.key
-              return (
-                <button
-                  key={chip.key}
-                  type="button"
-                  onClick={() => setActiveSection(chip.key)}
-                  aria-pressed={isActive}
-                  className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? `bg-white shadow dark:bg-gray-900 ${chip.activeColor}` : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                >
-                  <Icon className="h-4 w-4" /> {chip.label}
-                </button>
-              )
-            })}
-          </div>
-        ) : null}
-
-        {activeSection === 'loyalty' ? (
+        {/* No page title (user, Sep 3 2026). Promotions used to be the one
+            hub that kept an always-visible "Promotions" heading above its
+            switcher; the other four show none, and the sidebar already says
+            which page you are on. Removing it brings Promotions into line
+            with its siblings and gives the sections a screenful more room.
+            The name is still passed to HubSectionNav below, where layer 2 on
+            a phone does need it as the mini-page heading. */}
+        <HubSectionNav
+          sections={sections}
+          active={activeSection}
+          onChange={(id) => setActiveSection(id as PromotionsSection)}
+          storageKey="bos:hub:promotions:active"
+          pageId="promotions"
+        >
+        {activeSection === 'loyalty' && canLoyalty ? (
           // G2: the whole former Loyalty Points page, embedded (its own
           // header/sections/logic untouched -- one implementation, new home).
           <Suspense fallback={<p className="py-4 text-sm text-gray-500">{t('loading') || 'Loading'}...</p>}>
@@ -750,9 +750,10 @@ export default function PromotionsPage() {
             )}
           </div>
         ) : null}
+        </HubSectionNav>
 
-        {draft ? (
-          <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={() => !savingRule && setDraft(null)}>
+        {draft && canManagePromotions ? (
+          <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={requestCloseRule}>
             <div className="modal-panel-safe my-auto w-full max-w-lg space-y-3 overflow-y-auto rounded-2xl bg-white p-4 shadow-xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
               <h2 className="text-base font-semibold">
                 {draft.id ? (t('promo_edit_rule') || 'Edit promotion') : (t('promo_new_rule') || 'New rule')}
@@ -941,30 +942,36 @@ export default function PromotionsPage() {
                 </div>
               )}
               {draft.scope_type === 'category' && (
-                <AppSelect
+                <SuggestionTextInput
+                  id="promo-scope-category"
                   value={draft.category}
                   onChange={(value: string) => setDraft({ ...draft, category: value })}
-                  options={[{ value: '', label: t('promo_pick_category') || 'Choose a category...' }, ...categories.map((c) => ({ value: c, label: c }))]}
+                  options={categories}
+                  placeholder={t('promo_pick_category') || 'Choose a category...'}
+                  ariaLabel={t('promo_pick_category') || 'Choose a category...'}
                 />
               )}
               {draft.scope_type === 'brand' && (
-                <AppSelect
+                <SuggestionTextInput
+                  id="promo-scope-brand"
                   value={draft.brand}
                   onChange={(value: string) => setDraft({ ...draft, brand: value })}
-                  options={[{ value: '', label: t('promo_pick_brand') || 'Choose a brand...' }, ...brands.map((b) => ({ value: b, label: b }))]}
+                  options={brands}
+                  placeholder={t('promo_pick_brand') || 'Choose a brand...'}
+                  ariaLabel={t('promo_pick_brand') || 'Choose a brand...'}
                 />
               )}
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className={labelCls}>{t('promo_starts') || 'Starts (optional)'}</label>
-                  <input type="date" className={inputCls} value={draft.starts_at}
-                    onChange={(event) => setDraft({ ...draft, starts_at: event.target.value })} />
+                  <DateEntryInput className={inputCls} bare t={t} ariaLabel={t('promo_starts') || 'Starts'} value={draft.starts_at}
+                    onChange={(iso) => setDraft({ ...draft, starts_at: iso })} />
                 </div>
                 <div>
                   <label className={labelCls}>{t('promo_ends') || 'Ends (optional)'}</label>
-                  <input type="date" className={inputCls} value={draft.ends_at}
-                    onChange={(event) => setDraft({ ...draft, ends_at: event.target.value })} />
+                  <DateEntryInput className={inputCls} bare t={t} ariaLabel={t('promo_ends') || 'Ends'} value={draft.ends_at}
+                    onChange={(iso) => setDraft({ ...draft, ends_at: iso })} />
                 </div>
               </div>
 
@@ -975,7 +982,7 @@ export default function PromotionsPage() {
               </label>
 
               <div className="flex justify-end gap-2 pt-1">
-                <button type="button" className="btn btn-ghost btn-sm" disabled={savingRule} onClick={() => setDraft(null)}>
+                <button type="button" className="btn btn-ghost btn-sm" disabled={savingRule} onClick={requestCloseRule}>
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button type="button" className="btn btn-primary btn-sm" disabled={savingRule} onClick={saveRule}>
@@ -983,11 +990,12 @@ export default function PromotionsPage() {
                 </button>
               </div>
             </div>
+            <UnsavedChangesPrompt guard={ruleGuard} />
           </div>
         ) : null}
 
-        {discountDraft ? (
-          <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={() => !savingDiscount && setDiscountDraft(null)}>
+        {discountDraft && canManageDiscounts ? (
+          <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={requestCloseDiscount}>
             <div className="modal-panel-safe my-auto w-full max-w-lg space-y-3 overflow-y-auto rounded-2xl bg-white p-4 shadow-xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
               <h2 className="truncate text-base font-semibold">
                 {(t('promo_discount_for') || 'Discount for')} {String(discountDraft.product.name || `#${discountDraft.product.id}`)}
@@ -1049,18 +1057,18 @@ export default function PromotionsPage() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className={labelCls}>{t('promo_starts') || 'Starts (optional)'}</label>
-                  <input type="date" className={inputCls} value={discountDraft.discount_starts_at}
-                    onChange={(event) => setDiscountDraft({ ...discountDraft, discount_starts_at: event.target.value })} />
+                  <DateEntryInput className={inputCls} bare t={t} ariaLabel={t('promo_starts') || 'Starts'} value={discountDraft.discount_starts_at}
+                    onChange={(iso) => setDiscountDraft({ ...discountDraft, discount_starts_at: iso })} />
                 </div>
                 <div>
                   <label className={labelCls}>{t('promo_ends') || 'Ends (optional)'}</label>
-                  <input type="date" className={inputCls} value={discountDraft.discount_ends_at}
-                    onChange={(event) => setDiscountDraft({ ...discountDraft, discount_ends_at: event.target.value })} />
+                  <DateEntryInput className={inputCls} bare t={t} ariaLabel={t('promo_ends') || 'Ends'} value={discountDraft.discount_ends_at}
+                    onChange={(iso) => setDiscountDraft({ ...discountDraft, discount_ends_at: iso })} />
                 </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-1">
-                <button type="button" className="btn btn-ghost btn-sm" disabled={savingDiscount} onClick={() => setDiscountDraft(null)}>
+                <button type="button" className="btn btn-ghost btn-sm" disabled={savingDiscount} onClick={requestCloseDiscount}>
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button type="button" className="btn btn-primary btn-sm" disabled={savingDiscount} onClick={saveDiscount}>
@@ -1068,6 +1076,7 @@ export default function PromotionsPage() {
                 </button>
               </div>
             </div>
+            <UnsavedChangesPrompt guard={discountGuard} />
           </div>
         ) : null}
       </div>

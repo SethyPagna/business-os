@@ -1,26 +1,68 @@
-import { Hono } from 'hono'
-import { getDb } from '../lib/db'
+import { Hono, type Context } from 'hono'
+import { getDb, type D1Compat } from '../lib/db'
+
+/** Fail closed until the complete additive release schema is available. */
+async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
+  try {
+    const row = await db.prepare(`SELECT COUNT(*) AS ready FROM sqlite_master
+      WHERE (type='table' AND name='fee_operation_receipts')
+         OR (type='trigger' AND name='transfer_receipts_require_provenance_insert')`).get<{ ready: number }>()
+    return row?.ready === 2
+  } catch {
+    return false
+  }
+}
 import { localDateAtOrAfter, localDateAtOrBefore } from '../lib/businessDateWindow'
 import { attachBatchCounts } from '../lib/productBatches'
 import { paginateProductFamilies } from '../lib/familyPagination'
+import { buildProductSalesLedgerSql } from '../lib/productSalesLedger'
 import { getFamilyStockStats } from '../lib/familyStockStats'
+import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
+import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
-import { findIdentityMatch, type ProductIdentityRow } from '../lib/productIdentity'
-import { buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildLikeAliasClause, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
-import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
+import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
+import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
+import { planReceiveBatchStock, receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, type ReceiptCostPreimage } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
-import { dateToBatchCode, normalizeToIsoDate } from '../lib/batchCode'
+import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
+import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
+import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchRoleGuards'
+import {
+  CANONICAL_BRANCH_CONFIGURATION_CODE,
+  CANONICAL_BRANCH_CONFIGURATION_ERROR,
+  CANONICAL_TRANSFER_BRANCHES_SQL,
+  CanonicalBranchConfigurationError,
+  isCanonicalTransferSelection,
+  resolveCanonicalTransferPair,
+  type CanonicalTransferBranchRow,
+  type CanonicalTransferPair,
+} from '../lib/canonicalBranchIdentity'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
+import { planTransferOperation } from '../lib/transferOperation'
+import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchName } from '../lib/movementBranchName'
+import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
+import { movementReferenceSelectSql } from '../lib/movementReference'
+import { movementSearchHaystackSql } from '../lib/movementSearch'
+import { findTransferReceipt, normalizeTransferRequestId, transferReceiptResponse, transferRequestDigest } from '../lib/transferOperationReceipt'
+import { resolveMovementCostSnapshot, type MovementCostComponent } from '../lib/movementCostSnapshot'
+import { parseStockConditionTag, type StockConditionTag } from '../lib/stockCondition'
+import {
+  allocateTaggedLots, planDisposeTagged, planHoldAsTagged, planRestoreTagged,
+  readOpenTaggedLots, readTaggedLotGroups,
+} from '../lib/damagedLotActions'
+import { addMoney4, roundMoney4 } from '../lib/moneyPrecision'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -50,6 +92,18 @@ import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+
+// Shared with lib/stockInCommit.ts (batched fast stock-in) and this file's
+// own runTaggedLotAction below: one context type for every handler that was
+// pulled out from behind `app.post`/`app.get` into a plain callable function.
+export type InventoryContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
+
+function explicitReceiptMoney4(value: unknown, field: string): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${field} must be a non-negative finite number`)
+  try { return roundMoney4(typeof value === 'string' ? value : parsed) }
+  catch { throw new Error(`${field} is out of range`) }
+}
 // Legacy gates every single inventory endpoint (reads and writes alike)
 // behind requirePermission('inventory') -- this Worker only checked
 // requireAuth (any logged-in user), a real gap since inventory data/actions
@@ -67,8 +121,34 @@ app.use('*', requireAuth)
 // this middleware only decides "in the door or not".
 app.use('*', async (c, next) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'inventory') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const productOnlySessionEntry = c.req.method === 'POST'
+    && ['/sessions', '/api/inventory/sessions'].includes(c.req.path)
+    && getActionTier(user, 'products', 'add') === 'full'
+  if (productOnlySessionEntry) return next()
+  // View revocation narrows reads only; writes keep their own action gates.
+  const tier = c.req.method === 'GET' || c.req.method === 'HEAD'
+    ? getActionTier(user, 'inventory', 'view')
+    : getPermissionTier(user, 'inventory')
+  if (tier === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
+})
+
+// Milestone A: one immutable, bounded envelope for existing-product receipts
+// and product-create-plus-opening-receipt. Every durable row is committed by
+// commitStockSession's single D1 batch; cache/broadcast work is post-commit.
+app.post('/sessions', async (c) => {
+  const body = await c.req.json<unknown>().catch(() => null)
+  const stockSession = await import('../lib/stockSession')
+  try {
+    const receipt = await stockSession.commitStockSession(c.env, c.get('user'), body)
+    if (!receipt.replayed) c.executionCtx.waitUntil(stockSession.notifyStockSession(c.env, receipt))
+    return c.json(receipt)
+  } catch (error) {
+    if (error instanceof stockSession.StockSessionError) {
+      return c.json({ error: error.message, code: error.code, ...(error.details || {}) }, error.statusCode)
+    }
+    throw error
+  }
 })
 
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
@@ -136,7 +216,125 @@ function getInitialType(key: unknown): 'latin' | 'number' | 'khmer' | 'other' | 
 
 type InventoryFilterQuery = Record<string, string | undefined>
 
-function appendInventoryProductFilters(query: InventoryFilterQuery) {
+type InventoryProductMetricRow = {
+  product_id: number
+  display_quantity: number
+  stock_value_usd: number
+  stock_value_khr: number
+  qty_sold: number
+  revenue_usd: number
+  revenue_khr: number
+  cogs_usd: number
+  cogs_khr: number
+}
+
+/**
+ * Enrich only the rows already admitted by family-aware pagination. The one
+ * JSON parameter avoids D1 bind-count limits even when a large product family
+ * expands beyond the requested family page size.
+ */
+export async function attachInventoryProductMetrics(
+  db: D1Compat,
+  items: Array<Record<string, unknown>>,
+  query: InventoryFilterQuery,
+): Promise<void> {
+  const productIds = [...new Set(items
+    .map((item) => Number(item.id))
+    .filter((id) => Number.isSafeInteger(id) && id > 0))]
+  if (!productIds.length) return
+
+  const params: Record<string, unknown> = { productIdsJson: JSON.stringify(productIds) }
+  const branchId = Number.parseInt(String(query.branchId || query.branch_id || ''), 10)
+  const branchScoped = Number.isFinite(branchId) && branchId > 0
+  if (branchScoped) params.branchId = branchId
+
+  const startDate = String(query.startDate || query.start_date || '').trim()
+  const endDate = String(query.endDate || query.end_date || '').trim()
+  if (startDate) params.startDate = startDate
+  if (endDate) params.endDate = endDate
+
+  const saleClauses = [
+    startDate ? localDateAtOrAfter('s.created_at') : '',
+    endDate ? localDateAtOrBefore('s.created_at') : '',
+  ].filter(Boolean)
+  const stockQuantitySql = branchScoped ? 'COALESCE(bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
+  const stockJoinSql = branchScoped
+    ? 'LEFT JOIN branch_stock bs ON bs.product_id = ids.product_id AND bs.branch_id = @branchId'
+    : ''
+
+  // The sales-minus-returns arithmetic is lib/productSalesLedger.ts's, not this
+  // file's. It used to be hand-copied here and at the three sites further down,
+  // and all four had drifted off the salesAnalytics scoping rules in the same
+  // four ways -- which is how this list could style a NEGATIVE profit while the
+  // detail pane opened from the very same row clamped the same numbers to 0.
+  // See that module's header for each defect, and for the per-(sale, product)
+  // invariants that now make `revenue_usd >= 0` and `cogs_usd >= 0` true by
+  // construction instead of by display floor.
+  const rows = await db.prepare(`
+    WITH requested_ids(product_id) AS (
+      SELECT DISTINCT CAST(value AS INTEGER)
+      FROM json_each(@productIdsJson)
+    ),
+    ledger AS (${buildProductSalesLedgerSql({ requestedIds: true, branchScoped, saleClauses })})
+    SELECT ids.product_id,
+           ${stockQuantitySql} AS display_quantity,
+           ${stockQuantitySql} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0) AS stock_value_usd,
+           ${stockQuantitySql} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0) AS stock_value_khr,
+           COALESCE(ledger.qty_sold, 0) AS qty_sold,
+           COALESCE(ledger.revenue_usd, 0) AS revenue_usd,
+           COALESCE(ledger.revenue_khr, 0) AS revenue_khr,
+           COALESCE(ledger.cogs_usd, 0) AS cogs_usd,
+           COALESCE(ledger.cogs_khr, 0) AS cogs_khr
+    FROM requested_ids ids
+    JOIN products p ON p.id = ids.product_id
+    ${stockJoinSql}
+    LEFT JOIN ledger ON ledger.product_id = ids.product_id
+  `).all<InventoryProductMetricRow>(params)
+
+  const metricsById = new Map((rows || []).map((row) => [Number(row.product_id), row]))
+  for (const item of items) {
+    const metric = metricsById.get(Number(item.id))
+    if (!metric) throw new Error(`Inventory metrics missing for returned product ${String(item.id)}`)
+    const revenueUsd = num(metric.revenue_usd)
+    const cogsUsd = num(metric.cogs_usd)
+    Object.assign(item, {
+      display_quantity: num(metric.display_quantity),
+      stock_value_usd: num(metric.stock_value_usd),
+      stock_value_khr: num(metric.stock_value_khr),
+      qty_sold: num(metric.qty_sold),
+      revenue_usd: revenueUsd,
+      revenue_khr: num(metric.revenue_khr),
+      cogs_usd: cogsUsd,
+      cogs_khr: num(metric.cogs_khr),
+      // Both operands are non-negative by construction (productSalesLedger.ts),
+      // so this is identical to inventory/ProductDetailModal.tsx's
+      // `Math.max(0, revenue) - Math.max(0, cogs)`. The pane clamps FOUR cells
+      // of this row, not one -- qty_sold, revenue_usd and cogs_usd each with
+      // `Math.max(0, ...)`, and the profit built on the last two -- and the
+      // list renders all four raw, so agreement needs the ledger to guarantee
+      // all four. It does, and for the branch-scoped read it takes an
+      // APPORTIONMENT rather than a cap to get there: a customer return names
+      // no sale LINE, so subtracting it whole at every branch the sale touched
+      // is what reported "Net sold -2" here beside "0" in the pane. Each
+      // return group is now split across the sale's branch lines -- each column
+      // against its own denominator, units by the unit share and money by the
+      // share of the VALUE a branch recognised -- so the branch rows add back
+      // up to the unfiltered figure instead of each reversing the whole,
+      // wherever a reversal fits inside the sale it names (the ledger header
+      // states the two over-refund cases where both sides clamp separately).
+      // Units are allocated by largest remainder on top of that, because this
+      // route's qty_sold is rendered by the list with no formatting at all.
+      // The per-(sale, product) caps stay behind all of it as a residual guard
+      // for what no scoping rule can fix -- a return line taking back more
+      // than the sale recognised for the product at all. A negative
+      // PROFIT survives only where it is true -- the product was sold below
+      // cost -- and is not floored, here or in the sales kernel.
+      profit_usd: revenueUsd - cogsUsd,
+    })
+  }
+}
+
+function appendInventoryProductFilters(query: InventoryFilterQuery, lowStock: LowStockConfig) {
   const where = ['p.is_active = 1']
   const params: Record<string, unknown> = {}
   const joins: string[] = []
@@ -147,90 +345,23 @@ function appendInventoryProductFilters(query: InventoryFilterQuery) {
     joins.push('LEFT JOIN branch_stock selected_bs ON selected_bs.product_id = p.id AND selected_bs.branch_id = @branchId')
   }
 
-  const termGroups = splitSearchTermGroups(query.query || query.q || '')
-  let matchRankSql: string | undefined
-  let searchWhereClause: string | undefined
-  const mode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
-  // Previously opt-in via searchFields=name (Inventory.tsx sent that on
-  // every request, forcing a name-only match and silently dropping
-  // barcode/sku/brand/category/supplier/description/unit hits). That
-  // param is no longer sent by Inventory.tsx -- see its own comment --
-  // so titleOnly now only fires for a caller that actually asks for it.
-  const titleOnly = ['name', 'title'].includes(String(query.searchFields || query.search_fields || '').toLowerCase())
-  if (termGroups.length) {
-    // FTS5 MATCH against products_fts (migrations/0018_products_fts.sql)
-    // plus products_fts_code (migrations/0019_products_fts_code.sql,
-    // barcode/sku substring fallback) -- same approach as products.ts's
-    // buildSearchFilters, see that file's comment for the full reasoning
-    // (including why both MATCH conditions are IN-subqueries rather than
-    // a JOIN + direct MATCH: combining a JOINed FTS5 table's MATCH with
-    // an OR throws at the SQLite level, confirmed against real FTS5).
-    // Scoped to PRODUCT_SEARCH_COLUMNS, same reasoning as products.ts's identical
-    // change (see lib/searchMatch.ts's own comment on that constant).
-    const ftsMatch = buildFtsMatchExpression(termGroups, mode, titleOnly ? 'name' : PRODUCT_SEARCH_COLUMNS)
-    // Computed once, unconditionally (not gated on titleOnly), and reused
-    // for both products_fts_code (barcode/sku) below and
-    // products_fts_name_trigram (name) -- see products.ts's identical
-    // wiring/comment for the fused-token gap (e.g. "100ml", "110C") this
-    // second table closes, confirmed against this project's own real
-    // catalog data.
-    const trigramMatch = buildTrigramMatchExpression(termGroups, mode)
-    const matchClauses: string[] = []
-    if (ftsMatch) {
-      params.ftsQuery = ftsMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @ftsQuery)')
-    }
-    if (trigramMatch && !titleOnly) {
-      params.codeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @codeQuery)')
-    }
-    if (trigramMatch) {
-      params.nameCodeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @nameCodeQuery)')
-    }
-    // Mixed-group fallback (e.g. one group containing both "mac" and
-    // "012") -- see buildHybridMatchClause's own comment in
-    // lib/searchMatch.ts and products.ts's identical wiring. No-op for
-    // the common single-word-per-group case.
-    const hybridMatch = titleOnly ? undefined : buildHybridMatchClause(termGroups, mode, 'hyb', PRODUCT_SEARCH_COLUMNS)
-    if (hybridMatch) {
-      Object.assign(params, hybridMatch.params)
-      matchClauses.push(hybridMatch.sql)
-    }
-    // Short-word (<3 char) LIKE fallback -- see buildShortWordFallbackClause's
-    // own comment in lib/searchMatch.ts and products.ts's identical wiring
-    // for why the trigram tables above can't cover "ml"/"g"/a single
-    // shade-code letter on their own.
-    // Same depth-100 fix as products.ts's identical call site: pass the
-    // precomputed name_normalized/unit_normalized columns with
-    // alreadyNormalizedCols=true instead of raw p.name/p.unit, so this
-    // doesn't run the ~78-level nested REPLACE() chain per column for
-    // every sub-3-character word (see migration 0037_product_search_
-    // compact_columns.sql and products.ts's own comment on this exact fix).
-    // Scoped to name_normalized only -- unit dropped along with unit
-    // leaving PRODUCT_SEARCH_COLUMNS (see that constant's own comment in
-    // lib/searchMatch.ts): unit has its own exact-match filter now instead
-    // of being a free-text search dimension.
-    const shortWordMatch = buildShortWordFallbackClause(termGroups, mode, ['p.name_normalized'], params, 'shortw', true)
-    if (shortWordMatch) matchClauses.push(shortWordMatch)
-    // Compact-brand substring fallback intentionally NOT called here
-    // anymore -- brand is no longer a free-text search dimension (see
-    // PRODUCT_SEARCH_COLUMNS's own comment in lib/searchMatch.ts): names
-    // already carry the brand in this catalog, and the brand filter
-    // dropdown already covers exact-brand lookup.
-    // Partial multi-word fallback -- same long-name gap and identical
-    // wiring as products.ts (see buildPartialWordMatchClause's own
-    // comment in lib/searchMatch.ts). Scoped to name only, same reasoning.
-    // Same depth-100 fix as products.ts -- name_normalized, alreadyNormalizedCols=true.
-    const partialMatch = buildPartialWordMatchClause(termGroups, mode, ['p.name_normalized'], params, 'partialw', 4, true)
-    if (partialMatch) matchClauses.push(partialMatch)
-    if (matchClauses.length) {
-      searchWhereClause = matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0]
-      if (!titleOnly && ftsMatch) {
-        matchRankSql = `COALESCE((SELECT ${PRODUCTS_FTS_BM25_SQL} FROM products_fts WHERE products_fts.rowid = p.id AND products_fts MATCH @ftsQuery), 0)`
-      }
-    }
-  }
+  // `search` accepted as a third alias alongside query/q -- identical
+  // reasoning and identical wiring to products.ts's buildSearchFilters (a
+  // term sent under an unrecognized key used to return the entire
+  // unfiltered catalog with a 200 instead of erroring).
+  const rawSearchText = String(query.query || query.q || query.search || '')
+  // Search tail + relevance ranking come from the one shared
+  // implementation (lib/productSearchQuery.ts) that every product picker
+  // orders by -- this file used to carry a hand-copied duplicate of
+  // products.ts's block, which is how routes/branches.ts's third copy was
+  // able to drift into having no bm25 rank at all without anything
+  // failing. See that module's header for the ordering contract.
+  const searchQuery = buildProductSearchQuery(rawSearchText, params, {
+    mode: query.searchMode || query.search_mode,
+    titleOnly: ['name', 'title'].includes(String(query.searchFields || query.search_fields || '').toLowerCase()),
+  })
+  const { matchRankSql, matchTierSql, titleOnly } = searchQuery
+  const searchWhereClause = searchQuery.whereClause
 
   // Same multi-brand membership check as products.ts's buildSearchFilters
   // (see migrations/0033_product_multi_category_brand.sql and
@@ -274,7 +405,7 @@ function appendInventoryProductFilters(query: InventoryFilterQuery) {
 
   const stockExpr = params.branchId ? 'COALESCE(selected_bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
   const stockState = String(query.stockState || query.stock_state || '').toLowerCase()
-  if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= COALESCE(p.low_stock_threshold, 10)`)
+  if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)
   if (stockState === 'out') where.push(`${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`)
   if (stockState === 'in_stock' || stockState === 'positive') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)
 
@@ -328,11 +459,12 @@ function appendInventoryProductFilters(query: InventoryFilterQuery) {
 
   if (searchWhereClause) where.push(searchWhereClause)
 
-  return { where, joins, params, stockExpr, matchRankSql, titleOnly }
+  return { where, joins, params, stockExpr, matchRankSql, matchTierSql, titleOnly }
 }
 
 async function getInventoryProductMetadata(env: Env, query: InventoryFilterQuery) {
   const db = getDb(env)
+  const lowStock = await loadLowStockConfig(env)
   // Metadata (brand list + initials bar) always reflects "all initials" --
   // only the initial filter itself is excluded so the bar doesn't collapse
   // to a single letter once one is selected, matching the legacy behavior.
@@ -357,9 +489,9 @@ async function getInventoryProductMetadata(env: Env, query: InventoryFilterQuery
   // function doesn't itself track for re-fetch timing.
   const { query: _searchTerm, q: _searchTermAlt, ...structuralQuery } = query
   const metaBase: InventoryFilterQuery = { ...structuralQuery, initial: 'all' }
-  const brandMetaFilters = appendInventoryProductFilters({ ...metaBase, brand: '' })
-  const categoryMetaFilters = appendInventoryProductFilters({ ...metaBase, category: '' })
-  const initialMetaFilters = appendInventoryProductFilters(metaBase)
+  const brandMetaFilters = appendInventoryProductFilters({ ...metaBase, brand: '' }, lowStock)
+  const categoryMetaFilters = appendInventoryProductFilters({ ...metaBase, category: '' }, lowStock)
+  const initialMetaFilters = appendInventoryProductFilters(metaBase, lowStock)
   const sql = (f: ReturnType<typeof appendInventoryProductFilters>) => `WHERE ${f.where.join(' AND ')}`
   const joinSql = (f: ReturnType<typeof appendInventoryProductFilters>) => f.joins.join('\n')
 
@@ -423,8 +555,8 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
   const includeMetadata = String(query.metadata ?? '1') !== '0'
   const metadataOnly = ['1', 'true', 'yes'].includes(String(query.metadataOnly ?? query.metadata_only ?? '').trim().toLowerCase())
   const db = getDb(env)
-  const filters = appendInventoryProductFilters(query)
-  const { where, joins, params, matchRankSql } = filters
+  const filters = appendInventoryProductFilters(query, await loadLowStockConfig(env))
+  const { where, joins, params, matchRankSql, matchTierSql } = filters
   const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
 
@@ -433,7 +565,10 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
   // searchProductsPayload; no matchRankSql (no search term, or metadataOnly
   // stripped `name`/etc out of selectColumns so there's nothing to rank
   // against) falls back to the plain name order as before.
-  const effectiveFamilyOrderSql = (matchRankSql && !metadataOnly) ? 'match_rank ASC, family_name ASC' : 'family_name ASC'
+  const effectiveFamilyOrderSql = buildFamilyRelevanceOrderSql('family_name ASC', {
+    hasTier: Boolean(matchTierSql) && !metadataOnly,
+    hasRank: Boolean(matchRankSql) && !metadataOnly,
+  })
 
   const selectColumns = metadataOnly ? 'p.id' : `p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
            p.selling_price_usd, p.selling_price_khr, p.purchase_price_usd, p.purchase_price_khr,
@@ -475,6 +610,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
       // below), so fall back to the one column guaranteed to exist.
       intraFamilyOrderSql: metadataOnly ? 'id ASC' : 'lower(name) ASC, id ASC',
       matchRankSql: metadataOnly ? undefined : matchRankSql,
+      matchTierSql: metadataOnly ? undefined : matchTierSql,
     }),
     includeMetadata ? getInventoryProductMetadata(env, query) : Promise.resolve({ filters: { brands: [], categories: [] }, initials: [] }),
   ])
@@ -492,7 +628,12 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
     return next
   })
 
-  if (items.length) await attachBatchCounts(getDb(env), items)
+  if (items.length) {
+    await Promise.all([
+      attachBatchCounts(db, items),
+      attachInventoryProductMetrics(db, items, query),
+    ])
+  }
 
   return {
     items,
@@ -517,12 +658,20 @@ app.get('/bootstrap', async (c) => {
   const [familyStats, movements, brands, categories, branchRows] = await Promise.all([
     getFamilyStockStats({
       db,
+      lowStock: await loadLowStockConfig(c.env),
       joinSql: '',
       whereSql: 'WHERE p.is_active = 1',
       params: {},
       qtyExpr: 'COALESCE(p.stock_quantity, 0)',
     }),
-    db.prepare('SELECT * FROM inventory_movements ORDER BY created_at DESC, id DESC LIMIT 50').all({}),
+    // N13: the bootstrap's movement preview is the SAME ledger rows the
+    // /movements drill serves, so it resolves branch / actor / receipt
+    // through the same shared expressions instead of showing a blank branch
+    // and a full name on its first 50 rows.
+    db.prepare(`SELECT *, ${movementBranchNameSql('inventory_movements')} AS ${RESOLVED_BRANCH_NAME_COLUMN},
+      ${movementActorNameSql('inventory_movements')} AS ${RESOLVED_ACTOR_NAME_COLUMN},
+      ${movementReferenceSelectSql('inventory_movements')}
+      FROM inventory_movements ORDER BY created_at DESC, id DESC LIMIT 50`).all<Record<string, unknown>>({}),
     db.prepare("SELECT DISTINCT trim(brand) AS value FROM products WHERE is_active = 1 AND trim(COALESCE(brand, '')) <> '' ORDER BY lower(trim(brand)) ASC").all<{ value: string }>({}),
     // Previously missing -- same gap as getInventoryProductMetadata's own
     // brands-only query, just this route's separate first-load copy of it.
@@ -553,7 +702,10 @@ app.get('/bootstrap', async (c) => {
       stock_value_usd: familyStats.stock_value_usd,
       stock_value_khr: familyStats.stock_value_khr,
     },
-    movements: { items: movements || [], total: (movements || []).length, page: 1, pageSize: 50 },
+    movements: {
+      items: (movements || []).map((row) => withResolvedActorName(withResolvedBranchName(row))),
+      total: (movements || []).length, page: 1, pageSize: 50,
+    },
     filters: { brands: (brands || []).map((row) => row.value), categories: (categories || []).map((row) => row.value) },
     branches: branchRows || [],
   })
@@ -585,54 +737,31 @@ app.get('/summary', async (c) => {
         COALESCE(bs.quantity, 0) AS display_quantity,
         COALESCE(bs.quantity * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
         COALESCE(bs.quantity * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
-        COALESCE(si.qty_sold, 0) - COALESCE(ret.qty_returned, 0) AS qty_sold,
-        COALESCE(si.store_discount_usd, 0) AS store_discount_usd,
-        COALESCE(si.store_discount_khr, 0) AS store_discount_khr,
-        COALESCE(si.membership_discount_usd, 0) AS membership_discount_usd,
-        COALESCE(si.membership_discount_khr, 0) AS membership_discount_khr,
-        COALESCE(si.revenue_usd, 0) - COALESCE(ret.refund_usd, 0) AS revenue_usd,
-        COALESCE(si.revenue_khr, 0) - COALESCE(ret.refund_khr, 0) AS revenue_khr,
-        COALESCE(si.cogs_usd, 0) - COALESCE(ret.cogs_returned_usd, 0) AS cogs_usd,
-        COALESCE(si.cogs_khr, 0) - COALESCE(ret.cogs_returned_khr, 0) AS cogs_khr,
-        COALESCE((
-          SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
-          FROM branch_stock bs2
-          JOIN branches b2 ON b2.id = bs2.branch_id
-          WHERE bs2.product_id = p.id
-        ), '[]') AS branch_stock_json
+        COALESCE(fin.qty_sold, 0) AS qty_sold,
+        COALESCE(fin.store_discount_usd, 0) AS store_discount_usd,
+        COALESCE(fin.store_discount_khr, 0) AS store_discount_khr,
+        COALESCE(fin.membership_discount_usd, 0) AS membership_discount_usd,
+        COALESCE(fin.membership_discount_khr, 0) AS membership_discount_khr,
+        COALESCE(fin.revenue_usd, 0) AS revenue_usd,
+        COALESCE(fin.revenue_khr, 0) AS revenue_khr,
+        COALESCE(fin.cogs_usd, 0) AS cogs_usd,
+        COALESCE(fin.cogs_khr, 0) AS cogs_khr,
+        COALESCE(bsj.branch_stock_json, '[]') AS branch_stock_json
       FROM products p
       LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = @branchId
+      -- Pre-aggregated once, not a per-row correlated subquery (this used to
+      -- run once per product -- 10,271 times on the unfiltered path -- to
+      -- build one product's branch_stock array; same shape as the financial
+      -- join right below, which already aggregates before joining).
       LEFT JOIN (
-        SELECT si.product_id, si.branch_id,
-               SUM(si.quantity) AS qty_sold,
-               SUM(CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.discount_usd, 0) ELSE 0 END) AS store_discount_usd,
-               SUM(CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.discount_khr, 0) ELSE 0 END) AS store_discount_khr,
-               SUM(CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.membership_discount_usd, 0) ELSE 0 END) AS membership_discount_usd,
-               SUM(CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.membership_discount_khr, 0) ELSE 0 END) AS membership_discount_khr,
-               SUM(si.total_usd - CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * (COALESCE(s.discount_usd, 0) + COALESCE(s.membership_discount_usd, 0)) ELSE 0 END) AS revenue_usd,
-               SUM(si.total_khr - CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * (COALESCE(s.discount_khr, 0) + COALESCE(s.membership_discount_khr, 0)) ELSE 0 END) AS revenue_khr,
-               SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
-               SUM(si.cost_price_khr * si.quantity) AS cogs_khr
-        FROM sale_items si
-        JOIN sales s ON s.id = si.sale_id
-        WHERE si.branch_id = @branchId
-          AND COALESCE(s.sale_status, 'completed') NOT IN ('awaiting_payment', 'cancelled')
-        GROUP BY si.product_id, si.branch_id
-      ) si ON si.product_id = p.id
-      LEFT JOIN (
-        SELECT ri.product_id,
-               SUM(ri.quantity) AS qty_returned,
-               SUM(ri.total_usd) AS refund_usd,
-               SUM(ri.total_khr) AS refund_khr,
-               SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_usd * ri.quantity ELSE 0 END) AS cogs_returned_usd,
-               SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_khr * ri.quantity ELSE 0 END) AS cogs_returned_khr
-        FROM return_items ri
-        JOIN returns r ON r.id = ri.return_id
-        WHERE COALESCE(ri.branch_id, r.branch_id) = @branchId
-          AND COALESCE(r.status, 'completed') != 'cancelled'
-          AND COALESCE(r.return_scope, 'customer') = 'customer'
-        GROUP BY ri.product_id
-      ) ret ON ret.product_id = p.id
+        SELECT bs2.product_id,
+               json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity)) AS branch_stock_json
+        FROM branch_stock bs2
+        JOIN branches b2 ON b2.id = bs2.branch_id
+        GROUP BY bs2.product_id
+      ) bsj ON bsj.product_id = p.id
+      -- One financial join, one implementation (lib/productSalesLedger.ts).
+      LEFT JOIN (${buildProductSalesLedgerSql({ branchScoped: true })}) fin ON fin.product_id = p.id
       WHERE p.is_active = 1
       ORDER BY lower(p.name) ASC
     `).all<Record<string, unknown>>({ branchId })
@@ -663,51 +792,28 @@ app.get('/summary', async (c) => {
       p.stock_quantity AS display_quantity,
       COALESCE(p.stock_quantity * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
       COALESCE(p.stock_quantity * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
-      COALESCE(si.qty_sold, 0) - COALESCE(ret.qty_returned, 0) AS qty_sold,
-      COALESCE(si.store_discount_usd, 0) AS store_discount_usd,
-      COALESCE(si.store_discount_khr, 0) AS store_discount_khr,
-      COALESCE(si.membership_discount_usd, 0) AS membership_discount_usd,
-      COALESCE(si.membership_discount_khr, 0) AS membership_discount_khr,
-      COALESCE(si.revenue_usd, 0) - COALESCE(ret.refund_usd, 0) AS revenue_usd,
-      COALESCE(si.revenue_khr, 0) - COALESCE(ret.refund_khr, 0) AS revenue_khr,
-      COALESCE(si.cogs_usd, 0) - COALESCE(ret.cogs_returned_usd, 0) AS cogs_usd,
-      COALESCE(si.cogs_khr, 0) - COALESCE(ret.cogs_returned_khr, 0) AS cogs_khr,
-      COALESCE((
-        SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
-        FROM branch_stock bs2
-        JOIN branches b2 ON b2.id = bs2.branch_id
-        WHERE bs2.product_id = p.id
-      ), '[]') AS branch_stock_json
+      COALESCE(fin.qty_sold, 0) AS qty_sold,
+      COALESCE(fin.store_discount_usd, 0) AS store_discount_usd,
+      COALESCE(fin.store_discount_khr, 0) AS store_discount_khr,
+      COALESCE(fin.membership_discount_usd, 0) AS membership_discount_usd,
+      COALESCE(fin.membership_discount_khr, 0) AS membership_discount_khr,
+      COALESCE(fin.revenue_usd, 0) AS revenue_usd,
+      COALESCE(fin.revenue_khr, 0) AS revenue_khr,
+      COALESCE(fin.cogs_usd, 0) AS cogs_usd,
+      COALESCE(fin.cogs_khr, 0) AS cogs_khr,
+      COALESCE(bsj.branch_stock_json, '[]') AS branch_stock_json
     FROM products p
+    -- Pre-aggregated once, not a per-row correlated subquery -- see the
+    -- branchId-scoped path above for why.
     LEFT JOIN (
-      SELECT si.product_id,
-             SUM(si.quantity) AS qty_sold,
-             SUM(CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.discount_usd, 0) ELSE 0 END) AS store_discount_usd,
-             SUM(CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.discount_khr, 0) ELSE 0 END) AS store_discount_khr,
-             SUM(CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.membership_discount_usd, 0) ELSE 0 END) AS membership_discount_usd,
-             SUM(CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.membership_discount_khr, 0) ELSE 0 END) AS membership_discount_khr,
-             SUM(si.total_usd - CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * (COALESCE(s.discount_usd, 0) + COALESCE(s.membership_discount_usd, 0)) ELSE 0 END) AS revenue_usd,
-             SUM(si.total_khr - CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * (COALESCE(s.discount_khr, 0) + COALESCE(s.membership_discount_khr, 0)) ELSE 0 END) AS revenue_khr,
-             SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
-             SUM(si.cost_price_khr * si.quantity) AS cogs_khr
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      WHERE COALESCE(s.sale_status, 'completed') NOT IN ('awaiting_payment', 'cancelled')
-      GROUP BY si.product_id
-    ) si ON si.product_id = p.id
-    LEFT JOIN (
-      SELECT ri.product_id,
-             SUM(ri.quantity) AS qty_returned,
-             SUM(ri.total_usd) AS refund_usd,
-             SUM(ri.total_khr) AS refund_khr,
-             SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_usd * ri.quantity ELSE 0 END) AS cogs_returned_usd,
-             SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_khr * ri.quantity ELSE 0 END) AS cogs_returned_khr
-      FROM return_items ri
-      JOIN returns r ON r.id = ri.return_id
-      WHERE COALESCE(r.status, 'completed') != 'cancelled'
-        AND COALESCE(r.return_scope, 'customer') = 'customer'
-      GROUP BY ri.product_id
-    ) ret ON ret.product_id = p.id
+      SELECT bs2.product_id,
+             json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity)) AS branch_stock_json
+      FROM branch_stock bs2
+      JOIN branches b2 ON b2.id = bs2.branch_id
+      GROUP BY bs2.product_id
+    ) bsj ON bsj.product_id = p.id
+    -- One financial join, one implementation (lib/productSalesLedger.ts).
+    LEFT JOIN (${buildProductSalesLedgerSql()}) fin ON fin.product_id = p.id
     WHERE p.is_active = 1
     ORDER BY lower(p.name) ASC
   `).all<Record<string, unknown>>({})
@@ -728,42 +834,15 @@ app.get('/summary', async (c) => {
 // Sales-minus-returns financial join, scoped to a branch when the caller
 // filtered by one (mirrors appendInventoryProductFilters's own branch
 // scoping so the two join consistently on the same @branchId param).
-// Ported from backend/src/routes/inventory.ts's buildInventoryFinancialJoinSql.
+//
+// The arithmetic itself is lib/productSalesLedger.ts's -- this used to be a
+// fourth hand-copied copy of it. The join is exposed as `fin`, which carries
+// BOTH readings of the same population: net-of-returns (revenue_usd/cogs_usd),
+// and gross-of-returns (gross_revenue_usd/gross_cogs_usd) for the stat cards,
+// which the owner keeps gross with refunds reported separately (Z10).
 function buildInventoryFinancialJoinSql(branchScoped: boolean): string {
-  const saleBranchClause = branchScoped ? 'AND si.branch_id = @branchId' : ''
-  const returnBranchClause = branchScoped ? 'AND COALESCE(ri.branch_id, r.branch_id) = @branchId' : ''
   return `
-    LEFT JOIN (
-      SELECT si.product_id,
-             SUM(si.quantity) AS qty_sold,
-             SUM(CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.discount_usd, 0) ELSE 0 END) AS store_discount_usd,
-             SUM(CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.discount_khr, 0) ELSE 0 END) AS store_discount_khr,
-             SUM(CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.membership_discount_usd, 0) ELSE 0 END) AS membership_discount_usd,
-             SUM(CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.membership_discount_khr, 0) ELSE 0 END) AS membership_discount_khr,
-             SUM(si.total_usd - CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * (COALESCE(s.discount_usd, 0) + COALESCE(s.membership_discount_usd, 0)) ELSE 0 END) AS revenue_usd,
-             SUM(si.total_khr - CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * (COALESCE(s.discount_khr, 0) + COALESCE(s.membership_discount_khr, 0)) ELSE 0 END) AS revenue_khr,
-             SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
-             SUM(si.cost_price_khr * si.quantity) AS cogs_khr
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      WHERE COALESCE(s.sale_status, 'completed') NOT IN ('awaiting_payment', 'cancelled')
-        ${saleBranchClause}
-      GROUP BY si.product_id
-    ) si ON si.product_id = p.id
-    LEFT JOIN (
-      SELECT ri.product_id,
-             SUM(ri.quantity) AS qty_returned,
-             SUM(ri.total_usd) AS refund_usd,
-             SUM(ri.total_khr) AS refund_khr,
-             SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_usd * ri.quantity ELSE 0 END) AS cogs_returned_usd,
-             SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_khr * ri.quantity ELSE 0 END) AS cogs_returned_khr
-      FROM return_items ri
-      JOIN returns r ON r.id = ri.return_id
-      WHERE COALESCE(r.status, 'completed') != 'cancelled'
-        AND COALESCE(r.return_scope, 'customer') = 'customer'
-        ${returnBranchClause}
-      GROUP BY ri.product_id
-    ) ret ON ret.product_id = p.id
+    LEFT JOIN (${buildProductSalesLedgerSql({ branchScoped })}) fin ON fin.product_id = p.id
   `
 }
 
@@ -783,7 +862,8 @@ function buildInventoryFinancialJoinSql(branchScoped: boolean): string {
 // unfiltered totals, just under the field names the frontend expects.
 app.get('/stats', async (c) => {
   const query = c.req.query() as InventoryFilterQuery
-  const { where, joins, params, stockExpr } = appendInventoryProductFilters(query)
+  const lowStock = await loadLowStockConfig(c.env)
+  const { where, joins, params, stockExpr } = appendInventoryProductFilters(query, lowStock)
   const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
   const branchScoped = Number.isFinite(Number(params.branchId))
@@ -799,14 +879,14 @@ app.get('/stats', async (c) => {
   // per-row (unchanged) since those are real per-variant transaction
   // totals, not a "how many products" count.
   const [familyStats, financialRow] = await Promise.all([
-    getFamilyStockStats({ db, joinSql, whereSql, params, qtyExpr: stockExpr }),
+    getFamilyStockStats({ db, lowStock, joinSql, whereSql, params, qtyExpr: stockExpr }),
     db.prepare(`
       SELECT
-        COALESCE(SUM(COALESCE(si.qty_sold, 0) - COALESCE(ret.qty_returned, 0)), 0) AS net_sold_qty,
-        COALESCE(SUM(COALESCE(si.store_discount_usd, 0)), 0) AS store_discount_usd,
-        COALESCE(SUM(COALESCE(si.store_discount_khr, 0)), 0) AS store_discount_khr,
-        COALESCE(SUM(COALESCE(si.membership_discount_usd, 0)), 0) AS membership_discount_usd,
-        COALESCE(SUM(COALESCE(si.membership_discount_khr, 0)), 0) AS membership_discount_khr,
+        COALESCE(SUM(COALESCE(fin.qty_sold, 0)), 0) AS net_sold_qty,
+        COALESCE(SUM(COALESCE(fin.store_discount_usd, 0)), 0) AS store_discount_usd,
+        COALESCE(SUM(COALESCE(fin.store_discount_khr, 0)), 0) AS store_discount_khr,
+        COALESCE(SUM(COALESCE(fin.membership_discount_usd, 0)), 0) AS membership_discount_usd,
+        COALESCE(SUM(COALESCE(fin.membership_discount_khr, 0)), 0) AS membership_discount_khr,
         -- Z10 (user, Aug 29 -- "follow dashboard, keeps them separate"):
         -- Revenue and COGS are GROSS here (before refunds / returned COGS),
         -- exactly like the Dashboard's salesAnalytics kernel (revenue_usd =
@@ -815,10 +895,14 @@ app.get('/stats', async (c) => {
         -- Branch "Revenue" now agrees with the Dashboard's for the same set of
         -- sales instead of being quietly net-of-refunds. net_sold_qty keeps
         -- its return subtraction -- it is a units metric, not revenue.
-        COALESCE(SUM(COALESCE(si.revenue_usd, 0)), 0) AS revenue_usd,
-        COALESCE(SUM(COALESCE(si.revenue_khr, 0)), 0) AS revenue_khr,
-        COALESCE(SUM(COALESCE(si.cogs_usd, 0)), 0) AS cogs_usd,
-        COALESCE(SUM(COALESCE(si.cogs_khr, 0)), 0) AS cogs_khr
+        --
+        -- gross_* comes off the SAME ledger as the net columns the product
+        -- list shows, so "gross" and "net" are two readings of one population
+        -- rather than two hand-copied joins that can drift apart.
+        COALESCE(SUM(COALESCE(fin.gross_revenue_usd, 0)), 0) AS revenue_usd,
+        COALESCE(SUM(COALESCE(fin.gross_revenue_khr, 0)), 0) AS revenue_khr,
+        COALESCE(SUM(COALESCE(fin.gross_cogs_usd, 0)), 0) AS cogs_usd,
+        COALESCE(SUM(COALESCE(fin.gross_cogs_khr, 0)), 0) AS cogs_khr
       FROM products p
       ${joinSql}
       ${financialJoinSql}
@@ -911,11 +995,12 @@ app.get('/movements', async (c) => {
     // scattered INSERT sites and no shared writer, and movement text is a
     // denormalized copy of product names (measured ~0 Latin diacritics in Part
     // 484), so the practical loss is nil and the crash risk is what mattered.
-    const movementHaystack = `(
-      COALESCE(product_name, '') || ' ' || COALESCE(branch_name, '') || ' ' ||
-      COALESCE(user_name, '') || ' ' || COALESCE(movement_type, '') || ' ' ||
-      COALESCE(reason, '')
-    )`
+    //
+    // N13 (round 2): the haystack itself lives in lib/movementSearch.ts and is
+    // built from the SAME branch and actor expressions the SELECT below renders
+    // -- searching the raw snapshots asked about values that are nowhere on the
+    // screen. Same shallow shape, same alreadyNormalizedCols=true contract.
+    const movementHaystack = movementSearchHaystackSql('inventory_movements')
     const termClauses = terms.map((term, index) => buildLikeAliasClause(term, [movementHaystack], params, `search${index}`, true))
     where.push(`(${termClauses.join(` ${mode} `)})`)
   }
@@ -937,14 +1022,42 @@ app.get('/movements', async (c) => {
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
-  const total = await db.prepare(`SELECT COUNT(*) AS count FROM inventory_movements ${whereSql}`).get<{ count: number }>(params)
-  const items = await db.prepare(`
-    SELECT * FROM inventory_movements
-    ${whereSql}
-    ORDER BY created_at DESC, id DESC
-    LIMIT @pageSize OFFSET @offset
-  `).all({ ...params, pageSize, offset })
-  return c.json({ items, total: total?.count || 0, page, pageSize, totalPages: Math.max(1, Math.ceil((total?.count || 0) / pageSize)) })
+  // N13 (round 2): the COUNT and the page SELECT are independent reads over
+  // the same WHERE/params -- no data dependency on each other -- so they go
+  // over the wire as one db.batch() round trip instead of two sequential
+  // prepare().get()/prepare().all() calls, same shape as
+  // familyPagination.ts's paginateProductFamilies.
+  //
+  // N13: the branch a movement happened at. Sale/return-family rows carry
+  // branch_id but no branch_name snapshot, so this drill showed an empty
+  // Branch column for them; resolved from the id (snapshot-first) via the
+  // shared expression. It is aliased rather than named branch_name because
+  // `SELECT *` already emits that column, and folded back onto branch_name in
+  // JS so every consumer still sees one field.
+  // N13: the ACTOR is resolved the same way and for the same reason -- older
+  // rows snapshot the full name, and every history surface names the account
+  // username. Same aliased-then-folded shape as the branch.
+  // N13: and the RECORD the row belongs to -- reference_id alone identifies
+  // nothing to a person, so the receipt it names is resolved here too. These
+  // two are new column names, so they need no fold.
+  const [totalResult, itemsResult] = await db.batch([
+    { sql: `SELECT COUNT(*) AS count FROM inventory_movements ${whereSql}`, params },
+    {
+      sql: `
+        SELECT *, ${movementBranchNameSql('inventory_movements')} AS ${RESOLVED_BRANCH_NAME_COLUMN},
+          ${movementActorNameSql('inventory_movements')} AS ${RESOLVED_ACTOR_NAME_COLUMN},
+          ${movementReferenceSelectSql('inventory_movements')}
+        FROM inventory_movements
+        ${whereSql}
+        ORDER BY created_at DESC, id DESC
+        LIMIT @pageSize OFFSET @offset
+      `,
+      params: { ...params, pageSize, offset },
+    },
+  ])
+  const total = (totalResult?.results?.[0] as { count?: number } | undefined)?.count || 0
+  const items = (itemsResult?.results ?? []) as Record<string, unknown>[]
+  return c.json({ items: (items || []).map((row) => withResolvedActorName(withResolvedBranchName(row))), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) })
 })
 
 // ---- Reasons (saved as JSON in settings, matching the Docker backend) ----
@@ -984,10 +1097,17 @@ app.get('/reasons/impact', async (c) => {
   const to = String(c.req.query('to') || '').trim()
   if (!from || !to) return c.json({ error: 'Source and target reasons are required' }, 400)
   const db = getDb(c.env)
-  const row = await db.prepare("SELECT value FROM settings WHERE key = 'inventory_saved_reasons'").get<{ value: string }>()
+  // Two independent reads (the saved-reasons settings row, the linked-movement
+  // count) with no data dependency on each other -- one db.batch() round trip
+  // instead of two sequential get() calls.
+  const [settingsResult, countResult] = await db.batch([
+    { sql: "SELECT value FROM settings WHERE key = 'inventory_saved_reasons'" },
+    { sql: "SELECT COUNT(*) AS n FROM inventory_movements WHERE lower(trim(COALESCE(reason,''))) = @from", params: { from: from.toLowerCase() } },
+  ])
+  const row = settingsResult?.results?.[0] as { value?: string } | undefined
   let saved: InventoryReason[] = []
   try { saved = normalizeReasons(JSON.parse(row?.value || '[]')) } catch { saved = [] }
-  const movements = Number((await db.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE lower(trim(COALESCE(reason,''))) = @from").get<{ n: number }>({ from: from.toLowerCase() }))?.n || 0)
+  const movements = Number((countResult?.results?.[0] as { n?: number } | undefined)?.n || 0)
   return c.json({
     type, from, to,
     configured: saved.some((item) => item.type === type && item.label.toLowerCase() === from.toLowerCase()),
@@ -1027,7 +1147,7 @@ app.post('/reasons/replace', async (c) => {
   const results = await db.batch(statements)
   const linkedResult = results[1] as unknown as { changes?: number; meta?: { changes?: number } } | undefined
   const changed = scope === 'linked' ? Number(linkedResult?.meta?.changes ?? linkedResult?.changes ?? 0) : 0
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'replace', 'inventory_reason', null, { type, from, to, scope, changed })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'replace', 'inventory_reason', null, { type, from, to, scope, changed })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reasons_replace', type, from, to, scope }))
   return c.json({ success: true, items: next, scope, changed })
 })
@@ -1066,7 +1186,7 @@ app.put('/reasons', async (c) => {
     INSERT INTO settings (key, value, updated_at) VALUES ('inventory_saved_reasons', @value, CURRENT_TIMESTAMP)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
   `).run({ value: JSON.stringify(items) })
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'inventory_reason', null, { count: items.length })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'inventory_reason', null, { count: items.length })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reasons_update' }))
   return c.json({ items })
 })
@@ -1117,8 +1237,8 @@ type StockRowFields = {
   parent_id: number | null
   selling_price_usd: number | null
   selling_price_khr: number | null
-  special_price_usd: number | null
-  special_price_khr: number | null
+  wholesale_price_usd: number | null
+  wholesale_price_khr: number | null
   discount_enabled: number | null
   discount_type: string | null
   discount_percent: number | null
@@ -1133,14 +1253,10 @@ type StockRowFields = {
 }
 
 const STOCK_ROW_COLUMNS = `id, name, sku, barcode, category, brand, unit, description, supplier, parent_id,
-  selling_price_usd, selling_price_khr, special_price_usd, special_price_khr,
+  selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr,
   discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr,
   purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
   low_stock_threshold, out_of_stock_threshold`
-
-function moneyEq(a: unknown, b: unknown): boolean {
-  return Math.round((Number(a) || 0) * 100) === Math.round((Number(b) || 0) * 100)
-}
 
 function lowerTrim(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
@@ -1159,24 +1275,25 @@ function mirrorCostFields(usd: number, khr: number) {
 // destination row, then move quantity onto it). Applies the exact same
 // identity rule findIdentityMatch already uses for transfers/import/
 // merge-duplicates (lib/productDetailRule.ts): same name group + same
-// DETAILS (barcode + cost) is one row; anything else is a different row.
-// Selling and special price are deliberately not part of that -- they are
-// what we plan to charge, not what the item is. Returns the product id stock
-// should actually be added to -- either an existing sibling row that
-// already matches the edited pricing, the source row itself (pricing
-// wasn't actually different from what it already had), or a brand-new
-// sibling row created to hold this specific combination of details.
+// DETAIL (the barcode, and nothing else) is one row; only a different
+// barcode is a different row. Cost, selling and wholesale price are
+// deliberately not part of that -- cost is what we paid on one receipt and
+// belongs to the batch ledger, the other two are what we plan to charge.
+// Returns the product id stock should actually be added to -- either the
+// source row itself (the ordinary case: the barcode did not change), an
+// existing sibling row that already carries the edited barcode, or a
+// brand-new sibling row created to hold a barcode nothing else has.
 async function resolveAddStockTarget(
   env: Env,
   source: StockRowFields,
   overrides: {
     sellingUsd: number; sellingKhr: number
-    specialUsd: number; specialKhr: number
+    wholesaleUsd: number; wholesaleKhr: number
     discountEnabled: boolean; discountType: string; discountPercent: number; discountAmountUsd: number; discountAmountKhr: number
     costUsd: number; costKhr: number
     barcode: string | null
   },
-  receivedDate?: string | null,
+  preflightReceiptCost: (target: Pick<ProductIdentityRow, 'id' | 'cost_price_usd' | 'cost_price_khr'>) => void | Promise<void>,
 ): Promise<{ productId: number; created: boolean }> {
   const db = getDb(env)
   const candidate: ProductIdentityRow = {
@@ -1189,32 +1306,58 @@ async function resolveAddStockTarget(
     selling_price_khr: overrides.sellingKhr,
   }
 
-  // cost_price_*, not purchase_price_*: the latter is a legacy pair that only
-  // mirrorCostFields ever populates, so it sits at its 0 default on every
-  // import-created and Add/Edit-form-created product. Comparing it here meant
-  // this short-circuit could never fire for those rows -- the same
-  // always-zero-column mistake lib/productIdentity.ts carried.
-  // Same product + barcode + receipt batch may share the option even when
-  // this receipt's cost differs. Per-receipt cost belongs to the batch and
-  // movement ledgers; it must not rewrite products.cost_price_*.
-  const effectiveReceivedDate = receivedDate || new Date().toISOString().slice(0, 10)
-  const receiptBatchKey = String(dateToBatchCode(effectiveReceivedDate)).toLowerCase()
-  const ownsReceiptBatch = lowerTrim(overrides.barcode) === lowerTrim(source.barcode)
-    && Boolean(await db.prepare(`
-      SELECT 1 AS found FROM product_batches
-      WHERE variant_product_id = @productId AND is_active = 1
-        AND LOWER(TRIM(batch_key)) = @batchKey
-      LIMIT 1
-    `).get<{ found: number }>({ productId: source.id, batchKey: receiptBatchKey }))
-  if (ownsReceiptBatch) return { productId: source.id, created: false }
+  // THE identity rule (lib/productDetailRule.ts), as it has stood since
+  // Sep 4 2026: the barcode is the ONLY detail. Cost is NOT identity -- two
+  // receipts of the same article at different prices are ONE row, and the
+  // costs merge (resolveMergedCost) rather than forking a child row.
+  //
+  // This function used to spell that rule out itself, and went on spelling
+  // out the OLD version of it after the rule changed. It required the cost
+  // to match as well, and then handed the leftover to findIdentityMatch --
+  // which excludes the source row (`id != @id`). With only one row on the
+  // barcode there was nothing else to find, so every Add Stock at a new
+  // cost fell through and INSERTed a sibling carrying the SAME barcode.
+  //
+  // That is not hypothetical. Production, Sep 3 2026: "Olay Serum Body
+  // Lotion 547ml" / 075609215322 received 28 units at 17.50 against a row
+  // costed 17.00. The add forked row 47155; the 28 units and their lot
+  // landed on it, while the POS -- which resolves the barcode to row 4758 --
+  // showed Out of Stock over a lot list of 31 zeroes. Stock the person had
+  // just received became unsellable. The split then survived the 0109 fold,
+  // which moves branch_stock but by its own written design not batches, so
+  // the units ended up stranded on a deactivated row.
+  //
+  // So: the same barcode means the SOURCE row. Always, with no lookup and
+  // no fork. This was the one call site that re-implemented the rule rather
+  // than delegating; every other one goes through productDetailSignature
+  // and inherited the Sep-4 change for free (routes/branches.ts,
+  // lib/importEngine.ts, lib/productIdentity.ts -- all swept, all clean).
+  //
+  // The receipt's own cost is NOT lost by staying on this row: it is written
+  // to the batch and movement ledgers (`unit_cost_usd`, see receiveBatchStock
+  // and the inventory_movements INSERT below), which is where per-receipt
+  // cost belongs. `products.cost_price_*` is deliberately left untouched
+  // here -- re-deriving the catalog cost from a receipt is a separate
+  // decision with its own drift trap (averaging against the stored scalar
+  // compounds on every repeat receipt, so it would have to be re-derived
+  // from the ledger's DISTINCT costs, not folded in pairwise), and it is
+  // recorded as an open ruling rather than silently taken here.
+  // identityBarcodeKey, not a bare lowerTrim: a barcode retyped with a leading
+  // zero is the SAME code, and forking a row on it is how the twins got into
+  // the catalogue in the first place.
+  if (identityBarcodeKey(overrides.barcode) === identityBarcodeKey(source.barcode)) {
+    await preflightReceiptCost(source)
+    return { productId: source.id, created: false }
+  }
 
-  const sameAsSelf = moneyEq(overrides.costUsd, source.cost_price_usd)
-    && moneyEq(overrides.costKhr, source.cost_price_khr)
-    && lowerTrim(overrides.barcode) === lowerTrim(source.barcode)
-  if (sameAsSelf) return { productId: source.id, created: false }
-
+  // A genuinely different barcode is a different article -- but another
+  // child row in the same name group may already carry it, in which case
+  // the stock belongs there rather than on a third row.
   const match = await findIdentityMatch(db, candidate)
-  if (match) return { productId: match.id, created: false }
+  if (match) {
+    await preflightReceiptCost(match)
+    return { productId: match.id, created: false }
+  }
 
   // No existing row has this exact combination -- create a new sibling
   // row (same name, so it still groups with the source in every view
@@ -1222,6 +1365,7 @@ async function resolveAddStockTarget(
   // share a name with no is_group/parent_id set at all" comment) carrying
   // the edited pricing, and mirror it into the source's parent, if any.
   const cost = mirrorCostFields(overrides.costUsd, overrides.costKhr)
+  await preflightReceiptCost({ id: 0, cost_price_usd: overrides.costUsd, cost_price_khr: overrides.costKhr })
   const insertPayload = {
     name: source.name,
     sku: null,
@@ -1236,8 +1380,8 @@ async function resolveAddStockTarget(
     is_active: 1,
     selling_price_usd: overrides.sellingUsd,
     selling_price_khr: overrides.sellingKhr,
-    special_price_usd: overrides.specialUsd,
-    special_price_khr: overrides.specialKhr,
+    wholesale_price_usd: overrides.wholesaleUsd,
+    wholesale_price_khr: overrides.wholesaleKhr,
     discount_enabled: overrides.discountEnabled ? 1 : 0,
     discount_type: overrides.discountType || 'percent',
     discount_percent: overrides.discountPercent,
@@ -1281,7 +1425,13 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
   ])
 }
 
-app.post('/adjust', async (c) => {
+// Pulled out from behind `app.post('/adjust', ...)` (P4-B, batched fast
+// stock-in) so lib/stockInCommit.ts's batched-commit route can run the exact
+// same validation/write kernel per line instead of re-implementing it -- the
+// body only, no logic changed. The route registration right below is now a
+// three-line wrapper: parse the body, call this, done. Exported for that one
+// other caller; nothing else should import it (use POST /adjust).
+export async function runAdjustAction(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
   const user = c.get('user')
   // Part 152: not yet wired into the Review Required queue (see the
   // comment above /reasons for why -- live batch/stock state at apply
@@ -1292,7 +1442,6 @@ app.post('/adjust', async (c) => {
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
     return c.json({ error: 'Stock adjustments require Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
   }
-  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const productId = Number.parseInt(String(body.productId ?? ''), 10)
   let type = String(body.type || '')
   let quantity = Number(body.quantity)
@@ -1305,8 +1454,8 @@ app.post('/adjust', async (c) => {
   // Absent stays null (the kernel then uses today); a supplied but
   // unreadable date is refused rather than silently becoming today's.
   const rawReceivedDate = body.receivedDate != null && String(body.receivedDate).trim() !== '' ? String(body.receivedDate).trim() : null
-  const receivedDate = rawReceivedDate ? normalizeToIsoDate(rawReceivedDate) : null
-  if (rawReceivedDate && !receivedDate) return c.json({ error: 'Received date must be a readable date (mm/dd/yyyy)' }, 400)
+  const receivedDate = rawReceivedDate ? normalizeTypedDate(rawReceivedDate) : null
+  if (rawReceivedDate && !receivedDate) return c.json({ error: 'Received date must be a readable date (dd/mm/yyyy)' }, 400)
   // D5a: supplier attribution for the lot this add creates or fills.
   // camelCase keys like the rest of THIS route's body (receivedDate,
   // batchId...); coerced with the same rules as POST /api/batches so the
@@ -1321,11 +1470,33 @@ app.post('/adjust', async (c) => {
   // resolve to a sibling variant. Preserve all receipt/session metadata so
   // choosing a variant does not make that line disappear from its session.
   const expiryDate = body.expiryDate != null ? String(body.expiryDate).trim() || null : null
-  const unitCostUsd = body.unitCostUsd != null && Number.isFinite(Number(body.unitCostUsd)) ? Number(body.unitCostUsd) : null
+  let unitCostUsd: number | null = null
+  if (body.unitCostUsd != null) {
+    try { unitCostUsd = explicitReceiptMoney4(body.unitCostUsd, 'Unit cost') }
+    catch (error) { return c.json({ error: error instanceof Error ? error.message : 'Invalid unit cost' }, 400) }
+  }
   const paymentStatus = body.paymentStatus === 'paid' || body.paymentStatus === 'credit' ? body.paymentStatus : null
   const creditDueDate = body.creditDueDate != null ? String(body.creditDueDate).trim() || null : null
   const sessionId = Number.isSafeInteger(Number(body.sessionId)) && Number(body.sessionId) > 0 ? Number(body.sessionId) : null
-  if (paymentStatus === 'credit' && !creditDueDate) return c.json({ error: 'A credit purchase needs its due date' }, 400)
+  // N14-D. `freeGoods` is the operator's explicit declaration that a $0.00
+  // receipt really was free; without it a zero cost is refused, because a
+  // defaulted zero and a declared zero used to look identical in the ledger.
+  // `attribution` is the ONE exemption from the receipt facts, and it is
+  // explicit: undo/redo and snapshot restores put stock back to a figure the
+  // ledger already held and have no supplier to name. Anything that is not the
+  // literal 'correction' -- absent, misspelt, a hand-written request trying its
+  // luck -- is a receipt and is gated.
+  const freeGoods = body.freeGoods === true
+  const attribution = body.attribution === 'correction' ? 'correction' : 'receipt'
+  // P3-L6: the condition tag chosen on the remove control ("Keep in group
+  // as broken/damaged/...") or on a tagged restock. Absent means the
+  // ordinary removal/receipt this route has always done. Both spellings are
+  // accepted because this route's body is camelCase while the column and
+  // every other surface that names the field spell it snake_case.
+  const conditionTagResult = parseStockConditionTag(body.conditionTag ?? body.condition_tag)
+  if (!conditionTagResult.ok) return c.json({ error: conditionTagResult.error }, 400)
+  const conditionTag: StockConditionTag | null = conditionTagResult.tag
+  if (paymentStatus === 'credit' && !creditDueDate) return c.json({ error: 'A Not Yet Paid purchase needs its due date' }, 400)
   // `unlockPricing` is an explicit flag from the frontend, not inferred by
   // diffing -- see InventoryStockModals.tsx's "Lock current pricing"
   // toggle. Locked (the default) skips the identity lookup below entirely
@@ -1334,7 +1505,24 @@ app.post('/adjust', async (c) => {
 
   if (!productId || !Number.isFinite(quantity)) return c.json({ error: 'Missing required fields' }, 400)
   if (!['add', 'remove', 'set'].includes(type)) return c.json({ error: 'Invalid stock action' }, 400)
-  if (!(quantity > 0)) return c.json({ error: 'Quantity must be a positive number' }, 400)
+  // A tag names where UNITS went (held as broken/expired/...) or what was
+  // received. A 'set' is a target figure whose direction is only decided
+  // below, against live stock -- "set to 12, keep as damaged" does not say
+  // how many units are damaged. Refused outright rather than guessed.
+  if (conditionTag && type === 'set') {
+    return c.json({ error: 'Choose Add or Remove to record a condition tag -- a Set has no quantity of its own to tag.' }, 400)
+  }
+  // N27: an add or a remove is a MOVEMENT, so zero is meaningless and refused.
+  // A set is a TARGET -- "this branch now holds exactly N" -- and zero is a
+  // number an operator counts: the last one sold, a branch being emptied, a
+  // miscount corrected down to nothing. The conversion below already knows how
+  // to reach zero (it posts the difference as a remove, or answers no-op when
+  // the branch is already there); it was simply unreachable, because this guard
+  // sits above it. Non-negative, not "any number" -- a branch cannot hold less
+  // than nothing.
+  if (type === 'set' ? !(quantity >= 0) : !(quantity > 0)) {
+    return c.json({ error: type === 'set' ? 'Quantity cannot be negative' : 'Quantity must be a positive number' }, 400)
+  }
   // Every stock change needs a documented cause -- no add/remove/set can go
   // through undocumented. Checked here, once, ahead of any DB work, so
   // there's no path (direct API call included) that can move stock without
@@ -1343,14 +1531,25 @@ app.post('/adjust', async (c) => {
   // existing caller -- it only closes the gap where a hand-typed request
   // omitted `reason` entirely.
   if (!reason) return c.json({ error: 'A reason is required for stock adjustments' }, 400)
+  // ... and no longer than the shared cap in lib/stockReason.ts, which the
+  // editor and the session parser measure the same way. Two of the writers
+  // once accepted an unbounded string, so a reason could be written that the
+  // editor could then never save back.
+  if (stockReasonTooLong(reason)) return c.json({ error: `Reason is too long (max ${STOCK_REASON_MAX_LENGTH} characters)`, code: 'reason_too_long' }, 400)
 
   const db = getDb(c.env)
-  const product = unlockPricing
-    ? await db.prepare(`SELECT ${STOCK_ROW_COLUMNS} FROM products WHERE id = @id`).get<StockRowFields>({ id: productId })
-    : await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId })
+  // Perf-2: product and the default-branch lookup read different tables and
+  // neither depends on the other's result, so they go in one round trip
+  // instead of two sequential ones (`branchId` only needs `defaultBranchId`
+  // when the request omitted it -- an explicit requestedBranchId already
+  // skips that query, unchanged from before).
+  const [product, branchId] = await Promise.all([
+    unlockPricing
+      ? db.prepare(`SELECT ${STOCK_ROW_COLUMNS} FROM products WHERE id = @id`).get<StockRowFields>({ id: productId })
+      : db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId }),
+    requestedBranchId ? Promise.resolve(requestedBranchId) : defaultBranchId(c.env),
+  ])
   if (!product) return c.json({ error: 'Product not found' }, 404)
-
-  const branchId = requestedBranchId || (await defaultBranchId(c.env))
   if (!branchId) return c.json({ error: 'An active branch is required before stock can be changed' }, 400)
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
 
@@ -1381,6 +1580,24 @@ app.post('/adjust', async (c) => {
     quantity = Math.abs(diff)
   }
 
+  // The receipt gate (lib/stockReceiptGate.ts), run on the CONVERTED type so a
+  // "set to 40" that raises stock is gated exactly like the add it becomes,
+  // and a "set to 2" that lowers it is not gated at all. Ahead of every write,
+  // like the mandatory-reason check above, so no path can record goods with an
+  // invented supplier or an invented cost.
+  const isReceipt = type === 'add'
+  // A top-up of an EXISTING lot inherits that lot's supplier -- first
+  // attribution sticks server-side, so the pickers send no supplier for an
+  // attributed lot and show the locked name instead. Read it rather than
+  // refusing a receipt that is already attributed.
+  const explicitBatchId = Number.isSafeInteger(Number(body.batchId)) && Number(body.batchId) > 0 ? Number(body.batchId) : null
+  const lotSupplierName = isReceipt && explicitBatchId
+    ? (await db.prepare('SELECT supplier_name FROM product_batches WHERE id = @id').get<{ supplier_name: string | null }>({ id: explicitBatchId }))?.supplier_name ?? null
+    : null
+  const gate = stockReceiptGateCode({ isStockIn: isReceipt, supplierName, lotSupplierName, unitCostUsd, freeGoods, attribution })
+  if (gate) return c.json({ error: stockReceiptGateMessage(gate), code: gate }, 400)
+  const reasonNotes = isReceipt && attribution === 'receipt' && freeGoods ? [FREE_GOODS_REASON_NOTE] : []
+
   // Resolve which product row actually receives the quantity. Ordinary
   // adds (pricing locked, or type isn't 'add' at all) always target the
   // row the request named -- this is the fast, unchanged path. Only an
@@ -1389,36 +1606,90 @@ app.post('/adjust', async (c) => {
   let targetProductId = productId
   let targetProductName = product.name
   let createdSibling = false
+  let preflightAddMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
+  let unlockedReceiptCostPreimage: ReceiptCostPreimage | undefined
+  let mergedPricingStatement: { sql: string; params: Record<string, unknown> } | null = null
   if (unlockPricing) {
     const pricing = body.pricing as Record<string, unknown>
     const source = product as StockRowFields
+    let explicitCostUsd: number | null = null
+    let explicitCostKhr: number | null = null
+    try {
+      explicitCostUsd = pricing.cost_usd != null ? explicitReceiptMoney4(pricing.cost_usd, 'USD cost') : null
+      explicitCostKhr = pricing.cost_khr != null ? explicitReceiptMoney4(pricing.cost_khr, 'KHR cost') : null
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : 'Invalid pricing cost' }, 400)
+    }
+    // The discounted tier arrives as wholesale_price_usd/khr only. The retired
+    // special_price_* spelling is NOT accepted as an alias, deliberately: a
+    // stale PWA till tab renders that field from its own cached product row,
+    // and migration 0111 zeroed the column, so an old tab can only ever send
+    // 0 there. Aliasing it would let that 0 overwrite the sibling row's
+    // inherited wholesale price on an INSERT. Ignoring the dead key instead
+    // makes an old tab fall through to `source.wholesale_price_*` below --
+    // its edit to the tier is dropped, which is the safe half of the trade,
+    // and its stock adjustment still lands. Do not "fix" this by adding the
+    // alias without re-reading migration 0111's header first.
     const overrides = {
       sellingUsd: pricing.selling_price_usd != null ? Number(pricing.selling_price_usd) || 0 : Number(source.selling_price_usd) || 0,
       sellingKhr: pricing.selling_price_khr != null ? Number(pricing.selling_price_khr) || 0 : Number(source.selling_price_khr) || 0,
-      specialUsd: pricing.special_price_usd != null ? Number(pricing.special_price_usd) || 0 : Number(source.special_price_usd) || 0,
-      specialKhr: pricing.special_price_khr != null ? Number(pricing.special_price_khr) || 0 : Number(source.special_price_khr) || 0,
+      wholesaleUsd: pricing.wholesale_price_usd != null ? Number(pricing.wholesale_price_usd) || 0 : Number(source.wholesale_price_usd) || 0,
+      wholesaleKhr: pricing.wholesale_price_khr != null ? Number(pricing.wholesale_price_khr) || 0 : Number(source.wholesale_price_khr) || 0,
       discountEnabled: pricing.discount_enabled != null ? Boolean(pricing.discount_enabled) : Boolean(source.discount_enabled),
       discountType: pricing.discount_type != null ? String(pricing.discount_type) : String(source.discount_type || 'percent'),
       discountPercent: pricing.discount_percent != null ? Number(pricing.discount_percent) || 0 : Number(source.discount_percent) || 0,
       discountAmountUsd: pricing.discount_amount_usd != null ? Number(pricing.discount_amount_usd) || 0 : Number(source.discount_amount_usd) || 0,
       discountAmountKhr: pricing.discount_amount_khr != null ? Number(pricing.discount_amount_khr) || 0 : Number(source.discount_amount_khr) || 0,
-      costUsd: pricing.cost_usd != null ? Number(pricing.cost_usd) || 0 : Number(source.cost_price_usd) || 0,
-      costKhr: pricing.cost_khr != null ? Number(pricing.cost_khr) || 0 : Number(source.cost_price_khr) || 0,
+      costUsd: explicitCostUsd ?? (Number(source.cost_price_usd) || 0),
+      costKhr: explicitCostKhr ?? (Number(source.cost_price_khr) || 0),
       barcode: pricing.barcode != null ? (String(pricing.barcode).trim() || null) : source.barcode,
     }
-    const resolved = await resolveAddStockTarget(c.env, source, overrides, receivedDate)
+    let resolved: Awaited<ReturnType<typeof resolveAddStockTarget>>
+    try {
+      resolved = await resolveAddStockTarget(c.env, source, overrides, async (target) => {
+        const targetCostUsd = target.cost_price_usd ?? null
+        const targetCostKhr = target.cost_price_khr ?? null
+        preflightAddMovementCost = resolveMovementCostSnapshot({
+          quantity,
+          components: [{
+            quantity,
+            unitCostUsd: unitCostUsd ?? targetCostUsd,
+            unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : targetCostKhr,
+          }],
+          fallbackUnitCostUsd: targetCostUsd,
+          fallbackUnitCostKhr: targetCostKhr,
+        })
+        if (target.id > 0 && preflightAddMovementCost.totalCostUsd != null) {
+          const batchKey = dateToBatchCode(receivedDate || new Date().toISOString().slice(0, 10)) as string
+          const existingLot = await db.prepare(
+            'SELECT received_cost_usd FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
+          ).get<{ received_cost_usd: number | null }>({ productId: target.id, batchKey })
+          unlockedReceiptCostPreimage = { batchExists: Boolean(existingLot), receivedCostUsd: existingLot?.received_cost_usd ?? null }
+          if (existingLot) addMoney4(existingLot.received_cost_usd ?? 0, preflightAddMovementCost.totalCostUsd)
+        } else if (target.id > 0) {
+          const batchKey = dateToBatchCode(receivedDate || new Date().toISOString().slice(0, 10)) as string
+          const existingLot = await db.prepare(
+            'SELECT received_cost_usd FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
+          ).get<{ received_cost_usd: number | null }>({ productId: target.id, batchKey })
+          unlockedReceiptCostPreimage = { batchExists: Boolean(existingLot), receivedCostUsd: existingLot?.received_cost_usd ?? null }
+        }
+      })
+    } catch (error) {
+      if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
+      throw error
+    }
     targetProductId = resolved.productId
     createdSibling = resolved.created
     if (!createdSibling) {
-      // Selling/VIP price is mergeable data: an explicit unlocked receipt
+      // Selling/wholesale price is mergeable data: an explicit unlocked receipt
       // may raise it, but never lower it. Cost remains untouched here.
-      await db.prepare(`UPDATE products SET
+      mergedPricingStatement = { sql: `UPDATE products SET
           selling_price_usd = MAX(COALESCE(selling_price_usd, 0), @sellingUsd),
           selling_price_khr = MAX(COALESCE(selling_price_khr, 0), @sellingKhr),
-          special_price_usd = MAX(COALESCE(special_price_usd, 0), @specialUsd),
-          special_price_khr = MAX(COALESCE(special_price_khr, 0), @specialKhr),
+          wholesale_price_usd = MAX(COALESCE(wholesale_price_usd, 0), @wholesaleUsd),
+          wholesale_price_khr = MAX(COALESCE(wholesale_price_khr, 0), @wholesaleKhr),
           updated_at = CURRENT_TIMESTAMP
-        WHERE id = @id`).run({ id: targetProductId, ...overrides })
+        WHERE id = @id`, params: { id: targetProductId, ...overrides } }
     }
     if (createdSibling) {
       const created = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: targetProductId })
@@ -1429,6 +1700,14 @@ app.post('/adjust', async (c) => {
       targetProductName = matched?.name ?? source.name
     }
   }
+
+  // Snapshot catalog cost before moving stock. It is only the fallback for a
+  // receipt/removal that has no more specific entered/lot cost; it is never
+  // consulted later when this historical row is displayed or reverted.
+  const productCostSnapshot = await db.prepare(`
+    SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id
+  `).get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id: targetProductId })
+  const receiptUnitCostUsd = unitCostUsd ?? productCostSnapshot?.cost_price_usd ?? null
 
   // Mandatory batch selection (InventoryStockModals.tsx, add/remove on flat
   // rows) rides on this same endpoint rather than a separate one, so undo/
@@ -1485,6 +1764,12 @@ app.post('/adjust', async (c) => {
   let batchNumber: number | null = null
   let resolvedBatchId: number | null = batchIdRequested
   let lotCode: string | null = null
+  let removedBatchQuantities: Array<{ batchId: number; quantity: number }> = []
+  let removalCostByBatch = new Map<number, number | null>()
+  let addMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = preflightAddMovementCost
+  let removeMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
+  let movementWrittenAtomically = false
+  let capturedRemovalAllocations: Array<{ batchId: number; quantity: number }> | undefined
   if (type === 'add') {
     delta = quantity
   } else {
@@ -1493,8 +1778,110 @@ app.post('/adjust', async (c) => {
     delta = -quantity
   }
 
+  // Capture the cost facts before any batch/aggregate mutation. Besides being
+  // the correct historical boundary, this prevents a concurrent lot metadata
+  // edit (or a test hook between the decrement and movement INSERT) from
+  // changing the cost recorded for stock that was already removed.
+  try {
+  if (useBatchLedger && type === 'remove') {
+    const costRows = batchIdRequested != null
+      ? await db.prepare(`
+          SELECT pb.id, pb.unit_cost_usd, bbs.quantity AS available
+          FROM product_batches pb
+          JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
+          WHERE pb.id = @batchId AND pb.variant_product_id = @productId AND pb.is_active = 1
+        `).all<{ id: number; unit_cost_usd: number | null; available: number }>({ batchId: batchIdRequested, branchId, productId: targetProductId })
+      : await db.prepare(`
+          SELECT pb.id, pb.unit_cost_usd, bbs.quantity AS available
+          FROM product_batches pb
+          JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
+          WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
+          ORDER BY (pb.expiry_date IS NULL), pb.expiry_date ASC, pb.received_at ASC, pb.id ASC
+        `).all<{ id: number; unit_cost_usd: number | null; available: number }>({ branchId, productId: targetProductId })
+    removalCostByBatch = new Map(costRows.map((row) => [Number(row.id), row.unit_cost_usd ?? null]))
+    let unallocated = quantity
+    capturedRemovalAllocations = []
+    for (const row of costRows) {
+      if (unallocated <= 0) break
+      const take = batchIdRequested != null ? unallocated : Math.min(unallocated, Number(row.available) || 0)
+      if (!(take > 0)) continue
+      capturedRemovalAllocations.push({ batchId: Number(row.id), quantity: take })
+      unallocated -= take
+    }
+    removeMovementCost = resolveMovementCostSnapshot({
+      quantity,
+      components: capturedRemovalAllocations.map((allocation) => ({
+        quantity: allocation.quantity,
+        unitCostUsd: removalCostByBatch.get(allocation.batchId) ?? null,
+      })),
+      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+    })
+  } else if (type === 'add' && !addMovementCost) {
+    addMovementCost = resolveMovementCostSnapshot({
+      quantity,
+      components: [{ quantity, unitCostUsd: receiptUnitCostUsd, unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : null }],
+      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+    })
+  }
+  } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
+    throw error
+  }
+
   if (useBatchLedger && type === 'add') {
     try {
+      if (unlockPricing && !createdSibling && mergedPricingStatement && addMovementCost) {
+        const plan = planReceiveBatchStock({
+          productId: targetProductId,
+          branchId,
+          quantity,
+          receivedDate,
+          expiryDate,
+          supplierId,
+          supplierName,
+          unitCostUsd: receiptUnitCostUsd,
+          preserveHistoricalUnitCost: unitCostUsd == null,
+          paymentStatus,
+          creditDueDate,
+          receiptCostPreimage: receiptUnitCostUsd == null ? undefined : unlockedReceiptCostPreimage,
+        })
+        await db.batch([
+          ...plan.statements,
+          mergedPricingStatement,
+          {
+            sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+              unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id)
+            VALUES (@productId, @productName, @branchId, @branchName, 'add', @quantity,
+              @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr,
+              @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP,
+              (SELECT id FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey))`,
+            params: {
+              productId: targetProductId,
+              productName: targetProductName,
+              branchId,
+              branchName: branch?.name || null,
+              quantity: Math.abs(delta),
+              ...addMovementCost,
+              reason: appendReceiptNotes(reason, reasonNotes),
+              referenceId: sessionId,
+              userId: user?.id ?? null,
+              userName: actorSnapshot(user),
+              batchKey: plan.batchKey,
+            },
+          },
+          ...(receiptUnitCostUsd == null ? [] : [{ sql: 'DELETE FROM stock_session_guards', params: {} }]),
+        ])
+        const received = await db.prepare(
+          'SELECT id,batch_number,lot_code FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
+        ).get<{ id: number; batch_number: number | null; lot_code: string }>({ productId: targetProductId, batchKey: plan.batchKey })
+        if (!received) throw new Error('Received stock batch was not found after commit')
+        batchNumber = received.batch_number
+        resolvedBatchId = received.id
+        lotCode = received.lot_code
+        movementWrittenAtomically = true
+      } else {
       const received = await receiveBatchStock(db, {
         productId: targetProductId,
         branchId,
@@ -1514,30 +1901,33 @@ app.post('/adjust', async (c) => {
         // inside receiveBatchStock).
         supplierId,
         supplierName,
-        unitCostUsd,
+        unitCostUsd: receiptUnitCostUsd,
+        preserveHistoricalUnitCost: unitCostUsd == null,
         paymentStatus,
         creditDueDate,
       })
       batchNumber = received.batchNumber
       resolvedBatchId = received.batchId
       lotCode = received.lotCode
+      }
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : 'Failed to receive batch stock' }, 400)
+      return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
     }
   } else if (useBatchLedger && type === 'remove') {
     if (batchIdRequested != null) {
       try {
         await removeStockFromBatch(db, { batchId: batchIdRequested, productId: targetProductId, branchId, quantity })
+        removedBatchQuantities = [{ batchId: batchIdRequested, quantity }]
       } catch (err) {
         if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
-        return c.json({ error: err instanceof Error ? err.message : 'Failed to remove batch stock' }, 400)
+        return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }
     } else if (rawBatchId != null && rawBatchId !== '') {
       // An interactive picker explicitly requires a choice -- 'new' isn't
       // valid for remove (see BranchStockAdjuster.tsx/
       // InventoryStockModals.tsx's own client-side guard); this only
       // fires if that guard was somehow bypassed.
-      return c.json({ error: 'A batch must be selected to remove stock' }, 400)
+      return c.json({ error: 'A received date must be selected to remove stock' }, 400)
     } else {
       // Auto-routed remove (no interactive batchId at all) -- FIFO-drain
       // across whatever active batches this branch has rather than
@@ -1546,26 +1936,87 @@ app.post('/adjust', async (c) => {
       // provenance stock, see removeStockAcrossBatches) falls through to
       // the same plain decrement a batch-less product already used.
       try {
-        const drained = await removeStockAcrossBatches(db, { productId: targetProductId, branchId, quantity })
+        const drained = await removeStockAcrossBatches(db, {
+          productId: targetProductId, branchId, quantity, allocations: capturedRemovalAllocations,
+        })
         autoBatchDrainIds = drained.batchIds
+        removedBatchQuantities = drained.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))
         // 0084: an auto-drain that ONE lot fully covered is attributable to
         // it; a multi-lot spread or a legacy-aggregate remainder is not.
         resolvedBatchId = drained.batchIds.length === 1 && drained.remainder === 0 ? drained.batchIds[0] : null
         if (drained.remainder > 0) await applyStockDelta(c.env, targetProductId, branchId, -drained.remainder)
       } catch (err) {
-        return c.json({ error: err instanceof Error ? err.message : 'Failed to remove batch stock' }, 400)
+        return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }
     }
   } else if (delta !== 0) {
     await applyStockDelta(c.env, targetProductId, branchId, delta)
   }
 
-  if (delta !== 0) {
+  // P3-L6 HOLD (remove): the units have just left sellable stock above. A
+  // tagged removal records them as still-owned held stock instead of a
+  // destruction: one db.batch writes the damage_out movement AND the
+  // damaged_stock_lots row, so there is no state where stock left sellable
+  // with no held row to restore it from. The movement carries the same cost
+  // snapshot the plain removal would have carried, so the units are valued
+  // at what they cost -- but as damage_out, which a loss report must not
+  // count; the loss is booked once, when the held row is disposed of.
+  if (conditionTag && type === 'remove' && delta !== 0 && !movementWrittenAtomically) {
+    const holdCost = removeMovementCost || resolveMovementCostSnapshot({
+      quantity: Math.abs(delta),
+      components: removedBatchQuantities.map((entry) => ({
+        quantity: entry.quantity,
+        unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null,
+      })),
+      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+    })
+    await db.batch(planHoldAsTagged({
+      productId: targetProductId,
+      productName: targetProductName,
+      branchId,
+      branchName: branch?.name || null,
+      batchId: useBatchLedger ? resolvedBatchId : null,
+      quantity: Math.abs(delta),
+      tag: conditionTag,
+      source: 'remove',
+      reason,
+      cost: holdCost,
+      referenceId: sessionId,
+      actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
+    }))
+    movementWrittenAtomically = true
+  }
+
+  if (delta !== 0 && !movementWrittenAtomically) {
+    let costComponents: MovementCostComponent[] = []
+    if (type === 'add') {
+      // An entered receipt cost, including an explicit free-goods zero, is
+      // the strongest action-time fact. KHR has no request/lot field; zero
+      // is defensible for explicitly free goods, otherwise use the catalog
+      // KHR snapshot without inventing an exchange conversion.
+      costComponents = [{
+        quantity: Math.abs(delta),
+        unitCostUsd: receiptUnitCostUsd,
+        unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : null,
+      }]
+    } else if (removedBatchQuantities.length) {
+      costComponents = removedBatchQuantities.map((entry) => ({
+        quantity: entry.quantity,
+        unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null,
+      }))
+    }
+    const movementCost = addMovementCost || removeMovementCost || resolveMovementCostSnapshot({
+        quantity: Math.abs(delta),
+        components: costComponents,
+        fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+        fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+      })
     await db.prepare(`
       INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-        unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name, created_at, batch_id)
+        unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id)
       VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity,
-        @unitCostUsd, CASE WHEN @unitCostUsd IS NULL THEN NULL ELSE ROUND(@quantity * @unitCostUsd, 4) END,
+        @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr,
         @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
     `).run({
       productId: targetProductId,
@@ -1574,13 +2025,13 @@ app.post('/adjust', async (c) => {
       branchName: branch?.name || null,
       movementType,
       quantity: Math.abs(delta),
-      unitCostUsd: type === 'add' ? unitCostUsd : null,
-      reason: createdSibling
+      ...movementCost,
+      reason: appendReceiptNotes(createdSibling
         ? `${reason ? `${reason} - ` : ''}Auto-created row (barcode/cost differs from ${product.name})`
-        : setToNote ? `${reason} (${setToNote})` : reason,
+        : setToNote ? `${reason} (${setToNote})` : reason, reasonNotes),
       referenceId: sessionId,
       userId: user?.id ?? null,
-      userName: user?.name ?? null,
+      userName: actorSnapshot(user),
       // 0084: the lot this adjust touched -- the received/topped lot on
       // add, the explicit pick or fully-covering single auto-drained lot
       // on remove; NULL when no single lot owns the whole movement.
@@ -1588,14 +2039,72 @@ app.post('/adjust', async (c) => {
     })
   }
 
+  // P3-L6 HOLD (restock with a tag). The receipt above ran UNCHANGED: a real
+  // product_batches lot carrying supplier_id/supplier_name, received
+  // quantity/cost and payment state, plus its own 'add' movement. That is
+  // deliberate and is the least-bloat choice of the two on the table:
+  //
+  //   (a) a "non-sellable lot" flag on product_batches -- a new column, a new
+  //       state every lot reader (POS FIFO, pickers, transfers, merges, the
+  //       0154/0155 activation invariants) would have to learn, and a second
+  //       meaning for is_active;
+  //   (b) receive, then immediately hold -- zero new concepts, and every
+  //       supplier-facing column is written by receiveBatchStock, the SAME
+  //       writer the supplier mirror pins as W3
+  //       (scripts/test-supplier-mirror-writers-pure.cjs). Contacts sees the
+  //       purchase, the invoice, the cost and the "not paid" balance exactly
+  //       as it does for any other stock-in.
+  //
+  // (b) is what runs here. The ledger tells the honest story too -- goods
+  // arrived and were immediately found broken -- rather than a receipt that
+  // silently never became sellable.
+  if (conditionTag && type === 'add' && delta !== 0) {
+    const heldBatchId = useBatchLedger ? resolvedBatchId : null
+    try {
+      if (heldBatchId != null) {
+        await removeStockFromBatch(db, { batchId: heldBatchId, productId: targetProductId, branchId, quantity: Math.abs(delta) })
+      } else {
+        await applyStockDelta(c.env, targetProductId, branchId, -Math.abs(delta))
+      }
+    } catch (err) {
+      if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
+      return c.json({ error: err instanceof Error ? err.message : 'Failed to hold received stock as tagged' }, 400)
+    }
+    await db.batch(planHoldAsTagged({
+      productId: targetProductId,
+      productName: targetProductName,
+      branchId,
+      branchName: branch?.name || null,
+      batchId: heldBatchId,
+      quantity: Math.abs(delta),
+      tag: conditionTag,
+      source: 'restock',
+      reason,
+      cost: addMovementCost || resolveMovementCostSnapshot({
+        quantity: Math.abs(delta),
+        components: [{ quantity: Math.abs(delta), unitCostUsd: receiptUnitCostUsd }],
+        fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+        fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+      }),
+      referenceId: sessionId,
+      actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
+    }))
+  }
+
   // `type` is always 'add'/'remove' here (a 'set' request was converted
   // above), so the audit action must key off `originalType` -- keying off
   // `type` would make 'stock_set' unreachable and misreport every "Set
   // stock to X" as a plain add/remove in the audit log.
-  await audit(c.env, user?.id ?? null, user?.name ?? null, originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing, receivedDate })
-  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: targetProductId }))
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: targetProductId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  // Perf-2: the response below is built entirely from values already in
+  // scope (targetProductId/branchId/movementType/...) and reads nothing
+  // audit() writes, so the insert can run after the response is sent --
+  // same reasoning as the broadcast/bumpVersion calls it now joins.
+  c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing, receivedDate }),
+    broadcast(c.env, 'products', { action: 'update', id: targetProductId }),
+    broadcast(c.env, 'inventory', { action: 'adjust', id: targetProductId }),
+    bumpVersion(c.env, 'products'),
+  ]))
   if (delta !== 0) {
     // The alert carries the RESULTING on-hand figures (this branch and all
     // branches), read back after the write -- not just the delta.
@@ -1612,10 +2121,11 @@ app.post('/adjust', async (c) => {
           quantity: delta,
           branch: branch?.name || null,
           reason,
+          receivedDate: type === 'add' ? receivedDate : null,
           lot: type === 'add' ? lotCode : null,
           branchOnHand: branchRow ? num(branchRow.quantity) : null,
           totalOnHand: productRow ? num(productRow.stock_quantity) : null,
-          by: user?.name || user?.username || null,
+          by: actorSnapshot(user),
         }),
       })
     })().catch((error) => console.error('[telegram] stock adjustment notification failed', error)))
@@ -1647,6 +2157,11 @@ app.post('/adjust', async (c) => {
     lotCode,
     autoBatchDrainIds,
   })
+}
+
+app.post('/adjust', async (c) => {
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  return runAdjustAction(c, body)
 })
 
 // Dated stock-reconciliation import -- route wiring for
@@ -1686,7 +2201,7 @@ app.post('/dated-stock-count/resolve', async (c) => {
   const { resolved, unresolved, branchesCreated } = await resolveDatedStockCountRows(getDb(c.env), parsed.rows)
 
   if (branchesCreated.length) {
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'dated_stock_count_resolve_branch_create', 'inventory', null, { branchesCreated })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_resolve_branch_create', 'inventory', null, { branchesCreated })
     c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update' }))
   }
 
@@ -1719,7 +2234,7 @@ app.post('/dated-stock-count/resolve/apply-decisions', async (c) => {
   const result = await applyDatedStockCountDecisions(db, resolvedIn as any, unresolvedIn as any, decisionsIn as DatedCountDecision[])
 
   if (result.productsCreated.length) {
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'dated_stock_count_resolve_products_created', 'inventory', null, { productsCreated: result.productsCreated })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_resolve_products_created', 'inventory', null, { productsCreated: result.productsCreated })
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   }
 
@@ -1754,9 +2269,9 @@ app.post('/dated-stock-count/apply', async (c) => {
   const built = await buildDatedStockCountPlan(db, parsed.entries)
   if ('error' in built) return c.json({ success: false, error: built.error }, built.status)
 
-  const result = await applyDatedStockCountPlan(db, built.plan, { userId: user?.id ?? null, userName: user?.name ?? null })
+  const result = await applyDatedStockCountPlan(db, built.plan, { userId: user?.id ?? null, userName: actorSnapshot(user) })
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'dated_stock_count_import', 'inventory', null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_import', 'inventory', null, {
     entryCount: parsed.entries.length,
     movementsApplied: result.movementsApplied,
     movementsDeleted: result.movementsDeleted,
@@ -1778,26 +2293,80 @@ app.post('/transfer', async (c) => {
     return c.json({ error: 'Branch transfers require Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  if (body.transfer_provenance_version !== 1) return c.json({ error: 'Refresh the app before transferring stock.', code: 'client_upgrade_required' }, 409)
   const productId = Number.parseInt(String(body.productId ?? body.product_id ?? ''), 10)
   const fromBranchId = Number.parseInt(String(body.fromBranchId ?? body.from_branch_id ?? ''), 10)
   const toBranchId = Number.parseInt(String(body.toBranchId ?? body.to_branch_id ?? ''), 10)
   const quantity = Number(body.quantity)
-  const reason = body.reason != null ? String(body.reason).trim() || null : (body.note != null ? String(body.note).trim() || null : null)
+  // The operator's own reason. `reason` is what every current client sends;
+  // a non-empty legacy `note` is still accepted as the reason so a cached
+  // PWA build or a queued offline replay is not 400ed mid-release.
+  const reason = String(body.reason ?? '').trim() || String(body.note ?? '').trim() || null
+  const clientRequestId = normalizeTransferRequestId(body.client_request_id)
 
   if (!productId || !fromBranchId || !toBranchId || !Number.isFinite(quantity)) return c.json({ error: 'Missing required fields' }, 400)
   if (fromBranchId === toBranchId) return c.json({ error: 'Source and destination cannot be the same' }, 400)
   if (!(quantity > 0)) return c.json({ error: 'Transfer quantity must be greater than zero' }, 400)
+  if (!clientRequestId) return c.json({ error: 'client_request_id is required for a transfer.', code: 'client_request_id_required' }, 400)
+  // The same mandatory-cause rule POST /adjust enforces above, now on the
+  // route that MOVES stock between branches.
+  // Inventory.tsx has refused a reasonless transfer in the browser since
+  // Part 387; nothing behind it did, so a stale tab, a replayed offline
+  // write or any direct caller could move stock with no recorded cause.
+  // Checked ahead of any DB work, so no path can move stock without one.
+  // The sentence is the exact English of the `transfer_reason_required`
+  // pack key -- the convention branchRoleGuards' refusals already follow, and
+  // exactly what a client-side mapping keys off. That mapping does not cover
+  // it yet: BRANCH_RULE_MESSAGE_KEYS in frontend/src/api/branchRuleErrors.ts
+  // carries only the two branch-role sentences, so a refusal that outruns the
+  // UI still surfaces in English. One entry there is all Khmer needs, with no
+  // Worker change -- which is the whole point of pinning the wording here.
+  if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
 
   const db = getDb(c.env)
+  if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
+  const requestJson = JSON.stringify({ version: 1, kind: 'inventory-transfer', productId, fromBranchId, toBranchId, quantity, reason })
+  const requestDigest = await transferRequestDigest(requestJson)
+  const previousReceipt = await findTransferReceipt(db, user.id, clientRequestId)
+  if (previousReceipt) {
+    if (previousReceipt.request_digest !== requestDigest || previousReceipt.request_json !== requestJson) {
+      return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
+    }
+    return c.json({ ...(transferReceiptResponse(previousReceipt) as Record<string, unknown>), replayed: true })
+  }
   const product = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId })
   if (!product) return c.json({ error: 'Product not found' }, 404)
   const available = await branchStockQty(c.env, productId, fromBranchId)
   if (quantity > available) return c.json({ error: 'Insufficient stock in source branch' }, 400)
 
-  const [fromBranch, toBranch] = await Promise.all([
+  const [fromBranch, toBranch, canonicalTransferRows] = await Promise.all([
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
+    db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
   ])
+
+  let canonicalTransferPair: CanonicalTransferPair
+  try {
+    canonicalTransferPair = resolveCanonicalTransferPair(canonicalTransferRows)
+  } catch (error) {
+    if (error instanceof CanonicalBranchConfigurationError) {
+      return c.json({ error: CANONICAL_BRANCH_CONFIGURATION_ERROR, code: CANONICAL_BRANCH_CONFIGURATION_CODE }, 409)
+    }
+    throw error
+  }
+
+  // The direction rule, on the THIRD transfer route. All three transfer
+  // routes accept the two ordered Shop/Warehouse directions and refuse every
+  // same-role or noncanonical pairing. Inventory undo posts the opposite
+  // direction, so it depends on this exact symmetry. Refused BEFORE the
+  // db.batch below, i.e. before any stock moves. The selected rows and the
+  // complete canonical-role set are read separately so duplicate active
+  // identities cannot be hidden by an id lookup.
+  const directionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+    || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
+      ? TRANSFER_DIRECTION_ERROR
+      : null)
+  if (directionError) return c.json({ error: directionError }, 400)
 
   // The LOTS move with the quantity (Part-77 CRITICAL, x3 audits): this
   // route used to move only the plain branch_stock total, leaving every
@@ -1821,35 +2390,24 @@ app.post('/transfer', async (c) => {
   // movement stamps it; a multi-lot or partly-untracked transfer stays NULL.
   const movementBatchId = takes.length === 1 && uncovered === 0 ? takes[0].batchId : null
 
-  await db.batch([
-    { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity, productId, branchId: fromBranchId } },
-    {
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
-      params: { productId, branchId: toBranchId, quantity },
-    },
-    ...takes.flatMap((take) => [
-      decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
-      incrementBatchStockStatement(take.batchId, toBranchId, take.quantity),
-    ]),
-    {
-      sql: `INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, notes, user_id, user_name, created_at)
-            VALUES (@productId, @productName, @fromBranchId, @toBranchId, @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-      params: { productId, productName: product.name, fromBranchId, toBranchId, quantity, reason, userId: user?.id ?? null, userName: user?.name ?? null },
-    },
-    {
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${reason ? ` - ${reason}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: movementBatchId },
-    },
-    {
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId, productName: product.name, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${reason ? ` - ${reason}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: movementBatchId },
-    },
-  ])
-
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'transfer', 'stock', productId, { productName: product.name, quantity, fromBranchId, toBranchId, lotsMoved: takes.length, uncoveredQuantity: uncovered || undefined })
+  const responsePayload = { success: true, fromBranchId, toBranchId, quantity, replayed: false }
+  const { statements } = await planTransferOperation(db, {
+    user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'inventory',
+    fromBranchId, toBranchId, reason,
+    lines: [{ productId, destProductId: productId, quantity }], response: responsePayload,
+  })
+  try {
+    await db.batch(statements)
+  } catch (error) {
+    const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
+    if (retryReceipt) {
+      if (retryReceipt.request_digest !== requestDigest || retryReceipt.request_json !== requestJson) {
+        return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
+      }
+      return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
+    }
+    throw error
+  }
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'transfer', id: productId }))
@@ -1865,9 +2423,11 @@ app.post('/transfer', async (c) => {
     await sendTelegramEvent(c.env, {
       type: 'stock_out', heading: '🔁 Stock transferred',
       lines: formatTransferTelegramLines({
-        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: user?.name || user?.username || null,
+        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user),
         items: [{
-          product: product.name, quantity, lot: takes.length === 1 ? takes[0].lotCode || null : null,
+          product: product.name, quantity,
+          receivedDate: takes.length === 1 ? takes[0].receivedAt || null : null,
+          lot: takes.length === 1 ? takes[0].lotCode || null : null,
           fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
           totalOnHand: totalRow ? Number(totalRow.stock_quantity) || 0 : null,
         }],
@@ -1875,7 +2435,7 @@ app.post('/transfer', async (c) => {
     })
   })().catch((error) => console.error('[telegram] transfer notification failed', error)))
   // See the matching note in /adjust above -- same missing-`success`-field bug.
-  return c.json({ success: true, fromBranchId, toBranchId, quantity })
+  return c.json(transferReceiptResponse((await findTransferReceipt(db, user.id, clientRequestId))!))
 })
 
 // DEPRECATED as a UI entry point: InventoryStockModals.tsx no longer has a
@@ -1900,10 +2460,27 @@ app.post('/move-row', async (c) => {
   const destinationProductId = Number.parseInt(String(body.destinationProductId ?? body.destination_product_id ?? ''), 10)
   const quantity = Number(body.quantity)
   const requestedBranchId = body.branchId ?? body.branch_id ? Number.parseInt(String(body.branchId ?? body.branch_id), 10) : null
-  const reason = body.reason != null ? String(body.reason).trim() || null : null
+  // The operator's own reason. `reason` is what every current client sends;
+  // a non-empty legacy `note` is still accepted as the reason so a cached
+  // PWA build or a queued offline replay is not 400ed mid-release.
+  const reason = String(body.reason ?? '').trim() || String(body.note ?? '').trim() || null
 
   if (!sourceProductId) return c.json({ error: 'Source product is required' }, 400)
   if (!Number.isFinite(quantity) || quantity <= 0) return c.json({ error: 'Quantity must be a positive number' }, 400)
+  // The same mandatory-cause rule POST /adjust and /transfer enforce, on
+  // the route that moves stock from one product row to another.
+  // Inventory.tsx has refused a reasonless transfer in the browser since
+  // Part 387; nothing behind it did, so a stale tab, a replayed offline
+  // write or any direct caller could move stock with no recorded cause.
+  // Checked ahead of any DB work, so no path can move stock without one.
+  // The sentence is the exact English of the `transfer_reason_required`
+  // pack key -- the convention branchRoleGuards' refusals already follow, and
+  // exactly what a client-side mapping keys off. That mapping does not cover
+  // it yet: BRANCH_RULE_MESSAGE_KEYS in frontend/src/api/branchRuleErrors.ts
+  // carries only the two branch-role sentences, so a refusal that outruns the
+  // UI still surfaces in English. One entry there is all Khmer needs, with no
+  // Worker change -- which is the whole point of pinning the wording here.
+  if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
   if (!destinationProductId) {
     // The Docker backend can create a brand-new destination product inline
     // (e.g. an auto-created "Damaged stock" line item). That path isn't
@@ -1944,16 +2521,16 @@ app.post('/move-row', async (c) => {
       // receiveBatchStock resolved.
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'move_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, reason: reason ? `Moved to ${destination.name} - ${reason}` : `Moved to ${destination.name}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: moveDrained.batchIds.length === 1 && moveDrained.remainder === 0 ? moveDrained.batchIds[0] : null },
+      params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: moveDrained.batchIds.length === 1 && moveDrained.remainder === 0 ? moveDrained.batchIds[0] : null },
     },
     {
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
             VALUES (@productId, @productName, @branchId, @branchName, 'move_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, reason: reason ? `Moved from ${source.name} - ${reason}` : `Moved from ${source.name}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: moveReceived.batchId },
+      params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: moveReceived.batchId },
     },
   ])
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'move', 'stock', sourceProductId, { toProductId: destinationProductId, quantity, branchId, reason })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'move', 'stock', sourceProductId, { toProductId: destinationProductId, quantity, branchId, reason })
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'move_row' }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
@@ -1977,14 +2554,15 @@ app.post('/movements/:id/revert', async (c) => {
   if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'Invalid movement id' }, 400)
   const db = getDb(c.env)
   const mv = await db.prepare(`
-    SELECT id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id
+    SELECT id, product_id, product_name, branch_id, branch_name, movement_type, quantity,
+      unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, batch_id
     FROM inventory_movements WHERE id = @id
   `).get<RevertMovementRow>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
-  const result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: user?.name ?? null })
+  const result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) })
   if (!result.ok) return c.json({ error: result.error }, result.status)
   const productId = Number(mv.product_id) || 0
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'stock_revert', 'product', productId || null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_revert', 'product', productId || null, {
     movementId: id, movementType: mv.movement_type, revertType: result.revertType, quantity: result.quantity,
     branchId: Number(mv.branch_id) || null, batchId: mv.batch_id ?? null,
   })
@@ -2004,19 +2582,115 @@ app.patch('/movements/:id/reason', async (c) => {
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const reason = body.reason != null ? String(body.reason).trim() : ''
   if (!reason) return c.json({ error: 'A reason is required' }, 400)
-  if (reason.length > 500) return c.json({ error: 'Reason is too long' }, 400)
+  // Same cap, same measure and same code as the wires that WROTE the reason
+  // (lib/stockReason.ts), so the editor can always save back what they stored.
+  if (stockReasonTooLong(reason)) return c.json({ error: `Reason is too long (max ${STOCK_REASON_MAX_LENGTH} characters)`, code: 'reason_too_long' }, 400)
   const db = getDb(c.env)
   const mv = await db.prepare('SELECT id, product_id, reason FROM inventory_movements WHERE id = @id')
     .get<{ id: number; product_id: number; reason: string | null }>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
   await db.prepare('UPDATE inventory_movements SET reason = @reason WHERE id = @id').run({ id, reason })
   const productId = Number(mv.product_id) || 0
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'stock_movement_reason_edit', 'product', productId || null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_movement_reason_edit', 'product', productId || null, {
     movementId: id, from: mv.reason ?? null, to: reason,
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: productId }))
   return c.json({ success: true, id, reason })
 })
+
+// ---- P3-L6: tagged (held, non-sellable) stock rows --------------------
+//
+// The Products page shows held units as their own child row inside the
+// product group -- one row per (product, tag, branch), qty =
+// SUM(quantity_remaining). The row is DELIBERATELY not part of the group's
+// sellable rows: it is never in branch_stock, never in the POS/product
+// pickers, and never inside the group's stock total. Reading it through its
+// own endpoint (rather than folding it into the products list) is what makes
+// that exclusion structural instead of a filter somebody can forget.
+app.get('/tagged-lots', async (c) => {
+  const ids = String(c.req.query('productIds') || c.req.query('productId') || '')
+    .split(',')
+    .map((part) => Number.parseInt(part.trim(), 10))
+    .filter((id) => Number.isSafeInteger(id) && id > 0)
+  if (!ids.length) return c.json({ items: [] })
+  // The 500 cap here is a sanity ceiling on the request, not what keeps D1
+  // happy -- a server page (up to 100 products) plus pinned recently-edited
+  // rows routinely asks for just over 100 ids, past D1's 100-bound-parameter
+  // limit (lib/sqlBinding.ts). readTaggedLotGroups is the one that actually
+  // stays inside that limit: it chunks the IN(...) list itself, so this
+  // route never needs to.
+  const items = await readTaggedLotGroups(getDb(c.env), ids.slice(0, 500))
+  return c.json({ items })
+})
+
+// The two row actions. Both take the SAME (product, branch, tag, quantity)
+// shape, both allocate oldest-held-first across that tag's open lots, and
+// both refuse outright when the held quantity no longer covers the request
+// -- a stale page must not partially apply. Gated exactly like /adjust: this
+// is a stock write.
+async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'restore') {
+  const user = c.get('user')
+  if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
+    return c.json({ error: 'Changing tagged stock requires Full Access to Inventory.' }, 403)
+  }
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const productId = Number.parseInt(String(body.productId ?? ''), 10)
+  const branchId = Number.parseInt(String(body.branchId ?? ''), 10)
+  const quantity = Number(body.quantity)
+  const reason = body.reason != null ? String(body.reason).trim() || null : null
+  const tagResult = parseStockConditionTag(body.conditionTag ?? body.condition_tag)
+  if (!tagResult.ok) return c.json({ error: tagResult.error }, 400)
+  if (!tagResult.tag) return c.json({ error: 'A condition tag is required' }, 400)
+  if (!Number.isSafeInteger(productId) || productId <= 0) return c.json({ error: 'Missing required fields' }, 400)
+  if (!Number.isSafeInteger(branchId) || branchId <= 0) return c.json({ error: 'A branch is required' }, 400)
+  if (!Number.isFinite(quantity) || quantity <= 0) return c.json({ error: 'Quantity must be a positive number' }, 400)
+  // Same mandatory-cause rule POST /adjust enforces -- a tagged disposal is a
+  // loss and a restore puts sellable stock back; neither goes undocumented.
+  if (!reason) return c.json({ error: 'A reason is required for stock adjustments' }, 400)
+
+  const db = getDb(c.env)
+  const product = await db.prepare('SELECT id, name, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
+    .get<{ id: number; name: string; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
+  if (!product) return c.json({ error: 'Product not found' }, 404)
+  const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
+
+  const lots = await readOpenTaggedLots(db, { productId, branchId, tag: tagResult.tag })
+  const { takes, uncovered } = allocateTaggedLots(lots, quantity)
+  if (uncovered > 0) {
+    const held = lots.reduce((sum, lot) => sum + (Number(lot.quantity_remaining) || 0), 0)
+    return c.json({ error: `Only ${held} ${tagResult.tag} unit(s) are held at ${branch?.name || 'this branch'}, ${quantity} requested.` }, 400)
+  }
+
+  const change = {
+    productId,
+    productName: product.name,
+    branchId,
+    branchName: branch?.name || null,
+    tag: tagResult.tag,
+    takes,
+    reason,
+    fallbackUnitCostUsd: product.cost_price_usd ?? null,
+    fallbackUnitCostKhr: product.cost_price_khr ?? null,
+    actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
+  }
+  try {
+    await db.batch(action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change))
+  } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
+    return c.json({ error: error instanceof Error ? error.message : 'Failed to change tagged stock' }, 400)
+  }
+
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), action === 'dispose' ? 'stock_tagged_dispose' : 'stock_tagged_restore', 'product', productId, {
+    branchId, conditionTag: tagResult.tag, quantity, reason, lotIds: takes.map((take) => take.lotId),
+  })
+  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: productId }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  return c.json({ success: true, productId, branchId, conditionTag: tagResult.tag, quantity })
+}
+
+app.post('/tagged-lots/dispose', (c) => runTaggedLotAction(c, 'dispose'))
+app.post('/tagged-lots/restore', (c) => runTaggedLotAction(c, 'restore'))
 
 app.get('/rfid/status', (c) => c.json({ connected: false, status: 'unconfigured', readers: [] }))
 app.get('/rfid/tags/search', (c) => c.json({ items: [], total: 0, page: 1, pageSize: 20 }))

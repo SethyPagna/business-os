@@ -13,6 +13,8 @@
 
 import { SYNC } from '../constants.ts'
 import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.ts'
+import { createSyncErrorId } from '../utils/syncProblemLifecycle.ts'
+import { assertActorReadScope, assertActorSessionDispatchAllowed, beginActorCookieMutation, finishActorCookieMutation, prepareActorOauthCookieRedirect, isActorCookieMutationPending, captureActorReadScope, invalidateActorReadChannel, isActorReadScopeCurrent, markActorReadResult, type ActorReadScope } from './actorReadScope.ts'
 import {
   getSyncServerUrl,
   getSyncToken,
@@ -32,8 +34,9 @@ declare const __FRONTEND_BUILD_REVISION__: string | undefined
 
 type LooseRecord = Record<string, any>
 type ApiRuntimeError = Error & LooseRecord
-type CacheEntry = { data: any; ts: number }
+type CacheEntry = { data: any; ts: number; scope: ActorReadScope }
 type CacheState = { data: any; stale: boolean }
+type ReadCacheToken = { channel: string; valid: boolean; pending: number; scope: ActorReadScope }
 type InflightWrite = { promise: Promise<any>; startedAt: number }
 // RouteFn optionally receives the AbortSignal for the search group it was
 // dispatched under (see `searchGroup` on RouteOptions below and
@@ -43,10 +46,25 @@ type InflightWrite = { promise: Promise<any>; startedAt: number }
 // expected -- so this is additive and doesn't require touching every
 // existing route() caller, only the ones that opt into a searchGroup.
 type RouteFn<T = any> = (signal?: AbortSignal) => T | Promise<T>
-type ApiFetchOptions = { skipWriteDedupe?: boolean; signal?: AbortSignal }
+const ACTOR_RECOVERY_READ = Symbol('actor-recovery-read')
+type ApiFetchOptions = { skipWriteDedupe?: boolean; signal?: AbortSignal; actorRecovery?: symbol }
+
+/** The sole quarantine exception: no shared route cache, local fallback,
+ * embedded bootstrap, mutation or general private-read bypass. */
+export function readActorSessionRecoveryBootstrap(): Promise<any> {
+  if (isActorCookieMutationPending()) return Promise.reject(Object.assign(new Error('Authentication is still in progress in another tab.'), { code: 'actor_session_quarantined', outcome: 'not_dispatched' }))
+  return apiFetch('GET', '/api/auth/bootstrap', undefined, 8000, { actorRecovery: ACTOR_RECOVERY_READ })
+}
 type RouteOptions = {
   isWrite?: boolean
   raceLocalFallback?: boolean
+  staleWhileRevalidate?: boolean
+  signal?: AbortSignal
+  // Most reads retain one retry for a transient connection failure. A caller
+  // with one outer deadline can disable retry specifically after apiFetch's
+  // own timeout, while still retrying an immediate failure such as
+  // `Failed to fetch` within that outer deadline.
+  retryTimedOutRead?: boolean
   // Opt a read into "only the latest request in this group survives"
   // semantics: starting a new route() call tagged with the same
   // searchGroup aborts whatever request is still in flight for that
@@ -99,6 +117,12 @@ const RECONNECT_REFRESH_CHANNELS = [
 const _cache: Record<string, CacheEntry> = {}
 const _inflight: Record<string, Promise<any>> = {}  // Track in-flight requests to dedupe
 const _inflightStartedAt: Record<string, number> = {}
+const _inflightScopes = new WeakMap<Promise<any>, ActorReadScope>()
+// Every local contender (including deduped callers) observes the same server
+// acceptance boundary. Weak ownership retains no completed request history.
+const _successfulServerReads = new WeakSet<Promise<any>>()
+// Only pending work owns tokens; completed query keys leave no generation map.
+const _readCacheTokens = new Set<ReadCacheToken>()
 const _writeInflight = new Map<string, InflightWrite>()
 const _apiMismatchCooldown = new Map<string, { error: ApiRuntimeError; until: number }>()
 const CACHE_TTL   = 20_000   // 20 seconds
@@ -229,11 +253,35 @@ export function markApiVersionMismatch(path: unknown, status = 404): ApiRuntimeE
 
 export function cacheGet(key: string): any {
   const e = _cache[key]
-  return (e && Date.now() - e.ts < CACHE_TTL) ? e.data : null
+  return (e && isActorReadScopeCurrent(e.scope) && Date.now() - e.ts < CACHE_TTL) ? e.data : null
 }
-export function cacheSet(key: string, data: any): void  { _cache[key] = { data, ts: Date.now() } }
+export function cacheSet(key: string, data: any): void  { _cache[key] = { data, ts: Date.now(), scope: captureActorReadScope(key) } }
+async function trackCacheRead<T>(token: ReadCacheToken, work: () => T | Promise<T>): Promise<T> {
+  token.pending++
+  if (token.valid) _readCacheTokens.add(token)
+  try {
+    return await work()
+  } finally {
+    if (--token.pending === 0) _readCacheTokens.delete(token)
+  }
+}
+
+function cacheReadResult(token: ReadCacheToken, data: any): boolean {
+  if (!token.valid || !isActorReadScopeCurrent(token.scope)) return false
+  cacheSet(token.channel, data)
+  return true
+}
+
 export function cacheInvalidate(prefix: string): void {
+  invalidateActorReadChannel(prefix)
   Object.keys(_cache).forEach(k => { if (k.startsWith(prefix)) delete _cache[k] })
+  Object.keys(_inflight).forEach(k => { if (k.startsWith(prefix)) clearInflight(k) })
+  for (const token of _readCacheTokens) {
+    if (token.channel.startsWith(prefix)) {
+      token.valid = false
+      _readCacheTokens.delete(token)
+    }
+  }
 }
 
 // Y18: aggregation reads DERIVED from an entity must die with it. The
@@ -244,6 +292,9 @@ export function cacheInvalidate(prefix: string): void {
 // still-fresh 20s cache (the reported "cancelled sale still shows
 // completed"). Declared ONCE here; both invalidation paths below apply it.
 const DERIVED_READ_PREFIXES: Record<string, string[]> = {
+  // A customer marker change affects the customer labels shown by already
+  // loaded Sales and Returns. Their readers have independent short caches.
+  customers: ['sales', 'returns'],
   sales: ['dashboard', 'analytics'],
   returns: ['dashboard', 'analytics'],
   products: ['dashboard', 'analytics'],
@@ -255,9 +306,7 @@ export function cacheInvalidateWithDerived(prefix: string): void {
   for (const derived of DERIVED_READ_PREFIXES[prefix] || []) cacheInvalidate(derived)
 }
 export function cacheClearAll(): void {
-  Object.keys(_cache).forEach(k => delete _cache[k])
-  Object.keys(_inflight).forEach(k => delete _inflight[k])
-  Object.keys(_inflightStartedAt).forEach(k => delete _inflightStartedAt[k])
+  cacheInvalidate('')
   _writeInflight.clear()
   _apiMismatchCooldown.clear()
 }
@@ -306,6 +355,21 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // can offer to SELECT the existing contact instead of dead-ending on the
   // 409 -- see routes/contacts.ts's duplicateErrorResponse.
   error.duplicate = parsed?.duplicate || null
+  // Carry the per-branch/per-lot breakdown a 400 stock_choice_required returns,
+  // so the caller can open the merge/remove dialog with the real numbers
+  // instead of a bare error toast -- see routes/products.ts's merge guard.
+  error.stockImpact = parsed?.stockImpact || null
+  // ...and whether the two rows are actually the same product (name + barcode
+  // + cost), so the same dialog can warn about a cross-identity merge whether
+  // it was opened from the preview or from this refusal.
+  error.identity = parsed?.identity || null
+  // The two refusals that are DECISIONS rather than failures, so the merge
+  // flow can restate them in the operator's own language instead of showing
+  // the server's English sentence: which cost pair was too far apart to be one
+  // cost (409 cost_outlier_review), and which stock-in session must settle
+  // before the rows it names can be merged (409 stock_session_reversible).
+  error.costOutlier = parsed?.costOutlier || null
+  error.operationId = parsed?.operationId || null
   error.transientGateway = isTransientGatewayError(status)
   error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'
   error.entity = parsed?.entity || null
@@ -497,6 +561,10 @@ export function isInvalidSessionError(error: any): boolean {
   ))
 }
 
+export function isReadAuthorizationError(error: any): boolean {
+  return Number(error?.status) === 401 || Number(error?.status) === 403 || isInvalidSessionError(error)
+}
+
 export function requireLiveServerWrite(channel: string, options: { notConfiguredMessage?: string; offlineMessage?: string } = {}): true {
   const syncServerUrl = getSyncServerUrl()
   if (!syncServerUrl) {
@@ -567,7 +635,16 @@ function hasUsableLocalData(value: any): boolean {
   return true
 }
 
-async function tryServerReadWithRetry<T>(serverFn: RouteFn<T>, signal?: AbortSignal): Promise<T> {
+function isRequestTimeoutError(error: any): boolean {
+  return error?.code === 'request_timeout'
+    || String(error?.message || '').toLowerCase().includes('request timed out after')
+}
+
+async function tryServerReadWithRetry<T>(
+  serverFn: RouteFn<T>,
+  signal?: AbortSignal,
+  retryTimedOutRead = true,
+): Promise<T> {
   try {
     return await serverFn(signal)
   } catch (error: any) {
@@ -575,6 +652,7 @@ async function tryServerReadWithRetry<T>(serverFn: RouteFn<T>, signal?: AbortSig
     // problem -- retrying it would just fire yet another request for a
     // query the user has already moved on from.
     if (isAbortError(error)) throw error
+    if (!retryTimedOutRead && isRequestTimeoutError(error)) throw error
     if (isTransientGatewayError(error?.status)) throw error
     if (!isConnectivityError(error)) throw error
     await sleep(SYNC.READ_SERVER_RETRY_DELAY_MS)
@@ -596,9 +674,26 @@ function noteReadFailure(channel: string, error: any, source: string, startedAt:
   return false
 }
 
-async function resolveLocalRead<T>(channel: string, localFn: RouteFn<T>, source = 'local'): Promise<T> {
-  const localResult = await localFn()
-  cacheSet(channel, localResult)
+function throwIfRequestAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  const abortError = new Error('Request canceled')
+  abortError.name = 'AbortError'
+  throw abortError
+}
+
+async function resolveLocalRead<T>(
+  channel: string,
+  localFn: RouteFn<T>,
+  token: ReadCacheToken,
+  source = 'local',
+  signal?: AbortSignal,
+): Promise<T> {
+  throwIfRequestAborted(signal)
+  const localResult = await localFn(signal)
+  // A local IndexedDB read may finish after its owning page deadline. Check
+  // again at the write boundary so cancellation cannot refill shared cache.
+  throwIfRequestAborted(signal)
+  cacheReadResult(token, localResult)
   logCall(channel, source, 0)
   return localResult
 }
@@ -646,8 +741,16 @@ export function __resetApiHealthForTests(): void {
 }
 
 // HTTP helpers ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs: number = SYNC.REQUEST_TIMEOUT_MS, options: ApiFetchOptions = {}): Promise<any> {
+export const WRITE_REQUEST_TIMEOUT_MS = 45_000
+
+export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs?: number, options: ApiFetchOptions = {}): Promise<any> {
+  const readScope = ['GET', 'HEAD'].includes(String(method || 'GET').toUpperCase()) ? captureActorReadScope() : null
+  const sideEffectScope = readScope || captureActorReadScope()
+  const recoveryRead = options.actorRecovery === ACTOR_RECOVERY_READ && method === 'GET' && path === '/api/auth/bootstrap'
+  if (!recoveryRead) assertActorSessionDispatchAllowed()
   const normalizedMethod = String(method || 'GET').toUpperCase()
+  const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(normalizedMethod)
+  timeoutMs = timeoutMs ?? (isMutation ? WRITE_REQUEST_TIMEOUT_MS : SYNC.REQUEST_TIMEOUT_MS)
   if (normalizedMethod === 'GET' && isRequiredRuntimeApiPath(path)) {
     const mismatchError = getApiVersionMismatchCooldown(path)
     if (mismatchError) {
@@ -698,6 +801,12 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     else externalSignal.addEventListener('abort', onExternalAbort, { once: true })
   }
 
+  let cookieMutation: string | null = null
+  let holdCookieAcrossRedirect = false
+  const oauthLogin = normalizedMethod === 'POST' && path === '/api/auth/oauth/start' && String((body as { mode?: unknown } | null)?.mode || 'login').trim().toLowerCase() !== 'link'
+  const establishesActor = normalizedMethod === 'POST' && ['/api/auth/login', '/api/auth/otp/verify'].includes(path)
+  let ownerReconciliation = establishesActor
+  let cookieUser: object | undefined
   try {
     const requestInit: RequestInitWithBody = {
       method: normalizedMethod,
@@ -709,11 +818,19 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     if (methodAllowsRequestBody(normalizedMethod) && body !== undefined) {
       requestInit.body = JSON.stringify(body)
     }
+    if (oauthLogin || (normalizedMethod === 'POST' && ['/api/auth/login', '/api/auth/otp/verify', '/api/auth/logout', '/api/auth/session-duration'].includes(path))) {
+      cookieMutation = await beginActorCookieMutation()
+    }
+    if (oauthLogin && cookieMutation) {
+      const payload = (body || {}) as Record<string, unknown>
+      requestInit.body = JSON.stringify({ ...payload, redirectTo: prepareActorOauthCookieRedirect(cookieMutation, String(payload.redirectTo || window.location.href)) })
+    }
     const res = await fetch(`${base}${path}`, requestInit)
-    clearTimeout(timer)
+    if (establishesActor && res.status >= 400 && res.status < 500) ownerReconciliation = false
+    if (readScope) assertActorReadScope(readScope, false, recoveryRead)
     if (isCloudflareAccessRedirectResponse(res)) {
       const accessError = createCloudflareAccessError(path)
-      dispatchUnauthorized({
+      if (!recoveryRead && isActorReadScopeCurrent(sideEffectScope, false)) dispatchUnauthorized({
         code: accessError.code,
         error: accessError.message,
         reason: accessError.reason,
@@ -723,6 +840,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     }
     if (!res.ok) {
       const text = await res.text().catch(() => '')
+      if (readScope) assertActorReadScope(readScope, false, recoveryRead)
       const parsed = (() => { try { return JSON.parse(text) } catch { return null } })()
       if (res.status === 404 && normalizedMethod === 'GET' && isRequiredRuntimeApiPath(path)) {
         throw markApiVersionMismatch(path, res.status)
@@ -736,7 +854,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       }
       const msg  = parsed?.error || text
       const apiError = createApiError(res.status, parsed, text)
-      if (typeof window !== 'undefined' && shouldDispatchUnauthorized(path, res.status, parsed)) {
+      if (!recoveryRead && isActorReadScopeCurrent(sideEffectScope, false) && typeof window !== 'undefined' && shouldDispatchUnauthorized(path, res.status, parsed)) {
         dispatchUnauthorized({
           code: parsed?.code || 'invalid_session',
           error: parsed?.error || 'Please sign in again to continue.',
@@ -746,8 +864,15 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       }
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }
-    return res.json()
+    const result = await res.json()
+    if (establishesActor) {
+      cookieUser = result?.user && typeof result.user === 'object' ? result.user : undefined
+      ownerReconciliation = !!cookieUser
+    }
+    if (oauthLogin && result?.success !== false && result?.url) holdCookieAcrossRedirect = true
+    return result
   } catch (e: any) {
+    if (e?.code === 'stale_read_scope') throw e
     clearTimeout(timer)
     if (externallyAborted) {
       // Cancelled because a newer request in the same search group took
@@ -760,10 +885,22 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       throw abortError
     }
     if (timedOut || e?.name === 'AbortError') {
-      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`)
+      const timeoutError = new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`) as ApiRuntimeError
+      timeoutError.code = 'request_timeout'
+      timeoutError.timeoutMs = timeoutMs
+      if (isMutation) timeoutError.outcome = 'unknown'
+      throw timeoutError
+    }
+    // A missing response cannot prove a dispatched write was rolled back.
+    // Preserve the error for callers that can reconcile their operation ID.
+    if (isMutation && (isConnectivityError(e) || Number(e?.status) >= 500 || e instanceof SyntaxError)) {
+      e.outcome = 'unknown'
+      e.code = e.code || 'write_outcome_unknown'
     }
     throw e
   } finally {
+    if (cookieMutation && !holdCookieAcrossRedirect) finishActorCookieMutation(cookieMutation, ownerReconciliation, cookieUser)
+    clearTimeout(timer)
     if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort)
   }
   })()
@@ -778,7 +915,10 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     }).catch(() => {})
   }
 
-  return requestPromise
+  if (!readScope) return requestPromise
+  const result = await requestPromise
+  assertActorReadScope(readScope, false, recoveryRead)
+  return markActorReadResult(result, readScope)
 }
 
 export function isNetErr(e: any): boolean {
@@ -977,7 +1117,7 @@ const FRESH_TTL   = CACHE_TTL // 20 s ??treat as fresh, skip server
 
 export function cacheGetStale(key: string): CacheState {
   const e = _cache[key]
-  if (!e) return { data: null, stale: false }
+  if (!e || !isActorReadScopeCurrent(e.scope)) return { data: null, stale: false }
   const age = Date.now() - e.ts
   if (age < FRESH_TTL) return { data: e.data, stale: false }
   if (age < STALE_TTL) return { data: e.data, stale: true  }
@@ -1003,7 +1143,8 @@ function emitCacheRefresh(channel: string): void {
   }))
 }
 
-function clearInflight(channel: string): void {
+function clearInflight(channel: string, owner?: Promise<any>): void {
+  if (owner && _inflight[channel] !== owner) return
   delete _inflight[channel]
   delete _inflightStartedAt[channel]
 }
@@ -1036,6 +1177,8 @@ function isAbortError(e: any): boolean {
 
 function hasReusableInflight(channel: string): boolean {
   if (!_inflight[channel]) return false
+  const scope = _inflightScopes.get(_inflight[channel])
+  if (scope && !isActorReadScopeCurrent(scope)) { clearInflight(channel); return false }
   const startedAt = _inflightStartedAt[channel] || 0
   if (startedAt && Date.now() - startedAt > INFLIGHT_REUSE_WINDOW_MS) {
     clearInflight(channel)
@@ -1048,35 +1191,48 @@ async function raceServerReadWithLocalFallback<T>(
   channel: string,
   inflightPromise: Promise<T>,
   localFn: RouteFn<T>,
+  token: ReadCacheToken,
   t0: number,
   sourceLabel = 'cache-dedup',
   fallbackDelayMs: number = SYNC.READ_LOCAL_FALLBACK_MS,
+  signal?: AbortSignal,
 ): Promise<T> {
   let localPromise: Promise<T | null> | null = null
   const startLocalRead = (): Promise<T | null> => {
     if (!localPromise) {
-      localPromise = Promise.resolve()
-        .then(() => localFn())
-        .then((result) => {
-          if (hasUsableLocalData(result)) {
-            cacheSet(channel, result)
-          }
-          return result
+      localPromise = trackCacheRead(token, () => Promise.resolve()
+        .then(() => {
+          throwIfRequestAborted(signal)
+          return localFn(signal)
         })
-        .catch(() => null)
+        .then((result) => {
+          throwIfRequestAborted(signal)
+          // Cache only when this race accepts the local result below. A local
+          // read can finish after server success, auth rejection or cancellation.
+          return result
+        }))
+        .catch((error) => {
+          if (isAbortError(error)) throw error
+          return null
+        })
     }
     return localPromise
   }
 
   let fallbackTimer: number | null = null
-  const localFallbackPromise = new Promise<RaceReadResult>((resolve) => {
+  const localFallbackPromise = new Promise<RaceReadResult>((resolve, reject) => {
     fallbackTimer = window.setTimeout(async () => {
-      const localResult = await startLocalRead()
-      if (hasUsableLocalData(localResult)) {
-        resolve({ source: 'local', data: localResult })
-        return
+      try {
+        const localResult = await startLocalRead()
+        throwIfRequestAborted(signal)
+        if (hasUsableLocalData(localResult)) {
+          resolve({ source: 'local', data: localResult })
+          return
+        }
+        resolve({ source: 'local', data: null })
+      } catch (error) {
+        reject(error)
       }
-      resolve({ source: 'local', data: null })
     }, fallbackDelayMs)
   })
 
@@ -1090,13 +1246,15 @@ async function raceServerReadWithLocalFallback<T>(
     }
 
     if (winner?.source === 'local' && winner.data !== null) {
+      throwIfRequestAborted(signal)
+      if (!_successfulServerReads.has(inflightPromise)) cacheReadResult(token, winner.data)
       logCall(channel, sourceLabel ? `${sourceLabel}-local` : 'local-fast', Date.now() - t0)
-      inflightPromise
+      trackCacheRead(token, () => inflightPromise
         .then((result) => {
-          cacheSet(channel, result)
-          emitCacheRefresh(channel)
+          throwIfRequestAborted(signal)
+          if (cacheReadResult(token, result)) emitCacheRefresh(channel)
         })
-        .catch(() => {})
+        .catch(() => {}))
       return winner.data
     }
 
@@ -1112,12 +1270,15 @@ async function raceServerReadWithLocalFallback<T>(
       logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
       throw error
     }
-    if (isInvalidSessionError(error)) {
+    if (isReadAuthorizationError(error)) {
       logCall(channel, 'auth-required', Date.now() - t0, false)
       throw error
     }
+    if (isAbortError(error)) throw error
     const localResult = await startLocalRead()
+    throwIfRequestAborted(signal)
     if (hasUsableLocalData(localResult)) {
+      if (!_successfulServerReads.has(inflightPromise)) cacheReadResult(token, localResult)
       if (isTransientGatewayError(error?.status)) {
         const recoverySource = sourceLabel
           ? `${sourceLabel}-transient-gateway-local-recovery`
@@ -1125,16 +1286,16 @@ async function raceServerReadWithLocalFallback<T>(
         noteReadFailure(channel, error, recoverySource, t0)
       }
       logCall(channel, sourceLabel ? `${sourceLabel}-local-recovery` : 'local-recovery', Date.now() - t0)
-      inflightPromise
+      trackCacheRead(token, () => inflightPromise
         .then((result) => {
-          cacheSet(channel, result)
-          emitCacheRefresh(channel)
+          throwIfRequestAborted(signal)
+          if (cacheReadResult(token, result)) emitCacheRefresh(channel)
         })
-        .catch(() => {})
+        .catch(() => {}))
       return localResult as T
     }
     noteReadFailure(channel, error, 'local-fallback', t0)
-    return resolveLocalRead(channel, localFn)
+    return resolveLocalRead(channel, localFn, token, 'local', signal)
   }
 }
 
@@ -1156,114 +1317,148 @@ export async function route<T = any>(
   const syncServerUrl = getSyncServerUrl()
   const readServerBaseUrl = getReadServerBaseUrl()
   const isWrite = typeof options === 'boolean' ? options : !!options?.isWrite
-  const raceLocalFallback = typeof options === 'boolean' ? true : options?.raceLocalFallback !== false
+  // An authenticated read must observe the server's permission decision before
+  // considering offline data; a fast mirror must not beat a later 401/403.
+  // Cookie-authenticated cold starts may not have recreated their JS session
+  // marker yet. A browser origin is therefore private-read capable as well.
+  const privateRead = hasStoredAuthSession() || !!getSameOriginApiBaseUrl()
+  const raceLocalFallback = !privateRead && (typeof options === 'boolean' ? true : options?.raceLocalFallback !== false)
+  const staleWhileRevalidate = !privateRead && (typeof options === 'boolean' ? true : options?.staleWhileRevalidate !== false)
+  const retryTimedOutRead = typeof options === 'boolean' ? true : options?.retryTimedOutRead !== false
+  const callerSignal = typeof options === 'boolean' ? undefined : options?.signal
+  throwIfRequestAborted(callerSignal)
   const browserExplicitlyOffline = typeof navigator !== 'undefined' && navigator.onLine === false
 
   // ?€?€ Reads ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
   if (!isWrite) {
-    if (readServerBaseUrl) {
-      const { data: cached, stale } = cacheGetStale(channel)
-
-      if (cached !== null && !stale) {
-        // Fresh cache hit ??return immediately
-        logCall(channel, 'cache', 0)
-        return cached
+    const scope = captureActorReadScope(channel)
+    const guard = (fn: RouteFn<T>): RouteFn<T> => async (signal) => {
+      assertActorReadScope(scope, false)
+      let result: T
+      try { result = await fn(signal) } catch (error) {
+        assertActorReadScope(scope, false)
+        if (isReadAuthorizationError(error)) cacheInvalidate(channel)
+        throw error
       }
+      assertActorReadScope(scope, false)
+      return markActorReadResult(result, scope)
+    }
+    serverFn = guard(serverFn)
+    if (localFn) localFn = guard(localFn)
+    // Invalidation detaches cache ownership, without canceling the original
+    // caller or adding automatic retries. Detached background/local work keeps
+    // the token alive until its final cache write boundary has passed.
+    const token: ReadCacheToken = { channel, valid: true, pending: 0, scope }
+    return trackCacheRead(token, async () => {
+      if (readServerBaseUrl) {
+        const { data: cached, stale } = cacheGetStale(channel)
 
-      if (cached !== null && stale) {
-        // Stale-while-revalidate: return stale now, refresh in background
-        logCall(channel, 'cache-stale', 0)
-        tryServerReadWithRetry(serverFn).then(result => {
-          cacheSet(channel, result)
-          emitCacheRefresh(channel)
-        }).catch((error) => {
-          if (isTransientGatewayError(error?.status)) {
-            noteReadFailure(channel, error, 'transient-gateway-stale-refresh', t0)
-          }
-        })
-        return cached
-      }
+        if (cached !== null && !stale) {
+          // Fresh cache hit ??return immediately
+          logCall(channel, 'cache', 0)
+          return cached
+        }
 
-      // No cache ??try server (skip if known offline)
-      if ((_serverOnline || readServerBaseUrl) && !browserExplicitlyOffline || !localFn) {
-        // Request deduplication: if same request already in flight, wait for it instead of re-requesting
-        if (hasReusableInflight(channel)) {
-          if (localFn) {
-            if (raceLocalFallback) {
-              return raceServerReadWithLocalFallback(channel, _inflight[channel], localFn, t0, 'cache-dedup', HEALTHY_SERVER_LOCAL_FALLBACK_MS)
+        if (cached !== null && stale && staleWhileRevalidate) {
+          // Stale-while-revalidate: return stale now, refresh in background
+          logCall(channel, 'cache-stale', 0)
+          trackCacheRead(token, () => tryServerReadWithRetry(serverFn, callerSignal, retryTimedOutRead).then(result => {
+            throwIfRequestAborted(callerSignal)
+            if (cacheReadResult(token, result)) emitCacheRefresh(channel)
+          }).catch((error) => {
+            if (isTransientGatewayError(error?.status)) {
+              noteReadFailure(channel, error, 'transient-gateway-stale-refresh', t0)
+            }
+          }))
+          return cached
+        }
+
+        // No cache ??try server (skip if known offline)
+        if ((_serverOnline || readServerBaseUrl) && !browserExplicitlyOffline || !localFn) {
+          // Request deduplication: if same request already in flight, wait for it instead of re-requesting
+          if (hasReusableInflight(channel)) {
+            if (localFn) {
+              if (raceLocalFallback) {
+                return raceServerReadWithLocalFallback(channel, _inflight[channel], localFn, token, t0, 'cache-dedup', HEALTHY_SERVER_LOCAL_FALLBACK_MS, callerSignal)
+              }
+              logCall(channel, 'cache-dedup', Date.now() - t0)
+              return _inflight[channel]
             }
             logCall(channel, 'cache-dedup', Date.now() - t0)
             return _inflight[channel]
           }
-          logCall(channel, 'cache-dedup', Date.now() - t0)
-          return _inflight[channel]
-        }
 
-        const searchGroup = typeof options === 'object' ? options.searchGroup : undefined
-        const groupCtrl = searchGroup ? beginSearchGroup(searchGroup) : null
-        const promise = tryServerReadWithRetry(serverFn, groupCtrl?.signal).then(result => {
-          cacheSet(channel, result)
-          setServerHealth(true)
-          logCall(channel, 'server', Date.now() - t0)
-          clearInflight(channel)
-          if (searchGroup && groupCtrl) endSearchGroup(searchGroup, groupCtrl)
-          return result
-        }).catch(e => {
-          clearInflight(channel)
-          if (searchGroup && groupCtrl) endSearchGroup(searchGroup, groupCtrl)
-          throw e
-        })
-        
-        _inflight[channel] = promise
-        _inflightStartedAt[channel] = Date.now()
-        
-        if (localFn && raceLocalFallback) {
-          return raceServerReadWithLocalFallback(channel, promise, localFn, t0, '', HEALTHY_SERVER_LOCAL_FALLBACK_MS)
-        } else {
-          try {
-            return await promise
-          } catch (e) {
-            if (isAbortError(e)) {
-              // Superseded by a newer search in the same group -- not a
-              // real failure, so skip noteReadFailure (which would
-              // otherwise wrongly mark the server unhealthy) and skip the
-              // local-fallback read (the caller's own tracked-request-id
-              // check already discards whatever this resolves to, so
-              // reading local data for it would be pure waste).
-              logCall(channel, 'search-superseded', Date.now() - t0, false)
-              throw e
-            }
-            if (isApiVersionMismatchError(e)) {
-              logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
-              throw e
-            }
-            if (isInvalidSessionError(e)) {
-              logCall(channel, 'auth-required', Date.now() - t0, false)
-              throw e
-            }
-            noteReadFailure(channel, e, 'local-fallback', t0)
-            if (localFn) {
-              const localResult = await localFn()
-              if (hasUsableLocalData(localResult)) {
-                cacheSet(channel, localResult)
-                logCall(channel, 'local-fallback', Date.now() - t0)
-                return localResult
-              }
-            }
-            // Nothing usable to fall back to -- surface the real failure
-            // instead of silently resolving as an empty-but-successful read.
+          const searchGroup = typeof options === 'object' ? options.searchGroup : undefined
+          const groupCtrl = searchGroup ? beginSearchGroup(searchGroup) : null
+          const promise = trackCacheRead(token, () => tryServerReadWithRetry(serverFn, groupCtrl?.signal || callerSignal, retryTimedOutRead).then(result => {
+            throwIfRequestAborted(callerSignal)
+            _successfulServerReads.add(promise)
+            cacheReadResult(token, result)
+            setServerHealth(true)
+            logCall(channel, 'server', Date.now() - t0)
+            clearInflight(channel, promise)
+            if (searchGroup && groupCtrl) endSearchGroup(searchGroup, groupCtrl)
+            return result
+          }).catch(e => {
+            clearInflight(channel, promise)
+            if (searchGroup && groupCtrl) endSearchGroup(searchGroup, groupCtrl)
             throw e
+          }))
+
+          _inflight[channel] = promise
+          _inflightScopes.set(promise, scope)
+          _inflightStartedAt[channel] = Date.now()
+
+          if (localFn && raceLocalFallback) {
+            return raceServerReadWithLocalFallback(channel, promise, localFn, token, t0, '', HEALTHY_SERVER_LOCAL_FALLBACK_MS, callerSignal)
+          } else {
+            try {
+              return await promise
+            } catch (e) {
+              if (isAbortError(e)) {
+                // Superseded by a newer search in the same group -- not a
+                // real failure, so skip noteReadFailure (which would
+                // otherwise wrongly mark the server unhealthy) and skip the
+                // local-fallback read (the caller's own tracked-request-id
+                // check already discards whatever this resolves to, so
+                // reading local data for it would be pure waste).
+                logCall(channel, 'search-superseded', Date.now() - t0, false)
+                throw e
+              }
+              if (isApiVersionMismatchError(e)) {
+                logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
+                throw e
+              }
+              if (isReadAuthorizationError(e)) {
+                logCall(channel, 'auth-required', Date.now() - t0, false)
+                throw e
+              }
+              noteReadFailure(channel, e, 'local-fallback', t0)
+              if (localFn) {
+                throwIfRequestAborted(callerSignal)
+                const localResult = await localFn(callerSignal)
+                throwIfRequestAborted(callerSignal)
+                if (hasUsableLocalData(localResult)) {
+                  cacheReadResult(token, localResult)
+                  logCall(channel, 'local-fallback', Date.now() - t0)
+                  return localResult
+                }
+              }
+              // Nothing usable to fall back to -- surface the real failure
+              // instead of silently resolving as an empty-but-successful read.
+              throw e
+            }
           }
         }
       }
-    }
 
-    // Local fallback
-    if (localFn) {
-      return resolveLocalRead(channel, localFn)
-    }
+      // Local fallback
+      if (localFn) {
+        return resolveLocalRead(channel, localFn, token, 'local', callerSignal)
+      }
 
-    return null
+      return null
+    })
   }
 
   // ?€?€ Writes ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -1309,25 +1504,20 @@ export async function route<T = any>(
     return result
   } catch (e: any) {
     const ms = Date.now() - t0
-    if (isConnectivityError(e)) {
-      setServerHealth(false)
-      if (isTransientGatewayError(e?.status)) {
-        dispatchTransientGatewayOutage(channel, e, true)
-      }
-      const message = 'Server is offline. Changes are invalid until the server reconnects.'
-      logCall(channel, 'server', ms, false)
-      dispatchWriteBlocked(channel, message, {
-        reason: 'server_unreachable',
-        serverOnline: false,
-        serverConfigured: true,
-        status: Number(e?.status || 0) || null,
-      })
-      throw createWriteBlockedError(channel, message, {
-        reason: 'server_unreachable',
-        serverOnline: false,
-        serverConfigured: true,
-        status: Number(e?.status || 0) || null,
-      })
+    if (isConnectivityError(e) || e?.outcome === 'unknown') {
+      e.outcome = 'unknown'
+      e.code = e.code || 'write_outcome_unknown'
+      e.syncErrorId = createSyncErrorId()
+      e.syncErrorChannel = channel
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('sync:error', {
+        detail: {
+          errorId: e.syncErrorId, channel, error: e.message, code: e.code,
+          status: Number(e?.status || 0) || null, outcome: 'unknown',
+          timeoutMs: e.timeoutMs || null, ts: new Date().toISOString(),
+        },
+      }))
+      logCall(channel, 'server-outcome-unknown', ms, false)
+      throw e
     }
     logCall(channel, 'server', ms, false)
     if (isWriteConflictError(e)) {
@@ -1355,8 +1545,23 @@ export async function route<T = any>(
     if (isInvalidSessionError(e)) {
       throw e
     }
+    // The server's machine-readable code and status travel with the event.
+    // Without them the global write banner could only reprint the raw error
+    // sentence, so a failure the user can actually FIX -- an out-of-date app
+    // shell rejected by a newer Worker (code client_request_id_required) --
+    // read as the same opaque "Write failed" as everything else.
+    const errorId = createSyncErrorId()
+    e.syncErrorId = errorId
+    e.syncErrorChannel = channel
     window.dispatchEvent(new CustomEvent('sync:error', {
-      detail: { channel, error: e.message, ts: new Date().toISOString() },
+      detail: {
+        errorId,
+        channel,
+        error: e.message,
+        code: e.code || null,
+        status: Number(e?.status || 0) || null,
+        ts: new Date().toISOString(),
+      },
     }))
     throw e
   }

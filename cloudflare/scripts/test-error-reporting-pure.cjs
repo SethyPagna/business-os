@@ -260,9 +260,14 @@ async function main() {
   })
 
   await check('the browser never holds the DSN and never calls Sentry directly', async () => {
+    // One reporter, shared by the per-page boundary in App.tsx and the root
+    // boundary above the providers; frontend/tests/startupResilience.test.ts
+    // pins the same shape from the frontend side.
+    const reporterSrc = fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'utils', 'clientCrashReport.ts'), 'utf8')
+    assert.match(reporterSrc, /\/api\/system\/client-error/, 'the browser reports through our own Worker')
     const appSrc = fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'App.tsx'), 'utf8')
-    assert.match(appSrc, /\/api\/system\/client-error/, 'the browser reports through our own Worker')
-    for (const file of ['App.tsx']) {
+    assert.match(appSrc, /import \{ reportClientCrash \} from '\.\/utils\/clientCrashReport\.ts'/, 'App.tsx must use the shared reporter')
+    for (const file of ['App.tsx', 'utils/clientCrashReport.ts', 'components/shared/RootErrorBoundary.tsx']) {
       const content = fs.readFileSync(path.join(repoRoot, 'frontend', 'src', file), 'utf8')
       assert.ok(!/ingest\.us\.sentry\.io/.test(content), `${file} must not embed the Sentry ingest host`)
     }

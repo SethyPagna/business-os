@@ -20,8 +20,13 @@ assert.match(
 )
 assert.equal(
   (returnsRoute.match(/client_request_id = \? AND client_request_id <> '' LIMIT 1/g) || []).length,
-  2,
-  'both return idempotency doors must include the partial-index predicate',
+  1,
+  'the occupied legacy return-request lookup must include the partial-index predicate',
+)
+assert.match(
+  returnsRoute,
+  /FROM return_create_receipts WHERE actor_id=\? AND request_id=\? LIMIT 1/,
+  'customer return replay must use the actor-scoped immutable receipt lookup',
 )
 assert.match(
   salesImportCommit,
@@ -65,6 +70,13 @@ db.exec(`
     ON returns(client_request_id)
     WHERE client_request_id IS NOT NULL AND client_request_id <> '';
 
+  CREATE TABLE return_create_receipts (
+    id TEXT PRIMARY KEY,
+    actor_id INTEGER NOT NULL,
+    request_id TEXT NOT NULL,
+    UNIQUE(actor_id, request_id)
+  );
+
   CREATE TABLE products (id INTEGER PRIMARY KEY, client_request_id TEXT);
   CREATE UNIQUE INDEX idx_products_client_request_unique_pg
     ON products(client_request_id)
@@ -82,6 +94,10 @@ assert.match(
 assert.match(
   plan("SELECT id FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1", ['return:1']),
   /idx_returns_client_request_unique_pg/,
+)
+assert.match(
+  plan('SELECT id FROM return_create_receipts WHERE actor_id=? AND request_id=? LIMIT 1', [7, 'return:1']),
+  /sqlite_autoindex_return_create_receipts/,
 )
 assert.match(
   plan("SELECT id FROM products WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1", ['product:1']),

@@ -167,58 +167,85 @@ async function readD1Version(env: Env, namespace: string): Promise<number | null
  * `v:` scheme is unreachable immediately after deployment.
  */
 export async function bumpVersion(env: Env, namespace: string): Promise<void> {
-  const versionKey = cacheVersionKey(namespace)
+  return bumpVersions(env, [namespace])
+}
 
-  let currentKvRaw: string | null = null
-  try {
-    currentKvRaw = await env.CACHE.get(versionKey)
-  } catch {
-    currentKvRaw = null
-  }
+// Multi-namespace bump. A write that touches several caches at once (a
+// return that invalidates both 'sales' and 'products', a merge that touches
+// 'products' and 'contacts', ...) used to call bumpVersion() once per
+// namespace -- each call independently re-derives its own KV/D1 plan, and
+// any namespace that had already crossed over to the D1 fallback fired its
+// own separate INSERT..ON CONFLICT. The KV path stays one write per key
+// (KV has no multi-key write primitive), but every namespace that needs the
+// D1 fallback in this one call goes out as ONE db.batch() round trip instead
+// of N sequential prepares.
+export async function bumpVersions(env: Env, namespaces: string[]): Promise<void> {
+  const unique = Array.from(new Set(namespaces.filter(Boolean)))
+  if (!unique.length) return
 
-  // Missing KV + an existing D1 row means this namespace already crossed
-  // over. Stay in strongly-consistent D1 mode permanently instead of
-  // recreating the KV key when tomorrow's quota window becomes "ok" again.
-  if (currentKvRaw == null) {
-    const currentD1 = await readD1Version(env, namespace)
-    if (currentD1 != null) {
-      await bumpVersionInD1(env, namespace, currentD1 + 1)
-      return
+  const d1Upserts: Array<{ namespace: string; minimumVersion: number }> = []
+
+  for (const namespace of unique) {
+    const versionKey = cacheVersionKey(namespace)
+
+    let currentKvRaw: string | null = null
+    try {
+      currentKvRaw = await env.CACHE.get(versionKey)
+    } catch {
+      currentKvRaw = null
+    }
+
+    // Missing KV + an existing D1 row means this namespace already crossed
+    // over. Stay in strongly-consistent D1 mode permanently instead of
+    // recreating the KV key when tomorrow's quota window becomes "ok" again.
+    if (currentKvRaw == null) {
+      const currentD1 = await readD1Version(env, namespace)
+      if (currentD1 != null) {
+        d1Upserts.push({ namespace, minimumVersion: currentD1 + 1 })
+        continue
+      }
+    }
+
+    const budget = await consumeQuota(env, 'kv_write', 1)
+    const currentKv = Number(currentKvRaw || '0') || 0
+    const nextKv = currentKv + 1
+
+    if (budget.zone === 'critical' || budget.zone === 'exhausted') {
+      d1Upserts.push({ namespace, minimumVersion: nextKv })
+      // One delete at the handoff. From this point, the D1 row above makes
+      // the switch permanent even after the quota counter rolls into a new
+      // day.
+      await env.CACHE.delete(versionKey).catch(() => {})
+      continue
+    }
+
+    try {
+      await env.CACHE.put(versionKey, String(nextKv))
+    } catch {
+      // A per-key write collision or other KV error must still invalidate
+      // the cache. Seed D1 at least one step beyond the KV value we were
+      // replacing, then remove KV so readers cannot observe two competing
+      // counters.
+      d1Upserts.push({ namespace, minimumVersion: nextKv })
+      await env.CACHE.delete(versionKey).catch(() => {})
     }
   }
 
-  const budget = await consumeQuota(env, 'kv_write', 1)
-  const currentKv = Number(currentKvRaw || '0') || 0
-  const nextKv = currentKv + 1
-
-  if (budget.zone === 'critical' || budget.zone === 'exhausted') {
-    await bumpVersionInD1(env, namespace, nextKv)
-    // One delete at the handoff. From this point, the D1 row above makes the
-    // switch permanent even after the quota counter rolls into a new day.
-    await env.CACHE.delete(versionKey).catch(() => {})
-    return
-  }
-
-  try {
-    await env.CACHE.put(versionKey, String(nextKv))
-  } catch {
-    // A per-key write collision or other KV error must still invalidate the
-    // cache. Seed D1 at least one step beyond the KV value we were replacing,
-    // then remove KV so readers cannot observe two competing counters.
-    await bumpVersionInD1(env, namespace, nextKv)
-    await env.CACHE.delete(versionKey).catch(() => {})
-  }
+  if (d1Upserts.length) await bumpVersionsInD1(env, d1Upserts)
 }
 
-async function bumpVersionInD1(env: Env, namespace: string, minimumVersion = 1): Promise<void> {
+async function bumpVersionsInD1(env: Env, entries: Array<{ namespace: string; minimumVersion: number }>): Promise<void> {
   try {
-    await getDb(env).prepare(`
-      INSERT INTO cache_versions (namespace, version, updated_at)
-      VALUES (@namespace, @minimumVersion, CURRENT_TIMESTAMP)
-      ON CONFLICT(namespace)
-      DO UPDATE SET version = MAX(version + 1, @minimumVersion), updated_at = CURRENT_TIMESTAMP
-    `).run({ namespace, minimumVersion })
+    await getDb(env).batch(entries.map(({ namespace, minimumVersion }) => ({
+      sql: `
+        INSERT INTO cache_versions (namespace, version, updated_at)
+        VALUES (@namespace, @minimumVersion, CURRENT_TIMESTAMP)
+        ON CONFLICT(namespace)
+        DO UPDATE SET version = MAX(version + 1, @minimumVersion), updated_at = CURRENT_TIMESTAMP
+      `,
+      params: { namespace, minimumVersion },
+    })))
   } catch (error) {
-    console.error('[cache] could not advance version in D1', namespace, error)
+    console.error('[cache] could not advance versions in D1', entries.map((entry) => entry.namespace), error)
   }
 }

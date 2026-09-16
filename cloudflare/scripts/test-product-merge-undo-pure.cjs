@@ -27,6 +27,20 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const cloudflareRoot = path.join(__dirname, '..')
 const LIB_DIR = path.join(cloudflareRoot, 'src', 'lib')
+const actualDependencyCache = new Map()
+function loadActualDependency(file) {
+  if (actualDependencyCache.has(file)) return actualDependencyCache.get(file)
+  const mod = { exports: {} }; actualDependencyCache.set(file, mod.exports)
+  const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file,
+  }).outputText
+  const actualRequire = (request) => request.startsWith('.')
+    ? loadActualDependency(path.resolve(path.dirname(file), request + '.ts'))
+    : require(request)
+  new Function('exports', 'require', 'module', output)(mod.exports, actualRequire, mod)
+  actualDependencyCache.set(file, mod.exports)
+  return mod.exports
+}
 
 // --------------------------------------------------------------------------
 // Load the REAL lib/undoAppliers.ts with its dependencies stubbed. getDb is
@@ -34,7 +48,38 @@ const LIB_DIR = path.join(cloudflareRoot, 'src', 'lib')
 // { changes, lastInsertRowid } shape lib/db.ts's wrapper does (the shim's raw
 // run() returns { meta: { last_row_id } }, which the real wrapper normalizes).
 // --------------------------------------------------------------------------
+// N13: the actor snapshot kernel, loaded for REAL. It is pure (no imports of
+// its own) and the whole point of it is WHICH identity it picks, so a stub
+// would be testing the stub.
+let actorSnapshotCache = null
+let productMergeCache = null
+function loadRealActorSnapshot() {
+  if (actorSnapshotCache) return actorSnapshotCache
+  const file = path.join(LIB_DIR, 'actorSnapshot.ts')
+  const { outputText } = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: 'actorSnapshot.ts',
+  })
+  const mod = { exports: {} }
+  new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod)
+  actorSnapshotCache = mod.exports
+  return actorSnapshotCache
+}
+function loadRealProductMerge() {
+  if (productMergeCache) return productMergeCache
+  const file = path.join(LIB_DIR, 'productMerge.ts')
+  const { outputText } = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: 'productMerge.ts',
+  })
+  const mod = { exports: {} }
+  new Function('exports', 'require', 'module', outputText)(mod.exports,
+    (name) => name === './moneyPrecision' ? require(path.join(LIB_DIR, 'moneyPrecision.ts')) : require(name), mod)
+  productMergeCache = mod.exports
+  return productMergeCache
+}
 function loadUndoAppliers(d1) {
+  const readBatches = []
   const dbAdapter = {
     prepare(sql) {
       const st = d1.prepare(sql)
@@ -47,9 +92,46 @@ function loadUndoAppliers(d1) {
         },
       }
     },
-    batch: (stmts) => d1.batch(stmts),
+    batch: (stmts) => {
+      const readOnly = stmts.every((stmt) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(stmt.sql))
+      if (!readOnly) return d1.batch(stmts)
+      readBatches.push(stmts)
+      return Promise.resolve(stmts.map((stmt) => ({
+        success: true,
+        results: d1.prepare(stmt.sql).all(stmt.params == null ? {} : stmt.params),
+      })))
+    },
   }
   const stubs = {
+    './customerGenderRestoration': loadActualDependency(path.join(LIB_DIR, 'customerGenderRestoration.ts')),
+    // undoAppliers.ts now imports the exact money kernels; Module._load only
+    // maps listed keys, so unlisted relative requests would resolve against this
+    // test file and fail.
+    './moneyPrecision': loadActualDependency(path.join(LIB_DIR, 'moneyPrecision.ts')),
+    './saleMoneyPrecision': loadActualDependency(path.join(LIB_DIR, 'saleMoneyPrecision.ts')),
+    './actorSnapshot': loadRealActorSnapshot(),
+    './productMerge': loadRealProductMerge(),
+    // Bulk status replay is outside this suite; fail if it is invoked.
+    './saleBulkStatus': {
+      replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-product-merge-undo-pure.cjs') },
+    },
+    './saleBulkUpdate': {
+      BULK_UPDATE_KIND: 'sale.fields.bulk',
+      BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk',
+      replaySaleBulkUpdate: () => { throw new Error('Unexpected bulk sale update replay in test-product-merge-undo-pure.cjs') },
+    },
+    './returnBulkAction': {
+      RETURN_BULK_ACTION_KIND: 'return.fields.bulk',
+      replayReturnBulkAction: () => { throw new Error('Unexpected return bulk replay in test-product-merge-undo-pure.cjs') },
+    },
+    './saleSettlementAction': {
+      SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement',
+      replaySaleSettlementAction: () => { throw new Error('Unexpected settlement replay in product merge fixture; use test-payment-fx-pure.cjs') },
+    },
+    './stockSession': {
+      STOCK_SESSION_KIND: 'stock.session',
+      replayStockSession: () => { throw new Error('Unexpected stock replay in product merge fixture; use test-stock-session-undo.cjs') },
+    },
     '../index': {},
     './auth': {},
     './db': { getDb: () => dbAdapter },
@@ -57,7 +139,37 @@ function loadUndoAppliers(d1) {
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' },
+    // S4-24b: the 'sale.add_items' applier's planners. This file exercises the
+    // merge appliers only, so these stubs exist to let the module load; the
+    // real planners are driven against a live schema by
+    // test-sale-add-items-pure.cjs, which is where that applier is proved.
+    './saleLineAddition': {
+      buildAllocationStatements: () => [],
+      planSaleLineAddition: () => ({ lines: [], statements: [], saleItemStatementIndexByLine: [], deductions: [], deductedUnits: 0, addedSubtotalUsd: 0 }),
+      planSaleLineRemoval: () => ({ statements: [], restoredUnits: 0 }),
+      plannedLineFromRecord: (record) => record,
+      saleMoneyUpdateStatement: () => ({ sql: 'SELECT 1', params: {} }),
+    },
+    // S4-30: the same applier also appends an amendment-ledger entry now, so
+    // an undone addition leaves a visible trail rather than a hole. Stubbed
+    // for the same reason -- the real statement builder and the append-only
+    // triggers behind it are driven against a live schema by
+    // test-sale-amendments-pure.cjs.
+    './saleAmendments': {
+      amendmentEntryStatement: () => ({ sql: 'SELECT 1', params: {} }),
+    },
+    // F65 registers the product.remove applier in the shared module. This
+    // harness exercises product merge replay only, so keep removal behavior
+    // inert while allowing the real undoAppliers source to load.
+    './productDelete': {
+      PRODUCT_REMOVE_ACTION_KIND: 'product.remove',
+      parseProductRemoveSnapshot: (value) => value,
+      productRemovePlanDigest: async () => '',
+      productRemoveReplayStatements: () => [],
+    },
   }
+  stubs['./productMergeLineage'] = loadActualDependency(path.join(LIB_DIR, 'productMergeLineage.ts'))
+  stubs['./saleItemPricing'] = loadActualDependency(path.join(LIB_DIR, 'saleItemPricing.ts'))
   const src = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(src, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -74,6 +186,8 @@ function loadUndoAppliers(d1) {
   } finally {
     Module._load = original
   }
+  mod.exports.__testDbAdapter = dbAdapter
+  mod.exports.__testReadBatches = readBatches
   return mod.exports
 }
 
@@ -138,7 +252,9 @@ async function foldForward(d1, keeper, dup, branchNameById, mergeContext) {
       }
       stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
       stmts.push({ sql: 'UPDATE product_batches SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
-      foldedBatches.push({ dupBatchId: batchRow.id, keeperBatchId: existingCanonicalBatchId, dupStockBefore: dupBatchStockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })), keeperStockBefore: keeperBatchStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })) })
+      const saleAllocationIds = d1.db.prepare('SELECT id FROM sale_item_batch_allocations WHERE batch_id = ?').all(batchRow.id).map((r) => Number(r.id))
+      stmts.push({ sql: 'UPDATE sale_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
+      foldedBatches.push({ dupBatchId: batchRow.id, keeperBatchId: existingCanonicalBatchId, dupStockBefore: dupBatchStockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })), keeperStockBefore: keeperBatchStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })), saleAllocationIds })
     } else {
       stmts.push({ sql: 'UPDATE product_batches SET variant_product_id = @canonicalId, batch_number = @batchNumber, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { canonicalId, batchNumber: nextCanonicalBatchNumber, id: batchRow.id } })
       canonicalBatchIdByKey.set(batchRow.batch_key, batchRow.id)
@@ -184,6 +300,7 @@ function fingerprint(d1, keeperId, dupId, batchIds) {
     product_batches: q(`SELECT id, variant_product_id, batch_number, is_active FROM product_batches WHERE id IN ${bids} ORDER BY id`),
     branch_batch_stock: q(`SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN ${bids} ORDER BY batch_id, branch_id`),
     sale_items: q(`SELECT id, product_id FROM sale_items WHERE product_id IN ${ids} ORDER BY id`),
+    sale_allocations: q(`SELECT id, sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE batch_id IN ${bids} ORDER BY id`),
     // Only the historical (non-adjustment) movements carry stable identity;
     // the fold's 'adjustment' rows are ephemeral markers that redo legitimately
     // regenerates with fresh ids (asserted by count, not identity).
@@ -210,6 +327,105 @@ function fingerprintMany(d1, productIds, batchIds) {
   }
 }
 
+// Reference implementation of the pre-batching merge fingerprint. Keeping
+// this serial in the test proves that fewer adapter calls do not change the
+// optimistic-CAS bytes, row ordering, or the set of protected rows.
+async function serialMergeStateFingerprint(d1, reversals, reparentTables) {
+  const chunks = (values, size = 80) => {
+    const out = []
+    for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size))
+    return out
+  }
+  const intIds = (values) => (Array.isArray(values) ? values : [])
+    .map(Number).filter((value) => Number.isInteger(value) && value > 0)
+  const all = (sql, params = []) => d1.prepare(sql).all(params)
+  const productIds = [...new Set(reversals.flatMap((row) => [Number(row.keeperId), Number(row.dupId)])
+    .filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
+  if (!productIds.length) return ''
+
+  const products = [], branchStock = [], batches = [], movementHeads = []
+  for (const ids of chunks(productIds)) {
+    const placeholders = ids.map(() => '?').join(',')
+    products.push(...all(`SELECT * FROM products WHERE id IN (${placeholders})`, ids))
+    branchStock.push(...all(`SELECT product_id, branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id IN (${placeholders})`, ids))
+    batches.push(...all(`SELECT id, variant_product_id, batch_key, batch_number, is_active FROM product_batches WHERE variant_product_id IN (${placeholders})`, ids))
+    movementHeads.push(...all(`SELECT product_id, MAX(id) AS max_id, COUNT(*) AS row_count FROM inventory_movements WHERE product_id IN (${placeholders}) GROUP BY product_id`, ids))
+  }
+  const savedBatchIds = reversals.flatMap((row) => [
+    ...(row.repointedBatches || []).map((batch) => Number(batch.id)),
+    ...(row.foldedBatches || []).flatMap((batch) => [Number(batch.dupBatchId), Number(batch.keeperBatchId)]),
+    ...(row.writtenOffBatches || []).map((batch) => Number(batch.batchId)),
+  ])
+  const batchIds = [...new Set([...batches.map((batch) => Number(batch.id)), ...savedBatchIds]
+    .filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
+  const batchStock = []
+  for (const ids of chunks(batchIds)) {
+    batchStock.push(...all(`SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN (${ids.map(() => '?').join(',')})`, ids))
+  }
+  const productImages = [], stockSessions = []
+  for (const ids of chunks(productIds)) {
+    const placeholders = ids.map(() => '?').join(',')
+    productImages.push(...all(`SELECT * FROM product_images WHERE product_id IN (${placeholders})`, ids))
+    stockSessions.push(...all(`SELECT * FROM stock_session_members WHERE product_id IN (${placeholders})`, ids))
+  }
+  const adjustmentRows = []
+  for (const reversal of reversals) {
+    if (reversal.adjustmentMovementMarker) {
+      adjustmentRows.push(...all('SELECT * FROM inventory_movements WHERE product_id=? AND reason LIKE ?', [reversal.keeperId, `%${reversal.adjustmentMovementMarker}%`]))
+    } else {
+      for (const ids of chunks(intIds(reversal.adjustmentMovementIds))) {
+        adjustmentRows.push(...all(`SELECT * FROM inventory_movements WHERE id IN (${ids.map(() => '?').join(',')})`, ids))
+      }
+    }
+  }
+  const linkedRows = {}
+  for (const entry of reparentTables) {
+    const ids = [...new Set(reversals.flatMap((row) => (row.reparentedByTable || [])
+      .filter((saved) => saved.table === entry.table && saved.column === entry.column)
+      .flatMap((saved) => intIds(saved.ids))))]
+    if (!ids.length) continue
+    const rows = []
+    for (const group of chunks(ids)) rows.push(...all(`SELECT * FROM ${entry.table} WHERE id IN (${group.map(() => '?').join(',')})`, group))
+    linkedRows[`${entry.table}.${entry.column}`] = rows
+  }
+  const promotionIds = [...new Set(reversals.flatMap((row) => (row.promotionRulesBefore || []).map((item) => Number(item.id)))
+    .filter((id) => Number.isInteger(id) && id > 0))]
+  const promotionRules = []
+  for (const ids of chunks(promotionIds)) promotionRules.push(...all(`SELECT * FROM promotion_rules WHERE id IN (${ids.map(() => '?').join(',')})`, ids))
+  const childIds = [...new Set(reversals.flatMap((row) => intIds(row.reparentedChildProductIds)))]
+  const childProducts = []
+  for (const ids of chunks(childIds)) childProducts.push(...all(`SELECT id,parent_id,updated_at FROM products WHERE id IN (${ids.map(() => '?').join(',')})`, ids))
+  const allocationIds = {
+    sale: [...new Set(reversals.flatMap((row) => (row.foldedBatches || []).flatMap((batch) => intIds(batch.saleAllocationIds))))],
+    returns: [...new Set(reversals.flatMap((row) => (row.foldedBatches || []).flatMap((batch) => intIds(batch.returnAllocationIds))))],
+  }
+  const saleAllocations = [], returnAllocations = []
+  for (const ids of chunks(allocationIds.sale)) saleAllocations.push(...all(`SELECT * FROM sale_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`, ids))
+  for (const ids of chunks(allocationIds.returns)) returnAllocations.push(...all(`SELECT * FROM return_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`, ids))
+
+  const byNumbers = (keys) => (left, right) => {
+    for (const key of keys) {
+      const difference = Number(left[key]) - Number(right[key])
+      if (difference) return difference
+    }
+    return 0
+  }
+  products.sort(byNumbers(['id']))
+  branchStock.sort(byNumbers(['product_id', 'branch_id']))
+  batches.sort(byNumbers(['id']))
+  batchStock.sort(byNumbers(['batch_id', 'branch_id']))
+  movementHeads.sort(byNumbers(['product_id']))
+  adjustmentRows.sort(byNumbers(['id']))
+  productImages.sort(byNumbers(['id']))
+  stockSessions.sort((a, b) => String(a.operation_id).localeCompare(String(b.operation_id)) || Number(a.product_id) - Number(b.product_id))
+  promotionRules.sort(byNumbers(['id']))
+  childProducts.sort(byNumbers(['id']))
+  saleAllocations.sort(byNumbers(['id']))
+  returnAllocations.sort(byNumbers(['id']))
+  for (const rows of Object.values(linkedRows)) rows.sort(byNumbers(['id']))
+  return JSON.stringify({ products, branchStock, batches, batchStock, movementHeads, adjustmentRows, productImages, stockSessions, linkedRows, promotionRules, childProducts, saleAllocations, returnAllocations })
+}
+
 let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`  ✓ ${name}`) }
 
@@ -233,6 +449,7 @@ async function run() {
   run1(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (5000,1,5),(5001,1,4),(5001,2,2),(5002,3,7)`)
   run1(`INSERT INTO sales (id) VALUES (900),(901)`)
   run1(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity) VALUES (700,900,200,'Dup',1),(701,900,200,'Dup',2),(702,901,200,'Dup',1)`)
+  run1(`INSERT INTO sale_item_batch_allocations (id, sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (750,700,5001,1,1,0)`)
   run1(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, movement_type, quantity, reason) VALUES (800,200,'Dup',1,'sale',-1,'legacy'),(801,200,'Dup',3,'received',7,'legacy')`)
 
   const branchNameById = new Map([[1, 'B1'], [2, 'B2'], [3, 'B3']])
@@ -255,10 +472,25 @@ async function run() {
     assert.equal(reversal.imagesMovedToKeeper.length, 2)
     assert.equal(reversal.repointedBatches.length, 1)
     assert.equal(reversal.foldedBatches.length, 1)
+    assert.equal(d1.db.prepare('SELECT batch_id FROM sale_item_batch_allocations WHERE id=750').get().batch_id, KB, 'historical allocation follows the active keeper lot')
     assert.equal(reversal.adjustmentMovementIds.length, 2)
   })
 
   const F1 = fingerprint(d1, KEEPER, DUP, BATCH_IDS)
+
+  await check('batched merge fingerprint is byte-equivalent to the serial CAS fingerprint', async () => {
+    const serial = await serialMergeStateFingerprint(d1, [reversal], undo.MERGE_REPARENT_TABLES)
+    const before = undo.__testReadBatches.length
+    const batched = await undo.mergeStateFingerprint(undo.__testDbAdapter, [reversal])
+    assert.equal(batched, serial)
+    assert.equal(undo.__testReadBatches.length, before + 1, 'the complete fingerprint uses one adapter batch')
+    for (const statement of undo.__testReadBatches.at(-1)) {
+      const bindCount = Array.isArray(statement.params)
+        ? statement.params.length
+        : Object.keys(statement.params || {}).length
+      assert.ok(bindCount <= 80, `fingerprint statement exceeded 80 binds: ${bindCount}`)
+    }
+  })
 
   await check('recordMergeUndoSnapshot stores the snapshot + a small action_history row (real code, 0097 table)', async () => {
     const rec = await undo.recordMergeUndoSnapshot({}, { id: 42, name: 'Merger' }, reversal)
@@ -307,19 +539,50 @@ async function run() {
     )
   })
 
+  await check('post-commit history lookup failure returns a stable pending reconciliation receipt', async () => {
+    const operationId = 'committed-merge-overload'
+    const result = await undo.finalizeAtomicMergeHistory({}, operationId, reversal, {
+      prepare: () => ({
+        get: async () => { throw new Error('D1_ERROR: D1 DB is overloaded. Requests queued for too long.') },
+      }),
+      batch: async () => { throw new Error('finalization batch must not run after lookup failure') },
+    })
+    assert.deepEqual(result, {
+      operationId,
+      committed: true,
+      snapshotId: null,
+      actionHistoryId: null,
+      historyResolved: false,
+      fingerprintReady: false,
+    })
+  })
+
   // ---- Source guards: the REAL fold in products.ts must emit the same shape ----
   const productsSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
   const appliersSrc = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
+  const snapshotSrc = fs.readFileSync(path.join(LIB_DIR, 'productMergeSnapshot.ts'), 'utf8')
 
   await check('products.ts fold re-parents sale_items + inventory_movements and captures their ids', async () => {
-    assert.match(productsSrc, /UPDATE sale_items SET product_id = @canonicalId WHERE product_id = @dupId/)
-    assert.match(productsSrc, /UPDATE inventory_movements SET product_id = @canonicalId WHERE product_id = @dupId/)
-    assert.match(productsSrc, /const reparentedSaleItemIds =/)
-    assert.match(productsSrc, /const reparentedMovementIds =/)
-    assert.match(productsSrc, /rfid_confirmed_qty FROM branch_stock WHERE product_id = @id/)
+    // The batched snapshot must still be driven by MERGE_REPARENT_TABLES (the
+    // one list undoAppliers.ts and the fold share), and the route may only
+    // replay the exact ids returned by that snapshot.
+    assert.match(productsSrc, /UPDATE \$\{table\} SET \$\{column\} = @canonicalId WHERE \$\{column\} = @dupId/)
+    assert.match(productsSrc, /readProductMergeCaseSnapshot\(db, canonicalId, dup\.id, MERGE_REPARENT_TABLES\)/)
+    assert.match(productsSrc, /const reparentedByTable = snapshot\.reparentedByTable/)
+    assert.match(productsSrc, /for \(const \{ table, column, ids \} of reparentedByTable\)/)
+    assert.match(snapshotSrc, /\.\.\.reparentTables\.map\(\(\{ table, column \}, index\) =>/)
+    assert.match(snapshotSrc, /sql: `SELECT id FROM \$\{table\} WHERE \$\{column\} = @id`/)
+    assert.match(appliersSrc, /\{ table: 'sale_items', column: 'product_id' \}/)
+    assert.match(appliersSrc, /\{ table: 'inventory_movements', column: 'product_id' \}/)
+    assert.match(productsSrc, /const reparentedSaleItemIds = byTable\('sale_items'\)/)
+    assert.match(productsSrc, /const reparentedMovementIds = byTable\('inventory_movements'\)/)
+    assert.match(snapshotSrc, /rfid_confirmed_qty FROM branch_stock WHERE product_id = @id/)
     assert.match(productsSrc, /const adjustmentMovementIds =/)
     assert.match(productsSrc, /registerMergeFold\(foldDuplicateProductInto\)/)
-    assert.match(productsSrc, /recordMergeUndoSnapshot\(c\.env, user, stats\.reversal\)/)
+    assert.match(productsSrc, /buildAtomicMergeHistoryStatements\(user, reversal, atomicHistory\.operationId, auditDetails\)/)
+    assert.match(productsSrc, /await finalizeAtomicMergeHistory\(env, atomicHistory\.operationId, reversal, db\)/)
+    assert.match(appliersSrc, /VALUES\('products','product',@entityId,@label,@undoLabel,@redoLabel,0,'recorded'/)
+    assert.match(appliersSrc, /UPDATE action_history SET reversible=1,status='undoable'/)
   })
 
   await check('undoAppliers.ts undo preserves keeper rfid (UPDATE qty, not delete+reinsert) and gates on merge_duplicates', async () => {
@@ -327,8 +590,177 @@ async function run() {
     assert.match(appliersSrc, /INSERT INTO branch_stock \(product_id, branch_id, quantity, rfid_confirmed_qty\)/)
     assert.match(appliersSrc, /action: 'merge_duplicates'/)
     assert.match(appliersSrc, /DELETE FROM inventory_movements WHERE id IN/)
+    assert.match(productsSrc, /UPDATE sale_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId/)
+    assert.match(productsSrc, /UPDATE return_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId/)
+    assert.match(appliersSrc, /This merge has later stock or batch activity/)
   })
 
+  await check('image-denied image-free undo omits image SQL and preserves a concurrent keeper cover', async () => {
+    const statement = undo.mergeKeeperRestoreStatement({
+      keeperId: KEEPER,
+      dupId: DUP,
+      keeperImagePathBefore: null,
+      dupImagesBefore: [],
+      imagesMovedToKeeper: [],
+    }, false)
+    assert.doesNotMatch(statement.sql, /image_path/)
+    assert.equal(Object.prototype.hasOwnProperty.call(statement.params, 'path'), false)
+    d1.db.prepare("UPDATE products SET image_path='/uploads/concurrent.png' WHERE id=?").run(KEEPER)
+    d1.db.prepare(statement.sql).run(statement.params)
+    assert.equal(d1.db.prepare('SELECT image_path FROM products WHERE id=?').get(KEEPER).image_path, '/uploads/concurrent.png')
+  })
+
+  await check('reviewed merge undo restores the optional exact keeper catalog before-image', async () => {
+    const statement = undo.mergeKeeperRestoreStatement({
+      keeperId: KEEPER,
+      dupId: DUP,
+      keeperImagePathBefore: null,
+      dupImagesBefore: [],
+      imagesMovedToKeeper: [],
+      keeperCatalogBefore: {
+        category: 'Before category', categories: '["Before category"]',
+        brand: '', brands: '[]', unit: 'box', unit_normalized: 'box', brand_compact: '',
+      },
+    }, false)
+    assert.match(statement.sql, /category=@category,categories=@categories,brand=@brand,brands=@brands,unit=@unit,unit_normalized=@unitNormalized,brand_compact=@brandCompact/)
+    d1.db.prepare(statement.sql).run(statement.params)
+    const keeper = d1.db.prepare('SELECT category,categories,brand,brands,unit,unit_normalized,brand_compact FROM products WHERE id=?').get(KEEPER)
+    assert.deepEqual({ ...keeper }, {
+      category: 'Before category', categories: '["Before category"]', brand: '', brands: '[]',
+      unit: 'box', unit_normalized: 'box', brand_compact: '',
+    })
+  })
+
+  await check('undo refuses a merge after later stock activity', async () => {
+    await applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'redo' })
+    run1('UPDATE branch_stock SET quantity = quantity + 1 WHERE product_id = @productId AND branch_id = @branchId', { productId: KEEPER, branchId: B1 })
+    await assert.rejects(
+      applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' }),
+      /later stock or batch activity/,
+    )
+    assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=?').get(DUP).is_active, 0, 'refusal mutates nothing')
+  })
+
+}
+
+// A bounded bulk cluster may be applied one duplicate at a time, but its cost
+// is resolved once from every original member. Redo must therefore replay the
+// saved cluster economics rather than average the keeper's restored 4 with the
+// current duplicate's 5 (which would drift to 4.5 and lose the original 6).
+async function runSavedClusterEconomics() {
+  console.log('\n-- saved bulk-cluster economics across undo/redo --')
+  const d1 = openDb(loadAll())
+  const undo = loadUndoAppliers(d1)
+  const productMerge = loadRealProductMerge()
+  const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
+
+  run1(`INSERT INTO products (
+    id, name, barcode, is_active,
+    selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr,
+    cost_price_usd, cost_price_khr, stock_quantity
+  ) VALUES
+    (1,'Planned Item','PLAN-1',1,10,41000,9,36900,4,4000,0),
+    (2,'Planned Item','PLAN-1',1,10,41000,9,36900,5,5000,0),
+    (3,'Planned Item','PLAN-1',1,10,41000,9,36900,6,6000,0)`)
+
+  const planRows = d1.db.prepare(`
+    SELECT id, updated_at,
+           selling_price_usd, selling_price_khr,
+           wholesale_price_usd, wholesale_price_khr,
+           cost_price_usd, cost_price_khr
+      FROM products
+     WHERE id IN (1,2,3)
+     ORDER BY id
+  `).all()
+  const clusterPlan = productMerge.createProductMergeClusterPlan('planned item\u0001plan-1', 1, planRows)
+  const plannedEconomics = productMerge.resolveProductMergeClusterPlanEconomics(clusterPlan)
+  assert.equal(plannedEconomics.merged.cost_price_usd, 5)
+  assert.equal(plannedEconomics.merged.cost_price_khr, 5000)
+
+  const observedRedoCosts = []
+  const foldWithEconomics = async (_env, _db, _user, keeper, dup, branchNameById, ctx, _stockDisposition, economicsOverride) => {
+    const before = d1.db.prepare(`
+      SELECT selling_price_usd, selling_price_khr,
+             wholesale_price_usd, wholesale_price_khr,
+             cost_price_usd, cost_price_khr
+        FROM products WHERE id = ?
+    `).get(keeper.id)
+    const result = await foldForward(d1, keeper, dup, branchNameById, ctx)
+    const economics = economicsOverride || productMerge.resolveProductMergeEconomics([
+      { id: keeper.id, ...before },
+      d1.db.prepare(`
+        SELECT id, selling_price_usd, selling_price_khr,
+               wholesale_price_usd, wholesale_price_khr,
+               cost_price_usd, cost_price_khr
+          FROM products WHERE id = ?
+      `).get(dup.id),
+    ])
+    if (economicsOverride) observedRedoCosts.push(economics.merged.cost_price_usd)
+    run1(`UPDATE products
+             SET selling_price_usd=@sellingUsd,
+                 selling_price_khr=@sellingKhr,
+                 wholesale_price_usd=@wholesaleUsd,
+                 wholesale_price_khr=@wholesaleKhr,
+                 cost_price_usd=@costUsd,
+                 cost_price_khr=@costKhr,
+                 updated_at=CURRENT_TIMESTAMP
+           WHERE id=@id`, {
+      id: keeper.id,
+      sellingUsd: economics.merged.selling_price_usd ?? before.selling_price_usd,
+      sellingKhr: economics.merged.selling_price_khr ?? before.selling_price_khr,
+      wholesaleUsd: economics.merged.wholesale_price_usd ?? before.wholesale_price_usd,
+      wholesaleKhr: economics.merged.wholesale_price_khr ?? before.wholesale_price_khr,
+      costUsd: economics.merged.cost_price_usd ?? before.cost_price_usd,
+      costKhr: economics.merged.cost_price_khr ?? before.cost_price_khr,
+    })
+    result.reversal.keeperPricingBefore = {
+      selling_price_usd: Number(before.selling_price_usd),
+      selling_price_khr: Number(before.selling_price_khr),
+      wholesale_price_usd: Number(before.wholesale_price_usd),
+      wholesale_price_khr: Number(before.wholesale_price_khr),
+      cost_price_usd: Number(before.cost_price_usd),
+      cost_price_khr: Number(before.cost_price_khr),
+    }
+    return result
+  }
+  undo.registerMergeFold(foldWithEconomics)
+
+  const first = await foldWithEconomics(
+    {}, undo.__testDbAdapter, { id: 42 },
+    { id: 1, name: 'Planned Item' },
+    { id: 2, name: 'Planned Item', image_path: null },
+    new Map(), 'bounded duplicate cleanup', 'merge', plannedEconomics,
+  )
+  first.reversal.bulkClusterPlan = clusterPlan
+  const recorded = await undo.recordMergeUndoSnapshot({}, { id: 42, name: 'Merger' }, first.reversal)
+  const applier = undo.resolveUndoApplier({ applier: 'product.merge', snapshot_id: recorded.snapshotId })
+  assert.ok(applier, 'product.merge applier must resolve for a planned cluster fold')
+  observedRedoCosts.length = 0
+
+  await check('4/5/6 cluster redo keeps the original mean at 5 across repeated undo/redo', async () => {
+    assert.equal(d1.db.prepare('SELECT cost_price_usd FROM products WHERE id=1').get().cost_price_usd, 5)
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      await applier.run(
+        { applier: 'product.merge', snapshot_id: recorded.snapshotId },
+        { env: {}, user: { id: 42 }, direction: 'undo' },
+      )
+      assert.equal(d1.db.prepare('SELECT cost_price_usd FROM products WHERE id=1').get().cost_price_usd, 4)
+      assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 1)
+
+      await applier.run(
+        { applier: 'product.merge', snapshot_id: recorded.snapshotId },
+        { env: {}, user: { id: 42 }, direction: 'redo' },
+      )
+      const redone = d1.db.prepare('SELECT cost_price_usd, cost_price_khr FROM products WHERE id=1').get()
+      assert.equal(redone.cost_price_usd, 5)
+      assert.notEqual(redone.cost_price_usd, 4.5)
+      assert.equal(redone.cost_price_khr, 5000)
+      const saved = JSON.parse(d1.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(recorded.snapshotId).payload_json)
+      assert.deepEqual(saved.bulkClusterPlan, clusterPlan, 'redo snapshot must retain the immutable original cluster plan')
+    }
+    assert.deepEqual(observedRedoCosts, [5, 5], 'every redo uses the saved 4/5/6 cluster mean')
+    assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=3').get().is_active, 1, 'the remaining cluster member is untouched')
+  })
 }
 
 // --------------------------------------------------------------------------
@@ -451,17 +883,20 @@ async function runBulk() {
     )
   })
 
-  // Source guard: the REAL bulk route must capture reversals and record them.
+  // Source guard: the real bulk route records every case with its own atomic
+  // snapshot and carries the immutable cluster plan across retries.
   const productsSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
-  await check('products.ts bulk route captures each fold reversal and records ONE composite undo', async () => {
-    assert.match(productsSrc, /const \{ reversal \} = await foldDuplicateProductInto\(/)
-    assert.match(productsSrc, /reversals\.push\(reversal\)/)
-    assert.match(productsSrc, /recordBulkMergeUndoSnapshot\(c\.env, user, reversals\)/)
+  await check('products.ts bulk route records each fold atomically and persists the retry plan', async () => {
+    assert.match(productsSrc, /const result = await foldDuplicateProductInto\(/)
+    assert.match(productsSrc, /bulkClusterPlan: clusterPlan/)
+    assert.match(productsSrc, /readAppliedBulkClusterPlan/)
+    assert.match(productsSrc, /buildAtomicMergeHistoryStatements\(user, reversal, atomicHistory\.operationId, auditDetails\)/)
   })
 }
 
 async function main() {
   await run()
+  await runSavedClusterEconomics()
   await runBulk()
   console.log(`\n${passed} check(s) passed.`)
 }

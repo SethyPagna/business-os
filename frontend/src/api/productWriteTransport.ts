@@ -1,10 +1,263 @@
 import { apiFetch, cacheInvalidate, route } from './http.ts'
-import { getLocalDb } from './lazyLocalDb.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import type { SelectedConflictGroupFinalizeRequest, SelectedConflictGroupReviewRequest } from '../utils/selectedConflictActionReview.ts'
 
 type ProductPayload = ExpectedUpdatedAtPayload
+
+export type MergeDuplicateProductsChunkResult = {
+  success: boolean
+  complete: boolean
+  blockedOnly?: boolean
+  interrupted?: boolean
+  interruptionCode?: 'merge_budget_reached' | 'merge_infrastructure_interrupted' | null
+  error?: string
+  stalled: boolean
+  madeProgress: boolean
+  batchLimit: number
+  mergedGroups: number
+  mergedProducts: number
+  remainingProductsBefore: number
+  remainingProducts: number | null
+  remainingGroupCount: number | null
+  maxAdditionalRequests: number | null
+  requestId: string | null
+  processedCaseKeys: string[]
+  actionHistoryIds: number[]
+  mergeOperationIds: string[]
+  undoPendingOperationIds: string[]
+  undoPendingCount: number
+  refusals: Array<{ caseKey: string; keeperId: number; mergedId: number; mergedName: string | null; code: string; error: string }>
+}
+
+export type LeadingZeroMergeManifest = {
+  scope: 'leading_zero'
+  manifest_version: 1
+  manifest_digest: string
+  groups: Array<{ keeper_id: number; member_ids: number[] }>
+}
+
+export type MergeDuplicateProductsOptions = {
+  requestId?: string
+  signal?: AbortSignal
+  manifest?: LeadingZeroMergeManifest
+}
+
+const MERGE_DUPLICATES_CHUNK_TIMEOUT_MS = 120_000
+export const MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS = 30_000
+export const SELECTED_CONFLICT_MERGE_TIMEOUT_MS = 120_000
+
+export type SelectedConflictGroupReviewMember = {
+  id: number
+  name: string | null
+  barcode: string | null
+  category: string | null
+  brand: string | null
+  unit: string | null
+  image_path: string | null
+  updated_at: string | null
+  cost_price_usd: number | string | null
+  cost_price_khr: number | string | null
+  selling_price_usd: number | string | null
+  selling_price_khr: number | string | null
+  wholesale_price_usd: number | string | null
+  wholesale_price_khr: number | string | null
+}
+
+export type SelectedConflictGroupReviewGroup = {
+  ordinal: number
+  group_key: string
+  source_group_keys: string[]
+  member_ids: number[]
+  eligibility_basis: 'name' | 'barcode' | null
+  eligibility_value: string | null
+  members: SelectedConflictGroupReviewMember[]
+  options: {
+    barcode_source_ids: number[]
+    category_source_ids: number[]
+    brand_source_ids: number[]
+    unit_source_ids: number[]
+  }
+  economics: {
+    merged: Partial<Record<'cost_price_usd' | 'cost_price_khr' | 'selling_price_usd' | 'selling_price_khr' | 'wholesale_price_usd' | 'wholesale_price_khr', number>>
+    distinctCosts: Partial<Record<'cost_price_usd' | 'cost_price_khr', number[]>>
+    issues: Array<{ field: string; rowId: number | null; value: unknown; code: 'negative' | 'malformed' }>
+  }
+  stock: {
+    rows: Array<{ product_id: number; branch_id: number; branch_name: string | null; quantity: number }>
+    projected_by_branch: Array<{ branch_id: number; branch_name: string | null; quantity: number }>
+  }
+  lots: {
+    rows: Array<{
+      product_id: number
+      batch_id: number
+      batch_key: string
+      lot_code: string | null
+      expiry_date: string | null
+      received_at: string | null
+      is_active: number
+      notes: string | null
+      unit_cost_usd: number | null
+      received_quantity: number | null
+      received_branch_id: number | null
+      received_cost_usd: number | null
+      supplier_id: number | null
+      supplier_name: string | null
+      payment_status: string | null
+      credit_due_date: string | null
+      branch_id: number | null
+      quantity: number | null
+    }>
+    projected_quantity: number
+    count: number
+  }
+  state_digest: string
+  status?: 'actionable' | 'blocked' | 'ready' | 'partial' | 'completed' | 'refused' | 'reversed' | 'history_pending'
+  resolution?: SelectedConflictGroupFinalizeRequest['resolutions'][number] | null
+  projected_result?: { economics?: SelectedConflictGroupReviewGroup['economics']['merged'] } | null
+  blocked: null | {
+    code: 'stale_group_members' | 'incompatible_group_identity' | 'overlap_requires_selection' | 'invalid_merge_numeric'
+    message: string
+  }
+}
+
+export type SelectedConflictGroupReviewRemoval = {
+  action_ordinal: number
+  product_id: number
+  reason: string
+  status: 'reviewed' | 'blocked' | 'ready' | 'approval_pending' | 'undo_ready' | 'refused' | 'reversed'
+  operation_id: string
+  state_digest: string
+  plan_digest: string
+  blocker: null | { code: string; message: string }
+  product: Record<string, unknown> | null
+  branch_stock: Array<Record<string, unknown>>
+  batches: Array<Record<string, unknown>>
+  branch_batch_stock: Array<Record<string, unknown>>
+  source_bytes: number
+}
+
+export type SelectedConflictGroupReviewPage = {
+  cursor: string
+  next_cursor: string | null
+  limit: number
+  groups: SelectedConflictGroupReviewGroup[]
+  removals: SelectedConflictGroupReviewRemoval[]
+}
+
+export type SelectedConflictGroupReviewResult = {
+  success: true
+  manifest_version: 1
+  resolution_version: 2
+  review_id: string
+  draft_digest: string
+  manifest_digest: string | null
+  status: 'draft' | 'finalized' | 'running' | 'approval_pending' | 'completed' | 'interrupted'
+  expires_at: string
+  counts: {
+    requested_actions: number
+    requested_groups: number
+    requested_removals: number
+    actionable_groups: number
+    blocked_groups: number
+    total_members: number
+  }
+  page: SelectedConflictGroupReviewPage
+}
+
+export type SelectedConflictGroupFinalizeResult = {
+  success: true
+  manifest_version: 1
+  resolution_version: 2
+  review_id: string
+  manifest_digest: string
+  status: 'finalized'
+  counts: {
+    requested_groups: number
+    canonical_groups: number
+    ready_groups: number
+    blocked_groups: number
+    total_members: number
+    merge_folds: number
+    requested_actions?: number
+    requested_removals?: number
+    ready_removals?: number
+    blocked_removals?: number
+  }
+  summary: {
+    groups_ready: number
+    groups_blocked: number
+    image_effect_groups: number
+    removals_ready?: number
+    removals_blocked?: number
+  }
+}
+
+export type SelectedConflictGroupApplyBody = {
+  review_id: string
+  manifest_digest: string
+  client_request_id: string
+}
+
+export type SelectedConflictGroupApplyCounts = {
+  requested_actions: number
+  requested_groups: number
+  requested_removals: number
+  total_members: number
+  canonical_groups: number
+  pending_groups: number
+  partial_groups: number
+  completed_groups: number
+  refused_groups: number
+  blocked_groups: number
+  reversed_groups: number
+  history_pending_groups: number
+  undo_ready_groups: number
+  merge_folds: number
+  pending_folds: number
+  committed_folds: number
+  refused_folds: number
+  reversed_folds: number
+  removal_actions: number
+  pending_removals: number
+  approval_pending_removals: number
+  completed_removals: number
+  refused_removals: number
+  blocked_removals: number
+  reversed_removals: number
+}
+
+export type SelectedConflictGroupApplyResult = {
+  success: true
+  manifest_version: 1
+  resolution_version: 2
+  review_id: string
+  manifest_digest: string
+  status: 'running' | 'approval_pending' | 'completed' | 'interrupted'
+  continuation_required: boolean
+  approval_required: boolean
+  counts: SelectedConflictGroupApplyCounts
+  groups: Array<{
+    group_key: string
+    status: string
+    processed_folds: number
+    keeper_id?: number
+    merged_ids: number[]
+    operation_ids: string[]
+  }>
+  removals: Array<{
+    action_ordinal: number
+    product_id: number
+    status: 'undo_ready' | 'approval_pending'
+    pending_action_id?: number | null
+    action_history_id?: number | null
+    undo_availability: 'ready' | 'unavailable'
+    generation: number
+  }>
+  interruption_code?: string
+  interruption_message?: string
+}
 
 function getDevicePayload(): ProductPayload {
   return { ...getClientDeviceInfo() }
@@ -14,30 +267,8 @@ function encodeId(id: string | number): string {
   return encodeURIComponent(String(id))
 }
 
-async function ensureSupplierExists(name: unknown): Promise<void> {
-  const supplierName = String(name || '').trim()
-  if (!supplierName) return
-
-  try {
-    const db = await getLocalDb()
-    const suppliers = db.table('suppliers') as unknown as {
-      where: (field: string) => {
-        equalsIgnoreCase: (value: string) => {
-          first: () => Promise<unknown>
-        }
-      }
-    }
-    const existing = await suppliers.where('name').equalsIgnoreCase(supplierName).first()
-    if (existing) return
-
-    await apiFetch('POST', '/api/suppliers', { name: supplierName, ...getDevicePayload() })
-    cacheInvalidate('suppliers')
-  } catch (_) {}
-}
-
 export async function createProduct(payload: ProductPayload = {}): Promise<unknown> {
   const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'product')
-  await ensureSupplierExists(body.supplier)
   return route(
     'products:create',
     () => apiFetch('POST', '/api/products', body),
@@ -47,7 +278,6 @@ export async function createProduct(payload: ProductPayload = {}): Promise<unkno
 }
 
 export async function updateProduct(id: string | number, payload: ProductPayload = {}): Promise<unknown> {
-  await ensureSupplierExists(payload.supplier)
   const body = await withExpectedUpdatedAt('products', id, { ...getDevicePayload(), ...(payload || {}) })
   return route(
     'products:update',
@@ -58,7 +288,10 @@ export async function updateProduct(id: string | number, payload: ProductPayload
 }
 
 export async function deleteProduct(id: string | number, reason?: string): Promise<unknown> {
-  const payload = await withExpectedUpdatedAt('products', id, { reason: reason ?? '' })
+  const payload = ensureClientRequestId(
+    await withExpectedUpdatedAt('products', id, { reason: reason ?? '' }),
+    'product-remove',
+  )
   return route(
     'products:delete',
     () => apiFetch('DELETE', `/api/products/${encodeId(id)}`, payload),
@@ -118,13 +351,19 @@ export function createProductVariant(payload: ProductPayload = {}): Promise<unkn
 // routes/products.ts's POST /merge-duplicates, for the full identity rule
 // and why import alone never catches this). Not tied to any one product --
 // scans the whole catalog server-side, so no payload needed.
-export function mergeDuplicateProducts(): Promise<unknown> {
+export function mergeDuplicateProducts(options: MergeDuplicateProductsOptions = {}): Promise<MergeDuplicateProductsChunkResult> {
+  // One request id is retained by the caller for the entire bounded run. The
+  // same body also lets apiFetch share an in-flight retry after a double tap.
+  const body = ensureClientRequestId({
+    ...(options.manifest || getDevicePayload()),
+    client_request_id: options.requestId,
+  }, 'product-merge')
   return route(
     'products:mergeDuplicates',
-    () => apiFetch('POST', '/api/products/merge-duplicates'),
+    () => apiFetch('POST', '/api/products/merge-duplicates', body, MERGE_DUPLICATES_CHUNK_TIMEOUT_MS, { signal: options.signal }),
     null,
     true,
-  )
+  ) as Promise<MergeDuplicateProductsChunkResult>
 }
 
 // Read-only dry run for the endpoint above (GET /api/products/merge-
@@ -134,8 +373,9 @@ export function mergeDuplicateProducts(): Promise<unknown> {
 // machinery the way mergeDuplicateProducts() above is: this never mutates
 // anything, so there's nothing to replay if it fails offline -- a plain
 // apiFetch that the modal can just retry is the right shape for a GET.
-export function previewMergeDuplicateProducts(): Promise<unknown> {
-  return apiFetch('GET', '/api/products/merge-duplicates/preview')
+export function previewMergeDuplicateProducts(options: { signal?: AbortSignal; scope?: 'leading_zero' } = {}): Promise<unknown> {
+  const suffix = options.scope === 'leading_zero' ? '?scope=leading_zero' : ''
+  return apiFetch('GET', `/api/products/merge-duplicates/preview${suffix}`, undefined, MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS, { signal: options.signal })
 }
 
 // Products → Duplicates review section ("possibly the same" residue --
@@ -149,7 +389,7 @@ export function getPossiblySameProducts(): Promise<unknown> {
   return apiFetch('GET', '/api/products/possible-duplicates')
 }
 
-export function dismissProductDuplicateCluster(type: 'barcode' | 'name' | 'similar', value: string): Promise<unknown> {
+export function dismissProductDuplicateCluster(type: 'leadingzero' | 'barcode' | 'name' | 'similar', value: string): Promise<unknown> {
   return route(
     'products:dismissDuplicateCluster',
     () => apiFetch('POST', '/api/products/possible-duplicates/dismiss', { type, value }),
@@ -158,13 +398,105 @@ export function dismissProductDuplicateCluster(type: 'barcode' | 'name' | 'simil
   )
 }
 
-export function mergePossiblySameProducts(keepId: number | string, mergeId: number | string): Promise<unknown> {
+// Read-only dry run behind every "keep this one" decision: what the row being
+// discarded still holds (per branch, per lot) and whether the merge would move
+// the keeper's prices. Callers open the confirm dialog with these numbers, so
+// the operator answers with the facts in view. Plain apiFetch -- it writes
+// nothing and is safe to repeat.
+export function getMergePreview(keepId: number | string, mergeId: number | string): Promise<unknown> {
+  const query = `keepId=${encodeURIComponent(String(keepId))}&mergeId=${encodeURIComponent(String(mergeId))}`
+  return apiFetch('GET', `/api/products/possible-duplicates/merge-preview?${query}`)
+}
+
+// `stock` is the operator's answer for the discarded row's remaining stock:
+// 'merge' moves every lot onto the keeper keeping its batch and branch, and
+// 'write_off' zeroes them against a balancing ledger entry. It is deliberately
+// NOT defaulted here: the server refuses a stocked row with no answer (400
+// stock_choice_required) rather than guessing, and a default in the transport
+// would quietly reinstate exactly the silent behaviour that was wrong.
+export function mergePossiblySameProducts(
+  keepId: number | string,
+  mergeId: number | string,
+  stock?: 'merge' | 'write_off',
+): Promise<unknown> {
   return route(
     'products:mergePossiblySame',
-    () => apiFetch('POST', '/api/products/possible-duplicates/merge', { keepId, mergeId }),
+    () => apiFetch('POST', '/api/products/possible-duplicates/merge', stock ? { keepId, mergeId, stock } : { keepId, mergeId }),
     null,
     true,
   )
+}
+
+export function createSelectedConflictGroupReview(
+  body: SelectedConflictGroupReviewRequest,
+  options: { signal?: AbortSignal } = {},
+): Promise<SelectedConflictGroupReviewResult> {
+  return apiFetch(
+    'POST',
+    '/api/products/possible-duplicates/merge-batch/preview',
+    body,
+    MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS,
+    { signal: options.signal },
+  ) as Promise<SelectedConflictGroupReviewResult>
+}
+
+export function getSelectedConflictGroupReviewPage(
+  reviewId: string,
+  cursor: string,
+  limit = 50,
+  options: { signal?: AbortSignal } = {},
+): Promise<SelectedConflictGroupReviewResult> {
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(Number(limit) || 50)))
+  const safeCursor = /^\d+$/.test(String(cursor)) ? String(cursor) : '0'
+  return apiFetch(
+    'GET',
+    `/api/products/possible-duplicates/merge-batch/reviews/${encodeId(reviewId)}?cursor=${encodeURIComponent(safeCursor)}&limit=${safeLimit}`,
+    undefined,
+    MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS,
+    { signal: options.signal },
+  ) as Promise<SelectedConflictGroupReviewResult>
+}
+
+export function finalizeSelectedConflictGroupReview(
+  reviewId: string,
+  body: SelectedConflictGroupFinalizeRequest,
+  options: { signal?: AbortSignal } = {},
+): Promise<SelectedConflictGroupFinalizeResult> {
+  return apiFetch(
+    'POST',
+    `/api/products/possible-duplicates/merge-batch/reviews/${encodeId(reviewId)}/finalize`,
+    body,
+    SELECTED_CONFLICT_MERGE_TIMEOUT_MS,
+    { signal: options.signal },
+  ) as Promise<SelectedConflictGroupFinalizeResult>
+}
+
+export function makeSelectedConflictGroupApplyBody(
+  finalized: Pick<SelectedConflictGroupFinalizeResult, 'review_id' | 'manifest_digest'>,
+): SelectedConflictGroupApplyBody {
+  return {
+    review_id: finalized.review_id,
+    manifest_digest: finalized.manifest_digest,
+    client_request_id: finalized.review_id,
+  }
+}
+
+export async function applySelectedConflictGroupReview(
+  body: SelectedConflictGroupApplyBody,
+  options: { signal?: AbortSignal } = {},
+): Promise<SelectedConflictGroupApplyResult> {
+  try {
+    return await apiFetch(
+      'POST',
+      '/api/products/possible-duplicates/merge-batch',
+      body,
+      SELECTED_CONFLICT_MERGE_TIMEOUT_MS,
+      { signal: options.signal },
+    ) as SelectedConflictGroupApplyResult
+  } finally {
+    cacheInvalidate('products')
+    cacheInvalidate('inventory')
+  }
 }
 
 // Zero-quantity product cleanup (progress.md part 91's full spec, part 97

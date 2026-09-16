@@ -1,0 +1,161 @@
+// The one matching rule behind every "type or select" catalog field
+// (Category, Brand, Unit, Supplier, and the create-form Name lookup).
+//
+// Root cause this module exists for (owner report, 2026-09-06: "categories
+// still does not show the available options when i write"): each field grew
+// its OWN inline matcher inside the component that rendered it, and they
+// disagreed on the one case that matters most -- an EMPTY query.
+// ProductForm's supplier field computed
+//     const supplierMatches = form.supplier ? supplierList.filter(...) : []
+// so focusing the field with nothing typed produced zero rows and no
+// dropdown at all: the operator had to guess a first letter before the app
+// would admit it knew any suppliers. The Category/Brand/Unit matcher next to
+// it did the opposite (empty query => every option). One rule, one
+// implementation: an empty query means "show me everything", because that is
+// exactly the moment the operator does not know what exists.
+//
+// Kept JSX-free and dependency-free so `node tests/suggestionMatching.test.ts`
+// can exercise the real logic instead of a copy of it.
+
+export type SuggestionOption = {
+  /** The text that lands in the input when this row is picked. */
+  value: string
+  /** Stable React key / dom id fragment. Defaults to the lowercased value. */
+  key?: string
+  /** Secondary line shown under the value (barcode, brand, company...). */
+  meta?: string
+  /** Renders a check mark: this row is the currently linked record. */
+  selected?: boolean
+  /** Opaque payload handed back to onChange so a pick can carry an id. */
+  payload?: unknown
+}
+
+export type SuggestionFilterMode = 'substring' | 'none'
+
+export type BuildSuggestionMatchesOptions = {
+  /**
+   * 'substring' (default) filters client-side on the typed text.
+   * 'none' is for lists the SERVER already narrowed -- the create-form Name
+   * lookup searches by name AND barcode, so re-filtering its rows against
+   * the typed name would silently drop every barcode hit.
+   */
+  filter?: SuggestionFilterMode
+  limit?: number
+}
+
+const DEFAULT_LIMIT = 50
+
+/**
+ * Trim, drop blanks, and de-duplicate case-insensitively (first spelling
+ * wins). Imported catalog data carries "Ariana" and "ARIANA" as two rows;
+ * a plain Set would show both and they look identical on screen.
+ */
+export function normalizeSuggestionOptions(
+  options: ReadonlyArray<string | SuggestionOption | null | undefined> = [],
+): SuggestionOption[] {
+  const seen = new Set<string>()
+  const unique: SuggestionOption[] = []
+  for (const raw of options || []) {
+    if (raw === null || raw === undefined) continue
+    const option: SuggestionOption = typeof raw === 'string' ? { value: raw } : raw
+    const value = String(option?.value ?? '').trim()
+    if (!value) continue
+    const dedupeKey = String(option?.key ?? value).toLowerCase()
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+    unique.push({
+      value,
+      key: option.key ? String(option.key) : value.toLowerCase(),
+      meta: option.meta ? String(option.meta) : undefined,
+      selected: option.selected === true,
+      payload: option.payload,
+    })
+  }
+  return unique
+}
+
+/**
+ * The rows a suggestion field should show for the currently typed text.
+ * An empty/whitespace query returns every option -- see the header note.
+ */
+export function buildSuggestionMatches(
+  options: ReadonlyArray<string | SuggestionOption | null | undefined> = [],
+  query = '',
+  { filter = 'substring', limit = DEFAULT_LIMIT }: BuildSuggestionMatchesOptions = {},
+): SuggestionOption[] {
+  const normalizedQuery = String(query ?? '').trim().toLowerCase()
+  const unique = normalizeSuggestionOptions(options)
+  const matched = (filter === 'none' || !normalizedQuery)
+    ? unique
+    : unique.filter((option) => (
+      option.value.toLowerCase().includes(normalizedQuery)
+      || String(option.meta || '').toLowerCase().includes(normalizedQuery)
+    ))
+  return limit > 0 ? matched.slice(0, limit) : matched
+}
+
+/**
+ * Keyboard cursor movement inside an open list. -1 means "nothing
+ * highlighted"; ArrowDown from there lands on the first row, ArrowUp on the
+ * last, and both ends wrap so a long list is reachable from either side.
+ */
+export function nextSuggestionIndex(current: number, count: number, delta: number): number {
+  if (count <= 0) return -1
+  if (current < 0) return delta > 0 ? 0 : count - 1
+  return ((current + delta) % count + count) % count
+}
+
+/**
+ * How long after a pick a click still belongs to the SAME pointer gesture.
+ * One tap dispatches touchstart -> touchend -> mousedown -> mouseup -> click,
+ * and the whole sequence lands well inside this window.
+ */
+export const PICK_GESTURE_WINDOW_MS = 400
+
+/**
+ * Whether the click on a suggestion row should pick it.
+ *
+ * A row picks on MOUSEDOWN, because that is what beats the input's blur --
+ * on mouse and on touch alike: a tap's synthetic mousedown is dispatched
+ * before the focus change, which is why SupplierPickerField's mousedown-only
+ * picker has always worked on its four touch surfaces. Handling touchstart
+ * instead is worse than redundant: preventDefault there cancels the gesture
+ * before the browser has decided whether it was a tap or a scroll, so
+ * dragging a long list selects whichever row the finger first touched.
+ *
+ * Click remains as the fallback for a browser that skips the synthetic
+ * mousedown (the deferred blur in SuggestionTextInput keeps the row mounted
+ * long enough for it). It must not pick twice when the mousedown of the same
+ * tap already did -- hence the window.
+ */
+export function shouldPickOnClick(lastPickAt: number, now: number): boolean {
+  if (!(lastPickAt > 0)) return true
+  return now - lastPickAt >= PICK_GESTURE_WINDOW_MS
+}
+
+/**
+ * What an open list may honestly say when it has no row to show.
+ *
+ * There are three different reasons a suggestion list is empty and only two
+ * of them have anything true to tell the operator:
+ *
+ *   'unknown'   the option source has not reported. FastStockInModal renders
+ *               ProductForm with no brandOptions at all; announcing "nothing
+ *               saved yet" there was a claim about 205 brands the field had
+ *               simply never been given. Say nothing.
+ *   'none-yet'  the source reported and holds nothing -- typing a new value
+ *               really is the only way forward.
+ *   'no-match'  the source holds values, none of which match what was typed.
+ *               "Nothing saved yet" is false here too.
+ *
+ * `sourced` is the caller's evidence that its source reported. A list fed by
+ * a prop can only prove that by being non-empty (an empty array is
+ * indistinguishable from a host whose own fetch is still in flight); a list
+ * the field fetches itself knows when the read settled.
+ */
+export type SuggestionEmptyState = 'unknown' | 'none-yet' | 'no-match'
+
+export function suggestionEmptyState(sourced: boolean, optionCount: number): SuggestionEmptyState {
+  if (!sourced) return 'unknown'
+  return optionCount > 0 ? 'no-match' : 'none-yet'
+}

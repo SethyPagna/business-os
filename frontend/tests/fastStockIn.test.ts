@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { nullableMoney4, multiplyMoney4 } from '../src/utils/moneyPrecision.ts'
 
 // F2 (Part 419): fast stock-in -- "enter batch + supplier once, then
 // per-product name→details entry; Add appends and continues, Done
@@ -39,7 +40,7 @@ runTest('F2: the shipment header is entered once and rides every line', () => {
   // F3 slice 1: initializers became draft-aware -- the saved shipment
   // header wins over a reopened-session seed; dates intentionally start
   // blank so the app never silently filters/records a preset day.
-  assert.match(modalSource, /draft\?\.receivedDate \|\| initialHeader\?\.receivedDate \|\| ''/)
+  assert.match(modalSource, /draft\?\.receivedDate \|\| initialHeader\?\.receivedDate \|\| todayStr\(\)/)
   assert.match(modalSource, /draft\?\.paymentStatus \|\| initialHeader\?\.paymentStatus \|\| 'paid'/)
   // every Add sends the header fields with the line
   assert.match(modalSource, /receivedDate: receivedDate\.trim\(\) \|\| null/)
@@ -53,13 +54,19 @@ runTest('F2: the shipment header is entered once and rides every line', () => {
 
 runTest('F2: Add queues editable lines; completion writes through the one D4 kernel', () => {
   // the shared transport is the only write path -- no parallel writes
-  assert.match(modalSource, /import \{ receiveBatchStock \} from '\.\.\/\.\.\/api\/batchesTransport\.ts'/)
+  assert.match(modalSource, /import \{ receiveBatchStock[^}]*\} from '\.\.\/\.\.\/api\/batchesTransport\.ts'/)
   assert.doesNotMatch(modalSource, /apiFetch|fetch\(/)
   assert.equal((modalSource.match(/receiveBatchStock\(/g) || []).length, 1) // exactly one call site
   assert.match(modalSource, /status: 'queued'/)
-  assert.match(modalSource, /const editLine = \(line: ReceivedLine\)/)
+  assert.match(modalSource, /(?:const editLine = \(line: ReceivedLine\)|function editLine\(line: ReceivedLine\))/)
   assert.match(modalSource, /const removeLine = \(key: string\)/)
-  assert.match(modalSource, /status: 'saved', detail: result\?\.lotCode/)
+  // N27: a saved ADD still shows its lot code; remove / set lines say what
+  // they did instead (there is no lot to name)
+  // P4-B: the per-outcome message moved into describeLineResult(line, result),
+  // reused by both the batched commit result and the sequential fallback --
+  // same ternary chain, one place instead of a copy at each call site.
+  assert.match(modalSource, /const describeLineResult = \(line: ReceivedLine, result[^)]*\): string => \(\s*line\.mode === 'remove'[^]*?: line\.mode === 'set'[^]*?: result\?\.lotCode/)
+  assert.equal((modalSource.match(/detail: describeLineResult\(line, result/g) || []).length, 2, 'both the batched-result branch and the sequential fallback report through the same function')
   assert.match(modalSource, /status: 'error', detail: message/)
   // Add clears the line and refocuses for the next product
   assert.match(modalSource, /const resetLine = \(\) => \{/)
@@ -68,8 +75,22 @@ runTest('F2: Add queues editable lines; completion writes through the one D4 ker
   assert.match(modalSource, /if \(event\.key === 'Enter'\) addLine\(\)/)
 })
 
+runTest('the same product cannot be added twice in one stock session', () => {
+  assert.match(modalSource, /findSessionProductDuplicate\(duplicateRows, candidate, editingKey\)/,
+    'selecting a duplicate redirects before another line is opened')
+  assert.match(modalSource, /findSessionProductDuplicate\(duplicateRows, picked, editingKey\)/,
+    'Add rechecks the rule immediately before queueing')
+  assert.match(modalSource, /create_products_session_duplicate', 'Duplicate: You added this item already\.'/)
+  assert.match(modalSource, /duplicate\.row\.status !== 'saved'\) editLine\(duplicate\.row\)/,
+    'queued duplicates reopen for quantity editing; saved lines remain immutable')
+  assert.match(modalSource, /sessionDuplicateCheck=\{\(candidate\) => Boolean\(findSessionProductDuplicate\(duplicateRows, candidate\)\)\}/,
+    'nested scanned-product creation sees saved and queued session lines too')
+})
+
 runTest('changed cost offers and uses the existing price-variant path', () => {
-  assert.match(modalSource, /import \{ adjustStock \} from '\.\.\/\.\.\/api\/inventoryWriteTransport\.tsx?'/)
+  // P4-B: the same import now also brings in the batched fast-stock-in
+  // commit transport (commitFastStockIn) alongside adjustStock.
+  assert.match(modalSource, /import \{ adjustStock[^}]*\} from '\.\.\/\.\.\/api\/inventoryWriteTransport\.tsx?'/)
   assert.match(modalSource, /setCreatePriceVariant\(costChanged\(picked, next\)\)/, 'a changed cost enables the safe variant choice by default')
   assert.match(modalSource, /create_price_variant.*Create\/use a price variant/, 'the choice is visible beside the edited cost')
   assert.match(modalSource, /unlockPricing: true/)
@@ -79,9 +100,33 @@ runTest('changed cost offers and uses the existing price-variant path', () => {
   assert.match(modalSource, /Total cost'\)}: \$\{sessionCostTotal\.toFixed\(2\)\}/, 'session cost stays visible above the received rows')
 })
 
+runTest('known zero catalog cost is prefetched and the two read surfaces agree on missing', () => {
+  assert.match(modalSource, /candidate\.cost_price_usd != null[\s\S]*candidate\.purchase_price_usd/)
+  assert.match(modalSource, /Number\.isFinite\(cost\) && cost >= 0/)
+  assert.match(modalSource, /tr\('cost_price_usd', 'Cost price \$'\)/)
+  assert.match(sessionsSource, /movementTotal != null && Number\.isFinite\(movementTotal\) && movementTotal >= 0/)
+  // The SQL that decides recorded-vs-missing is tested where it can be RUN,
+  // against real rows: cloudflare/scripts/test-stock-in-sessions-pure.cjs seeds
+  // a declared-$0.00 session beside an unpriced one and asserts they come back
+  // different. A regex over the query text here would only restate the
+  // implementation and would pass forever whatever the kernel then answered.
+  //
+  // What DOES belong here is the pair that can silently split: the desktop
+  // table cell and the phone card render the same figure, and the zero-cost
+  // ruling was once half-applied -- $0.00 on a phone, an em-dash on the table.
+  // Both must test for null only, and neither may go back to reading a
+  // recorded $0.00 as 'not recorded'.
+  assert.equal((sessionsSource.match(/unitCost == null \?/g) || []).length, 2,
+    'the table cell and the card must both test for null only')
+  assert.equal((sessionsSource.match(/unitCost == null \|\| Number\(unitCost\) <= 0/g) || []).length, 0,
+    'a recorded $0.00 unit cost is a cost, on both surfaces')
+})
+
 runTest('F2: the modal portals, guards mid-save closes, and Done refreshes only after real writes', () => {
   assert.match(modalSource, /return createPortal\(/)
-  assert.match(modalSource, /const closeIfIdle = \(\) => \{ if \(!saving\) \{ if \(successCount > 0\) onDone\(\); onClose\(\) \} \}/)
+  assert.match(modalSource, /const requestCloseIfIdle = \(\) => \{ if \(!saving\) closeGuard\.requestClose\(\) \}/)
+  assert.match(modalSource, /const closeGuard = useCloseGuard\(\{ dirty: closeDirty \}, discardAndClose, onMinimize \? preserveAndMinimize : undefined\)/)
+  assert.match(modalSource, /if \(successCount > 0\) onDone\(\)\s+onClose\(\)/)
 })
 
 runTest('F2: Inventory launches it from the Manage menu and reloads after', () => {
@@ -108,21 +153,32 @@ runTest('STK-06: creation reuses ProductForm and resumes without losing the stoc
     'fast stock-in drafts should be scoped to the signed-in user')
   assert.match(modalSource, /writeWorkDraft<FastStockInDraft>\(fastStockInDraftKey/)
   assert.match(modalSource, /onClose=\{\(\) => setCreateBarcode\(''\)\}/)
-  assert.match(modalSource, /setCreateBarcode\(''\)\s*\n\s*pick\(created\)/)
+  const createHandler = modalSource.slice(modalSource.indexOf('  const createProductForScannedBarcode = async'), modalSource.indexOf('\n  const ', modalSource.indexOf('  const createProductForScannedBarcode = async') + 1))
+  assert.match(createHandler, /pick\(created\)/)
+  assert.doesNotMatch(createHandler, /setCreateBarcode\(''\)/, 'ProductForm must clear its draft before its onClose unmounts the scanned-product form')
   assert.match(modalSource, /Product created\. Continue adding it to this stock-in session\./)
 })
 
 runTest('stock-in sessions reuse linked report data and preserve per-receipt costs', () => {
   assert.match(batchRouteSource, /unit_cost_usd, total_cost_usd, reason, reference_id/)
-  assert.match(batchRouteSource, /Math\.round\(Number\(body\.unit_cost_usd\) \* quantity \* 10000\) \/ 10000/)
-  assert.match(stockImportSource, /CASE WHEN @costPriceUsd IS NULL THEN NULL ELSE ROUND\(@quantity \* @costPriceUsd, 4\) END/,
-    'legacy stock-history imports must preserve each event cost on its movement')
+  assert.match(batchRouteSource, /unitCostUsd = nullableMoney4\(body\.unit_cost_usd\)/)
+  assert.match(batchRouteSource, /totalCostUsd = unitCostUsd == null \? null : multiplyMoney4\(unitCostUsd, quantity\)/)
+  assert.ok(batchRouteSource.indexOf('totalCostUsd = unitCostUsd') < batchRouteSource.indexOf('received = await receiveBatchStock'),
+    'receipt cost must be calculated and range-checked before stock mutation')
+  assert.match(stockImportSource, /totalCostUsd = costPriceUsd == null \? null : multiplyMoney4\(costPriceUsd, quantity\)/)
+  assert.match(stockImportSource, /@costPriceUsd,\s*@totalCostUsd,/,
+    'stock-history imports bind the exact per-event snapshot into the movement')
+  assert.equal(nullableMoney4(null), null, 'unknown cost is not zero')
+  assert.equal(nullableMoney4(0), 0, 'explicit zero remains known')
+  assert.equal(multiplyMoney4(.0003, .5), .0002, 'halfway event cost rounds nearest4, not binary Math.round')
+  assert.equal(multiplyMoney4(.3333, 3), .9999, 'per-receipt cost retains four decimals')
+  assert.throws(() => multiplyMoney4(1e11, 2), /money_overflow/, 'unsafe event totals refuse before writes')
   for (const field of ['p.brand', 'p.category', 'p.tag_label', 'm.unit_cost_usd', 'm.total_cost_usd', 'b.payment_status', 'b.credit_due_date', 'b.updated_at']) {
     assert.ok(ledgerSource.includes(field), `stock-session ledger should expose ${field}`)
   }
   assert.match(ledgerSource, /COUNT\(DISTINCT COALESCE\(mx\.reference_id, -mx\.id\)\)/)
   assert.match(sessionsSource, /function sessionCost\(/)
-  assert.match(sessionsSource, /Shared-lot totals are not guessed\./)
+  assert.match(sessionsSource, /Shared received-date totals are not guessed\./)
   assert.match(sessionsSource, /fmtDateTime24\(session\.createdAt\)/)
   assert.match(sessionsSource, /selectedLine\.brand[\s\S]*selectedLine\.category/,
     'brand and category should remain available after opening a stock-in line')
@@ -148,6 +204,70 @@ runTest('stock-in header edits are collision- and concurrency-safe', () => {
   assert.match(batchTransportSource, /body\.credit_due_date = patch\.creditDueDate/)
 })
 
+runTest('the lot picker matches the sibling add-stock surfaces', () => {
+  // Same affordance ReceiveBatchModal / InventoryStockModals already have:
+  // a chip row scoped to the picked product and the shipment branch.
+  assert.match(modalSource, /getProductBatches/, 'the fast modal reads lots like every other add-stock surface')
+  assert.match(modalSource, /getProductBatches\(productId, parsedBranchId, false\)/, 'add shows every active lot, empty ones included')
+  assert.match(modalSource, /\}, \[picked\?\.id, branchId\]\)/, 'lots refetch per picked product AND branch')
+  assert.match(modalSource, /setBatchChoice\('new'\)/, "a stale lot id can never ride to submit")
+  assert.match(modalSource, /batchDisplayLabel\(batch, tr\('batch', 'Received date'\)\)/, 'lot labels come from the shared helper')
+  // A batch is identified by its DATE -- the code is previewed, never typed.
+  assert.match(modalSource, /dateToBatchCode\(receivedDate\)/, 'the derived lot code is visible before commit')
+  assert.match(modalSource, /existing_lot_keeps_date/, 'picking a lot replaces the date rather than pretending it applies')
+  // The choice reaches the server, and unlocked pricing never carries one.
+  assert.match(modalSource, /batchId: typeof line\.batchChoice === 'number' \? line\.batchChoice : null/)
+  assert.match(modalSource, /receivedDate: line\.batchChoice === 'new' \? \(receivedDate\.trim\(\) \|\| null\) : null/)
+  assert.match(modalSource, /batch_auto_new_unlocked/, 'a price variant always creates a fresh lot, and says so')
+  // The lot is frozen onto the queued line and stays visible.
+  assert.match(modalSource, /batchChoice: effectiveBatchChoice/)
+  assert.match(modalSource, /\{line\.batchLabel\}/, 'what was chosen is visible before and after Complete')
+  // Reopening a queued line must not silently drop its lot: the options
+  // effect re-keys on the product and would otherwise reset it to new.
+  assert.match(modalSource, /pendingBatchRestoreRef/, 'the restore survives the refetch editLine triggers')
+  assert.match(modalSource, /lots\.some\(\(lot\) => Number\(lot\.id\) === restore\)/, 'a lot that no longer exists here is not restored')
+})
+
+runTest('queueing a line and committing the session are visibly different actions', () => {
+  // The queue action is its own row with an explicit verb -- it no longer
+  // says "Save" while writing nothing.
+  assert.match(modalSource, /fast_stockin_add/, "the queue button uses the 'Add & next' key")
+  assert.match(modalSource, /update_line/, 'editing a queued line says Update line, not Save')
+  assert.doesNotMatch(modalSource, /tr\('save', 'Save'\)/, 'nothing that writes nothing may be labelled Save')
+  // ONE commit control at every width. 3eec9f22 (S4-20) replaced the old pair
+  // -- a phone-only header button plus a desktop footer button -- with a single
+  // primary action at the end of the panel. The two assertions this replaces
+  // still demanded that split, so they contradicted the rule
+  // modalPrimaryPlacement.test.ts enforces across 237 components: a modal must
+  // not hide its primary action behind a breakpoint. They went unnoticed
+  // because this file's exit guard used to sit ABOVE them.
+  const commitControls = modalSource.match(/<button[^>]*onClick=\{commitSession\}/g) || []
+  assert.equal(commitControls.length, 1, 'exactly ONE commit control, not one per breakpoint')
+  assert.doesNotMatch(commitControls[0], /(^|["'`\s])(sm:|md:|lg:|xl:)?hidden(?=["'`\s]|$)/,
+    'the commit control is never hidden at any width')
+  assert.match(modalSource, /lines_queued/, 'the footer states what is queued and what it costs')
+  assert.match(modalSource, /add_next_hint/, 'the difference is a tooltip, not prose on the card')
+})
+
+runTest('committing asks through ConfirmDialog, and placeholders are filled', () => {
+  assert.doesNotMatch(modalSource, /window\.confirm/, 'no native confirm -- off-brand and untranslatable')
+  assert.match(modalSource, /<ConfirmDialog/, 'the shared compact review dialog asks instead')
+  assert.match(modalSource, /confirm_complete_stock_session/, 'the existing pack key survives the move')
+  // tr() does not interpolate, so every {placeholder} must be substituted or
+  // the operator reads the braces literally.
+  assert.match(modalSource, /\.replace\('\{lines\}'/)
+  assert.match(modalSource, /\.replace\('\{units\}'/)
+  assert.match(modalSource, /\.replace\('\{branch\}'/)
+  assert.match(modalSource, /\.replace\('\{count\}', String\(saved\)\)/, 'the completion toast fills its count too')
+  // A failure keeps the modal and the draft, and the reason stays readable.
+  assert.match(modalSource, /break-words text-\[10px\]/, 'a long server reason wraps rather than being squeezed out')
+})
+
+// The exit guard MUST be the last statement in this file. It previously sat
+// at line 152 with three runTest() calls after it, so a failure in any of
+// those three incremented a counter nothing re-read: the file printed FAIL
+// and still exited 0. test:utils chains with &&, so the whole gate reported
+// green over a real red. Anything appended below this guard is invisible.
 if (failed > 0) {
   process.exitCode = 1
 }

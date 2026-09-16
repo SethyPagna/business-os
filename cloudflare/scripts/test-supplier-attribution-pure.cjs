@@ -75,9 +75,38 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const batchCode = loadReal('lib/batchCode.ts')
+// N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
+// real module has to be in the stub map like every other real dependency.
+const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
-const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding })
+const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
+const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
+const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
+  './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision,
+  './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision,
+})
+const analyticsPrecision = { './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
+const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
+const branchRoles = loadReal('lib/branchRoles.ts')
+const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
+  './db': loadReal('lib/db.ts'),
+  './branchRoles': branchRoles,
+})
+const businessDateWindow = loadReal('lib/businessDateWindow.ts')
+const schemaProbeReal = loadReal('lib/schemaProbe.ts')
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
+  './db': { getDb: () => db },
+  './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
+  ...analyticsPrecision,
+})
+// routes/inventory.ts's per-product revenue/COGS SQL moved into this shared
+// ledger (audit sibling:F14); the REAL module, so the route builds real SQL.
+const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnalytics': salesAnalytics })
 // routes/batches.ts imports the shared optimistic-locking helpers; without
 // this override the transpiled module's './conflictControl' require resolves
 // against scripts/ and the whole test file dies at load time.
@@ -85,16 +114,77 @@ const conflictControl = loadReal('lib/conflictControl.ts')
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
 
+// Sep 6 2026: the owner's low-stock alert setting reaches this module through
+// lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
+// asserted below are the ones it composes -- while the settings READ answers
+// the shipped default, there being no settings row in this harness. The rule
+// itself is proven in scripts/test-low-stock-settings-pure.cjs.
+const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
+const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
+
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+// N13: the shared actor / branch kernels these routes now import.
+const movementBranchNameKernel = loadReal('lib/movementBranchName.ts')
+// N13: and the actor / receipt kernels the movement readers now import.
+const movementActorNameKernel = loadReal('lib/movementActorName.ts')
+const movementReferenceKernel = loadReal('lib/movementReference.ts')
+// N13 (round 2): the /movements search haystack is built from those same two
+// expressions, so the route imports the haystack kernel too.
+const movementSearchKernel = loadReal('lib/movementSearch.ts', {
+  './movementActorName': movementActorNameKernel,
+  './movementBranchName': movementBranchNameKernel,
+})
+// P3-L6: routes/inventory.ts imports the tagged-stock kernel, so this
+// loader has to resolve it too (the paths under test never tag anything;
+// they just have to import).
+const stockCondition = loadReal('lib/stockCondition.ts')
+const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
+  './productBatches': productBatches,
+  './stockCondition': stockCondition,
+  './movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision }),
+  './returnsStock': loadReal('lib/returnsStock.ts', { './productBatches': productBatches, './stockCondition': stockCondition }),
+  // readTaggedLotGroups now chunks its IN(...) list through this helper
+  // (D1's 100-bound-parameter fix); without the override the transpiled
+  // require resolves against scripts/ and the whole loader dies.
+  './sqlBinding': sqlBinding,
+})
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/stockCondition': stockCondition,
+  '../lib/damagedLotActions': damagedLotActions,
+  '../lib/moneyPrecision': moneyPrecision,
+  '../lib/movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision }),
+  // inventory.ts imports this TypeScript-only helper; load it through the
+  // harness rather than asking Node to resolve a non-existent .js sibling.
+  '../lib/transferOperationReceipt': loadReal('lib/transferOperationReceipt.ts'),
+  // Supplier attribution uses receive/adjust only; transfer has its own suite.
+  '../lib/transferOperation': { planTransferOperation: async () => { throw new Error('unrelated transfer path invoked') } },
+  // REAL, not stubbed: POST /inventory/transfer now refuses a shop -> warehouse
+  // move through this guard, so the fixtures here run through the rejection
+  // instead of opting out of it.
+  '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
+  '../lib/canonicalBranchIdentity': canonicalBranchIdentity,
+  '../lib/actorSnapshot': actorSnapshotKernel,
+  '../lib/movementBranchName': movementBranchNameKernel,
+  '../lib/movementActorName': movementActorNameKernel,
+  '../lib/movementReference': movementReferenceKernel,
+  '../lib/movementSearch': movementSearchKernel,
   '../lib/db': { getDb: () => db },
   // routes/inventory.ts buckets movement dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
-  '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
+  '../lib/businessDateWindow': businessDateWindow,
+  '../lib/salesAnalytics': salesAnalytics,
+  '../lib/productSalesLedger': productSalesLedger,
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
+  '../lib/stockReceiptGate': stockReceiptGate,
+  // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
+  // stub: the point of the module is that every wire measures the same way.
+  '../lib/stockReason': loadReal('lib/stockReason.ts'),
   '../lib/sqlBinding': sqlBinding,
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },
   '../lib/familyStockStats': { getFamilyStockStats: async () => ({}) },
+  '../lib/lowStockSettings': lowStockStub,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
   '../lib/telegram': { sendTelegramEvent: async () => false },
@@ -103,6 +193,14 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/productIdentity': { findIdentityMatch: async () => null },
+  // routes/products.ts + inventory.ts now build their search tail from the
+  // one shared implementation (lib/productSearchQuery.ts). These tests
+  // exercise write paths, not search, so an inert builder keeps the WHERE
+  // unfiltered exactly as the searchMatch stubs above already did.
+  '../lib/productSearchQuery': {
+    buildProductSearchQuery: () => ({ hasSearchTerm: false, titleOnly: false }),
+    buildFamilyRelevanceOrderSql: (tail) => tail,
+  },
   '../lib/searchMatch': {
     buildFtsMatchExpression: () => "''",
     buildHybridMatchClause: () => '1=1',
@@ -129,6 +227,8 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
 const app = inventoryRoute.default
 
 const batchesRoute = loadReal('routes/batches.ts', {
+  '../lib/moneyPrecision': moneyPrecision,
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
@@ -137,6 +237,10 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
+  '../lib/stockReceiptGate': stockReceiptGate,
+  // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
+  // stub: the point of the module is that every wire measures the same way.
+  '../lib/stockReason': loadReal('lib/stockReason.ts'),
   // K2 Part 416: routes/batches.ts gained the damaged-lots POS lookup;
   // these tests exercise receive/adjust, so an empty stub is honest.
   '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
@@ -182,7 +286,7 @@ async function main() {
   await check('adjust add (picked contact): the new lot records supplier_id AND supplier_name', async () => {
     seed()
     const { status, json } = await req('POST', '/adjust', {
-      productId: 1, type: 'add', quantity: 5, reason: 'Receive', branchId: 1,
+      productId: 1, type: 'add', unitCostUsd: 2, quantity: 5, reason: 'Receive', branchId: 1,
       batchId: 'new', supplierId: 7, supplierName: 'Acme Beauty Co',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
@@ -196,7 +300,7 @@ async function main() {
     seed()
     const before = supplierCount()
     const { status, json } = await req('POST', '/adjust', {
-      productId: 1, type: 'add', quantity: 3, reason: 'Receive', branchId: 1,
+      productId: 1, type: 'add', unitCostUsd: 2, quantity: 3, reason: 'Receive', branchId: 1,
       batchId: 'new', supplierName: 'Handwritten Vendor',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
@@ -208,10 +312,10 @@ async function main() {
 
   await check("top-up of an ATTRIBUTED lot with a different supplier changes NOTHING but quantity (first attribution sticks)", async () => {
     seed()
-    await req('POST', '/adjust', { productId: 1, type: 'add', quantity: 5, reason: 'r', branchId: 1, batchId: 'new', supplierId: 7, supplierName: 'Acme Beauty Co' })
+    await req('POST', '/adjust', { productId: 1, type: 'add', unitCostUsd: 2, quantity: 5, reason: 'r', branchId: 1, batchId: 'new', supplierId: 7, supplierName: 'Acme Beauty Co' })
     const lotId = batchRows()[0].id
     const { status, json } = await req('POST', '/adjust', {
-      productId: 1, type: 'add', quantity: 2, reason: 'top-up', branchId: 1,
+      productId: 1, type: 'add', unitCostUsd: 2, quantity: 2, reason: 'top-up', branchId: 1,
       batchId: lotId, supplierName: 'Somebody Else',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
@@ -224,11 +328,21 @@ async function main() {
 
   await check('top-up of an UNATTRIBUTED lot FILLS the blank (COALESCE honors the choice the picker offered)', async () => {
     seed()
-    await req('POST', '/adjust', { productId: 1, type: 'add', quantity: 4, reason: 'r', branchId: 1, batchId: 'new' })
+    // N14-D: the route can no longer MINT an unattributed lot -- a stock-in
+    // must name its supplier. Unattributed lots still exist (legacy imports,
+    // and every lot created before that rule), so the COALESCE fill below is
+    // still the live path for them; the precondition is now built by blanking
+    // the row, and the refusal itself is asserted first so this fixture cannot
+    // quietly become the only way such a lot is made.
+    const refused = await req('POST', '/adjust', { productId: 1, type: 'add', unitCostUsd: 2, quantity: 4, reason: 'r', branchId: 1, batchId: 'new' })
+    assert.strictEqual(refused.status, 400, 'an add with no supplier must be refused outright')
+    assert.strictEqual(refused.json?.code, 'supplier_required')
+    await req('POST', '/adjust', { productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 4, reason: 'r', branchId: 1, batchId: 'new' })
     const lotId = batchRows()[0].id
+    rawDb.prepare('UPDATE product_batches SET supplier_id = NULL, supplier_name = NULL WHERE id = @id').run({ id: lotId })
     assert.strictEqual(batchRows()[0].supplier_name, null, 'precondition: lot starts unattributed')
     const { status, json } = await req('POST', '/adjust', {
-      productId: 1, type: 'add', quantity: 2, reason: 'top-up', branchId: 1,
+      productId: 1, type: 'add', unitCostUsd: 2, quantity: 2, reason: 'top-up', branchId: 1,
       batchId: lotId, supplierId: 7, supplierName: 'Acme Beauty Co',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
@@ -240,7 +354,7 @@ async function main() {
   await check('auto-routed add (no batchId -- the BulkAddStockModal wire) attributes the lot it creates', async () => {
     seed()
     const { status, json } = await req('POST', '/adjust', {
-      productId: 1, type: 'add', quantity: 6, reason: 'bulk', branchId: 1,
+      productId: 1, type: 'add', unitCostUsd: 2, quantity: 6, reason: 'bulk', branchId: 1,
       receivedDate: '2025-04-01', supplierId: 7, supplierName: 'Acme Beauty Co',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
@@ -252,20 +366,23 @@ async function main() {
 
   await check("remove ignores supplier fields entirely -- a removal has no supplier semantics", async () => {
     seed()
-    await req('POST', '/adjust', { productId: 1, type: 'add', quantity: 5, reason: 'r', branchId: 1, batchId: 'new' })
+    await req('POST', '/adjust', { productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 5, reason: 'r', branchId: 1, batchId: 'new' })
     const lotId = batchRows()[0].id
     const { status, json } = await req('POST', '/adjust', {
       productId: 1, type: 'remove', quantity: 2, reason: 'damage', branchId: 1,
       batchId: lotId, supplierId: 7, supplierName: 'Acme Beauty Co',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
-    assert.strictEqual(batchRows()[0].supplier_name, null, 'the removal did not attribute the lot')
+    // The lot was attributed to 'Fixture Supplier' when it was received (a
+    // stock-in must name its supplier now); what matters here is that the
+    // removal's own supplier fields changed nothing.
+    assert.strictEqual(batchRows()[0].supplier_name, 'Fixture Supplier', 'the removal did not re-attribute the lot')
   })
 
   await check('POST /api/batches (snake_case wire) still records supplier_id + supplier_name on create -- two wires, one rule', async () => {
     seed()
     const { status, json } = await req('POST', '/', {
-      product_id: 1, branch_id: 1, quantity: 6, received_date: '2025-02-10',
+      product_id: 1, branch_id: 1, quantity: 6, received_date: '2025-02-10', unit_cost_usd: 2,
       supplier_id: 7, supplier_name: 'Acme Beauty Co',
     }, batchesApp)
     assert.strictEqual(status, 200, JSON.stringify(json))

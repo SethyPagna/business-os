@@ -1,4 +1,6 @@
-import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { useMobileSectionNavMode } from './utils/sectionNavPreference.ts'
+import { getHubPageFromLocation } from './components/shared/hubNavigation.ts'
+import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ComponentType, ErrorInfo, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -11,14 +13,24 @@ import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getM
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
+import { ensureTextAffordances } from './components/shared/textAffordances.ts'
+import InfoHint from './components/shared/InfoHint.tsx'
+import IosInstallHint from './components/shared/IosInstallHint.tsx'
 import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
+import { restartIntoLatestApp, setAppUpdateUnsavedWorkNotice } from './utils/appUpdate.ts'
+import { reportClientCrash } from './utils/clientCrashReport.ts'
+import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from './utils/standaloneNavigation.ts'
+import { persistentNoticeFingerprint, shouldRenderPersistentNotice } from './utils/persistentNoticeDismissal.ts'
 import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGuard.ts'
 import { hasDirtyWork } from './utils/dirtyWork.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
+import { ACTOR_SESSION_RETRY_EVENT, actorSessionQuarantineStatus, isActorSessionQuarantined, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
+import { hasLocalSyncProblemPresentation, subscribeSyncProblemPresentation, shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
+import { presentWriteError } from './utils/writeErrorPresentation.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 
@@ -62,6 +74,7 @@ interface AppUser {
 }
 
 interface AppSettings {
+  ui_mobile_section_nav?: unknown
   business_name?: string
   customer_portal_logo_image?: string
   customer_portal_favicon_image?: string
@@ -84,8 +97,15 @@ interface AppNotification {
 }
 
 interface SyncProblemDetail {
+  errorId?: string | null
   reason?: string
   error?: string
+  // The server's machine-readable error code (api/http.ts's sync:error).
+  // Lets the banner explain a failure the user can act on instead of
+  // reprinting a sentence written for a developer.
+  code?: string | null
+  outcome?: string | null
+  timeoutMs?: number | string | null
   channel?: string
   transient?: boolean
   connected?: boolean
@@ -93,6 +113,8 @@ interface SyncProblemDetail {
   status?: number | string
   message?: string
   ts?: number | string
+  version?: string
+  waiting?: boolean
 }
 
 interface PendingSyncState {
@@ -156,34 +178,11 @@ interface AppContextValue {
   theme: string
   notify: (message: string, type?: string, durationMs?: number) => void
   t: TranslateFn
+  /** C5: navigator.storage.persist()'s answer, null until AppContext has asked. */
+  storagePersisted: boolean | null
   clearSyncError?: () => void
 }
 
-
-// Sends a browser crash to our own Worker, which forwards it to Sentry.
-//
-// Deliberately uses bare fetch rather than the app's api layer: that layer
-// retries, dispatches auth events and can itself throw -- all reasonable for
-// real requests, all wrong for the last thing that runs after a page has
-// already crashed. Every failure mode here ends in silence on purpose.
-async function reportClientCrash(error: Error, pageId: string): Promise<void> {
-  try {
-    await fetch('/api/system/client-error', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        message: String(error?.message || error).slice(0, 1000),
-        stack: String(error?.stack || '').slice(0, 4000),
-        // The page id, never location.href -- a URL carries the query
-        // string, which is where search terms and membership lookups live.
-        page: pageId,
-      }),
-    })
-  } catch {
-    // Intentionally silent. See the docstring above.
-  }
-}
 
 interface PageErrorBoundaryProps {
   pageId: string
@@ -205,6 +204,11 @@ interface SyncErrorBannerProps {
   onGoToServer: () => void
 }
 
+interface AppUpdateBannerProps {
+  update: SyncProblemDetail | null
+  onDismiss: () => void
+}
+
 interface OfflineModeBannerProps {
   pendingSync: PendingSyncState | null
   canWriteToServer: boolean
@@ -212,6 +216,11 @@ interface OfflineModeBannerProps {
   transientOutage: SyncProblemDetail | null
   vaultLocked: SyncProblemDetail | null
   conflictsNeedReview: WriteConflictDetail | null
+}
+
+interface StorageEvictionBandProps {
+  pendingSync: PendingSyncState | null
+  storagePersisted: boolean | null
 }
 
 interface PageSlotProps {
@@ -227,6 +236,21 @@ interface NotificationCenterFallbackProps {
 }
 
 const useApp = useAppHook as () => AppContextValue
+
+// The shell's bottom advisory stack, and the clearance it needs.
+//
+// The mobile bottom nav is `fixed` at the bottom edge, so anything else
+// pinned there lands ON TOP of it and every nav destination underneath stops
+// being tappable -- measured live on rc/p2-9-pwa (394919ba) at 375x812, where
+// a 49px install band covered the nav completely. The clearance below is the
+// SAME measurement <main> already carries as its own bottom padding
+// (`pb-[calc(3.55rem+env(safe-area-inset-bottom))]`); iosInstallAndPersistence
+// .test.ts asserts the two stay equal rather than trusting them by eye.
+// Tailwind scans literal class strings, so these are whole class names rather
+// than a shared number interpolated into a template.
+const BOTTOM_STACK_CLEARS_NAV_CLASS = 'bottom-[calc(3.55rem+env(safe-area-inset-bottom))]'
+/** Pages-mode compact navigation has no bottom nav: only the safe area. */
+const BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS = 'bottom-[env(safe-area-inset-bottom)]'
 
 function asPageModule(importer: () => Promise<unknown>): ChunkImporter {
   return () => importer() as Promise<{ default: ComponentType<Record<string, unknown>> }>
@@ -711,7 +735,37 @@ function useSyncErrorBanner(user: AppUser | null) {
   const [pendingSync, setPendingSync] = useState<PendingSyncState | null>(null)
   const [vaultLocked, setVaultLocked] = useState<SyncProblemDetail | null>(null)
   const [appUpdate, setAppUpdate] = useState<SyncProblemDetail | null>(null)
+  const dismissedAppUpdateRef = useRef('')
   const [conflictsNeedReview, setConflictsNeedReview] = useState<WriteConflictDetail | null>(null)
+
+  // App updates are independent of authentication. A waiting worker may
+  // announce itself on the login screen, during session restoration, or in
+  // the signed-in shell, so keep one listener mounted for App's lifetime.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+
+    const acceptAppUpdate = (detail: SyncProblemDetail) => {
+      const announcedHash = String(detail.version || '').replace(/^business-os-app-shell-/, '')
+      // A device's first service-worker activation announces the same build
+      // the page is already running. That is not an update and must not nag
+      // the user; a genuinely newer waiting/active worker has a different hash.
+      if (announcedHash && FRONTEND_BUILD_HASH !== 'dev' && announcedHash === FRONTEND_BUILD_HASH) return
+      if (persistentNoticeFingerprint('app-update', detail) === dismissedAppUpdateRef.current) return
+      setAppUpdate(detail)
+    }
+    const onAppUpdate = (event: Event) => acceptAppUpdate(
+      event instanceof CustomEvent
+        ? event.detail as SyncProblemDetail
+        : { message: 'New version ready', ts: Date.now() },
+    )
+    const bufferedAppUpdate = getAppShellApi().getPendingAppUpdate?.()
+    if (bufferedAppUpdate) {
+      acceptAppUpdate(bufferedAppUpdate)
+      getAppShellApi().clearPendingAppUpdate?.()
+    }
+    window.addEventListener('sync:app-update-available', onAppUpdate)
+    return () => window.removeEventListener('sync:app-update-available', onAppUpdate)
+  }, [])
 
   useEffect(() => {
     if (!user || typeof window === 'undefined') {
@@ -719,7 +773,6 @@ function useSyncErrorBanner(user: AppUser | null) {
       setTransientOutage(null)
       setPendingSync(null)
       setVaultLocked(null)
-      setAppUpdate(null)
       setConflictsNeedReview(null)
       return undefined
     }
@@ -751,21 +804,12 @@ function useSyncErrorBanner(user: AppUser | null) {
         refreshPendingSync()
       }
     }
+    const onSyncErrorResolved = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as SyncProblemReference : null
+      setSyncError((current) => shouldClearResolvedSyncError(current, detail) ? null : current)
+    }
     const onQueueChanged = () => refreshPendingSync()
     const onVaultLocked = (event: Event) => setVaultLocked(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { reason: 'locked', ts: Date.now() })
-    const onAppUpdate = (event: Event) => setAppUpdate(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { message: 'New version ready', ts: Date.now() })
-    // The service worker can broadcast BUSINESS_OS_APP_UPDATE_AVAILABLE at any
-    // time, including while this effect isn't mounted yet (no user signed in
-    // -- e.g. sitting on the login screen right after a deploy). The window
-    // CustomEvent it triggers is fire-and-forget, so a listener that only
-    // exists once a user is present would silently miss it, leaving the app
-    // running the stale pre-update JS with no banner ever shown. Pick up
-    // anything that already fired and was buffered before we could listen.
-    const bufferedAppUpdate = getAppShellApi().getPendingAppUpdate?.()
-    if (bufferedAppUpdate) {
-      setAppUpdate(bufferedAppUpdate)
-      getAppShellApi().clearPendingAppUpdate?.()
-    }
     const onConflictReview = (event: Event) => {
       setConflictsNeedReview(event instanceof CustomEvent ? event.detail as WriteConflictDetail : { message: 'Conflicts need review', ts: Date.now() })
       refreshPendingSync()
@@ -775,11 +819,11 @@ function useSyncErrorBanner(user: AppUser | null) {
     window.addEventListener('sync:transient-outage', onTransientOutage)
     window.addEventListener('sync:status', onSyncRecovered)
     window.addEventListener('sync:reconnected', onSyncRecovered)
+    window.addEventListener(SYNC_ERROR_RESOLVED_EVENT, onSyncErrorResolved)
     window.addEventListener('sync:queue-changed', onQueueChanged)
     window.addEventListener('sync:offline-sale-queued', onQueueChanged)
     window.addEventListener('sync:offline-sale-synced', onQueueChanged)
     window.addEventListener('offline:vault-locked', onVaultLocked)
-    window.addEventListener('sync:app-update-available', onAppUpdate)
     window.addEventListener('sync:write-conflict', onConflictReview)
     const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh(refreshPendingSync)
     const cancelPendingSyncPolling = scheduleDeferredPendingSyncPolling(refreshPendingSync)
@@ -791,11 +835,11 @@ function useSyncErrorBanner(user: AppUser | null) {
       window.removeEventListener('sync:transient-outage', onTransientOutage)
       window.removeEventListener('sync:status', onSyncRecovered)
       window.removeEventListener('sync:reconnected', onSyncRecovered)
+      window.removeEventListener(SYNC_ERROR_RESOLVED_EVENT, onSyncErrorResolved)
       window.removeEventListener('sync:queue-changed', onQueueChanged)
       window.removeEventListener('sync:offline-sale-queued', onQueueChanged)
       window.removeEventListener('sync:offline-sale-synced', onQueueChanged)
       window.removeEventListener('offline:vault-locked', onVaultLocked)
-      window.removeEventListener('sync:app-update-available', onAppUpdate)
       window.removeEventListener('sync:write-conflict', onConflictReview)
     }
   }, [user])
@@ -808,7 +852,10 @@ function useSyncErrorBanner(user: AppUser | null) {
     appUpdate,
     conflictsNeedReview,
     clearVaultLocked: () => setVaultLocked(null),
-    clearAppUpdate: () => setAppUpdate(null),
+    clearAppUpdate: () => {
+      if (appUpdate) dismissedAppUpdateRef.current = persistentNoticeFingerprint('app-update', appUpdate)
+      setAppUpdate(null)
+    },
     clearConflictsNeedReview: () => setConflictsNeedReview(null),
     clearSyncError: () => setSyncError(null),
   }
@@ -1109,11 +1156,134 @@ function Notification({ notification, onDismiss }: NotificationProps) {
   return typeof document !== 'undefined' ? createPortal(node, document.body) : node
 }
 
+function AppUpdateBanner({ update, onDismiss }: AppUpdateBannerProps) {
+  const { t } = useApp()
+  const [restarting, setRestarting] = useState(false)
+
+  if (!update) return null
+
+  const restart = async () => {
+    if (restarting) return
+    setRestarting(true)
+    const result = await restartIntoLatestApp({
+      unsavedWorkMessage: t('save_or_discard_before_update') || 'Save or discard your unfinished work before updating the app.',
+    })
+    if (result === 'blocked') setRestarting(false)
+  }
+
+  const node = (
+    <div
+      role="alert"
+      aria-live="assertive"
+      className="fixed inset-x-0 top-0 z-[1500] flex min-h-[calc(3rem+env(safe-area-inset-top))] w-full items-center bg-blue-700 px-[calc(0.75rem+env(safe-area-inset-left))] pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] text-white shadow-lg dark:bg-blue-600"
+    >
+      <div className="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-3">
+        <span className="min-w-0 text-sm font-semibold">
+          {t('app_update_ready') || 'A new version is ready.'}
+        </span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => { void restart() }}
+            disabled={restarting}
+            className="rounded-lg bg-white px-3 py-1.5 text-sm font-bold text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:cursor-wait disabled:opacity-70 dark:text-blue-700"
+          >
+            {restarting
+              ? (t('restarting_app') || 'Restarting...')
+              : (t('restart_now') || 'Restart now')}
+          </button>
+          <button type="button" onClick={onDismiss} aria-label={t('dismiss_notification') || 'Dismiss notification'}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-xl leading-none text-white/80 hover:bg-white/15 hover:text-white">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
+  return typeof document !== 'undefined' ? createPortal(node, document.body) : node
+}
+
+// C5: the one place the browser's "I may delete your offline data" answer is
+// ever shown to the person it can cost money.
+//
+// web-api.ts already computed 'persistent' | 'eviction_possible' inside
+// unlockOfflineVault and wrote it to IndexedDB, where nothing read it back,
+// and the persist() request itself only ran once a sale was ALREADY queued
+// offline (saleWriteTransport.ts). AppContext now asks at boot instead and
+// hands the answer down as `storagePersisted`.
+//
+// BOTH conditions are required before this band appears:
+//   - storagePersisted === false: the browser refused (or has no Storage
+//     Manager). `null` means not asked yet and must stay silent -- a band
+//     that flashes on every boot before the answer arrives is noise.
+//   - a non-empty outbox: a granted-or-not origin with nothing queued has
+//     nothing to lose today, and on a shop till the band would then be
+//     permanent furniture. The count is the same pendingSync.total the
+//     offline indicator above already reads.
+//
+// Dismissal is per page session on purpose, not persisted: the risk is not a
+// one-time device fact, it is "there are unsynced sales on a device whose
+// storage can be evicted", and that comes back every time it is true. It is
+// component state, so signing out unmounts it and the next cashier starts
+// clean.
+//
+// SHARED DEVICE, SEVERAL ACCOUNTS. Both inputs are already session-scoped and
+// neither is stored: `storagePersisted` is re-measured per authenticated
+// session and reset to null on sign-out (AppContext), and `pendingSync` is
+// set to null and refetched whenever `user` changes (useSyncErrorBanner
+// above). The count itself is the device's IndexedDB outbox, which this app
+// deliberately preserves across sign-out (clearLocalBusinessState's
+// preserveOfflineWork) and which the existing OfflineModeBanner already shows
+// the same way -- this band reads the identical source rather than inventing
+// a second, differently-scoped count.
+function StorageEvictionBand({ pendingSync, storagePersisted }: StorageEvictionBandProps) {
+  const { t } = useApp()
+  const [dismissed, setDismissed] = useState(false)
+  const pending = Number(pendingSync?.total || 0)
+
+  if (storagePersisted !== false || pending <= 0 || dismissed) return null
+
+  return (
+    <div
+      className="pointer-events-auto flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-900 shadow-lg dark:border-amber-700 dark:bg-amber-950/90 dark:text-amber-100"
+      role="status"
+      aria-live="polite"
+    >
+      <span aria-hidden="true" className="shrink-0 text-sm leading-6">!</span>
+      {/* No truncation: Khmer is longer than the English here, and a clipped
+          warning is exactly the dead-end "..." the project forbids. The band
+          grows downward instead -- leading-6 gives Khmer glyphs their room. */}
+      <span className="min-w-0 flex-1 break-words font-semibold">
+        {t('storage_eviction_title') || 'Offline data may be cleared'}
+      </span>
+      <span className="shrink-0 rounded-full border border-current/30 px-2 leading-6">
+        {pending} {t('pending') || 'pending'}
+      </span>
+      <InfoHint
+        className="shrink-0"
+        label={t('storage_eviction_title') || 'Offline data may be cleared'}
+        text={t('storage_eviction_detail') || 'Add to Home Screen keeps sales safe: offline sales waiting to sync can be deleted by the browser when space runs low, but browsers keep data for installed apps.'}
+      />
+      <button
+        type="button"
+        onClick={() => setDismissed(true)}
+        aria-label={t('dismiss_notification') || 'Dismiss notification'}
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-base leading-none opacity-70 hover:bg-current/10 hover:opacity-100"
+      >
+        <span aria-hidden="true">×</span>
+      </button>
+    </div>
+  )
+}
+
 function SyncErrorBanner({ error, onDismiss, onGoToServer }: SyncErrorBannerProps) {
-  const { t, canAccessPage } = useApp()
+  const { t, canAccessPage, user } = useApp()
+  const locallyPresented = useSyncExternalStore(subscribeSyncProblemPresentation,
+    () => hasLocalSyncProblemPresentation(error, user?.id), () => false)
   if (!error) return null
-  const blocked = String(error?.reason || '').startsWith('server_')
-  const title = blocked ? 'Write blocked - server unavailable: ' : 'Write failed - data not saved: '
+  const presentation = presentWriteError(error, t)
+  if (presentation.unknownOutcome && locallyPresented) return null
   // navigateTo('server') (App.tsx's onGoToServer -> AppContext.tsx's
   // navigateTo) already silently no-ops for a user without the 'settings'
   // permission the Server Sync page requires (same gate PageSlot's render
@@ -1128,9 +1298,8 @@ function SyncErrorBanner({ error, onDismiss, onGoToServer }: SyncErrorBannerProp
     <div className="fixed left-0 right-0 top-16 z-[200] bg-red-600 text-white px-4 py-2.5 flex items-start gap-3 shadow-lg md:top-14">
       <span className="text-lg flex-shrink-0">!</span>
       <div className="flex-1 min-w-0">
-        <span className="font-semibold text-sm">{title}</span>
-        <span className="text-sm opacity-90">{error.error}</span>
-        {error.channel && <span className="text-xs opacity-70 ml-2">(operation: {error.channel})</span>}
+        <span className="font-semibold text-sm">{presentation.title}</span>
+        <span className="text-sm opacity-90">{presentation.detail}</span>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         {canViewDetails ? (
@@ -1165,14 +1334,21 @@ function useMobileHeaderAutoHide(page: string): boolean {
   const [visible, setVisible] = useState(true)
   const scrollAnchorRef = useRef(0)
   const frameRequestedRef = useRef(false)
+  const scrollEpochRef = useRef(0)
 
   // Entering a page -- including switching between two already-mounted
   // pages -- always starts with the bar shown, and resets the anchor so
   // the next scroll delta is measured from a fresh baseline instead of
   // whatever position the previously active page happened to leave behind.
   useEffect(() => {
-    setVisible(true)
-    scrollAnchorRef.current = 0
+    const reveal = () => {
+      setVisible(true)
+      scrollAnchorRef.current = 0
+      scrollEpochRef.current += 1
+    }
+    reveal()
+    window.addEventListener(APP_NAVIGATION_EVENT, reveal)
+    return () => window.removeEventListener(APP_NAVIGATION_EVENT, reveal)
   }, [page])
 
   useEffect(() => {
@@ -1192,7 +1368,11 @@ function useMobileHeaderAutoHide(page: string): boolean {
     const handleScroll = () => {
       if (frameRequestedRef.current) return
       frameRequestedRef.current = true
-      window.requestAnimationFrame(update)
+      const epoch = scrollEpochRef.current
+      window.requestAnimationFrame(() => {
+        if (epoch !== scrollEpochRef.current) { frameRequestedRef.current = false; return }
+        update()
+      })
     }
     // capture: true -- the actual scrolling happens on the active
     // `.page-scroll` node nested deep inside <main>, and scroll events
@@ -1206,7 +1386,7 @@ function useMobileHeaderAutoHide(page: string): boolean {
   return visible
 }
 
-function GlobalScrollControls() {
+function GlobalScrollControls({ mobileBottomNavVisible }: { mobileBottomNavVisible: boolean }) {
   const scrollTo = (direction: ScrollDirection) => {
     const target = getScrollTarget(window)
     const top = getScrollToPosition(target, direction)
@@ -1221,7 +1401,7 @@ function GlobalScrollControls() {
   }
 
   return (
-    <div className="pointer-events-none fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-[calc(0.625rem+env(safe-area-inset-right))] z-[1000] flex flex-col gap-1.5 md:bottom-[calc(1rem+env(safe-area-inset-bottom))] md:right-[calc(1rem+env(safe-area-inset-right))]">
+    <div className={`pointer-events-none fixed right-[calc(0.625rem+env(safe-area-inset-right))] z-[1000] flex flex-col gap-1.5 ${mobileBottomNavVisible ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))]'} md:bottom-[calc(1rem+env(safe-area-inset-bottom))] md:right-[calc(1rem+env(safe-area-inset-right))]`}>
       <button
         type="button"
         className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-gray-500 shadow-none backdrop-blur-none transition hover:bg-white/70 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-gray-900/55 dark:hover:text-blue-300"
@@ -1251,12 +1431,19 @@ function formatSyncTimestamp(value: unknown): string {
   }
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
-  return date.toLocaleString([], {
+  // dd/mm HH:mm -- day-first like every other date in the app (Sep 4 2026).
+  // The locale is pinned to en-US and only its field VALUES are read, so a
+  // viewer's machine locale can no longer decide the order or the clock; the
+  // bare `[]` here used to hand both to the device.
+  const parts = new Intl.DateTimeFormat('en-US', {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-  })
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
+  return `${get('day')}/${get('month')}, ${get('hour')}:${get('minute')}`
 }
 
 function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOutage, vaultLocked, conflictsNeedReview }: OfflineModeBannerProps) {
@@ -1264,6 +1451,9 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
   const total = Number(pendingSync?.total || 0)
   const [showRecovered, setShowRecovered] = useState(false)
   const [showVerboseMessage, setShowVerboseMessage] = useState(false)
+  const [dismissedNotice, setDismissedNotice] = useState('')
+  const [outageEpoch, setOutageEpoch] = useState(0)
+  const priorOfflineRef = useRef(false)
   const wasOfflineRef = useRef(false)
 
   useEffect(() => {
@@ -1319,6 +1509,20 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
   const title = priority?.title || (reconnecting ? (t('server_reconnecting') || 'Server reconnecting') : t('offline_mode') || 'Offline mode')
   const message = priority?.message || `${label}${statusSuffix}`
   const shouldShowVerboseImmediately = !!priority || total > 0 || offline
+  const noticeFingerprint = persistentNoticeFingerprint(
+    offline ? 'offline-outage' : 'offline-recovered',
+    offline ? transientOutage : { reason: 'recovered' },
+    outageEpoch,
+  )
+  const hasBlockingError = failed > 0 || Boolean(priority)
+
+  useEffect(() => {
+    if (offline && !priorOfflineRef.current) {
+      setOutageEpoch((value) => value + 1)
+      setDismissedNotice('')
+    }
+    priorOfflineRef.current = offline
+  }, [offline])
 
   useEffect(() => {
     if (!offline && !ready && !priority && !showRecovered) {
@@ -1335,6 +1539,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
   }, [offline, ready, priority, showRecovered, shouldShowVerboseImmediately])
 
   if (!offline && !total && !showRecovered && !vaultLocked && !conflictsNeedReview) return null
+  if (!shouldRenderPersistentNotice(noticeFingerprint, dismissedNotice, hasBlockingError)) return null
 
   return (
     <div className={`pointer-events-none fixed left-1/2 top-16 z-[1100] ${showVerboseMessage ? 'w-[min(calc(100vw-1rem),56rem)]' : 'w-[min(calc(100vw-1rem),24rem)]'} -translate-x-1/2 px-2 md:top-[4.25rem]`}>
@@ -1373,6 +1578,13 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
               </div>
             ) : null}
           </div>
+          {!hasBlockingError ? (
+            <button type="button" onClick={() => setDismissedNotice(noticeFingerprint)}
+              aria-label={t('dismiss_notification') || 'Dismiss notification'}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-lg leading-none opacity-70 hover:bg-current/10 hover:opacity-100">
+              <span aria-hidden="true">×</span>
+            </button>
+          ) : null}
             <div className="flex shrink-0 items-center gap-2">
             {total ? (
               <button
@@ -1539,7 +1751,102 @@ function PublicCatalogView() {
   )
 }
 
+/** Imperative boundary deliberately lives outside the mounted app/portal tree.
+ * It changes visibility/inertness, never unmounts an editor or clears a draft. */
+export function installActorSessionQuarantineDom(): () => void {
+  const host = document.createElement('div')
+  host.id = 'businessos-session-quarantine'
+  host.setAttribute('role', 'alertdialog')
+  host.setAttribute('aria-modal', 'true')
+  host.setAttribute('aria-label', 'Sign-in changed')
+  host.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#fff;color:#111;padding:32px;display:none;overflow:auto;'
+  const title = document.createElement('h2')
+  title.textContent = 'Sign-in changed / ការចូលគណនីបានផ្លាស់ប្ដូរ'
+  const message = document.createElement('p')
+  const note = document.createElement('p')
+  note.textContent = 'Existing drafts remain in this tab. Nothing will be submitted automatically. / សេចក្ដីព្រាងនៅតែរក្សាទុកក្នុងផ្ទាំងនេះ។'
+  const retry = document.createElement('button')
+  retry.type = 'button'; retry.textContent = 'Retry / ព្យាយាមម្ដងទៀត'; retry.dataset.sessionAction = 'retry'
+  const reload = document.createElement('button')
+  reload.type = 'button'; reload.textContent = 'Reload / ផ្ទុកឡើងវិញ'; reload.dataset.sessionAction = 'reload'
+  for (const button of [retry, reload]) button.style.cssText = 'padding:12px 20px;margin:12px 12px 0 0;border:1px solid #999;border-radius:8px;background:#f5f5f5;color:#111;'
+  host.append(title, message, note, retry, reload)
+  document.body.append(host)
+  const hidden = new Map<HTMLElement, { inert: boolean; visibility: string; priority: string; content: string; contentPriority: string; aria: string | null }>()
+  let wasBlocked = false
+  const hideOldUi = () => {
+    for (const node of Array.from(document.body.children)) {
+      if (!(node instanceof HTMLElement) || node === host || hidden.has(node)) continue
+      hidden.set(node, { inert: node.inert, visibility: node.style.getPropertyValue('visibility'), priority: node.style.getPropertyPriority('visibility'), content: node.style.getPropertyValue('content-visibility'), contentPriority: node.style.getPropertyPriority('content-visibility'), aria: node.getAttribute('aria-hidden') })
+      node.inert = true
+      node.style.setProperty('visibility', 'hidden', 'important')
+      node.style.setProperty('content-visibility', 'hidden', 'important')
+      node.setAttribute('aria-hidden', 'true')
+    }
+  }
+  const restore = () => {
+    hidden.forEach((before, node) => {
+      node.inert = before.inert
+      if (before.visibility) node.style.setProperty('visibility', before.visibility, before.priority)
+      else node.style.removeProperty('visibility')
+      if (before.content) node.style.setProperty('content-visibility', before.content, before.contentPriority)
+      else node.style.removeProperty('content-visibility')
+      if (before.aria === null) node.removeAttribute('aria-hidden')
+      else node.setAttribute('aria-hidden', before.aria)
+    })
+    hidden.clear()
+  }
+  const update = () => {
+    const blocked = isActorSessionQuarantined()
+    host.style.display = blocked ? 'block' : 'none'
+    if (blocked) {
+      hideOldUi()
+      const status = actorSessionQuarantineStatus()
+      message.textContent = status === 'authentication-pending' ? 'Sign-in is still in progress in another tab. Finish it there, then retry. / ការចូលគណនីនៅកំពុងដំណើរការក្នុងផ្ទាំងផ្សេង។ សូមបញ្ចប់នៅទីនោះ រួចព្យាយាមម្ដងទៀត។'
+        : status === 'checking' ? 'Checking the current session… / កំពុងពិនិត្យវគ្គចូលគណនីបច្ចុប្បន្ន…'
+          : status === 'different-account' ? 'Another account is signed in. Sign back into the original account in the other tab, then retry. Reload only when no unfinished editor work remains. / គណនីផ្សេងបានចូល។ សូមចូលគណនីដើមវិញក្នុងផ្ទាំងផ្សេង រួចព្យាយាមម្ដងទៀត។ ផ្ទុកឡើងវិញតែពេលគ្មានការកែប្រែមិនទាន់បញ្ចប់។'
+            : 'This screen remains locked because the current session could not be safely restored. Retry, or reload when no unfinished editor work remains. / អេក្រង់នេះនៅតែចាក់សោ ព្រោះមិនអាចស្ដារវគ្គចូលគណនីដោយសុវត្ថិភាពបាន។ សូមព្យាយាមម្ដងទៀត ឬផ្ទុកឡើងវិញពេលគ្មានការកែប្រែមិនទាន់បញ្ចប់។'
+      if (!wasBlocked) retry.focus()
+    } else restore()
+    wasBlocked = blocked
+  }
+  const act = (button: HTMLElement | null) => {
+    if (button?.dataset.sessionAction === 'retry') window.dispatchEvent(new CustomEvent(ACTOR_SESSION_RETRY_EVENT))
+    if (button?.dataset.sessionAction === 'reload') {
+      flushPendingWorkDrafts()
+      if (hasDirtyWork()) {
+        message.textContent = 'Unfinished editors are still retained here. Sign back into the original account and retry; this tab will not discard them. / ការកែប្រែមិនទាន់បញ្ចប់នៅតែរក្សាទុកនៅទីនេះ។ សូមចូលគណនីដើមវិញ ហើយព្យាយាមម្ដងទៀត។ ផ្ទាំងនេះនឹងមិនលុបការកែប្រែទាំងនោះទេ។'
+        return
+      }
+      window.location.reload()
+    }
+  }
+  const blockInput = (event: Event) => {
+    if (!isActorSessionQuarantined()) return
+    const target = event.target instanceof HTMLElement ? event.target : null
+    event.preventDefault(); event.stopImmediatePropagation()
+    if (!target || !host.contains(target)) return
+    if (event.type === 'click') act(target.closest('button'))
+    if (event instanceof KeyboardEvent && event.type === 'keydown') {
+      if (event.key === 'Tab') (document.activeElement === retry ? reload : retry).focus()
+      else if (event.key === 'Enter' || event.key === ' ') act(target.closest('button'))
+    }
+  }
+  const events = ['keydown', 'keyup', 'keypress', 'click', 'dblclick', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'contextmenu', 'submit', 'input', 'change']
+  events.forEach((name) => window.addEventListener(name, blockInput, { capture: true, passive: false }))
+  const observer = new MutationObserver(() => { if (isActorSessionQuarantined()) hideOldUi() })
+  observer.observe(document.body, { childList: true })
+  const unsubscribe = subscribeActorSessionQuarantine(update)
+  update()
+  return () => {
+    unsubscribe(); observer.disconnect()
+    events.forEach((name) => window.removeEventListener(name, blockInput, true))
+    restore(); host.remove()
+  }
+}
+
 export default function App() {
+  useEffect(() => installActorSessionQuarantineDom(), [])
   const {
     user,
     authReady,
@@ -1562,6 +1869,7 @@ export default function App() {
     theme,
     notify,
     t,
+    storagePersisted,
   } = useApp()
   const offlineNoticeRef = useRef({ queued: '', synced: '' })
   const {
@@ -1569,11 +1877,14 @@ export default function App() {
     transientOutage,
     pendingSync,
     vaultLocked,
+    appUpdate,
     conflictsNeedReview,
     clearSyncError,
+    clearAppUpdate,
   } = useSyncErrorBanner(authReady ? user : null)
   const mountedPages = useMountedPages(page)
   const mobileHeaderVisible = useMobileHeaderAutoHide(page)
+  const inlineMobileNavigation = useMobileSectionNavMode(settings?.ui_mobile_section_nav) === 'pages'
   const mainRef = useRef<HTMLElement | null>(null)
   // Swipe-down-to-refresh: listens on the shell's <main> (an ancestor of
   // whichever page's own `.page-scroll` div is actually scrolling --
@@ -1620,6 +1931,44 @@ export default function App() {
 
   useVisibilityRecovery(authReady && !!user)
   useIntentChunkWarmup(authReady ? user : null, page, canAccessPage)
+
+  // Mount once at the shell so truncated cells work on every route.
+  useEffect(() => { ensureTextAffordances({ copy: t('copy'), copied: t('copied') }) }, [t])
+
+  // G5: arm the native install-prompt capture at boot, before IosInstallHint
+  // mounts. Chromium chooses when to fire beforeinstallprompt and the event
+  // is lost if nothing calls preventDefault() on it; capturing here (and not
+  // in the component) means an event that fires during sign-in is still
+  // replayable afterwards. Idempotent, so the effect re-running is harmless.
+  //
+  // B9: the same boot moment installs the standalone external-link guard, so
+  // a same-origin _blank link cannot strand an installed-app user in a
+  // chromeless second window with no back button. Also idempotent, and a
+  // no-op in an ordinary browser tab. Deliberately above the
+  // isPublicCatalogRoute early return: the storefront can be installed too,
+  // and most of the affected links live on it.
+  // Both installers are idempotent and both return their own teardown, so
+  // the listeners are attached exactly once and removed on unmount rather
+  // than accumulating a pair per render.
+  useEffect(() => {
+    const stopInstallPromptCapture = installBeforeInstallPromptCapture()
+    const stopExternalLinkGuard = installStandaloneExternalLinkGuard()
+    return () => {
+      stopInstallPromptCapture()
+      stopExternalLinkGuard()
+    }
+  }, [])
+
+  // G10: hand appUpdate.ts the shell's own non-blocking notice, so the
+  // unsaved-work refusal stops being a window.alert() that freezes the tab
+  // (and, on an installed iOS PWA, puts a system sheet over a chromeless
+  // window). Registered here rather than at each call site so the sidebar's
+  // manual update action gets the same treatment as the update bar without
+  // being touched. Long duration: this one is a refusal, not a receipt.
+  useEffect(() => {
+    setAppUpdateUnsavedWorkNotice((message) => notify(message, 'warning', 6000))
+    return () => setAppUpdateUnsavedWorkNotice(null)
+  }, [notify])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
@@ -1700,20 +2049,25 @@ export default function App() {
     }
   }, [notify, t, user])
 
-  const [, setLocationVersion] = useState(0)
+  const [shellLocation, setShellLocation] = useState(() => ({ pathname: window.location.pathname, hash: window.location.hash }))
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
-    const handleLocationChange = () => setLocationVersion((value) => value + 1)
-    window.addEventListener('popstate', handleLocationChange)
+    const handleLocationChange = () => setShellLocation({ pathname: window.location.pathname, hash: window.location.hash })
+    // Admin Back can be temporarily rolled back by the dirty guard. Follow its
+    // committed event, so the raw target URL cannot bypass that guard here.
+    const handlePublicLocationChange = () => {
+      if (isPublicCatalogPath(window.location.pathname)) handleLocationChange()
+    }
+    window.addEventListener('popstate', handlePublicLocationChange)
     window.addEventListener(APP_NAVIGATION_EVENT, handleLocationChange)
     return () => {
-      window.removeEventListener('popstate', handleLocationChange)
+      window.removeEventListener('popstate', handlePublicLocationChange)
       window.removeEventListener(APP_NAVIGATION_EVENT, handleLocationChange)
     }
   }, [])
 
-  const pathname = typeof window !== 'undefined' ? (window.location.pathname || '/') : '/'
+  const pathname = shellLocation.pathname
   const isPublicCatalogRoute = isPublicCatalogPath(pathname)
   // '/' resolves through the org's configurable default landing page
   // (Settings > Navigation Layout, settings.default_landing_page) instead of
@@ -1721,7 +2075,7 @@ export default function App() {
   // 'dashboard' itself for an unset/unrecognized value, and the access-guard
   // effect below still won't navigate a user to a page they can't open.
   const requestedAdminPage = pathname === '/'
-    ? normalizePageId(resolveAdminLandingPage(settings.default_landing_page), 'dashboard')
+    ? normalizePageId(getHubPageFromLocation(pathname, shellLocation.hash) || resolveAdminLandingPage(settings.default_landing_page), 'dashboard')
     : normalizePageId(getAdminPageFromPath(pathname), 'dashboard')
 
   useEffect(() => {
@@ -1780,6 +2134,13 @@ export default function App() {
 
 
   if (isPublicCatalogRoute) {
+    // The admin app-update prompt is deliberately absent here. A shopper on
+    // the public catalog is not running the till: the prompt offers "Restart
+    // now" and its guard message talks about saving unfinished work, neither
+    // of which means anything to a storefront visitor. A public page updates
+    // the ordinary way, by being loaded again.
+    // (Named in prose rather than in code above, because the test for this
+    // greps the branch for the component's tag.)
     return <PublicCatalogView />
   }
 
@@ -1794,28 +2155,35 @@ export default function App() {
     // used everywhere in the app, instead of several different-looking
     // loading screens appearing back to back during boot/navigation.
     return (
-      <div className="business-os-initial-shell" role="status" aria-live="polite">
-        <div className="business-os-initial-panel">
-          <div className="business-os-initial-spinner" aria-hidden="true" />
-          <div className="business-os-initial-brand">
-            <h1 className="business-os-initial-title">Business OS</h1>
-            <p className="business-os-initial-copy">Preparing secure sign-in...</p>
+      <>
+        <AppUpdateBanner update={appUpdate} onDismiss={clearAppUpdate} />
+        <div className="business-os-initial-shell" role="status" aria-live="polite">
+          <div className="business-os-initial-panel">
+            <div className="business-os-initial-spinner" aria-hidden="true" />
+            <div className="business-os-initial-brand">
+              <h1 className="business-os-initial-title">Business OS</h1>
+              <p className="business-os-initial-copy">Preparing secure sign-in...</p>
+            </div>
           </div>
         </div>
-      </div>
+      </>
     )
   }
 
   if (!user) {
     return (
-      <Suspense fallback={<PageLoader />}>
-        <Login />
-      </Suspense>
+      <>
+        <AppUpdateBanner update={appUpdate} onDismiss={clearAppUpdate} />
+        <Suspense fallback={<PageLoader />}>
+          <Login />
+        </Suspense>
+      </>
     )
   }
 
   return (
-    <div id="app-root" className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
+    <div id="app-root" className={`flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900 ${appUpdate ? 'pt-[calc(3rem+env(safe-area-inset-top))]' : ''}`}>
+      <AppUpdateBanner update={appUpdate} onDismiss={clearAppUpdate} />
       {/* Desktop's standalone top bar (logo, business name, notification
           bell, theme/language toggles in their own h-14 row above the
           sidebar+content) is gone -- per request, large screens fold all
@@ -1831,12 +2199,13 @@ export default function App() {
               desktopNotificationSlot={desktopNotificationSlot}
               showQuickPreferences={shouldMountQuickPreferences}
               mobileHeaderVisible={mobileHeaderVisible}
+              appUpdateVisible={!!appUpdate}
             />
           </Suspense>
 
           <main
             ref={mainRef}
-            className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(3.55rem+env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] transition-[padding-top] duration-300 ease-in-out md:pb-0 md:pl-0 md:pr-0 md:pt-0 ${mobileHeaderVisible ? 'pt-[calc(4rem+env(safe-area-inset-top))]' : 'pt-[env(safe-area-inset-top)]'}`}
+            className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${inlineMobileNavigation ? 'pb-[env(safe-area-inset-bottom)]' : 'pb-[calc(3.55rem+env(safe-area-inset-bottom))]'} pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] transition-[padding-top] duration-300 ease-in-out md:pb-0 md:pl-0 md:pr-0 md:pt-0 ${mobileHeaderVisible ? (appUpdate ? 'pt-16' : 'pt-[calc(4rem+env(safe-area-inset-top))]') : (appUpdate ? 'pt-0' : 'pt-[env(safe-area-inset-top)]')}`}
           >
             <PullToRefreshIndicator pullDistance={pullDistance} refreshing={pullRefreshing} />
             <div className="flex min-w-0 items-center gap-3">
@@ -1871,7 +2240,16 @@ export default function App() {
       </NotesProvider>
 
       <Notification notification={notification} onDismiss={dismissNotification} />
-      <GlobalScrollControls />
+      {/* One bottom stack for the shell's persistent advisories, so two of
+          them can never land on top of each other, and so the clearance over
+          the mobile bottom nav is decided once. Inert where empty. */}
+      <div
+        className={`pointer-events-none fixed inset-x-2 z-[1200] flex flex-col gap-2 ${inlineMobileNavigation ? BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS : BOTTOM_STACK_CLEARS_NAV_CLASS} md:inset-x-auto md:bottom-4 md:right-4 md:w-[24rem]`}
+      >
+        <StorageEvictionBand pendingSync={pendingSync} storagePersisted={storagePersisted} />
+        <IosInstallHint />
+      </div>
+      <GlobalScrollControls mobileBottomNavVisible={!inlineMobileNavigation} />
       {writeConflict ? (
         <Suspense fallback={null}>
           <WriteConflictModal

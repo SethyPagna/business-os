@@ -6,8 +6,8 @@
 //     return_to_stock boolean keeps its exact default (absent = restock)
 //   - computeSettlement: even exchange only at a zero gap; price
 //     difference is signed and needs full access
-//   - same-name gate: a replacement from another row of the SAME name
-//     group passes; a different-name product is refused
+//   - replacement selection is not restricted by product name; the route
+//     records a linked sale/receipt for any chosen catalog item
 //   - damaged lots: created traceable (return/branch/batch), never touch
 //     sellable branch_stock; reversal deletes untouched lots and REFUSES
 //     once any quantity was drawn (ConsumedDamagedStockError)
@@ -20,6 +20,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
 const ts = require(path.join(__dirname, '..', '..', 'frontend', 'node_modules', 'typescript'))
+// Load the actual dependency before any permissive per-module shim is active.
+const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -35,6 +37,7 @@ function loadReal(relPath, requireOverrides = {}) {
   })
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
@@ -52,7 +55,8 @@ function loadReal(relPath, requireOverrides = {}) {
 const sqlBinding = loadReal('lib/sqlBinding.ts', { './db': {} })
 const batchCode = loadReal('lib/batchCode.ts', { './db': {} })
 const productBatches = loadReal('lib/productBatches.ts', { './db': {}, './batchCode': batchCode, './sqlBinding': sqlBinding })
-const kernel = loadReal('lib/returnsStock.ts', { './db': {}, './productBatches': productBatches, './sqlBinding': sqlBinding })
+const stockCondition = loadReal('lib/stockCondition.ts')
+const kernel = loadReal('lib/returnsStock.ts', { './db': {}, './productBatches': productBatches, './sqlBinding': sqlBinding, './stockCondition': stockCondition })
 
 let passed = 0
 async function check(name, fn) {
@@ -102,28 +106,52 @@ async function run() {
     assert.equal(kernel.normalizeStockAction({ stock_action: 'garbage', return_to_stock: false }), 'none')
   })
 
-  await check('computeSettlement: even exchange only at zero gap; price difference is signed + full-access', async () => {
-    const even = kernel.computeSettlement({ returnedTotalUsd: 20, returnedTotalKhr: 82000, replacementTotalUsd: 20, replacementTotalKhr: 82000 })
-    assert.equal(even.mode, 'even_exchange')
-    assert.equal(even.evenExchangeBlocked, false)
-    assert.equal(even.needsFullAccess, false)
-    const uneven = kernel.computeSettlement({ returnedTotalUsd: 20, returnedTotalKhr: 0, replacementTotalUsd: 25.5, replacementTotalKhr: 0 })
-    assert.equal(uneven.evenExchangeBlocked, true)
-    const diff = kernel.computeSettlement({ mode: 'price_difference', returnedTotalUsd: 20, returnedTotalKhr: 0, replacementTotalUsd: 25.5, replacementTotalKhr: 0 })
-    assert.equal(diff.needsFullAccess, true)
-    assert.equal(diff.evenExchangeBlocked, false)
-    assert.equal(diff.diffUsd, 5.5) // positive = customer owes
-    const refundSide = kernel.computeSettlement({ mode: 'price_difference', returnedTotalUsd: 30, returnedTotalKhr: 0, replacementTotalUsd: 25, replacementTotalKhr: 0 })
-    assert.equal(refundSide.diffUsd, -5)
+  await check('resolveRefundUnitPrice: the ORIGINAL sale line wins over anything posted', async () => {
+    // the sale charged $8; the client claims $25 -- the sale wins
+    const fromSale = kernel.resolveRefundUnitPrice({
+      saleLine: { applied_price_usd: 8, applied_price_khr: 32000 },
+      postedUsd: 25, postedKhr: 100000,
+    })
+    assert.equal(fromSale.unitUsd, 8)
+    assert.equal(fromSale.unitKhr, 32000)
+    assert.equal(fromSale.fromSaleLine, true)
+    // a line sold at $0 (a giveaway) refunds $0 -- not the posted price
+    assert.equal(kernel.resolveRefundUnitPrice({ saleLine: { applied_price_usd: 0, applied_price_khr: 0 }, postedUsd: 9, postedKhr: 0 }).unitUsd, 0)
+    // a manual return has no sale line, so the posted price is all there is
+    const manual = kernel.resolveRefundUnitPrice({ saleLine: null, postedUsd: 9.5, postedKhr: 38000 })
+    assert.equal(manual.unitUsd, 9.5)
+    assert.equal(manual.fromSaleLine, false)
   })
 
-  await check('same-name gate: sibling row of the name group passes, different name is refused', async () => {
-    // tc1 returned, tc2 handed out -- same name_key (trigger-maintained)
-    await kernel.assertReplacementsSameName(db, [ids.tc1], [ids.tc2])
-    await assert.rejects(
-      () => kernel.assertReplacementsSameName(db, [ids.tc1], [ids.os1]),
-      (err) => err.name === 'ReplacementNameMismatchError' && /same-name stock/.test(err.message),
-    )
+  await check('planReturnLot: the sale names the lot, or the operator does, or it is refused', async () => {
+    // multi-lot line: split back across the SAME lots, last drawn first
+    const multi = kernel.planReturnLot({
+      allocations: [{ batch_id: 11, outstanding: 3 }, { batch_id: 22, outstanding: 2 }],
+      saleLineBatchId: null, operatorBatchId: null, quantity: 5, lotTracked: true,
+    })
+    assert.deepEqual(multi.splits, [{ batchId: 22, quantity: 2 }, { batchId: 11, quantity: 3 }])
+    assert.equal(multi.requiresLotPick, false)
+    assert.equal(multi.plainQuantity, 0)
+    // single-lot line falls back to the lot recorded on the sale line
+    const single = kernel.planReturnLot({ allocations: [], saleLineBatchId: 9, operatorBatchId: null, quantity: 4, lotTracked: true })
+    assert.deepEqual(single.splits, [{ batchId: 9, quantity: 4 }])
+    // an explicit pick is authoritative for the WHOLE line -- it never merges
+    // with a derived split and leaves units somewhere nobody chose
+    const picked = kernel.planReturnLot({
+      allocations: [{ batch_id: 11, outstanding: 3 }],
+      saleLineBatchId: 9, operatorBatchId: 77, quantity: 5, lotTracked: true,
+    })
+    assert.deepEqual(picked.splits, [{ batchId: 77, quantity: 5 }])
+    // lot-tracked with no answer anywhere: REFUSED, never a silent aggregate bump
+    const stuck = kernel.planReturnLot({ allocations: [], saleLineBatchId: null, operatorBatchId: null, quantity: 2, lotTracked: true })
+    assert.equal(stuck.requiresLotPick, true)
+    assert.equal(stuck.plainQuantity, 0)
+    // ...and a product that has never had a lot keeps the plain bump
+    const legacy = kernel.planReturnLot({ allocations: [], saleLineBatchId: null, operatorBatchId: null, quantity: 2, lotTracked: false })
+    assert.equal(legacy.requiresLotPick, false)
+    assert.equal(legacy.plainQuantity, 2)
+    // the settlement kernel is GONE, not merely unused
+    assert.equal(typeof kernel.computeSettlement, 'undefined')
   })
 
   await check('damaged lot: traceable, never sellable stock; open-lot listing sees it', async () => {
@@ -234,11 +262,19 @@ async function run() {
     const salesSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'sales.ts'), 'utf8')
     // damaged lines skip the sellable-stock checks and deductions...
     assert.match(salesSource, /shouldDeductStock && !item\.damaged_lot_id\)/)
-    // ...draw their lot up front with compensation on every later failure...
-    assert.match(salesSource, /await consumeDamagedLot\(db, \{ lotId: Number\(item\.damaged_lot_id\)/)
-    assert.match(salesSource, /await restoreConsumedDamagedLots\(\)\s+await db\.prepare\('DELETE FROM sales WHERE id = \?'\)/)
-    // ...record which lot on the sale line, and ledger the draw
-    assert.match(salesSource, /@batch_id, @batch_label, @batch_expiry_date, @damaged_lot_id/)
+    // ...guard and draw their lot inside the same atomic creation batch. The
+    // route-level sale-create suite injects a later audit failure and proves
+    // quantity_remaining rolls back with the header, line and movement.
+    assert.match(salesSource, /SELECT CASE WHEN EXISTS \([\s\S]*?FROM damaged_stock_lots[\s\S]*?quantity_remaining >= @quantity/)
+    assert.match(salesSource, /UPDATE damaged_stock_lots[\s\S]*?quantity_remaining = quantity_remaining - @quantity/)
+    assert.doesNotMatch(salesSource, /await consumeDamagedLot\(db/)
+    assert.doesNotMatch(salesSource, /restoreConsumedDamagedLots/)
+    // ...record which damaged lot on the sale line. Sellable batch metadata
+    // comes from the validated current-line CTE rather than trusting the
+    // caller's batch label/expiry strings.
+    assert.match(salesSource, /WITH current_batch AS \([\s\S]*?WHERE pb\.id = @batch_id[\s\S]*?pb\.variant_product_id = @product_id[\s\S]*?current_line AS \(/)
+    assert.match(salesSource, /\(SELECT batch_id FROM current_line\),\s*\(SELECT lot_code FROM current_line\),\s*\(SELECT expiry_date FROM current_line\),\s*@damaged_lot_id/)
+    assert.doesNotMatch(salesSource, /@batch_id,\s*@batch_label,\s*@batch_expiry_date,\s*@damaged_lot_id/)
     assert.match(salesSource, /DAMAGE_OUT_MOVEMENT/)
     // status transitions run damaged lines on the SAME heldQuantity state
     // machine, outside the branch-stock plan
@@ -256,25 +292,41 @@ async function run() {
     // three-way action drives both create and edit re-apply, and the
     // column is written on both INSERT INTO return_items statements
     assert.match(routeSource, /const stockAction = normalizeStockAction\(item\)/)
-    assert.equal((routeSource.match(/@return_to_stock, @stock_action, @branch_id/g) || []).length, 2)
+    assert.equal((routeSource.match(/@return_to_stock,\s*@stock_action,\s*@branch_id/g) || []).length, 2)
     // damaged lots reverse (and can block) before an edit re-applies
-    assert.match(routeSource, /const reversedLots = await reverseDamagedLots\(db, id\)/)
+    assert.match(routeSource, /const damagedLots = await db\.prepare\(`[\s\S]*?FROM damaged_stock_lots WHERE return_id=@returnId/)
+    assert.match(routeSource, /editReversedDamaged = damagedLots\.map[\s\S]*?DELETE FROM damaged_stock_lots WHERE return_id=@returnId/)
     assert.match(routeSource, /instanceof ConsumedDamagedStockError/)
-    // replacements: same-name gate + settlement gate before any write,
-    // full-access enforcement, and the damaged-lots read endpoint sits
-    // above the /:id param route
-    assert.match(routeSource, /await assertReplacementsSameName\(/)
-    assert.match(routeSource, /code: 'uneven_exchange'/)
-    assert.match(routeSource, /Settling a price difference on a replacement requires Full Access/)
+    // replacements: any catalog item is accepted, a linked sale/receipt is
+    // written, and the damaged-lots endpoint sits above the /:id param route.
+    // The settlement gate is GONE from the route -- a return no longer nets
+    // against its replacement, so there is nothing to refuse or to escalate.
+    assert.doesNotMatch(routeSource, /assertReplacementsSameName/)
+    assert.doesNotMatch(routeSource, /uneven_exchange/)
+    assert.doesNotMatch(routeSource, /settle_difference/)
+    assert.doesNotMatch(routeSource, /computeSettlement/)
+    // ...and the lot refusal took its place
+    assert.match(routeSource, /code: error\.code, product_id: productId/)
+    assert.match(routeSource, /INSERT INTO sales\(/)
+    assert.match(routeSource, /source_return_id/)
+    assert.match(routeSource, /INSERT INTO sale_items\(/)
+    assert.match(routeSource, /replacementReceiptNumber/)
     assert.ok(routeSource.indexOf(`app.get('/damaged-lots'`) < routeSource.indexOf(`app.get('/:id'`))
-    // failed creates clean up ALL of this return's rows
-    assert.match(routeSource, /DELETE FROM damaged_stock_lots WHERE return_id = \?/)
-    assert.match(routeSource, /DELETE FROM return_replacement_items WHERE return_id = \?/)
+    // Create is one guarded atomic batch, so a failed create never needs a
+    // compensating partial-row cleanup path.
+    assert.match(routeSource, /returnCreateGuardStatement\(operationId, 'precondition'/)
+    assert.match(routeSource, /INSERT INTO return_create_receipts\(/)
+    assert.match(routeSource, /returnCreateGuardStatement\(operationId, 'postcondition'/)
     const migration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0074_returns_replace_damaged.sql'), 'utf8')
     assert.match(migration, /CREATE TABLE IF NOT EXISTS damaged_stock_lots/)
     assert.match(migration, /CREATE TABLE IF NOT EXISTS return_replacement_items/)
     assert.match(migration, /ALTER TABLE return_items ADD COLUMN stock_action TEXT/)
     assert.match(migration, /WHEN COALESCE\(return_to_stock, 0\) = 1 THEN 'restock' ELSE 'none'/)
+    const replacementSaleMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0106_return_replacement_sales.sql'), 'utf8')
+    assert.match(replacementSaleMigration, /ALTER TABLE returns ADD COLUMN replacement_sale_id INTEGER/)
+    assert.match(replacementSaleMigration, /ALTER TABLE sales ADD COLUMN source_return_id INTEGER/)
+    const atomicCreateMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0142_return_create_receipts.sql'), 'utf8')
+    assert.match(atomicCreateMigration, /CREATE TABLE return_create_receipts/)
   })
 
   console.log(`\n${passed} check(s) passed.`)

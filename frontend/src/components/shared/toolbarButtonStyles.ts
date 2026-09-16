@@ -26,7 +26,7 @@
 // Fixed height + icon/label sizing, independent of how wide the button
 // is allowed to grow.
 export const TOOLBAR_BUTTON_BASE =
-  'inline-flex h-9 items-center justify-center gap-1.5 overflow-hidden rounded-xl px-3 text-xs font-semibold sm:text-sm'
+  'inline-flex h-10 min-h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3 text-xs font-semibold sm:text-sm'
 
 // Equal-share width on the narrowest screens (so a row of 2-3 toolbar
 // buttons stays easy to tap edge-to-edge), settling to natural content
@@ -40,3 +40,5 @@ export const TOOLBAR_BUTTON_SIZING = `${TOOLBAR_BUTTON_BASE} ${TOOLBAR_BUTTON_WI
 // like "Add product" / "Add Fee" / "Add user".
 export const manageToolbarButtonClassName = `btn-secondary ${TOOLBAR_BUTTON_SIZING}`
 export const primaryToolbarButtonClassName = `btn-primary ${TOOLBAR_BUTTON_SIZING}`
+
+export const toolbarIconButtonClassName = 'inline-flex h-10 min-h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:bg-zinc-800'

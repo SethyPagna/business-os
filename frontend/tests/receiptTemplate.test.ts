@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import { DEFAULT_TEMPLATE } from '../src/components/receipt-settings/constants.ts'
 import { parseReceiptTemplate, serializeReceiptTemplate } from '../src/components/receipt-settings/template.ts'
 import { computeImagePdfLayout } from '../src/utils/receiptPdfLayout.ts'
+import './posMoneyV1.test.ts' // actual Receipt SSR proves exact29 versus rounded-unit29.0001
 import { normalizeReceiptPrintSettings, normalizeReceiptTemplate, RECEIPT_TEMPLATE_REVISION, DEFAULT_RECEIPT_TEMPLATE } from '../src/utils/receiptAppliedConfig.ts'
 
 let failed = 0
@@ -104,11 +105,23 @@ await runTest('print export normalizes receipt root width inside paper frame', (
 })
 
 
-await runTest('thermal print keeps configured margins inside paper and uses one measured page', () => {
+await runTest('thermal print keeps configured margins inside one measured-height roll page', () => {
   const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
   assert.match(source, /const measuredHeightMm = renderedHeightPx \* \(widthMm \/ renderedWidthPx\)/)
-  assert.match(source, /const pageHeightMm = fixedHeightMm \?\? Math\.max\(1, measuredHeightMm \+ 1\)/)
-  assert.match(source, /size: \$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm;/)
+  assert.match(source, /return \{ pageHeightMm: fixedHeightMm, continuousRoll: false, pageSizeMode \}/,
+    'a genuine fixed sheet keeps its own explicit height')
+  assert.match(source, /return \{ pageHeightMm: Math\.max\(1, measuredHeightMm \+ 1\), continuousRoll: true, pageSizeMode: 'measured' \}/,
+    'the default measured mode still grows the page with the complete receipt content')
+  assert.match(source, /const pageSizeCss = `\$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm`/,
+    'the @page size is always an explicit, valid width-by-height pair -- CSS Paged Media never accepts a length combined with `auto`')
+  assert.doesNotMatch(source, /\$\{widthMm\}mm auto/,
+    'a length combined with `auto` is invalid CSS Paged Media and must never reappear')
+  assert.match(source, /size: \$\{pageSizeCss\};/,
+    'every print document declares exactly one explicit width-by-height page')
+  assert.match(source, /remeasureContinuousRollBeforePrint/,
+    'the continuous roll height is re-measured inside the actual print document, right before print()')
+  assert.match(source, /const documentHeightCss = clipToOnePage/,
+    'only a genuine fixed sheet pins html/body to a measured height; a continuous roll grows with content instead of inserting page breaks')
   assert.match(source, /clone\.style\.minWidth = `\$\{widthMm\}mm`/)
   assert.doesNotMatch(source, /clone\.style\.padding = '0'/)
   assert.doesNotMatch(source, /node\.style\.width = `\$\{widthMm\}mm`[\s\S]{0,120}node\.style\.maxWidth = `\$\{widthMm\}mm`/)
@@ -122,6 +135,8 @@ await runTest('thermal print keeps configured margins inside paper and uses one 
     'continuous receipt margins should replace the screen-shell padding')
   assert.match(source, /descendant\.style\.height = 'auto'/,
     'wrapped receipt rows must be allowed to grow in the printable clone')
+  assert.match(source, /line\.style\.gridTemplateRows = 'none'/,
+    'computed pixel grid tracks must not freeze a wrapped print row at one line')
 })
 
 await runTest('fixed 80x50 PDF layout keeps exact dimensions and fits tall content proportionally', () => {
@@ -181,7 +196,21 @@ await runTest('receipt layout keeps Khmer labels, item columns, and row-aware im
   assert.match(receiptSource, /const RECEIPT_KHMER_LABELS/)
   assert.match(receiptSource, /បង្កាន់ដៃ/)
   assert.doesNotMatch(receiptSource, /áž/)
-  assert.match(receiptSource, /grid-cols-\[minmax\(0,1fr\)_2\.8rem_minmax\(4\.6rem,auto\)\]/)
+  // FOUR columns since Sep 4 2026 (item / qty / price / total), three when a
+  // shop switches the price column off, and ONE track so the header row and
+  // the item rows can never disagree about the count. Since N33 (owner, Sep 6
+  // 2026, "make them compact... especially name") that track is
+  // receiptItemGridTemplate() in utils/receiptItemColumns -- shared with
+  // printReceipt.ts's paper re-layout, which used to keep a drifted copy.
+  // receiptCompactRows.test.ts renders the component and states the geometry.
+  assert.match(receiptSource, /const itemGridStyle: CSSProperties = \{/)
+  assert.match(receiptSource, /gridTemplateColumns: receiptItemGridTemplate\(showUnitPriceCol\)/)
+  assert.equal(
+    (receiptSource.match(/style=\{itemGridStyle\}/g) || []).length,
+    2,
+    'the header row and the item rows must both read the shared track'
+  )
+  assert.match(receiptSource, /data-receipt-cell="line-total"/)
   assert.doesNotMatch(receiptSource, /getStatusLabel/)
   assert.doesNotMatch(receiptSource, /<Row label=\{labelFor\(lang, 'status'\)/)
   assert.doesNotMatch(receiptSource, /@\s*\{fmtUSD\(unitUsd\)\}/)
@@ -191,12 +220,12 @@ await runTest('receipt layout keeps Khmer labels, item columns, and row-aware im
   assert.match(receiptSource, /const target = variant === 'compact' \? compactPrintRef\.current : printRef\.current/)
   assert.match(receiptSource, /const exportReceiptVariant = async/)
   assert.match(receiptSource, /printTools\.printReceipt\(target,\s*\{[\s\S]*title,/)
-  assert.match(receiptSource, /printTools\.openReceiptPdf\(target,\s*\{[\s\S]*title,/)
+  // N4 (owner, Sep 6 2026): the Open PDF action is gone, so the receipt
+  // exports through Print and Image only -- see receiptActionRow.test.ts.
+  assert.doesNotMatch(receiptSource, /printTools\.openReceiptPdf/)
   assert.match(receiptSource, /const defaultVariant: ReceiptVariant = 'full'/,
-    'Open PDF and Image must export the detailed receipt, not silently use the 80x50 summary card')
-  assert.match(receiptSource, /void exportReceiptPdf\('open', 'compact'\)/)
+    'Image must export the detailed receipt, not silently use the 80x50 summary card')
   assert.match(receiptSource, /void exportReceiptPdf\('image', 'compact'\)/)
-  assert.match(receiptSource, /void exportBothSeparately\('open'\)/)
   assert.match(receiptSource, /void exportBothSeparately\('image'\)/)
   assert.match(receiptSource, /exportReceiptPdf\('print', 'compact'\)/)
   assert.match(receiptSource, /exportReceiptPdf\('print', 'full'\)/)
@@ -215,16 +244,44 @@ await runTest('receipt discounts stay beside the charged price and printable gri
   const previewSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
   const printSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
 
-  assert.match(receiptSource, /\{fmtUSD\(lineUsd\)\}[\s\S]*\(-\{fmtUSD\(itemSavingsUsd\)\}\)/,
-    'line savings should be rendered next to the charged total in the Price cell')
-  assert.match(receiptSource, /\{qty\} × \{fmtUSD\(unitUsd\)\}/,
-    'optional unit math should stay in the Price cell rather than duplicate quantity under the name')
+  // The saving still belongs to the price, but the price is now a UNIT price
+  // in its own column, so the parenthesised figure is the cut on one unit --
+  // the owner's photo reads `28.00 (-7.00)` there, then `21.00` in Total.
+  assert.match(receiptSource, /\{unknownRecordedUnit \? '—' : fmtUSD\(unitUsd\)\}[\s\S]*\(-\{fmtUSD\(unitSavingsUsd\)\}\)/,
+    'the per-unit saving should be rendered next to the unit price in the Price cell')
+  const priceExpression = receiptSource.match(/\{(unknownRecordedUnit \? '—' : fmtUSD\(unitUsd\))\}/)?.[1]
+  assert.ok(priceExpression)
+  const renderPrice = new Function('unknownRecordedUnit', 'unitUsd', 'fmtUSD', `return (${priceExpression})`)
+  assert.equal(renderPrice(false, 10, (amount: number) => `$${amount.toFixed(2)}`), '$10.00')
+  assert.equal(renderPrice(true, 0, () => { throw new Error('unknown unit cannot be formatted as zero') }), '—')
+  assert.match(receiptSource, /const lineUsd = figures\.lineUsd/,
+    'the Total column carries the net line, which is what the printed Subtotal sums')
+  assert.doesNotMatch(receiptSource, /\{qty\} × \{fmtUSD\(unitUsd\)\}/,
+    'the qty × unit subline duplicated the Price column once that column existed')
   assert.doesNotMatch(receiptSource, /line-through text-gray-400/,
     'the receipt should not add a separate crossed-out price block beneath the product name')
   assert.match(previewSource, /businessDateTimeId\(previewNow\)/)
   assert.match(previewSource, /created_at: previewNow\.toISOString\(\)/)
   assert.doesNotMatch(previewSource, /receipt_number: '20260831-143000'/)
-  assert.match(printSource, /line\.style\.gridTemplateColumns = 'minmax\(0,1fr\) 2\.5rem minmax\(4\.25rem,auto\)'/)
+  // N33 (owner, Sep 6 2026): the exporter no longer carries its own literal
+  // track list. It had drifted from what the component renders (3.6rem/3.2rem
+  // here against 3.9rem/3.4rem there, 4.25rem against 4.6rem on the label
+  // rows), so a column change reached the screen and never reached paper. Both
+  // sides now read utils/receiptItemColumns; receiptCompactRows.test.ts pins
+  // the resulting geometry.
+  assert.match(printSource, /line\.style\.gridTemplateColumns = receiptItemGridTemplate\(false\)/)
+  assert.match(printSource, /line\.style\.gridTemplateColumns = RECEIPT_ROW_GRID_TEMPLATE/)
+  assert.doesNotMatch(printSource, /gridTemplateColumns = 'minmax\(0,1fr\)/,
+    'no literal track may come back into the exporter -- that is the copy that drifted')
+  // On paper the tracks are recomputed from the printable box, so the count
+  // has to follow the cells. Three tracks under a four-cell row would wrap the
+  // line total onto a row of its own -- invisible on screen, wrong on paper.
+  assert.match(printSource, /const hasLineTotal = Boolean\(line\.querySelector\(.\[data-receipt-cell="line-total"\].\)\)/)
+  assert.match(printSource, /line\.style\.gridTemplateColumns = receiptItemGridTemplate\(true\)/)
+  // ...and the canvas fallback (iOS / tainted-foreignObject) draws four fields
+  // rather than folding price and total into one right-aligned slot.
+  assert.match(printSource, /const hasTotalColumn = parts\.length >= 4/)
+  assert.match(printSource, /return compactValues\.slice\(0, 4\)\.join\('\\t'\)/)
   assert.match(printSource, /node\.style\.overflowX = 'visible'/)
 })
 
@@ -238,6 +295,17 @@ await runTest('compact receipt output uses ABA details and configurable secondar
   assert.match(receiptSource, /tpl\.show_discount_khr !== false/)
   assert.match(receiptSource, /tpl\.show_membership_discount_khr !== false/)
   assert.match(receiptSource, /tpl\.show_delivery_khr !== false/)
+})
+
+await runTest('text_contrast survives a parseReceiptTemplate/serializeReceiptTemplate round trip alongside other fields', () => {
+  const serialized = serializeReceiptTemplate({ text_contrast: 'maximum', font_size: 13 })
+  const reparsed = parseReceiptTemplate(serialized)
+  assert.equal(reparsed.text_contrast, 'maximum')
+  assert.equal(reparsed.font_size, 13)
+
+  const withoutField = parseReceiptTemplate(JSON.stringify({ font_size: 11 }))
+  assert.equal(withoutField.text_contrast, DEFAULT_TEMPLATE.text_contrast,
+    'a stored template predating this setting must default to normal, not undefined')
 })
 
 await runTest('receipt asset inlining uses bounded workers', () => {

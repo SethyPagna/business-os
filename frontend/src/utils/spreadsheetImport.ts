@@ -47,18 +47,41 @@ export function isSpreadsheetFileName(fileName: string): boolean {
   return SPREADSHEET_EXTENSION_PATTERN.test(String(fileName || '').trim())
 }
 
+// The ONE case where a numeric cell's DISPLAY text carries a digit its
+// stored value does not: a zero-padding custom format ("0000000000000"),
+// which is what an operator applies to keep a leading-zero barcode looking
+// right in Excel. The workbook then holds { t:'n', v:123, w:'0123' } and
+// reading .v alone silently drops the zero -- the second root cause behind
+// "products that actually have barcode with leading 0" (verified against
+// SheetJS: a cell written with z:'0000' round-trips exactly like that).
+//
+// Deliberately as narrow as the claim: the formatted text must be nothing
+// but digits, must be LONGER than the plain stringified number, and must
+// still parse back to the same number. That admits '0123' for 123 and
+// rejects everything else -- thousands separators, currency, percentages,
+// and above all the "8.85107E+12" scientific rendering the next case is
+// specifically written not to trust.
+function zeroPaddedNumericText(cell: XLSX.CellObject): string {
+  const formatted = typeof cell.w === 'string' ? cell.w.trim() : ''
+  if (!/^0[0-9]*$/.test(formatted)) return ''
+  const plain = String(cell.v)
+  if (formatted.length <= plain.length) return ''
+  return Number(formatted) === Number(cell.v) ? formatted : ''
+}
+
 // Converts one cell to the text that should appear in the equivalent CSV.
-// Deliberately reads cell.v (the raw stored value), never cell.w (Excel's
-// *display* text) -- for a numeric cell, .w is what shows "8.80123E+12" in
-// Excel's UI, but .v is still the full-precision number underneath. Numbers
-// this size (real barcodes are well under JavaScript's 2^53 safe-integer
-// ceiling) stringify back to plain digits with no exponent, which is exactly
-// what String() already does for anything under 1e21.
+// Reads cell.v (the raw stored value), not cell.w (Excel's *display* text)
+// -- for a numeric cell, .w is what shows "8.80123E+12" in Excel's UI, but
+// .v is still the full-precision number underneath. Numbers this size (real
+// barcodes are well under JavaScript's 2^53 safe-integer ceiling) stringify
+// back to plain digits with no exponent, which is exactly what String()
+// already does for anything under 1e21. The single exception is the
+// zero-padded rendering above, where .w holds a digit .v cannot.
 function cellToText(cell: XLSX.CellObject | undefined): string {
   if (!cell || cell.v === undefined || cell.v === null) return ''
   switch (cell.t) {
     case 'n':
-      return String(cell.v)
+      return zeroPaddedNumericText(cell) || String(cell.v)
     case 'b':
       return cell.v ? 'TRUE' : 'FALSE'
     case 'd': {

@@ -6,9 +6,11 @@ import { buildLiveLookupMutationPlan } from '../lib/renameCascade'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { hasPermission } from '../lib/permissions'
 import { assertCatalogTextIntegrity, normalizeCatalogText } from '../lib/catalogText'
+import { mergeLookupSuggestionRows, usedLookupValuesSql, type UsedLookupValue } from '../lib/lookupSuggestions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 // Categories and units ("lookups"), ported from backend/src/routes/categories.ts
 // and backend/src/routes/units.ts. Both admin pages were 404ing on Cloudflare
@@ -96,9 +98,28 @@ function isNormalizedNameCollision(error: unknown): boolean {
 }
 
 function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
+  // Read = the MANAGED vocabulary union the values products actually carry.
+  //
+  // This used to be `SELECT * FROM ${table}` alone, and production's
+  // `categories` table holds ZERO rows while products carry 42 distinct
+  // category strings -- so every product form (Products edit, the
+  // create-products session item form, the fast stock-in inline create)
+  // offered an empty Category list on a catalog full of categories. Merging
+  // here rather than in each caller is what lets every host benefit without
+  // per-host plumbing.
+  //
+  // Rows are tagged `source`; the manager modals keep source === 'lookup'
+  // only, so a used-but-unmanaged name never becomes renameable/deletable.
+  // See lib/lookupSuggestions.ts for the ordering rule and
+  // scripts/test-lookup-suggestions-pure.cjs for the pins.
   app.get(`/${table}`, async (c) => {
-    const rows = await getDb(c.env).prepare(`SELECT * FROM ${table} ORDER BY lower(name) ASC`).all()
-    return c.json(rows || [])
+    const db = getDb(c.env)
+    const column = kind === 'category' ? 'category' : 'unit'
+    const [rows, used] = await Promise.all([
+      db.prepare(`SELECT * FROM ${table} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(),
+      db.prepare(usedLookupValuesSql(column)).all<UsedLookupValue>(),
+    ])
+    return c.json(mergeLookupSuggestionRows(rows || [], used || []))
   })
 
   app.post(`/${table}`, async (c) => {
@@ -131,7 +152,7 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
     }
     if (!Number(result.changes || 0)) return c.json({ error: `${kind === 'category' ? 'Category' : 'Unit'} already exists`, code: 'normalized_name_collision' }, 409)
     const id = result.lastInsertRowid
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', kind, id, { name })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', kind, id, { name })
     const item = await db.prepare(`SELECT * FROM ${table} WHERE id = @id`).get({ id })
     c.executionCtx.waitUntil(broadcast(c.env, table, { action: 'create', id }))
     return c.json(item)
@@ -177,7 +198,7 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
         throw error
       }
       const copyId = inserted.lastInsertRowid
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', kind, copyId, { name, copied_from_id: id })
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', kind, copyId, { name, copied_from_id: id })
       const copyRow = await db.prepare(`SELECT * FROM ${table} WHERE id = @id`).get({ id: copyId })
       c.executionCtx.waitUntil(broadcast(c.env, table, { action: 'create', id: copyId }))
       return c.json({ ...copyRow, copied: true, copied_from_id: id })
@@ -218,7 +239,7 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
     } else {
       responseRow = await db.prepare(`SELECT * FROM ${table} WHERE id = @id`).get({ id })
     }
-    await audit(c.env, user?.id ?? null, user?.name ?? null, duplicate ? 'merge' : 'update', kind, mergedIntoId || id, { name, merged_from_id: duplicate ? id : null })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), duplicate ? 'merge' : 'update', kind, mergedIntoId || id, { name, merged_from_id: duplicate ? id : null })
     // Carry/merge rewrites products.category/categories or products.unit.
     // /api/products/search and every derived filter payload are keyed on the
     // products version, not the lookup-table broadcast, so advance it before
@@ -261,7 +282,7 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
       ...cleared.statements,
       { sql: `DELETE FROM ${table} WHERE id = @id`, params: { id } },
     ])
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', kind, id, { name: current.name, cleared_products: cleared.products })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', kind, id, { name: current.name, cleared_products: cleared.products })
     await bumpVersion(c.env, 'products')
     c.executionCtx.waitUntil(broadcast(c.env, table, { action: 'delete', id }))
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: `${kind}_ripple`, id }))

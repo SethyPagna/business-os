@@ -20,10 +20,42 @@ function source(path: string): string {
 // Material stock writes must have one review/confirmation before the request
 // and a visible outcome afterwards. Navigation, search, filters, and opening
 // details deliberately do not confirm: they make no state change.
-runTest('single branch transfer permits direct FIFO quantity entry and confirms the exact action', () => {
+runTest('single branch transfer caps explicit lots by aggregate stock and retains FIFO', () => {
   const transfer = source('branches/TransferModal.tsx')
   assert.match(transfer, /const hasBatchLots =/)
-  assert.match(transfer, /const transferAvailable = selectedBatch[\s\S]*?: Number\(selectedProduct\?\.branch_quantity \|\| 0\)/)
+  assert.match(
+    transfer,
+    /const sourceBranchAvailable = finiteStockAvailable\(selectedProduct\?\.branch_quantity\)/,
+    'the UI limit must retain the source branch aggregate used by the Worker',
+  )
+  assert.match(
+    transfer,
+    /const selectedBatchAvailable = selectedBatch[\s\S]*?finiteStockAvailable\(selectedBatch\.quantity\)[\s\S]*?: null/,
+    'a selected lot must contribute its own positive availability limit',
+  )
+  assert.match(
+    transfer,
+    /const transferAvailable = selectedBatchAvailable == null[\s\S]*?sourceBranchAvailable[\s\S]*?: Math\.min\(selectedBatchAvailable, sourceBranchAvailable\)/,
+    'a selected lot must never expose more than the source branch aggregate',
+  )
+  // Production exposed the boundary case: a selected lot can be one unit
+  // above the source aggregate while the Worker correctly checks both. The
+  // modal must therefore show/accept five, not the lot's stale six.
+  assert.equal(Math.min(Math.max(0, 6), Math.max(0, 5)), 5)
+  const normalizeSource = transfer.match(/const finiteStockAvailable = \(value: unknown\) => \{([\s\S]*?)\n  \}/)?.[1]
+  assert.ok(normalizeSource, 'availability must fail closed for non-finite data')
+  const normalize = new Function('value', normalizeSource) as (value: unknown) => number
+  for (const value of [null, undefined, -1, Number.NaN, Infinity, -Infinity, 'bad', 'Infinity']) {
+    assert.equal(normalize(value), 0, `invalid availability ${String(value)} must become zero`)
+  }
+  assert.equal(normalize('6'), 6)
+  assert.equal(normalize(2.5), 2.5)
+  assert.equal(Math.min(normalize(6), normalize(5)), 5)
+  assert.match(transfer, /max=\{transferAvailable\}/)
+  assert.match(transfer, /onClick=\{\(\) => setQuantity\(String\(transferAvailable\)\)\}/)
+  const validationAt = transfer.indexOf('if (qty > transferAvailable)')
+  const requestAt = transfer.indexOf('prepareTransferRun(user?.id', validationAt)
+  assert.ok(validationAt > 0 && requestAt > validationAt, 'the aggregate-aware limit must reject before the single transfer request')
   assert.match(transfer, /batchId: selectedBatchId/)
   assert.doesNotMatch(transfer, /transfer_pick_batch_first/)
   assert.doesNotMatch(transfer, /disabled=\{hasBatchLots && !selectedBatchId\}/)
@@ -57,20 +89,60 @@ runTest('stock adjustments, transfers, and ledger edits retain review plus feedb
   const inventory = source('inventory/Inventory.tsx')
   const adjustment = source('products/forms/StockAdjustModal.tsx')
   const bulk = source('products/forms/BulkAddStockModal.tsx')
-  const branch = source('products/forms/BranchStockAdjuster.tsx')
   const ledger = source('products/StockChangeSection.tsx')
 
   assert.match(inventory, /window\.confirm\(adjustConfirmLabel\)/)
   assert.match(inventory, /confirm_transfer_stock_details/)
   assert.match(inventory, /stock_transferred_details/)
+  assert.match(inventory, /pendingTransfer \|\| !transferRetryReady \|\| !canTransferStock/)
+  assert.match(inventory, /const quantity = Number\(transferForm.quantity\)/)
+  assert.doesNotMatch(inventory, /runInventoryTransferIntent\('(?:undo|redo)'/, 'transfer undo/redo must not create a new reverse-FIFO stock movement')
+  assert.match(inventory, /transferHistoryRef.current.refreshServerItems\(\)/, 'forward transfers consume server-owned action history')
+  const history = readFileSync(new URL('../src/utils/actionHistory.ts', import.meta.url), 'utf8')
+  assert.match(history, /payload\?\.applier === 'stock.transfer'[\s\S]*?executeTransferReplay/)
+  assert.match(history, /serverId, direction, operationId: String\(payload.operation_id \|\| ''\), generation: Number\(payload.generation\)/)
+  assert.match(history, /storage.setItem\(key, serialized\)[\s\S]*?storage.getItem\(key\) !== serialized[\s\S]*?await send\(pending, \{ require_applied: true, expected_generation: pending.generation \}\)/, 'exact transition identity must be durably checked before the server replay request')
+  assert.match(history, /pending.direction === 'undo'[\s\S]*?api.undoActionHistory\(pending.serverId, body\) : api.redoActionHistory\(pending.serverId, body\)/)
+  const transport = readFileSync(new URL('../src/api/inventoryWriteTransport.ts', import.meta.url), 'utf8')
+  assert.match(transport, /if \(run.context.kind !== 'submit'\) return Promise.reject/, 'legacy reverse-transfer drafts retain evidence without issuing stock writes')
+  assert.doesNotMatch(transport, /updateActionHistory|patchInventoryTransferHistory/, 'stock replay must not depend on a separate client history-status patch')
+  assert.match(inventory, /api\.saveInventoryTransfer\(actorId, run\)[\s\S]*await completeInventoryTransfer\(run\)/)
+  assert.match(inventory, /const saved = api\.loadInventoryTransfer\(actorId\)/)
+  assert.match(inventory, /const run = saved \|\| api\.prepareInventoryTransfer/)
+  assert.doesNotMatch(inventory, /runInventoryMutation\(\(\) => getInventoryApi\(\)\.transferInventoryStock/)
   assert.match(adjustment, /<ConfirmDialog/)
   assert.match(adjustment, /notify\(tr\('stock_updated'/)
   assert.match(bulk, /<ConfirmDialog/)
-  assert.match(branch, /<ConfirmDialog/)
   assert.match(ledger, /confirmRevert/)
   assert.match(ledger, /confirm_update_stock_reason/)
   assert.match(ledger, /movement_reverted/)
   assert.match(ledger, /reason_updated/)
+})
+
+// S4-24b: adding a line to a sale that already exists deducts stock exactly
+// as checkout does, so it owes the same contract as every other stock write.
+runTest('adding items to a recorded sale reviews before the write and names what happened to stock', () => {
+  const detail = source('sales/SaleDetailModal.tsx')
+  const sales = source('sales/Sales.tsx')
+
+  // one review before the request...
+  assert.match(detail, /<ConfirmDialog/)
+  assert.match(detail, /onConfirm=\{submitAddItems\}/)
+  assert.match(detail, /add_items_submit/)
+  // ...which says out loud whether these units leave stock now
+  assert.match(detail, /add_items_moves_stock/)
+  assert.match(detail, /add_items_holds_stock/)
+  // the surface is only offered where the Worker would accept the write
+  assert.match(detail, /STATUSES_ACCEPTING_ADDED_ITEMS\.includes\(currentStatus\)/)
+  assert.match(detail, /hasRecordedReturns/)
+
+  // ...and a visible outcome afterwards, distinguishing the stock case
+  assert.match(sales, /sale_items_added_stock/)
+  assert.match(sales, /sale_items_added_no_stock/)
+  assert.match(sales, /sale_items_add_failed/)
+  // the permission is enforced on the server; the client withholds the prop
+  // rather than rendering an action that would 403.
+  assert.match(sales, /canAddSaleItems \? handleAddSaleItems : undefined/)
 })
 
 if (failed > 0) {

@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import PageSizeSelect from './PageSizeSelect'
+import { clampPageNumber, pagerState } from '../../utils/pagerState.ts'
 
 export const PAGE_SIZE_OPTIONS: number[] = [20, 50, 100]
 
@@ -51,17 +52,27 @@ export interface PaginationControlsProps {
   // `compact`; leaving it off keeps the existing three-column compact layout,
   // so callers that don't set it are unaffected.
   rangeAsPageSize?: boolean
+  /** Tight visual form for a centered pager between two fixed action slots. */
+  compactCentered?: boolean
+  // Opt-in CENTRED single-line form for the public storefront. The default
+  // three-part admin row -- a "Showing 1-50 of 3,555 products" summary on the
+  // left, then a labelled per-page column and the pager pushed to the right
+  // edge -- is what a shopper was being shown above and below the product
+  // grid. This variant drops the summary, keeps an editable page number
+  // between visible Back/Next controls, and centres the whole thing. It shows
+  // a page-size selector only when the caller passes onPageSizeChange.
+  // 2026-09-15 (owner, supersedes the 2026-09-14 order): Back first, then the
+  // size selector, then page/total, then Next. 'default' stays the default,
+  // so every admin consumer of this control renders exactly as before.
+  layout?: 'default' | 'centered'
+  /** `centered` layout only: printed on the SAME row as the pill, e.g.
+   * "3,585 result(s)". Omit to leave the row exactly as wide as the pill
+   * (the merge-review modal's own `centered` pager never passes this). */
+  resultsCount?: string
 }
 
 export function clampPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
-  const parsedPageSize = Number(pageSize || DEFAULT_PAGE_SIZE)
-  const safePageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : DEFAULT_PAGE_SIZE
-  const parsedTotal = Number(totalItems || 0)
-  const total = Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0
-  const totalPages = Math.max(1, Math.ceil(total / safePageSize))
-  const parsedPage = Number(page || 1)
-  const requestedPage = Number.isFinite(parsedPage) ? parsedPage : 1
-  return Math.max(1, Math.min(totalPages, requestedPage))
+  return clampPageNumber(page, totalItems, pageSize, DEFAULT_PAGE_SIZE)
 }
 
 export function paginateItems<T>(items: readonly T[] = [], page: NumericInput = 1, pageSize: NumericInput = DEFAULT_PAGE_SIZE): T[] {
@@ -88,15 +99,17 @@ export default function PaginationControls({
   editablePageInput = true,
   editablePageSizeInput = true,
   rangeAsPageSize = false,
+  compactCentered = false,
+  layout = 'default',
+  resultsCount,
 }: PaginationControlsProps) {
-  const parsedPageSize = Number(pageSize || DEFAULT_PAGE_SIZE)
-  const safePageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : DEFAULT_PAGE_SIZE
-  const parsedTotal = Number(totalItems || 0)
-  const total = Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0
-  const totalPages = Math.max(1, Math.ceil(total / safePageSize))
-  const safePage = clampPage(page, total, safePageSize)
-  const start = total ? ((safePage - 1) * safePageSize) + 1 : 0
-  const end = Math.min(total, safePage * safePageSize)
+  // One shared kernel (utils/pagerState.ts) answers all of it: the clamped
+  // page, the page count, the item range, whether each arrow is dead, and
+  // whether the control renders at all.
+  const state = pagerState(page, totalItems, pageSize, DEFAULT_PAGE_SIZE)
+  const { total, totalPages, start, end, backDisabled, nextDisabled } = state
+  const safePageSize = state.pageSize
+  const safePage = state.page
   const pageLabel = typeof t === 'function' ? (t('page') || 'Page') : 'Page'
   const ofLabel = typeof t === 'function' ? (t('of') || 'of') : 'of'
   const perPageLabel = typeof t === 'function' ? (t('per_page') || 'per page') : 'per page'
@@ -143,7 +156,151 @@ export default function PaginationControls({
     }
   }
 
-  if (total <= 0) return null
+  if (!state.visible) return null
+
+  if (layout === 'centered') {
+    // Storefront pager: ONE centred pill, "< Back  20  1 / 72  Next >", mounted
+    // identically above and below the grid.
+    //
+    // Order is the owner's (2026-09-15, supersedes 2026-09-14's page-size-
+    // first order): Back, then the page-size selector, then the editable
+    // page field and total page count, then Next. All controls keep a 40px
+    // hit area and an inset keyboard focus ring so the rounded pill does not
+    // clip the indicator.
+    const focusRingClass = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500'
+    const showPageSizeSelect = typeof onPageSizeChange === 'function'
+    // A configured size that is not on the menu (the store's own 50 while the
+    // menu offers 20/50/100 is the common case, but a future config could be
+    // 30) still has to appear in it: PageSizeSelect marks nothing selected for
+    // an off-menu value, so the pager would offer 20/50/100 with none of them
+    // highlighted while the grid held 30.
+    const sizeOptions = pageSizeOptions.includes(safePageSize) ? pageSizeOptions : [...pageSizeOptions, safePageSize].sort((a, b) => a - b)
+    const arrowButtonClass = `inline-flex h-10 shrink-0 items-center gap-0.5 px-3 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600 ${focusRingClass}`
+    const countClass = 'h-10 shrink-0 whitespace-nowrap px-2 text-xs font-semibold leading-10 text-slate-500 dark:text-slate-400'
+    // The page box takes its width from what it prints. `ch` is the width of
+    // "0" in the current font, which is the right unit for a numeric field.
+    //
+    // With a FLOOR, though. Removing the fixed `w-9` closed the gap the owner
+    // circled, and then overshot: at text-xs a `ch` is about 6-7px, so a
+    // one-digit page gave `calc(1ch + 0.5rem)` ~= 15px of tap target -- 21px
+    // narrower than the 36px box it replaced, on the storefront's only
+    // page-jump control, and half the 40px floor the arrows beside it keep.
+    // `max()` keeps both facts: 40px minimum, and it still grows with the
+    // digits so "108" is snug and nothing reserves room for digits that are
+    // not there. `min-w-10` rather than `min-w-0` for the same reason -- a
+    // flex child told it may collapse below its content is the one thing that
+    // could undo the floor.
+    const pageDigits = Math.max(1, String(editablePageInput ? pageDraft : safePage).length)
+    // Centered NAVIGATION has no useful action on a single page -- but the
+    // size selector does: a shopper who narrowed to 12 products on 20/page
+    // must still be able to go back to 100, and hiding the whole pill is
+    // exactly how the earlier in-pill chooser became unreachable. So the
+    // single-page early return only applies when this pill is navigation and
+    // nothing else. Keep the rule local: admin layouts still use
+    // `state.visible === total > 0` and may carry controls that remain useful
+    // when both arrows are disabled.
+    if (totalPages <= 1 && !showPageSizeSelect) return null
+    // A LANDMARK, not a bare div. This row is the storefront's whole
+    // navigation between pages of the catalogue, and as a `<div>` it appeared
+    // in no landmark list, so the one control a screen-reader user most needs
+    // to jump to was the one they had to hunt for.
+    //
+    // The name is composed from `page`, which every one of the 17 portal
+    // language packs already translates (portalLanguagePacks.ts), rather than
+    // from a `pagination` key added for this row alone: the storefront's
+    // `copy()` resolves through those packs, so a new key would be English in
+    // 15 languages and would duplicate a string that already exists.
+    //
+    // And it SAYS where it went. Pressing Next swapped the grid silently: the
+    // focus stays on Next, whose accessible name does not change, so nothing
+    // was announced at all. The polite live region carries the page and the
+    // total. Both mounts (above and below the grid) carry one, because either
+    // one can be the pager being operated; a reader on a page with both will
+    // hear the move once per region.
+    return (
+      <nav className={`flex w-full flex-wrap items-center justify-center gap-2 ${className}`} aria-label={pageLabel}>
+        <div className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+          <button
+            type="button"
+            className={`${arrowButtonClass} rounded-l-full`}
+            disabled={backDisabled}
+            onClick={() => onPageChange?.(safePage - 1)}
+            aria-label={backLabel}
+          >
+            <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
+            <span className="whitespace-nowrap">{backLabel}</span>
+          </button>
+          {showPageSizeSelect ? (
+            // The same control the other two branches use, not a native OS
+            // dropdown: components/ may not ship one (tests/sourceSyntaxCheck.ts
+            // bans it repo-wide, naming page-size menus), and a square platform
+            // picker inside a rounded pill is exactly what that rule exists to
+            // prevent. `allowCustom={false}` keeps the storefront to the
+            // three offered sizes, so a shopper cannot ask for 5,000 products
+            // in one request.
+            //
+            // Digits only on the trigger. The row is already four controls
+            // wide at 320px, and "per page" spelled out in Khmer would wrap
+            // the pill; the words live in the accessible name instead, where
+            // the storefront packs already translate them.
+            <PageSizeSelect
+              value={safePageSize}
+              options={sizeOptions}
+              onChange={(nextValue) => onPageSizeChange?.(nextValue)}
+              ariaLabel={perPageLabel}
+              allowCustom={false}
+              className="shrink-0"
+              // `!text-xs` because Tailwind resolves conflicts by CSS order,
+              // not by the order classes appear here: the trigger's own
+              // `text-sm` would otherwise outrank a plain `text-xs` and print
+              // the size two pixels larger than the page number beside it.
+              buttonClassName="h-10 gap-1 rounded-none border-0 border-x border-slate-200 bg-white px-3 py-0 !text-xs font-semibold text-slate-800 shadow-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              menuClassName="min-w-[6rem]"
+              optionClassName="text-xs"
+            />
+          ) : null}
+          <div className="inline-flex min-w-0 shrink items-center">
+            {editablePageInput ? (
+              <>
+                <span className="sr-only">{pageLabel}</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  aria-label={pageLabel}
+                  style={{ width: `max(2.5rem, calc(${pageDigits}ch + 0.5rem))` }}
+                  className={`h-10 min-w-10 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100 ${focusRingClass}`}
+                  value={pageDraft}
+                  onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
+                  onBlur={(event) => commitPageDraft(event.currentTarget.value)}
+                  onKeyDown={handlePageInputKeyDown}
+                />
+              </>
+            ) : (
+              <span className="px-1 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
+            )}
+            <span className={countClass}>/ {totalPages}</span>
+          </div>
+          <button
+            type="button"
+            className={`${arrowButtonClass} rounded-r-full`}
+            disabled={nextDisabled}
+            onClick={() => onPageChange?.(safePage + 1)}
+            aria-label={nextLabel}
+          >
+            <span className="whitespace-nowrap">{nextLabel}</span>
+            <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
+          </button>
+        </div>
+        {/* Same row as the pill, not a separate line above/below it -- the
+            owner's 2026-09-15 ask. Wraps onto its own line only if the pill
+            itself doesn't fit (320px width with a long translated count). */}
+        {resultsCount ? (
+          <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-500 dark:text-slate-400">{resultsCount}</span>
+        ) : null}
+        <span className="sr-only" aria-live="polite">{pageLabel} {safePage} {ofLabel} {totalPages}</span>
+      </nav>
+    )
+  }
 
   if (compact && rangeAsPageSize) {
     // The user's "‹ page (1-20) / total ›" form. Everything lives on one line
@@ -156,32 +313,44 @@ export default function PaginationControls({
     // so the numbers read as one set; the prev/next arrows are the strongest
     // element (darker, bolder stroke, solid hover) so the primary action --
     // paging -- stands out and the disabled edge is unmistakable.
-    const arrowButtonClass = 'inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
+    const arrowButtonClass = `inline-flex h-10 shrink-0 items-center gap-0.5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600 ${compactCentered ? 'px-0.5 text-[10px]' : 'px-1'}`
+    const arrowIconClass = compactCentered ? 'h-3 w-3' : 'h-4 w-4'
+    // The centered pager has only the middle 216px at a 320px viewport once
+    // PagerActionRow reserves its equal 40px side slots. A full item range
+    // such as "3,541-3,555" used to be silently flex-clipped by the old 200px
+    // cap. Show the selected page-size count in this constrained variant;
+    // the full range remains in its accessible name. This is a deliberate
+    // compact representation, not text hidden by overflow.
+    const rangeText = compactCentered ? safePageSize.toLocaleString() : `${start.toLocaleString()}-${end.toLocaleString()}`
+    const rangeAriaLabel = compactCentered
+      ? `${perPageLabel}: ${safePageSize.toLocaleString()}. ${showingLabel} ${start.toLocaleString()}-${end.toLocaleString()} ${ofLabel} ${total.toLocaleString()} ${label}`
+      : perPageLabel
+    const compactPageDigits = Math.max(1, String(editablePageInput ? pageDraft : safePage).length)
     return (
-      <div className={`inline-flex max-w-full items-center overflow-hidden rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 ${className}`}>
+      <div className={`mx-auto flex w-fit max-w-full items-center rounded-full border border-slate-300 bg-white font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 ${compactCentered ? 'text-[10px]' : 'text-xs'} ${className}`}>
         <button
           type="button"
           className={arrowButtonClass}
-          disabled={safePage <= 1}
+          disabled={backDisabled}
           onClick={() => onPageChange?.(safePage - 1)}
           aria-label={backLabel}
         >
-          <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
-          <span className="hidden sm:inline">{backLabel}</span>
+          <ChevronLeft className={arrowIconClass} strokeWidth={2.5} />
+          <span className="whitespace-nowrap">{backLabel}</span>
         </button>
-        <div className="inline-flex min-w-0 items-center gap-1.5 px-1.5">
+        <div className={`inline-flex min-w-0 items-center ${compactCentered ? 'gap-0 px-0' : 'gap-0.5 px-0.5'}`}>
           {/* Order per request: the item-range chip (per-page trigger) FIRST,
               then the editable page number, then the total page count. */}
           {onPageSizeChange ? <PageSizeSelect
             value={safePageSize}
             options={pageSizeOptions}
             onChange={(nextValue) => onPageSizeChange?.(nextValue)}
-            ariaLabel={perPageLabel}
+            ariaLabel={rangeAriaLabel}
             allowCustom={editablePageSizeInput}
             hideCaret
-            buttonContent={`${start.toLocaleString()}-${end.toLocaleString()}`}
+            buttonContent={rangeText}
             className="min-w-0"
-            buttonClassName="h-6 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0 text-xs font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+            buttonClassName={`h-10 rounded-full border border-slate-200 bg-slate-100 py-0 font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 ${compactCentered ? 'px-0.5 text-[10px]' : 'px-1 text-xs'}`}
             menuClassName="min-w-[9rem]"
             optionClassName="text-xs"
           /> : <span className="h-6 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">{start.toLocaleString()}-{end.toLocaleString()}</span>}
@@ -192,7 +361,8 @@ export default function PaginationControls({
                 type="text"
                 inputMode="numeric"
                 aria-label={pageLabel}
-                className="h-7 w-9 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
+                style={compactCentered ? { width: `max(1.75rem, calc(${compactPageDigits}ch + 0.75rem))` } : undefined}
+                className={`h-10 border-0 bg-transparent px-0 text-center font-semibold text-slate-800 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:text-slate-100 ${compactCentered ? 'min-w-7 shrink-0 text-[10px]' : 'w-8 text-xs'}`}
                 value={pageDraft}
                 onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                 onBlur={(event) => commitPageDraft(event.currentTarget.value)}
@@ -200,19 +370,19 @@ export default function PaginationControls({
               />
             </>
           ) : (
-            <span className="px-0.5 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
+              <span className={`${compactCentered ? 'px-0 text-[10px]' : 'px-0.5 text-xs'} font-semibold text-slate-800 dark:text-slate-100`}>{safePage}</span>
           )}
-          <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-500 dark:text-slate-400">/ {totalPages}</span>
+          <span className={`shrink-0 whitespace-nowrap font-semibold text-slate-500 dark:text-slate-400 ${compactCentered ? 'text-[10px]' : 'text-xs'}`}>/ {totalPages}</span>
         </div>
         <button
           type="button"
           className={arrowButtonClass}
-          disabled={safePage >= totalPages}
+          disabled={nextDisabled}
           onClick={() => onPageChange?.(safePage + 1)}
           aria-label={nextLabel}
         >
-          <span className="hidden sm:inline">{nextLabel}</span>
-          <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
+          <span className="whitespace-nowrap">{nextLabel}</span>
+          <ChevronRight className={arrowIconClass} strokeWidth={2.5} />
         </button>
       </div>
     )
@@ -247,7 +417,7 @@ export default function PaginationControls({
             <button
               type="button"
               className="inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-              disabled={safePage <= 1}
+              disabled={backDisabled}
               onClick={() => onPageChange?.(safePage - 1)}
               aria-label={backLabel}
             >
@@ -278,7 +448,7 @@ export default function PaginationControls({
             <button
               type="button"
               className="inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-              disabled={safePage >= totalPages}
+              disabled={nextDisabled}
               onClick={() => onPageChange?.(safePage + 1)}
               aria-label={nextLabel}
             >
@@ -314,7 +484,7 @@ export default function PaginationControls({
           <button
             type="button"
             className="inline-flex h-9 items-center gap-0.5 bg-white px-3 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
-            disabled={safePage <= 1}
+            disabled={backDisabled}
             onClick={() => onPageChange?.(safePage - 1)}
             aria-label={backLabel}
           >
@@ -344,7 +514,7 @@ export default function PaginationControls({
           <button
             type="button"
             className="inline-flex h-9 items-center gap-0.5 bg-white px-3 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
-            disabled={safePage >= totalPages}
+            disabled={nextDisabled}
             onClick={() => onPageChange?.(safePage + 1)}
             aria-label={nextLabel}
           >

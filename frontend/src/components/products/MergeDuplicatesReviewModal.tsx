@@ -4,11 +4,17 @@ import Info from 'lucide-react/dist/esm/icons/info.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
+import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Modal from '../shared/Modal'
+import { costMoveRows } from './mergeConfirmationRule'
+import { createMergeDuplicatesPreviewRequestCoordinator } from './mergeDuplicatesPreviewRequest'
+import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 
 type Translate = (key: string, fallback?: string) => string | undefined
 
 export type MergeDuplicatesPreviewGroup = {
+  caseKeys?: string[]
   canonicalId: number
   canonicalName: string | null
   canonicalBarcode: string | null
@@ -21,33 +27,76 @@ export type MergeDuplicatesPreviewGroup = {
   }>
   totalQuantityToMove: number
   branchBreakdown: Array<{ branchId: number; branchName: string | null; quantity: number }>
+  /**
+   * What the run does to the KEPT row's cost. A merge averages the distinct
+   * costs (owner ruling, 2026-09-04), so "nothing changes but the row count"
+   * was never true. The server takes one whole-cluster DISTINCT mean before
+   * any row is folded, and this modal shows it before confirmation.
+   */
+  costBefore?: Record<string, number>
+  costAfter?: Record<string, number>
+  /** Invalid stored numeric values that block this whole identity cluster. */
+  costRefusals?: Array<{ mergedId: number | null; field: string; code: string; error: string }>
+  mergeable?: boolean
+  mergeBlockers?: Array<{ code: string; error: string }>
 }
 
 type PreviewResult = {
   groupCount: number
   duplicateProductCount: number
+  mergeableDuplicateProductCount?: number
+  blockedGroupCount?: number
   groups: MergeDuplicatesPreviewGroup[]
+  /** Total across every group; a dry run that hides it is not a dry run. */
+  costRefusalCount?: number
+}
+
+export type MergeDuplicatesRecoveryNotice = {
+  requestId: string
+  mergedGroups: number
+  mergedProducts: number
+  detail: string
+}
+
+const COST_FIELD_LABEL: Record<string, [string, string]> = {
+  cost_price_usd: ['cost', 'Cost'],
+  cost_price_khr: ['cost_price_khr', 'Cost (KHR)'],
+}
+
+const DETAIL_PAGE_SIZE = 25
+
+function formatCost(field: string, value: number): string {
+  const amount = Number(value) || 0
+  return field.endsWith('_khr')
+    ? `${amount.toLocaleString('en-US', { maximumFractionDigits: 4 })}\u17db`
+    : `$${amount.toLocaleString('en-US', { maximumFractionDigits: 4 })}`
+}
+
+/** The cost fields this group’s fold actually moves, as before -> after. */
+function costMoves(group: MergeDuplicatesPreviewGroup): Array<{ field: string; from: number; to: number }> {
+  // The SAME function the pair dialog uses (mergeConfirmationRule), so the
+  // whole-catalog dry run and the one-pair confirm cannot describe one fold
+  // two different ways.
+  return costMoveRows(group.costBefore, group.costAfter)
 }
 
 interface MergeDuplicatesReviewModalProps {
   t?: Translate
   onClose: () => void
   onConfirm: () => void
-  onLoadPreview: () => Promise<PreviewResult>
+  onLoadPreview: (signal: AbortSignal) => Promise<PreviewResult>
+  recoveryNotice?: MergeDuplicatesRecoveryNotice | null
   working: boolean
+  scope?: 'leading_zero' | null
 }
 
 // Explains exactly what "Merge duplicate products" does, and (since part
 // 96) actually shows which products would merge before the person commits
 // -- backed by the read-only GET /api/products/merge-duplicates/preview
 // (routes/products.ts), which reuses findDuplicateProductGroups without
-// acting on it. There is still no atomic preview-then-commit in one
-// transaction (see progress.md part 96's "did not touch" note) -- a
-// catalog change between opening this modal and clicking confirm can make
-// the real merge act on a slightly different group set than what was
-// shown, which the staleness note below says plainly rather than implying
-// a guarantee that doesn't exist.
-export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLoadPreview, working }: MergeDuplicatesReviewModalProps) {
+// acting on it. Each confirmed fold rechecks identity and source revisions in
+// its transaction; a changed case is refused and remains available to resume.
+export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLoadPreview, recoveryNotice, working, scope = null }: MergeDuplicatesReviewModalProps) {
   // t() returns the raw key itself (never undefined/empty) on a miss, so
   // `t(key) || fallback` never actually falls back -- same fix as
   // ProductDetailModal.tsx/ProductHistoryPreviewModal.tsx's T().
@@ -59,50 +108,128 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
   const [previewLoading, setPreviewLoading] = useState(true)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [preview, setPreview] = useState<PreviewResult | null>(null)
+  const [detailPage, setDetailPage] = useState(1)
+  const [recoveryNeedsPreview, setRecoveryNeedsPreview] = useState(Boolean(recoveryNotice))
   const mountedRef = useRef(true)
   const firstLoadRef = useRef(true)
+  const previewRequestsRef = useRef<ReturnType<typeof createMergeDuplicatesPreviewRequestCoordinator> | null>(null)
+  if (!previewRequestsRef.current) previewRequestsRef.current = createMergeDuplicatesPreviewRequestCoordinator()
 
   useEffect(() => {
     mountedRef.current = true
-    return () => { mountedRef.current = false }
+    return () => {
+      mountedRef.current = false
+      previewRequestsRef.current?.cancel()
+    }
   }, [])
 
   const runPreview = () => {
+    const request = previewRequestsRef.current!.begin()
+    const actorScope = captureActorReadScope('products:merge-duplicates-preview')
+    const requestIsCurrent = () => mountedRef.current && request.isCurrent() && isActorReadScopeCurrent(actorScope, false)
     setPreviewLoading(true)
     setPreviewError(null)
-    onLoadPreview()
+    onLoadPreview(request.signal)
       .then((result) => {
-        if (!mountedRef.current) return
+        if (!requestIsCurrent()) return
         setPreview(result)
+        setDetailPage(1)
         setAcknowledged(false)
+        setRecoveryNeedsPreview(false)
       })
-      .catch((error) => { if (mountedRef.current) setPreviewError(error?.message || 'Failed to load preview') })
-      .finally(() => { if (mountedRef.current) setPreviewLoading(false) })
+      .catch((error) => {
+        if (requestIsCurrent()) setPreviewError(error?.message || 'Failed to load preview')
+      })
+      .finally(() => {
+        if (requestIsCurrent() && request.finish()) setPreviewLoading(false)
+      })
+  }
+
+  const close = () => {
+    previewRequestsRef.current?.cancel()
+    onClose()
   }
 
   useEffect(() => {
     if (!firstLoadRef.current) return
     firstLoadRef.current = false
+    if (recoveryNotice) {
+      setPreviewLoading(false)
+      return
+    }
     runPreview()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    if (!recoveryNotice) return
+    previewRequestsRef.current?.cancel()
+    setPreview(null)
+    setPreviewError(null)
+    setPreviewLoading(false)
+    setAcknowledged(false)
+    setDetailPage(1)
+    setRecoveryNeedsPreview(true)
+  }, [recoveryNotice?.requestId])
+
   const groups = preview?.groups || []
+  const detailPageCount = Math.max(1, Math.ceil(groups.length / DETAIL_PAGE_SIZE))
+  const safeDetailPage = Math.min(Math.max(detailPage, 1), detailPageCount)
+  const detailStart = (safeDetailPage - 1) * DETAIL_PAGE_SIZE
+  const detailEnd = Math.min(detailStart + DETAIL_PAGE_SIZE, groups.length)
+  const visibleGroups = groups.slice(detailStart, detailEnd)
   const duplicateProductCount = preview?.duplicateProductCount || 0
-  const canMerge = !previewLoading && !previewError && groups.length > 0
+  const mergeableDuplicateProductCount = preview?.mergeableDuplicateProductCount ?? duplicateProductCount
+  const blockedGroupCount = preview?.blockedGroupCount || 0
+  const costRefusalCount = preview?.costRefusalCount || 0
+  const canMerge = !recoveryNeedsPreview && !previewLoading && !previewError && mergeableDuplicateProductCount > 0
+
+  useEffect(() => {
+    setDetailPage((current) => Math.min(Math.max(current, 1), detailPageCount))
+  }, [detailPageCount])
 
   return (
-    <Modal title={T('merge_duplicate_products', 'Merge duplicate products')} onClose={onClose} size="lg">
+    <Modal title={scope === 'leading_zero'
+      ? T('merge_leading_zero_products', 'Merge leading-zero barcode duplicates')
+      : T('merge_duplicate_products', 'Merge duplicate products')} onClose={close} size="lg" unsavedChanges="read-only">
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
         <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
           <GitMerge className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
           <p className="text-blue-800 dark:text-blue-300">
-            {T(
-              'merge_duplicates_summary',
-              'Scans every active product and folds branch-only duplicates -- rows that are identical in every identity field but landed in the catalog separately, usually from two import runs (e.g. one file per branch) that never saw each other -- into a single row.',
-            )}
+            {scope === 'leading_zero'
+              ? T('merge_leading_zero_summary', 'Only exact-name product pairs whose barcodes differ by leading zeros are eligible. Cross-name collisions, stock mismatches, changed links, and larger clusters remain quarantined.')
+              : T(
+                'merge_duplicates_summary',
+                'Scans every active product and folds branch-only duplicates -- rows that are identical in every identity field but landed in the catalog separately, usually from two import runs (e.g. one file per branch) that never saw each other -- into a single row.',
+              )}
           </p>
         </div>
+
+        {recoveryNotice && (
+          <div role="alert" className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="space-y-1">
+              <p className="font-semibold">
+                {T('merge_duplicates_unknown_outcome_title', 'The previous merge request has an unknown outcome.')}
+              </p>
+              <p>
+                {T(
+                  'merge_duplicates_unknown_outcome_counts',
+                  'The browser received confirmation for {products} product(s) in {groups} completed group(s) before the interruption. The failed request may have saved more complete groups.',
+                )
+                  .replace('{products}', String(recoveryNotice.mergedProducts))
+                  .replace('{groups}', String(recoveryNotice.mergedGroups))}
+              </p>
+              <p>
+                {T(
+                  'merge_duplicates_unknown_outcome_rescan',
+                  'The old preview was cleared. Re-scan and review the current remaining products before confirming again. No merge write will be retried automatically.',
+                )}
+              </p>
+              <p className="text-xs opacity-80">{recoveryNotice.detail}</p>
+            </div>
+          </div>
+        )}
 
         <section>
           <h3 className="mb-1 font-semibold text-gray-900 dark:text-gray-100">
@@ -111,7 +238,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           <p>
             {T(
               'merge_duplicates_what_counts_body',
-              'Two products are only merged if their normalized name, cost price, and barcode all match. Selling and special prices do not create a child row; when they differ, the highest price is kept. A different cost or barcode stays as a separate child row. Matching is exact, never fuzzy or approximate.',
+              'Two products are merged only when their normalized names match exactly and their barcodes are equal after the leading-zero comparison rule. Cost is reconciled, not used as identity: one mean is taken from the whole group\u2019s distinct valid non-zero costs. The highest retail and wholesale prices are kept.',
             )}
           </p>
         </section>
@@ -124,7 +251,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
             <li>
               {T(
                 'merge_duplicates_quantity_kept',
-                'The oldest row in each duplicate group (lowest id) is kept as the "canonical" product; every other row in the group is merged into it.',
+                'The kept product is chosen in a fixed order. For leading-zero barcode duplicates, the row with the fewest extra leading zeros is preferred. Next, the row with the highest current stock is preferred; remaining ties keep the lowest ID. Every other row in the group is merged into it.',
               )}
             </li>
             <li>
@@ -156,19 +283,19 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
             <li>
               {T(
                 'merge_duplicates_trail_audit',
-                'Every merged product gets an audit log entry recording which product it was folded into.',
+                'Every merged product\u2019s catalog changes, audit record, and undo record are saved together.',
               )}
             </li>
             <li>
               {T(
                 'merge_duplicates_trail_soft_delete',
-                'The absorbed duplicate is deactivated (soft delete), the same as a normal product delete -- it stops showing in the catalog, but old sales and movement records that reference it are unaffected and keep showing its original name.',
+                'The absorbed duplicate is deactivated. Product-linked sales, returns, inventory, RFID, promotion, image, batch, and stock records are moved to the kept product; a reversible stock session blocks the case until that session is resolved.',
               )}
             </li>
             <li>
               {T(
                 'merge_duplicates_trail_batches',
-                'Batch and lot records (lot codes, expiry dates) move to the kept product too, the same way quantity does -- they stay visible under "Manage Batches" after merging, not just the stock number. If both products already had a batch with the same lot code, those two batches are combined into one rather than kept as duplicates.',
+                'Received-date records (their codes and expiry dates) move to the kept product too, the same way quantity does -- they stay visible under "Manage Received Dates" after merging, not just the stock number. If both products already had the same received date, those two records are combined into one rather than kept as duplicates.',
               )}
             </li>
           </ul>
@@ -182,11 +309,13 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
             <button
               type="button"
               onClick={runPreview}
-              disabled={previewLoading}
+              disabled={previewLoading || working}
               className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${previewLoading ? 'animate-spin' : ''}`} />
-              {T('merge_duplicates_preview_refresh', 'Re-scan')}
+              {recoveryNeedsPreview
+                ? T('merge_duplicates_recovery_rescan', 'Re-scan current products')
+                : T('merge_duplicates_preview_refresh', 'Re-scan')}
             </button>
           </div>
 
@@ -207,23 +336,36 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
             </div>
           )}
 
-          {!previewLoading && !previewError && groups.length === 0 && (
+          {!previewLoading && !previewError && preview && groups.length === 0 && (
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-gray-600 dark:border-gray-700 dark:bg-gray-800/40 dark:text-gray-400">
               {T('merge_duplicates_preview_none', 'No duplicate products found. Nothing to merge right now.')}
             </div>
           )}
 
-          {!previewLoading && !previewError && groups.length > 0 && (
+          {!previewLoading && !previewError && preview && groups.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {T('merge_duplicates_preview_count', 'Found {groups} group(s), {products} duplicate product(s) that will be folded away.')
+                {T('merge_duplicates_preview_count', 'Found {groups} group(s) containing {products} duplicate product candidate(s). Blocked groups shown below remain unchanged.')
                   .replace('{groups}', String(groups.length))
                   .replace('{products}', String(duplicateProductCount))}
               </p>
+              {costRefusalCount > 0 && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+                  {T('merge_duplicates_preview_cost_refused', '{count} invalid stored numeric value(s) block their identity group until corrected.')
+                    .replace('{count}', String(costRefusalCount))}
+                </p>
+              )}
+              {blockedGroupCount > 0 && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+                  {T('merge_duplicates_preview_blocked_groups', '{count} group(s) are quarantined and will remain unchanged.')
+                    .replace('{count}', String(blockedGroupCount))}
+                </p>
+              )}
               <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-                {groups.map((group) => (
+                {visibleGroups.map((group) => (
                   <div
                     key={group.canonicalId}
+                    data-merge-preview-group={group.canonicalId}
                     className="rounded-lg border border-gray-200 p-2.5 text-sm dark:border-gray-700"
                   >
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -244,12 +386,34 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                           </span>
                           {dup.batchCount > 0 && (
                             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] dark:bg-gray-800">
-                              {dup.batchCount} {T('merge_duplicates_preview_batches', 'batch(es)')}
+                              {dup.batchCount} {T('merge_duplicates_preview_batches', 'received date(s)')}
                             </span>
                           )}
                         </li>
                       ))}
                     </ul>
+                    {costMoves(group).map((move) => (
+                      <div key={move.field} className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {T(COST_FIELD_LABEL[move.field]?.[0] || move.field, COST_FIELD_LABEL[move.field]?.[1] || move.field)}
+                        </span>
+                        <span className="line-through opacity-60">{formatCost(move.field, move.from)}</span>
+                        <span aria-hidden>{'\u2192'}</span>
+                        <span className="font-medium text-gray-900 dark:text-gray-100">{formatCost(move.field, move.to)}</span>
+                        <span className="text-gray-400">
+                          {T('merge_cost_average_title', 'One mean of the group\u2019s distinct non-zero costs')}
+                        </span>
+                      </div>
+                    ))}
+                    {(group.costRefusals || []).length > 0 && (
+                      <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
+                        {T('merge_duplicates_preview_cost_refused_group', '{count} invalid numeric value(s) block this whole group until corrected.')
+                          .replace('{count}', String((group.costRefusals || []).length))}
+                      </p>
+                    )}
+                    {(group.mergeBlockers || []).map((blocker) => (
+                      <p key={blocker.code} className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">{blocker.error}</p>
+                    ))}
                     {group.branchBreakdown.length > 0 && (
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {group.branchBreakdown.map((b) => (
@@ -265,6 +429,39 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                   </div>
                 ))}
               </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
+                <span role="status" aria-live="polite">
+                  {T('showing', 'Showing')} {detailStart + 1}-{detailEnd} {T('of', 'of')} {groups.length}
+                  {' · '}{T('page', 'Page')} {safeDetailPage} {T('of', 'of')} {detailPageCount}
+                </span>
+                {detailPageCount > 1 && (
+                  <nav
+                    aria-label={`${T('page', 'Page')} ${safeDetailPage} ${T('of', 'of')} ${detailPageCount}`}
+                    className="flex items-center gap-2"
+                  >
+                    <button
+                      type="button"
+                      data-merge-preview-page="back"
+                      disabled={safeDetailPage <= 1}
+                      onClick={() => setDetailPage((current) => Math.max(1, current - 1))}
+                      className="flex min-h-9 items-center gap-1 rounded-lg border border-gray-300 px-2.5 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                      {T('back', 'Back')}
+                    </button>
+                    <button
+                      type="button"
+                      data-merge-preview-page="next"
+                      disabled={safeDetailPage >= detailPageCount}
+                      onClick={() => setDetailPage((current) => Math.min(detailPageCount, current + 1))}
+                      className="flex min-h-9 items-center gap-1 rounded-lg border border-gray-300 px-2.5 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                    >
+                      {T('next', 'Next')}
+                      <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </nav>
+                )}
+              </div>
             </div>
           )}
         </section>
@@ -274,7 +471,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           <p className="text-gray-600 dark:text-gray-400">
             {T(
               'merge_duplicates_preview_staleness',
-              'This preview reflects the catalog right now -- if another change lands between opening this dialog and confirming, the merge below still acts on whatever the catalog looks like at that moment, so the exact result may shift slightly.',
+              'This preview reflects the catalog now. Each case is checked again while it is saved. Changed or blocked cases stay unmerged and can be resumed; large runs are saved in bounded batches.',
             )}
           </p>
         </div>
@@ -290,7 +487,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           <span>
             {T(
               'merge_duplicates_acknowledge',
-              'I understand quantities and batch/lot records will be combined per branch, and duplicates will be deactivated (not permanently erased).',
+              'I understand this one confirmation starts a bounded, resumable merge; quantities and linked records move to the kept products. Undo is available while linked records remain unchanged.',
             )}
           </span>
         </label>
@@ -305,14 +502,15 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           >
             {working
               ? T('merge_duplicates_working', 'Merging...')
-              : T('merge_duplicates_confirm_count', 'Merge {products} product(s) now').replace('{products}', String(duplicateProductCount))}
+              : scope === 'leading_zero'
+                ? T('merge_leading_zero_confirm', 'Merge reviewed leading-zero products').replace('{products}', String(mergeableDuplicateProductCount))
+                : T('merge_duplicates_confirm_count', 'Merge {products} product(s) now').replace('{products}', String(mergeableDuplicateProductCount))}
           </button>
           <button
-            onClick={onClose}
-            disabled={working}
-            className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300"
+            onClick={close}
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300"
           >
-            {T('cancel', 'Cancel')}
+            {working ? T('merge_duplicates_stop', 'Stop and keep completed cases') : T('cancel', 'Cancel')}
           </button>
         </div>
       </div>

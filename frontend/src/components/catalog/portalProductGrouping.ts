@@ -29,10 +29,10 @@ export type CatalogProduct = LooseRecord & {
 // the highest-priced variant in the group -- a deliberate choice so the
 // storefront never advertises a lower price than what every branch/variant
 // actually charges.
-export function collapsePortalProductGroups(products: CatalogProduct[]): CatalogProduct[] {
+export function collapsePortalProductGroups(products: CatalogProduct[], preserveInputOrder = false): CatalogProduct[] {
   if (!products.length) return products
   const productsById = new Map<unknown, CatalogProduct>(products.map((p) => [p?.id, p]))
-  return buildProductGroups(products, productsById as unknown as Map<unknown, ProductRecord>).map((group) => {
+  return buildProductGroups(products, productsById as unknown as Map<unknown, ProductRecord>, { preserveInputOrder }).map((group) => {
     const candidates = group.rows.length ? group.rows : group.items
     return candidates.reduce((best, row) => {
       const price = Number((row as CatalogProduct)?.selling_price_usd || 0)
@@ -75,9 +75,16 @@ function combineMergedStockStatus(merged: CatalogProduct[], sourceById: Map<stri
   })
 }
 
-export function mergePortalCatalogProducts(products: unknown): CatalogProduct[] {
+// `preserveInputOrder` is for a SEARCH response. The storefront search
+// hits the same ranked backend the admin pickers do, and collapsing the
+// payload used to re-sort it A-Z, so a shopper who typed a product name
+// got their answer wherever the alphabet filed it. Bootstrap/cache reads
+// are browse lists and keep A-Z. Sibling-surface parity with POS, the
+// Products page, Branches and the transfer picker, which all made the
+// same mistake through this same helper.
+export function mergePortalCatalogProducts(products: unknown, preserveInputOrder = false): CatalogProduct[] {
   const source = Array.isArray(products) ? products as CatalogProduct[] : []
   const deduped = mergeSameDetailRows(source) as unknown as CatalogProduct[]
   const sourceById = new Map(source.map((item) => [String(item?.id), item]))
-  return collapsePortalProductGroups(combineMergedStockStatus(deduped, sourceById))
+  return collapsePortalProductGroups(combineMergedStockStatus(deduped, sourceById), preserveInputOrder)
 }

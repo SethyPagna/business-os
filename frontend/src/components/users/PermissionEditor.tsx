@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import InfoHint from '../shared/InfoHint.tsx'
+import AppSelect from '../shared/AppSelect.tsx'
 import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
-import { REVIEW_TIER_KEYS, VIEW_TIER_KEYS, type PermissionValue } from '../../utils/permissions.ts'
+import { normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 import { actionOverrideKey, actionsForKey, isActionOverriddenOff, outcomeAt, type ActionOutcome } from '../../utils/permissionActions.ts'
 
 type PermissionState = Record<string, PermissionValue>
@@ -40,21 +41,7 @@ interface PermissionEditorProps {
 // tier to Full Access the moment this editor mounted, even before the
 // admin touched anything.
 function parsePermissionState(permissions: PermissionEditorProps['permissions']): PermissionState {
-  let value: unknown = permissions
-  if (typeof value === 'string') {
-    try {
-      value = JSON.parse(value || '{}')
-    } catch {
-      return {}
-    }
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.entries(value as Record<string, unknown>).reduce<PermissionState>((acc, [key, raw]) => {
-    acc[key] = raw === 'review' && REVIEW_TIER_KEYS.has(key) ? 'review'
-      : raw === 'view' && VIEW_TIER_KEYS.has(key) ? 'view'
-        : Boolean(raw)
-    return acc
-  }, {})
+  return normalizePermissionState(permissions)
 }
 
 function tierOf(value: PermissionValue | undefined): Tier {
@@ -500,8 +487,28 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                               withheld -- see permissionActions.ts for why
                               that is what makes it safe to enforce. A row
                               the tier already blocks is therefore inert. */}
+                          {permission.key === 'sales' ? (
+                            <label className="mb-2 block px-1 text-xs text-gray-700 dark:text-gray-200">
+                              {translate('perm_sales_customer_mode', 'Edit customer mode')}
+                              <AppSelect
+                                className="mt-1 w-full"
+                                buttonClassName="input w-full text-xs"
+                                ariaLabel={translate('perm_sales_customer_mode', 'Edit customer mode')}
+                                disabled={tier !== 'full' || isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer')}
+                                value={isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer_reassign') ? 'name-only' : 'assignment'}
+                                onChange={(value) => {
+                                  const nameOnly = isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer_reassign')
+                                  if ((value === 'name-only') !== nameOnly) toggleActionOverride('sales', 'customer_reassign')
+                                }}
+                                options={[
+                                  { value: 'assignment', label: translate('perm_sales_customer_assignment', 'Choose another customer (default)') },
+                                  { value: 'name-only', label: translate('perm_sales_customer_name_only', 'Edit this sale’s name only') },
+                                ]}
+                              />
+                            </label>
+                          ) : null}
                           <ul className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
-                            {actionsForKey(permission.key).map((action) => {
+                            {actionsForKey(permission.key).filter((action) => permission.key !== 'sales' || action.key !== 'customer_reassign').map((action) => {
                               const tierOutcome = outcomeAt(action, tier)
                               const overriddenOff = isActionOverriddenOff(perms as Record<string, unknown>, permission.key, action.key)
                               const meta = outcomeMeta(overriddenOff ? 'block' : tierOutcome)

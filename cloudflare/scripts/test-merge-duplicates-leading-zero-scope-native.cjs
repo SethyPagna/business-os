@@ -1,0 +1,393 @@
+// Native route regression for the bounded leading-zero duplicate manifest.
+// It mounts the real products route and duplicate detector over the full D1
+// migration chain. No production database or network is used.
+
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const ts = require('typescript')
+const Module = require('module')
+const { openDb } = require('./harness/d1compat.cjs')
+const { loadAll } = require('./harness/load_migrations.cjs')
+
+const SRC = path.join(__dirname, '..', 'src')
+
+function permissive() {
+  return new Proxy(function () {}, {
+    get: (_target, prop) => prop === 'default' ? permissive() : permissive(),
+    apply: () => undefined,
+    construct: () => ({}),
+  })
+}
+
+function loadTs(relPath, stubs = {}) {
+  const abs = path.join(SRC, relPath)
+  const output = ts.transpileModule(fs.readFileSync(abs, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: abs,
+  }).outputText
+  const original = Module._load
+  Module._load = (request, parent, isMain) => {
+    if (request === './moneyPrecision' || request === '../lib/moneyPrecision') return original.call(Module, path.join(SRC, 'lib/moneyPrecision.ts'), parent, isMain)
+    if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    if (request.startsWith('.') || request === 'hono') return permissive()
+    return original.call(Module, request, parent, isMain)
+  }
+  const mod = { exports: {} }
+  try {
+    new Function('exports', 'require', 'module', '__filename', '__dirname', output)(
+      mod.exports, require, mod, abs, path.dirname(abs),
+    )
+  } finally { Module._load = original }
+  return mod.exports
+}
+
+class CapturingHono {
+  constructor() { this.routes = [] }
+  add(method, routePath, handler) { this.routes.push({ method, path: routePath, handler }); return this }
+  get(routePath, handler) { return this.add('GET', routePath, handler) }
+  post(routePath, handler) { return this.add('POST', routePath, handler) }
+  put(routePath, handler) { return this.add('PUT', routePath, handler) }
+  patch(routePath, handler) { return this.add('PATCH', routePath, handler) }
+  delete(routePath, handler) { return this.add('DELETE', routePath, handler) }
+  use() { return this }
+  on() { return this }
+  all() { return this }
+  route() { return this }
+  onError() { return this }
+  notFound() { return this }
+}
+
+function adapter(d1, beforeMutationBatch) {
+  let mutationHookPending = typeof beforeMutationBatch === 'function'
+  return {
+    prepare(sql) {
+      const statement = d1.prepare(sql)
+      return {
+        get: (params = {}) => statement.get(params),
+        all: (params = {}) => statement.all(params),
+        run: (params = {}) => {
+          const result = statement.run(params)
+          return { changes: Number(result.meta?.changes || 0), lastInsertRowid: Number(result.meta?.last_row_id || 0) }
+        },
+      }
+    },
+    async batch(statements) {
+      const readOnly = statements.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))
+      if (!readOnly) {
+        if (mutationHookPending) {
+          mutationHookPending = false
+          beforeMutationBatch()
+        }
+        return d1.batch(statements)
+      }
+      return statements.map(({ sql, params }) => ({ success: true, results: d1.prepare(sql).all(params || {}) }))
+    },
+  }
+}
+
+function loadRoute(db) {
+  const sqlBinding = loadTs(path.join('lib', 'sqlBinding.ts'))
+  const detailRule = loadTs(path.join('lib', 'productDetailRule.ts'))
+  const productMerge = loadTs(path.join('lib', 'productMerge.ts'))
+  const productIdentity = loadTs(path.join('lib', 'productIdentity.ts'), {
+    './db': {}, './sqlBinding': sqlBinding, './productDetailRule': detailRule,
+  })
+  const productMergeSnapshot = loadTs(path.join('lib', 'productMergeSnapshot.ts'), { './db': {} })
+  const conflictBatch = loadTs(path.join('lib', 'productConflictMergeBatch.ts'))
+  const undoAppliers = loadTs(path.join('lib', 'undoAppliers.ts'), {
+    '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {} },
+    '../durable-objects/broadcastHub': { broadcast: async () => {} },
+    './branchWrites': { branchUpdateStatements: () => [] },
+    './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' },
+  })
+  return loadTs(path.join('routes', 'products.ts'), {
+    hono: { Hono: CapturingHono },
+    '../lib/db': { getDb: () => db },
+    '../lib/permissions': { getActionTier: () => 'full', hasPermission: () => true, getPermissionTier: () => 'full' },
+    '../lib/productIdentity': productIdentity,
+    '../lib/productDetailRule': detailRule,
+    '../lib/productMerge': productMerge,
+    '../lib/productMergeSnapshot': productMergeSnapshot,
+    '../lib/productConflictMergeBatch': conflictBatch,
+    '../lib/sqlBinding': sqlBinding,
+    '../lib/audit': { audit: async () => {} },
+    '../lib/undoAppliers': undoAppliers,
+  }).default
+}
+
+function seed() {
+  const d1 = openDb(loadAll())
+  const raw = d1.db
+  raw.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)")
+  const insert = raw.prepare(`INSERT INTO products(
+    id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,
+    wholesale_price_usd,wholesale_price_khr,stock_quantity,is_active,is_group
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,1,0)`)
+  const add = (id, name, barcode, stock = 0, cost = 4) => insert.run(
+    id, name, barcode, cost, cost * 4000, 10, 40000, 8, 32000, stock,
+  )
+  // Every barcode below is REAL (all-digit, >=MIN_REAL_BARCODE_DIGITS=6) --
+  // this scope/manifest feature is specifically the "two REAL barcodes
+  // differing only by leading zeros" case, and a SHORT/broken code (below
+  // the Sep 15 2026 realness floor) would instead wildcard-merge under the
+  // general rule with a stock/id tiebreak, not the "cleaner spelling always
+  // wins" tiebreak this file exercises. Short-code wildcard behavior has its
+  // own coverage in test-merge-rules-pure.cjs.
+  add(1, 'Clean Pair', '0123456', 3, 4)
+  add(2, 'Clean Pair', '123456', 2, 6)
+  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(1, 1, 3)
+  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(2, 1, 2)
+  add(3, 'Exact Raw', '777777')
+  add(4, 'Exact Raw', '777777')
+  add(5, 'Mismatch Pair', '0888888', 9)
+  add(6, 'Mismatch Pair', '888888', 1)
+  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(5, 1, 7)
+  raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').run(6, 1, 1)
+  add(7, 'Collision Pair', '0099999')
+  add(8, 'Collision Pair', '099999')
+  // Distinct RAW spelling from both Collision Pair rows (extra leading
+  // zero) so the manual-review "same raw barcode, different name" guard
+  // does not itself exclude id8 from the auto-eligible pool -- only the
+  // FOLDED key needs to collide with the Collision Pair group's folded key.
+  add(9, 'Other Name', '00099999')
+  add(11, 'Aardvark Pair', '0555555', 0, 0)
+  add(12, 'Aardvark Pair', '555555', 0, 8)
+  add(13, 'Zebra Pair', '0666666', 0, 2)
+  add(14, 'Zebra Pair', '666666', 0, 200)
+  return { d1, raw }
+}
+
+function context({ scope, body } = {}) {
+  return {
+    get: (key) => key === 'user' ? { id: 1, username: 'admin' } : undefined,
+    env: {},
+    req: {
+      query: (key) => key === 'scope' ? scope : undefined,
+      json: async () => body || {},
+    },
+    executionCtx: { waitUntil: () => {} },
+    json: (responseBody, status = 200) => ({ status, body: responseBody }),
+  }
+}
+
+async function main() {
+  const { d1, raw } = seed()
+  const app = loadRoute(adapter(d1))
+  const preview = app.routes.find((route) => route.method === 'GET' && route.path === '/merge-duplicates/preview').handler
+  const apply = app.routes.find((route) => route.method === 'POST' && route.path === '/merge-duplicates').handler
+
+  const unknownGet = await preview(context({ scope: 'anything_else' }))
+  assert.equal(unknownGet.status, 400)
+  const unknownPost = await apply(context({ body: { scope: 'anything_else' } }))
+  assert.equal(unknownPost.status, 400)
+
+  const defaultPreview = await preview(context())
+  assert.equal(Object.prototype.hasOwnProperty.call(defaultPreview.body, 'scope'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(defaultPreview.body, 'applyManifest'), false)
+
+  const result = await preview(context({ scope: 'leading_zero' }))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.scope, 'leading_zero')
+  assert.deepEqual(result.body.applyManifest.groups, [
+    { keeper_id: 2, member_ids: [1, 2] },
+    { keeper_id: 12, member_ids: [11, 12] },
+    { keeper_id: 14, member_ids: [13, 14] },
+  ], 'manifest order is canonical even when detector name order differs')
+  assert.equal(result.body.applyManifest.scope, 'leading_zero')
+  assert.equal(result.body.applyManifest.manifest_version, 1)
+  assert.match(result.body.applyManifest.manifest_digest, /^sha256-[a-f0-9]{64}$/)
+  assert.equal(result.body.groups.some((group) => group.canonicalName === 'Exact Raw'), false, 'same raw barcode is outside scope')
+  assert.equal(result.body.groups.find((group) => group.canonicalName === 'Mismatch Pair').mergeBlockers[0].code, 'cached_stock_mismatch')
+  assert.equal(result.body.groups.find((group) => group.canonicalName === 'Collision Pair').mergeBlockers[0].code, 'canonical_barcode_cross_name_collision')
+
+  const malformed = await apply(context({ body: {
+    scope: 'leading_zero', manifest_version: 1, manifest_digest: result.body.applyManifest.manifest_digest,
+    groups: [{ keeper_id: 2, member_ids: [1, 2], outsider: 9 }],
+  } }))
+  assert.equal(malformed.status, 400)
+
+  raw.prepare('UPDATE products SET stock_quantity=4 WHERE id=1').run()
+  const stockChanged = await apply(context({ body: {
+    scope: 'leading_zero', manifest_version: 1, manifest_digest: result.body.applyManifest.manifest_digest,
+    groups: result.body.applyManifest.groups,
+  } }))
+  assert.equal(stockChanged.status, 409)
+  assert.match(stockChanged.body.error, /stock/i)
+  raw.prepare('UPDATE products SET stock_quantity=3 WHERE id=1').run()
+
+  const collisionPreview = await preview(context({ scope: 'leading_zero' }))
+  // Folds (leading zeros stripped) to '123456', the Clean Pair manifest
+  // group's canonical barcode -- a late collision introduced between
+  // preview and apply.
+  addOutsider(raw, 'Other Fresh Name', '000123456')
+  const newCollision = await apply(context({ body: {
+    ...collisionPreview.body.applyManifest,
+  } }))
+  assert.equal(newCollision.status, 409)
+  assert.match(newCollision.body.error, /more than one exact product name/i)
+  raw.prepare('DELETE FROM products WHERE id=10').run()
+
+  const pricePreview = await preview(context({ scope: 'leading_zero' }))
+  raw.prepare('UPDATE products SET selling_price_usd=11 WHERE id=1').run()
+  const stale = await apply(context({ body: {
+    ...pricePreview.body.applyManifest,
+  } }))
+  assert.equal(stale.status, 409)
+  assert.match(stale.body.error, /preview is stale/i)
+  assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=1').get().is_active, 1)
+  assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 1)
+
+  const refreshed = await preview(context({ scope: 'leading_zero' }))
+  // A broken/short barcode (below the realness floor) wildcard-attaches to
+  // the Clean Pair group's one real cluster, changing its membership -- a
+  // genuinely different real barcode would instead form its own cluster and
+  // never join this group at all.
+  addOutsider(raw, 'Clean Pair', '99')
+  const changedGroup = await apply(context({ body: {
+    scope: 'leading_zero', manifest_version: 1, manifest_digest: refreshed.body.applyManifest.manifest_digest,
+    groups: refreshed.body.applyManifest.groups,
+  } }))
+  assert.equal(changedGroup.status, 409)
+  assert.match(changedGroup.body.error, /group changed/i)
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM products WHERE id IN (1,2,10) AND is_active=1').get().n, 3)
+
+  const successFixture = seed()
+  const successApp = loadRoute(adapter(successFixture.d1))
+  const successPreviewHandler = successApp.routes.find((route) => route.method === 'GET' && route.path === '/merge-duplicates/preview').handler
+  const successApplyHandler = successApp.routes.find((route) => route.method === 'POST' && route.path === '/merge-duplicates').handler
+  const successPreview = await successPreviewHandler(context({ scope: 'leading_zero' }))
+  const success = await successApplyHandler(context({ body: {
+    ...successPreview.body.applyManifest,
+    client_request_id: 'native-leading-zero-success',
+  } }))
+  assert.equal(success.status, 200)
+  assert.equal(success.body.success, true)
+  assert.equal(success.body.mergedProducts, 3)
+  assert.equal(successFixture.raw.prepare('SELECT is_active FROM products WHERE id=1').get().is_active, 0)
+  assert.equal(successFixture.raw.prepare('SELECT stock_quantity FROM products WHERE id=2').get().stock_quantity, 5)
+  assert.equal(successFixture.raw.prepare('SELECT cost_price_usd FROM products WHERE id=2').get().cost_price_usd, 5)
+  assert.equal(successFixture.raw.prepare('SELECT cost_price_usd FROM products WHERE id=12').get().cost_price_usd, 8, 'zero is excluded when a positive cost exists')
+  assert.equal(successFixture.raw.prepare('SELECT cost_price_usd FROM products WHERE id=14').get().cost_price_usd, 101, 'widely different positive costs still use the scoped DISTINCT mean')
+  assert.equal(successFixture.raw.prepare("SELECT COUNT(*) AS n FROM action_history WHERE scope='products'").get().n, 3)
+
+  await concurrentGuard('price', (rawDb) => {
+    rawDb.prepare('UPDATE products SET selling_price_usd=99 WHERE id=1').run()
+  })
+  await concurrentGuard('cross-name folded outsider', (rawDb) => {
+    // Folds to '123456', the Clean Pair manifest group's canonical barcode.
+    addOutsider(rawDb, 'Concurrent Other Name', '000123456')
+  })
+  await concurrentGuard('new linked history', (rawDb) => {
+    rawDb.prepare(`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity)
+      VALUES(1,'Clean Pair',1,'Shop','remove',1)`).run()
+  })
+  await concurrentGuard('received-date metadata', (rawDb) => {
+    rawDb.prepare("UPDATE product_batches SET expiry_date='2031-01-01' WHERE id=100").run()
+  }, (rawDb) => {
+    rawDb.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,batch_number,received_at,expiry_date,is_active)
+      VALUES(100,1,'lot-100','L100',1,'2026-01-01','2030-01-01',1)`).run()
+  })
+
+  await boundedPreviewCohorts()
+
+  console.log(JSON.stringify({ status: 'PASS', manifestGroups: result.body.applyManifest.groups.length, digest: result.body.applyManifest.manifest_digest }))
+}
+
+async function boundedPreviewCohorts() {
+  const { d1, raw } = seed()
+  raw.exec('DELETE FROM branch_stock; DELETE FROM products;')
+  for (let i = 0; i < 12; i++) for (let member = 0; member < 2; member++) {
+    raw.prepare(`INSERT INTO products(id,name,barcode,is_active,is_group,stock_quantity,
+      cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr)
+      VALUES(?,?,?,1,0,0,4,16000,10,40000,8,32000)`).run(
+      100 + i * 2 + member, `Cohort ${String(i).padStart(3, '0')}`, `${member ? '0' : ''}${100000 + i}`,
+    )
+  }
+  const base = adapter(d1)
+  let calls = 0
+  const counted = {
+    ...base,
+    prepare(sql) {
+      const statement = base.prepare(sql)
+      return Object.fromEntries(Object.entries(statement).map(([method, fn]) => [method, (...args) => {
+        calls += 1
+        return fn(...args)
+      }]))
+    },
+    async batch(statements) { calls += 1; return base.batch(statements) },
+  }
+  const app = loadRoute(counted)
+  const preview = app.routes.find(route => route.method === 'GET' && route.path === '/merge-duplicates/preview').handler
+  const apply = app.routes.find(route => route.method === 'POST' && route.path === '/merge-duplicates').handler
+  const processed = new Set()
+  for (const [iteration, remaining] of [12, 7, 2].entries()) {
+    calls = 0
+    const response = await preview(context({ scope: 'leading_zero' }))
+    const cohort = Math.min(5, remaining)
+    assert.equal(response.status, 200)
+    assert.equal(response.body.groupCount, remaining, 'preview counts include the whole remaining candidate set')
+    assert.equal(response.body.groups.length, remaining, 'examples are not silently truncated to the executable cohort')
+    assert.equal(response.body.duplicateProductCount, remaining)
+    assert.equal(response.body.mergeableDuplicateProductCount, remaining)
+    assert.equal(response.body.applyManifest.groups.length, cohort)
+    assert.equal(response.body.batchLimit, 25, 'request compatibility limit is unchanged')
+    assert.ok(calls <= 6, 'at most two complete graph read batches for the default cohort')
+    if (iteration === 0) {
+      const larger = response.body.groups.map(group => ({ keeper_id: group.canonicalId,
+        member_ids: [group.canonicalId, ...group.duplicates.map(row => row.id)].sort((a, b) => a - b) }))
+      const staleLarger = await apply(context({ body: { ...response.body.applyManifest, groups: larger } }))
+      assert.equal(staleLarger.status, 409, 'a larger legacy-sized request still reaches digest validation, not a new five-pair parser cap')
+      assert.match(staleLarger.body.error, /preview is stale/)
+      assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM action_history WHERE scope='products'").get().n, 0,
+        'five-pair digest cannot authorize a wider request')
+    }
+    const approvedIds = response.body.applyManifest.groups.flatMap(g => g.member_ids.filter(id => id !== g.keeper_id))
+    assert.ok(approvedIds.every(id => !processed.has(id)), 'fresh cohort cannot reinclude completed pairs')
+    const untouchedBefore = raw.prepare('SELECT * FROM products ORDER BY id').all()
+      .filter(row => !response.body.applyManifest.groups.some(group => group.member_ids.includes(row.id)))
+    calls = 0
+    const result = await apply(context({ body: { ...response.body.applyManifest, client_request_id: `cohort-${iteration}` } }))
+    assert.equal(result.status, 200)
+    assert.equal(result.body.mergedProducts, cohort, JSON.stringify(result.body))
+    assert.equal(result.body.undoPendingCount, 0)
+    assert.equal(result.body.actionHistoryIds.length, cohort)
+    assert.equal(result.body.mergeOperationIds.length, cohort)
+    assert.equal(result.body.requiresFreshPreview, true)
+    for (const id of approvedIds) processed.add(id)
+    const untouchedAfter = raw.prepare('SELECT * FROM products ORDER BY id').all()
+      .filter(row => !response.body.applyManifest.groups.some(group => group.member_ids.includes(row.id)))
+    assert.deepEqual(untouchedAfter, untouchedBefore, 'POST never widens its reviewed five-pair cohort')
+    assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM action_history WHERE scope='products'").get().n, processed.size)
+    console.log(JSON.stringify({ cohort, remainingBefore: remaining, postCalls: calls, receipts: result.body.actionHistoryIds.length }))
+  }
+  assert.equal(processed.size, 12)
+  assert.equal((await preview(context({ scope: 'leading_zero' }))).body.groupCount, 0)
+  raw.close()
+}
+
+async function concurrentGuard(label, mutate, prepare = () => {}) {
+  const fixture = seed()
+  fixture.raw.prepare('DELETE FROM products WHERE id IN (11,12,13,14)').run()
+  prepare(fixture.raw)
+  const guardedAdapter = adapter(fixture.d1, () => mutate(fixture.raw))
+  const app = loadRoute(guardedAdapter)
+  const preview = app.routes.find((route) => route.method === 'GET' && route.path === '/merge-duplicates/preview').handler
+  const apply = app.routes.find((route) => route.method === 'POST' && route.path === '/merge-duplicates').handler
+  const reviewed = await preview(context({ scope: 'leading_zero' }))
+  const result = await apply(context({ body: { ...reviewed.body.applyManifest, client_request_id: `race-${label}` } }))
+  assert.equal(result.status, 200, `${label}: bounded route reports an explicit refusal result`)
+  assert.equal(result.body.mergedProducts, 0, `${label}: no reviewed product was folded`)
+  assert.ok(result.body.refusals.some((refusal) => refusal.code === 'merge_state_conflict'), `${label}: atomic guard is surfaced`)
+  assert.equal(fixture.raw.prepare('SELECT COUNT(*) AS n FROM products WHERE id IN (1,2) AND is_active=1').get().n, 2, `${label}: both rows remain active`)
+  assert.equal(fixture.raw.prepare("SELECT COUNT(*) AS n FROM action_history WHERE scope='products'").get().n, 0, `${label}: rolled-back fold left no history receipt`)
+}
+
+function addOutsider(raw, name, barcode) {
+  raw.prepare(`INSERT INTO products(
+    id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,
+    wholesale_price_usd,wholesale_price_khr,stock_quantity,is_active,is_group
+  ) VALUES(10,?,?,4,16000,10,40000,8,32000,0,1,0)`).run(name, barcode)
+}
+
+main().catch((error) => { console.error(error); process.exitCode = 1 })

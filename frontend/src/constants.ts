@@ -182,12 +182,16 @@ export function formatDate(dateStr: unknown): string {
   const raw = String(dateStr)
   try {
     const iso = raw.includes('T') ? raw : `${raw}Z`
-    return new Date(iso).toLocaleDateString('en-US', {
+    // dd/mm/yyyy, assembled by hand rather than delegated to a locale --
+    // see utils/formatters.ts's fmtDate for why the order is ours.
+    const parts = new Intl.DateTimeFormat('en-US', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
       timeZone: BUSINESS_TIME_ZONE,
-    })
+    }).formatToParts(new Date(iso))
+    const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
+    return `${get('day')}/${get('month')}/${get('year')}`
   } catch {
     return raw
   }

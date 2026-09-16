@@ -34,7 +34,8 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const contactOptions = loadReal('lib/contactOptions.ts')
-const { formatPhoneP8 } = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions })
+const phone = loadReal('lib/phone.ts')
+const { formatPhoneP8 } = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone })
 
 let passed = 0
 function check(name, fn) {
@@ -93,6 +94,9 @@ check('route wiring pin: contacts POST and PUT both pass payload.phone through f
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8')
   const calls = src.match(/payload\.phone = formatPhoneP8\(payload\.phone\)/g) || []
   assert.strictEqual(calls.length, 2, 'exactly the create AND update handlers format the stored phone')
+  const optionCalls = src.match(/payload\.address = formatContactOptionPhones\(payload\.address, config\.optionMode\)/g) || []
+  assert.strictEqual(optionCalls.length, 2, 'create AND update format phones inside structured Contact Options')
+  assert.match(src, /resolve-missing[\s\S]*?const storedPhone = formatPhoneP8\(phone\)[\s\S]*?checkContactDuplicateBlock/, 'sale-link customer creation formats and duplicate-checks its phone too')
   assert.ok(/formatPhoneP8,/.test(src), 'imported from lib/contactDuplicates')
 })
 
@@ -116,7 +120,7 @@ async function realDbChecks() {
       }
     },
   }
-  const lib = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions })
+  const lib = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone })
   rawDb.prepare("INSERT INTO customers (name, phone) VALUES ('Dara', '012 111 222')").run()
   rawDb.prepare("INSERT INTO suppliers (name, phone) VALUES ('Acme Co', '012 333 444')").run()
   rawDb.prepare("INSERT INTO delivery_contacts (name, phone) VALUES ('VET Express', '012 555 666')").run()
@@ -128,6 +132,52 @@ async function realDbChecks() {
   }
   passed += 1
   console.log('PASS findContactDuplicates runs real SQL against all three contact tables (membership_number regression)')
+
+  const expectedPhoneByTable = {
+    customers: '012111222',
+    suppliers: '012333444',
+    delivery_contacts: '012555666',
+  }
+  for (const table of ['customers', 'suppliers', 'delivery_contacts']) {
+    const canonical = expectedPhoneByTable[table]
+    const rawDigits = await lib.findContactDuplicates(db, table, { name: 'Different name', phones: [canonical] })
+    assert.strictEqual(rawDigits.length, 1, `${table}: spaced stored phone matches raw digits under a different name`)
+    assert.strictEqual(rawDigits[0].severity, 'phone_conflict')
+    const countryCode = await lib.findContactDuplicates(db, table, { name: 'Different name', phones: [`+855 ${canonical.slice(1, 3)} ${canonical.slice(3, 6)} ${canonical.slice(6)}`] })
+    assert.strictEqual(countryCode.length, 1, `${table}: Cambodia country-code form matches the local stored phone`)
+  }
+  passed += 1
+  console.log('PASS canonical phone prefilter finds raw/spaced/+855 conflicts across all three real tables')
+
+  for (let i = 0; i < 51; i += 1) {
+    rawDb.prepare("INSERT INTO suppliers (name, phone) VALUES ('Crowded Name', @phone)").run({ phone: `088${String(i).padStart(6, '0')}` })
+  }
+  const crowdedOwner = rawDb.prepare("SELECT id FROM suppliers WHERE name='Crowded Name' ORDER BY id DESC LIMIT 1").get()
+  const crowded = await lib.findContactDuplicates(db, 'suppliers', { name: 'Crowded Name', phones: ['088000050'] })
+  assert.ok(crowded.some((match) => match.id === crowdedOwner.id && match.matchedPhone === '088000050'), 'unbounded phone lookup finds the owner beyond the 50-row name suggestion cap')
+  passed += 1
+  console.log('PASS name-only limit cannot crowd a hard phone owner out of duplicate detection')
+
+  rawDb.prepare("INSERT INTO suppliers (name, phone) VALUES ('Acknowledged Exact', '066 111 222')").run()
+  const strictGuard = lib.contactDuplicateWriteGuardStatement('suppliers', { name: 'Acknowledged Exact', phones: ['066111222'] })
+  assert.throws(() => rawDb.prepare(strictGuard.sql).run(strictGuard.params), /UNIQUE constraint failed/, 'an unacknowledged owner aborts the write guard')
+  const acknowledgedState = await lib.findContactDuplicateState(db, 'suppliers', { name: 'Acknowledged Exact', phones: ['066111222'] })
+  const decision = { action: 'create_separate', ...acknowledgedState.review }
+  const allowedGuard = lib.contactDuplicateWriteGuardStatement('suppliers', { name: 'Acknowledged Exact', phones: ['+855 66 111 222'] }, decision, acknowledgedState.snapshots)
+  assert.strictEqual(rawDb.prepare(allowedGuard.sql).get(allowedGuard.params).contact_duplicate_guard, 1, 'an exact full candidate snapshot explicitly acknowledged by staff is allowed')
+  rawDb.prepare("UPDATE suppliers SET name='Renamed Concurrently' WHERE name='Acknowledged Exact'").run()
+  assert.throws(() => rawDb.prepare(allowedGuard.sql).get(allowedGuard.params), /malformed JSON/, 'a concurrent rename invalidates the earlier exact-match acknowledgement')
+  const clearGuard = lib.contactDuplicateWriteGuardStatement('suppliers', { phones: ['097000000'] })
+  assert.strictEqual(rawDb.prepare(clearGuard.sql).run(clearGuard.params).meta.changes, 0, 'a free canonical phone passes the write-time guard')
+  passed += 1
+  console.log('PASS atomic duplicate guard blocks races and preserves only the acknowledged full candidate snapshot')
+
+  rawDb.prepare(`UPDATE customers SET address='[{"label":"Other","phone":"+855 77 888 999","address":"Somewhere"}]' WHERE name='Dara'`).run()
+  const optionMatches = await lib.findContactDuplicates(db, 'customers', { name: 'Another person', phones: ['077888999'] })
+  assert.strictEqual(optionMatches.length, 1)
+  assert.strictEqual(optionMatches[0].severity, 'phone_conflict')
+  passed += 1
+  console.log('PASS canonical phone prefilter finds a country-form phone inside structured Contact Options')
 
   for (const table of ['customers', 'suppliers', 'delivery_contacts']) {
     const clusters = await lib.findDuplicateContactClusters(db, table)

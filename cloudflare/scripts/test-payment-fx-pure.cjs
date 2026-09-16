@@ -1,0 +1,583 @@
+const fs = require('node:fs')
+const path = require('node:path')
+const assert = require('node:assert/strict')
+const ts = require('typescript')
+const Database = require('better-sqlite3')
+
+const root = path.join(__dirname, '..')
+const user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
+const cache = new Map()
+const actual = new Set(['actorSnapshot','movementBranchName',
+  'db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding',
+  'productBatches','batchCode','salesStatus','conflictControl','searchMatch','financialPrecision',
+  'paymentMethodRegistry','paymentSettlement','saleSettlementAction','saleLineAddition','saleAmendments',
+  'nativeSaleChange','deliveryAmounts','saleRecords','saleRecordEvents','saleCreationSnapshot',
+  'moneyPrecision','saleMoneyPrecision','saleItemPricing','promotionRules','productMergeLineage','saleMutationHeaderQuote',
+  'anonymousCustomer',
+  'receiptNumber','clientTimestamp',
+  // N21: routes/sales.ts resolves the display address through this kernel on
+  // every write. A stub makes contactDisplayAddress undefined and the route
+  // 500s, so it is loaded for real -- it has no imports of its own.
+  'contactOptions',
+  // The selling-branch guard and the two canonical branch roles it reads:
+  // real modules, so POST /sales here rejects a warehouse line exactly as
+  // the Worker does rather than silently resolving to an empty stub.
+  'branchRoleGuards','branchRoles',
+  // Shared per-isolate PRAGMA table_info() memoization sales.ts's
+  // saleMoneySchemaReady/readStripMoneyRows now delegate to; no imports of
+  // its own, so it is loaded for real rather than stubbed.
+  'schemaProbe',
+])
+function load(rel) {
+  if (cache.has(rel)) return cache.get(rel).exports
+  const mod = { exports: {} }; cache.set(rel, mod)
+  const sourcePath = path.join(root, 'src', rel)
+  const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: sourcePath,
+  }).outputText
+  const req = (name) => {
+    if (name === 'hono') return require(name)
+    if (name.endsWith('/auth')) return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
+    if (name.endsWith('/cache')) return { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_e,_k,_t,fn) => fn() }
+    if (name.endsWith('/broadcastHub')) return { broadcast: async () => {} }
+    if (name.endsWith('/audit')) return { audit: async () => {} }
+    if (name.endsWith('/telegram')) return { formatSaleTelegramLines: () => [], sendTelegramEvent: async () => {}, telegramMoney: () => '' }
+    if (name.endsWith('/undoAppliers')) return { recordSaleAddItemsUndoSnapshot: async () => null }
+    if (name.startsWith('.')) {
+      const target = path.posix.normalize(path.posix.join(path.posix.dirname(rel), name)) + '.ts'
+      if (actual.has(path.posix.basename(name))) return load(target)
+      return {}
+    }
+    return require(name)
+  }
+  new Function('require','module','exports',output)(req,mod,mod.exports)
+  return mod.exports
+}
+
+const sales = load('routes/sales.ts').default
+const settlementAction = load('lib/saleSettlementAction.ts')
+const lineAddition = load('lib/saleLineAddition.ts')
+const amendments = load('lib/saleAmendments.ts')
+
+function fixture() {
+  const sql = new Database(':memory:')
+  sql.pragma('foreign_keys = OFF')
+  for (const file of fs.readdirSync(path.join(root, 'migrations')).filter((name) => name.endsWith('.sql')).sort()) {
+    sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
+  }
+  let beforeBatch = null
+  const env = { DB: {
+    prepare(text) { return { bind(...params) { return { text, params,
+      async first() { return sql.prepare(text).get(...params) || null },
+      async all() { return { results: sql.prepare(text).all(...params) } },
+      async run() { const r = sql.prepare(text).run(...params); return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } } },
+    } } } },
+    async batch(statements) {
+      if (beforeBatch) { const fn = beforeBatch; beforeBatch = null; fn() }
+      return sql.transaction(() => statements.map((statement) => {
+        const r = sql.prepare(statement.text).run(...statement.params)
+        return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } }
+      }))()
+    },
+  } }
+  const executionCtx = { waitUntil() {}, passThroughOnException() {} }
+  const call = async (url, body, method = 'PATCH') => {
+    const response = await sales.request(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, env, executionCtx)
+    return { status: response.status, body: await response.json() }
+  }
+  return { sql, env, call, barrier(fn) { beforeBatch = fn } }
+}
+
+function seed(f) {
+  f.sql.exec(`
+    INSERT INTO settings(key,value,updated_at) VALUES
+      ('exchange_rate','4200','s1'),('change_exchange_rate','4000','s1'),
+      ('pos_payment_methods','["ABA Bank"]','s1');
+    INSERT INTO branches(id,name) VALUES(1,'Shop');
+    INSERT INTO products(id,name,stock_quantity) VALUES(1,'Serum',10);
+    INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,8);
+    INSERT INTO sales(
+      id,receipt_number,cashier_name,branch_id,branch_name,customer_name,payment_method,payment_details,
+      payment_currency,exchange_rate,subtotal_usd,subtotal_khr,discount_usd,discount_khr,tax_usd,tax_khr,
+      total_usd,total_khr,amount_paid_usd,amount_paid_khr,change_usd,change_khr,sale_status,search_normalized,updated_at
+    ) VALUES(
+      1,'S-1','Mia',1,'Shop','Customer','Legacy Cash','[{"method":"Legacy Cash","amount_usd":1.2346,"amount_khr":0}]',
+      'USD',4100,5,20500,0,NULL,0,0,5,20500,1.2346,0,0,0,'awaiting_payment','old search','sale-v1'
+    );
+    INSERT INTO sale_items(
+      id,sale_id,product_id,product_name,quantity,applied_price_usd,applied_price_khr,total_usd,total_khr,
+      product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,manual_discount_usd,manual_discount_khr,branch_id
+    ) VALUES(1,1,1,'Serum',1,5,20500,5,20500,0,NULL,5,NULL,0,NULL,1);
+  `)
+}
+
+function request(key = 'settle-request-1') {
+  return {
+    sale_status: 'completed',
+    expected_updated_at: 'sale-v1',
+    client_request_id: key,
+    expected_exchange_rate: 4200,
+    payment_details: [
+      { method: 'Legacy Cash', amount_usd: 1.2346, amount_khr: 0 },
+      { method: 'aba bank', amount_usd: 1, amount_khr: 0 },
+      { method: 'ABA BANK', amount_usd: 0, amount_khr: 12600 },
+    ],
+  }
+}
+
+// Precision v1 sale mutations are review-then-confirm: the first submission
+// without expected_header_quote is answered 409 sale_header_quote_conflict
+// carrying the exact header the server will write, and the confirm resend
+// echoes it back. Same pattern as test-historical-sale-edit-native.cjs. A first
+// answer that is not a quote conflict is left for the caller to assert on.
+// v1 add-items lines carry explicit pricing intent and the line quote the client
+// reviewed (pricing_source/selling_price_input_usd/pricing_quote, keyed by
+// client_line_key); Serum has no catalog price, so every line here is manual at
+// 2 USD per unit on the sale's recorded 4100 rate.
+const manualLine = (units, extra = {}) => ({
+  product_id: 1, quantity: units, client_line_key: `payment-fx-line-${units}`,
+  pricing_source: 'manual', selling_price_input_usd: 2,
+  pricing_quote: { gross_usd: 2 * units, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 2 * units, total_khr: 2 * units * 4100 },
+  ...extra,
+})
+async function reviewed(f, path, body) {
+  const first = await f.call(path, body, 'POST')
+  if (first.status !== 409 || first.body.code !== 'sale_header_quote_conflict') return body
+  return { ...body, expected_header_quote: first.body.header_quote }
+}
+
+async function run() {
+  const native = fixture(); seed(native)
+  const nativeCreate = await native.call('/', {
+    money_precision_version: 1,
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1,
+      client_line_key: 'native-change-create-line-1', pricing_source: 'manual',
+      selling_price_input_usd: 5,
+      pricing_quote: { gross_usd: 5, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 5, total_khr: 21000 } }],
+    branch_id: 1,
+    payment_details: [{ method: 'ABA Bank', amount_usd: 6, amount_khr: 0 }],
+    payment_currency: 'USD',
+    amount_paid_usd: 6,
+    amount_paid_khr: 0,
+    exchange_rate: 4200,
+    change_is_actual: true,
+    change_usd: 1,
+    change_khr: 0,
+    client_request_id: 'native-change-create-1',
+  }, 'POST')
+  assert.equal(nativeCreate.status, 200, JSON.stringify(nativeCreate))
+  const nativeStored = native.sql.prepare('SELECT change_usd,change_khr,change_is_actual,change_exchange_rate FROM sales WHERE id=?').get(nativeCreate.body.id)
+  assert.deepEqual(nativeStored, { change_usd: 1, change_khr: 0, change_is_actual: 1, change_exchange_rate: 4000 })
+  const saleCountBeforeInvalid = native.sql.prepare('SELECT COUNT(*) n FROM sales').get().n
+  const invalidNative = await native.call('/', {
+    money_precision_version: 1,
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1,
+      client_line_key: 'native-change-invalid-line-1', pricing_source: 'manual',
+      selling_price_input_usd: 5,
+      pricing_quote: { gross_usd: 5, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 5, total_khr: 21000 } }],
+    branch_id: 1, amount_paid_usd: 6, exchange_rate: 4200,
+    change_is_actual: true, change_usd: 0, change_khr: 0,
+    client_request_id: 'native-change-invalid-1',
+  }, 'POST')
+  assert.equal(invalidNative.status, 400, JSON.stringify(invalidNative))
+  assert.equal(native.sql.prepare('SELECT COUNT(*) n FROM sales').get().n, saleCountBeforeInvalid)
+  console.log('PASS create validates explicit native change before writes and persists its captured server change rate')
+
+  const f = fixture(); seed(f)
+  f.sql.prepare('UPDATE sales SET change_is_actual=1,change_exchange_rate=4000 WHERE id=1').run()
+  assert.equal((await f.call('/1/status', { ...request('unsupported-aggregate'), amount_paid_usd: 99 })).body.code, 'unsupported_payment_aggregate')
+  console.log('PASS client aggregate payment fields are rejected in favor of server-derived tender totals')
+  const stockBefore = f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity
+  const applied = await f.call('/1/status', request())
+  assert.equal(applied.status, 200, JSON.stringify(applied))
+  assert.equal(applied.body.exchange_rate, 4200)
+  assert.equal(applied.body.payment_method, 'Legacy Cash + ABA Bank')
+  assert.deepEqual(JSON.parse(applied.body.payment_details), [
+    { method: 'Legacy Cash', amount_usd: 1.2346, amount_khr: 0 },
+    { method: 'ABA Bank', amount_usd: 1, amount_khr: 0 },
+    { method: 'ABA Bank', amount_usd: 0, amount_khr: 12600 },
+  ])
+  assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, stockBefore)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
+  const sale = f.sql.prepare('SELECT * FROM sales WHERE id=1').get()
+  const line = f.sql.prepare('SELECT * FROM sale_items WHERE id=1').get()
+  assert.deepEqual([sale.subtotal_khr,sale.total_khr,line.applied_price_khr,line.total_khr],[21000,21000,21000,21000])
+  assert.equal(sale.discount_khr, 0)
+  assert.equal(line.base_price_khr, 21000)
+  assert.equal(line.manual_discount_khr, 0)
+  assert.match(sale.search_normalized, /aba bank/)
+  assert.deepEqual([sale.change_is_actual,sale.change_exchange_rate],[0,null])
+  const fractional = settlementAction.buildSaleSettlementAfterState(
+    {},
+    { subtotal_usd: 1.2345, discount_usd: 0.0001, tax_usd: 0.0002, total_usd: 1.2346,
+      delivery_fee_usd: 0, membership_discount_usd: 0, receipt_number: 'S-FX' },
+    [{ id: 1, applied_price_usd: 1.2345, total_usd: 1.2346, product_discount_usd: 0.0001,
+      base_price_usd: 1.2345, manual_discount_usd: 0.0001 }],
+    'completed', { ...request(), ...applied.body, exchangeRate: 4200, paymentMethod: 'ABA Bank',
+      paymentDetailsJson: '[]', paymentCurrency: 'USD', amountPaidUsd: 2, amountPaidKhr: 0,
+      changeUsd: 0, changeKhr: 0, changeExchangeRate: 4000 },
+  )
+  assert.deepEqual(
+    [fractional.subtotal_khr,fractional.discount_khr,fractional.tax_khr,fractional.total_khr,
+      fractional.lines[0].applied_price_khr,fractional.lines[0].total_khr],
+    [5184.9,0.42,0.84,5185.32,5184.9,5185.32],
+  )
+  assert.equal(lineAddition.rebaseSaleLineKhrSnapshot([{ id: 1, total_usd: 1.2345 }], 4200)[0].total_khr, 5184.9)
+  assert.equal(amendments.planDeliveryFeeChange({ saleId: 1, sale: { delivery_fee_usd: 1 }, newFeeUsd: 2.01, exchangeRate: 4200.1234 }).statements[0].params.fee_khr, 8442.248)
+  assert.ok(applied.body.actionHistoryId > 0)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_mutation_receipts').get().n, 1)
+  let recordEvents = f.sql.prepare('SELECT * FROM sale_record_events ORDER BY generation').all()
+  assert.equal(recordEvents.length, 1)
+  assert.deepEqual(
+    [recordEvents[0].source_kind, recordEvents[0].generation, recordEvents[0].kind, recordEvents[0].via],
+    ['sale_settlement', 0, 'payment_settled', 'apply'],
+  )
+  assert.deepEqual(JSON.parse(recordEvents[0].changes_json).map(change => change.field),
+    ['payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'sale_status'])
+  const settlementAudit = f.sql.prepare("SELECT details FROM audit_logs WHERE action='sale_settlement'").get()
+  assert.deepEqual(JSON.parse(settlementAudit.details).record_event, {
+    source_kind: 'sale_settlement', source_id: recordEvents[0].source_id, generation: 0, sale_id: 1,
+  })
+  console.log('PASS settlement canonicalizes active methods, preserves inactive legacy tender, uses latest rate once, and moves no stock')
+
+  // The production failure was reported on a sale with several item rows,
+  // no delivery/customer block, and an awaiting-payment -> completed write.
+  // Keep that shape here so a future change cannot make the status/payment
+  // batch succeed while silently dropping the item lines or moving stock a
+  // second time.
+  const multiLine = fixture(); seed(multiLine)
+  multiLine.sql.exec(`
+    INSERT INTO sale_items(
+      id,sale_id,product_id,product_name,quantity,applied_price_usd,applied_price_khr,total_usd,total_khr,
+      product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,manual_discount_usd,manual_discount_khr,branch_id
+    ) VALUES
+      (2,1,1,'Serum',2,40,168000,80,336000,0,NULL,40,NULL,0,NULL,1),
+      (3,1,1,'Serum',3,25,105000,75,315000,0,NULL,25,NULL,0,NULL,1),
+      (4,1,1,'Serum',1,100,420000,100,420000,0,NULL,100,NULL,0,NULL,1);
+    UPDATE sales SET subtotal_usd=260,subtotal_khr=1092000,total_usd=265,total_khr=1113000,
+      amount_paid_usd=0,amount_paid_khr=0,payment_method=NULL,payment_details=NULL,
+      customer_id=NULL,customer_name=NULL,delivery_contact_id=NULL,is_delivery=0,
+      delivery_fee_usd=NULL,delivery_fee_khr=NULL,delivery_actual_cost_usd=NULL,
+      delivery_actual_cost_khr=NULL,updated_at='multi-line-v1' WHERE id=1;
+  `)
+  const multiStockBefore = multiLine.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity
+  const multiApplied = await multiLine.call('/1/status', {
+    sale_status: 'completed',
+    expected_updated_at: 'multi-line-v1',
+    client_request_id: 'multi-line-settlement-1',
+    expected_exchange_rate: 4200,
+    payment_details: [{ method: 'ABA Bank', amount_usd: 265, amount_khr: 0 }],
+  })
+  assert.equal(multiApplied.status, 200, JSON.stringify(multiApplied))
+  assert.equal(multiApplied.body.payment_method, 'ABA Bank')
+  assert.equal(multiApplied.body.amount_paid_usd, 265)
+  assert.equal(multiLine.sql.prepare('SELECT COUNT(*) n FROM sale_items WHERE sale_id=1').get().n, 4)
+  assert.equal(multiLine.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'completed')
+  assert.equal(multiLine.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, multiStockBefore)
+  assert.equal(multiLine.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
+  assert.equal(multiLine.sql.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='sale_settlement'").get().n, 1)
+  console.log('PASS four-line no-delivery settlement keeps every item, records payment, and moves no stock twice')
+
+  f.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
+  const retry = await f.call('/1/status', request())
+  assert.deepEqual(retry, applied)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_mutation_receipts').get().n, 1)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 1)
+  assert.equal((await f.call('/1/status', { ...request(), payment_details: [...request().payment_details, { method: 'ABA Bank', amount_usd: 1 }] })).status, 409)
+  const rateChanged = fixture(); seed(rateChanged)
+  rateChanged.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
+  const staleRate = await rateChanged.call('/1/status', request('settle-request-2'))
+  assert.equal(staleRate.status, 409)
+  assert.equal(staleRate.body.code, 'exchange_rate_changed')
+  assert.equal(staleRate.body.current.exchange_rate, 4300)
+  console.log('PASS exact retry returns first 4200 outcome; altered request and stale reviewed rate are rejected')
+
+  const receipt = f.sql.prepare('SELECT * FROM sale_mutation_receipts').get()
+  await settlementAction.replaySaleSettlementAction(f.env, user, 'undo', applied.body.actionHistoryId, 0, { operation_id: receipt.id })
+  const undoneSale = f.sql.prepare('SELECT * FROM sales WHERE id=1').get()
+  const undoneLine = f.sql.prepare('SELECT * FROM sale_items WHERE id=1').get()
+  assert.deepEqual([undoneSale.sale_status,undoneSale.exchange_rate,undoneSale.payment_method,undoneSale.amount_paid_usd],['awaiting_payment',4100,'Legacy Cash',1.2346])
+  assert.equal(undoneSale.discount_khr, null)
+  assert.deepEqual([undoneSale.change_is_actual,undoneSale.change_exchange_rate],[1,4000])
+  assert.equal(undoneLine.base_price_khr, null)
+  assert.equal(undoneLine.manual_discount_khr, null)
+  await settlementAction.replaySaleSettlementAction(f.env, user, 'redo', applied.body.actionHistoryId, 1, { operation_id: receipt.id })
+  assert.equal(f.sql.prepare('SELECT exchange_rate FROM sales WHERE id=1').get().exchange_rate, 4200)
+  assert.deepEqual(Object.values(f.sql.prepare('SELECT change_is_actual,change_exchange_rate FROM sales WHERE id=1').get()), [0,null])
+  assert.equal(f.sql.prepare('SELECT value FROM settings WHERE key=\'exchange_rate\'').get().value, '4300')
+  recordEvents = f.sql.prepare('SELECT generation,kind,via,changes_json FROM sale_record_events ORDER BY generation').all()
+  assert.deepEqual(recordEvents.map(event => [event.generation,event.kind,event.via]), [
+    [0,'payment_settled','apply'], [1,'payment_settled','undo'], [2,'payment_settled','redo'],
+  ])
+  assert.deepEqual(JSON.parse(recordEvents[1].changes_json)[0], {
+    field: 'payment_method', before: { state: 'known_value', value: 'Legacy Cash + ABA Bank' }, after: { state: 'known_value', value: 'Legacy Cash' },
+  })
+  console.log('PASS undo restores exact nullable 4100 snapshot and redo restores captured 4200 without current settings recomputation')
+
+  const correction = fixture(); seed(correction)
+  const deniedCorrection = await correction.call('/1/status', {
+    sale_status: 'completed',
+    expected_updated_at: 'sale-v1',
+    expected_exchange_rate: 4200,
+    client_request_id: 'payment-correction-without-reopen',
+    replace_existing_payment: true,
+    payment_details: [{ method: 'ABA Bank', amount_usd: 5, amount_khr: 0 }],
+  })
+  assert.equal(deniedCorrection.status, 409, JSON.stringify(deniedCorrection))
+  assert.equal(deniedCorrection.body.code, 'payment_correction_not_allowed')
+
+  correction.sql.prepare("UPDATE sales SET sale_status='completed',updated_at='correction-v1' WHERE id=1").run()
+  const correctionStockBefore = correction.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity
+  const reopenRequest = {
+    sale_status: 'awaiting_payment',
+    expected_updated_at: 'correction-v1',
+    client_request_id: 'payment-correction-reopen',
+  }
+  const reopened = await correction.call('/1/status', reopenRequest)
+  assert.equal(reopened.status, 200, JSON.stringify(reopened))
+  assert.equal(correction.sql.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='sale_payment_correction_opened' AND entity_id='1'").get().n, 1)
+  const reopenEvent = correction.sql.prepare("SELECT * FROM sale_record_events WHERE source_kind='sale_status'").get()
+  assert.equal(reopenEvent.source_id, 'actor:1:request:payment-correction-reopen')
+  assert.deepEqual([reopenEvent.kind,reopenEvent.via,reopenEvent.generation], ['status_changed','apply',0])
+  assert.deepEqual(JSON.parse(reopenEvent.changes_json), [{
+    field: 'sale_status', before: { state: 'known_value', value: 'completed' }, after: { state: 'known_value', value: 'awaiting_payment' },
+  }])
+  assert.deepEqual(JSON.parse(reopenEvent.response_json), reopened.body)
+  assert.deepEqual(await correction.call('/1/status', reopenRequest), reopened, 'exact retry returns the first stored status response')
+  assert.equal((await correction.call('/1/status', { ...reopenRequest, notes: 'different intent' })).body.code, 'idempotency_conflict')
+  const reopenedRevision = correction.sql.prepare('SELECT updated_at FROM sales WHERE id=1').get().updated_at
+  const corrected = await correction.call('/1/status', {
+    sale_status: 'completed',
+    expected_updated_at: reopenedRevision,
+    expected_exchange_rate: 4200,
+    client_request_id: 'payment-correction-after-reopen',
+    replace_existing_payment: true,
+    payment_details: [{ method: 'ABA Bank', amount_usd: 5, amount_khr: 0 }],
+  })
+  assert.equal(corrected.status, 200, JSON.stringify(corrected))
+  assert.equal(corrected.body.paymentCorrection, true)
+  assert.equal(corrected.body.payment_method, 'ABA Bank')
+  assert.deepEqual(JSON.parse(corrected.body.payment_details), [{ method: 'ABA Bank', amount_usd: 5, amount_khr: 0 }])
+  assert.equal(correction.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, correctionStockBefore)
+  assert.equal(correction.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
+  const correctionReceipt = correction.sql.prepare("SELECT * FROM sale_mutation_receipts WHERE request_id='payment-correction-after-reopen'").get()
+  assert.ok(correctionReceipt)
+  assert.equal(JSON.parse(correctionReceipt.request_json).replace_existing_payment, true)
+  assert.equal(JSON.parse(correctionReceipt.before_json).payment_method, 'Legacy Cash')
+  assert.equal(JSON.parse(correctionReceipt.after_json).payment_method, 'ABA Bank')
+  const correctionHistory = correction.sql.prepare('SELECT * FROM action_history WHERE id=?').get(corrected.body.actionHistoryId)
+  assert.match(correctionHistory.label, /^Corrected payment for sale /)
+  await settlementAction.replaySaleSettlementAction(correction.env, user, 'undo', corrected.body.actionHistoryId, 0, { operation_id: correctionReceipt.id })
+  assert.deepEqual(
+    Object.values(correction.sql.prepare('SELECT sale_status,payment_method,amount_paid_usd FROM sales WHERE id=1').get()),
+    ['awaiting_payment','Legacy Cash',1.2346],
+  )
+  await settlementAction.replaySaleSettlementAction(correction.env, user, 'redo', corrected.body.actionHistoryId, 1, { operation_id: correctionReceipt.id })
+  assert.deepEqual(
+    Object.values(correction.sql.prepare('SELECT sale_status,payment_method,amount_paid_usd FROM sales WHERE id=1').get()),
+    ['completed','ABA Bank',5],
+  )
+  assert.deepEqual(
+    correction.sql.prepare("SELECT generation,kind,via FROM sale_record_events WHERE source_kind='sale_settlement' ORDER BY generation").all(),
+    [{ generation: 0, kind: 'payment_changed', via: 'apply' }, { generation: 1, kind: 'payment_changed', via: 'undo' }, { generation: 2, kind: 'payment_changed', via: 'redo' }],
+  )
+  console.log('PASS completed-to-awaiting marker authorizes one atomic payment replacement with receipt, stock invariance, undo, and redo')
+
+  const missingStatusKey = fixture(); seed(missingStatusKey)
+  const missingStatusKeyResult = await missingStatusKey.call('/1/status', {
+    sale_status: 'completed', expected_updated_at: 'sale-v1',
+  })
+  assert.equal(missingStatusKeyResult.status, 400, JSON.stringify(missingStatusKeyResult))
+  assert.equal(missingStatusKeyResult.body.code, 'client_request_id_required')
+  assert.equal(missingStatusKeyResult.body.action, 'refresh_required')
+  assert.equal(missingStatusKey.sql.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 0)
+
+  const directRace = fixture(); seed(directRace)
+  directRace.barrier(() => directRace.sql.prepare("UPDATE sales SET notes='concurrent' WHERE id=1").run())
+  const directRaceResult = await directRace.call('/1/status', {
+    sale_status: 'completed', expected_updated_at: 'sale-v1', client_request_id: 'direct-status-race',
+  })
+  assert.equal(directRaceResult.status, 409, JSON.stringify(directRaceResult))
+  assert.equal(directRace.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'awaiting_payment')
+  assert.equal(directRace.sql.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 0)
+  console.log('PASS direct status requires a stable request id and its sale mutation/event roll back together on a revision race')
+
+  const cancelled = fixture(); seed(cancelled)
+  const cancelledResult = await cancelled.call('/1/status', {
+    sale_status: 'cancelled', expected_updated_at: 'sale-v1', client_request_id: 'direct-cancel-1',
+    cancel_reason: 'other', cancel_note: 'Customer changed their mind',
+  })
+  assert.equal(cancelledResult.status, 200, JSON.stringify(cancelledResult))
+  const cancelledEvent = cancelled.sql.prepare("SELECT kind,changes_json,response_json FROM sale_record_events WHERE source_kind='sale_status'").get()
+  assert.equal(cancelledEvent.kind, 'cancelled')
+  assert.deepEqual(JSON.parse(cancelledEvent.changes_json), [
+    { field: 'sale_status', before: { state: 'known_value', value: 'awaiting_payment' }, after: { state: 'known_value', value: 'cancelled' } },
+    { field: 'cancel_reason', before: { state: 'known_none' }, after: { state: 'known_value', value: 'other' } },
+    { field: 'cancel_note', before: { state: 'known_none' }, after: { state: 'known_value', value: 'Customer changed their mind' } },
+  ])
+  assert.deepEqual(JSON.parse(cancelledEvent.response_json), cancelledResult.body)
+  console.log('PASS direct cancellation records only the changed status, reason, and supplied note with its exact retry response')
+
+  const uncancelled = fixture(); seed(uncancelled)
+  uncancelled.sql.prepare(`UPDATE sales SET sale_status='cancelled',status_before_cancel='completed',
+    cancel_reason='other',cancel_note='Historical note',updated_at='cancel-v1' WHERE id=1`).run()
+  const uncancelledResult = await uncancelled.call('/1/status', {
+    sale_status: 'completed', expected_updated_at: 'cancel-v1', client_request_id: 'direct-uncancel-1',
+  })
+  assert.equal(uncancelledResult.status, 200, JSON.stringify(uncancelledResult))
+  const uncancelEvent = uncancelled.sql.prepare("SELECT kind,changes_json FROM sale_record_events WHERE source_kind='sale_status'").get()
+  assert.equal(uncancelEvent.kind, 'cancelled')
+  assert.deepEqual(JSON.parse(uncancelEvent.changes_json), [
+    { field: 'sale_status', before: { state: 'known_value', value: 'cancelled' }, after: { state: 'known_value', value: 'completed' } },
+    { field: 'cancel_reason', before: { state: 'known_value', value: 'other' }, after: { state: 'known_none' } },
+    { field: 'cancel_note', before: { state: 'known_value', value: 'Historical note' }, after: { state: 'known_none' } },
+  ])
+
+  const staleCancel = fixture(); seed(staleCancel)
+  staleCancel.sql.prepare("UPDATE sales SET cancel_reason='mistake',cancel_note='Stale legacy note' WHERE id=1").run()
+  const staleCancelResult = await staleCancel.call('/1/status', {
+    sale_status: 'cancelled', expected_updated_at: 'sale-v1', client_request_id: 'direct-stale-cancel-1',
+    cancel_reason: 'buyer_refused',
+  })
+  assert.equal(staleCancelResult.status, 200, JSON.stringify(staleCancelResult))
+  assert.deepEqual(JSON.parse(staleCancel.sql.prepare("SELECT changes_json FROM sale_record_events WHERE source_kind='sale_status'").get().changes_json), [
+    { field: 'sale_status', before: { state: 'known_value', value: 'awaiting_payment' }, after: { state: 'known_value', value: 'cancelled' } },
+    { field: 'cancel_reason', before: { state: 'known_value', value: 'mistake' }, after: { state: 'known_value', value: 'buyer_refused' } },
+    { field: 'cancel_note', before: { state: 'known_value', value: 'Stale legacy note' }, after: { state: 'known_none' } },
+  ])
+  console.log('PASS un-cancel and stale legacy cancellation fields retain exact before values and changed-only clears')
+
+  const raced = fixture(); seed(raced)
+  raced.barrier(() => raced.sql.prepare("UPDATE sales SET notes='concurrent' WHERE id=1").run())
+  const conflict = await raced.call('/1/status', request('settle-race'))
+  assert.equal(conflict.status, 409, JSON.stringify(conflict))
+  assert.equal(raced.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'awaiting_payment')
+  assert.equal(raced.sql.prepare('SELECT COUNT(*) n FROM sale_mutation_receipts').get().n, 0)
+  assert.equal(raced.sql.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 0)
+  console.log('PASS stale matched sale/settings conflict is all-or-none')
+
+  const amended = fixture(); seed(amended)
+  amended.sql.prepare(`UPDATE sales SET sale_status='completed',is_delivery=1,delivery_fee_usd=1,
+    delivery_fee_khr=4100,total_usd=6,total_khr=24600,change_usd=1,change_khr=0,
+    change_is_actual=1,change_exchange_rate=4000 WHERE id=1`).run()
+  amended.sql.prepare("UPDATE sales SET updated_at='amend-v1' WHERE id=1").run()
+  // Precision v1 (4a2ce71b): amendments and added lines keep the SALE'S recorded
+  // exchange rate (4100 here) instead of rebasing to the latest server rate, so
+  // the reviewed rate must equal the recorded one and KHR figures stay at 4100.
+  // The settings-race guard below is unchanged: a rate edit mid-request still
+  // rejects the whole mutation.
+  const amendmentDraft = {
+    money_precision_version: 1,
+    kind: 'delivery_fee_changed',
+    delivery_fee_usd: 2,
+    expected_updated_at: 'amend-v1',
+    expected_exchange_rate: 4100,
+    client_request_id: 'amend-fee-request-1',
+  }
+  const amendmentRequest = await reviewed(amended, '/1/amendments', amendmentDraft)
+  const amendmentApplied = await amended.call('/1/amendments', amendmentRequest, 'POST')
+  assert.equal(amendmentApplied.status, 200, JSON.stringify(amendmentApplied))
+  assert.equal(amendmentApplied.body.exchangeRate, 4100)
+  assert.equal(amendmentApplied.body.totalUsd, 7)
+  assert.equal(amendmentApplied.body.totalKhr, 28700)
+  const amendedSale = amended.sql.prepare('SELECT * FROM sales WHERE id=1').get()
+  const amendedLine = amended.sql.prepare('SELECT * FROM sale_items WHERE id=1').get()
+  assert.deepEqual([amendedSale.exchange_rate,amendedSale.delivery_fee_khr,amendedSale.total_khr,amendedLine.total_khr],[4100,8200,28700,20500])
+  assert.deepEqual([amendedSale.change_usd,amendedSale.change_khr,amendedSale.change_is_actual,amendedSale.change_exchange_rate],[1,0,1,4000])
+  assert.equal(amended.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='amendment'").get().n, 1)
+  amended.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
+  assert.deepEqual(await amended.call('/1/amendments', amendmentRequest, 'POST'), amendmentApplied)
+  assert.equal((await amended.call('/1/amendments', { ...amendmentRequest, delivery_fee_usd: 3 }, 'POST')).status, 409)
+  console.log('PASS amendment keeps the recorded sale rate on header and lines and exact retry preserves the first outcome')
+
+  const amendmentRace = fixture(); seed(amendmentRace)
+  amendmentRace.sql.prepare(`UPDATE sales SET sale_status='completed',is_delivery=1,delivery_fee_usd=1,
+    delivery_fee_khr=4100,total_usd=6,total_khr=24600,updated_at='amend-v1' WHERE id=1`).run()
+  amendmentRace.barrier(() => amendmentRace.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run())
+  const amendmentConflict = await amendmentRace.call('/1/amendments', amendmentRequest, 'POST')
+  assert.equal(amendmentConflict.status, 409, JSON.stringify(amendmentConflict))
+  assert.equal(amendmentRace.sql.prepare('SELECT delivery_fee_usd FROM sales WHERE id=1').get().delivery_fee_usd, 1)
+  assert.equal(amendmentRace.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='amendment'").get().n, 0)
+  console.log('PASS amendment settings race rolls back fee, ledger, and receipt together')
+
+  const addition = fixture(); seed(addition)
+  addition.sql.prepare('UPDATE sales SET change_usd=1,change_khr=0,change_is_actual=1,change_exchange_rate=4000 WHERE id=1').run()
+  addition.sql.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_number,batch_key,is_active,received_at,lot_code)
+    VALUES(501,1,1,'lot-501',1,'2026-01-01','LOT-501')`).run()
+  addition.sql.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,8)').run()
+  const additionDraft = {
+    money_precision_version: 1,
+    items: [manualLine(1, { applied_price_usd: 2 })],
+    expected_updated_at: 'sale-v1',
+    expected_exchange_rate: 4100,
+    client_request_id: 'add-items-request-1',
+  }
+  const additionRequest = await reviewed(addition, '/1/items', additionDraft)
+  const additionApplied = await addition.call('/1/items', additionRequest, 'POST')
+  assert.equal(additionApplied.status, 200, JSON.stringify(additionApplied))
+  assert.equal(additionApplied.body.exchangeRate, 4100)
+  assert.ok(additionApplied.body.actionHistoryId > 0)
+  assert.equal(additionApplied.body.undoActionId, additionApplied.body.actionHistoryId)
+  const addedSale = addition.sql.prepare('SELECT * FROM sales WHERE id=1').get()
+  assert.deepEqual([addedSale.exchange_rate,addedSale.subtotal_usd,addedSale.total_usd,addedSale.total_khr],[4100,7,7,28700])
+  assert.deepEqual([addedSale.change_usd,addedSale.change_khr,addedSale.change_is_actual,addedSale.change_exchange_rate],[1,0,1,4000])
+  assert.deepEqual(addition.sql.prepare('SELECT total_khr FROM sale_items WHERE sale_id=1 ORDER BY id').all().map((r) => r.total_khr), [20500,8200])
+  assert.equal(addition.sql.prepare('SELECT COUNT(*) n FROM sale_item_batch_allocations').get().n, 1)
+  assert.equal(addition.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_members WHERE entity_kind='sale_item'").get().n, 1)
+  assert.equal(addition.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='add_items' AND history_id IS NOT NULL").get().n, 1)
+  const storedSnapshot = JSON.parse(addition.sql.prepare("SELECT payload_json FROM undo_snapshots WHERE kind='sale.add_items'").get().payload_json)
+  assert.ok(storedSnapshot.lines[0].saleItemId > 0)
+  assert.ok(storedSnapshot.saleStateRevision > 0)
+  assert.equal(storedSnapshot.moneyBefore.exchange_rate, 4100)
+  assert.equal(storedSnapshot.moneyAfter.exchange_rate, 4100)
+  addition.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
+  assert.deepEqual(await addition.call('/1/items', additionRequest, 'POST'), additionApplied)
+  assert.equal((await addition.call('/1/items', { ...additionRequest, items: [manualLine(2, { applied_price_usd: 2 })] }, 'POST')).status, 409)
+  console.log('PASS add-items atomically stores dynamic line/allocation/history ids, keeps the recorded sale rate, and retries exactly')
+
+  const additionRace = fixture(); seed(additionRace)
+  additionRace.barrier(() => additionRace.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run())
+  const additionConflict = await additionRace.call('/1/items', { ...additionRequest, client_request_id: 'add-items-race-1' }, 'POST')
+  assert.equal(additionConflict.status, 409, JSON.stringify(additionConflict))
+  assert.equal(additionRace.sql.prepare('SELECT COUNT(*) n FROM sale_items WHERE sale_id=1').get().n, 1)
+  assert.equal(additionRace.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='add_items'").get().n, 0)
+  assert.equal(additionRace.sql.prepare("SELECT COUNT(*) n FROM action_history WHERE entity='sale'").get().n, 0)
+  console.log('PASS add-items settings race rejects core rows, history, allocations, and receipt together')
+
+  function unlottedFixture() {
+    const f = fixture(); seed(f)
+    f.sql.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,received_at) VALUES(501,1,'dated',1,'2026-01-01'); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,5)")
+    return f
+  }
+  const unlottedDraft = { ...additionDraft, client_request_id: 'explicit-unlotted', items: [manualLine(2, { unlotted_stock: true })] }
+  for (const status of ['completed', 'awaiting_payment', 'awaiting_delivery']) {
+    const f = unlottedFixture()
+    f.sql.prepare('UPDATE sales SET sale_status=? WHERE id=1').run(status)
+    const unlottedRequest = await reviewed(f, '/1/items', unlottedDraft)
+    const added = await f.call('/1/items', unlottedRequest, 'POST')
+    assert.equal(added.status, 200, JSON.stringify(added))
+    assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 6)
+    assert.equal(f.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=501').get().quantity, 5)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_item_batch_allocations').get().n, 0, 'explicit residual source never silently FIFO allocates')
+    assert.deepEqual(await f.call('/1/items', unlottedRequest, 'POST'), added)
+    assert.equal((await f.call('/1/items', { ...unlottedRequest, items: [manualLine(2, { unlotted_stock: false })] }, 'POST')).status, 409, 'source choice is in the retry digest')
+  }
+  for (const invalid of [{ unlotted_stock: 'true' }, { unlotted_stock: true, batch_id: 501 }]) {
+    const f = unlottedFixture()
+    assert.equal((await f.call('/1/items', { ...unlottedDraft, items: [manualLine(1, invalid)] }, 'POST')).status, 400)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1)
+  }
+  const duplicateResidual = unlottedFixture()
+  const duplicateDraft = { ...unlottedDraft, items: [unlottedDraft.items[0], { ...unlottedDraft.items[0], client_line_key: 'payment-fx-line-2-again' }] }
+  assert.equal((await duplicateResidual.call('/1/items', await reviewed(duplicateResidual, '/1/items', duplicateDraft), 'POST')).status, 409)
+  assert.equal(duplicateResidual.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1)
+  const residualRace = unlottedFixture()
+  const residualRequest = await reviewed(residualRace, '/1/items', unlottedDraft)
+  residualRace.barrier(() => residualRace.sql.prepare('UPDATE branch_stock SET quantity=6 WHERE product_id=1 AND branch_id=1').run())
+  assert.equal((await residualRace.call('/1/items', residualRequest, 'POST')).status, 409)
+  assert.equal(residualRace.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1)
+  assert.equal(residualRace.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='add_items'").get().n, 0)
+  console.log('PASS add-items explicit unlotted source: three stock-holding statuses, exact retry, strict flags, duplicate capacity, and atomic race rejection')
+}
+
+run().catch((error) => { console.error(error); process.exitCode = 1 })

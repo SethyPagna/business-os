@@ -41,10 +41,52 @@ routes = [
 [assets]
 directory = "../frontend/dist"
 not_found_handling = "single-page-application"
-run_worker_first = ["/api/*", "/uploads/*", "/health", "/ws"]
+# The built frontend, also bound so the Worker itself can read a document it
+# has been asked to serve (src/index.ts's serveAppDocument). The binding name
+# is STATIC_ASSETS because ASSETS is already taken by the R2 bucket holding
+# uploaded files.
+binding = "STATIC_ASSETS"
+# Everything after /ws is a DOCUMENT route: the asset layer would otherwise
+# answer it from index.html without ever invoking this Worker, and G4's
+# admin-host identity rewrite has to happen before iOS reads those bytes (see
+# src/lib/adminDocumentIdentity.ts). The list mirrors that file's
+# APP_DOCUMENT_ROUTES exactly -- scripts/test-admin-host-document-rewrite-pure
+# .cjs fails if they drift, because a path listed here without a handler there
+# 404s a whole page, and a handler there without a path here never runs.
+run_worker_first = [
+  "/api/*", "/uploads/*", "/health", "/ws", "/robots.txt", "/sitemap.xml",
+  "/", "/index.html", "/admin", "/admin/*",
+  "/app", "/app/*", "/login", "/login/*",
+  "/audit", "/audit/*", "/audit-log", "/audit-log/*",
+  "/backup", "/backup/*", "/backups", "/backups/*",
+  "/branches", "/branches/*", "/catalog", "/catalog/*",
+  "/contacts", "/contacts/*", "/dashboard", "/dashboard/*",
+  "/delivery-contacts", "/delivery-contacts/*", "/fees", "/fees/*",
+  "/files", "/files/*", "/inventory", "/inventory/*",
+  "/library", "/library/*", "/loyalty", "/loyalty/*",
+  "/loyalty-points", "/loyalty-points/*", "/notes", "/notes/*",
+  "/point-of-sale", "/point-of-sale/*", "/pos", "/pos/*",
+  "/product", "/product/*", "/products", "/products/*",
+  "/promos", "/promos/*", "/promotions", "/promotions/*",
+  "/receipt-settings", "/receipt-settings/*", "/receipts", "/receipts/*",
+  "/returns", "/returns/*", "/review", "/review/*",
+  "/review-queue", "/review-queue/*", "/sales", "/sales/*",
+  "/server", "/server/*", "/settings", "/settings/*",
+  "/users", "/users/*",
+]
 
 [triggers]
 crons = ["0 */6 * * *"]
+
+# P4-4a: Smart Placement lets Cloudflare run this Worker's invocation next to
+# the D1 primary/whatever backend it talks to most, instead of always at the
+# edge location closest to the requesting browser -- this Worker's own
+# request path is D1-round-trip-bound (see the audit()/transfer/etc. fixes
+# elsewhere in this program), which is exactly the workload Smart Placement
+# is for. Free on both Workers plans (no [limits]-style Paid gate), so it
+# needs no free/paid branch the way cpu_ms above does.
+[placement]
+mode = "smart"
 
 # CPU headroom for the import queue consumer (queue.ts) and other chunked
 # D1 work (importEngine.ts's runD1BatchInChunks). This block previously had
@@ -168,8 +210,15 @@ queue = "business-os-import"
 # With a 5-minute budget, batching is a pure throughput win again.
 max_batch_size = 5
 max_batch_timeout = 5
-# Once a message has thrown on every one of Cloudflare's default max_retries
-# attempts, it's moved here instead of silently dropped -- queue.ts's
+# Six deliveries (1 + max_retries) is what lib/queueDispatch.ts
+# chunkRowsForAttempt needs to walk 600 -> 300 -> 150 -> 75 -> 37 -> 25 rows
+# before a message is given up on; Cloudflare's default of 3 retries stopped
+# at 75, and the operator's Retry then started over at 600. Same value in
+# wrangler.toml and wrangler.free.toml on purpose (the drift test pins the
+# two files to four differences).
+max_retries = 5
+# Once a message has thrown on every one of its max_retries attempts, it's
+# moved here instead of silently dropped -- queue.ts's
 # handleImportDeadLetterQueue picks it up and marks the job definitively
 # failed with an actionable last_error (see that function's own comment for
 # the full "why", including what used to happen without this: the job could
@@ -213,11 +262,15 @@ queue = "business-os-backup-assets"
 # copies a bounded slice and re-enqueues itself; Drive mirror uploads one
 # finalized manifest; restore-stage streams an app-tagged Drive manifest into
 # an isolated R2 candidate and validates it. The shared max_batch_size=1 keeps
-# all three kinds isolated and gives each its own retry budget -- same reasoning as
-# business-os-import's
-# max_batch_size = 1 above: keep each invocation's R2 get()+put() work
-# inside the Workers Free plan's per-invocation CPU budget rather than
-# packing several continuation steps' worth of copying into one call.
+# all three kinds isolated and gives each its own retry budget, and keeps each
+# invocation's R2 get()+put() work inside one per-invocation CPU budget rather
+# than packing several continuation steps' worth of copying into one call.
+#
+# This comment used to say "same reasoning as business-os-import's
+# max_batch_size = 1 above" -- stale since that consumer was restored to 5 on
+# Paid (see its own comment). This consumer stays at 1 on BOTH plans: its work
+# is R2 byte-copying, not a D1 write, so batching it packs real CPU rather than
+# amortising network latency. wrangler.free.toml therefore does NOT diff here.
 max_batch_size = 1
 max_batch_timeout = 5
 # No dead_letter_queue configured here (unlike business-os-import) --
@@ -250,6 +303,12 @@ tag = "v2-broadcast-hub"
 new_sqlite_classes = ["BroadcastHub"]
 
 [vars]
+# Which Workers plan this config deploys onto. Read by src/lib/planTier.ts,
+# which turns it into the limit table every plan-sensitive call site uses.
+# Pinned EXPLICITLY here rather than left to the code default so the two
+# configs state their own tier and wrangler.free.toml's only differ by value;
+# see that file's header for the complete list of diffs between them.
+PLAN_TIER = "paid"
 BUSINESS_OS_PUBLIC_URL = "https://leangbeauty.com"
 BUSINESS_OS_ADMIN_URL = "https://admin.leangbeauty.com"
 # The one organization this deployment serves. The login screen pins to it

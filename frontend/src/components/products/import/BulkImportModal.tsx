@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { Suspense, useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -27,6 +27,7 @@ import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import { parseImportFile } from '../../../utils/spreadsheetImport.ts'
 import { parseCsvRows } from '../../../utils/csvImport.ts'
 import { useApp as useAppHook } from '../../../app/AppContextCore.tsx'
+import { lazyRetry } from '../../../utils/lazyImport.ts'
 import { detectLikelyDatedReconciliation, type ImportModeDetectionResult } from './importModeDetection.ts'
 import { REPLACE_COLUMN_GROUPS } from './productReplaceColumnGroups.ts'
 import { MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
@@ -34,7 +35,18 @@ import ProductImportModeTabs, { ProductImportOptionCard, type ProductImportTopMo
 import ProductServerImportReviewScreen from './ProductServerImportReviewScreen'
 
 type NotifyFn = (message: string, tone?: 'info' | 'success' | 'warning' | 'error') => void
-const useApp = useAppHook as () => { notify: NotifyFn; hasPermission: (key: string) => boolean }
+const useApp = useAppHook as () => { notify: NotifyFn; hasPermission: (key: string) => boolean; can: (permissionKey: string, actionKey: string) => boolean }
+
+// The destination the dated-stock-count suggestion banner names. Until the
+// import-review audit it named it and went nowhere: the button was wired to
+// onClose alone, so DatedStockReconciliationModal had no importer anywhere
+// in the frontend and the live Worker routes behind it
+// (routes/inventory.ts POST /dated-stock-count/resolve,
+// /resolve/apply-decisions, /preview, /apply) had no client at all.
+// Lazy, like every other modal this size: it is a 600-line flow only the
+// dated-count file shape ever reaches, so it must not ride along in the
+// products-bulk-import chunk that every ordinary import downloads.
+const DatedStockReconciliationModal = lazyRetry(() => import('./DatedStockReconciliationModal'), 'products-dated-stock-reconciliation')
 
 const IMAGE_CONFLICT_OPTIONS = [
   { value: 'keep_existing', label: 'Keep existing images' },
@@ -256,6 +268,11 @@ type BulkImportModalProps = {
   t?: (key: string) => string
   topMode?: Exclude<ProductImportTopMode, 'stock_actions'>
   onTopModeChange?: (mode: ProductImportTopMode) => void
+  // Only forwarded: the Dated Reconciliation flow this modal can hand off
+  // to labels its unresolved rows' candidate products by name. Without the
+  // list it can only show "#123". Products.tsx already passes it to
+  // ImportModeWizard; the wizard had declared it and dropped it.
+  products?: { id?: EntityId; name?: string | null }[]
 }
 type ProductImportError = Error & {
   code?: string
@@ -484,15 +501,15 @@ const IMPORT_REVIEW_EDIT_FIELDS: Array<[string, string, string]> = [
   ['purchase_price_khr', 'purchase_price_khr', 'Cost KHR'],
   ['selling_price_usd', 'selling_price_usd', 'Sell USD'],
   ['selling_price_khr', 'selling_price_khr', 'Sell KHR'],
-  ['special_price_usd', 'special_price_usd_full', 'Special USD'],
-  ['special_price_khr', 'special_price_khr_full', 'Special KHR'],
+  ['wholesale_price_usd', 'wholesale_price_usd_full', 'Wholesale USD'],
+  ['wholesale_price_khr', 'wholesale_price_khr_full', 'Wholesale KHR'],
   ['discount_percent', 'discount_percent', 'Discount %'],
   ['discount_amount_usd', 'discount_amount_usd', 'Discount USD'],
   ['discount_amount_khr', 'discount_amount_khr', 'Discount KHR'],
   ['description', 'description', 'Description'],
 ]
 
-const IMPORT_PRICE_FIELDS = ['purchase_price_usd', 'purchase_price_khr', 'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr']
+const IMPORT_PRICE_FIELDS = ['purchase_price_usd', 'purchase_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr']
 
 function compactImportValue(value: unknown): string {
   const text = String(value ?? '').trim()
@@ -501,7 +518,7 @@ function compactImportValue(value: unknown): string {
 
 // Short "$1.50 / 6,000 KHR" style price summary for the redesigned
 // conflict-row header -- the full per-field grid (with cost, discount,
-// special price, etc.) still lives one click away in "More details";
+// wholesale price, etc.) still lives one click away in "More details";
 // this line is just enough to recognize the product at a glance.
 function compactImportPrice(row: ProductImportRow = {}): string {
   const usd = String(row?.selling_price_usd ?? '').trim()
@@ -1097,8 +1114,8 @@ function getBrowserImageEntries(imageFiles: ImageFileMap = {}): BrowserImageEntr
     }))
 }
 
-export default function BulkImportModal({ onClose, onDone, t, topMode = 'general', onTopModeChange }: BulkImportModalProps) {
-  const { notify, hasPermission } = useApp()
+export default function BulkImportModal({ onClose, onDone, t, topMode = 'general', onTopModeChange, products = [] }: BulkImportModalProps) {
+  const { notify, hasPermission, can } = useApp()
   // Server-side gate lives in routes/importJobs.ts (requires the
   // 'destructive_delete' permission, not just ordinary products-import
   // access, for BOTH destructive modes -- replace_all and replace_columns
@@ -1107,6 +1124,17 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   // replacement for it: someone without this permission would otherwise
   // see a mode they can pick but always get a 403 on.
   const canReplaceAll = hasPermission('destructive_delete')
+  // Same shape, mirroring routes/inventory.ts's own guard exactly: every
+  // dated-stock-count route (resolve, resolve/apply-decisions, preview,
+  // apply -- inventory.ts:1851/1881/1903/1919) calls
+  // getActionTier(user, 'inventory', 'stock_count') !== 'full' and 403s
+  // below Full Access. permissionActions.ts:136 declares stock_count with
+  // review:'block', so can() is true only at the 'full' tier -- the exact
+  // condition the Worker enforces. Disabled, not hidden, per this file's
+  // own precedent at the replace-mode notice below: the operator should
+  // see the destination named and know why it's blocked, not wonder where
+  // it went.
+  const canDatedStockCount = can('inventory', 'stock_count')
   const mode: ImportMode = topMode === 'images' ? 'images' : 'products'
   const [step, setStep] = useState(1)
   const [showColumnsInfo, setShowColumnsInfo] = useState(false)
@@ -1138,6 +1166,15 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   // alongside every other per-file analysis state in analyzePickedCsv.
   const [datedReconciliationSignal, setDatedReconciliationSignal] = useState<ImportModeDetectionResult | null>(null)
   const [dismissedDatedSignal, setDismissedDatedSignal] = useState(false)
+  // Taking the suggestion swaps this modal for the Dated Reconciliation
+  // importer (swapped, not stacked -- the pattern ImportModeWizard and
+  // ContactImportModal already use), so one dialog is on screen at a time
+  // and its own Back still means "back inside that flow". Backing out of
+  // it returns here with this file's analysis intact; once it has actually
+  // applied a reconciliation there is nothing to come back to, so its
+  // close finishes the whole import instead.
+  const [datedReconciliationOpen, setDatedReconciliationOpen] = useState(false)
+  const [datedReconciliationApplied, setDatedReconciliationApplied] = useState(false)
   const [analysisProgress, setAnalysisProgress] = useState<ImportProgress | null>(null)
   const [decisions, setDecisions] = useState<Record<RowIndex, ImportDecision>>({})
   const [imageDecisions, setImageDecisions] = useState<Record<RowIndex, string>>({})
@@ -2393,8 +2430,33 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
 
   const cancelledImportRecovery = currentJob && ['cancelled', 'cancelling'].includes(String(currentJob.status || '').toLowerCase())
 
+  // The suggestion banner's destination. This component stays mounted, so
+  // backing out of the reconciliation importer lands back on this file's
+  // own analysis rather than an empty upload screen.
+  if (datedReconciliationOpen) {
+    return (
+      <Suspense fallback={null}>
+        <DatedStockReconciliationModal
+          t={(key: string, fallback?: string) => T(key, fallback ?? key)}
+          products={products}
+          onClose={() => {
+            setDatedReconciliationOpen(false)
+            if (datedReconciliationApplied) onClose()
+          }}
+          onDone={() => {
+            setDatedReconciliationApplied(true)
+            // The reconciliation reports its own applied counts on its done
+            // screen; the parent only uses this callback to refresh the
+            // product list behind the modal, so no count is invented here.
+            void signalDone({ imported: 0, updated: 0, message: T('dated_stock_reconciliation_title', 'Dated Stock Reconciliation') })
+          }}
+        />
+      </Suspense>
+    )
+  }
+
   return (
-    <Modal title={mode === 'products' ? T('csv_template_title', 'Products + CSV') : T('csv_images_only', 'Images Only')} onClose={onClose} wide draggable>
+    <Modal title={mode === 'products' ? T('csv_template_title', 'Products + CSV') : T('csv_images_only', 'Images Only')} onClose={onClose} wide draggable unsavedChanges={{ dirty: Boolean(csvData) }}>
       {step === 1 && onTopModeChange ? <ProductImportModeTabs value={topMode} onChange={onTopModeChange} /> : null}
 
       <div className="mb-5 flex gap-1.5">
@@ -2482,10 +2544,10 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
       {/* Item 10a: suggest (never auto-switch) Dated Stock Reconciliation
           when this "Add / Update Products" file's own shape looks like a
           dated snapshot -- see importModeDetection.ts for the signal and
-          why it stops at a dismissible suggestion. Cancelling here (not a
-          silent redirect) keeps the deliberate "mode is locked once you're
-          past the wizard" design DatedStockReconciliationModal's own header
-          comment documents. */}
+          why it stops at a dismissible suggestion. Taking the suggestion is
+          an explicit click, so the "mode is locked once you're past the
+          wizard" design DatedStockReconciliationModal's own header comment
+          documents still holds: nothing switches on the file's behalf. */}
       {datedReconciliationSignal && !dismissedDatedSignal && step === 1 ? (
         <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
           <div className="flex items-start gap-2">
@@ -2495,18 +2557,19 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               <div className="mt-1">
                 {T(
                   'dated_reconciliation_suggestion_body',
-                  `${datedReconciliationSignal.repeatedGroupCount} product${datedReconciliationSignal.repeatedGroupCount === 1 ? '' : 's'} in this file` +
-                  (datedReconciliationSignal.sampleProductName ? ` (e.g. "${datedReconciliationSignal.sampleProductName}")` : '') +
-                  ' appear on more than one date at the same branch. If you\'re recording repeated stock counts over time, the Dated Stock Reconciliation import handles that better -- it works out what changed between counts instead of overwriting stock in place.',
-                )}
+                  'These {count} products (e.g. "{name}") appear on more than one date at the same branch. If you\'re recording repeated stock counts over time, the Dated Stock Reconciliation import handles that better -- it works out what changed between counts instead of overwriting stock in place.',
+                )
+                  .replace('{count}', String(datedReconciliationSignal.repeatedGroupCount))
+                  .replace('{name}', datedReconciliationSignal.sampleProductName ?? '')}
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={onClose}
-                  className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700"
+                  disabled={!canDatedStockCount}
+                  onClick={() => { if (canDatedStockCount) setDatedReconciliationOpen(true) }}
+                  className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-600"
                 >
-                  {T('dated_reconciliation_suggestion_switch', 'Cancel this import & choose Dated Reconciliation')}
+                  {T('dated_reconciliation_suggestion_switch', 'Open the Dated Reconciliation import')}
                 </button>
                 <button
                   type="button"
@@ -2516,6 +2579,11 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
                   {T('dated_reconciliation_suggestion_dismiss', 'No, this file is correct')}
                 </button>
               </div>
+              {!canDatedStockCount ? (
+                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                  {T('dated_reconciliation_permission_required', 'The Dated Stock Reconciliation import needs Full Access to Inventory. Ask an administrator for access.')}
+                </p>
+              ) : null}
             </div>
           </div>
         </div>
@@ -2817,14 +2885,14 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
             {showColumnsInfo ? (
               <div className="mt-3 space-y-3 rounded-lg border border-blue-200 bg-white/70 p-3 text-xs leading-relaxed text-slate-700 dark:border-blue-900/40 dark:bg-slate-900/40 dark:text-slate-200">
                 <p className="font-mono leading-relaxed">
-                  {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, vip_price_usd, vip_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, batch(mm/dd/yyyy), expiry_date, expiry_alert_days, branch, supplier, parent_id, is_group, image_filename_1..5, image_filenames, is_active')}
+                  {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, batch(dd/mm/yyyy), expiry_date, expiry_alert_days, branch, supplier, parent_id, is_group, image_filename_1..5, image_filenames, is_active')}
                 </p>
                 <p><strong>{T('csv_info_required_label', 'Required')}:</strong> {T('csv_info_required', 'only name (marked with *) has to be filled in -- every other column can be left blank.')}</p>
-                <p><strong>{T('csv_info_pricing_label', 'Pricing')}:</strong> {T('csv_info_pricing', 'selling/special/cost prices each have a USD and a KHR column -- fill in whichever currency you use, the other can stay blank.')}</p>
-                <p><strong>{T('csv_info_batch_label', 'Batch')}:</strong> {T('csv_info_batch', 'optional -- one column, batch(mm/dd/yyyy), is the date this stock was received (e.g. "08/24/2026"). Leave it blank and it defaults to today. The system auto-formats whichever date you give it into the stored batch code (e.g. "08242026") -- there is no separate free-typed label to fill in. A row naming the same received date as an earlier import or manual receive lands in the same batch automatically. expiry_date/expiry_alert_days are separate and control low-stock/expiry warnings, not batch numbering.')}</p>
+                <p><strong>{T('csv_info_pricing_label', 'Pricing')}:</strong> {T('csv_info_pricing', 'selling/wholesale/purchase prices each have a USD and a KHR column -- fill in whichever currency you use, the other can stay blank.')}</p>
+                <p><strong>{T('csv_info_batch_label', 'Received date')}:</strong> {T('csv_info_batch', 'optional -- one column, batch(dd/mm/yyyy), is the date this stock was received, day first (e.g. "24/08/2026"; yyyy-mm-dd also works). A sheet that says batch(mm/dd/yyyy) still imports and is still read month first. Leave it blank and it defaults to today. The system auto-formats whichever date you give it into the stored received-date code (e.g. "08242026") -- there is no separate free-typed label to fill in. A row naming the same received date as an earlier import or manual receive lands under that same received date automatically. expiry_date/expiry_alert_days are separate and control low-stock/expiry warnings, not received-date numbering.')}</p>
                 <p><strong>{T('csv_info_images_label', 'Images')}:</strong> {T('csv_info_images', 'image_filename_1 through image_filename_5 (or the combined image_filenames column) should match the filenames of images you upload alongside the CSV. What to do about a product\'s existing images (keep, replace, or add to them) is chosen on the review screen after upload, not in the file.')}</p>
                 <p><strong>{T('csv_info_grouping_label', 'Variants/grouping')}:</strong> {T('csv_info_grouping', 'set is_group to 1 on a row that should act as a parent product, then set parent_id on its variant rows to that parent row\'s number to group them together.')}</p>
-                <p><strong>{T('csv_info_example_label', 'Example row')}:</strong> <span className="font-mono">{T('csv_info_example', 'name=Iced Coffee, sku=BEV-001, category=Beverages, selling_price_usd=2.50, stock_quantity=40, batch(mm/dd/yyyy)=08/24/2026 (blank = today, auto-formatted to a code like 08242026), branch=Main Branch, image_filename_1=iced-coffee.jpg')}</span> {T('csv_info_example_note', '-- also included as an actual second row in the downloaded template file, not just here.')}</p>
+                <p><strong>{T('csv_info_example_label', 'Example row')}:</strong> <span className="font-mono">{T('csv_info_example', 'name=Iced Coffee, sku=BEV-001, category=Beverages, selling_price_usd=2.50, stock_quantity=40, batch(dd/mm/yyyy)=2026-08-24 (blank = today, auto-formatted to a code like 08242026), branch=Main Branch, image_filename_1=iced-coffee.jpg')}</span> {T('csv_info_example_note', '-- also included as an actual second row in the downloaded template file, not just here.')}</p>
               </div>
             ) : null}
           </div>
@@ -2998,7 +3066,13 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               </button>
             </div>
           ) : null}
-          <button type="button" className="btn-primary w-full" onClick={onClose}>{T('close', 'Close')}</button>
+          {/* No terminal Close here: the shared Modal already renders the
+              one close affordance (its header X), and a full-width
+              btn-primary Close at the bottom of the result screen was a
+              second one competing with it -- and on a phone it was the
+              most prominent control on the screen, outranking the "Wire
+              images" and error-download actions the operator may still
+              need to use. */}
         </div>
       ) : null}
 

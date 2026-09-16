@@ -5,22 +5,59 @@ const assert = require('node:assert/strict')
 const Database = require('better-sqlite3')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-function compileSubject() {
-  const sourcePath = path.join(__dirname, '..', 'src', 'lib', 'salesImportCommit.ts')
+function compileLib(name, localRequire) {
+  const sourcePath = path.join(__dirname, '..', 'src', 'lib', `${name}.ts`)
   const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => {
-    if (request === './db') return {}
-    if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
-    return require(request)
-  }
   new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
   return moduleObj.exports
 }
 
+function compileSubject() {
+  let actorSnapshot
+  let saleCreationSnapshot
+  let anonymousCustomer
+  let moneyPrecision
+  let saleMoneyPrecision
+  const localRequire = (request) => {
+    if (request === './db') return {}
+    if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
+    if (request === './branchRoles') return compileLib('branchRoles', localRequire)
+    if (request === './branchRoleGuards') return compileLib('branchRoleGuards', localRequire)
+    // The REAL receipt-number module, not a stub: an imported sale's receipt
+    // id and its legacy-label routing are exactly what this test checks.
+    if (request === './receiptNumber') return compileLib('receiptNumber', localRequire)
+    if (request === './actorSnapshot') {
+      actorSnapshot ||= compileLib('actorSnapshot', localRequire)
+      return actorSnapshot
+    }
+    if (request === './moneyPrecision') {
+      moneyPrecision ||= compileLib('moneyPrecision', localRequire)
+      return moneyPrecision
+    }
+    if (request === './saleMoneyPrecision') {
+      saleMoneyPrecision ||= compileLib('saleMoneyPrecision', localRequire)
+      return saleMoneyPrecision
+    }
+    if (request === './saleCreationSnapshot') {
+      saleCreationSnapshot ||= compileLib('saleCreationSnapshot', localRequire)
+      return saleCreationSnapshot
+    }
+    if (request === './anonymousCustomer') {
+      anonymousCustomer ||= compileLib('anonymousCustomer', localRequire)
+      return anonymousCustomer
+    }
+    return require(request)
+  }
+  return compileLib('salesImportCommit', localRequire)
+}
+
 function filterParams(sql, params = {}) {
+  // The uniqueness probe in receiptNumber.ts binds positionally (`?`), the
+  // commit statements bind by @name. Pass an array straight through.
+  if (Array.isArray(params)) return params
   const filtered = {}
   for (const match of sql.matchAll(/@(\w+)/g)) filtered[match[1]] = params[match[1]] ?? null
   return filtered
@@ -29,12 +66,14 @@ function filterParams(sql, params = {}) {
 function setup() {
   const sqlite = new Database(':memory:')
   for (const migration of loadAll()) sqlite.exec(migration)
-  sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Main Branch', 1)`).run()
+  sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Shop', 1)`).run()
+  sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (2, 'Warehouse', 1)`).run()
   sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 3)`).run()
   sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)`).run()
   sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (20, 10, 'lot-a', 'LOT-A', 1, 1)`).run()
   sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (20, 1, 5)`).run()
 
+  let beforeBatch = null
   const db = {
     prepare(sql) {
       return {
@@ -42,16 +81,21 @@ function setup() {
       }
     },
     batch(statements) {
+      if (beforeBatch) {
+        const hook = beforeBatch
+        beforeBatch = null
+        hook()
+      }
       const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(filterParams(sql, params))))
       return Promise.resolve(run())
     },
   }
-  return { sqlite, db }
+  return { sqlite, db, setBeforeBatch(hook) { beforeBatch = hook } }
 }
 
 function saleData(overrides = {}) {
   return {
-    receipt_number: 'R-100', cashier_id: null, cashier_name: 'Admin', branch_id: 1, branch_name: 'Main Branch',
+    receipt_number: 'R-100', cashier_id: null, cashier_name: 'Admin', branch_id: 1, branch_name: 'stale imported name',
     customer_id: null, customer_name: 'Dara', customer_phone: '012345678', customer_address: null,
     payment_method: 'Cash', payment_currency: 'USD', exchange_rate: 4100, notes: null,
     subtotal_usd: 10, subtotal_khr: 41000, discount_usd: 0, discount_khr: 0, tax_usd: 0, tax_khr: 0,
@@ -72,27 +116,282 @@ function saleData(overrides = {}) {
   }
 }
 
+function customerMatch(overrides = {}) {
+  return {
+    customer_match_basis: 'name',
+    customer_match_key: 'historical member',
+    customer_match_name_snapshot: 'Historical Member',
+    customer_match_phone_snapshot: null,
+    customer_match_phone_normalized_snapshot: null,
+    ...overrides,
+  }
+}
+
 ;(async () => {
   const subject = compileSubject()
+  const actor = { id: 41, username: 'current-importer', name: 'Ignored Full Name' }
 
   // Existing concurrent-looking row proves line linkage uses the import's
   // deterministic key, never "latest id" ordering.
   const normal = setup()
   normal.sqlite.prepare(`INSERT INTO sales (receipt_number, client_request_id) VALUES ('OTHER', 'other-request')`).run()
-  const input = { jobId: 'job-1', rowNumber: 2, data: saleData(), nowIso: '2026-08-28T08:00:00.000Z' }
+  const input = { jobId: 'job-1', rowNumber: 2, data: saleData(), nowIso: '2026-08-28T08:00:00.000Z', actor }
   const first = await subject.applyHistoricalSaleImport(normal.db, input)
   const retry = await subject.applyHistoricalSaleImport(normal.db, input)
   assert.equal(first.alreadyApplied, false)
   assert.equal(retry.alreadyApplied, true)
-  assert.equal(normal.sqlite.prepare(`SELECT COUNT(*) n FROM sales WHERE receipt_number = 'R-100'`).get().n, 1)
+  // The CSV's own label 'R-100' is not a business receipt id, so it is kept
+  // as the source key in legacy_receipt_number while the sale gets a real
+  // receipt minted from ITS OWN moment: 2026-08-28T07:30:00Z = 14:30:00 in
+  // Phnom Penh. This is what stops a sales import re-introducing the old
+  // system's `NNNNNN@YYYY-MM-DD` shape (migration 0107).
+  assert.deepEqual(
+    normal.sqlite.prepare(`SELECT receipt_number, legacy_receipt_number FROM sales WHERE client_request_id = 'sales-import:job-1:2'`).all(),
+    [{ receipt_number: '20260828-143000', legacy_receipt_number: 'R-100' }],
+  )
+  const creation = JSON.parse(normal.sqlite.prepare(`SELECT creation_snapshot_json FROM sales WHERE client_request_id = 'sales-import:job-1:2'`).get().creation_snapshot_json)
+  assert.equal(creation.version, 1)
+  assert.equal(creation.origin, 'sales_import')
+  assert.deepEqual(creation.actor, { id: 41, username: 'current-importer' })
+  assert.deepEqual(creation.cashier, { id: null, username: 'Admin' })
+  assert.deepEqual(creation.products, [{
+    product_id: 10, product: 'Widget', sku: 'SKU-1', quantity: 2, unit_price_usd: 5, line_total_usd: 10,
+  }])
+  assert.equal(creation.sale_at, '2026-08-28T07:30:00.000Z')
+  assert.equal(creation.recorded_at, input.nowIso)
+  assert.deepEqual(creation.customer, { id: null, name: 'Dara' }, 'a name-only imported sale is not rewritten as General')
+  assert.equal(creation.membership, null, 'a name-only imported sale has no linked membership')
+
+  const member = setup()
+  member.sqlite.prepare("INSERT INTO customers(id,name,membership_number,is_anonymous) VALUES(5,'Historical Member','HIST-5',0)").run()
+  await subject.applyHistoricalSaleImport(member.db, {
+    ...input,
+    rowNumber: 3,
+    data: saleData({
+      customer_id: 5,
+      customer_name: 'Historical Member',
+      membership_number: 'HIST-5',
+      membership_discount_usd: 1,
+      membership_points_redeemed: 20,
+      ...customerMatch(),
+    }),
+  })
+  const memberCreation = JSON.parse(member.sqlite.prepare(`SELECT creation_snapshot_json FROM sales WHERE client_request_id = 'sales-import:job-1:3'`).get().creation_snapshot_json)
+  assert.deepEqual(memberCreation.customer, { id: 5, name: 'Historical Member' })
+  assert.deepEqual(memberCreation.membership, { number: 'HIST-5', discount_usd: 1, discount_khr: 0, points_redeemed: 20 })
+
+  const anonymous = setup()
+  anonymous.sqlite.prepare("INSERT INTO customers(id,name,membership_number,is_anonymous) VALUES(5,'General','LEGACY-GENERAL',1)").run()
+  await subject.applyHistoricalSaleImport(anonymous.db, {
+    ...input,
+    rowNumber: 4,
+    data: saleData({
+      customer_id: 5,
+      customer_name: 'General',
+      customer_phone: '',
+      membership_number: 'LEGACY-GENERAL',
+      membership_discount_usd: 2,
+      membership_points_redeemed: 50,
+    }),
+  })
+  const anonymousSale = anonymous.sqlite.prepare("SELECT customer_id,customer_name,customer_phone,membership_discount_usd,membership_points_redeemed,creation_snapshot_json FROM sales WHERE client_request_id='sales-import:job-1:4'").get()
+  assert.deepEqual({
+    customer_id: anonymousSale.customer_id,
+    customer_name: anonymousSale.customer_name,
+    customer_phone: anonymousSale.customer_phone,
+    membership_discount_usd: anonymousSale.membership_discount_usd,
+    membership_points_redeemed: anonymousSale.membership_points_redeemed,
+  }, { customer_id: null, customer_name: null, customer_phone: null, membership_discount_usd: 0, membership_points_redeemed: 0 })
+  assert.equal(JSON.parse(anonymousSale.creation_snapshot_json).customer, null)
+  assert.equal(JSON.parse(anonymousSale.creation_snapshot_json).membership, null)
+
+  const markerRace = setup()
+  markerRace.sqlite.prepare("INSERT INTO customers(id,name,is_anonymous) VALUES(5,'Historical Member',0)").run()
+  markerRace.setBeforeBatch(() => markerRace.sqlite.prepare('UPDATE customers SET is_anonymous=1 WHERE id=5').run())
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(markerRace.db, { ...input, rowNumber: 5, data: saleData({ customer_id: 5, customer_name: 'Historical Member', ...customerMatch() }), nowIso: input.nowIso, actor }),
+    /did not commit/,
+  )
+  assert.equal(markerRace.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+  assert.equal(markerRace.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+
+  const identityRace = setup()
+  identityRace.sqlite.prepare("INSERT INTO customers(id,name,phone,phone_normalized,is_anonymous) VALUES(5,'Historical Member','012345678','012345678',0)").run()
+  identityRace.setBeforeBatch(() => identityRace.sqlite.prepare("UPDATE customers SET name='Changed after review',phone='099999999',phone_normalized='099999999' WHERE id=5").run())
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(identityRace.db, {
+      ...input,
+      rowNumber: 6,
+      data: saleData({
+        customer_id: 5,
+        customer_name: 'Historical Member',
+        customer_phone: '012345678',
+        ...customerMatch({
+          customer_match_basis: 'phone',
+          customer_match_key: '012345678',
+          customer_match_phone_snapshot: '012345678',
+          customer_match_phone_normalized_snapshot: '012345678',
+        }),
+      }),
+    }),
+    /did not commit/,
+  )
+  assert.equal(identityRace.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+  assert.equal(identityRace.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+
+  const duplicatePhoneRace = setup()
+  duplicatePhoneRace.sqlite.prepare("INSERT INTO customers(id,name,phone,phone_normalized,is_anonymous) VALUES(5,'Historical Member','012345678','012345678',0)").run()
+  duplicatePhoneRace.setBeforeBatch(() => duplicatePhoneRace.sqlite.prepare("INSERT INTO customers(id,name,phone,phone_normalized,is_anonymous) VALUES(6,'Concurrent duplicate','012-345-678',NULL,0)").run())
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(duplicatePhoneRace.db, {
+      ...input,
+      rowNumber: 7,
+      data: saleData({
+        customer_id: 5,
+        customer_name: 'Historical Member',
+        customer_phone: '012345678',
+        ...customerMatch({
+          customer_match_basis: 'phone',
+          customer_match_key: '012345678',
+          customer_match_phone_snapshot: '012345678',
+          customer_match_phone_normalized_snapshot: '012345678',
+        }),
+      }),
+    }),
+    /did not commit/,
+  )
+  assert.equal(duplicatePhoneRace.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+  assert.equal(duplicatePhoneRace.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
   assert.equal(normal.sqlite.prepare(`SELECT COUNT(*) n FROM sale_items`).get().n, 1)
-  assert.equal(normal.sqlite.prepare(`SELECT s.receipt_number FROM sale_items si JOIN sales s ON s.id = si.sale_id`).get().receipt_number, 'R-100')
+  assert.equal(normal.sqlite.prepare(`SELECT s.receipt_number FROM sale_items si JOIN sales s ON s.id = si.sale_id`).get().receipt_number, '20260828-143000')
   assert.equal(normal.sqlite.prepare(`SELECT stock_quantity FROM products WHERE id = 10`).get().stock_quantity, 5, 'ordinary history import never deducts current stock')
   assert.equal(normal.sqlite.prepare(`SELECT status FROM import_sales_commits`).get().status, 'applied')
+  assert.deepEqual(
+    normal.sqlite.prepare(`SELECT branch_id, branch_name, json_extract(items, '$[0].branch_id') item_branch_id FROM sales WHERE client_request_id = 'sales-import:job-1:2'`).get(),
+    { branch_id: 1, branch_name: 'Shop', item_branch_id: 1 },
+  )
+
+  for (const [index, data] of [
+    saleData({ branch_id: 2, branch_name: 'Shop', items: [{ ...saleData().items[0], branch_id: 2 }] }),
+    saleData({ branch_id: 999, branch_name: 'Shop', items: [{ ...saleData().items[0], branch_id: 999 }] }),
+    saleData({ items: [{ ...saleData().items[0], branch_id: 2 }] }),
+    saleData({ branch_id: null, items: [{ ...saleData().items[0], branch_id: null }] }),
+  ].entries()) {
+    const rejected = setup()
+    await assert.rejects(
+      () => subject.applyHistoricalSaleImport(rejected.db, { jobId: `job-rejected-${index}`, rowNumber: 3, data, nowIso: input.nowIso, actor }),
+      /Only allow Shop sale/,
+    )
+    assert.equal(rejected.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+    assert.equal(rejected.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+  }
+
+  const duplicateShop = setup()
+  duplicateShop.sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (3, ' shop ', 1)`).run()
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(duplicateShop.db, { jobId: 'job-duplicate-shop', rowNumber: 3, data: saleData(), nowIso: input.nowIso, actor }),
+    /Only allow Shop sale/,
+  )
+  assert.equal(duplicateShop.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+  assert.equal(duplicateShop.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+
+  // The classifier's batch match is only a preview. The atomic writer must
+  // reject direct/stale calls when the batch is for another product,
+  // inactive, renamed, or not allocated at the sale's Shop.
+  for (const [index, mutate, data = saleData()] of [
+    [0, (sqlite) => {
+      sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity) VALUES (11, 'Other', 'SKU-2', 0)`).run()
+    }, saleData({ items: [{ ...saleData().items[0], product_id: 11, product_name: 'Other', sku: 'SKU-2' }] })],
+    [1, (sqlite) => {
+      // 0154 permits deactivation only after the lot is empty. This remains an
+      // invalid selected lot without manufacturing inactive-positive state.
+      sqlite.prepare(`UPDATE branch_batch_stock SET quantity = 0 WHERE batch_id = 20 AND branch_id = 1`).run()
+      sqlite.prepare(`UPDATE product_batches SET is_active = 0 WHERE id = 20`).run()
+    }],
+    [2, (sqlite) => sqlite.prepare(`UPDATE product_batches SET lot_code = 'LOT-RENAMED' WHERE id = 20`).run()],
+    [3, (sqlite) => sqlite.prepare(`DELETE FROM branch_batch_stock WHERE batch_id = 20 AND branch_id = 1`).run()],
+    [4, (sqlite) => {
+      sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (21, 10, 'lot-a-duplicate', ' lot-a ', 1, 2)`).run()
+      sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (21, 1, 1)`).run()
+    }],
+  ]) {
+    const invalidBatch = setup()
+    mutate(invalidBatch.sqlite)
+    await assert.rejects(
+      () => subject.applyHistoricalSaleImport(invalidBatch.db, { jobId: `job-invalid-batch-${index}`, rowNumber: 4, data, nowIso: input.nowIso, actor }),
+      /batch\/lot/,
+    )
+    assert.equal(invalidBatch.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+    assert.equal(invalidBatch.sqlite.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0)
+    assert.equal(invalidBatch.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+  }
+
+  // Interpose a catalog mutation after the writer's authoritative pre-read
+  // but immediately before D1Database.batch. The in-batch reference guard
+  // must make the entire transaction a no-op, including its commit marker.
+  const racedBatch = setup()
+  racedBatch.setBeforeBatch(() => {
+    // Model a valid current-schema race: another writer empties the lot, then
+    // deactivates it between the authoritative pre-read and atomic commit.
+    racedBatch.sqlite.prepare(`UPDATE branch_batch_stock SET quantity = 0 WHERE batch_id = 20 AND branch_id = 1`).run()
+    racedBatch.sqlite.prepare(`UPDATE product_batches SET is_active = 0 WHERE id = 20`).run()
+  })
+  const racedReturn = saleData({ sale_status: 'partial_return', items: [{ ...saleData().items[0], returned_quantity: 1 }] })
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(racedBatch.db, { jobId: 'job-raced-batch', rowNumber: 5, data: racedReturn, nowIso: input.nowIso, actor }),
+    /changed before the atomic write/,
+  )
+  assert.equal(racedBatch.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+  assert.equal(racedBatch.sqlite.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0)
+  assert.equal(racedBatch.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+  assert.equal(racedBatch.sqlite.prepare('SELECT stock_quantity FROM products WHERE id = 10').get().stock_quantity, 5)
+  assert.equal(racedBatch.sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = 20 AND branch_id = 1').get().quantity, 0, 'the external empty-lot race remains, but the rejected import writes nothing')
+  assert.equal(racedBatch.sqlite.prepare('SELECT is_active FROM product_batches WHERE id = 20').get().is_active, 0)
+
+  const racedDuplicateBatch = setup()
+  racedDuplicateBatch.setBeforeBatch(() => {
+    racedDuplicateBatch.sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (21, 10, 'lot-a-duplicate', ' lot-a ', 1, 2)`).run()
+    racedDuplicateBatch.sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (21, 1, 1)`).run()
+  })
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(racedDuplicateBatch.db, { jobId: 'job-raced-batch-duplicate', rowNumber: 5, data: saleData(), nowIso: input.nowIso, actor }),
+    /changed before the atomic write/,
+  )
+  assert.equal(racedDuplicateBatch.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+  assert.equal(racedDuplicateBatch.sqlite.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0)
+  assert.equal(racedDuplicateBatch.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+
+  // The selected Shop and the uniqueness of the active Shop identity are
+  // equally authoritative at commit time. Exercise both batch-bearing and
+  // batch-free receipts so this guard cannot accidentally depend on lot rows.
+  const noBatchSale = saleData({ items: [{ ...saleData().items[0], batch_id: null, batch_label: null }] })
+  for (const [label, mutate, data] of [
+    ['deactivated', (sqlite) => sqlite.prepare(`UPDATE branches SET is_active = 0 WHERE id = 1`).run(), saleData()],
+    ['renamed', (sqlite) => sqlite.prepare(`UPDATE branches SET name = 'Former Shop' WHERE id = 1`).run(), noBatchSale],
+    ['deleted', (sqlite) => sqlite.prepare(`DELETE FROM branches WHERE id = 1`).run(), noBatchSale],
+    ['duplicated', (sqlite) => sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (3, ' shop ', 1)`).run(), noBatchSale],
+  ]) {
+    const racedBranch = setup()
+    racedBranch.setBeforeBatch(() => mutate(racedBranch.sqlite))
+    await assert.rejects(
+      () => subject.applyHistoricalSaleImport(racedBranch.db, {
+        jobId: `job-raced-branch-${label}`,
+        rowNumber: 6,
+        data,
+        nowIso: input.nowIso,
+        actor,
+      }),
+      /Shop branch or batch\/lot reference changed before the atomic write/,
+    )
+    assert.equal(racedBranch.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0, `${label}: sale must not persist`)
+    assert.equal(racedBranch.sqlite.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0, `${label}: items must not persist`)
+    assert.equal(racedBranch.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0, `${label}: marker must not persist`)
+    assert.equal(racedBranch.sqlite.prepare('SELECT stock_quantity FROM products WHERE id = 10').get().stock_quantity, 5, `${label}: stock must not change`)
+  }
 
   const returned = setup()
   const returnedData = saleData({ sale_status: 'partial_return', items: [{ ...saleData().items[0], returned_quantity: 1 }] })
-  const returnedInput = { jobId: 'job-return', rowNumber: 8, data: returnedData, nowIso: '2026-08-28T08:00:00.000Z' }
+  const returnedInput = { jobId: 'job-return', rowNumber: 8, data: returnedData, nowIso: '2026-08-28T08:00:00.000Z', actor }
   await subject.applyHistoricalSaleImport(returned.db, returnedInput)
   await subject.applyHistoricalSaleImport(returned.db, returnedInput)
   assert.equal(returned.sqlite.prepare(`SELECT stock_quantity FROM products WHERE id = 10`).get().stock_quantity, 6)

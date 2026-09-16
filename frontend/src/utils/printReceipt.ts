@@ -2,9 +2,12 @@ import {
   DEFAULT_RECEIPT_PRINT_SETTINGS,
   normalizeReceiptPrintSettings,
   RECEIPT_PRINT_SETTINGS_STORAGE_KEY,
-} from './receiptAppliedConfig'
+} from './receiptAppliedConfig.ts'
 import type { ReceiptPrintSettings } from '../types/receiptContracts'
-import { computeImagePdfLayout } from './receiptPdfLayout.ts'
+import { computeFixedSheetFit, computeImagePageSegments, computeImagePdfLayout, isSingleSheetPaperSize } from './receiptPdfLayout.ts'
+import { RECEIPT_ITEM_COLUMN_GAP_EM, RECEIPT_ROW_GRID_TEMPLATE, receiptItemGridTemplate } from './receiptItemColumns.ts'
+import { receiptLengthDiagnosticLine, receiptPreviewDiagnosticLines, receiptPreviewSettings, type ReceiptPreviewSettings, type ReceiptPreviewTranslate } from './receiptPreviewDiagnostics.ts'
+import { openPrintPreviewWindow, printHtmlInHiddenFrame, waitForFrameAssets } from './printSurface.ts'
 
 export const PRINT_DEFAULTS = { ...DEFAULT_RECEIPT_PRINT_SETTINGS }
 const RECEIPT_ASSET_INLINE_CONCURRENCY = 3
@@ -25,6 +28,19 @@ type ReceiptPrintOptions = {
   previewFallback?: boolean
   autoPrintOnPreviewFallback?: boolean
   previewFallbackNote?: string
+  previewTranslate?: ReceiptPreviewTranslate
+  // The preview window the CALLER opened inside the user's tap, before its own
+  // awaits (Receipt.tsx lazy-loads this module first, and after that await iOS
+  // no longer treats window.open as user-initiated). `null` means "this device
+  // gave no second window" and selects the same-document print path;
+  // `undefined` means "not a gesture-critical caller, open one here".
+  previewWindow?: Window | null
+  // Text colour for the last-resort text-only canvas fallback in
+  // createReceiptImageBlob (used only when the primary html2canvas render of
+  // the already-styled DOM clone fails). Callers pass '#000000' when the
+  // receipt's Text contrast setting is 'maximum' so even that rare fallback
+  // stays pure black instead of the softer default.
+  textColor?: string
 }
 type ByteChunk = Uint8Array<ArrayBufferLike>
 type ImagePdfInput = {
@@ -33,12 +49,15 @@ type ImagePdfInput = {
   imageHeightPx: number
   pageWidthPt: number
   pageHeightPt?: number
+  singleSheet?: boolean
+  breakOffsetsPx?: number[]
   title?: string
 }
 type TextPdfInput = {
   lines: unknown[]
   pageWidthPt: number
   pageHeightPt?: number
+  singleSheet?: boolean
   title?: string
   bold?: boolean
 }
@@ -52,7 +71,22 @@ type PrintableReceiptLayout = {
   widthMm: number
   pageHeightMm: number
   continuousRoll: boolean
+  /** One physical card/label: the whole receipt has to land on this one page. */
+  singleSheet: boolean
+  previewSettings?: ReceiptPreviewSettings
+  // The owner's chosen fallback strategy for continuous-roll paper (see
+  // ReceiptPrintSettings.pageSizeMode). Defaults to 'measured' so a caller
+  // that builds a layout without this field (existing tests, a genuinely
+  // fixed sheet) keeps today's behaviour exactly.
+  pageSizeMode?: ReceiptPrintSettings['pageSizeMode']
 }
+
+// One explicit page as long as the longest continuous roll a thermal driver
+// commonly exposes. Chosen as a fallback for drivers that ignore a measured
+// `@page` height outright but still honour an explicit one: an owner who
+// still sees a blank band or a second strip after 'measured' and 'fixed'
+// have both been tried can select this as the last resort before 'driver'.
+const RECEIPT_AUTO_LONGEST_PAGE_MM = 3276
 
 function parsePrintNumber(value: unknown, fallback: number): number {
   const parsed = Number.parseFloat(String(value ?? ''))
@@ -212,19 +246,44 @@ export function normalizeReceiptContentWidth<T>(root: T): T {
       line.style.height = 'auto'
       line.style.minHeight = '0'
       line.style.maxHeight = 'none'
+      // getComputedStyle() resolves an implicit grid row to a concrete pixel
+      // track (for example `16.5px`). cloneElementWithInlineStyles carries
+      // that value into the printable clone. If a different paper/driver
+      // width then wraps the value, clearing height alone is not enough: the
+      // explicit grid track stays one line tall and the extra lines paint
+      // through the following receipt rows. Restore implicit auto sizing so
+      // identifiers, dates, phone numbers and Khmer money can make the row
+      // grow without overlap.
+      line.style.gridTemplateRows = 'none'
       line.style.overflow = 'visible'
       const hasQty = Boolean(line.querySelector('[data-receipt-cell="qty"]'))
       const hasPrice = Boolean(line.querySelector('[data-receipt-cell="price"]'))
-      if (hasQty && hasPrice) {
-        // Replace pixel tracks captured from the on-screen preview with tracks
-        // that are recalculated against the actual printable content box.
-        line.style.gridTemplateColumns = 'minmax(0,1fr) 2.5rem minmax(4.25rem,auto)'
+      const hasLineTotal = Boolean(line.querySelector('[data-receipt-cell="line-total"]'))
+      // Replace pixel tracks captured from the on-screen preview with tracks
+      // recalculated against the actual printable content box. Count the cells
+      // rather than assuming: the item table is four columns (item, qty, price,
+      // total) unless a shop has turned the price column off, and a track count
+      // that disagrees with the cell count silently wraps a cell onto its own
+      // row on paper while looking perfect on screen.
+      //
+      // The tracks themselves come from utils/receiptItemColumns, the ONE
+      // owner of the receipt's grid geometry. This block used to carry its own
+      // copy, and that copy had already drifted from what Receipt.tsx renders
+      // (3.6rem/3.2rem here against 3.9rem/3.4rem there, 4.25rem against
+      // 4.6rem on the label rows) -- so a column change made in the component
+      // reached the screen and never reached print, image or PDF.
+      if (hasQty && hasPrice && hasLineTotal) {
+        line.style.gridTemplateColumns = receiptItemGridTemplate(true)
+        line.style.columnGap = `${RECEIPT_ITEM_COLUMN_GAP_EM}em`
+      } else if (hasQty && (hasPrice || hasLineTotal)) {
+        line.style.gridTemplateColumns = receiptItemGridTemplate(false)
+        line.style.columnGap = `${RECEIPT_ITEM_COLUMN_GAP_EM}em`
       } else if (line.children.length === 2) {
-        line.style.gridTemplateColumns = 'minmax(0,1fr) minmax(4.25rem,auto)'
+        line.style.gridTemplateColumns = RECEIPT_ROW_GRID_TEMPLATE
       }
     })
 
-    node.querySelectorAll<HTMLElement>('[data-receipt-cell="name"], [data-receipt-cell="price"]')
+    node.querySelectorAll<HTMLElement>('[data-receipt-cell="name"], [data-receipt-cell="price"], [data-receipt-cell="line-total"]')
       .forEach((cell) => {
         cell.style.minWidth = '0'
         cell.style.maxWidth = '100%'
@@ -391,31 +450,8 @@ function buildPdfStream(dict: string, bodyBytes: ByteChunk): ByteChunk {
   ])
 }
 
-export function buildSingleImagePdf({ imageBytes, imageWidthPx, imageHeightPx, pageWidthPt, pageHeightPt: fixedHeightPt, title = 'Receipt' }: ImagePdfInput): ByteChunk {
+function serializePdfObjects(objects: ByteChunk[], infoObjectId: number): ByteChunk {
   const encoder = new TextEncoder()
-  // Continuous rolls wrap the complete rendered receipt. A fixed sheet keeps
-  // its exact physical MediaBox; oversized content is uniformly scaled down
-  // and centered instead of silently changing 80x50 into a taller page or
-  // clipping an edge at the printer driver.
-  const { pageHeightPt, drawWidthPt, drawHeightPt, drawXPt, drawYPt } = computeImagePdfLayout({
-    imageWidthPx,
-    imageHeightPx,
-    pageWidthPt,
-    fixedHeightPt,
-  })
-  const safeTitle = String(title === '' ? '' : (title || 'Receipt')).replace(/[()\\]/g, '')
-  const content = encoder.encode(`q\n${drawWidthPt.toFixed(2)} 0 0 ${drawHeightPt.toFixed(2)} ${drawXPt.toFixed(2)} ${drawYPt.toFixed(2)} cm\n/Im0 Do\nQ`)
-
-  const objects = [
-    encoder.encode(`<< /Type /Catalog /Pages 2 0 R /ViewerPreferences << /DisplayDocTitle true >> >>`),
-    encoder.encode(`<< /Type /Pages /Count 1 /Kids [3 0 R] >>`),
-    encoder.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(2)} ${pageHeightPt.toFixed(2)}] /Resources 4 0 R /Contents 6 0 R >>`),
-    encoder.encode(`<< /ProcSet [/PDF /ImageC] /XObject << /Im0 5 0 R >> >>`),
-    buildPdfStream(`<< /Type /XObject /Subtype /Image /Width ${imageWidthPx} /Height ${imageHeightPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imageBytes.length} >>`, imageBytes),
-    buildPdfStream(`<< /Length ${content.length} >>`, content),
-    encoder.encode(`<< /Title (${safeTitle}) >>`),
-  ]
-
   const chunks: ByteChunk[] = [encoder.encode('%PDF-1.4\n%\xFF\xFF\xFF\xFF\n')]
   const offsets = [0]
   let position = chunks[0].length
@@ -434,8 +470,59 @@ export function buildSingleImagePdf({ imageBytes, imageWidthPx, imageHeightPx, p
     xrefLines.push(`${String(offsets[index]).padStart(10, '0')} 00000 n `)
   }
   chunks.push(encoder.encode(`${xrefLines.join('\n')}\n`))
-  chunks.push(encoder.encode(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info 7 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`))
+  chunks.push(encoder.encode(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info ${infoObjectId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`))
   return joinPdfChunks(chunks)
+}
+
+export function buildSingleImagePdf({ imageBytes, imageWidthPx, imageHeightPx, pageWidthPt, pageHeightPt: fixedHeightPt, singleSheet = false, breakOffsetsPx = [], title = 'Receipt' }: ImagePdfInput): ByteChunk {
+  const encoder = new TextEncoder()
+  // Continuous rolls wrap the complete rendered receipt. The explicit 80x50
+  // card keeps one exact MediaBox and is fitted there. Other fixed-height
+  // formats are document pages: draw the raster at full paper width on as many
+  // pages as it needs instead of shrinking a long receipt onto one page.
+  const { pageHeightPt, drawWidthPt, drawHeightPt, drawXPt, drawYPt } = computeImagePdfLayout({
+    imageWidthPx,
+    imageHeightPx,
+    pageWidthPt,
+    fixedHeightPt: singleSheet ? fixedHeightPt : undefined,
+  })
+  const safeTitle = String(title === '' ? '' : (title || 'Receipt')).replace(/[()\\]/g, '')
+  const documentPageHeightPt = fixedHeightPt != null && !singleSheet ? Math.max(36, fixedHeightPt) : pageHeightPt
+  const pageSegments = fixedHeightPt != null && !singleSheet
+    ? computeImagePageSegments({
+      imageHeightPx,
+      pageCapacityPx: documentPageHeightPt * imageWidthPx / pageWidthPt,
+      breakOffsetsPx,
+    })
+    : [{ startPx: 0, endPx: imageHeightPx }]
+  const pageCount = pageSegments.length
+  const pageObjectIds = Array.from({ length: pageCount }, (_, index) => 3 + index)
+  const resourcesObjectId = 3 + pageCount
+  const imageObjectId = resourcesObjectId + 1
+  const firstContentObjectId = imageObjectId + 1
+  const infoObjectId = firstContentObjectId + pageCount
+  const pageContents = pageSegments.map((segment) => {
+    const pxToPt = drawWidthPt / Math.max(1, imageWidthPx)
+    const segmentHeightPt = (segment.endPx - segment.startPx) * pxToPt
+    const clipY = Math.max(0, documentPageHeightPt - segmentHeightPt)
+    const offsetY = pageCount === 1
+      ? drawYPt
+      : documentPageHeightPt - drawHeightPt + segment.startPx * pxToPt
+    const clip = pageCount === 1
+      ? ''
+      : `0 ${clipY.toFixed(2)} ${pageWidthPt.toFixed(2)} ${segmentHeightPt.toFixed(2)} re W n\n`
+    return encoder.encode(`q\n${clip}${drawWidthPt.toFixed(2)} 0 0 ${drawHeightPt.toFixed(2)} ${drawXPt.toFixed(2)} ${offsetY.toFixed(2)} cm\n/Im0 Do\nQ`)
+  })
+  const objects: ByteChunk[] = [
+    encoder.encode(`<< /Type /Catalog /Pages 2 0 R /ViewerPreferences << /DisplayDocTitle true >> >>`),
+    encoder.encode(`<< /Type /Pages /Count ${pageCount} /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(' ')}] >>`),
+    ...pageObjectIds.map((_, pageIndex) => encoder.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(2)} ${documentPageHeightPt.toFixed(2)}] /Resources ${resourcesObjectId} 0 R /Contents ${firstContentObjectId + pageIndex} 0 R >>`)),
+    encoder.encode(`<< /ProcSet [/PDF /ImageC] /XObject << /Im0 ${imageObjectId} 0 R >> >>`),
+    buildPdfStream(`<< /Type /XObject /Subtype /Image /Width ${imageWidthPx} /Height ${imageHeightPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imageBytes.length} >>`, imageBytes),
+    ...pageContents.map((content) => buildPdfStream(`<< /Length ${content.length} >>`, content)),
+    encoder.encode(`<< /Title (${safeTitle}) >>`),
+  ]
+  return serializePdfObjects(objects, infoObjectId)
 }
 
 function escapePdfText(value: unknown): string {
@@ -464,7 +551,7 @@ function wrapTextLine(text: unknown, maxChars = 54): string[] {
   return lines.length ? lines : ['']
 }
 
-function buildTextOnlyPdf({ lines, pageWidthPt, pageHeightPt: fixedHeightPt, title = 'Receipt', bold = false }: TextPdfInput): ByteChunk {
+function buildTextOnlyPdf({ lines, pageWidthPt, pageHeightPt: fixedHeightPt, singleSheet = false, title = 'Receipt', bold = false }: TextPdfInput): ByteChunk {
   const encoder = new TextEncoder()
   const safeTitle = String(title === '' ? '' : (title || 'Receipt')).replace(/[()\\]/g, '')
   const margin = 18
@@ -472,55 +559,46 @@ function buildTextOnlyPdf({ lines, pageWidthPt, pageHeightPt: fixedHeightPt, tit
   const lineHeight = 12
   const preparedLines = (Array.isArray(lines) ? lines : [''])
     .flatMap((line) => wrapTextLine(line, 54))
-    .slice(0, 260)
-
   const contentHeightPt = margin * 2 + preparedLines.length * lineHeight + 12
   const pageHeightPt = fixedHeightPt != null ? Math.max(72, fixedHeightPt) : Math.max(72, contentHeightPt)
-  const fixedContentScale = fixedHeightPt != null
+  const fixedContentScale = fixedHeightPt != null && singleSheet
     ? Math.min(1, Math.max(0.1, (pageHeightPt - margin * 2) / Math.max(1, preparedLines.length * lineHeight + 12)))
     : 1
   const fittedFontSize = fontSize * fixedContentScale
   const fittedLineHeight = lineHeight * fixedContentScale
-  const startY = pageHeightPt - margin - fittedFontSize
-  const contentLines = ['BT', `/F1 ${fittedFontSize.toFixed(2)} Tf`, `${margin} ${startY.toFixed(2)} Td`]
-
-  preparedLines.forEach((line, index) => {
-    const escaped = escapePdfText(line)
-    contentLines.push(`(${escaped}) Tj`)
-    if (index < preparedLines.length - 1) contentLines.push(`0 -${fittedLineHeight.toFixed(2)} Td`)
+  const isFixedDocument = fixedHeightPt != null && !singleSheet
+  const linesPerPage = isFixedDocument
+    ? Math.max(1, Math.floor((pageHeightPt - margin * 2 - 12) / fittedLineHeight))
+    : Math.max(1, preparedLines.length)
+  const pageLines: string[][] = []
+  for (let index = 0; index < Math.max(1, preparedLines.length); index += linesPerPage) {
+    pageLines.push(preparedLines.slice(index, index + linesPerPage))
+  }
+  if (!pageLines.length) pageLines.push([''])
+  const pageContents = pageLines.map((linesForPage) => {
+    const startY = pageHeightPt - margin - fittedFontSize
+    const contentLines = ['BT', `/F1 ${fittedFontSize.toFixed(2)} Tf`, `${margin} ${startY.toFixed(2)} Td`]
+    linesForPage.forEach((line, index) => {
+      contentLines.push(`(${escapePdfText(line)}) Tj`)
+      if (index < linesForPage.length - 1) contentLines.push(`0 -${fittedLineHeight.toFixed(2)} Td`)
+    })
+    contentLines.push('ET')
+    return encoder.encode(contentLines.join('\n'))
   })
-  contentLines.push('ET')
-
-  const content = encoder.encode(contentLines.join('\n'))
-  const objects = [
+  const pageCount = pageContents.length
+  const pageObjectIds = Array.from({ length: pageCount }, (_, index) => 3 + index)
+  const resourcesObjectId = 3 + pageCount
+  const firstContentObjectId = resourcesObjectId + 1
+  const infoObjectId = firstContentObjectId + pageCount
+  const objects: ByteChunk[] = [
     encoder.encode(`<< /Type /Catalog /Pages 2 0 R /ViewerPreferences << /DisplayDocTitle true >> >>`),
-    encoder.encode(`<< /Type /Pages /Count 1 /Kids [3 0 R] >>`),
-    encoder.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(2)} ${pageHeightPt.toFixed(2)}] /Resources 4 0 R /Contents 5 0 R >>`),
+    encoder.encode(`<< /Type /Pages /Count ${pageCount} /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(' ')}] >>`),
+    ...pageObjectIds.map((_, pageIndex) => encoder.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(2)} ${pageHeightPt.toFixed(2)}] /Resources ${resourcesObjectId} 0 R /Contents ${firstContentObjectId + pageIndex} 0 R >>`)),
     encoder.encode(`<< /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /${bold ? 'Helvetica-Bold' : 'Helvetica'} >> >> >>`),
-    buildPdfStream(`<< /Length ${content.length} >>`, content),
+    ...pageContents.map((content) => buildPdfStream(`<< /Length ${content.length} >>`, content)),
     encoder.encode(`<< /Title (${safeTitle}) >>`),
   ]
-
-  const chunks: ByteChunk[] = [encoder.encode('%PDF-1.4\n%\xFF\xFF\xFF\xFF\n')]
-  const offsets = [0]
-  let position = chunks[0].length
-
-  objects.forEach((objectBytes, index) => {
-    offsets.push(position)
-    const objectHeader = encoder.encode(`${index + 1} 0 obj\n`)
-    const objectFooter = encoder.encode('\nendobj\n')
-    chunks.push(objectHeader, objectBytes, objectFooter)
-    position += objectHeader.length + objectBytes.length + objectFooter.length
-  })
-
-  const xrefOffset = position
-  const xrefLines = ['xref', `0 ${objects.length + 1}`, '0000000000 65535 f ']
-  for (let index = 1; index < offsets.length; index += 1) {
-    xrefLines.push(`${String(offsets[index]).padStart(10, '0')} 00000 n `)
-  }
-  chunks.push(encoder.encode(`${xrefLines.join('\n')}\n`))
-  chunks.push(encoder.encode(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info 6 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`))
-  return joinPdfChunks(chunks)
+  return serializePdfObjects(objects, infoObjectId)
 }
 
 function buildReceiptFileName(title = 'receipt', extension = 'pdf'): string {
@@ -647,10 +725,15 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
   const context = canvas.getContext('2d')
   if (!context) throw new Error('Canvas rendering unavailable')
 
+  // Two contrast controls stack here, newest first: the receipt template's
+  // Text contrast = maximum arrives as options.textColor and forces pure
+  // black, and failing that the older per-print highContrastBold switch still
+  // darkens the default. Neither touches font size.
+  const textColor = options.textColor || (printSettings.highContrastBold ? '#000000' : '#111827')
   context.scale(scale, scale)
   context.fillStyle = '#ffffff'
   context.fillRect(0, 0, widthPx, heightPx)
-  context.fillStyle = printSettings.highContrastBold ? '#000000' : '#111827'
+  context.fillStyle = textColor
   const fontStack = `"Noto Sans Khmer", "Khmer OS", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`
   context.font = `${defaultFontWeight}${fontSize}px ${fontStack}`
   context.textBaseline = 'top'
@@ -674,7 +757,10 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
       }
 
       if (isSeparator) {
-        context.strokeStyle = printSettings.highContrastBold ? '#000000' : '#cbd5e1'
+        // Dividers take the same stacked rule as the text, and keep the
+        // thicker 1.5px rule bold mode ships -- a weak-ink thermal printer
+        // drops a 1px hairline entirely.
+        context.strokeStyle = options.textColor || (printSettings.highContrastBold ? '#000000' : '#cbd5e1')
         context.lineWidth = printSettings.highContrastBold ? 1.5 : 1
         context.beginPath()
         context.moveTo(paddingX, y + 7)
@@ -686,8 +772,14 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
 
       if (entry.kind === 'item' && textLine.includes('\t')) {
         const parts = textLine.split('\t')
-        const qtyX = widthPx - paddingX - 96
+        // Four fields = item / qty / price / total (the Sep-4 layout); three =
+        // the same table with the price column switched off. The right edge is
+        // fixed either way, and the extra money column is carved out of the
+        // name's width rather than pushed past the paper.
+        const hasTotalColumn = parts.length >= 4
         const priceX = widthPx - paddingX
+        const qtyX = widthPx - paddingX - (hasTotalColumn ? 150 : 96)
+        const unitX = widthPx - paddingX - (hasTotalColumn ? 54 : 0)
         const nameMaxWidth = Math.max(92, qtyX - paddingX - 18)
         const nameLines = wrapCanvasText(context, parts[0] || '', nameMaxWidth)
         context.textAlign = 'left'
@@ -695,7 +787,12 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
         context.textAlign = 'center'
         context.fillText(parts[1] || '', qtyX, y)
         context.textAlign = 'right'
-        context.fillText(parts.slice(2).join(' ') || '', priceX, y)
+        if (hasTotalColumn) {
+          context.fillText(parts[2] || '', unitX, y)
+          context.fillText(parts.slice(3).join(' ') || '', priceX, y)
+        } else {
+          context.fillText(parts.slice(2).join(' ') || '', priceX, y)
+        }
         context.textAlign = 'left'
         nameLines.slice(1).forEach((continuation) => {
           y += lineHeight
@@ -774,7 +871,7 @@ async function waitForElementAssets(element: HTMLElement): Promise<void> {
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
 }
 
-async function renderElementToCanvas(element: HTMLElement): Promise<HTMLCanvasElement> {
+async function renderElementToCanvasResult(element: HTMLElement): Promise<{ canvas: HTMLCanvasElement; breakOffsetsPx: number[] }> {
   await waitForElementAssets(element)
 
   const rect = element.getBoundingClientRect()
@@ -830,7 +927,7 @@ async function renderElementToCanvas(element: HTMLElement): Promise<HTMLCanvasEl
       Math.ceil(cloned.scrollHeight || renderedRect.height || cloned.offsetHeight || sourceHeight),
     )
     const { default: html2canvas } = await import('html2canvas')
-    return await html2canvas(cloned, {
+    const canvas = await html2canvas(cloned, {
       backgroundColor: '#ffffff',
       scale,
       width,
@@ -843,9 +940,61 @@ async function renderElementToCanvas(element: HTMLElement): Promise<HTMLCanvasEl
       allowTaint: false,
       logging: false,
     })
+    return {
+      canvas,
+      // Measure boundaries on the exact normalized clone html2canvas painted.
+      // The live host can wrap one line differently after its computed styles
+      // are copied, which is enough to bisect the last item on a PDF page.
+      breakOffsetsPx: collectReceiptPageBreakOffsets(cloned, canvas.height),
+    }
   } finally {
     stage.remove()
   }
+}
+
+async function renderElementToCanvas(element: HTMLElement): Promise<HTMLCanvasElement> {
+  return (await renderElementToCanvasResult(element)).canvas
+}
+
+function collectReceiptPageBreakOffsets(element: HTMLElement, canvasHeightPx: number): number[] {
+  const rootRect = element.getBoundingClientRect()
+  const sourceHeightPx = Math.max(1, element.scrollHeight || rootRect.height || element.offsetHeight || 1)
+  const canvasScale = canvasHeightPx / sourceHeightPx
+  const offsets = new Set<number>()
+  const noteBoundary = (node: Element | null | undefined, edge: 'top' | 'bottom' | 'both' = 'bottom') => {
+    if (!(node instanceof HTMLElement)) return
+    const rect = node.getBoundingClientRect()
+    const top = Math.max(0, rect.top - rootRect.top) * canvasScale
+    // Include two CSS pixels of the element's following spacing. Rasterized
+    // glyph antialiasing and borders can paint just beyond getBoundingClientRect
+    // by a fraction; ending exactly at `bottom` visibly shaves a baseline even
+    // though the next page technically contains the remaining pixels.
+    const bottom = (Math.max(0, rect.bottom - rootRect.top) + 2) * canvasScale
+    if ((edge === 'top' || edge === 'both') && top > 0) offsets.add(top)
+    if ((edge === 'bottom' || edge === 'both') && bottom > 0) offsets.add(bottom)
+  }
+
+  element.querySelectorAll('[data-receipt-line="true"]').forEach((node) => {
+    // An item line sits inside a padded/separated wrapper. Its grid bottom is
+    // not the end of the visual item, so break after the wrapper instead.
+    const parent = node.parentElement
+    const atomicBlock = parent?.classList.contains('py-1.5') || parent?.classList.contains('border-y-2')
+      ? parent
+      : node
+    noteBoundary(atomicBlock)
+  })
+
+  // Keep a generated QR block together too. It has no receipt-line marker,
+  // so use the top-level receipt child that owns each image as an atomic block.
+  const receiptRoot = element.querySelector('[data-receipt-export-root="true"]') || element.firstElementChild
+  receiptRoot?.querySelectorAll('img').forEach((image) => {
+    let block: Element | null = image
+    while (block?.parentElement && block.parentElement !== receiptRoot) block = block.parentElement
+    noteBoundary(block, 'top')
+    noteBoundary(block, 'bottom')
+  })
+
+  return Array.from(offsets).sort((a, b) => a - b)
 }
 
 async function withReceiptElement<T>(
@@ -880,14 +1029,27 @@ async function withReceiptElement<T>(
     inner.style.transform = `scale(${scaleFactor})`
     inner.style.width = `${100 / scaleFactor}%`
   }
+  const fixedSheetHeightMm = getPaperHeightMm(printSettings)
+  // Only a single card/label has to hold the whole receipt; A4/Letter and any
+  // custom size as tall as a document page keep paginating at full size.
+  const fitToOneSheet = isSingleSheetPaperSize(printSettings.paperSize)
   if (isElementContent) {
     const cloned = normalizeReceiptContentWidth(cloneElementWithInlineStyles(content))
     // On continuous rolls the receipt shell's padding is the physical print
     // margin. Replace its screen-preview padding with the operator setting,
     // instead of stacking two independent margins. Fixed cards keep their
     // deliberately designed internal card padding.
-    if (cloned && getPaperHeightMm(printSettings) == null) {
+    if (cloned && fixedSheetHeightMm == null) {
       cloned.style.padding = printPadding
+    } else if (cloned && fitToOneSheet) {
+      // A fixed sheet keeps that designed card padding but must NEVER keep the
+      // frozen on-screen height: cloneElementWithInlineStyles bakes the computed
+      // `height` of the export root, so a card measured on a viewport narrower
+      // than 80mm would be fitted against its taller phone-layout height and
+      // shrink further than its own content needs.
+      cloned.style.height = 'auto'
+      cloned.style.minHeight = '0'
+      cloned.style.maxHeight = 'none'
     }
     inner.innerHTML = cloned?.outerHTML || ''
   } else {
@@ -902,10 +1064,101 @@ async function withReceiptElement<T>(
       const rect = inner.getBoundingClientRect()
       host.style.minHeight = `${Math.ceil(rect.height)}px`
     }
+    // Fit a fixed sheet HERE, once, so Print, PDF and Image all export the same
+    // single correctly scaled page. Before this, the print document handed an
+    // over-tall 80x50 card straight to `@page` and the engine broke it across
+    // two pages, while the PDF rescued itself by shrinking the finished raster
+    // uniformly and centering it inside side gutters -- two policies, both wrong.
+    if (fixedSheetHeightMm != null && fitToOneSheet) {
+      // Measure only once the fonts and images this card is made of have
+      // settled. Both callers await the same helper AFTER this point, so a fit
+      // computed before it would be measuring a half-laid-out card and could
+      // decide a card that overflows needs no scaling at all.
+      await waitForElementAssets(host)
+      const hostWidthPx = Math.max(1, host.getBoundingClientRect().width || host.offsetWidth || 1)
+      // Derive px/mm from the host itself rather than assuming 96dpi: CSS
+      // physical units resolve consistently inside it, exactly as the page
+      // measurement below already relies on.
+      const pxPerMm = hostWidthPx / Math.max(0.01, widthMm)
+      const contentHeightMm = Math.max(1, inner.getBoundingClientRect().height) / pxPerMm
+      const fit = computeFixedSheetFit({ contentHeightMm, sheetHeightMm: fixedSheetHeightMm })
+      if (!fit.fits) {
+        // Render wider, then scale back down -- the same mechanism the operator
+        // Scale setting uses. A transform on its own would not stop pagination:
+        // it never shrinks the layout box the print engine fragments, and
+        // scaling in place would leave the card narrow inside side gutters.
+        const totalScale = scaleFactor * fit.scale
+        inner.style.transform = `scale(${totalScale})`
+        inner.style.width = `${100 / totalScale}%`
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+      }
+      host.style.height = `${fixedSheetHeightMm}mm`
+      host.style.minHeight = `${fixedSheetHeightMm}mm`
+      host.style.maxHeight = `${fixedSheetHeightMm}mm`
+      host.style.overflow = 'hidden'
+    }
     return await action(host)
   } finally {
     host.remove()
   }
+}
+
+export type ReceiptPageGeometry = {
+  pageHeightMm: number
+  continuousRoll: boolean
+  pageSizeMode: ReceiptPrintSettings['pageSizeMode']
+}
+
+/**
+ * The one place that decides a receipt's printable page length and whether
+ * it is a continuous, in-document-remeasured roll -- pulled out of
+ * createPrintableReceiptMarkup as a pure function so it is directly testable
+ * without a DOM (that function also clones/measures the live host, which
+ * needs `document`). `fixedHeightMm` is getPaperHeightMm(printSettings): a
+ * genuine fixed sheet (80x50mm/A4/Letter/custom with a height) always keeps
+ * its own explicit height and 'measured' bookkeeping, regardless of what
+ * pageSizeMode happens to be saved as -- pageSizeMode only ever governs
+ * CONTINUOUS ROLL paper (58/72/80mm, fixedHeightMm null).
+ */
+export function resolveReceiptPageGeometry({
+  fixedHeightMm,
+  measuredHeightMm,
+  savedPageSizeMode,
+  fixedPageLengthMm,
+}: {
+  fixedHeightMm: number | null
+  measuredHeightMm: number
+  savedPageSizeMode?: string
+  fixedPageLengthMm?: unknown
+}): ReceiptPageGeometry {
+  const pageSizeMode: ReceiptPrintSettings['pageSizeMode'] = fixedHeightMm == null
+    ? ((savedPageSizeMode as ReceiptPrintSettings['pageSizeMode']) || 'measured')
+    : 'measured'
+  if (fixedHeightMm != null) {
+    return { pageHeightMm: fixedHeightMm, continuousRoll: false, pageSizeMode }
+  }
+  if (pageSizeMode === 'fixed') {
+    // A document page of the owner's chosen length; a long receipt flows
+    // onto further pages of that same length instead of clipping or scaling
+    // (isSingleSheetPaperSize stays false here, same as A4/Letter).
+    return { pageHeightMm: Math.max(10, parsePrintNumber(fixedPageLengthMm, 100)), continuousRoll: false, pageSizeMode }
+  }
+  if (pageSizeMode === 'auto-longest') {
+    return { pageHeightMm: RECEIPT_AUTO_LONGEST_PAGE_MM, continuousRoll: false, pageSizeMode }
+  }
+  if (pageSizeMode === 'driver') {
+    // No `@page size` will be emitted at all (see buildPrintablePreviewDocument),
+    // so this number is never printed as a page length. Keep the measured
+    // estimate anyway so a caller inspecting the layout still gets a
+    // sensible content height (e.g. for the PDF export path, which stays on
+    // 'measured' geometry independent of this HTML/@page setting).
+    return { pageHeightMm: Math.max(1, measuredHeightMm + 1), continuousRoll: false, pageSizeMode }
+  }
+  // 'measured' (default): current behaviour. A continuous roll is
+  // width-only media: its one logical page grows with the complete receipt.
+  // Keep this measured height for both HTML Print and PDF/Image so item
+  // count can never trigger pagination or fit-to-page shrinking.
+  return { pageHeightMm: Math.max(1, measuredHeightMm + 1), continuousRoll: true, pageSizeMode: 'measured' }
 }
 
 async function createPrintableReceiptMarkup(content: ReceiptContent, options: ReceiptPrintOptions = {}): Promise<PrintableReceiptLayout> {
@@ -923,11 +1176,12 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
     const renderedHeightPx = Math.max(1, host.scrollHeight || hostRect.height || host.offsetHeight)
     const measuredHeightMm = renderedHeightPx * (widthMm / renderedWidthPx)
     const fixedHeightMm = getPaperHeightMm(printSettings)
-    const continuousRoll = fixedHeightMm == null
-    // A tiny tail allowance prevents sub-pixel/driver rounding from spilling a
-    // one-page thermal receipt onto a second blank/cut page. It is deliberately
-    // applied only to continuous rolls; fixed cards/sheets keep their exact size.
-    const pageHeightMm = fixedHeightMm ?? Math.max(1, measuredHeightMm + 1)
+    const { pageHeightMm, continuousRoll, pageSizeMode } = resolveReceiptPageGeometry({
+      fixedHeightMm,
+      measuredHeightMm,
+      savedPageSizeMode: printSettings.pageSizeMode,
+      fixedPageLengthMm: printSettings.fixedPageLengthMm,
+    })
 
     const clone = normalizePrintableRoot(cloneElementWithInlineStyles(host), widthMm)
     if (!clone) throw new Error('Receipt preview element is unavailable')
@@ -942,15 +1196,111 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
     clone.querySelectorAll('canvas, video').forEach((node) => node.remove())
     await inlineImageNodeSources(clone)
     await inlineStyleAssetUrls(clone)
-    return { markup: clone.outerHTML, widthMm, pageHeightMm, continuousRoll }
+    return {
+      markup: clone.outerHTML,
+      widthMm,
+      pageHeightMm,
+      continuousRoll,
+      singleSheet: isSingleSheetPaperSize(printSettings.paperSize),
+      previewSettings: receiptPreviewSettings(printSettings),
+      pageSizeMode,
+    }
   }, printSettings)
 }
 
-function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: ReceiptPrintOptions = {}): string {
-  const { markup, widthMm, pageHeightMm } = layout
+export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: ReceiptPrintOptions = {}): string {
+  const { markup, widthMm, pageHeightMm, continuousRoll, singleSheet, pageSizeMode = 'measured' } = layout
+  // 'driver' is the owner's explicit "let the printer's own registered form
+  // decide" fallback -- no `@page size` reaches the document at all (margin
+  // stays 0). Every other mode keeps an explicit, valid width x height.
+  const omitPageSize = pageSizeMode === 'driver'
+  // Three page semantics, not two. A continuous roll is one variable-height
+  // logical page whose length is the measured receipt content.
+  // A DOCUMENT page (A4, Letter, custom) is a stack of pages, so a long receipt
+  // legitimately continues onto page 2. Only the explicit 80x50 summary is one
+  // physical card: withReceiptElement has already fitted it to that height, and
+  // clipping here prevents rounding from spilling a second card.
+  const clipToOnePage = singleSheet && !continuousRoll
+  const pageOverflow = clipToOnePage ? 'hidden' : 'visible'
+  // 2026-09-15 (owner, two photos of a real 80mm print) + coordinator review:
+  // `size: <width>mm auto` is NOT a valid @page value -- CSS Paged Media only
+  // accepts `auto` alone, one/two lengths, or a page-size keyword, never a
+  // length combined with `auto`. That declaration silently parses to nothing,
+  // the printer falls back to its OWN default document size, and that is
+  // exactly the "auto inserts page breaks / shrinks to a fixed sheet" failure
+  // a4d99ac0 hit on Sep 12 (bare `auto`, same root cause) and 943e9884
+  // reverted the same day. `size` must stay a VALID explicit width x height.
+  //
+  // What actually caused the blank band and the forced second page: the
+  // height was measured in the APP's off-screen clone, not in the document
+  // that is about to print. A different document (its own font-fallback
+  // timing, its own sub-pixel rounding) lays the same markup out a hair
+  // taller or shorter, and a real thermal driver, handed a page shorter than
+  // what it is physically printing, still has to put that overflow
+  // somewhere -- a gap reconciled against its own registered form, then a
+  // forced page for whatever no longer fit. The value below is only the
+  // FALLBACK for a print with no JS (or one that reaches print() before the
+  // re-measure resolves); `remeasureContinuousRollBeforePrint` below
+  // overwrites it, in the actual print document, right before print() is
+  // called in both delivery paths.
+  const pageSizeCss = `${widthMm}mm ${pageHeightMm.toFixed(2)}mm`
+  // 'auto-longest' is one explicit page as long as the printer's longest
+  // supported roll (RECEIPT_AUTO_LONGEST_PAGE_MM); a receipt must never
+  // legitimately fill it, so nothing should ever try to break after it --
+  // this only guards against a driver that pages anyway.
+  const autoLongestCss = pageSizeMode === 'auto-longest'
+    ? `
+        .receipt-frame, .receipt-frame > * {
+          page-break-after: avoid;
+          break-after: avoid-page;
+        }`
+    : ''
+  const documentHeightCss = clipToOnePage
+    ? `height: ${pageHeightMm.toFixed(2)}mm !important;
+          min-height: ${pageHeightMm.toFixed(2)}mm !important;`
+    : `height: auto !important;
+          min-height: 0 !important;`
+  const fixedFrameHeightCss = clipToOnePage
+    ? `height: ${pageHeightMm.toFixed(2)}mm !important;
+          max-height: ${pageHeightMm.toFixed(2)}mm !important;`
+    : ''
+  // The atomic "keep this block on one page" rules exist for a genuine
+  // multi-page document (A4/Letter/custom) and the single fixed 80x50 card,
+  // where a second page is expected and an item or the QR block must not be
+  // sliced mid-block across it. A continuous roll never legitimately has a
+  // second page, so forcing its top-level blocks (items, totals, the QR
+  // footer) to stay together is exactly what pushed a whole block onto a
+  // manufactured page 2 when the roll's real height differed from the
+  // JS estimate by even a fraction of a millimetre. `auto` removes the risk
+  // at the source; these rules would only reintroduce it.
+  const pageBreakAvoidanceCss = continuousRoll
+    ? ''
+    : `
+        .receipt-frame {
+          break-inside: avoid-page;
+          page-break-inside: avoid;
+        }
+        .receipt-frame > * {
+          break-inside: avoid-page;
+          page-break-inside: avoid;
+        }
+        .receipt-frame [data-receipt-line="true"],
+        .receipt-frame img {
+          break-inside: avoid-page;
+          page-break-inside: avoid;
+        }`
   const title = options.title === '' ? '' : (options.title || 'Receipt')
   const toolbarTitle = title || 'Receipt Preview'
   const note = options.note ? `<div class="receipt-note">${escapeHtml(options.note)}</div>` : ''
+  const diagnostics = receiptPreviewDiagnosticLines(layout,
+    layout.previewSettings || receiptPreviewSettings(options.printSettings || getPrintSettings()), options.previewTranslate)
+    .map((line) => `<p>${escapeHtml(line)}</p>`).join('')
+  // The exact measured length, as its OWN line with a stable selector so
+  // remeasureContinuousRollBeforePrint can replace it once it has a number
+  // measured in this document instead of the app's off-screen estimate.
+  const lengthLine = continuousRoll
+    ? `<p data-receipt-length-line="true">${escapeHtml(receiptLengthDiagnosticLine(pageHeightMm, options.previewTranslate))}</p>`
+    : ''
 
   return `<!doctype html>
 <html lang="en">
@@ -1037,6 +1387,15 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
         font-size: 12px;
         line-height: 1.5;
       }
+      .receipt-print-diagnostics {
+        flex: 1 0 100%;
+        min-width: 0;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #334155;
+        overflow-wrap: anywhere;
+      }
+      .receipt-print-diagnostics p { margin: 4px 0 0; }
       .receipt-stage {
         display: flex;
         justify-content: center;
@@ -1064,7 +1423,7 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
         word-break: break-word;
       }
       @page {
-        size: ${widthMm}mm ${pageHeightMm.toFixed(2)}mm;
+        ${omitPageSize ? '' : `size: ${pageSizeCss};`}
         margin: 0;
       }
       @media print {
@@ -1074,10 +1433,9 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
           width: ${widthMm}mm !important;
           min-width: ${widthMm}mm !important;
           max-width: ${widthMm}mm !important;
-          height: ${pageHeightMm.toFixed(2)}mm !important;
-          min-height: ${pageHeightMm.toFixed(2)}mm !important;
+          ${documentHeightCss}
           background: #ffffff;
-          overflow: visible !important;
+          overflow: ${pageOverflow} !important;
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
         }
@@ -1106,17 +1464,20 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
           padding: 0 !important;
           border-radius: 0;
           box-shadow: none;
-          overflow: visible !important;
-          break-inside: avoid-page;
-          page-break-inside: avoid;
+          overflow: ${pageOverflow} !important;
+          ${fixedFrameHeightCss}
         }
         .receipt-frame > * {
           margin: 0 !important;
-          break-inside: avoid-page;
-          page-break-inside: avoid;
-        }
+        }${pageBreakAvoidanceCss}${autoLongestCss}
       }
     </style>
+    <!-- Empty until remeasureContinuousRollBeforePrint (below) fills it in,
+         right before print(), with an @page rule measured in THIS document.
+         Placed after the main stylesheet so it wins the cascade once it has
+         content; a fixed sheet or a print with no JS never touches it and
+         keeps the fallback @page above. -->
+    <style id="receipt-page-size"></style>
   </head>
   <body>
     <div class="receipt-shell">
@@ -1129,6 +1490,7 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
           <button type="button" data-receipt-action="print">Print</button>
           <button type="button" data-receipt-action="close">Close</button>
         </div>
+        <div class="receipt-print-diagnostics" data-receipt-print-diagnostics="true">${diagnostics}${lengthLine}</div>
       </div>
       ${note}
       <div class="receipt-stage">
@@ -1141,31 +1503,137 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
 </html>`
 }
 
-function attachPrintablePreviewActions(previewWindow: Window | null, { autoPrint = false }: { autoPrint?: boolean } = {}): void {
+// Safety margin added on top of the in-document measurement below. The app's
+// off-screen estimate already adds 1mm (createPrintableReceiptMarkup); this
+// is a second, independent buffer for the number measured in the ACTUAL
+// print document, where sub-pixel rounding differs again.
+const RECEIPT_PAGE_MEASURE_BUFFER_MM = 3
+
+/**
+ * Reads `.receipt-frame`'s own rendered size INSIDE `doc` -- the document
+ * that is actually about to print, fonts and images already settled -- and
+ * converts it to a page height in mm using that same document's px/mm ratio.
+ * Returns null when the frame cannot be measured (no `.receipt-frame`, or a
+ * zero width); the caller keeps the app-measured fallback @page rule in that
+ * case instead of writing a bogus one.
+ */
+export function measureContinuousRollPageHeightMm(doc: Document, widthMm: number): number | null {
+  const frame = doc.querySelector('.receipt-frame')
+  if (!frame) return null
+  const rect = frame.getBoundingClientRect?.() as { width?: number; height?: number } | undefined
+  const renderedWidthPx = rect?.width || (frame as HTMLElement).offsetWidth || 0
+  if (!(renderedWidthPx > 0)) return null
+  const renderedHeightPx = (frame as HTMLElement).scrollHeight || rect?.height || (frame as HTMLElement).offsetHeight || 0
+  if (!(renderedHeightPx > 0)) return null
+  const heightMm = renderedHeightPx * (widthMm / renderedWidthPx)
+  return Math.max(1, heightMm + RECEIPT_PAGE_MEASURE_BUFFER_MM)
+}
+
+/**
+ * Overwrites the dedicated `#receipt-page-size` stylesheet with a fresh,
+ * VALID `@page { size: <width>mm <height>mm; margin: 0; }` rule -- never
+ * `auto` combined with a length, which CSS Paged Media rejects outright and
+ * which is what handed pagination to the printer's own default document
+ * size in the first place. No-ops if the document has no such element (a
+ * fixed sheet's document never needs one).
+ */
+export function writeContinuousRollPageSize(doc: Document, widthMm: number, heightMm: number): void {
+  const styleEl = doc.getElementById('receipt-page-size')
+  if (!styleEl) return
+  styleEl.textContent = `@page { size: ${widthMm}mm ${heightMm.toFixed(2)}mm; margin: 0; }`
+}
+
+/**
+ * The one place both print delivery paths (the preview window and the
+ * hidden same-document iframe) re-measure a continuous roll's page height
+ * INSIDE the document that is about to print, and show that exact number to
+ * the operator, right before print() is called. A fixed sheet (already
+ * fitted to its explicit height) and any measurement failure are silent
+ * no-ops -- this must never throw and block a print; the fallback @page rule
+ * already baked into the document by buildPrintablePreviewDocument still
+ * works on its own.
+ */
+export function remeasureContinuousRollBeforePrint(
+  doc: Document,
+  layout: PrintableReceiptLayout,
+  translate?: ReceiptPreviewTranslate,
+): void {
+  if (!layout.continuousRoll) return
+  try {
+    const heightMm = measureContinuousRollPageHeightMm(doc, layout.widthMm)
+    if (heightMm == null) return
+    writeContinuousRollPageSize(doc, layout.widthMm, heightMm)
+    const lengthLineEl = doc.querySelector('[data-receipt-length-line]')
+    if (lengthLineEl) lengthLineEl.textContent = receiptLengthDiagnosticLine(heightMm, translate)
+  } catch {
+    // The fallback @page rule from the initial markup still prints correctly.
+  }
+}
+
+function attachPrintablePreviewActions(
+  previewWindow: Window | null,
+  layout: PrintableReceiptLayout,
+  options: ReceiptPrintOptions,
+  { autoPrint = false }: { autoPrint?: boolean } = {},
+): void {
   if (!previewWindow?.document) return
   const doc = previewWindow.document
   const printButton = doc.querySelector('[data-receipt-action="print"]')
   const closeButton = doc.querySelector('[data-receipt-action="close"]')
-  printButton?.addEventListener('click', () => previewWindow.print?.())
+  const printNow = async () => {
+    // Re-measure in THIS document, fonts/images settled, right before print()
+    // -- the one moment left to correct the app's off-screen estimate.
+    await waitForFrameAssets(previewWindow, doc)
+    remeasureContinuousRollBeforePrint(doc, layout, options.previewTranslate)
+    previewWindow.print?.()
+  }
+  printButton?.addEventListener('click', () => { void printNow() })
   closeButton?.addEventListener('click', () => previewWindow.close?.())
 
   if (!autoPrint) return
-  const schedulePrint = () => previewWindow.setTimeout?.(() => previewWindow.print?.(), 240)
+  const schedulePrint = () => previewWindow.setTimeout?.(() => { void printNow() }, 240)
   if (doc.readyState === 'complete') schedulePrint()
   else previewWindow.addEventListener?.('load', schedulePrint, { once: true })
 }
 
 export async function openPrintableReceiptPreview(content: ReceiptContent, options: ReceiptPrintOptions = {}) {
-  const layout = await createPrintableReceiptMarkup(content, options)
-  const html = buildPrintablePreviewDocument(layout, options)
-  const previewWindow = window.open('', '_blank')
-  if (!previewWindow) throw new Error('Popup blocked. Allow popups for this page and try again.')
-  previewWindow.document.open()
-  previewWindow.document.write(html)
-  previewWindow.document.close()
-  attachPrintablePreviewActions(previewWindow, { autoPrint: !!options.autoPrint })
-  previewWindow.focus?.()
-  return { opened: true, mode: 'preview' }
+  // The window is opened BEFORE the first await, not after it. Building the
+  // markup awaits fonts, images and a requestAnimationFrame, and by then the
+  // user's tap is over: iOS blocks window.open, and an installed iOS PWA has
+  // no address bar to un-block it and would hand the blank window to Safari
+  // anyway -- which is why the receipt never reached the printer on iPhone.
+  const previewWindow = options.previewWindow !== undefined ? options.previewWindow : openPrintPreviewWindow()
+  try {
+    const layout = await createPrintableReceiptMarkup(content, options)
+    const html = buildPrintablePreviewDocument(layout, options)
+    if (!previewWindow) {
+      // No second window on this device. Print the SAME document -- identical
+      // markup, identical embedded stylesheet, so the thermal layout is byte
+      // for byte the one the preview would have shown -- from a hidden iframe
+      // in this document. On iOS the platform print sheet is itself the
+      // preview (and its Save to Files is the PDF), so this path prints even
+      // when the caller only asked to preview: there is nowhere else to show
+      // it, and silently doing nothing is what people reported as broken.
+      const printed = await printHtmlInHiddenFrame(html, {
+        // printHtmlInHiddenFrame has already awaited fonts/images by the time
+        // this runs -- re-measuring here needs no second wait, just the read
+        // + rewrite, right before it calls print().
+        beforePrint: (_win, frameDoc) => { remeasureContinuousRollBeforePrint(frameDoc, layout, options.previewTranslate) },
+      })
+      if (!printed) throw new Error('This browser could not open the receipt for printing.')
+      return { opened: true, mode: 'frame-print' }
+    }
+    previewWindow.document.open()
+    previewWindow.document.write(html)
+    previewWindow.document.close()
+    attachPrintablePreviewActions(previewWindow, layout, options, { autoPrint: !!options.autoPrint })
+    previewWindow.focus?.()
+    return { opened: true, mode: 'preview' }
+  } catch (error) {
+    // Never leave the blank tab this function opened stranded on screen.
+    try { previewWindow?.close?.() } catch { /* already closed by the user */ }
+    throw error
+  }
 }
 
 function downloadBlob(blob: Blob, fileName: string): string {
@@ -1236,6 +1704,7 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
   const title = options.title === '' ? '' : (options.title || 'Receipt')
   const pageWidthPt = mmToPt(widthMm)
   const pageHeightPt = heightMm != null ? mmToPt(heightMm) : undefined
+  const singleSheet = isSingleSheetPaperSize(printSettings.paperSize)
   const allowTextFallback = Boolean(options.allowTextFallback || options.preferTextOnly)
   const buildTextOnlyReceiptBlob = () => {
     const fallbackLines = extractReceiptLines(content)
@@ -1243,6 +1712,7 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
       lines: fallbackLines,
       pageWidthPt,
       pageHeightPt,
+      singleSheet,
       title,
       bold: printSettings.highContrastBold,
     })
@@ -1254,7 +1724,8 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
   }
 
   const renderPdfBlob = async () => {
-    const canvas = await withReceiptElement(content, widthMm, renderElementToCanvas, printSettings)
+    const rendered = await withReceiptElement(content, widthMm, renderElementToCanvasResult, printSettings)
+    const { canvas, breakOffsetsPx } = rendered
     const jpegUrl = canvas.toDataURL('image/jpeg', 0.98)
     const jpegBytes = dataUrlToBytes(jpegUrl)
     const pdfBytes = buildSingleImagePdf({
@@ -1263,6 +1734,8 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
       imageHeightPx: canvas.height,
       pageWidthPt,
       pageHeightPt,
+      singleSheet,
+      breakOffsetsPx,
       title,
     })
     return new Blob([bytesToBlobPart(pdfBytes)], { type: 'application/pdf' })
@@ -1345,9 +1818,10 @@ function extractReceiptLines(content: ReceiptContent): string[] {
   }
   const joinColumns = (values: string[]): string => {
     const compactValues = values.map((value) => String(value || '').trim())
+    // Up to FOUR tab-separated fields, because the item table has four columns.
+    // Truncating at three here is what would silently drop the line total.
     if (compactValues.length >= 3) {
-      const [name, qty, price] = compactValues
-      return [name, qty, price].join('\t')
+      return compactValues.slice(0, 4).join('\t')
     }
     if (compactValues.length === 2) {
       const [label, value] = compactValues
@@ -1360,26 +1834,27 @@ function extractReceiptLines(content: ReceiptContent): string[] {
     .flatMap((node) => {
       const element = node as HTMLElement
       const cells = Array.from(element.querySelectorAll(':scope > [data-receipt-cell]')) as HTMLElement[]
-      if (cells.length === 3) {
-        const [nameCell, qtyCell, priceCell] = cells
-        const nameLines = elementLines(nameCell)
-        const qtyLines = elementLines(qtyCell)
-        const priceLines = elementLines(priceCell)
+      // Three or four: the item table is four columns unless the price column
+      // is switched off. Sublines (the riel figure) hang off the LAST cell,
+      // which is the line total when there is one.
+      if (cells.length === 3 || cells.length === 4) {
+        const columns = cells.map((cell) => elementLines(cell))
+        const lastColumn = columns[columns.length - 1] || []
         return [
-          joinColumns([nameLines[0] || '', qtyLines[0] || '', priceLines[0] || '']),
-          ...nameLines.slice(1).map((line) => `  ${line}`),
-          ...priceLines.slice(1).map((line) => `\t\t${line}`),
+          joinColumns(columns.map((lines) => lines[0] || '')),
+          ...(columns[0] || []).slice(1).map((line) => `  ${line}`),
+          ...lastColumn.slice(1).map((line) => `\t\t${line}`),
         ].filter(Boolean)
       }
       const childLines = Array.from(element.children)
         .map((child) => elementLines(child as HTMLElement))
         .filter((lines) => lines.length > 0)
-      if (childLines.length === 3) {
-        const [nameLines, qtyLines, priceLines] = childLines
+      if (childLines.length === 3 || childLines.length === 4) {
+        const lastColumn = childLines[childLines.length - 1] || []
         return [
-          joinColumns([nameLines[0] || '', qtyLines[0] || '', priceLines[0] || '']),
-          ...nameLines.slice(1).map((line) => `  ${line}`),
-          ...priceLines.slice(1).map((line) => `\t\t${line}`),
+          joinColumns(childLines.map((lines) => lines[0] || '')),
+          ...(childLines[0] || []).slice(1).map((line) => `  ${line}`),
+          ...lastColumn.slice(1).map((line) => `\t\t${line}`),
         ]
       }
       if (childLines.length === 2) {

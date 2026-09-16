@@ -139,7 +139,7 @@ check('restrictToImageOnlyFields honors a merged-permissions map, granting exact
   assert.strictEqual('stock_quantity' in restricted, false, 'stock must stay hidden -- not granted in this scenario')
 })
 
-check('IMAGE_ONLY_OPTIONAL_FIELDS covers exactly the eight expected optional keys, each mapping to real row keys', () => {
+check('IMAGE_ONLY_OPTIONAL_FIELDS covers exactly the seven expected optional keys, each mapping to real row keys', () => {
   assert.deepStrictEqual(Object.keys(IMAGE_ONLY_OPTIONAL_FIELDS).sort(), [
     'products_image_only_show_barcode',
     // Per-branch quantities (K6): not a table column -- the array
@@ -150,14 +150,21 @@ check('IMAGE_ONLY_OPTIONAL_FIELDS covers exactly the eight expected optional key
     'products_image_only_show_category',
     'products_image_only_show_price',
     'products_image_only_show_stock',
-    // VIP price is its own grant, separate from selling price (Aug 28) --
-    // an org can show shelf price while keeping VIP terms private.
-    'products_image_only_show_vip',
-    // Wholesale price is likewise its own independent grant.
+    // 'products_image_only_show_vip' is deliberately NOT here: the 2026-09-04
+    // ruling deleted the "VIP" tier (it was the wholesale price under a wrong
+    // name) and migration 0111 emptied special_price_*, so the grant is gone.
+    // Wholesale is its own independent grant and is the surviving tier.
     'products_image_only_show_wholesale',
   ])
   assert.deepStrictEqual(IMAGE_ONLY_OPTIONAL_FIELDS.products_image_only_show_price, ['selling_price_usd', 'selling_price_khr'])
-  assert.deepStrictEqual(IMAGE_ONLY_OPTIONAL_FIELDS.products_image_only_show_vip, ['special_price_usd', 'special_price_khr'])
+  // The deleted grant must not come back, and must never re-expose the dead
+  // special_price_* columns if it somehow does.
+  assert.strictEqual('products_image_only_show_vip' in IMAGE_ONLY_OPTIONAL_FIELDS, false)
+  assert.strictEqual(
+    JSON.stringify(IMAGE_ONLY_OPTIONAL_FIELDS).includes('special_price'),
+    false,
+    'no image-only grant may map to the dead special_price_* columns',
+  )
   assert.deepStrictEqual(IMAGE_ONLY_OPTIONAL_FIELDS.products_image_only_show_wholesale, ['wholesale_price_usd', 'wholesale_price_khr'])
   assert.deepStrictEqual(IMAGE_ONLY_OPTIONAL_FIELDS.products_image_only_show_branch_stock, ['branch_stock'])
 })

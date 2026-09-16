@@ -1,3 +1,5 @@
+import ProductNameRail from '../shared/ProductNameRail'
+import TruncatedText from '../shared/TruncatedText.tsx'
 import { Fragment } from 'react'
 import type { ComponentType, Dispatch, RefObject, SetStateAction } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
@@ -9,6 +11,13 @@ import type { PaginationControlsProps } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { fmtClock24 } from '../../utils/formatters'
 import { translateMovementType } from './movementGroups'
+// N13: branch / actor / reason are rendered through the one shared history
+// row model, so this drill and the Stock Change ledger cannot disagree about
+// the same movement row (an absent value said nothing here and '—' there).
+// The same model now answers a fourth question -- WHICH RECORD the row
+// belongs to -- so "Sale 20260901-193100" reads identically here and in the
+// Stock Change ledger instead of this drill printing a bare reference id.
+import { formatHistoryReference, historyActor, historyField, historyGroupReference } from '../../utils/historyRowModel.ts'
 
 type Translator = (key: string) => string | undefined
 type TranslationWithFallback = (key: string, fallback?: string, altFallback?: string) => string
@@ -48,6 +57,10 @@ type MovementRecord = {
   reason?: string
   quantity?: number
   total_cost_usd?: number
+  // N13: resolved server-side; the client never derives which table a
+  // reference_id points at (cloudflare/src/lib/movementReference.ts).
+  reference_kind?: 'sale' | 'return' | null
+  reference_label?: string | null
 }
 
 type MovementGroup = {
@@ -61,6 +74,8 @@ type MovementGroup = {
   branchSummary?: string
   userSummary?: string
   reasonSummary?: string
+  reasonPrimary?: string
+  reasonExtraCount?: number
   totalQuantity: number
   totalCostUsd?: number
   items: MovementRecord[]
@@ -233,10 +248,38 @@ export default function InventoryMovementsSurface({
     return (
       <>
         <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
-          <span>{t('reference') || 'Reference'}: <span className="text-gray-700 dark:text-gray-200">{String(group.reference_id || '—')}</span></span>
+          {/* N13: a reference id identifies nothing to a person. When the
+              Worker resolved the record it names, show THAT -- the receipt --
+              and keep the raw id only for the rows that have no receipt
+              (stock-in session tokens, reverts). */}
+          {(() => {
+            // Read across the WHOLE group, not the visible page: an ambiguous
+            // movement type resolves per product (a row whose product is in
+            // neither the sale nor the return is left unlabelled), so the row
+            // that names the record can be on page 2. That pick is shared with
+            // the /movements CSV export (utils/historyRowModel.ts's
+            // historyGroupReference), so the header and the spreadsheet column
+            // can never name different rows of the same group.
+            const reference = historyGroupReference(group.items)
+            const receipt = formatHistoryReference(reference, {
+              sale: t('sale') || 'Sale',
+              return: t('return') || 'Return',
+            })
+            return receipt
+              ? <span>{t('receipt') || 'Receipt'}: <span className="text-gray-700 dark:text-gray-200">{receipt}</span></span>
+              : <span>{t('reference') || 'Reference'}: <span className="text-gray-700 dark:text-gray-200">{String(group.reference_id || '—')}</span></span>
+          })()}
           <span>{t('recorded_at') || 'Recorded at'}: <span className="text-gray-700 dark:text-gray-200">{fmtTime(group.created_at)}</span></span>
-          {group.reasonSummary ? (
-            <span className="min-w-0 max-w-full truncate" title={group.reasonSummary}>{t('reason') || 'Reason'}: <span className="text-gray-700 dark:text-gray-200">{group.reasonSummary}</span></span>
+          {/* Three spans, not one: only the reason TEXT may be clipped. A
+              single truncating span ate the " +2" first -- the narrower the
+              screen, the more certain the operator was that the group had
+              one reason. The label and the count are shrink-0 beside it. */}
+          {group.reasonPrimary ? (
+            <span className="flex min-w-0 max-w-full items-baseline gap-1" title={group.reasonSummary}>
+              <span className="shrink-0">{t('reason') || 'Reason'}:</span>
+              <span className="min-w-0 truncate leading-normal text-gray-700 dark:text-gray-200">{group.reasonPrimary}</span>
+              {group.reasonExtraCount ? <span className="shrink-0 text-gray-700 dark:text-gray-200">+{group.reasonExtraCount}</span> : null}
+            </span>
           ) : null}
         </div>
         <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
@@ -260,20 +303,20 @@ export default function InventoryMovementsSurface({
                   <td className={cellClass}>
                     <button
                       type="button"
-                      className="max-w-[16rem] truncate text-left font-medium text-gray-900 hover:text-blue-600 hover:underline dark:text-white dark:hover:text-blue-300"
+                      className="min-w-0 max-w-[16rem] text-left font-medium text-gray-900 hover:text-blue-600 hover:underline dark:text-white dark:hover:text-blue-300"
                       onClick={() => openMovementProductDetail(movement)}
                       title={movement.product_name || ''}
                     >
-                      {movement.product_name || (t('product') || 'Product')}
+                      <ProductNameRail name={movement.product_name || (t('product') || 'Product')} />
                     </button>
                   </td>
                   <td className={`${cellClass} text-right font-semibold tabular-nums text-gray-900 dark:text-white`}>{movement.quantity}</td>
                   <td className={`${cellClass} text-right tabular-nums text-emerald-600 dark:text-emerald-400`}>{(movement.total_cost_usd || 0) > 0 ? fmtUSD(movement.total_cost_usd || 0) : ''}</td>
-                  <td className={`${cellClass} text-gray-600 dark:text-gray-300`}>{movement.branch_name || ''}</td>
-                  <td className={`${cellClass} text-gray-600 dark:text-gray-300`}>{movement.user_name || ''}</td>
+                  <td className={`${cellClass} text-gray-600 dark:text-gray-300`}>{historyField(movement.branch_name)}</td>
+                  <td className={`${cellClass} text-gray-600 dark:text-gray-300`}>{historyActor(movement.user_name)}</td>
                   <td className={`${cellClass} whitespace-nowrap tabular-nums text-gray-600 dark:text-gray-300`}>{fmtTime(movement.created_at)}</td>
                   <td className={`${cellClass} max-w-[14rem] text-gray-500 dark:text-gray-400`}>
-                    <span className="block max-w-full truncate" title={movement.reason || ''}>{movement.reason || ''}</span>
+                    <TruncatedText text={historyField(movement.reason)} className="block max-w-full" />
                   </td>
                 </tr>
               ))}

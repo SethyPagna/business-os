@@ -60,7 +60,12 @@ function loadReal(relPath, requireOverrides = {}) {
 // Load the REAL portal route against the real DB. Everything here is
 // cross-cutting infrastructure the redaction does not depend on; getDb is the
 // one that matters -- it hands the handler the real, migrated, seeded database.
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/actorSnapshot': actorSnapshotKernel,
+  '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
+  '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../index': {},
   '../lib/db': { getDb: () => db },
   '../lib/sqlBinding': { buildInClause: () => '', inlineIntegerIds: () => '', selectInChunks: async () => [] },
@@ -71,6 +76,11 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   '../lib/promotionRulesSql': { loadActivePromotionRules: async () => [], productPromotedSql: () => '0', productDiscountActiveSql: () => '0', anyRuleAppliesSql: () => '0', singleRuleAppliesSql: () => '0' },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), getClientIp: () => '127.0.0.1' },
+  '../lib/portalAbuseKey': loadReal('lib/portalAbuseKey.ts'),
+  '../lib/safeLinkUrl': loadReal('lib/safeLinkUrl.ts'),
+  ...(fs.existsSync(path.join(__dirname, '..', 'src', 'lib', 'portalImagePrivacy.ts'))
+    ? { '../lib/portalImagePrivacy': loadReal('lib/portalImagePrivacy.ts') }
+    : {}),
   // The membership route is disabled, so these account libs are imported by
   // portal.ts but never invoked here — stub them so the module loads.
   '../lib/portalAccounts': { signupPortalAccount: async () => ({ ok: false }), signinPortalAccount: async () => ({ ok: false }) },
@@ -80,9 +90,11 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/fileAssets': { buildUniqueStoredName: (n) => n },
   '../lib/media': { sanitizeMediaList: (l) => l },
   '../lib/uploadSecurity': { detectBufferKind: () => null },
+  '../lib/r2': { serveObject: async () => new Response(null, { status: 404 }) },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/portalAi': { generatePortalAiResponse: async () => ({}), getPortalAiUsageStatus: () => ({}) },
   '../lib/searchMatch': {},
+  '../lib/productSearchQuery': {},
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0 }) },
   '../lib/importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3, ADMIN_MAX_IMAGES_PER_PRODUCT: 5 },
 })

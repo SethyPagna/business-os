@@ -16,10 +16,10 @@ const sectionMatrix: Record<string, { file: string; tokens: string[] }> = {
   products: { file: 'components/products/Products.tsx', tokens: ["'products' | 'stock_changes' | 'stock_in_sessions' | 'duplicates'", 'HeaderActions', 'ManageBatchesModal', 'ProductDetailModal'] },
   pos: { file: 'components/pos/POS.tsx', tokens: ['FilterPanel', 'ProductDetailSheet', 'QuickAddModal', 'PaginationControls'] },
   sales: { file: 'components/sales/SalesHubPage.tsx', tokens: ["'sales'", "'returns'", "'fees'", "'reports'"] },
-  branches: { file: 'components/branches/BranchesHubPage.tsx', tokens: ["'overview'", "'transfers'", "'rfid'", 'showSectionNavigation={false}', 'overflow-x-auto'] },
+  branches: { file: 'components/branches/BranchesHubPage.tsx', tokens: ["'overview'", "'products'", "'transfers'", "'rfid'", 'showSectionNavigation={false}', 'overflow-x-auto'] },
   contacts: { file: 'components/contacts/Contacts.tsx', tokens: ["'customers'", "'suppliers'", "'delivery'", "'duplicates'", 'overflow-x-auto'] },
   catalog: { file: 'components/catalog/CatalogPage.tsx', tokens: ["activeTab === 'products'", "activeTab === 'about'", "activeTab === 'faq'", "activeTab === 'ai'"] },
-  promotions: { file: 'components/promotions/PromotionsPage.tsx', tokens: ["key: 'rules'", "key: 'discounts'", "key: 'loyalty'", 'overflow-x-auto'] },
+  promotions: { file: 'components/promotions/PromotionsPage.tsx', tokens: ["id: 'rules'", "id: 'discounts'", "id: 'loyalty'", 'overflow-x-auto'] },
   review: { file: 'components/review/ReviewLogsPage.tsx', tokens: ["key: 'review'", "key: 'audit'", "key: 'deleted'", 'overflow-x-auto'] },
   receipt_settings: { file: 'components/receipt-settings/ReceiptSettings.tsx', tokens: ["id: 'fields'", "id: 'order'", "id: 'delivery'", "id: 'style'", "id: 'language'", "id: 'footer'", "id: 'qr'", "id: 'print'", 'overflow-x-auto'] },
   settings: { file: 'components/utils-settings/SettingsHubPage.tsx', tokens: ["id: 'settings'", "id: 'users'", "id: 'backup'", 'overflow-x-auto'] },
@@ -27,21 +27,40 @@ const sectionMatrix: Record<string, { file: string; tokens: string[] }> = {
   server: { file: 'components/server/ServerPage.tsx', tokens: ['page-scroll', 'PageHeader', 'card flex'] },
 }
 
+// The section chip row moved out of the hub pages and into the shared
+// HubSectionNav (the 3-layer mobile navigation). A hub that renders it
+// satisfies the row's viewport-bounded / wrapping pin through that
+// component, so the row tokens are looked up there instead of in the hub.
+const hubSectionNav = read('components/shared/HubSectionNav.tsx')
+const delegatesRow = (source: string): boolean => /<HubSectionNav\b/.test(source)
+const rowSource = (source: string): string => (delegatesRow(source) ? hubSectionNav : source)
+
 for (const [page, contract] of Object.entries(sectionMatrix)) {
   const source = read(contract.file)
-  for (const token of contract.tokens) assert.ok(source.includes(token), `${page}: missing nested surface/action token ${token}`)
+  for (const token of contract.tokens) {
+    if (token === 'overflow-x-auto' && delegatesRow(source)) continue
+    const haystack = token === 'overflow-x-auto' ? rowSource(source) : source
+    assert.ok(haystack.includes(token), `${page}: missing nested surface/action token ${token}`)
+  }
 }
 
 const branchesHub = read('components/branches/BranchesHubPage.tsx')
 assert.doesNotMatch(branchesHub, /id: 'movements'/, 'Branches hub must not restore a separate generic Movement mini-section')
 assert.doesNotMatch(branchesHub, /hostSection="movements"/, 'the redundant Inventory movement ledger must stay removed from Branches')
 assert.match(branchesHub, /active === 'transfers'[\s\S]*view="transfers"/, 'Transfer must own transfer history without a second movement ledger')
-assert.match(branchesHub, /active === 'inventory'[\s\S]*view="branches"/, 'Inventory must render the branch-product stock workspace moved into Branches')
+assert.match(branchesHub, /active === 'products'[\s\S]*hostSection="products"/, 'Products must render the branch-scoped product stock workspace')
+assert.doesNotMatch(branchesHub, /active === 'products'[\s\S]{0,500}hostSection="stats"/, 'Products must not regress to the stats-only workspace')
+assert.doesNotMatch(branchesHub, /active === 'inventory'/, 'Branches must not restore the redundant branch-inventory duplicate section')
 
 for (const file of ['components/branches/BranchesHubPage.tsx', 'components/review/ReviewLogsPage.tsx', 'components/utils-settings/SettingsHubPage.tsx', 'components/promotions/PromotionsPage.tsx']) {
-  const source = read(file)
-  assert.match(source, /max-w-full[^"']*overflow-x-auto|overflow-x-auto[^"']*max-w-full/, `${file}: section row must be viewport bounded and horizontally scrollable`)
-  assert.doesNotMatch(source, /inline-flex flex-wrap rounded-xl/, `${file}: section row must not push into extra rows`)
+  const pageSource = read(file)
+  const source = rowSource(pageSource)
+  if (delegatesRow(pageSource)) {
+    assert.match(source, /hub-section-pills[^"']*max-w-full[^"']*flex-wrap/, `${file}: shared section row must be viewport bounded and wrap`)
+    assert.doesNotMatch(source, /hub-section-pills[^"']*overflow-x-auto/, `${file}: shared section row must not scroll horizontally`)
+  } else {
+    assert.match(source, /max-w-full[^"']*overflow-x-auto|overflow-x-auto[^"']*max-w-full/, `${file}: legacy section row must remain viewport bounded`)
+  }
 }
 
 const pageHeader = read('components/shared/PageHeader.tsx')
@@ -49,10 +68,29 @@ assert.match(pageHeader, /overflow-x-auto/, 'shared page actions must stay on on
 assert.match(pageHeader, /max-w-full/, 'shared page actions must be bounded by the viewport')
 
 const sectionSwitcher = read('components/shared/SectionSwitcher.tsx')
-assert.match(sectionSwitcher, /max-w-full min-w-0 overflow-x-auto/, 'shared section switcher must be viewport bounded')
+assert.match(sectionSwitcher, /section-switcher max-w-full min-w-0/, 'shared section switcher must be viewport bounded')
+assert.match(sectionSwitcher, /flex min-w-0 flex-wrap/, 'shared section switcher must wrap without horizontal scrolling')
 
 const pagination = read('components/shared/PaginationControls.tsx')
-assert.equal((pagination.match(/hidden sm:inline">\{(?:back|next)Label\}/g) || []).length, 2, 'compact pager labels must collapse to icon-only on narrow screens')
+// Back/Next remain visible at 375px in both centered and compact pagers. The
+// directional icons reinforce the action instead of replacing its label.
+for (const [name, from, to] of [
+  ['compact range-as-page-size', '  if (compact && rangeAsPageSize)', '  if (compact)'],
+] as const) {
+  const start = pagination.indexOf(from)
+  const end = pagination.indexOf(to, start + from.length)
+  assert.ok(start > 0 && end > start, `pagination pill branch '${name}' must still be findable`)
+  const branch = pagination.slice(start, end)
+  assert.equal((branch.match(/<span(?:\s+className="[^"]*")?>\{(?:back|next)Label\}<\/span>/g) || []).length, 2, `${name} pager must render both Back and Next words`)
+  assert.doesNotMatch(branch, /hidden sm:inline/, `${name} pager labels must not disappear on narrow screens`)
+  assert.match(branch, /<ChevronLeft[^>]*>[\s\S]*\{backLabel\}[\s\S]*\{nextLabel\}[\s\S]*<ChevronRight/, `${name} pager keeps labels paired with directional icons`)
+}
+const centeredStart = pagination.indexOf("  if (layout === 'centered')")
+const centeredEnd = pagination.indexOf('  if (compact && rangeAsPageSize)', centeredStart)
+const centered = pagination.slice(centeredStart, centeredEnd)
+assert.equal((centered.match(/<span(?:\s+className="[^"]*")?>\{(?:back|next)Label\}<\/span>/g) || []).length, 2,
+  'centered pager keeps Back and Next visible on narrow storefronts')
+assert.doesNotMatch(centered, /hidden sm:inline/, 'centered pager labels must not disappear at 375px')
 assert.match(pagination, /onPageChange\?\.\(safePage\)/, 'pager must repair stale out-of-range controlled pages')
 
 const modal = read('components/shared/Modal.tsx')
@@ -66,18 +104,59 @@ assert.match(login, /min-w-0 break-words text-center text-2xl/, 'long business n
 assert.match(mainCss, /\.auth-frame \{[\s\S]*min-width: 0;[\s\S]*max-width: 100%;/)
 assert.match(mainCss, /\.auth-card \.input \{[\s\S]*min-width: 0;[\s\S]*max-width: 100%;[\s\S]*box-sizing: border-box;/)
 
-for (const file of ['components/shared/InfoHint.tsx', 'components/shared/TruncatedText.tsx']) {
+for (const file of ['components/shared/InfoHint.tsx']) {
   const source = read(file)
   assert.match(source, /createPortal\([\s\S]*document\.body/, `${file}: explanatory content must portal to the viewport layer`)
   assert.match(source, /fixed z-\[1200\]/, `${file}: explanatory content must render above z-[1050] modals and z-[1100] notifications`)
 }
 
+// TruncatedText's reveal keeps exactly the same two properties -- a
+// body-level layer, above z-[1050] modals -- but no longer portals them
+// itself: the panel is one shared body-level host built by the delegated
+// controller (textAffordances.ts) so that `.dense-cell-truncate` cells on
+// surfaces which import nothing from it are served too, and it is styled in
+// main.css because it is plain DOM rather than a React subtree. Assert the
+// property where it now lives instead of pinning the component that used to
+// own it.
+const truncatedText = read('components/shared/TruncatedText.tsx')
+assert.match(truncatedText, /ensureTextAffordances\(\)/, 'TruncatedText must mount the shared reveal controller')
+const affordances = read('components/shared/textAffordances.ts')
+assert.match(affordances, /document\.body\.appendChild\(host\)/, 'the reveal panel must live on the body layer')
+assert.match(read('styles/main.css'), /\.text-affordance-float \{[\s\S]*position:fixed;[\s\S]*z-index:1200;/,
+  'the reveal panel must render above z-[1050] modals and z-[1100] notifications')
+
 // The rename-cascade prompt is awaited by saves that run INSIDE a z-[1050]
 // shared Modal; below that layer it is invisible and the save never resolves.
-// Accept the literal layer or the token alias the RC branch introduces.
+// The default prompt stays above the normal form; a nested form explicitly
+// raises its prompt again. Check both branches, not an obsolete static class.
 const renameCascade = read('components/shared/RenameCascadeModal.tsx')
 assert.match(renameCascade, /createPortal\(/, 'RenameCascadeModal must portal to the viewport layer')
-assert.match(renameCascade, /fixed inset-0 z-\[(?:1060|var\(--z-modal-2\))\]/, 'RenameCascadeModal must layer above the z-[1050] shared Modal it is opened from')
+assert.match(renameCascade, /layer = 'default'/, 'existing callers retain the normal prompt layer')
+assert.match(renameCascade, /className=\{`fixed inset-0 \$\{layer === 'nested' \? 'z-\[1080\]' : 'z-\[1060\]'\}/,
+  'rename prompts must sit above both normal 1050 and nested 1070 forms')
+const productFormLayers = read('components/products/forms/ProductForm.tsx')
+assert.match(productFormLayers, /<RenameCascadeModal[^>]*layer=\{modalLayer\}/,
+  'nested product forms must pass their layer to rename prompts')
+assert.doesNotMatch(productFormLayers, /const effectiveModalLayer\s*=/,
+  'opening a child must not lower the parent behind its own session')
+
+// Sibling-surface parity: every contact tab with live name snapshots asks the
+// rename question the same way (Customers, Suppliers, Delivery) -- fetch the
+// impact, await the carry / only-this-one choice, send __rename_cascade, and
+// mount the prompt at the tab root. A tab missing any step saves silently
+// (Delivery did until Part 582).
+for (const [tab, fetcher] of [
+  ['CustomersTab', 'getCustomerRenameImpact('],
+  ['SuppliersTab', "getRenameImpact('supplier'"],
+  ['DeliveryTab', 'getDeliveryContactRenameImpact('],
+] as const) {
+  const source = read(`components/contacts/${tab}.tsx`)
+  assert.match(source, /import RenameCascadeModal/, `${tab} must import RenameCascadeModal`)
+  assert.ok(source.includes(fetcher), `${tab} must fetch the rename impact via ${fetcher}`)
+  assert.match(source, /askRenameChoice\(\{ kind: '/, `${tab} must await the rename choice`)
+  assert.match(source, /__rename_cascade = /, `${tab} must send the chosen scope as __rename_cascade`)
+  assert.match(source, /<RenameCascadeModal request=\{renameRequest\}/, `${tab} must mount the prompt`)
+}
 
 for (const file of ['components/products/forms/BulkAddStockModal.tsx', 'components/promotions/PromotionsPage.tsx']) {
   const source = read(file)

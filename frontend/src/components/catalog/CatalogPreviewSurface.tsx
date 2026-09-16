@@ -16,7 +16,11 @@ import '../../styles/public-portal.css'
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'catalog-preview-image-gallery-lightbox')
 const ProductDetailFlyout = lazyRetry(() => import('./ProductDetailFlyout'), 'catalog-preview-product-detail-flyout')
 
-type CopyFunction = (key: string, fallback?: string) => string
+// The storefront translator really takes a Khmer fallback as its third
+// argument (CatalogPage declares it that way and PublicCatalogPage implements
+// it) -- this local alias just under-declared it, so any call that supplied
+// the Khmer text was a type error.
+type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
 
 type DisplayConfig = {
   businessName?: string
@@ -112,6 +116,11 @@ type CatalogPreviewSurfaceProps = {
   catalogSection: ReactNode
   secondaryTabSection: ReactNode
   promotionsSection?: ReactNode
+  // N45 legal lane: the storefront <footer> (business details + the
+  // Policies menu). Rendered here so the live site and the admin
+  // preview show the SAME footer from one place; the caller supplies it
+  // so this surface never has to know the business-detail shape.
+  footer?: ReactNode
   publicScrollButtonsVisible: boolean
   scrollPublicPortal: (direction: 'top' | 'bottom') => void
   productGalleryView: GalleryViewState
@@ -174,6 +183,7 @@ export default function CatalogPreviewSurface({
   catalogSection,
   secondaryTabSection,
   promotionsSection,
+  footer,
   publicScrollButtonsVisible,
   scrollPublicPortal,
   productGalleryView,
@@ -263,9 +273,41 @@ export default function CatalogPreviewSurface({
       // containers each fighting for wheel/touch events is what produced the frozen
       // scroll + duplicate scrollbar bug mid-page. Just fill width and let the parent
       // scroller handle scrolling.
-      className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'w-full'}`}
+      //
+      // The publicView branch used to say `overflow-visible` next to the
+      // inline `overflowY: 'auto'` below, which is a contradiction the browser
+      // resolves against us: CSS turns a `visible` axis into `auto` whenever
+      // the other axis is not visible, so this shell quietly became a TWO-axis
+      // scroll container and any over-wide descendant produced a horizontal
+      // scroller INSIDE it -- somewhere html/body's own `overflow-x: hidden`
+      // could never reach. `clip` is the one value that contains the
+      // horizontal axis without making the shell a scrollport; `hidden` would
+      // make it one and break every sticky descendant, and the pinned section
+      // nav lives in here.
+      //
+      // The VERTICAL axis then had to follow, and this is the fix for
+      // "scrollability in public website". `overflowY: 'auto'` was kept here
+      // as "iOS momentum scrolling on the shell", but this box has
+      // `height: auto` (only a min-height), so it grows with the catalog and
+      // its scrollHeight never exceeds its clientHeight: it is a scrollport
+      // that can never scroll, and `-webkit-overflow-scrolling: touch` on a
+      // scrollport with nothing to scroll buys no momentum -- the DOCUMENT
+      // was always the thing actually moving. What that dead scrollport DID
+      // do is become the nearest scrollport ancestor for every `position:
+      // sticky` descendant, and a sticky element resolves against its
+      // scrollport, not the page. So the section nav (`sticky top-1`) and the
+      // products search/filter row (`sticky top-16`) were pinned to a box
+      // that never moves -- i.e. they simply scrolled away -- on the live
+      // storefront, where the JS pinning fallback is also switched off
+      // (PublicCatalogPage passes publicPortalNavPinned={false}).
+      //
+      // `overflow-x: clip` is deliberately the only overflow left: `clip`
+      // paired with `visible` is the ONE pair CSS does not rewrite to `auto`,
+      // so the horizontal containment above survives while the document goes
+      // back to owning vertical scroll for the whole public route.
+      className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-x-clip' : 'w-full'}`}
       style={{
-        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+        ...(publicView ? { touchAction: 'pan-y', overflowX: 'clip' } : {}),
         background: portalBackground,
       }}
     >
@@ -283,6 +325,15 @@ export default function CatalogPreviewSurface({
       <div className={`mx-auto max-w-[1680px] px-5 py-3 sm:px-10 sm:py-4 lg:px-16 xl:px-20 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-[calc(1rem+env(safe-area-inset-top))]' : ''}`}>
         <div className="space-y-0">
           <div ref={previewSectionRef} className="space-y-0">
+            {/* WCAG 2.4.1: the storefront opens with a row of social links,
+                the language and theme controls and a scrolling section nav.
+                Without this a keyboard visitor walked all of it again on
+                every page view before reaching a single product. */}
+            {publicView ? (
+              <a className="portal-skip-link" href="#portal-main-content">
+                {copy('portal_a11y_skip_to_content', 'Skip to products', 'រំលងទៅផលិតផល')}
+              </a>
+            ) : null}
             {canEdit ? (
               <div className="flex justify-end">
                 <button
@@ -294,13 +345,27 @@ export default function CatalogPreviewSurface({
                 </button>
               </div>
             ) : null}
-            <section className="portal-header-shell rounded-t-[28px] border-b border-slate-200/80 dark:border-neutral-800/80">
+            <header className="portal-header-shell rounded-t-[28px] border-b border-slate-200/80 dark:border-neutral-800/80">
               <div className="px-1 py-4 sm:py-5">
-                <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                   {/* 6.2 (user): the LOGO is out of the top bar -- it still
                       lives on the About page hero. Social links take this
                       side; language + light/dark sit on the far side. */}
-                  <div className="flex min-w-0 flex-wrap items-center gap-1">
+                  {/* `flex-nowrap`, not `flex-wrap`: at 320-375px this row and
+                      the wishlist/account/language/theme row on the other
+                      side share one line with the brand name pushed to row
+                      2 below. Wrapping split Facebook/Instagram from
+                      Telegram onto a second row and pushed the brand name
+                      down again underneath it. Icons shrink one size below
+                      `sm` instead, which keeps all three (and a fourth, if a
+                      merchant adds a website link) on the one row every
+                      phone width the storefront targets. `data-portal-header-
+                      icons` is the hook public-portal.css's pointer:coarse
+                      44px floor exempts -- every icon below carries an
+                      aria-label, which matched that rule and would otherwise
+                      silently re-widen it past `h-8`/`h-9` and reopen this
+                      same overflow. */}
+                  <div data-portal-header-icons="" className="flex min-w-0 flex-nowrap items-center gap-0.5 sm:gap-1">
                     {headerLinks.map((item) => {
                       const Icon = item.icon
                       return (
@@ -309,11 +374,11 @@ export default function CatalogPreviewSurface({
                           href={item.value}
                           target="_blank"
                           rel="noreferrer"
-                          className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 ${item.accentClassName || ''}`}
+                          className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${item.accentClassName || ''}`}
                           aria-label={item.label}
                           title={item.label}
                         >
-                          <Icon className="h-[18px] w-[18px]" />
+                          <Icon className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
                         </a>
                       )
                     })}
@@ -323,26 +388,31 @@ export default function CatalogPreviewSurface({
                       </div>
                     ) : null}
                   </div>
-                  <div className="min-w-0 text-center">
+                  <div className="col-span-2 row-start-2 min-w-0 text-center sm:col-span-1 sm:row-start-auto">
                     {showBrandLabel ? (
-                      <div className="notranslate truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-neutral-500" translate="no">
+                      <div className="notranslate truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-neutral-400" translate="no">
                         {displayConfig.businessName}
                       </div>
                     ) : null}
-                    <div
-                      className="notranslate text-lg font-semibold leading-tight tracking-tight text-balance break-words [overflow-wrap:anywhere] text-slate-900 sm:truncate sm:text-2xl dark:text-neutral-100"
+                    <h1
+                      className="notranslate line-clamp-2 break-normal text-lg font-semibold leading-tight tracking-tight [overflow-wrap:normal] [word-break:normal] text-slate-900 sm:truncate sm:text-2xl dark:text-neutral-100"
                       style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
                       translate="no"
                     >
                       {previewTitle || displayConfig.businessName || copy('about', 'About')}
-                    </div>
+                    </h1>
                     {displayConfig.businessTagline ? (
                       <div className="notranslate hidden truncate text-xs text-slate-500 sm:block dark:text-neutral-400" translate="no">
                         {displayConfig.businessTagline}
                       </div>
                     ) : null}
                   </div>
-                  <div className="flex flex-wrap items-center justify-end gap-1">
+                  {/* Same one-row rule as the social links opposite it --
+                      `flex-nowrap` plus the sub-`sm` shrink keeps wishlist/
+                      account/language/theme together even with all four
+                      present. Same `data-portal-header-icons` exemption
+                      hook too (see the social row's comment above). */}
+                  <div data-portal-header-icons="" className="flex flex-nowrap items-center justify-end gap-0.5 sm:gap-1">
                     {/* Wishlist + Account live in the top bar (public storefront
                         only — the admin editor preview doesn't wire these
                         handlers, so they don't render there). Each opens its own
@@ -350,12 +420,12 @@ export default function CatalogPreviewSurface({
                     {onOpenWishlist ? (
                       <button
                         type="button"
-                        className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                        className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                         onClick={onOpenWishlist}
                         aria-label={copy('wishlistTitle', 'Wishlist')}
                         title={copy('wishlistTitle', 'Wishlist')}
                       >
-                        <Heart className="h-[18px] w-[18px]" />
+                        <Heart className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
                         {wishlistCount > 0 ? (
                           <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white">
                             {wishlistCount}
@@ -366,12 +436,12 @@ export default function CatalogPreviewSurface({
                     {onOpenAccount ? (
                       <button
                         type="button"
-                        className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-100 dark:hover:bg-neutral-800 ${accountSignedIn ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-700 dark:text-neutral-200'}`}
+                        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-100 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${accountSignedIn ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-700 dark:text-neutral-200'}`}
                         onClick={onOpenAccount}
                         aria-label={copy('account', 'Account')}
                         title={copy('account', 'Account')}
                       >
-                        <User className="h-[18px] w-[18px]" />
+                        <User className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
                       </button>
                     ) : null}
                     {displayConfig.translateWidgetEnabled ? (
@@ -383,11 +453,11 @@ export default function CatalogPreviewSurface({
                         trigger={(
                           <button
                             type="button"
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                             aria-label={copy('publicTranslation', 'Language tools')}
                             title={copy('publicTranslation', 'Language tools')}
                           >
-                            <Globe className="h-[18px] w-[18px]" />
+                            <Globe className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
                           </button>
                         )}
                         content={({ closeMenu }) => {
@@ -427,7 +497,15 @@ export default function CatalogPreviewSurface({
                                     value={translateSearch}
                                     onChange={(event) => setTranslateSearch(event.target.value)}
                                     placeholder={copy('searchLanguages', 'Search languages')}
-                                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-400 dark:focus:bg-neutral-900"
+                                    aria-label={copy('searchLanguages', 'Search languages')}
+                                    // Same createPortal() problem as the
+                                    // filter menu's search field: this popup
+                                    // is mounted on document.body, outside
+                                    // every portal root, so the stylesheet's
+                                    // :focus-visible ring cannot reach it and
+                                    // focus:border-blue-400 alone is a 1px
+                                    // tint. It paints the ring itself.
+                                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-400 dark:focus:bg-neutral-900 dark:focus-visible:outline-[#fcd34d]"
                                     // Real user requirement, not decorative:
                                     // a flat 28-option list with no way to
                                     // filter was the actual complaint behind
@@ -439,18 +517,25 @@ export default function CatalogPreviewSurface({
                                   />
                                 </div>
                               ) : null}
-                              <div className="max-h-[min(60vh,20rem)] overflow-y-auto py-1">
+                              <div className="max-h-[min(calc(60*var(--app-vh)),20rem)] overflow-y-auto py-1">
                                 {firstPartyTranslateOptions.length ? firstPartyTranslateOptions.map(renderOption) : null}
                                 {externalTranslateOptions.length ? (
                                   <>
-                                    <div className="mt-1 border-t border-slate-200 px-4 pb-1.5 pt-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:border-neutral-700 dark:text-neutral-500">
+                                    <div className="mt-1 border-t border-slate-200 px-4 pb-1.5 pt-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:border-neutral-700 dark:text-neutral-400">
                                       {copy('externalTranslation', 'More languages (auto-translated)')}
                                     </div>
+                                    <p className="px-4 pb-2 text-xs leading-5 text-slate-500 dark:text-neutral-400">
+                                      {copy(
+                                        'externalTranslationDisclosure',
+                                        'Choosing one sends the text on this page to Google Translate and may set Google cookies.',
+                                        'ការជ្រើសរើសភាសាមួយនឹងផ្ញើអត្ថបទលើទំព័រនេះទៅ Google Translate ហើយអាចកំណត់ខូឃី Google។',
+                                      )}
+                                    </p>
                                     {externalTranslateOptions.map(renderOption)}
                                   </>
                                 ) : null}
                                 {!firstPartyTranslateOptions.length && !externalTranslateOptions.length ? (
-                                  <div className="px-4 py-6 text-center text-sm text-slate-400 dark:text-neutral-500">
+                                  <div className="px-4 py-6 text-center text-sm text-slate-500 dark:text-neutral-400">
                                     {copy('noLanguagesFound', 'No languages match your search.')}
                                   </div>
                                 ) : null}
@@ -476,19 +561,23 @@ export default function CatalogPreviewSurface({
                     ) : null}
                     <button
                       type="button"
-                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                       onClick={toggleTheme}
                       aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
                       title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
                     >
-                      {darkMode ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
+                      {darkMode ? <Sun className="h-4 w-4 sm:h-[18px] sm:w-[18px]" /> : <Moon className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />}
                     </button>
                   </div>
                 </div>
               </div>
-            </section>
+            </header>
 
-            <section
+            {/* The section tabs are navigation, and the name that described
+                them sat on an inner scroll <div> with no role of its own, so
+                nothing announced it. */}
+            <nav
+              aria-label={copy('publicNavigation', 'Section navigation')}
               ref={publicPortalNavRef}
               className={`pb-1 ${publicView ? 'sticky top-1 z-40 sm:top-2' : ''}`}
               style={publicView && publicPortalNavPinned ? { minHeight: `${publicPortalNavMetrics.height || 0}px` } : undefined}
@@ -497,7 +586,7 @@ export default function CatalogPreviewSurface({
                 className="portal-nav-shell rounded-b-[28px] border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
                 style={pinnedNavStyle}
               >
-                <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden" aria-label={copy('publicNavigation', 'Section navigation')}>
+                <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden">
                   <div className="portal-nav-track flex w-max min-w-full flex-nowrap items-center gap-6 px-1">
                     {portalTabs.map((item) => {
                       const Icon = item.icon
@@ -512,6 +601,7 @@ export default function CatalogPreviewSurface({
                               : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-400 dark:hover:text-neutral-200'
                           }`}
                           onClick={() => handlePortalTabClick(item.key)}
+                          aria-current={selected ? 'page' : undefined}
                         >
                           <Icon className="h-4 w-4 sm:hidden" />
                           <span className="whitespace-nowrap">{item.label}</span>
@@ -521,11 +611,22 @@ export default function CatalogPreviewSurface({
                   </div>
                 </div>
               </div>
-            </section>
+            </nav>
 
-            {promotionsSection}
-            {catalogSection}
-            {secondaryTabSection}
+            {/* No system-generated notice is rendered here on purpose. The
+                amber "seller details" banner that used to sit between the
+                tabs and the content was removed at the owner's direction
+                (2026-09-14: "remove the notice in the public website. i
+                don't want it. if i want to add i will in the editor"). The
+                storefront shows owner-written content only; the empty seller
+                fields are still named to the owner inside the editor
+                (CatalogEditorSurface.tsx's publication summary). */}
+            <main id="portal-main-content" tabIndex={-1}>
+              {promotionsSection}
+              {catalogSection}
+              {secondaryTabSection}
+            </main>
+            {footer}
           </div>
         </div>
       </div>

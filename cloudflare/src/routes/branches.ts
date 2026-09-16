@@ -1,11 +1,24 @@
 import { Hono } from 'hono'
-import { getDb, toDbBool } from '../lib/db'
+import { getDb } from '../lib/db'
+
+/** Fail closed until the complete additive release schema is available. */
+async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
+  try {
+    const row = await db.prepare(`SELECT COUNT(*) AS ready FROM sqlite_master
+      WHERE (type='table' AND name='fee_operation_receipts')
+         OR (type='trigger' AND name='transfer_receipts_require_provenance_insert')`).get<{ ready: number }>()
+    return row?.ready === 2
+  } catch {
+    return false
+  }
+}
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import type { D1Compat } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
+import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { getPermissionTier, getActionTier } from '../lib/permissions'
+import { getActionTier } from '../lib/permissions'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -13,18 +26,30 @@ import { audit } from '../lib/audit'
 import { formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
-import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
 import {
-  buildFtsMatchExpression,
-  buildHybridMatchClause,
-  buildPartialWordMatchClause,
-  buildShortWordFallbackClause,
-  buildTrigramMatchExpression,
-  PRODUCT_SEARCH_COLUMNS,
-  tokenizeSearchTermGroups,
-} from '../lib/searchMatch'
+  CANONICAL_BRANCH_CONFIGURATION_CODE,
+  CANONICAL_BRANCH_CONFIGURATION_ERROR,
+  CANONICAL_BRANCH_IDENTITY_CODE,
+  CANONICAL_BRANCH_IDENTITY_ERROR,
+  CANONICAL_TRANSFER_BRANCHES_SQL,
+  CanonicalBranchConfigurationError,
+  CanonicalBranchIdentityError,
+  isCanonicalTransferSelection,
+  prepareCanonicalBranchUpdate,
+  resolveCanonicalTransferPair,
+  type CanonicalTransferBranchRow,
+  type CanonicalTransferPair,
+} from '../lib/canonicalBranchIdentity'
+// Transfers run in either direction between Shop and Warehouse. The exact
+// opposite-role rule lives with the canonical branch roles rather than being
+// restated at each call site.
+import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchRoleGuards'
+import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
+import { planTransferOperation } from '../lib/transferOperation'
+import { findTransferReceipt, normalizeTransferRequestId, transferReceiptResponse, transferRequestDigest } from '../lib/transferOperationReceipt'
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
@@ -118,7 +143,7 @@ app.get('/summary', async (c) => {
   // hasPermission() boolean, which would have 403'd a Review Required
   // user out of a plain read, same class of bug Parts 152-156 already
   // fixed for products/inventory/returns/contacts/library.
-  if (getPermissionTier(c.get('user'), 'branches') === 'none') {
+  if (getActionTier(c.get('user'), 'branches', 'view') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
@@ -144,6 +169,7 @@ app.get('/summary', async (c) => {
   // family-grouped pagination total Products/Inventory's listings show.
   const familyStats = await getFamilyStockStats({
     db,
+    lowStock: await loadLowStockConfig(c.env),
     joinSql: '',
     whereSql: 'WHERE p.is_active = 1',
     params: {},
@@ -166,7 +192,7 @@ app.get('/summary', async (c) => {
 // integrity issue. Earlier code treated every such row as "misplaced" and
 // could move valid transferred/received inventory back to Main.
 app.get('/stock-integrity', async (c) => {
-  if (getPermissionTier(c.get('user'), 'branches') === 'none') {
+  if (getActionTier(c.get('user'), 'branches', 'view') === 'none') {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'branches' }, 403)
   }
   const db = getDb(c.env)
@@ -261,7 +287,7 @@ app.post('/stock-integrity/repair', async (c) => {
 
   const remaining = await readStockIntegrityIssues(db)
   const repairedRows = Math.max(0, issues.length - remaining.length)
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'repair', 'branch_stock_integrity', null, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'repair', 'branch_stock_integrity', null, {
     repairedRows,
     beforeIssues: issues.length,
     remainingIssues: remaining.length,
@@ -337,21 +363,51 @@ app.post('/transfer', async (c) => {
     return c.json({ error: 'Transferring stock requires Full Access to Branches -- Review Required support for this action is not built.' }, 403)
   }
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  if (body.transfer_provenance_version !== 1) return c.json({ error: 'Refresh the app before transferring stock.', code: 'client_upgrade_required' }, 409)
   const productId = Number.parseInt(String(body.productId ?? ''), 10)
   const fromBranchId = Number.parseInt(String(body.fromBranchId ?? ''), 10)
   const toBranchId = Number.parseInt(String(body.toBranchId ?? ''), 10)
   const quantity = Number(body.quantity)
-  const note = body.note != null ? String(body.note).trim() || null : null
+  // The operator's own reason. `reason` is what every current client sends;
+  // a non-empty legacy `note` is still accepted as the reason so a cached
+  // PWA build or a queued offline replay is not 400ed mid-release.
+  const reason = String(body.reason ?? '').trim() || String(body.note ?? '').trim() || null
   // Optional batch/lot to transfer -- see this route's comment above for
   // why this has to move branch_batch_stock alongside the plain
   // branch_stock total, not instead of it.
   const batchId = body.batchId != null && body.batchId !== '' ? Number.parseInt(String(body.batchId), 10) : null
+  const clientRequestId = normalizeTransferRequestId(body.client_request_id)
 
   if (!productId || !fromBranchId || !toBranchId || !Number.isFinite(quantity)) return c.json({ error: 'Missing required fields' }, 400)
   if (fromBranchId === toBranchId) return c.json({ error: 'Source and destination cannot be the same' }, 400)
   if (!(quantity > 0)) return c.json({ error: 'Transfer quantity must be greater than zero' }, 400)
+  if (!clientRequestId) return c.json({ error: 'client_request_id is required for a transfer.', code: 'client_request_id_required' }, 400)
+  // The same mandatory-cause rule POST /inventory/adjust enforces, on the
+  // route the Branches transfer modal calls.
+  // Inventory.tsx has refused a reasonless transfer in the browser since
+  // Part 387; nothing behind it did, so a stale tab, a replayed offline
+  // write or any direct caller could move stock with no recorded cause.
+  // Checked ahead of any DB work, so no path can move stock without one.
+  // The sentence is the exact English of the `transfer_reason_required`
+  // pack key -- the convention branchRoleGuards' refusals already follow, and
+  // exactly what a client-side mapping keys off. That mapping does not cover
+  // it yet: BRANCH_RULE_MESSAGE_KEYS in frontend/src/api/branchRuleErrors.ts
+  // carries only the two branch-role sentences, so a refusal that outruns the
+  // UI still surfaces in English. One entry there is all Khmer needs, with no
+  // Worker change -- which is the whole point of pinning the wording here.
+  if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
 
   const db = getDb(c.env)
+  const requestJson = JSON.stringify({ version: 1, kind: 'transfer', productId, fromBranchId, toBranchId, quantity, reason, batchId })
+  if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
+  const requestDigest = await transferRequestDigest(requestJson)
+  const previousReceipt = await findTransferReceipt(db, user.id, clientRequestId)
+  if (previousReceipt) {
+    if (previousReceipt.request_digest !== requestDigest || previousReceipt.request_json !== requestJson) {
+      return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
+    }
+    return c.json({ ...(transferReceiptResponse(previousReceipt) as Record<string, unknown>), replayed: true })
+  }
   const product = await db.prepare(`
     SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr
     FROM products WHERE id = @id
@@ -361,130 +417,71 @@ app.post('/transfer', async (c) => {
   const available = fromStock ? Number(fromStock.quantity) || 0 : 0
   if (quantity > available) return c.json({ error: 'Insufficient stock in source branch' }, 400)
 
-  let sourceBatch: { id: number; lot_code: string | null; expiry_date: string | null; notes: string | null } | null = null
+  let sourceBatch: { id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null } | null = null
   if (batchId) {
     sourceBatch = (await db.prepare(
-      `SELECT id, lot_code, expiry_date, notes FROM product_batches WHERE id = @batchId AND variant_product_id = @productId AND is_active = 1`,
-    ).get<{ id: number; lot_code: string | null; expiry_date: string | null; notes: string | null }>({ batchId, productId })) ?? null
-    if (!sourceBatch) return c.json({ error: 'Batch not found for this product' }, 404)
+      `SELECT id, lot_code, received_at, expiry_date, notes FROM product_batches WHERE id = @batchId AND variant_product_id = @productId AND is_active = 1`,
+    ).get<{ id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null }>({ batchId, productId })) ?? null
+    if (!sourceBatch) return c.json({ error: 'Received date not found for this product' }, 404)
     const batchStock = await db.prepare(
       'SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = @branchId',
     ).get<{ quantity: number }>({ batchId, branchId: fromBranchId })
     const batchAvailable = batchStock ? Number(batchStock.quantity) || 0 : 0
-    if (quantity > batchAvailable) return c.json({ error: 'Insufficient batch stock in source branch' }, 400)
+    if (quantity > batchAvailable) return c.json({ error: 'Insufficient stock in source branch' }, 400)
   }
 
-  const [fromBranch, toBranch, mergeTarget] = await Promise.all([
+  const [fromBranch, toBranch, canonicalTransferRows, mergeTarget] = await Promise.all([
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
+    db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
     findIdentityMatch(db, product),
   ])
+  let canonicalTransferPair: CanonicalTransferPair
+  try {
+    canonicalTransferPair = resolveCanonicalTransferPair(canonicalTransferRows)
+  } catch (error) {
+    if (error instanceof CanonicalBranchConfigurationError) {
+      return c.json({ error: CANONICAL_BRANCH_CONFIGURATION_ERROR, code: CANONICAL_BRANCH_CONFIGURATION_CODE }, 409)
+    }
+    throw error
+  }
+  // Direction, on the same shared predicate the TransferModal's two selects
+  // grey out with (lib/branchRoles.ts). Same-branch is rejected above; this
+  // is the other half of the rule: endpoints must have opposite canonical
+  // Shop/Warehouse roles in either order.
+  const directionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+    || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
+      ? TRANSFER_DIRECTION_ERROR
+      : null)
+  if (directionError) return c.json({ error: directionError }, 400)
+
   const destProductId = mergeTarget?.id ?? productId
   const destProductName = mergeTarget?.name ?? product.name
   const mergedNote = mergeTarget ? `Added to existing product "${destProductName}" (#${destProductId}) at ${toBranch?.name || 'destination'}` : null
-  const combinedNote = [note, mergedNote].filter(Boolean).join(' -- ') || null
+  const combinedNote = [reason, mergedNote].filter(Boolean).join(' -- ') || null
 
-  // Same batch when the destination product wasn't redirected (the lot
-  // itself hasn't changed, only which branch's branch_batch_stock has the
-  // quantity); resolved/cloned into an equivalent batch on destProductId
-  // when it was.
-  const destBatchId = sourceBatch
-    ? (mergeTarget ? await resolveDestinationBatch(db, sourceBatch, destProductId) : sourceBatch.id)
-    : null
+  const destBatchId = sourceBatch && !mergeTarget ? sourceBatch.id : null
+  const responsePayload = mergeTarget
+    ? { success: true, mergedIntoProductId: destProductId, mergedIntoProductName: destProductName, destBatchId, replayed: false }
+    : { success: true, destBatchId, replayed: false }
+  const { statements } = await planTransferOperation(db, {
+    user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'branches',
+    fromBranchId, toBranchId, reason,
+    lines: [{ productId, destProductId, quantity, batchId }], response: responsePayload,
+  })
 
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
-    { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity, productId, branchId: fromBranchId } },
-    {
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
-      params: { productId: destProductId, branchId: toBranchId, quantity },
-    },
-    {
-      sql: `INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, notes, user_id, user_name, created_at)
-            VALUES (@productId, @productName, @fromBranchId, @toBranchId, @quantity, @note, @userId, @userName, CURRENT_TIMESTAMP)`,
-      params: { productId, productName: product.name, fromBranchId, toBranchId, quantity, note: combinedNote, userId: user?.id ?? null, userName: user?.name ?? null },
-    },
-    {
-      // 0084: a lot-scoped transfer stamps its lot on both legs (out = the
-      // source lot, in = the same/cloned destination lot); an aggregate
-      // transfer touched no specific lot and stays NULL.
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: sourceBatch?.id ?? null },
-    },
-    {
-      // Recorded against destProductId -- this is a real per-product stock
-      // audit trail (used to reconcile that product's own stock_quantity),
-      // so it has to reflect whichever row's branch_stock actually gained
-      // the quantity, not necessarily the row the operator picked.
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}${mergeTarget ? ` (merged from "${product.name}" #${productId})` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: destBatchId },
-    },
-  ]
-  // Track A/C audit (part 53) found this was missing: when the transfer
-  // crosses a merge (destProductId !== productId), branch_stock's total for
-  // *productId* actually decreases and *destProductId*'s actually increases
-  // -- unlike a same-product branch-to-branch move, which is zero-sum for
-  // the product's own total and needs no update here. Every other writer of
-  // branch_stock (products.ts, returns.ts, inventory.ts, stock-integrity/
-  // repair) recomputes/adjusts products.stock_quantity in the same batch;
-  // this route never did for the merge case, so a merged transfer left both
-  // products' denormalized stock_quantity stale -- wrong on the low-stock
-  // notification (notifications.ts reads stock_quantity directly), the
-  // Dashboard/Inventory stat tiles (getFamilyStockStats' global qtyExpr is
-  // also `p.stock_quantity`), and POS's stock badge, until someone happened
-  // to run the unrelated stock-integrity/repair tool.
-  if (mergeTarget) {
-    statements.push(
-      { sql: 'UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId', params: { quantity, productId } },
-      { sql: 'UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @destProductId', params: { quantity, destProductId } },
-    )
-  }
-  if (sourceBatch && destBatchId != null) {
-    statements.push(
-      decrementBatchStockStatement(sourceBatch.id, fromBranchId, quantity),
-      incrementBatchStockStatement(destBatchId, toBranchId, quantity),
-    )
-  } else if (!sourceBatch) {
-    // C1 fix: no lot was picked (the multi-select flow never picks one, and
-    // any caller that omits batchId lands here). Moving only branch_stock
-    // above would strand every source lot in place and give the destination
-    // no branch_batch_stock rows -- the per-lot ledger drifts from the branch
-    // total and the moved units lose their lot identity. Auto-allocate the
-    // quantity across the source branch's active lots FIFO -- the SAME policy
-    // inventory.ts POST /transfer uses for an unpicked line -- and move each
-    // take's branch_batch_stock alongside, materializing the matching lot at
-    // the destination (its own lot when same-product, the resolved/cloned lot
-    // when the transfer merges into an identity match). Any `uncovered`
-    // remainder is legacy stock the lot ledger never tracked; it moves on
-    // branch_stock alone, exactly as before. Strict (unclamped) source
-    // decrements, matching inventory.ts /transfer's FIFO leg: readFifoLot-
-    // Availability runs OUTSIDE the db.batch() below, so a concurrent sale
-    // that drains a lot between the read and the write would let a clamped
-    // decrement floor the source at 0 while the destination still gained the
-    // full take -- minting the exact per-lot drift this fix exists to prevent.
-    // Strict instead violates branch_batch_stock's CHECK(quantity >= 0) and
-    // aborts the whole atomic batch, so the transfer cleanly fails and retries
-    // on fresh availability. (The explicit-batch leg above stays clamped: it
-    // decrements a user-picked lot whose quantity may legitimately trail the
-    // branch total under incomplete attribution.)
-    const sourceLots = await readFifoLotAvailability(db, productId, fromBranchId)
-    const { takes } = allocateAcrossLots(sourceLots, quantity)
-    for (const take of takes) {
-      const destLotId = mergeTarget
-        ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, notes: null }, destProductId)
-        : take.batchId
-      statements.push(
-        decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
-        incrementBatchStockStatement(destLotId, toBranchId, take.quantity),
-      )
+  try {
+    await db.batch(statements)
+  } catch (error) {
+    const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
+    if (retryReceipt) {
+      if (retryReceipt.request_digest !== requestDigest || retryReceipt.request_json !== requestJson) {
+        return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
+      }
+      return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
     }
+    throw error
   }
-
-  await db.batch(statements)
-
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'transfer', 'stock', productId, { productName: product.name, quantity, fromBranchId, toBranchId, mergedIntoProductId: mergeTarget?.id ?? null, batchId: sourceBatch?.id ?? null, destBatchId })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   if (mergeTarget) c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: destProductId }))
@@ -501,16 +498,16 @@ app.post('/transfer', async (c) => {
     await sendTelegramEvent(c.env, {
       type: 'stock_out', heading: '🔁 Stock transferred',
       lines: formatTransferTelegramLines({
-        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note, by: user?.name || user?.username || null,
+        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user),
         items: [{
-          product: product.name, quantity, lot: sourceBatch?.lot_code || null, mergedInto: mergeTarget ? destProductName : null,
+          product: product.name, quantity, receivedDate: sourceBatch?.received_at || null, lot: sourceBatch?.lot_code || null, mergedInto: mergeTarget ? destProductName : null,
           fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
           totalOnHand: totalRow ? Number(totalRow.stock_quantity) || 0 : null,
         }],
       }),
     })
   })().catch((error) => console.error('[telegram] transfer notification failed', error)))
-  return c.json(mergeTarget ? { mergedIntoProductId: destProductId, mergedIntoProductName: destProductName, destBatchId } : { destBatchId })
+  return c.json(transferReceiptResponse((await findTransferReceipt(db, user.id, clientRequestId))!))
 })
 
 // POST /api/branches/transfer-bulk -- same product-quantity move as
@@ -557,13 +554,33 @@ app.post('/transfer-bulk', async (c) => {
     return c.json({ error: 'Transferring stock requires Full Access to Branches -- Review Required support for this action is not built.' }, 403)
   }
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  if (body.transfer_provenance_version !== 1) return c.json({ error: 'Refresh the app before transferring stock.', code: 'client_upgrade_required' }, 409)
   const fromBranchId = Number.parseInt(String(body.fromBranchId ?? ''), 10)
   const toBranchId = Number.parseInt(String(body.toBranchId ?? ''), 10)
-  const note = body.note != null ? String(body.note).trim() || null : null
+  // The operator's own reason. `reason` is what every current client sends;
+  // a non-empty legacy `note` is still accepted as the reason so a cached
+  // PWA build or a queued offline replay is not 400ed mid-release.
+  const reason = String(body.reason ?? '').trim() || String(body.note ?? '').trim() || null
   const rawItems = Array.isArray(body.items) ? body.items : []
+  const clientRequestId = normalizeTransferRequestId(body.client_request_id)
 
   if (!fromBranchId || !toBranchId) return c.json({ error: 'Missing required fields' }, 400)
   if (fromBranchId === toBranchId) return c.json({ error: 'Source and destination cannot be the same' }, 400)
+  if (!clientRequestId) return c.json({ error: 'client_request_id is required for a bulk transfer.', code: 'client_request_id_required' }, 400)
+  // The same mandatory-cause rule /transfer enforces above -- one transfer
+  // is not exempt from it because it carries many products.
+  // Inventory.tsx has refused a reasonless transfer in the browser since
+  // Part 387; nothing behind it did, so a stale tab, a replayed offline
+  // write or any direct caller could move stock with no recorded cause.
+  // Checked ahead of any DB work, so no path can move stock without one.
+  // The sentence is the exact English of the `transfer_reason_required`
+  // pack key -- the convention branchRoleGuards' refusals already follow, and
+  // exactly what a client-side mapping keys off. That mapping does not cover
+  // it yet: BRANCH_RULE_MESSAGE_KEYS in frontend/src/api/branchRuleErrors.ts
+  // carries only the two branch-role sentences, so a refusal that outruns the
+  // UI still surfaces in English. One entry there is all Khmer needs, with no
+  // Worker change -- which is the whole point of pinning the wording here.
+  if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
   if (!rawItems.length) return c.json({ error: 'No products selected' }, 400)
   if (rawItems.length > MAX_BULK_TRANSFER_ITEMS) {
     return c.json({ error: `Too many products in one transfer (max ${MAX_BULK_TRANSFER_ITEMS}) -- split into more than one transfer` }, 400)
@@ -590,12 +607,22 @@ app.post('/transfer-bulk', async (c) => {
   }
 
   const db = getDb(c.env)
+  const requestJson = JSON.stringify({ version: 1, kind: 'transfer-bulk', fromBranchId, toBranchId, reason, items })
+  if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
+  const requestDigest = await transferRequestDigest(requestJson)
+  const previousReceipt = await findTransferReceipt(db, user.id, clientRequestId)
+  if (previousReceipt) {
+    if (previousReceipt.request_digest !== requestDigest || previousReceipt.request_json !== requestJson) {
+      return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
+    }
+    return c.json({ ...(transferReceiptResponse(previousReceipt) as Record<string, unknown>), replayed: true })
+  }
   // A transfer can carry any number of lines, so both product lookups are
   // chunked to stay inside D1's 100-bound-parameter limit; @branchId is
   // reserved out of the stock query's budget.
   const productIds = items.map((item) => item.productId)
 
-  const [products, stockRows, fromBranch, toBranch] = await Promise.all([
+  const [products, stockRows, fromBranch, toBranch, canonicalTransferRows] = await Promise.all([
     selectInChunks(productIds, 0, (chunk) => {
       const { sql, params } = buildInClause('id', chunk)
       return db.prepare(`
@@ -609,7 +636,24 @@ app.post('/transfer-bulk', async (c) => {
     }),
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
+    db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
   ])
+
+  let canonicalTransferPair: CanonicalTransferPair
+  try {
+    canonicalTransferPair = resolveCanonicalTransferPair(canonicalTransferRows)
+  } catch (error) {
+    if (error instanceof CanonicalBranchConfigurationError) {
+      return c.json({ error: CANONICAL_BRANCH_CONFIGURATION_ERROR, code: CANONICAL_BRANCH_CONFIGURATION_CODE }, 409)
+    }
+    throw error
+  }
+
+  const bulkDirectionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+    || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
+      ? TRANSFER_DIRECTION_ERROR
+      : null)
+  if (bulkDirectionError) return c.json({ error: bulkDirectionError }, 400)
 
   const productById = new Map(products.map((product) => [product.id, product]))
   const stockByProductId = new Map(stockRows.map((row) => [row.product_id, Number(row.quantity) || 0]))
@@ -645,14 +689,14 @@ app.post('/transfer-bulk', async (c) => {
   const mergeTargets = await findIdentityMatches(db, products)
 
   const batchItems = items.filter((item): item is typeof item & { batchId: number } => item.batchId != null)
-  const batchById = new Map<number, { id: number; lot_code: string | null; expiry_date: string | null; notes: string | null }>()
+  const batchById = new Map<number, { id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null }>()
   if (batchItems.length) {
     const batchIds = [...new Set(batchItems.map((item) => item.batchId))]
     const [batchRows, batchStockRows] = await Promise.all([
       selectInChunks(batchIds, 0, (chunk) => {
         const { sql, params } = buildInClause('bid', chunk)
-        return db.prepare(`SELECT id, variant_product_id, lot_code, expiry_date, notes FROM product_batches WHERE id IN (${sql}) AND is_active = 1`)
-          .all<{ id: number; variant_product_id: number; lot_code: string | null; expiry_date: string | null; notes: string | null }>(params)
+        return db.prepare(`SELECT id, variant_product_id, lot_code, received_at, expiry_date, notes FROM product_batches WHERE id IN (${sql}) AND is_active = 1`)
+          .all<{ id: number; variant_product_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null }>(params)
       }),
       selectInChunks(batchIds, 1, (chunk) => {
         const { sql, params } = buildInClause('bid', chunk)
@@ -665,122 +709,45 @@ app.post('/transfer-bulk', async (c) => {
     for (const item of batchItems) {
       const batchRow = batchRowById.get(item.batchId)
       if (!batchRow || batchRow.variant_product_id !== item.productId) {
-        return c.json({ error: `Batch not found for product ${productById.get(item.productId)?.name || `#${item.productId}`}` }, 404)
+        return c.json({ error: `Received date not found for product ${productById.get(item.productId)?.name || `#${item.productId}`}` }, 404)
       }
       const batchAvailable = batchStockById.get(item.batchId) || 0
       if (item.quantity > batchAvailable) {
-        return c.json({ error: `Insufficient batch stock for ${productById.get(item.productId)?.name || `#${item.productId}`} (need ${item.quantity}, have ${batchAvailable})` }, 400)
+        return c.json({ error: `Insufficient stock for ${productById.get(item.productId)?.name || `#${item.productId}`} (need ${item.quantity}, have ${batchAvailable})` }, 400)
       }
-      batchById.set(item.batchId, { id: batchRow.id, lot_code: batchRow.lot_code, expiry_date: batchRow.expiry_date, notes: batchRow.notes })
+      batchById.set(item.batchId, { id: batchRow.id, lot_code: batchRow.lot_code, received_at: batchRow.received_at, expiry_date: batchRow.expiry_date, notes: batchRow.notes })
     }
   }
 
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
-  const merges: Array<{ productId: number; productName: string | null; mergedIntoProductId: number; mergedIntoProductName: string | null }> = []
-  for (const item of items) {
-    const product = productById.get(item.productId)!
-    const mergeTarget = mergeTargets.get(item.productId)
-    const destProductId = mergeTarget?.id ?? item.productId
-    const destProductName = mergeTarget?.name ?? product.name
-    const mergedNote = mergeTarget ? `Added to existing product "${destProductName}" (#${destProductId}) at ${toBranch?.name || 'destination'}` : null
-    const combinedNote = [note, mergedNote].filter(Boolean).join(' -- ') || null
-    if (mergeTarget) merges.push({ productId: item.productId, productName: product.name, mergedIntoProductId: destProductId, mergedIntoProductName: destProductName })
-
-    // Resolved BEFORE the movement inserts so both legs can stamp their
-    // lot (0084) -- same values the branch_batch_stock statements below use.
-    const sourceBatchForItem = item.batchId != null ? batchById.get(item.batchId)! : null
-    const destBatchIdForItem = sourceBatchForItem
-      ? (mergeTarget ? await resolveDestinationBatch(db, sourceBatchForItem, destProductId) : sourceBatchForItem.id)
-      : null
-
-    statements.push(
-      { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity: item.quantity, productId: item.productId, branchId: fromBranchId } },
-      {
-        sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
-        params: { productId: destProductId, branchId: toBranchId, quantity: item.quantity },
-      },
-      {
-        sql: `INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, notes, user_id, user_name, created_at)
-              VALUES (@productId, @productName, @fromBranchId, @toBranchId, @quantity, @note, @userId, @userName, CURRENT_TIMESTAMP)`,
-        params: { productId: item.productId, productName: product.name, fromBranchId, toBranchId, quantity: item.quantity, note: combinedNote, userId: user?.id ?? null, userName: user?.name ?? null },
-      },
-      {
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-              VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-        params: { productId: item.productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity: item.quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: sourceBatchForItem?.id ?? null },
-      },
-      {
-        // Recorded against destProductId, same as the single-item route --
-        // this is a real per-product stock audit trail, so it has to
-        // reflect whichever row's branch_stock actually gained the
-        // quantity, not necessarily the row the operator selected.
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-              VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-        params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity: item.quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}${mergeTarget ? ` (merged from "${product.name}" #${item.productId})` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: destBatchIdForItem },
-      },
-    )
-
-    // Same fix as the single-item /transfer route above, applied per item:
-    // a merge crossing item.productId -> destProductId is not zero-sum for
-    // either product's own stock_quantity, so it needs its own explicit
-    // update. This bulk route's per-item loop never had this -- found while
-    // auditing this route against /transfer's contract/behavior for the
-    // frontend<->backend payload-shape diff (progress.md), not from a
-    // separate report, since the bug is identical and was easy to miss
-    // here: unlike /transfer's single pair of statements, this loop pushes
-    // per-item statements into one shared array across every item in the
-    // request, so a merge-case fix has to be scoped to the right item
-    // instead of just appended once at the end.
-    if (mergeTarget) {
-      statements.push(
-        { sql: 'UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId', params: { quantity: item.quantity, productId: item.productId } },
-        { sql: 'UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @destProductId', params: { quantity: item.quantity, destProductId } },
-      )
-    }
-
-    if (sourceBatchForItem && destBatchIdForItem != null) {
-      statements.push(
-        decrementBatchStockStatement(sourceBatchForItem.id, fromBranchId, item.quantity),
-        incrementBatchStockStatement(destBatchIdForItem, toBranchId, item.quantity),
-      )
-    } else if (item.batchId == null) {
-      // C1 fix (mirrors the single /transfer route above): an item with no
-      // picked lot -- every item in the multi-select flow -- must still move
-      // its branch_batch_stock, or a batch-tracked product's per-lot ledger
-      // drifts from the branch total and the destination loses lot identity.
-      // Auto-allocate FIFO across the source branch's active lots and move each
-      // take, materializing the matching destination lot (its own lot when
-      // same-product, the resolved/cloned lot on an identity-match merge). Any
-      // uncovered legacy stock moves on branch_stock alone. Strict (unclamped)
-      // source decrement, same rationale as the single /transfer route above:
-      // the FIFO read is outside this batch, so strict makes a concurrent
-      // drain abort-and-retry rather than mint per-lot drift.
-      const sourceLots = await readFifoLotAvailability(db, item.productId, fromBranchId)
-      const { takes } = allocateAcrossLots(sourceLots, item.quantity)
-      for (const take of takes) {
-        const destLotId = mergeTarget
-          ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, notes: null }, destProductId)
-          : take.batchId
-        statements.push(
-          decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
-          incrementBatchStockStatement(destLotId, toBranchId, take.quantity),
-        )
-      }
-    }
+  const merges = items.flatMap(item => {
+    const target = mergeTargets.get(item.productId)
+    return target ? [{ productId: item.productId, productName: productById.get(item.productId)?.name || null, mergedIntoProductId: target.id, mergedIntoProductName: target.name }] : []
+  })
+  const responsePayload = { success: true, transferredCount: items.length, merges, replayed: false }
+  const receivedDateByItemIndex = new Map<number, string | null>()
+  const lotCodeByItemIndex = new Map<number, string | null>()
+  for (const [index, item] of items.entries()) {
+    const lot = item.batchId == null ? null : batchById.get(item.batchId)
+    if (lot) { receivedDateByItemIndex.set(index, lot.received_at); lotCodeByItemIndex.set(index, lot.lot_code) }
   }
-
-  await db.batch(statements)
-
-  await Promise.all(items.map((item) => audit(
-    c.env,
-    user?.id ?? null,
-    user?.name ?? null,
-    'transfer',
-    'stock',
-    item.productId,
-    { productName: productById.get(item.productId)?.name, quantity: item.quantity, fromBranchId, toBranchId, bulk: true, mergedIntoProductId: mergeTargets.get(item.productId)?.id ?? null },
-  )))
+  const { statements } = await planTransferOperation(db, {
+    user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'branches',
+    fromBranchId, toBranchId, reason,
+    lines: items.map(item => ({ ...item, destProductId: mergeTargets.get(item.productId)?.id ?? item.productId })),
+    response: responsePayload,
+  })
+  try {
+    await db.batch(statements)
+  } catch (error) {
+    const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
+    if (retryReceipt) {
+      if (retryReceipt.request_digest !== requestDigest || retryReceipt.request_json !== requestJson) {
+        return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
+      }
+      return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
+    }
+    throw error
+  }
 
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
@@ -790,7 +757,7 @@ app.post('/transfer-bulk', async (c) => {
   // (the builder caps the list and states the remainder).
   c.executionCtx.waitUntil((async () => {
     const mergedInto = new Map(merges.map((merge) => [merge.productId, merge]))
-    const lines = await Promise.all(items.map(async (item) => {
+    const lines = await Promise.all(items.map(async (item, itemIndex) => {
       const destProductId = mergedInto.get(item.productId)?.mergedIntoProductId ?? item.productId
       const [fromRow, toRow, totalRow] = await Promise.all([
         db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId: item.productId, branchId: fromBranchId }),
@@ -799,6 +766,8 @@ app.post('/transfer-bulk', async (c) => {
       ])
       return {
         product: productById.get(item.productId)?.name || `#${item.productId}`, quantity: item.quantity,
+        receivedDate: receivedDateByItemIndex.get(itemIndex) || null,
+        lot: lotCodeByItemIndex.get(itemIndex) || null,
         mergedInto: mergedInto.get(item.productId)?.mergedIntoProductName || null,
         fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
         totalOnHand: totalRow ? Number(totalRow.stock_quantity) || 0 : null,
@@ -806,10 +775,10 @@ app.post('/transfer-bulk', async (c) => {
     }))
     await sendTelegramEvent(c.env, {
       type: 'stock_out', heading: '🔁 Stock transferred',
-      lines: formatTransferTelegramLines({ fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note, by: user?.name || user?.username || null, items: lines }),
+      lines: formatTransferTelegramLines({ fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user), items: lines }),
     })
   })().catch((error) => console.error('[telegram] bulk transfer notification failed', error)))
-  return c.json({ success: true, transferredCount: items.length, merges })
+  return c.json(transferReceiptResponse((await findTransferReceipt(db, user.id, clientRequestId))!))
 })
 
 
@@ -851,69 +820,71 @@ function normalizePositiveInt(value: unknown, fallback: number, { min = 1, max =
 // dropped brand/category as free-text dims (see that constant's own
 // comment -- both are already reachable via this page's own filter
 // dropdowns, and stay out of the same-shaped noise problem here too).
-function buildBranchStockWhere(c: any, branchId: number, { includeStockState = true } = {}) {
+function buildBranchStockWhere(c: any, branchId: number, lowStock: LowStockConfig, { includeStockState = true } = {}) {
   const where = ['p.is_active = 1']
   const params: Record<string, unknown> = { branchId }
-  const rawQuery = String(c.req.query('query') || c.req.query('q') || '')
-  const searchTermGroups = tokenizeSearchTermGroups(rawQuery, 6, 8)
-  if (searchTermGroups.length) {
-    const searchMode = 'AND'
-    const matchClauses: string[] = []
-    const ftsMatch = buildFtsMatchExpression(searchTermGroups, searchMode, PRODUCT_SEARCH_COLUMNS)
-    if (ftsMatch) {
-      params.ftsQuery = ftsMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @ftsQuery)')
-    }
-    // Same expression reused against both trigram tables (barcode/sku
-    // substring, and name substring) -- see products.ts's own call site
-    // comment for why one buildTrigramMatchExpression() call covers both.
-    const trigramMatch = buildTrigramMatchExpression(searchTermGroups, searchMode)
-    if (trigramMatch) {
-      params.codeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @codeQuery)')
-      params.nameCodeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @nameCodeQuery)')
-    }
-    // Mixed-group fallback (a group with both a free-text word and a
-    // barcode-fragment word) -- see buildHybridMatchClause's own comment.
-    const hybridMatch = buildHybridMatchClause(searchTermGroups, searchMode, 'hyb', PRODUCT_SEARCH_COLUMNS)
-    if (hybridMatch) {
-      Object.assign(params, hybridMatch.params)
-      matchClauses.push(hybridMatch.sql)
-    }
-    // Sub-3-character word fallback (FTS5's trigram tokenizer emits no
-    // trigrams below 3 chars) and long-query (4+ word) partial fallback --
-    // both scoped to name_normalized only, same reasoning as products.ts.
-    const shortWordMatch = buildShortWordFallbackClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'shortw', true)
-    if (shortWordMatch) matchClauses.push(shortWordMatch)
-    const partialMatch = buildPartialWordMatchClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'partialw', 4, true)
-    if (partialMatch) matchClauses.push(partialMatch)
-    if (matchClauses.length) {
-      where.push(matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0])
-    }
-  }
+  // `search` accepted as a third alias alongside query/q, same as
+  // products.ts/inventory.ts -- an unrecognized key used to mean "return the
+  // whole branch's stock" rather than an error.
+  const rawQuery = String(c.req.query('query') || c.req.query('q') || c.req.query('search') || '')
+  // THE FIX THIS LANE EXISTS FOR. This block used to be a fourth
+  // hand-copy of the search tail, and it had drifted: it computed a
+  // relevance rank ONLY when the typed text was a lone barcode, so every
+  // ordinary name search through this endpoint -- the Transfer picker
+  // (TransferModal) and the per-branch search box on the Branches page,
+  // both of which send ?query= here -- came back in plain alphabetical
+  // family order with no relevance term at all. The closest match landed
+  // wherever the alphabet put it, which is the reported "it shows products
+  // not really matched in top to bottom ... the likely result was at
+  // bottom". Now on the same shared implementation as every other picker
+  // (lib/productSearchQuery.ts), so it gains bm25 plus the exact-barcode/
+  // exact-name/name-prefix tier, and a future picker cannot be built
+  // without them.
+  const searchQuery = buildProductSearchQuery(rawQuery, params)
+  if (searchQuery.whereClause) where.push(searchQuery.whereClause)
+  const matchRankSql = searchQuery.matchRankSql
+  const matchTierSql = searchQuery.matchTierSql
   const stockState = String(c.req.query('stockState') || c.req.query('stock_state') || 'positive').toLowerCase()
   if (includeStockState) {
     if (stockState === 'positive' || stockState === 'in_stock') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)')
     // 'healthy' is the stricter subset of 'positive'/'in_stock' -- above the
     // low stock threshold, not just above zero/out threshold. See matching
     // comment in inventory.ts/products.ts.
-    if (stockState === 'healthy') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.low_stock_threshold, 10)')
+    // See products.ts's matching clause: the out-of-stock term is explicit
+    // because 'low >= out' stops being guaranteed once the alert can be off.
+    if (stockState === 'healthy') where.push(`COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) > ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)
     if (stockState === 'zero') where.push('COALESCE(bs.quantity, 0) = 0')
-    if (stockState === 'low') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= COALESCE(p.low_stock_threshold, 10)')
+    if (stockState === 'low') where.push(`COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)
     if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')
   }
-  return { where, params, stockState }
+  return { where, params, stockState, matchRankSql, matchTierSql }
 }
 
 app.get('/:id/stock', async (c) => {
+  // Ordinary catalog/branch quantities are also available to Inventory
+  // readers. This does not grant transfer planning or mutation authority.
+  const user = c.get('user')
+  if (getActionTier(user, 'branches', 'view') === 'none' && getActionTier(user, 'inventory', 'view') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
   const id = c.req.param('id')
   const db = getDb(c.env)
   const wantsPaged = PAGED_STOCK_QUERY_KEYS.some((key) => c.req.query(key) !== undefined)
 
   if (!wantsPaged) {
+    // p.barcode is in this SELECT because the ONE consumer of this unpaged
+    // branch -- TransferModal's bulk product picker -- filters and ranks the
+    // whole list client-side over `[name, sku, barcode]` and carries its own
+    // ScanSearchButton. The column was missing, so `product.barcode` was
+    // `undefined` on every row and a scanned code could not match the product
+    // it belongs to at all: measured live on the production snapshot, typing
+    // 3348901486385 (SAUVAGE dior Parfum 100ml, present and in stock in this
+    // branch) returned two unrelated Chanel rows and not the scanned product.
+    // The picker's TransferProduct type has always declared `barcode?: string`
+    // and the paged branch below already selects it; this is the payload
+    // catching up with both. Ordering stays A-Z here -- the client ranks.
     const rows = await db.prepare(`
-      SELECT p.id, p.name, p.sku, p.unit, p.selling_price_usd, p.selling_price_khr,
+      SELECT p.id, p.name, p.sku, p.barcode, p.unit, p.selling_price_usd, p.selling_price_khr,
              p.purchase_price_usd, p.purchase_price_khr, p.low_stock_threshold, p.out_of_stock_threshold,
              COALESCE(bs.quantity, 0) AS branch_quantity
       FROM products p
@@ -927,9 +898,10 @@ app.get('/:id/stock', async (c) => {
   const branchId = Number.parseInt(id, 10)
   const page = normalizePositiveInt(c.req.query('page'), 1, { min: 1, max: 100000 })
   const pageSize = normalizePositiveInt(c.req.query('pageSize') || c.req.query('page_size'), 20, { min: 1, max: 100 })
-  const { where, params, stockState } = buildBranchStockWhere(c, branchId)
+  const lowStock = await loadLowStockConfig(c.env)
+  const { where, params, stockState, matchRankSql, matchTierSql } = buildBranchStockWhere(c, branchId, lowStock)
   const whereSql = `WHERE ${where.join(' AND ')}`
-  const summaryWhere = buildBranchStockWhere(c, branchId, { includeStockState: false })
+  const summaryWhere = buildBranchStockWhere(c, branchId, lowStock, { includeStockState: false })
   const summaryWhereSql = `WHERE ${summaryWhere.where.join(' AND ')}`
   // INNER JOIN, not LEFT: a product only "belongs" to this branch's stats/
   // listing once it actually has a branch_stock row here (created by a
@@ -952,6 +924,7 @@ app.get('/:id/stock', async (c) => {
   const [familyStats, positiveRow] = await Promise.all([
     getFamilyStockStats({
       db,
+      lowStock,
       joinSql: branchStockJoinSql,
       whereSql: summaryWhereSql,
       params: summaryWhere.params,
@@ -990,8 +963,15 @@ app.get('/:id/stock', async (c) => {
     params,
     page,
     pageSize,
-    familyOrderSql: 'family_name ASC',
+    // Relevance first (exact barcode, then exact/prefix name, then bm25),
+    // A-Z only as the tail -- same contract every other picker uses.
+    familyOrderSql: buildFamilyRelevanceOrderSql('family_name ASC', {
+      hasTier: Boolean(matchTierSql),
+      hasRank: Boolean(matchRankSql),
+    }),
     intraFamilyOrderSql: 'lower(name) ASC, id ASC',
+    matchRankSql,
+    matchTierSql,
   })
 
   return c.json({
@@ -1011,79 +991,7 @@ app.post('/', async (c) => {
   if (getActionTier(user, 'branches', 'add') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const body = await c.req.json<BranchInput>()
-  const name = body.name?.trim()
-  if (!name) return c.json({ error: 'Name required' }, 400)
-
-  // Review Required tier: no live-state dependency (a straight insert with
-  // an optional is_default reassignment), safe to queue and replay exactly
-  // as-is later -- same reasoning as products.ts's create. maybeQueueForReview
-  // is a no-op (returns null) for Full tier, so this doesn't change behavior
-  // for anyone but a Review Required user.
-  const pendingId = await maybeQueueForReview(c.env, user, 'branches', {
-    actionType: 'create',
-    entityType: 'branch',
-    entityId: null,
-    payload: body,
-    summary: `Create branch "${name}"`,
-  })
-  if (pendingId != null) {
-    return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
-  }
-
-  const db = getDb(c.env)
-  const defaultFlag = toDbBool(body.is_default, 0)
-  const activeFlag = toDbBool(body.is_active, 1)
-
-  // Matches the original's db.transaction(): if this branch is being set as
-  // the new default, every other branch's is_default must clear first, in
-  // the same atomic unit as the insert -- otherwise a request that fails
-  // partway through could leave two branches both marked default.
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
-  if (defaultFlag) {
-    statements.push({ sql: 'UPDATE branches SET is_default = 0' })
-  }
-  statements.push({
-    sql: `INSERT INTO branches (name, location, phone, manager, notes, is_default, is_active, updated_at)
-          VALUES (@name, @location, @phone, @manager, @notes, @is_default, @is_active, CURRENT_TIMESTAMP)`,
-    params: {
-      name,
-      location: body.location || null,
-      phone: body.phone || null,
-      manager: body.manager || null,
-      notes: body.notes || null,
-      is_default: defaultFlag,
-      is_active: activeFlag,
-    },
-  })
-  await db.batch(statements)
-
-  const created = await db.prepare('SELECT id FROM branches WHERE name = ? ORDER BY id DESC LIMIT 1').get<{ id: number }>([name])
-  if (created) {
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'branch', created.id, { name })
-    // Real, confirmed gap: a brand-new branch previously got zero
-    // branch_stock rows for the catalog that already existed -- only
-    // products created AFTER this branch (via seedBranchStockForNewProduct
-    // in lib/productWrites.ts) ever got one. Every existing product simply
-    // had NO row for this branch_id at all, which any branch-scoped view
-    // (POS's branch filter, Inventory's branch filter) reads as "doesn't
-    // stock this branch" -- reported as "POS shows no products for this
-    // branch even though the branch selector itself is populated
-    // correctly." Seeding every active product at 0 here makes a new
-    // branch start in the same state seedBranchStockForNewProduct already
-    // gives a brand-new product: present, explicitly zero, adjustable from
-    // there via a normal stock count/transfer -- not silently absent.
-    c.executionCtx.waitUntil(
-      db.prepare(
-        `INSERT INTO branch_stock (product_id, branch_id, quantity)
-         SELECT p.id, @branchId, 0 FROM products p
-         WHERE p.is_active = 1
-           AND NOT EXISTS (SELECT 1 FROM branch_stock bs WHERE bs.product_id = p.id AND bs.branch_id = @branchId)`
-      ).run({ branchId: created.id }).catch(() => {})
-    )
-  }
-  c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'create', id: created?.id ?? null }))
-  return c.json({ id: created?.id ?? null })
+  return c.json({ error: CANONICAL_BRANCH_IDENTITY_ERROR, code: CANONICAL_BRANCH_IDENTITY_CODE }, 409)
 })
 
 app.put('/:id', async (c) => {
@@ -1096,7 +1004,8 @@ app.put('/:id', async (c) => {
   const body = await c.req.json<BranchInput & Record<string, unknown>>()
   const db = getDb(c.env)
 
-  const current = await db.prepare('SELECT id, updated_at FROM branches WHERE id = ?').get<{ id: number; updated_at: string }>([id])
+  const current = await db.prepare('SELECT id, name, is_active, updated_at FROM branches WHERE id = ?')
+    .get<{ id: number; name: string; is_active: number; updated_at: string }>([id])
   try {
     assertUpdatedAtMatch('branch', current, getExpectedUpdatedAt(body))
   } catch (error) {
@@ -1107,6 +1016,14 @@ app.put('/:id', async (c) => {
     throw error
   }
   if (!current) return c.json({ error: 'Branch not found' }, 404)
+  try {
+    prepareCanonicalBranchUpdate(current, body)
+  } catch (error) {
+    if (error instanceof CanonicalBranchIdentityError) {
+      return c.json({ error: CANONICAL_BRANCH_IDENTITY_ERROR, code: CANONICAL_BRANCH_IDENTITY_CODE }, 409)
+    }
+    throw error
+  }
 
   // Review Required tier: the conflict check above already confirmed the
   // request is against the current row, so queueing here is safe to
@@ -1127,9 +1044,9 @@ app.put('/:id', async (c) => {
 
   // Field write shared with the server-side undo/redo applier -- see
   // lib/branchWrites.ts for why this is one definition, not two.
-  await db.batch(branchUpdateStatements(id, body))
+  await db.batch(branchUpdateStatements(id, body, current))
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'branch', id, { name: body.name })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: current.name })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
   return c.json({})
 })
@@ -1140,59 +1057,7 @@ app.delete('/:id', async (c) => {
   if (getActionTier(user, 'branches', 'delete') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const id = c.req.param('id')
-  const db = getDb(c.env)
-
-  const branch = await db.prepare('SELECT * FROM branches WHERE id = ?').get<{ id: number; name: string; is_default: number; updated_at: string }>([id])
-  if (!branch) return c.json({ error: 'Branch not found' }, 404)
-
-  try {
-    assertUpdatedAtMatch('branch', branch, getExpectedUpdatedAt(Object.fromEntries(new URL(c.req.url).searchParams)))
-  } catch (error) {
-    if (error instanceof WriteConflictError) {
-      const { body: conflictBody, status } = writeConflictResponse(error)
-      return c.json(conflictBody, status)
-    }
-    throw error
-  }
-  if (branch.is_default) return c.json({ error: 'Cannot delete the default branch' }, 400)
-
-  const stockCheck = await db.prepare('SELECT SUM(quantity) AS total FROM branch_stock WHERE branch_id = ? AND quantity > 0').get<{ total: number | null }>([id])
-  if (stockCheck && Number(stockCheck.total) > 0) {
-    return c.json({ error: `Cannot delete branch - it still contains ${Math.round(Number(stockCheck.total))} unit(s) of stock. Transfer all stock to another branch first.` }, 400)
-  }
-
-  // Review Required tier: both safety checks above (not-default, no-stock)
-  // already passed against the current row, so it's tempting to think this
-  // is as safe to queue-and-replay-later as create/update -- it isn't,
-  // because time can pass between queueing and a reviewer's approval and
-  // either check could flip false in the meantime (someone makes this the
-  // default branch, or stock gets transferred back into it). Unlike
-  // stock-integrity/repair and transfer above (blocked outright), a delete
-  // IS still queued here -- but its applier (lib/reviewApply.ts) re-runs
-  // both checks itself against whatever the branch's state is AT APPROVAL
-  // TIME, not the state captured when this was requested, and throws
-  // (leaving the row 'open' rather than silently deleting something that
-  // no longer qualifies) if either has changed. See that applier's own
-  // comment for the exact re-check.
-  const pendingDeleteId = await maybeQueueForReview(c.env, user, 'branches', {
-    actionType: 'delete',
-    entityType: 'branch',
-    entityId: Number(id),
-    payload: { id },
-    summary: `Delete branch #${id} "${branch.name}"`,
-  })
-  if (pendingDeleteId != null) {
-    return c.json({ success: true, pending: true, pendingActionId: pendingDeleteId }, 202)
-  }
-
-  await db.batch([
-    { sql: 'DELETE FROM branch_stock WHERE branch_id = ?', params: [id] },
-    { sql: 'DELETE FROM branches WHERE id = ?', params: [id] },
-  ])
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', 'branch', id, { name: branch.name })
-  c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'delete', id }))
-  return c.json({})
+  return c.json({ error: CANONICAL_BRANCH_IDENTITY_ERROR, code: CANONICAL_BRANCH_IDENTITY_CODE }, 409)
 })
 
 export default app

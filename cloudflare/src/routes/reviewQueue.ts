@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
+import { hasProductMoneyPolicy, ProductMoneyWriteError } from '../lib/productWrites'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, getPermissionTier } from '../lib/permissions'
+import { hasPermission, getActionTier, getPermissionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import {
@@ -11,8 +12,11 @@ import {
   resubmitPendingAction,
   type PendingActionStatus,
 } from '../lib/pendingActions'
-import { applyApprovedPendingAction, NoReviewApplierError } from '../lib/reviewApply'
+import { applyApprovedPendingAction, NoReviewApplierError, productRemovePendingPointer, ReviewRequesterPermissionError } from '../lib/reviewApply'
+import { ProductImageAssetError } from '../lib/productImagePermission'
+import { ProductRemoveError } from '../lib/productDelete'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 // The Review/Approval page itself -- see progress.md's "Permissions UI
 // redesign" item. Gated Full Access only, same pattern Users already
@@ -92,6 +96,31 @@ app.post('/:id/resubmit', async (c) => {
     payloadJson = null
   }
 
+  if (payloadJson != null) {
+    const existing = await getPendingAction(c.env, id)
+    if (!existing || existing.requested_by !== Number(user.id)) {
+      return c.json({ error: 'That request is not yours, or is not awaiting resubmission.' }, 404)
+    }
+    if (productRemovePendingPointer(existing)) {
+      return c.json({ error: 'A product removal approval pointer cannot be edited. Submit a new removal request instead.' }, 400)
+    }
+    if (existing.section === 'products' && existing.entity_type === 'product') {
+      let oldPayload: unknown
+      try { oldPayload = JSON.parse(existing.payload_json || '{}') } catch { oldPayload = null }
+      if (!hasProductMoneyPolicy(oldPayload) && hasProductMoneyPolicy(JSON.parse(payloadJson))) {
+        return c.json({ error: 'A product price plan must be created by a new product edit.', code: 'product_money_plan_immutable' }, 409)
+      }
+      if (hasProductMoneyPolicy(oldPayload)) {
+        const stable = (value: unknown): string => JSON.stringify(value, (_key, part) =>
+          part && typeof part === 'object' && !Array.isArray(part)
+            ? Object.fromEntries(Object.entries(part).sort(([a], [b]) => a.localeCompare(b))) : part)
+        if (stable(oldPayload) !== stable(JSON.parse(payloadJson))) {
+          return c.json({ error: 'A saved product price plan cannot be edited. Submit a new product edit; unchanged resubmission is allowed.', code: 'product_money_plan_immutable' }, 409)
+        }
+      }
+    }
+  }
+
   const ok = await resubmitPendingAction(c.env, id, { requestedBy: Number(user.id), payloadJson, summary })
   // One response for "not yours", "doesn't exist" and "not in a rejected
   // state" -- distinguishing them would confirm the existence of other
@@ -99,7 +128,7 @@ app.post('/:id/resubmit', async (c) => {
   if (!ok) return c.json({ error: 'That request is not yours, or is not awaiting resubmission.' }, 404)
 
   const row = await getPendingAction(c.env, id)
-  await audit(c.env, user.id, user.name || user.username, 'resubmit', 'pending_action', id, row)
+  await audit(c.env, user.id, actorSnapshot(user), 'resubmit', 'pending_action', id, row)
   // Same channel the approve/reject handlers broadcast on, so an admin with
   // the Review page open sees it return to their queue without a refresh.
   await broadcast(c.env, 'pendingActions', { id, status: 'open' })
@@ -146,24 +175,47 @@ app.post('/:id/approve', async (c) => {
 
   const row = await getPendingAction(c.env, id)
   if (!row) return c.json({ error: 'Not found' }, 404)
-  if (row.status !== 'open') return c.json({ error: 'Already reviewed' }, 409)
+  const productRemoveApproval = productRemovePendingPointer(row) != null
+  if (productRemoveApproval && getActionTier(user, 'products', 'delete') !== 'full') {
+    return c.json({ error: 'Full product removal permission is required to approve this request.' }, 403)
+  }
+  if (row.status !== 'open') {
+    if (productRemoveApproval && row.status === 'approved') {
+      return c.json({ success: true, data: row, replayed: true })
+    }
+    return c.json({ error: 'Already reviewed' }, 409)
+  }
 
+  let pendingActionMarkedAtomically = false
   try {
-    await applyApprovedPendingAction(c.env, row, { id: user.id, name: user.name || user.username || null })
+    const outcome = await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user) }, user)
+    pendingActionMarkedAtomically = outcome.pendingActionMarkedAtomically
   } catch (err) {
+    if (err instanceof ProductMoneyWriteError) return c.json({ error: err.message, code: err.code }, err.status as 400 | 409)
     if (err instanceof NoReviewApplierError) {
       return c.json({ error: err.message, code: 'no_review_applier' }, 501)
+    }
+    if (err instanceof ReviewRequesterPermissionError) {
+      return c.json({ error: err.message, code: err.code }, 409)
+    }
+    if (err instanceof ProductImageAssetError) {
+      return c.json({ error: err.message, code: err.code }, 409)
+    }
+    if (err instanceof ProductRemoveError) {
+      return c.json({ error: err.message, code: err.code }, err.status)
     }
     return c.json({ error: (err as Error).message || 'Failed to apply the approved change' }, 500)
   }
 
-  const ok = await markPendingActionApproved(c.env, id, {
-    reviewedBy: user.id,
-    reviewedByName: user.name || user.username,
-  })
-  if (!ok) return c.json({ error: 'Already reviewed or not found' }, 409)
+  if (!pendingActionMarkedAtomically) {
+    const ok = await markPendingActionApproved(c.env, id, {
+      reviewedBy: user.id,
+      reviewedByName: actorSnapshot(user),
+    })
+    if (!ok) return c.json({ error: 'Already reviewed or not found' }, 409)
+  }
   const updatedRow = await getPendingAction(c.env, id)
-  await audit(c.env, user.id, user.name || user.username, 'approve', 'pending_action', id, updatedRow)
+  await audit(c.env, user.id, actorSnapshot(user), 'approve', 'pending_action', id, updatedRow)
   await broadcast(c.env, 'pendingActions', { id, status: 'approved' })
   return c.json({ success: true, data: updatedRow })
 })
@@ -183,12 +235,12 @@ app.post('/:id/reject', async (c) => {
   }
   const ok = await markPendingActionRejected(c.env, id, {
     reviewedBy: user.id,
-    reviewedByName: user.name || user.username,
+    reviewedByName: actorSnapshot(user),
     rejectReason: reason,
   })
   if (!ok) return c.json({ error: 'Already reviewed or not found' }, 409)
   const row = await getPendingAction(c.env, id)
-  await audit(c.env, user.id, user.name || user.username, 'reject', 'pending_action', id, row)
+  await audit(c.env, user.id, actorSnapshot(user), 'reject', 'pending_action', id, row)
   await broadcast(c.env, 'pendingActions', { id, status: 'rejected' })
   return c.json({ success: true, data: row })
 })

@@ -1,26 +1,32 @@
 import { Hono } from 'hono'
-import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES } from '../lib/requestBodyGuard'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { portalAbuseKey } from '../lib/portalAbuseKey'
+import { normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
 import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
-import { detectBufferKind } from '../lib/uploadSecurity'
+import { sanitizePortalImageMetadata } from '../lib/portalImagePrivacy'
+import { serveObject } from '../lib/r2'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { generatePortalAiResponse } from '../lib/portalAi'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
-import { buildFtsMatchExpression, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
-import { loadActivePromotionRules, productPromotedSql } from '../lib/promotionRulesSql'
+import { runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
+import { loadActivePromotionRules, productPromotedSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
 import { paginateProductFamilies } from '../lib/familyPagination'
-import { signupPortalAccount, signinPortalAccount } from '../lib/portalAccounts'
-import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccount } from '../lib/portalSession'
+import { PORTAL_CONSENT_VERSION, signupPortalAccount, signinPortalAccount } from '../lib/portalAccounts'
+import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccountState } from '../lib/portalSession'
 import { getPortalLockoutState, recordPortalFailure, clearPortalLockout } from '../lib/portalAuthLockout'
 import { canonicalizePhone } from '../lib/phone'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
+import { customerIsProfileSql } from '../lib/anonymousCustomer'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -62,6 +68,56 @@ function normalizePortalFaqItems(value: unknown): Array<{ id: string; question: 
       }
     })
     .filter((item) => item.question && item.answer)
+}
+
+// The editor's "Promotions and posts" cards (customer_portal_promo_items,
+// serialised by frontend portalEditorUtils.ts's serializePromoItems). Same
+// field set the storefront's CatalogProductsSection reads; a card links to
+// a product (linkProductId, opened in the product detail flyout) OR to a
+// URL, and BOTH of the card's URLs -- the link it navigates to and the image
+// it renders -- are sanitised ONCE here with the same allowlist the
+// announcement strip's link_url goes through (lib/safeLinkUrl.ts), so an
+// unsafe value stored before that guard existed can never reach a visitor.
+//
+// mediaUrl goes through the same allowlist as linkUrl rather than a looser
+// image-only rule: a real card image is either an uploaded /uploads/... path
+// or an https:// URL, which is exactly what the allowlist admits, and an
+// <img src> is not a harmless place for javascript:/data:/protocol-relative
+// values either (a data: document behind an onerror, a //evil.example beacon
+// that leaks every visitor's IP and referrer to a third party).
+//
+// Malformed JSON fails closed to no cards, like the FAQ above.
+export function normalizePortalPromoItems(value: unknown) {
+  let parsed: unknown = value
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value)
+    } catch (_) {
+      return []
+    }
+  }
+  if (!Array.isArray(parsed)) return []
+
+  return parsed
+    .slice(0, 50)
+    .map((item, index) => {
+      const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+      const text = (key: string) => String(row[key] || '').trim()
+      const linkProductId = Number.parseInt(String(row.linkProductId || ''), 10)
+      return {
+        id: text('id') || `promo-${index + 1}`,
+        eyebrow: text('eyebrow'),
+        title: text('title'),
+        subtitle: text('subtitle'),
+        body: text('body'),
+        mediaUrl: normalizeSafeLinkUrl(row.mediaUrl) || '',
+        ctaLabel: text('ctaLabel'),
+        linkUrl: normalizeSafeLinkUrl(row.linkUrl) || '',
+        linkProductId: Number.isFinite(linkProductId) && linkProductId > 0 ? linkProductId : null,
+        linkProductName: text('linkProductName'),
+      }
+    })
+    .filter((item) => item.title || item.subtitle || item.body || item.mediaUrl)
 }
 
 // Ported from backend/src/routes/portal.ts's normalizeUrl, minus the
@@ -184,6 +240,15 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     businessPhone: settings.business_phone || '',
     businessEmail: settings.business_email || '',
     businessAddress: settings.business_address || '',
+    // N45: the registered identity an online seller has to display (Cambodia's
+    // 2019 e-commerce law) and that the privacy/terms/cookie templates fill in.
+    // Separate from businessName, which is the display/brand name. WHICH of
+    // them are still blank stays an editor-side hint computed from the draft
+    // (CatalogEditorSurface.tsx) and is deliberately NOT published here: no
+    // visitor feature depends on it, and internal readiness has no business
+    // on an anonymous response (owner, 2026-09-14).
+    businessLegalName: settings.business_legal_name || '',
+    businessRegistrationNumber: settings.business_registration_number || '',
     businessTagline: settings.customer_portal_business_tagline || '',
     businessLogo: settings.customer_portal_logo_image || '',
     businessFavicon: settings.customer_portal_favicon_image || '',
@@ -201,6 +266,17 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     showFaq: normalizeBoolean(settings.customer_portal_show_faq, true),
     faqTitle: settings.customer_portal_faq_title || 'Frequently asked questions',
     faqItems: normalizePortalFaqItems(settings.customer_portal_faq_items),
+    // The editor's "Promotions and posts" cards. Same "editor saves it,
+    // buildPortalConfig never sent it" gap as the toggles and contact
+    // blocks below: PublicCatalogPage.tsx read displayConfig.promoItems /
+    // promotionsTitle / promotionsIntro / showPromotions, and the live
+    // /config never carried any of them, so the cards (and every product
+    // link on them) only ever showed in the editor's own preview. An empty
+    // title lets the storefront use its localised "Featured offers".
+    showPromotions: normalizeBoolean(settings.customer_portal_show_promotions, true),
+    promotionsTitle: settings.customer_portal_promotions_title || '',
+    promotionsIntro: settings.customer_portal_promotions_intro || '',
+    promoItems: normalizePortalPromoItems(settings.customer_portal_promo_items),
     showPrices: normalizeBoolean(settings.customer_portal_show_prices, true),
     showOutOfStockProducts: normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true),
     // Master switch for the In Stock/Low Stock/Out of Stock badge on each
@@ -312,6 +388,20 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     gridColumnsDesktop: Math.min(8, Math.max(2, Math.round(toNumber(settings.customer_portal_grid_columns_desktop, 4)))),
     googleMapsEmbed: normalizeGoogleMapsEmbed(settings.customer_portal_google_maps_embed),
     showGoogleMap: normalizeBoolean(settings.customer_portal_show_google_map, true),
+    // The owner's master switch for the whole membership-points programme
+    // (user, Sep 4 2026: "make the membership points on off in settings").
+    //
+    // It lives on `config` rather than being read at each call site because
+    // `summarizePoints` below is the ONE balance formula three surfaces share
+    // (portal.ts here, contacts.ts's computeCustomerPointsMap, and sales.ts's
+    // checkout re-validation). Gating anywhere else would let one surface keep
+    // showing a balance the shop has switched off -- which is exactly the
+    // Part-77 defect: POS displayed a balance and checkout then refused it.
+    //
+    // Defaults to ON. A shop that has never touched this setting must accrue
+    // exactly as it did before the switch existed; only an explicit off
+    // changes anything.
+    loyaltyPointsEnabled: normalizeBoolean(settings.loyalty_points_enabled, true),
     pointsBasis,
     pointsPerUsd,
     pointsPerKhr: toNumber(settings.customer_portal_points_per_khr, derivedPointsPerKhr),
@@ -320,10 +410,31 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     redeemValueKhr: normalizeRedeemValueKhr(settings.customer_portal_redeem_value_khr, exchangeRate),
     membershipInfoText: settings.customer_portal_membership_info_text
       || 'Membership points are reviewed and applied by staff during checkout. Redemption uses whole units only.',
-    submissionEnabled: normalizeBoolean(settings.customer_portal_submission_enabled, true),
+    // N45: OFF until the merchant turns it on. This flag gates a route that
+    // accepts customer photographs; a feature that collects personal data
+    // must not be live on every install merely because nobody said no. The
+    // stored setting still wins in both directions, so an install that has
+    // already switched it on is unaffected -- only the ABSENT setting's
+    // meaning changes.
+    submissionEnabled: normalizeBoolean(settings.customer_portal_submission_enabled, false),
     submissionRewardPoints: Math.max(0, Math.floor(toNumber(settings.customer_portal_submission_reward_points, 5))),
     submissionInstructions: settings.customer_portal_submission_instructions
       || 'Share the business on social media, then upload screenshots here for staff review.',
+    // Same "editor saves it, buildPortalConfig never sends it" gap already
+    // fixed above for translateWidgetEnabled, the per-field show* toggles,
+    // and the whole contact-links block: CatalogPage.tsx (Aug 24 request,
+    // Part 326 backlog item 3) saves these under
+    // customer_portal_product_caution_default/_need_more_details_default,
+    // and ProductDetailFlyout.tsx already renders them as the portal-wide
+    // Caution/Need-More-Details fallback on every product -- but this
+    // function never read them back out, so the real public storefront
+    // always fell back to the frontend's hardcoded generic copy
+    // ("Contact us for more product details." / no caution shown) instead
+    // of the merchant's own saved text, even though the editor's own live
+    // preview (which builds displayConfig straight from its own draft
+    // state, not a round trip through this endpoint) showed it correctly.
+    productCautionDefault: settings.customer_portal_product_caution_default || '',
+    productNeedMoreDetailsDefault: settings.customer_portal_product_need_more_details_default || '',
   }
 }
 
@@ -555,7 +666,12 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   const items = snapshot.items
   const total = snapshot.total
   const portalRules = snapshotRules
-  const itemsWithStockStatus = await attachPortalStockStatus(env, (items || []) as Array<Record<string, unknown>>)
+  // p6/efficiency-3: attachPortalStockStatus (branches + threshold settings +
+  // chunked branch_stock reads) and the initials/A-Z rail query below are
+  // independent -- the rail counts across the WHOLE visible product set via
+  // visibleFilter, not this page's `items` -- so they used to run as two
+  // sequential awaits for no reason. Fan them out together.
+  //
   // Two things were wrong here, and both made the storefront's A-Z rail
   // disagree with what the page below it actually shows.
   //
@@ -578,14 +694,17 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   // and uses the existing index rather than a fresh expression.
   // G4: the rail indexes BRANDS now -- one letter per brand initial,
   // counting distinct products under brands starting with it.
-  const initials = await db.prepare(`
-    SELECT upper(substr(trim(p.brand), 1, 1)) AS value,
-           COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
-    FROM products p
-    WHERE ${visibleFilter} AND trim(COALESCE(p.brand, '')) <> ''
-    GROUP BY value
-    ORDER BY value ASC
-  `).all<{ value: string; count: number }>()
+  const [itemsWithStockStatus, initials] = await Promise.all([
+    attachPortalStockStatus(env, (items || []) as Array<Record<string, unknown>>),
+    db.prepare(`
+      SELECT upper(substr(trim(p.brand), 1, 1)) AS value,
+             COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
+      FROM products p
+      WHERE ${visibleFilter} AND trim(COALESCE(p.brand, '')) <> ''
+      GROUP BY value
+      ORDER BY value ASC
+    `).all<{ value: string; count: number }>(),
+  ])
   return {
     items: itemsWithStockStatus,
     total,
@@ -638,6 +757,29 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
 const PORTAL_CONFIG_TTL_SECONDS = 60
 const PORTAL_CATALOG_TTL_SECONDS = 30
 
+const PORTAL_SEARCH_CACHE_PARAMS = [
+  'page', 'pageSize', 'query', 'q', 'brand', 'category', 'branchId', 'branch_id',
+  'stockState', 'initial', 'promo', 'productId',
+] as const
+
+// Consume Hono's SAME parsed first-value query object as the producer. Keep
+// alias precedence, empty values and duplicate branch-list values unchanged.
+// Only these five public GET producers ignore unknown query parameters.
+export function portalCacheRequest(request: Request, query: Record<string, string>, routePath: string): Request {
+  const url = new URL(request.url)
+  const search = routePath === '/api/portal/catalog/products/search'
+  if (!search && !['/api/portal/config', '/api/portal/bootstrap', '/api/portal/catalog/meta', '/api/portal/catalog/products'].includes(routePath)) return request
+  // Hono decodes encoded literal path characters before matching routes.
+  url.pathname = routePath
+  url.search = ''
+  if (search) {
+    for (const key of PORTAL_SEARCH_CACHE_PARAMS) {
+      if (Object.prototype.hasOwnProperty.call(query, key)) url.searchParams.set(key, query[key])
+    }
+  }
+  return new Request(url.toString(), request)
+}
+
 async function portalCacheVersion(c: { env: Env }): Promise<string> {
   // 6.3: the portal's responses depend on PRODUCTS and on SETTINGS (the
   // whole storefront config lives in settings rows) -- composing both
@@ -648,12 +790,12 @@ async function portalCacheVersion(c: { env: Env }): Promise<string> {
     getVersionWithFallback(c.env, 'products'),
     getVersionWithFallback(c.env, 'settings'),
   ])
-  return `${productsVersion}:${settingsVersion}`
+  return `portal-query-v1:${productsVersion}:${settingsVersion}`
 }
 
 app.get('/config', async (c) => {
   const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(c.req.raw, c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
+  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
     return buildPortalConfig(settings, c.env)
   }))
@@ -661,15 +803,16 @@ app.get('/config', async (c) => {
 
 app.get('/bootstrap', async (c) => {
   const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(c.req.raw, c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
+  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
+    const config = buildPortalConfig(settings, c.env)
     const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
     const [meta, catalog] = await Promise.all([
       buildPortalMeta(c.env, showOutOfStockProducts),
       buildPortalCatalog(c.env, showOutOfStockProducts),
     ])
     return {
-      config: buildPortalConfig(settings, c.env),
+      config,
       meta,
       catalog,
       products: catalog.items,
@@ -688,7 +831,7 @@ app.get('/bootstrap', async (c) => {
 // helpers /bootstrap above already calls.
 app.get('/catalog/meta', async (c) => {
   const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(c.req.raw, c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
+  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
     const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
     return buildPortalMeta(c.env, showOutOfStockProducts)
@@ -696,7 +839,7 @@ app.get('/catalog/meta', async (c) => {
 })
 app.get('/catalog/products', async (c) => {
   const version = await portalCacheVersion(c)
-  return c.json(await cachedJsonResponse(c.req.raw, c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
+  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
     const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
     return buildPortalCatalog(c.env, showOutOfStockProducts)
@@ -719,13 +862,13 @@ app.get('/ai/status', async (c) => {
   const db = getDb(c.env)
   const provider = config.aiProviderId
     ? await db.prepare(`
-        SELECT id, name, requests_per_minute FROM ai_provider_configs
+        SELECT id, name, provider, requests_per_minute FROM ai_provider_configs
         WHERE id = ? AND enabled = 1 AND provider_type = 'chat'
-      `).get<{ id: number; name: string; requests_per_minute: number }>([config.aiProviderId])
+      `).get<{ id: number; name: string; provider: string; requests_per_minute: number }>([config.aiProviderId])
     : await db.prepare(`
-        SELECT id, name, requests_per_minute FROM ai_provider_configs
+        SELECT id, name, provider, requests_per_minute FROM ai_provider_configs
         WHERE enabled = 1 AND provider_type = 'chat' ORDER BY priority ASC LIMIT 1
-      `).get<{ id: number; name: string; requests_per_minute: number }>()
+      `).get<{ id: number; name: string; provider: string; requests_per_minute: number }>()
 
   // Public availability only: whether the assistant is on, plus its title
   // and disclaimer. The backing provider row's identity (id/name) and config
@@ -737,6 +880,10 @@ app.get('/ai/status', async (c) => {
     enabled: !!config.aiEnabled && !!provider,
     title: config.aiTitle,
     disclaimer: config.aiDisclaimer,
+    provider: provider?.provider || '',
+    dataUseNotice: provider
+      ? 'Your question and optional shopping preferences are sent to this AI provider and may be processed outside Cambodia.'
+      : '',
     usage: { providers: [] },
   })
 })
@@ -761,10 +908,8 @@ function hasAiProfilePreference(profile: Record<string, unknown> = {}): boolean 
 // Lightweight visitor fingerprint for AI per-visitor throttling/fairness
 // only -- not used for auth or logging identity. Ported from backend/src/
 // routes/portal.ts's getVisitorFingerprint (req.ip -> Workers' CF-Connecting-IP).
-function getVisitorFingerprint(c: { req: { header: (name: string) => string | undefined } }, request: Request): string {
-  const ip = getClientIp(request).slice(0, 120)
-  const ua = (c.req.header('user-agent') || '').trim().slice(0, 240)
-  return `${ip}|${ua || 'unknown-agent'}`
+async function getVisitorFingerprint(env: Env, request: Request): Promise<string | null> {
+  return portalAbuseKey(env, 'portal:ai:visitor', getClientIp(request).slice(0, 120))
 }
 
 function collectRecommendationCitations(recommendations: Array<{ citations?: unknown[] }> = []) {
@@ -849,8 +994,12 @@ async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
 // instead of an in-memory Map).
 app.post('/ai/chat', async (c) => {
   try {
-    const clientIp = getClientIp(c.req.raw)
-    const ipCheck = await checkRateLimit(c.env, 'portal:ai_chat:ip', clientIp, 20, 60 * 1000)
+    const clientKey = await portalAbuseKey(c.env, 'portal:ai_chat:ip', getClientIp(c.req.raw))
+    const visitorFingerprint = await getVisitorFingerprint(c.env, c.req.raw)
+    if (!clientKey || !visitorFingerprint) {
+      return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+    }
+    const ipCheck = await checkRateLimit(c.env, 'portal:ai_chat:ip', clientKey, 20, 60 * 1000)
     if (!ipCheck.allowed) {
       c.header('Retry-After', String(ipCheck.retryAfterSeconds))
       return c.json({ error: `Too many requests. Try again in ${ipCheck.retryAfterSeconds} seconds.` }, 429)
@@ -862,7 +1011,12 @@ app.post('/ai/chat', async (c) => {
       return c.json({ error: 'Portal AI is currently disabled' }, 403)
     }
 
+    const rejection = await admitRequestBody(c, SMALL_BODY_BYTES)
+    if (rejection) return rejection
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+    if (body.dataUseConsent !== true) {
+      return c.json({ error: 'Confirm the AI data-use notice before sending a request', code: 'ai_data_use_consent_required' }, 400)
+    }
     const question = String(body?.question || '').trim().slice(0, 2000)
     const profile = sanitizeAiProfile(body?.profile)
     if (!question && !hasAiProfilePreference(profile)) {
@@ -880,7 +1034,7 @@ app.post('/ai/chat', async (c) => {
       profile,
       question,
       products,
-      visitorFingerprint: getVisitorFingerprint(c, c.req.raw),
+      visitorFingerprint,
     })
 
     const citations = collectRecommendationCitations(response.recommendations)
@@ -934,8 +1088,14 @@ app.post('/ai/chat', async (c) => {
       recommendations: response.recommendations || [],
       requestPolicy: response.requestPolicy || {},
     })
-  } catch (error) {
-    return c.json({ error: (error as Error)?.message || 'Portal AI request failed' }, 400)
+  } catch (_) {
+    // Provider and endpoint failures may include vendor URLs, account state,
+    // quota details, or echoed upstream response text. Keep those in server
+    // error reporting; the anonymous response gets one stable message.
+    return c.json({
+      error: 'The assistant is temporarily unavailable. Please try again later.',
+      code: 'portal_ai_unavailable',
+    }, 502)
   }
 })
 
@@ -958,7 +1118,13 @@ app.get('/promotions', async (c) => {
       AND (p.ends_at IS NULL OR p.ends_at >= @now)
     ORDER BY p.sort_order ASC, p.id ASC
   `).all({ now: nowIso })
-  return c.json({ items: rows })
+  const items = (Array.isArray(rows) ? rows : []).map((row) => ({
+    ...row,
+    // Legacy rows may predate the admin write guard. Refuse an unsafe value
+    // again at the public boundary so it never reaches a visitor as a target.
+    link_url: normalizeSafeLinkUrl((row as Record<string, unknown>).link_url),
+  }))
+  return c.json({ items })
 })
 
 // ---- Customer membership lookup + share-submission workflow ----
@@ -1011,7 +1177,22 @@ export function summarizePoints(sales: Array<Record<string, unknown>>, returns: 
   for (const adjustment of adjustments) manuallyAwarded += toNumber(adjustment.points)
 
   const balance = Math.max(0, earned - deducted - redeemed + rewarded + manuallyAwarded)
-  const redeemableUnits = Math.floor(balance / Math.max(1, config.redeemPoints))
+
+  // Membership points switched off. The user's ruling: off "turns off the
+  // calculation for sales from this point onwards" -- forward-only, existing
+  // sales and the balances derived from them untouched. So this function keeps
+  // REPORTING the balance a customer already holds; blanking it would be
+  // exactly the retroactive rewrite the ruling excludes, and it would also
+  // make the switch look destructive when it is not.
+  //
+  // What the switch does stop is SPENDING: no redeemable units, no redeem
+  // value, nothing for a checkout to offer. That is what makes "off" mean off
+  // without touching a row. The accrual side is handled where it belongs --
+  // at write time, in the sale insert, resolved server-side from this same
+  // setting so a stale POS tab cannot keep earning. Zeroing the historical
+  // DATA is a third, separate, explicit operation (migration 0116).
+  const spendable = config.loyaltyPointsEnabled !== false
+  const redeemableUnits = spendable ? Math.floor(balance / Math.max(1, config.redeemPoints)) : 0
 
   return {
     earned: Number(earned.toFixed(2)),
@@ -1023,7 +1204,9 @@ export function summarizePoints(sales: Array<Record<string, unknown>>, returns: 
     redeemableUnits,
     minimumRedeemPoints: config.redeemPoints,
     nextRedeemAt: config.redeemPoints,
-    nextRedeemNeeded: Math.max(0, Number((config.redeemPoints - (balance % config.redeemPoints || 0)).toFixed(2)) % config.redeemPoints),
+    nextRedeemNeeded: spendable
+      ? Math.max(0, Number((config.redeemPoints - (balance % config.redeemPoints || 0)).toFixed(2)) % config.redeemPoints)
+      : 0,
     redeemValueUsd: Number((redeemableUnits * config.redeemValueUsd).toFixed(2)),
     redeemValueKhr: Number((redeemableUnits * config.redeemValueKhr).toFixed(0)),
   }
@@ -1038,7 +1221,17 @@ function normalizePortalSubmissionRows(rows: Array<Record<string, unknown>>): Su
     } catch (_) {
       screenshots = []
     }
-    return { ...(entry as SubmissionRow), screenshots }
+    // A private key is not a URL. The reviewer gets a link to the staff-only
+    // route instead, positional so the key itself never leaves the Worker;
+    // rows written before N45 still hold '/uploads/...' paths and pass
+    // through unchanged so the existing queue keeps rendering.
+    const id = entry.id
+    const resolved = screenshots.map((entry_, index) => (
+      String(entry_ || '').startsWith(PORTAL_SUBMISSION_PREFIX)
+        ? `/api/portal/submissions/${id}/screenshot/${index}`
+        : String(entry_ || '')
+    ))
+    return { ...(entry as SubmissionRow), screenshots: resolved }
   })
 }
 
@@ -1051,6 +1244,7 @@ async function findCustomerByMembership(env: Env, membershipNumber: string) {
     SELECT id, name, membership_number, phone, email, address, created_at
     FROM customers
     WHERE lower(trim(membership_number)) = lower(trim(@membershipNumber))
+      AND ${customerIsProfileSql()}
     LIMIT 1
   `).get<{ id: number; name: string; membership_number: string; phone: string }>({ membershipNumber })
 }
@@ -1071,7 +1265,12 @@ function sanitizeScreenshots(value: unknown): string[] {
     if (safe.length >= 8) break
     const normalized = String(entry || '').trim()
     if (!normalized || normalized.length > 2_000_000) continue
-    if (normalized.startsWith('/uploads/') || DATA_IMAGE_RE.test(normalized)) safe.push(normalized)
+    // Inline images ONLY (N45). This used to also wave through any string
+    // starting '/uploads/', which let a submitter attach an object they did
+    // not upload -- any catalogue asset, or another customer's screenshot --
+    // to their own submission. The storefront has only ever sent data URLs
+    // (readImageFilesAsDataUrls), so nothing legitimate used that branch.
+    if (DATA_IMAGE_RE.test(normalized)) safe.push(normalized)
   }
   return safe
 }
@@ -1095,37 +1294,46 @@ function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; mimeType: string 
   }
 }
 
-// Persists any inline data-URL screenshots to R2 (same bucket/prefix as
-// lib/fileAssets.ts's uploads) and returns public paths; already-stored
-// `/uploads/...` paths pass through unchanged.
+// Customer screenshots are personal data: they carry the submitter's own
+// social profile and, routinely, other people's names and faces. They used
+// to be written to `uploads/`, which index.ts's GET /uploads/* serves to
+// anyone with the link, unauthenticated, under a one-year immutable cache
+// header -- a public image host for other people's photographs, with no
+// delete path anywhere in the codebase.
+//
+// They now go under a prefix nothing public serves. The only way back out is
+// GET /submissions/:id/screenshot/:index below, which is staff-only; the
+// value stored in screenshots_json is the R2 KEY, never a URL, so a leaked
+// database row is not by itself a link to the image (N45).
+export const PORTAL_SUBMISSION_PREFIX = 'private/portal-submissions/'
+
+// Persists inline data-URL screenshots to R2 under that private prefix and
+// returns their object keys.
 async function materializePortalScreenshots(env: Env, screenshots: string[]): Promise<string[]> {
   const resolved: string[] = []
   for (const entry of screenshots) {
     if (/^data:image\//i.test(entry)) {
       const decoded = dataUrlToBytes(entry)
       if (!decoded) continue
-      // This is the one upload path in the app that previously skipped
-      // magic-byte validation (see lib/uploadSecurity.ts) -- every other
-      // upload route (files.ts, products.ts, users.ts, importJobs.ts)
-      // already checks that the file's real bytes match its claimed type,
-      // but this one is also the only *unauthenticated* upload path
-      // (anyone can submit a "screenshot" with a membership number,
-      // no login), so it's the highest-value place to close the gap.
-      // sanitizeScreenshots already restricted the claimed mime type to
-      // image/(png|jpeg|webp|gif) via DATA_IMAGE_RE -- this confirms the
-      // decoded bytes actually are that kind of file, not just labeled as
-      // one, before anything gets written to R2 and served back out
-      // publicly at /uploads/*.
-      if (detectBufferKind(decoded.bytes) !== 'image') continue
-      const storedName = buildUniqueStoredName(`portal-submission-${Date.now()}.jpg`)
-      const objectKey = `uploads/${storedName}`
-      await env.ASSETS.put(objectKey, decoded.bytes, { httpMetadata: { contentType: decoded.mimeType } })
-      // K3: same on-upload normalization every other image entry point gets.
-      await enqueueImageNormalization(env, objectKey)
-      resolved.push(`/uploads/${storedName}`)
+      // Validate the real format and remove EXIF/GPS, XMP, comments, and
+      // vendor metadata on the server. A custom client can bypass any canvas
+      // conversion in the browser, so only these minimized bytes may reach R2.
+      const sanitized = sanitizePortalImageMetadata(decoded.bytes)
+      if (!sanitized) continue
+      const extension = sanitized.contentType === 'image/jpeg'
+        ? 'jpg'
+        : sanitized.contentType.slice('image/'.length)
+      const storedName = buildUniqueStoredName(`portal-submission-${Date.now()}.${extension}`)
+      const objectKey = `${PORTAL_SUBMISSION_PREFIX}${storedName}`
+      await env.ASSETS.put(objectKey, sanitized.bytes, { httpMetadata: { contentType: sanitized.contentType } })
+      // Keep customer-submitted evidence in the configured private R2 bucket.
+      // The shared image-normalization queue can fall back to Cloudinary, so
+      // these consented screenshots deliberately do not enter that pipeline.
+      resolved.push(objectKey)
       continue
     }
-    resolved.push(entry)
+    // Anything that is not an inline image was already dropped by
+    // sanitizeScreenshots; nothing else may become a stored screenshot.
   }
   return resolved
 }
@@ -1184,27 +1392,32 @@ async function loadAccountProfile(env: Env, accountId: number): Promise<{ member
 
 app.post('/auth/signup', async (c) => {
   const ip = getClientIp(c.req.raw)
-  const ipWindow = await checkRateLimit(c.env, 'portal:signup:ip', ip, 30, 15 * 60 * 1000)
+  const ipKey = await portalAbuseKey(c.env, 'portal:signup:ip', ip)
+  if (!ipKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  const ipWindow = await checkRateLimit(c.env, 'portal:signup:ip', ipKey, 30, 15 * 60 * 1000)
   if (!ipWindow.allowed) {
     c.header('Retry-After', String(ipWindow.retryAfterSeconds))
     return c.json({ error: `Too many attempts. Try again in ${ipWindow.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
   }
-  const lock = await getPortalLockoutState(c.env, 'signup', ip)
+  const lock = await getPortalLockoutState(c.env, 'signup', ipKey)
   if (lock.locked) {
     c.header('Retry-After', String(lock.retryAfterSeconds))
     return c.json({ error: `Too many sign-up attempts. Please wait about ${Math.ceil(lock.retryAfterSeconds / 60)} minutes, or contact us.`, code: 'locked' }, 429)
   }
 
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
-  const result = await signupPortalAccount(c.env, { name: body.name, phone: body.phone, membershipId: body.membershipId, password: body.password })
+  // consent is the visitor's agreement to the Terms and the Privacy Policy.
+  // The checkbox on the storefront is the prompt; this endpoint is public and
+  // unauthenticated, so the rule itself lives in signupPortalAccount.
+  const result = await signupPortalAccount(c.env, { name: body.name, phone: body.phone, membershipId: body.membershipId, password: body.password, consent: body.consent, consentLocale: body.consentLocale })
   if (!result.ok) {
     // Only phone/membership-id probing counts toward the 10-fail cap; a benign
     // form error (missing field, short password) is retryable without locking.
-    if (result.abuse) await recordPortalFailure(c.env, 'signup', ip)
-    return c.json({ error: result.error, code: result.code }, result.status as 400 | 409)
+    if (result.abuse) await recordPortalFailure(c.env, 'signup', ipKey)
+    return c.json({ error: result.error, code: result.code }, result.status as 400 | 409 | 503)
   }
-  await clearPortalLockout(c.env, 'signup', ip)
-  const session = await createPortalSession(c.env, result.accountId, { userAgent: c.req.header('user-agent'), ip })
+  await clearPortalLockout(c.env, 'signup', ipKey)
+  const session = await createPortalSession(c.env, result.accountId)
   setPortalCookie(c, session.token, session.expiresAt)
   return c.json({ ok: true, account: { membershipId: result.membershipId, name: result.name, email: null } })
 })
@@ -1212,7 +1425,9 @@ app.post('/auth/signup', async (c) => {
 app.post('/auth/signin', async (c) => {
   const ip = getClientIp(c.req.raw)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
-  const ipWindow = await checkRateLimit(c.env, 'portal:signin:ip', ip, 40, 15 * 60 * 1000)
+  const ipKey = await portalAbuseKey(c.env, 'portal:signin:ip', ip)
+  if (!ipKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  const ipWindow = await checkRateLimit(c.env, 'portal:signin:ip', ipKey, 40, 15 * 60 * 1000)
   if (!ipWindow.allowed) {
     c.header('Retry-After', String(ipWindow.retryAfterSeconds))
     return c.json({ error: `Too many attempts. Try again in ${ipWindow.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
@@ -1220,20 +1435,24 @@ app.post('/auth/signin', async (c) => {
   // Flat 10-fail cap keyed on the canonical phone (so one targeted account
   // can't be hammered from rotating IPs), falling back to IP when no phone is
   // supplied at all.
-  const phoneKey = canonicalizePhone(body.phone) || `nophone:${ip}`
+  const canonicalPhone = canonicalizePhone(body.phone)
+  const phoneKey = canonicalPhone
+    ? await portalAbuseKey(c.env, 'portal:signin:phone', canonicalPhone)
+    : ipKey
+  if (!phoneKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
   const lock = await getPortalLockoutState(c.env, 'signin', phoneKey)
   if (lock.locked) {
     c.header('Retry-After', String(lock.retryAfterSeconds))
     return c.json({ error: `Too many sign-in attempts. Please wait about ${Math.ceil(lock.retryAfterSeconds / 60)} minutes, or reset your password.`, code: 'locked' }, 429)
   }
 
-  const result = await signinPortalAccount(c.env, { identifier: body.identifier, phone: body.phone, password: body.password })
+  const result = await signinPortalAccount(c.env, { identifier: body.identifier, phone: body.phone, password: body.password, consent: body.consent, consentLocale: body.consentLocale })
   if (!result.ok) {
     await recordPortalFailure(c.env, 'signin', phoneKey)
-    return c.json({ error: result.error, code: result.code }, result.status as 401)
+    return c.json({ error: result.error, code: result.code }, result.status as 401 | 428 | 503)
   }
   await clearPortalLockout(c.env, 'signin', phoneKey)
-  const session = await createPortalSession(c.env, result.accountId, { userAgent: c.req.header('user-agent'), ip })
+  const session = await createPortalSession(c.env, result.accountId)
   setPortalCookie(c, session.token, session.expiresAt)
   const profile = await loadAccountProfile(c.env, result.accountId)
   return c.json({ ok: true, account: profile })
@@ -1246,23 +1465,30 @@ app.post('/auth/signout', async (c) => {
 })
 
 app.get('/auth/me', async (c) => {
-  const account = await getPortalAccount(c)
-  if (!account) return c.json({ account: null })
-  return c.json({ account: { membershipId: account.membership_id, name: account.name, email: account.email } })
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') {
+    return c.json({ account: null, error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  }
+  if (!state.account) return c.json({ account: null })
+  return c.json({ account: { membershipId: state.account.membership_id, name: state.account.name, email: state.account.email } })
 })
 
 // Server-persisted cart + wishlist ("permanent memory"). Strictly scoped by
 // the session's own account id from the cookie — never a client-supplied id
 // (no IDOR).
 app.get('/account/cart', async (c) => {
-  const account = await getPortalAccount(c)
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
   if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
   const row = await getDb(c.env).prepare('SELECT cart_json FROM portal_accounts WHERE id = ? LIMIT 1').get<{ cart_json: string | null }>([account.id])
   return c.json({ items: safeJsonArray(row?.cart_json) })
 })
 
 app.put('/account/cart', async (c) => {
-  const account = await getPortalAccount(c)
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
   if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const items = sanitizePortalBucketItems(body.items, PORTAL_CART_MAX_ITEMS, true)
@@ -1271,14 +1497,18 @@ app.put('/account/cart', async (c) => {
 })
 
 app.get('/account/wishlist', async (c) => {
-  const account = await getPortalAccount(c)
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
   if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
   const row = await getDb(c.env).prepare('SELECT wishlist_json FROM portal_accounts WHERE id = ? LIMIT 1').get<{ wishlist_json: string | null }>([account.id])
   return c.json({ items: safeJsonArray(row?.wishlist_json) })
 })
 
 app.put('/account/wishlist', async (c) => {
-  const account = await getPortalAccount(c)
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
   if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const items = sanitizePortalBucketItems(body.items, PORTAL_WISHLIST_MAX_ITEMS, false)
@@ -1292,7 +1522,9 @@ app.put('/account/wishlist', async (c) => {
 // The account system replaces it; the storefront shows a privacy message in
 // its place, and this endpoint refuses so the data path can't be reached
 // directly either. findCustomerByMembership is retained — /submissions still
-// uses it — but nothing here returns customer rows anymore.
+// resolves a SIGNED-IN account's own customer row through it (N45; the
+// membership number comes from the session, never from a request body) — but
+// nothing here returns customer rows anymore.
 app.get('/membership/:membershipNumber', async (c) => {
   return c.json({
     error: 'This feature is not built into the account structure for privacy and security purposes.',
@@ -1300,26 +1532,126 @@ app.get('/membership/:membershipNumber', async (c) => {
   }, 403)
 })
 
+// How many screenshots one customer may submit per rolling 24 hours. The
+// per-IP window above bounds a flood from one machine; this bounds the
+// storage one ACCOUNT can consume however many machines it uses. Three is a
+// generous reading of the feature (share a post, prove it once).
+export const PORTAL_SUBMISSION_DAILY_CAP = 3
+const PORTAL_SUBMISSION_CAP_WINDOW_MS = 24 * 60 * 60 * 1000
+export const PORTAL_SUBMISSION_CONSENT_VERSION = 'portal-submission-2026-09-07'
+
+let submissionConsentColumnsReady: boolean | null = null
+async function portalSubmissionConsentSchemaReady(env: Env): Promise<boolean> {
+  if (submissionConsentColumnsReady === true) return true
+  try {
+    const rows = await getDb(env).prepare('PRAGMA table_info("customer_share_submissions")').all<{ name?: string }>()
+    const names = new Set((Array.isArray(rows) ? rows : []).map((row) => String(row?.name || '')))
+    const ready = ['rights_consent_version', 'privacy_consent_version', 'consent_at', 'consent_locale']
+      .every((name) => names.has(name))
+    submissionConsentColumnsReady = ready
+    return ready
+  } catch {
+    submissionConsentColumnsReady = false
+    return false
+  }
+}
+
+// Resolve the CRM customer a signed-in portal account speaks for. The link
+// is the account row itself -- contact_id when the signup folded a contact,
+// otherwise the membership id the account was issued -- so the caller never
+// gets to name a customer.
+async function resolveSubmissionCustomer(env: Env, account: { contact_id: number | null; membership_id: string }) {
+  if (account.contact_id) {
+    const row = await getDb(env).prepare(
+      `SELECT id, name, membership_number FROM customers WHERE id = @id AND ${customerIsProfileSql()} LIMIT 1`,
+    ).get<{ id: number; name: string | null; membership_number: string | null }>({ id: account.contact_id })
+    if (row) return row
+  }
+  const byMembership = await findCustomerByMembership(env, account.membership_id || '')
+  return byMembership ? { id: byMembership.id, name: byMembership.name, membership_number: byMembership.membership_number } : null
+}
+
 app.post('/submissions', async (c) => {
-  const rate = await checkRateLimit(c.env, 'portal:submissions', getClientIp(c.req.raw), 12, 15 * 60 * 1000)
+  // Was: an UNAUTHENTICATED endpoint that accepted a membership number from
+  // the request body, looked it up, and wrote whatever images came with it.
+  // Membership numbers are a gap-filling LC-##### sequence (lib/
+  // membershipNumber.ts) -- guessable in order -- so the only thing standing
+  // between the open internet and an image-hosting write was counting. It
+  // now needs a real session, and the customer comes from that session's
+  // account, never from the body (N45).
+  const submissionKey = await portalAbuseKey(c.env, 'portal:submissions:ip', getClientIp(c.req.raw))
+  if (!submissionKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  const rate = await checkRateLimit(c.env, 'portal:submissions', submissionKey, 12, 15 * 60 * 1000)
   if (!rate.allowed) {
     c.header('Retry-After', String(rate.retryAfterSeconds))
     return c.json({ error: `Too many requests. Try again in ${rate.retryAfterSeconds} seconds.` }, 429)
   }
 
+  // Order is deliberate. The feature switch and the byte ceiling are
+  // cheap and answer the same for everyone (/config already publishes
+  // whether submissions are on), so they run before anything that costs a
+  // database round-trip; the session check is what actually gates the write.
   const settings = await loadSettingsMap(c.env)
   const config = buildPortalConfig(settings, c.env)
   if (!config.submissionEnabled) return c.json({ error: 'Customer submissions are currently disabled' }, 403)
 
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
-  const membershipNumber = String(body.membershipNumber || '').trim()
-  if (!membershipNumber) return c.json({ error: 'Membership number is required' }, 400)
+  const rejection = await admitRequestBody(c, PORTAL_SCREENSHOT_BODY_BYTES)
+  if (rejection) return rejection
 
-  const customer = await findCustomerByMembership(c.env, membershipNumber)
-  if (!customer) return c.json({ error: 'Membership not found' }, 404)
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') {
+    return c.json({
+      error: 'Please agree to the current policies by signing in again before sharing a screenshot.',
+      code: 'portal_consent_required',
+      consentVersion: PORTAL_CONSENT_VERSION,
+    }, 428)
+  }
+  const account = state.account
+  if (!account) {
+    return c.json({ error: 'Please sign in to your account before sharing a screenshot.', code: 'portal_unauthenticated' }, 401)
+  }
+
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  if (body.rightsConsent !== true || body.privacyConsent !== true) {
+    return c.json({
+      error: 'Please confirm both the content-rights and privacy statements before submitting.',
+      code: 'submission_consent_required',
+    }, 400)
+  }
+  if (!(await portalSubmissionConsentSchemaReady(c.env))) {
+    return c.json({
+      error: 'Submission consent storage is not ready. Please try again later.',
+      code: 'submission_consent_storage_unavailable',
+    }, 503)
+  }
 
   const screenshots = sanitizeScreenshots(body.screenshots)
   if (!screenshots.length) return c.json({ error: 'At least one screenshot is required' }, 400)
+
+  const customer = await resolveSubmissionCustomer(c.env, account)
+  if (!customer) {
+    // A signed-in account whose CRM row cannot be resolved (an unfolded
+    // signup, a merged/deleted contact). Do not claim success when no durable
+    // submission can be written; the account owner gets an actionable error.
+    return c.json({
+      error: 'Your account is not linked to a customer record yet. Please contact the store before submitting.',
+      code: 'submission_account_unlinked',
+    }, 409)
+  }
+
+  const db = getDb(c.env)
+  const cutoff = new Date(Date.now() - PORTAL_SUBMISSION_CAP_WINDOW_MS).toISOString().slice(0, 19).replace('T', ' ')
+  const recent = await db.prepare(
+    'SELECT COUNT(*) AS n FROM customer_share_submissions WHERE customer_id = @cid AND created_at >= @cutoff',
+  ).get<{ n: number }>({ cid: customer.id, cutoff })
+  if (Number(recent?.n || 0) >= PORTAL_SUBMISSION_DAILY_CAP) {
+    c.header('Retry-After', String(Math.ceil(PORTAL_SUBMISSION_CAP_WINDOW_MS / 1000)))
+    return c.json({
+      error: `You can share up to ${PORTAL_SUBMISSION_DAILY_CAP} screenshots a day. Please try again tomorrow.`,
+      code: 'submission_daily_cap',
+    }, 429)
+  }
+
   const persistedScreenshots = await materializePortalScreenshots(c.env, screenshots)
   if (!persistedScreenshots.length) {
     return c.json({ error: 'Screenshot upload failed validation. Please upload a real image file.' }, 400)
@@ -1328,19 +1660,30 @@ app.post('/submissions', async (c) => {
   const platform = String(body.platform || '').trim().slice(0, 120)
   const note = String(body.note || '').trim().slice(0, 4000)
 
-  const db = getDb(c.env)
-  const result = await db.prepare(`
-    INSERT INTO customer_share_submissions (
-      customer_id, membership_number, customer_name, platform, note, screenshots_json, status
-    ) VALUES (@customerId, @membershipNumber, @customerName, @platform, @note, @screenshotsJson, 'pending')
-  `).run({
-    customerId: customer.id || null,
-    membershipNumber: customer.membership_number || membershipNumber,
-    customerName: customer.name || '',
-    platform: platform || null,
-    note: note || null,
-    screenshotsJson: JSON.stringify(persistedScreenshots),
-  })
+  let result: Awaited<ReturnType<ReturnType<typeof db.prepare>['run']>>
+  try {
+    result = await db.prepare(`
+      INSERT INTO customer_share_submissions (
+        customer_id, membership_number, customer_name, platform, note, screenshots_json, status,
+        rights_consent_version, privacy_consent_version, consent_at, consent_locale
+      ) VALUES (
+        @customerId, @membershipNumber, @customerName, @platform, @note, @screenshotsJson, 'pending',
+        @consentVersion, @consentVersion, CURRENT_TIMESTAMP, @consentLocale
+      )
+    `).run({
+      customerId: customer.id,
+      membershipNumber: customer.membership_number || account.membership_id,
+      customerName: customer.name || '',
+      platform: platform || null,
+      note: note || null,
+      screenshotsJson: JSON.stringify(persistedScreenshots),
+      consentVersion: PORTAL_SUBMISSION_CONSENT_VERSION,
+      consentLocale: String(body.consentLocale || 'und').slice(0, 16),
+    })
+  } catch (error) {
+    await c.env.ASSETS.delete(persistedScreenshots).catch(() => undefined)
+    throw error
+  }
 
   c.executionCtx.waitUntil(broadcast(c.env, 'portalSubmissions', { action: 'create', id: result.lastInsertRowid }))
   return c.json({ success: true, id: result.lastInsertRowid })
@@ -1366,6 +1709,37 @@ app.get('/submissions/review', requireAuth, async (c) => {
       created_at DESC
   `).all()
   return c.json(normalizePortalSubmissionRows(rows as unknown as Array<Record<string, unknown>>))
+})
+
+// The ONLY way a stored submission screenshot leaves the Worker. Staff-only,
+// positional (the reviewer never learns the object key), and explicitly
+// uncacheable -- the default in lib/r2.ts is a year of immutable public
+// caching, which is right for a catalogue image and wrong for a photograph
+// of somebody's phone screen (N45).
+app.get('/submissions/:id/screenshot/:index', requireAuth, async (c) => {
+  if (!canManagePortalSubmissions(c.get('user'))) return c.json({ error: 'Forbidden' }, 403)
+  const id = Number(c.req.param('id'))
+  const index = Number(c.req.param('index'))
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(index) || index < 0) {
+    return c.json({ error: 'Not found' }, 404)
+  }
+  const row = await getDb(c.env).prepare(
+    'SELECT screenshots_json FROM customer_share_submissions WHERE id = @id LIMIT 1',
+  ).get<{ screenshots_json: string | null }>({ id })
+  if (!row) return c.json({ error: 'Not found' }, 404)
+  let keys: unknown[] = []
+  try { keys = JSON.parse(String(row.screenshots_json || '[]')) } catch { keys = [] }
+  const key = String(Array.isArray(keys) ? keys[index] ?? '' : '')
+  // Only keys this route wrote are servable. A legacy `/uploads/...` value is
+  // already public through index.ts and must not gain a second door here,
+  // and the prefix check is what stops a crafted row addressing any other
+  // object in the bucket.
+  if (!key.startsWith(PORTAL_SUBMISSION_PREFIX)) return c.json({ error: 'Not found' }, 404)
+  const response = await serveObject(c.env.ASSETS, key, c.req.raw)
+  const headers = new Headers(response.headers)
+  headers.set('cache-control', 'private, no-store')
+  headers.set('x-content-type-options', 'nosniff')
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
 })
 
 app.patch('/submissions/:id/review', requireAuth, async (c) => {
@@ -1395,10 +1769,10 @@ app.patch('/submissions/:id/review', requireAuth, async (c) => {
     rewardPoints: status === 'approved' ? rewardPoints : 0,
     reviewNote: reviewNote || null,
     reviewedById: user?.id ?? null,
-    reviewedByName: user?.name ?? null,
+    reviewedByName: actorSnapshot(user),
   })
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'review', 'portal_submission', id ?? null, { status, rewardPoints })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'review', 'portal_submission', id ?? null, { status, rewardPoints })
   c.executionCtx.waitUntil(broadcast(c.env, 'portalSubmissions', { action: 'review', id }))
   return c.json({ success: true })
 })
@@ -1469,115 +1843,63 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
     where.push(`EXISTS (SELECT 1 FROM branch_stock mb WHERE mb.product_id = p.id AND mb.branch_id IN (${keys.join(', ')}) AND mb.quantity > 0)`)
   }
 
-  // Was `raw.toLowerCase().split(/\s+/)` -- only ever split on whitespace,
-  // so it never folded accents/diacritics and never treated "+"/"&"/"-"
-  // etc. as word boundaries, meaning a typed "Cover+Concealer" (no spaces)
-  // and a stored "Cover + Concealer" (spaces around the plus) landed as
-  // different single "words" and never matched. Ported from
-  // routes/products.ts's splitSearchTerms (lib/searchMatch.ts's
-  // tokenizeSearchWords) -- this is the one search path that reaches
-  // real customers (GET /api/portal/catalog/products/search), so it's
-  // the one place fuzzy/typo-tolerant matching matters most, and it had
-  // been left on a plain substring LIKE this whole time.
+  // The flat word list, kept for the JS fuzzy (typo-tolerant) fallback in
+  // runPortalProductSearch below -- runFuzzyFallbackMatch takes words, not
+  // the comma-separated GROUPS the SQL tail tokenizes into. It no longer
+  // feeds the WHERE clause: buildProductSearchQuery does its own
+  // tokenization (tokenizeSearchTermGroups over the same raw text, and the
+  // two always agree on whether anything was typed at all -- both start
+  // from normalizeSearchText, which reduces a comma to a space, so neither
+  // can see a term the other cannot).
+  //
+  // History, since it explains the tokenizer choice: this used to be
+  // `raw.toLowerCase()` split on whitespace, which never folded accents/
+  // diacritics and never treated "+"/"&"/"-" as word boundaries, so a typed
+  // "Cover+Concealer" (no spaces) and a stored "Cover + Concealer" (spaces
+  // around the plus) landed as different single "words" and never matched.
+  // This is the one search path that reaches real customers (GET
+  // /api/portal/catalog/products/search), so it is the one place fuzzy/typo
+  // tolerance matters most.
   const searchTerms = tokenizeSearchWords(query.query || query.q || '', 8)
-  let searchWhereClause: string | undefined
-  let matchRankSql: string | undefined
-  if (searchTerms.length) {
-    // Now on products_fts (migrations/0018_products_fts.sql) via an FTS5
-    // column-SET filter (`{name brand category}:term`, see
-    // buildFtsMatchExpression's own comment in lib/searchMatch.ts for how
-    // this was verified against real FTS5) instead of the old per-row
-    // REPLACE()-chain LIKE full-table scan -- that old approach couldn't
-    // use SQLite's inverted index at all (every normalizedHaystackSql()
-    // wrapper defeats any index on the underlying column), so every
-    // storefront search was a full scan of the products table, the exact
-    // cost profile migration 0018's own comment warns about. This is the
-    // one search path that reaches real customers on every keystroke (see
-    // the debounce fix on PublicCatalogPage.tsx), so it's the one place
-    // that cost mattered most. The public portal doesn't expose an
-    // AND/OR toggle -- always one AND-group of every typed word, same
-    // shape this endpoint already had, just expressed as a single FTS5
-    // group instead of an ANDed chain of LIKEs. `IN (SELECT rowid FROM
-    // products_fts WHERE ... MATCH ...)` rather than a JOIN, matching
-    // products.ts/inventory.ts's own wiring (a JOINed FTS5 table combined
-    // via OR throws at the SQLite level -- confirmed against real FTS5,
-    // see inventory.ts's comment). expandAliasCandidates (RT/NYX/BH/OFRA
-    // shorthand) is folded into buildFtsMatchExpression itself now,
-    // rather than expanded into separate LIKE clauses here.
-    // Column set narrowed to name/sku/barcode only, matching
-    // PRODUCT_SEARCH_COLUMNS on the staff-facing surfaces (products.ts/
-    // inventory.ts) -- brand/category dropped per the same reasoning that
-    // constant's own comment documents: product names already carry the
-    // brand in this catalog, and the storefront's own brand/category filter
-    // chips (below, the `for (const field of ['brand', 'category'])` loop)
-    // already cover exact brand/category lookup. sku/barcode stay in scope
-    // -- a shopper scanning or typing a product's barcode/SKU is exactly the
-    // "second-most-used search dimension after name" case. 'unit' was never
-    // in scope here (no portal equivalent of the admin unit-review
-    // workflow), unaffected by this change.
-    const ftsMatch = buildFtsMatchExpression([searchTerms], 'AND', ['name', 'sku', 'barcode'])
-    const matchClauses: string[] = []
-    if (ftsMatch) {
-      params.portalFtsQuery = ftsMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @portalFtsQuery)')
-      // Relevance ranking (bm25, same weighting products.ts uses) so a
-      // search actually surfaces the best match first instead of just
-      // alphabetically -- the old LIKE-chain version had no ranking
-      // concept at all, every result tied and fell through to the
-      // alphabetical ORDER BY regardless of match quality.
-      matchRankSql = `COALESCE((SELECT ${PRODUCTS_FTS_BM25_SQL} FROM products_fts WHERE products_fts.rowid = p.id AND products_fts MATCH @portalFtsQuery), 0)`
-    }
-    // products_fts_code (migrations/0019_products_fts_code.sql, trigram
-    // tokenizer) covers the same real gap it covers for products.ts/
-    // inventory.ts: word-prefix FTS5 matching alone can never find a
-    // barcode/SKU typed as a MID-string fragment (e.g. the last 4 digits
-    // of a barcode) because that fragment isn't a token boundary-aligned
-    // prefix -- see that migration's own comment. Not wired to
-    // matchRankSql -- trigram relevance isn't meaningful the same way
-    // word-match relevance is, same call products.ts already made.
-    const trigramMatch = buildTrigramMatchExpression([searchTerms], 'AND')
-    if (trigramMatch) {
-      params.portalCodeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @portalCodeQuery)')
-    }
-    // products_fts_name_trigram (migrations/0021_products_fts_name_
-    // trigram.sql) -- same fused number+unit/shade-code gap
-    // (e.g. "100ml", "110C") as products.ts/inventory.ts, and the
-    // storefront needs it just as much: a shopper typing "ml" or a
-    // shade-code fragment into the public search box is exactly the
-    // reported "search hides a product that's clearly there" case, and
-    // this is the highest-traffic search surface in the app (every
-    // customer keystroke, not just staff). Reuses the same trigramMatch
-    // expression computed above -- it's table-agnostic MATCH text.
-    if (trigramMatch) {
-      params.portalNameCodeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @portalNameCodeQuery)')
-    }
-    // Short-word (<3 char) LIKE fallback -- see buildShortWordFallbackClause's
-    // own comment in lib/searchMatch.ts. Scoped to 'name' only on the
-    // storefront (no 'unit' column exposed here the way the admin
-    // products/inventory search intentionally keeps for the unit-review
-    // workflow -- see PRODUCT_SEARCH_COLUMNS's own comment).
-    // Same depth-100 fix as products.ts/inventory.ts's identical call
-    // sites: name_normalized instead of raw p.name, alreadyNormalizedCols=
-    // true, so a shopper's 1-2 character search doesn't run the ~78-level
-    // nested REPLACE() chain (see migration 0037_product_search_compact_
-    // columns.sql and products.ts's own comment on this exact fix).
-    const shortWordMatch = buildShortWordFallbackClause([searchTerms], 'AND', ['p.name_normalized'], params, 'portalShortw', true)
-    if (shortWordMatch) matchClauses.push(shortWordMatch)
-    // Compact-brand substring fallback intentionally NOT called here
-    // anymore -- brand dropped from ftsMatch's own column list above, same
-    // reasoning (see PRODUCT_SEARCH_COLUMNS's comment in lib/searchMatch.ts).
-    // Partial multi-word fallback -- same long-name gap products.ts/
-    // inventory.ts close (see buildPartialWordMatchClause's own comment).
-    // Scoped to name only, same reasoning as those two.
-    // Same depth-100 fix as products.ts/inventory.ts -- name_normalized, alreadyNormalizedCols=true.
-    const partialMatch = buildPartialWordMatchClause([searchTerms], 'AND', ['p.name_normalized'], params, 'portalPartialw', 4, true)
-    if (partialMatch) matchClauses.push(partialMatch)
-    if (matchClauses.length) {
-      searchWhereClause = matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0]
-    }
-  }
+  // The WHOLE search tail -- FTS5 MATCH over name/sku/barcode, both trigram
+  // tables, the hybrid/short-word/partial-word fallbacks, the exact-barcode
+  // equality probe, the bm25 relevance rank and the discrete relevance TIER
+  // -- comes from lib/productSearchQuery.ts, the ONE implementation every
+  // product picker in the app shares. This file carried the last hand-copy
+  // of it: products.ts, inventory.ts and branches.ts moved onto the shared
+  // module earlier in this lane and the storefront was left behind, which
+  // is exactly how four copies of the same ~90 lines drifted apart in the
+  // first place. See that module's header for the ordering contract and
+  // why the tier is kept separate from the bm25 rank.
+  //
+  // Nothing about WHICH columns are searched changes: PRODUCT_SEARCH_COLUMNS
+  // is name/sku/barcode, the same three this endpoint's own FTS5 column-set
+  // filter already scoped to, and brand/category stay out for the reason
+  // that constant's comment documents (the storefront's own brand/category
+  // chips already cover exact brand/category lookup). The portal exposes no
+  // AND/OR toggle and no "titles only" switch, so both stay at their
+  // defaults (AND, everything in scope).
+  //
+  // What the storefront GAINS by adopting it, beyond ending the drift:
+  //  - the exact-barcode disjunct with leading zeros folded on both sides,
+  //    so a shopper scanning a GTIN-14 finds the EAN-13 twin this catalog
+  //    also stores (and vice versa) instead of relying on the trigram
+  //    table happening to contain the fragment;
+  //  - the mixed word+code group clause, which neither FTS5 table resolves
+  //    alone;
+  //  - the discrete relevance TIER (exact barcode / exact name / name
+  //    prefix / everything else), which is what the ORDER BY in
+  //    runPortalProductSearch now leads with.
+  //
+  // paramPrefix 'portal' keeps every bound name this function produces
+  // inside its own namespace, the same way the hand-copy prefixed its
+  // own (@portalFtsQuery, @portalShortw0, ...) -- runPortalProductSearch
+  // binds promotion-rule and pagination params into the SAME object after
+  // this returns.
+  const searchQuery = buildProductSearchQuery(query.query || query.q || '', params, { paramPrefix: 'portal' })
+  const searchWhereClause = searchQuery.whereClause
+  const matchRankSql = searchQuery.matchRankSql
+  const matchTierSql = searchQuery.matchTierSql
 
   for (const field of ['brand', 'category']) {
     const values = String(query[field] || '')
@@ -1629,7 +1951,7 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
   const baseWhere = [...where]
   if (searchWhereClause) where.push(searchWhereClause)
 
-  return { where, joins, params, stockExpr, baseWhere, searchTerms, matchRankSql }
+  return { where, joins, params, stockExpr, baseWhere, searchTerms, matchRankSql, matchTierSql }
 }
 
 // The storefront's highest-traffic endpoint, and the one that scales with
@@ -1647,7 +1969,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // 20, matching CATALOG_DEFAULT_PAGE_SIZE on the storefront -- a request
   // that omits pageSize must get the same page the client would have asked
   // for, or the first load differs from every later one.
-  const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize || '20', 10) || 20))
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize || '50', 10) || 50))
   const offset = (page - 1) * pageSize
 
   // Targeted key lookup (not the full loadSettingsMap scan) since this runs
@@ -1673,22 +1995,37 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   const initialClause = initial && initial.toLowerCase() !== 'all'
     ? "upper(substr(trim(COALESCE(p.brand, '')), 1, 1)) = @initial"
     : undefined
-  if (initialClause) {
-    params.initial = initial.toUpperCase()
-    where.push(initialClause)
-  }
+  if (initialClause) params.initial = initial.toUpperCase()
   const joinSql = joins.join('\n')
-  // G1 promoted ordering + the public promo filter (G1b), hoisted ABOVE
+  // G1 promoted ordering + the public promo facet (G1b), hoisted ABOVE
   // whereSql so the COUNT and the page query see the same condition. The
-  // storefront exposes exactly ONE promo facet -- 'promoted' (a live
-  // discount or any active rule); rule-id filtering stays admin-only and
-  // internal facets (supplier etc.) never reach the portal (standing
-  // surface rule).
+  // facet is 'promoted' (a live discount or any active rule) or
+  // 'rule:<id>' -- the campaign chip on the storefront's promo strip
+  // narrows the grid to that one rule's products. Only an id in the ACTIVE
+  // rule set can match (singleRuleAppliesSql answers '0' for any other), so
+  // nothing internal is reachable through it; supplier-style admin facets
+  // still never reach the portal (standing surface rule).
   const searchRules = await loadActivePromotionRules(db)
   const searchPromotedRankSql = `CASE WHEN ${productPromotedSql(searchRules, params)} THEN 1 ELSE 0 END`
-  if (String(query.promo || '').trim().toLowerCase() === 'promoted') {
-    where.push(productPromotedSql(searchRules, params))
-  }
+  const promoFacet = String(query.promo || '').trim().toLowerCase()
+  const promoClause = promoFacet === 'promoted'
+    ? productPromotedSql(searchRules, params)
+    : /^rule:\d+$/.test(promoFacet)
+      ? singleRuleAppliesSql(searchRules, Number(promoFacet.slice('rule:'.length)), params)
+      : undefined
+  // One product by id: how the announcement strip and the promotion cards
+  // open a product that is not on the loaded page. It goes through this
+  // endpoint on purpose -- same visibility, stock and redaction rules as
+  // every other hit -- rather than a by-id route with its own copy of them.
+  const productId = Number.parseInt(String(query.productId || ''), 10)
+  const productIdClause = Number.isFinite(productId) && productId > 0 ? 'p.id = @productId' : undefined
+  if (productIdClause) params.productId = productId
+  // Applied after buildPortalProductFilters returned (so not in its
+  // baseWhere), which is why the fuzzy fallback below re-applies the same
+  // list: a fuzzy hit must not surface a product outside the alphabet
+  // letter, the promo facet or the requested id.
+  const postFilterClauses = [initialClause, promoClause, productIdClause].filter((clause): clause is string => !!clause)
+  where.push(...postFilterClauses)
   const whereSql = `WHERE ${where.join(' AND ')}`
 
   // Same field set as buildPortalCatalog's initial (unfiltered, page-1)
@@ -1708,20 +2045,44 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
            p.discount_enabled, p.discount_type, p.discount_percent,
            p.discount_amount_usd, p.discount_amount_khr, p.discount_label,
            p.discount_badge_color, p.discount_starts_at, p.discount_ends_at`
-  // When there's an active search, relevance (bm25 via matchRankSql) sorts
-  // first and name is just the tiebreaker -- otherwise (no search) the
-  // catalog stays name-alphabetical, same browsing order as before this
-  // session's FTS5 change. Mirrors products.ts's own
-  // effectiveFamilyOrderSql pattern (match_rank ASC, then the caller's
-  // chosen sort).
+  // Ordering, through the ONE shared builder (lib/productSearchQuery.ts's
+  // buildFamilyRelevanceOrderSql) that products.ts, inventory.ts and
+  // branches.ts already order through:
+  //
+  //   match_tier ASC         exact barcode, then exact name, then name
+  //                          prefix, then everything else
+  //   family_promoted DESC   G1b, but only WITHIN a relevance tier
+  //   match_rank ASC         bm25 among equally-tiered matches
+  //   family_sort_value ASC  the storefront's own brand-first browse key
+  //   family_name ASC        (+ family_root_id ASC, appended for every
+  //                          caller by familyPagination.ts)
+  //
+  // This endpoint used to hardcode 'family_promoted DESC, match_rank ASC,
+  // family_sort_value ASC, family_name ASC', and both halves of that were
+  // wrong the same way products.ts's copy was. (1) The promoted key sat
+  // ABOVE relevance, and because bm25 is continuous "promoted" became the
+  // de-facto primary sort of every storefront search -- a discounted
+  // product that merely shared a word with what the shopper typed outranked
+  // the product they actually typed. (2) There was no discrete tier at all,
+  // so an exact barcode or an exact name had nothing but its bm25 score to
+  // carry it, and any product scoring well on the same words could sit
+  // above it. Together that is the reported "it shows products not really
+  // matched, top to bottom".
+  //
+  // The brand-first tail stays the tail, so within one relevance tier the
+  // storefront's own browse order still applies -- that is the whole reason
+  // the tail is passed in rather than baked into the builder. With no
+  // search term typed, hasTier/hasRank are both false and the builder emits
+  // the previous browse order byte for byte: 'family_promoted DESC,
+  // family_sort_value ASC, family_name ASC'.
   // 6.5: paginate by GROUP (shared familyPagination helper), not by row --
   // the browser merges name groups into one card, so row-paged responses
   // thinned out and the pager promised pages that did not exist. total is
   // now a GROUP count (equal to the cards rendered and to what the A-Z
   // rail already counts), and a page carries every row of its window's
-  // groups so the client merge yields exactly pageSize cards. Ordering is
-  // the same promoted-first + brand-first rule, computed per family
-  // (relevance first-by-best-row while searching).
+  // groups so the client merge yields exactly pageSize cards. Every
+  // ordering key above is computed per FAMILY -- a family surfaces at its
+  // best row's tier and rank -- not per row.
   const paged = await paginateProductFamilies<Record<string, unknown>>({
     db,
     selectColumns: selectColumnsSql,
@@ -1730,11 +2091,14 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     params,
     page,
     pageSize,
-    familyOrderSql: filters.matchRankSql
-      ? 'family_promoted DESC, match_rank ASC, family_sort_value ASC, family_name ASC'
-      : 'family_promoted DESC, family_sort_value ASC, family_name ASC',
+    familyOrderSql: buildFamilyRelevanceOrderSql('family_sort_value ASC, family_name ASC', {
+      hasTier: Boolean(filters.matchTierSql),
+      hasRank: Boolean(filters.matchRankSql),
+      promotedFirst: true,
+    }),
     intraFamilyOrderSql: 'lower(name) ASC, id ASC',
     matchRankSql: filters.matchRankSql,
+    matchTierSql: filters.matchTierSql,
     promotedRankSql: searchPromotedRankSql,
     familySortValueSql: PORTAL_BRAND_SORT_KEY_SQL,
   })
@@ -1751,7 +2115,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // column list above (brand/category dropped for the same reasoning --
   // see PRODUCT_SEARCH_COLUMNS's comment in lib/searchMatch.ts).
   if (total === 0 && filters.searchTerms.length) {
-    const fallbackBaseWhere = initialClause ? [...filters.baseWhere, initialClause] : filters.baseWhere
+    const fallbackBaseWhere = [...filters.baseWhere, ...postFilterClauses]
     const candidateRows = await db.prepare(`
       SELECT p.id AS id, p.name AS name, p.sku AS sku, p.barcode AS barcode
       FROM products p
@@ -1775,16 +2139,25 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
       // that is not a safe integer, so no user input reaches the SQL text.
       const fuzzyParams: Record<string, unknown> = { ...params }
       const fuzzyWhereSql = `WHERE ${[...fallbackBaseWhere, `p.id IN (${inlineIntegerIds(fuzzyIds)})`].join(' AND ')}`
-      const fuzzyTotalRow = await db.prepare(`SELECT COUNT(*) AS count FROM products p ${joinSql} ${fuzzyWhereSql}`).get<{ count: number }>(fuzzyParams)
-      total = fuzzyTotalRow?.count || 0
-      items = await db.prepare(`
-        SELECT ${selectColumnsSql}
-        FROM products p
-        ${joinSql}
-        ${fuzzyWhereSql}
-        ORDER BY lower(p.name) ASC, p.id ASC
-        LIMIT @pageSize OFFSET @offset
-      `).all({ ...fuzzyParams, pageSize, offset })
+      // p6/efficiency-3: COUNT then page used to run as two sequential
+      // awaits against the identical WHERE -- same COUNT+page pattern as
+      // familyPagination.ts's paginateProductFamilies, batched the same way.
+      const [fuzzyTotalResult, fuzzyItemsResult] = await db.batch([
+        { sql: `SELECT COUNT(*) AS count FROM products p ${joinSql} ${fuzzyWhereSql}`, params: fuzzyParams },
+        {
+          sql: `
+            SELECT ${selectColumnsSql}
+            FROM products p
+            ${joinSql}
+            ${fuzzyWhereSql}
+            ORDER BY lower(p.name) ASC, p.id ASC
+            LIMIT @pageSize OFFSET @offset
+          `,
+          params: { ...fuzzyParams, pageSize, offset },
+        },
+      ])
+      total = (fuzzyTotalResult?.results?.[0] as { count?: number } | undefined)?.count || 0
+      items = (fuzzyItemsResult?.results ?? []) as Record<string, unknown>[]
     }
   }
 
@@ -1794,8 +2167,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // filter/page/search change actually hits, so leaving it out here would
   // re-leak raw quantities/thresholds on every interaction after the first
   // page load.
-  const itemsWithStockStatus = await attachPortalStockStatus(c.env, (items || []) as Array<Record<string, unknown>>)
-
+  //
   // Alphabet-bar counts scoped to the SAME filters as the main query above
   // (with `initial` itself forced to 'all', so the bar shows every letter
   // reachable under the current brand/category/branch/stock/search
@@ -1803,20 +2175,29 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // pattern as routes/products.ts's loadProductFilters, which exists
   // specifically because an unscoped alphabet bar shows non-zero counts
   // for letters that have zero real matches once filters are applied.
+  //
+  // p6/efficiency-3: this rail query does not depend on `items`/stock-status
+  // at all -- buildPortalProductFilters() is pure JS -- so it used to run as
+  // a second sequential await after attachPortalStockStatus for no reason.
+  // Fan the two independent D1 round trips out together, same shape as
+  // buildPortalCatalog's rail above.
   const { where: initialsWhere, joins: initialsJoins, params: initialsParams } = buildPortalProductFilters({ ...query, initial: 'all' }, allowStockStateFilter, showOutOfStockProducts)
   // Counts name GROUPS, not rows -- a group renders as ONE card on the
   // storefront, so counting rows would promise more products under a letter
   // than the grid can possibly show. Matches buildPortalCatalog's rail above
   // and loadProductFilters' rail in admin.
-  const initials = await db.prepare(`
-    SELECT upper(substr(trim(p.brand), 1, 1)) AS value,
-           COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
-    FROM products p
-    ${initialsJoins.join('\n')}
-    WHERE ${initialsWhere.join(' AND ')} AND trim(COALESCE(p.brand, '')) <> ''
-    GROUP BY value
-    ORDER BY value ASC
-  `).all<{ value: string; count: number }>(initialsParams)
+  const [itemsWithStockStatus, initials] = await Promise.all([
+    attachPortalStockStatus(c.env, (items || []) as Array<Record<string, unknown>>),
+    db.prepare(`
+      SELECT upper(substr(trim(p.brand), 1, 1)) AS value,
+             COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
+      FROM products p
+      ${initialsJoins.join('\n')}
+      WHERE ${initialsWhere.join(' AND ')} AND trim(COALESCE(p.brand, '')) <> ''
+      GROUP BY value
+      ORDER BY value ASC
+    `).all<{ value: string; count: number }>(initialsParams),
+  ])
 
   return {
     items: itemsWithStockStatus,
@@ -1836,7 +2217,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
 app.get('/catalog/products/search', async (c) => {
   const version = await portalCacheVersion(c)
   return c.json(await cachedJsonResponse(
-    c.req.raw,
+    portalCacheRequest(c.req.raw, c.req.query(), c.req.path),
     c.executionCtx,
     version,
     PORTAL_CATALOG_TTL_SECONDS,

@@ -20,6 +20,7 @@ import {
 } from '../lib/aiGateway'
 import { encryptSecret } from '../lib/secretCrypto'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -38,7 +39,7 @@ app.use('*', async (c, next) => {
 })
 
 function actorFrom(user: SessionUser) {
-  return { userId: user?.id ?? null, userName: user?.name || user?.username || '' }
+  return { userId: user?.id ?? null, userName: actorSnapshot(user) || '' }
 }
 
 async function getProviderRow(env: Env, id: string | number): Promise<any> {

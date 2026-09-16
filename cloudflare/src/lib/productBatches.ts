@@ -32,7 +32,8 @@
 //   the standard expiry-tracked-inventory rule referenced in
 //   routes/inventory.ts's disclosure comment.
 import type { D1Compat } from './db'
-import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
+import { dateToBatchCode, normalizeTypedDate } from './batchCode'
+import { addMoney4, multiplyMoney4, roundMoney4 } from './moneyPrecision'
 import { buildInClause, selectInChunks } from './sqlBinding'
 
 export type ProductBatchRow = {
@@ -74,10 +75,13 @@ function generateBatchKey(): string {
 
 // GET /api/batches/tracked-product-ids -- product ids the POS should force
 // through the batch-picker (ProductDetailSheet) instead of a one-tap add.
-// A product counts as "tracked" if it has at least one active batch; when
-// branchId is given, further scoped to products that actually have a
-// branch_batch_stock row at that branch (a product batch-tracked only at
-// other branches shouldn't force the picker here).
+// A product counts as tracked when it has an active scoped lot (including a
+// zero-quantity row, preserving the existing picker gate) OR an inactive lot
+// with positive known stock. Inactive rows remain absent from the received-date
+// picker, but their provenance must still make POS load the scoped scalar that
+// prevents their units being offered as date-less stock. When branchId is
+// given, scope to that branch so another branch's lots do not force this
+// picker here.
 // Per-product batch COUNT for a list badge (Products + Inventory). The list
 // reads deliberately do NOT ship every product's full batch array
 // (production has ~6,700 batches -- the detail view loads them on demand),
@@ -109,27 +113,293 @@ export async function attachBatchCounts(db: D1Compat, items: Array<Record<string
 // rule the insert/top-up paths already applied inline (finite and >= 0),
 // pulled out so the quantity write and the money write can never disagree
 // about whether this particular receipt carried a price.
-function unitCostForReceipt(value: unknown): number | null {
+function unitCostForReceipt(value: unknown, preserveHistoricalPrecision = false): number | null {
+  if (value == null) return null
   const cost = Number(value)
-  return Number.isFinite(cost) && cost >= 0 ? cost : null
+  if (!Number.isFinite(cost) || cost < 0) throw new Error('Unit cost must be a non-negative finite number')
+  return preserveHistoricalPrecision ? cost : roundMoney4(cost)
 }
 
 // This receipt's own money: its quantity at its own unit cost, or null
 // when no price was recorded for it.
-function receiptCostUsd(unitCost: unknown, quantity: number): number | null {
-  const cost = unitCostForReceipt(unitCost)
-  return cost === null ? null : Number(quantity) * cost
+function receiptCostUsd(unitCost: number | null, quantity: number): number | null {
+  return unitCost === null ? null : multiplyMoney4(unitCost, quantity)
+}
+
+export type ReceiptCostPreimage = {
+  batchExists: boolean
+  receivedCostUsd: number | null
+}
+
+export type StockWriteStatement = {
+  sql: string
+  params?: Record<string, unknown> | unknown[]
+}
+
+export type ReceiveBatchPlanInput = {
+  productId?: number | null
+  productClientRequestId?: string | null
+  branchId: number
+  quantity: number
+  expiryDate?: string | null
+  receivedDate?: string | null
+  notes?: string | null
+  batchId?: number | null
+  supplierId?: number | null
+  supplierName?: string | null
+  unitCostUsd?: number | null
+  paymentStatus?: 'paid' | 'credit' | null
+  creditDueDate?: string | null
+  /** Internal only: retain an already-recorded catalog/lot snapshot verbatim. */
+  preserveHistoricalUnitCost?: boolean
+  /**
+   * Required whenever a receipt records a unit cost. It freezes the current
+   * cumulative lot total so the planner can add exactly in JS and guard that
+   * preimage inside the same D1 batch instead of relying on SQLite REAL math.
+   */
+  receiptCostPreimage?: ReceiptCostPreimage
+  /** Internal provenance key, e.g. a return event; never an operator lot code. */
+  provenanceKey?: string
+}
+
+export type ReceiveBatchStatementPlan = {
+  statements: StockWriteStatement[]
+  productIdSql: string
+  batchIdSql: string
+  batchKey: string
+  lotCode: string
+  receivedAt: string
+  params: Record<string, unknown>
+}
+
+// First attribution sticks on a top-up: a lot's recorded supplier / cost /
+// payment is only filled where still NULL. The one exception is a lot that
+// is fully reverted (received_quantity = 0 AND is_active = 0: every receipt
+// on it was reverted or undone AND nothing of it remains in any branch's
+// stock, see planUnreceiveBatchStock). A NEW receipt landing on such a lot
+// (same product, same date code) is a different purchase, so it takes the
+// row over completely -- supplier, cost and payment state all come from the
+// new receipt, including a supplier-less receipt clearing the old supplier
+// to NULL, so the old supplier's purchases list never keeps units it never
+// sold. A lot that is merely zeroed but still "live" (is_active = 1,
+// because stock of it still sits somewhere) is NOT this case and keeps
+// first-attribution-sticks like any other lot.
+// Known limit, not changed here: two same-day receipts from DIFFERENT
+// suppliers share one lot (batch_key is the date code), and the first
+// attribution outlives the receipt it belonged to once a second receipt
+// has topped the lot up. Attribution is per lot, not per receipt.
+// Unqualified names are the stored row both in an UPDATE and in an upsert's
+// DO UPDATE SET, so one fragment serves both receipt shapes below.
+const LOT_ATTRIBUTION_SET_SQL = `
+          supplier_name = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @supplierName ELSE COALESCE(supplier_name, @supplierName) END,
+          supplier_id = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @supplierId ELSE COALESCE(supplier_id, @supplierId) END,
+          unit_cost_usd = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @unitCostUsd ELSE COALESCE(unit_cost_usd, @unitCostUsd) END,
+          credit_due_date = CASE WHEN payment_status IS NULL OR (received_quantity = 0 AND is_active = 0) THEN @creditDueDate ELSE credit_due_date END,
+          payment_status = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @paymentStatus ELSE COALESCE(payment_status, @paymentStatus) END,
+          received_branch_id = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @receivedBranchId ELSE COALESCE(received_branch_id, @receivedBranchId) END`
+
+// Side-effect-free receipt planner. Stock-session commands use this inside
+// their one operation batch; the legacy helper below uses the same plan so
+// metadata can no longer commit ahead of stock even on older endpoints.
+export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatchStatementPlan {
+  const quantity = Number(input.quantity)
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be a positive number')
+  const productId = Number(input.productId)
+  const productClientRequestId = String(input.productClientRequestId || '').trim()
+  if (!(Number.isSafeInteger(productId) && productId > 0) && !productClientRequestId) {
+    throw new Error('A product id or stable product request id is required')
+  }
+  const branchId = Number(input.branchId)
+  if (!Number.isSafeInteger(branchId) || branchId <= 0) throw new Error('A valid branch is required')
+  const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
+  const lotCode = dateToBatchCode(receivedAt) as string
+  const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : lotCode
+  const unitCostUsd = unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true)
+  const receivedCost = receiptCostUsd(unitCostUsd, quantity)
+  if (unitCostUsd !== null && !input.receiptCostPreimage) {
+    throw new Error('A receipt cost preimage is required before recording priced stock')
+  }
+  const receivedCostAfter = receivedCost === null
+    ? null
+    : input.receiptCostPreimage?.batchExists
+      ? addMoney4(input.receiptCostPreimage.receivedCostUsd ?? 0, receivedCost)
+      : receivedCost
+  const paymentStatus = input.paymentStatus === 'paid' || input.paymentStatus === 'credit' ? input.paymentStatus : null
+  const params: Record<string, unknown> = {
+    productId: Number.isSafeInteger(productId) && productId > 0 ? productId : null,
+    productClientRequestId: productClientRequestId || null,
+    branchId,
+    receivedBranchId: branchId,
+    quantity,
+    batchId: Number.isSafeInteger(Number(input.batchId)) && Number(input.batchId) > 0 ? Number(input.batchId) : null,
+    batchKey,
+    lotCode,
+    receivedAt,
+    expiryDate: input.expiryDate || null,
+    expiryProvided: input.expiryDate !== undefined && input.expiryDate !== null ? 1 : 0,
+    notes: input.notes || null,
+    notesProvided: input.notes !== undefined && input.notes !== null ? 1 : 0,
+    supplierId: Number.isSafeInteger(Number(input.supplierId)) && Number(input.supplierId) > 0 ? Number(input.supplierId) : null,
+    supplierName: input.supplierName?.trim() || null,
+    unitCostUsd,
+    paymentStatus,
+    creditDueDate: paymentStatus === 'credit' ? (input.creditDueDate || null) : null,
+    receivedCostUsd: receivedCost,
+    receivedCostBefore: input.receiptCostPreimage?.receivedCostUsd ?? null,
+    receivedCostAfter,
+    receivedCostBatchExists: input.receiptCostPreimage?.batchExists ? 1 : 0,
+  }
+  const productIdSql = productClientRequestId
+    ? `(SELECT id FROM products WHERE client_request_id = @productClientRequestId AND client_request_id <> '')`
+    : '@productId'
+  const explicitBatch = params.batchId != null
+  const metadata: StockWriteStatement = explicitBatch
+    ? {
+        sql: `UPDATE product_batches SET
+          is_active = 1,
+          expiry_date = CASE WHEN @expiryProvided = 1 THEN @expiryDate ELSE expiry_date END,
+          notes = CASE WHEN @notesProvided = 1 THEN @notes ELSE notes END,
+          ${LOT_ATTRIBUTION_SET_SQL},
+          received_quantity = COALESCE(received_quantity, 0) + @quantity,
+          received_cost_usd = CASE WHEN @receivedCostUsd IS NULL THEN received_cost_usd
+            ELSE @receivedCostAfter END,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = @batchId AND variant_product_id = ${productIdSql}`,
+        params,
+      }
+    : {
+        sql: `INSERT INTO product_batches (
+          variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes,
+          batch_number, supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date,
+          received_quantity, received_branch_id, received_cost_usd
+        ) VALUES (
+          ${productIdSql}, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes,
+          (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = ${productIdSql}),
+          @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @creditDueDate,
+          @quantity, @receivedBranchId, @receivedCostUsd
+        ) ON CONFLICT(variant_product_id, batch_key) DO UPDATE SET
+          is_active = 1,
+          expiry_date = CASE WHEN @expiryProvided = 1 THEN @expiryDate ELSE expiry_date END,
+          notes = CASE WHEN @notesProvided = 1 THEN @notes ELSE notes END,
+          ${LOT_ATTRIBUTION_SET_SQL},
+          received_quantity = COALESCE(received_quantity, 0) + excluded.received_quantity,
+          received_cost_usd = CASE WHEN excluded.received_cost_usd IS NULL THEN product_batches.received_cost_usd
+            ELSE @receivedCostAfter END,
+          updated_at = CURRENT_TIMESTAMP`,
+        params,
+      }
+  const batchIdSql = explicitBatch
+    ? '@batchId'
+    : `(SELECT id FROM product_batches WHERE variant_product_id = ${productIdSql} AND batch_key = @batchKey)`
+  return {
+    productIdSql,
+    batchIdSql,
+    batchKey,
+    lotCode,
+    receivedAt,
+    params,
+    statements: [
+      ...(receivedCost === null ? [] : [{
+        sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE
+          WHEN @receivedCostBatchExists = 1 THEN EXISTS(
+            SELECT 1 FROM product_batches WHERE variant_product_id = ${productIdSql}
+              AND ((@batchId IS NOT NULL AND id = @batchId)
+                OR (@batchId IS NULL AND batch_key = @batchKey))
+              AND received_cost_usd IS @receivedCostBefore
+          )
+          ELSE NOT EXISTS(
+            SELECT 1 FROM product_batches WHERE variant_product_id = ${productIdSql}
+              AND ((@batchId IS NOT NULL AND id = @batchId)
+                OR (@batchId IS NULL AND batch_key = @batchKey))
+          ) END`,
+        params,
+      }]),
+      metadata,
+      {
+        sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
+          VALUES (${batchIdSql}, @branchId, @quantity)
+          ON CONFLICT(batch_id, branch_id) DO UPDATE SET
+            quantity = branch_batch_stock.quantity + excluded.quantity,
+            updated_at = CURRENT_TIMESTAMP`,
+        params,
+      },
+      {
+        sql: `INSERT INTO branch_stock (product_id, branch_id, quantity)
+          VALUES (${productIdSql}, @branchId, @quantity)
+          ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + excluded.quantity`,
+        params,
+      },
+      {
+        sql: `UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + @quantity,
+          updated_at = CURRENT_TIMESTAMP WHERE id = ${productIdSql}`,
+        params,
+      },
+    ],
+  }
+}
+
+// Absolute import counts retain the oldest dated lots up to the target count.
+// Only an uncovered increase gets an explicit snapshot-reconciliation lot;
+// its date is the import's receipt date, never the product's creation date.
+// SQL computes against the state inside the caller's atomic row group, so
+// repeated snapshots and two branches cannot add the same stock twice.
+// Inactive lots still own their attributed units. Count and trim them too,
+// without reactivating them; growth belongs in an active reconciliation lot.
+export function planReconcileBranchSnapshot(input: {
+  productId: number; branchId: number; quantity: number; receivedDate: string; batchId?: number
+}): StockWriteStatement[] {
+  const receivedAt = normalizeTypedDate(input.receivedDate)
+  if (!receivedAt) throw new Error('A valid received date is required for a stock snapshot')
+  if (![input.productId, input.branchId].every((n) => Number.isSafeInteger(n) && n > 0)
+    || !Number.isFinite(input.quantity) || input.quantity < 0) throw new Error('Invalid stock snapshot')
+  const params = { ...input, batchId: input.batchId ?? null, receivedAt, batchKey: ` snapshot:${input.branchId}:${receivedAt}`, lotCode: dateToBatchCode(receivedAt) }
+  const available = `(SELECT COALESCE(SUM(bbs.quantity),0) FROM branch_batch_stock bbs
+    JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=@productId
+    AND bbs.branch_id=@branchId)`
+  // Reuse an active snapshot lot, but never unarchive a previous one. The
+  // fallback suffix is above every existing row id and is evaluated inside
+  // the atomic write group. After insertion this resolves to that active row.
+  const snapshotKey = `COALESCE((SELECT batch_key FROM product_batches
+    WHERE variant_product_id=@productId AND is_active=1
+      AND (batch_key=@batchKey OR substr(batch_key,1,length(@batchKey)+8)=@batchKey||':active:')
+    ORDER BY id DESC LIMIT 1), CASE WHEN EXISTS (
+      SELECT 1 FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey
+    ) THEN @batchKey||':active:'||(SELECT COALESCE(MAX(id),0)+1 FROM product_batches) ELSE @batchKey END)`
+  return [
+    { sql: `INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,notes,batch_number,received_branch_id)
+      SELECT @batchId,@productId,${snapshotKey},@lotCode,@receivedAt,1,'Stock reconciled from product import snapshot',
+        (SELECT COALESCE(MAX(batch_number),0)+1 FROM product_batches WHERE variant_product_id=@productId),@branchId
+      WHERE @quantity > ${available}
+      ON CONFLICT(variant_product_id,batch_key) DO NOTHING`, params },
+    { sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
+      SELECT id,@branchId,@quantity-${available} FROM product_batches
+      WHERE variant_product_id=@productId AND is_active=1 AND batch_key=${snapshotKey} AND @quantity > ${available}
+      ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=branch_batch_stock.quantity+excluded.quantity,updated_at=CURRENT_TIMESTAMP`, params },
+    { sql: `WITH ranked AS MATERIALIZED (
+        SELECT bbs.batch_id,bbs.quantity,COALESCE(SUM(bbs.quantity) OVER (
+          ORDER BY (pb.received_at IS NULL),pb.received_at,pb.id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS prior
+        FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+        WHERE pb.variant_product_id=@productId AND bbs.branch_id=@branchId
+      ) UPDATE branch_batch_stock SET quantity=(SELECT MIN(r.quantity,MAX(0,@quantity-r.prior)) FROM ranked r WHERE r.batch_id=branch_batch_stock.batch_id),updated_at=CURRENT_TIMESTAMP
+      WHERE branch_id=@branchId AND batch_id IN (SELECT batch_id FROM ranked)`, params },
+    { sql: `INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@productId,@branchId,@quantity)
+      ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=excluded.quantity`, params },
+    { sql: `UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@productId),updated_at=CURRENT_TIMESTAMP WHERE id=@productId`, params },
+  ]
 }
 
 export async function getTrackedProductIds(db: D1Compat, branchId: number | null): Promise<number[]> {
   const sql = branchId
     ? `SELECT DISTINCT pb.variant_product_id AS productId
        FROM product_batches pb
-       JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
-       WHERE pb.is_active = 1`
+       JOIN branch_batch_stock bbs
+         ON bbs.batch_id = pb.id
+        AND bbs.branch_id = @branchId
+       WHERE pb.is_active = 1 OR bbs.quantity > 0`
     : `SELECT DISTINCT pb.variant_product_id AS productId
        FROM product_batches pb
-       WHERE pb.is_active = 1`
+       WHERE pb.is_active = 1
+          OR EXISTS (SELECT 1 FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0)`
   const rows = await db.prepare(sql).all<{ productId: number }>(branchId ? { branchId } : {})
   return rows.map((row) => Number(row.productId)).filter((id) => Number.isFinite(id))
 }
@@ -207,9 +477,12 @@ export async function receiveBatchStock(db: D1Compat, input: {
   branchId: number
   quantity: number
   expiryDate?: string | null
-  // Read as mm/dd/yyyy (see batchCode.ts's normalizeToIsoDate) or this
+  // Read day-first, dd/mm/yyyy (batchCode.ts's normalizeTypedDate), or this
   // app's own ISO date shape; blank/omitted defaults to today, same as
-  // every other receive-stock date field in this app.
+  // every other receive-stock date field in this app. Every caller is a
+  // field a person typed into -- Inventory Adjust, Receive Batch, fast
+  // stock-in -- and all of them render the day-first DateEntryInput, so a
+  // month-first read here would contradict the screen that produced it.
   receivedDate?: string | null
   notes?: string | null
   // Explicit existing batch chosen by the person (Inventory's add-stock
@@ -222,130 +495,70 @@ export async function receiveBatchStock(db: D1Compat, input: {
   // Migration 0062/0065: who this lot was bought from, what one unit cost,
   // and whether it is paid or on credit (with the due date the admin is
   // reminded about). First attribution sticks on top-ups, same rule as the
-  // import writer: a lot's recorded supplier/cost is never overwritten by a
-  // later receive, only filled where still NULL.
+  // import writer: a lot's recorded supplier/cost is only filled where still
+  // NULL -- except on a lot whose receipts were all reverted (see
+  // LOT_ATTRIBUTION_SET_SQL), where the new receipt supplies its own.
   supplierId?: number | null
   supplierName?: string | null
   unitCostUsd?: number | null
   paymentStatus?: 'paid' | 'credit' | null
   creditDueDate?: string | null
+  provenanceKey?: string
+  preserveHistoricalUnitCost?: boolean
+  // P4-4a: statements that need this receipt's own resolved batch_id (e.g. an
+  // inventory_movements row logging the receipt) but can only be built once
+  // batchKey is known -- built here, after that, and folded into the SAME
+  // db.batch call below instead of costing the caller its own separate round
+  // trip after this function returns. `resolvedBatchIdSql` is a subquery
+  // fragment matching the exact same batch-identity rule the final SELECT
+  // below uses (explicit @batchId when one was picked, else @productId +
+  // @batchKey), so it can be dropped into a statement's own VALUES list.
+  buildBatchStatements?: (ctx: { batchKey: string; lotCode: string; resolvedBatchIdSql: string }) => StockWriteStatement[]
 }): Promise<{ batchId: number; created: boolean; batchNumber: number | null; lotCode: string }> {
-  const resolvedIso = normalizeToIsoDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
-  const lotCode = dateToBatchCode(resolvedIso) as string
-  const batchKey = lotCode
-
-  let batchId: number | null = null
-  let batchNumber: number | null = null
-
-  if (input.batchId != null) {
-    const explicit = await db.prepare(
-      'SELECT id, batch_number FROM product_batches WHERE id = @id AND variant_product_id = @productId',
-    ).get<{ id: number; batch_number: number | null }>({ id: input.batchId, productId: input.productId })
-    if (!explicit) throw new Error('Selected batch does not belong to this product')
-    batchId = Number(explicit.id)
-    batchNumber = explicit.batch_number != null ? Number(explicit.batch_number) : null
-  } else {
-    const existing = await db.prepare(
-      'SELECT id, batch_number FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey',
-    ).get<{ id: number; batch_number: number | null }>({ productId: input.productId, batchKey })
-    if (existing) { batchId = Number(existing.id); batchNumber = existing.batch_number != null ? Number(existing.batch_number) : null }
-  }
-
-  let created = false
-  if (batchId == null) {
-    // Assigned once at creation, same rule migration 0016's index/backfill
-    // comment documents -- a batch_number is never reused or shifted, so
-    // "Batch <n>" stays a stable reference even if an earlier batch is
-    // later deactivated.
-    const nextNumber = await nextBatchNumber(db, input.productId)
-    const inserted = await db.prepare(`
-      INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date, received_quantity, received_branch_id, received_cost_usd)
-      VALUES (@productId, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes, @batchNumber, @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @creditDueDate, @receivedQuantity, @receivedBranchId, @receivedCostUsd)
-    `).run({
-      productId: input.productId,
-      batchKey,
-      lotCode,
-      expiryDate: input.expiryDate || null,
-      receivedAt: resolvedIso,
-      notes: input.notes || null,
-      batchNumber: nextNumber,
-      supplierId: input.supplierId ?? null,
-      supplierName: input.supplierName?.trim() || null,
-      unitCostUsd: Number.isFinite(Number(input.unitCostUsd)) && Number(input.unitCostUsd) >= 0 ? Number(input.unitCostUsd) : null,
-      paymentStatus: input.paymentStatus === 'paid' || input.paymentStatus === 'credit' ? input.paymentStatus : null,
-      creditDueDate: input.paymentStatus === 'credit' ? (input.creditDueDate || null) : null,
-      receivedQuantity: input.quantity,
-      receivedBranchId: input.branchId,
-      // 0080: the money accumulates exactly like the quantity beside it.
-      // A receipt with no recorded price contributes nothing rather than
-      // borrowing whatever price the lot happens to carry.
-      receivedCostUsd: receiptCostUsd(input.unitCostUsd, input.quantity),
-    })
-    batchId = Number(inserted.lastInsertRowid)
-    batchNumber = nextNumber
-    created = true
-  } else {
-    // Topping up an existing lot -- reactivate it (a previously-deactivated
-    // batch receiving new stock should become sellable again) and let a
-    // newly-supplied expiry/notes refresh the stored ones, matching how
-    // PATCH /:id already treats these fields as independently updatable.
-    const updates: string[] = ['is_active = 1', `updated_at = datetime('now')`]
-    const params: Record<string, unknown> = { id: batchId }
-    if (input.expiryDate !== undefined && input.expiryDate !== null) { updates.push('expiry_date = @expiryDate'); params.expiryDate = input.expiryDate }
-    if (input.notes !== undefined && input.notes !== null) { updates.push('notes = @notes'); params.notes = input.notes }
-    // First attribution sticks (same rule as the import writer): a top-up
-    // only FILLS supplier/cost/payment fields that are still NULL.
-    if (input.supplierName?.trim()) { updates.push('supplier_name = COALESCE(supplier_name, @supplierName)', 'supplier_id = COALESCE(supplier_id, @supplierId)'); params.supplierName = input.supplierName.trim(); params.supplierId = input.supplierId ?? null }
-    if (Number.isFinite(Number(input.unitCostUsd)) && Number(input.unitCostUsd) >= 0) { updates.push('unit_cost_usd = COALESCE(unit_cost_usd, @unitCostUsd)'); params.unitCostUsd = Number(input.unitCostUsd) }
-    if (input.paymentStatus === 'paid' || input.paymentStatus === 'credit') {
-      updates.push('payment_status = COALESCE(payment_status, @paymentStatus)', 'credit_due_date = COALESCE(credit_due_date, @creditDueDate)')
-      params.paymentStatus = input.paymentStatus
-      params.creditDueDate = input.paymentStatus === 'credit' ? (input.creditDueDate || null) : null
-    }
-    // Cumulative received total (0067): a top-up ADDS, unlike the
-    // fill-if-NULL fields above -- every receipt into this lot counts.
-    updates.push('received_quantity = COALESCE(received_quantity, 0) + @receivedQuantity')
-    params.receivedQuantity = input.quantity
-    // 0080: and so does the money. `unit_cost_usd` above stays first-
-    // attribution (what a unit cost when this lot was first recorded, which
-    // is what the lot pickers show); `received_cost_usd` is what a spend
-    // report must read, because one lot can hold receipts bought at
-    // different prices -- batch_key is the date code, so a same-day
-    // re-receive tops THIS lot up rather than starting its own.
-    const receiptCost = receiptCostUsd(input.unitCostUsd, input.quantity)
-    if (receiptCost !== null) {
-      updates.push('received_cost_usd = COALESCE(received_cost_usd, 0) + @receivedCostUsd')
-      params.receivedCostUsd = receiptCost
-    }
-    // Receiving branch (0070): first attribution sticks, same as supplier --
-    // a lot topped up from another branch keeps the branch it first arrived
-    // at; pre-0070 lots get filled by their next receipt.
-    updates.push('received_branch_id = COALESCE(received_branch_id, @receivedBranchId)')
-    params.receivedBranchId = input.branchId
-    await db.prepare(`UPDATE product_batches SET ${updates.join(', ')} WHERE id = @id`).run(params)
-  }
-
-  // Atomic three-way write -- same db.batch() atomicity guarantee
-  // applyStockDelta (routes/inventory.ts) already relies on for its own
-  // two-statement version; extended here with the batch-stock row.
+  const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
+  const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : dateToBatchCode(receivedAt) as string
+  const before = input.batchId != null
+    ? await db.prepare(
+      'SELECT id,received_cost_usd FROM product_batches WHERE id = @id AND variant_product_id = @productId',
+    ).get<{ id: number; received_cost_usd: number | null }>({ id: input.batchId, productId: input.productId })
+    : await db.prepare(
+      'SELECT id,received_cost_usd FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey',
+    ).get<{ id: number; received_cost_usd: number | null }>({ productId: input.productId, batchKey })
+  if (input.batchId != null && !before) throw new Error('Selected received date does not belong to this product')
+  const hasEnteredCost = input.unitCostUsd != null
+  const plan = planReceiveBatchStock({
+    ...input,
+    receiptCostPreimage: hasEnteredCost
+      ? { batchExists: Boolean(before), receivedCostUsd: before?.received_cost_usd ?? null }
+      : undefined,
+  })
+  const resolvedBatchIdSql = `(SELECT id FROM product_batches WHERE variant_product_id = @productId AND
+        ((@batchId IS NOT NULL AND id = @batchId) OR (@batchId IS NULL AND batch_key = @batchKey)) LIMIT 1)`
+  const extraStatements = input.buildBatchStatements
+    ? input.buildBatchStatements({ batchKey: plan.batchKey, lotCode: plan.lotCode, resolvedBatchIdSql })
+    : []
   await db.batch([
-    {
-      sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @quantity)
-            ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = quantity + @quantity, updated_at = datetime('now')`,
-      params: { batchId, branchId: input.branchId, quantity: input.quantity },
-    },
-    {
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
-      params: { productId: input.productId, branchId: input.branchId, quantity: input.quantity },
-    },
-    {
-      sql: 'UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @productId',
-      params: { productId: input.productId, quantity: input.quantity },
-    },
+    ...plan.statements,
+    ...(hasEnteredCost ? [{ sql: 'DELETE FROM stock_session_guards', params: {} }] : []),
+    ...extraStatements,
   ])
-
-  return { batchId, created, batchNumber, lotCode }
+  const batch = await db.prepare(
+    `SELECT id, batch_number, lot_code FROM product_batches
+      WHERE variant_product_id = @productId AND
+        ((@batchId IS NOT NULL AND id = @batchId)
+          OR (@batchId IS NULL AND batch_key = @batchKey)) LIMIT 1`,
+  ).get<{ id: number; batch_number: number | null; lot_code: string | null }>({
+    batchId: input.batchId ?? null,
+    productId: input.productId,
+    batchKey: plan.batchKey,
+  })
+  if (!batch) throw new Error('Could not resolve received stock batch')
+  return {
+    batchId: Number(batch.id),
+    created: !before && input.batchId == null,
+    batchNumber: batch.batch_number != null ? Number(batch.batch_number) : null,
+    lotCode: batch.lot_code ?? plan.lotCode,
+  }
 }
 
 // Thrown by removeStockFromBatch when the chosen batch doesn't have enough
@@ -356,10 +569,110 @@ export async function receiveBatchStock(db: D1Compat, input: {
 export class InsufficientBatchStockError extends Error {
   available: number
   constructor(available: number) {
-    super(`Only ${available} available in this batch at this branch`)
+    super(`Only ${available} available under this received date at this branch`)
     this.name = 'InsufficientBatchStockError'
     this.available = available
   }
+}
+
+export type RemoveBatchStockPlanInput = {
+  batchId: number
+  productId: number
+  branchId: number
+  quantity: number
+}
+
+// Side-effect-free strict removal plan for callers that place lot stock,
+// aggregate branch stock, and their surrounding domain write in one D1
+// batch. Availability is read by the caller, while these unclamped updates
+// make a stale concurrent decrement violate the stock CHECK and roll the
+// entire action back instead of silently flooring a quantity at zero.
+export function planRemoveStockFromBatch(input: RemoveBatchStockPlanInput): { statements: StockWriteStatement[] } {
+  const batchId = Number(input.batchId)
+  const productId = Number(input.productId)
+  const branchId = Number(input.branchId)
+  const quantity = Number(input.quantity)
+  if (![batchId, productId, branchId].every((value) => Number.isSafeInteger(value) && value > 0)) {
+    throw new Error('A valid product, branch, and received date are required')
+  }
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be a positive number')
+  const params = { batchId, productId, branchId, quantity }
+  return { statements: [
+    {
+      sql: `UPDATE branch_batch_stock SET quantity = quantity - @quantity, updated_at = datetime('now')
+            WHERE batch_id = @batchId AND branch_id = @branchId`,
+      params,
+    },
+    {
+      sql: `UPDATE branch_stock SET quantity = quantity - @quantity
+            WHERE product_id = @productId AND branch_id = @branchId`,
+      params,
+    },
+    {
+      sql: `UPDATE products SET stock_quantity = (
+              SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@productId
+            ), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
+      params,
+    },
+  ] }
+}
+
+// The compensating side of a receipt, for the writers that reverse one
+// (lib/stockRevert.ts today; anything that un-receives a lot-stamped inflow
+// tomorrow). A lot's supplier-facing columns -- received_quantity (0067),
+// received_cost_usd (0080), payment_status/credit_due_date (0065) and the
+// first-attribution supplier/cost (0062/0065) -- are what Contacts derives
+// purchases, stock-in invoices, "not paid" balances and credit reminders
+// from, so a reverted receipt that leaves them untouched keeps showing as a
+// purchase. Rules, matching the stock-session undo's own lot target in
+// lib/stockSession.ts:
+//   - subtract THIS receipt's own units and money, never zero the row: two
+//     same-day receipts share one lot (batch_key is the date code), and the
+//     other receipt's purchase must survive.
+//   - a lot that never tracked receipts (NULL received_quantity, pre-0067)
+//     stays NULL rather than being guessed to 0; its payment state is left
+//     alone because nothing says this was its only receipt.
+//   - once the lot's tracked receipts are fully reverted (received_quantity
+//     reaches 0) nothing was bought: the money resets to 0. The supplier,
+//     unit cost, payment state and receiving branch STAY on the row -- they
+//     are not on the movement, and reverting the revert (re-receiving) must
+//     bring the purchase back under the same supplier and payment state.
+//     Every purchase reader (Contacts purchases, the stock-in invoice report,
+//     the credit reminder) treats "received_quantity 0 and no money" as "not
+//     a purchase", so nothing is owed or listed meanwhile; and a new receipt
+//     on the row supplies its own attribution (LOT_ATTRIBUTION_SET_SQL).
+//   - once it is ALSO empty everywhere it leaves the pickers (is_active 0);
+//     receiving on it again reactivates it.
+// Run inside the caller's atomic db.batch AFTER the stock decrement so the
+// emptiness test sees the post-revert quantities.
+export function planUnreceiveBatchStock(input: { batchId: number; quantity: number; totalCostUsd: number | null }): StockWriteStatement[] {
+  const batchId = Number(input.batchId)
+  const quantity = Number(input.quantity)
+  if (!Number.isSafeInteger(batchId) || batchId <= 0) throw new Error('A valid received date is required')
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be a positive number')
+  const totalCostUsd = input.totalCostUsd == null ? null : roundMoney4(Number(input.totalCostUsd))
+  const params = { batchId, quantity, totalCostUsd }
+  return [
+    {
+      sql: `UPDATE product_batches SET
+              received_quantity = CASE WHEN received_quantity IS NULL THEN NULL ELSE MAX(0, received_quantity - @quantity) END,
+              received_cost_usd = CASE WHEN received_cost_usd IS NULL THEN NULL ELSE MAX(0, ROUND(received_cost_usd - COALESCE(@totalCostUsd, 0), 4)) END,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = @batchId`,
+      params,
+    },
+    {
+      sql: `UPDATE product_batches SET received_cost_usd = 0
+            WHERE id = @batchId AND received_quantity = 0 AND received_cost_usd IS NOT NULL`,
+      params,
+    },
+    {
+      sql: `UPDATE product_batches SET is_active = 0
+            WHERE id = @batchId AND received_quantity = 0
+              AND NOT EXISTS (SELECT 1 FROM branch_batch_stock WHERE batch_id = @batchId AND quantity > 0)`,
+      params,
+    },
+  ]
 }
 
 // Mirror of receiveBatchStock for the remove side of mandatory batch
@@ -389,7 +702,7 @@ export async function removeStockFromBatch(db: D1Compat, input: {
     productId: input.productId,
     branchId: input.branchId,
   })
-  if (!batch) throw new Error('Selected batch does not belong to this product')
+  if (!batch) throw new Error('Selected received date does not belong to this product')
   const available = Number(batch.available) || 0
   if (input.quantity > available) throw new InsufficientBatchStockError(available)
 
@@ -433,8 +746,9 @@ export async function removeStockFromBatch(db: D1Compat, input: {
 // nothing extra to "rename" or reorder here.
 export async function resolveDestinationBatch(
   db: D1Compat,
-  sourceBatch: { lot_code: string | null; expiry_date: string | null; notes: string | null },
+  sourceBatch: { lot_code: string | null; expiry_date: string | null; received_at?: string | null; notes: string | null },
   destProductId: number,
+  options?: { writeGuard?: { sql: string; params?: Record<string, unknown> } },
 ): Promise<number> {
   const lotCode = normalizeLotCode(sourceBatch.lot_code)
   const match = lotCode
@@ -456,17 +770,26 @@ export async function resolveDestinationBatch(
   // batchLabel.ts).
   const batchNumber = await nextBatchNumber(db, destProductId)
   const batchKey = lotCode || generateBatchKey()
-  const inserted = await db.prepare(`
-    INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number)
-    VALUES (@productId, @batchKey, @lotCode, @expiryDate, datetime('now'), 1, @notes, @batchNumber)
-  `).run({
-    productId: destProductId,
-    batchKey,
-    lotCode,
-    expiryDate: sourceBatch.expiry_date || null,
-    notes: sourceBatch.notes || null,
-    batchNumber,
-  })
+  const insertStatement = {
+    sql: `INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number)
+      VALUES (@productId, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes, @batchNumber)`,
+    params: {
+      productId: destProductId,
+      batchKey,
+      lotCode,
+      expiryDate: sourceBatch.expiry_date || null,
+      receivedAt: sourceBatch.received_at || null,
+      notes: sourceBatch.notes || null,
+      batchNumber,
+    },
+  }
+  if (options?.writeGuard) {
+    const results = await db.batch([options.writeGuard, insertStatement])
+    const insertedId = Number(results[1]?.meta?.last_row_id ?? 0)
+    if (!Number.isSafeInteger(insertedId) || insertedId <= 0) throw new Error('Destination received date was not created')
+    return insertedId
+  }
+  const inserted = await db.prepare(insertStatement.sql).run(insertStatement.params)
   return Number(inserted.lastInsertRowid)
 }
 
@@ -506,6 +829,21 @@ export function incrementBatchStockStatement(batchId: number, branchId: number, 
   }
 }
 
+// Restoring real, previously allocated sale stock makes its original lot
+// selectable again. Keep both statements in the caller's atomic db.batch:
+// activating first also satisfies the inactive-positive-stock invariant.
+// Neither statement rewrites the lot's received date, cost or identity.
+export function restoreBatchStockStatements(batchId: number, branchId: number, quantity: number): Array<{ sql: string; params: Record<string, unknown> }> {
+  if (!Number.isFinite(quantity) || quantity <= 0) return []
+  return [
+    {
+      sql: `UPDATE product_batches SET is_active = 1, updated_at = datetime('now') WHERE id = @batchId AND is_active IS NOT 1`,
+      params: { batchId },
+    },
+    incrementBatchStockStatement(batchId, branchId, quantity),
+  ]
+}
+
 // ---------------------------------------------------------------------------
 // Z0: FIFO lot allocation for sales that did not explicitly pick a batch.
 // The user's rule -- "returns and cancels must return stock to the SAME
@@ -516,6 +854,8 @@ export function incrementBatchStockStatement(batchId: number, branchId: number, 
 export type FifoLotAvailability = {
   batchId: number
   lotCode: string | null
+  /** Operator-facing received date source; lotCode remains a wire/storage alias. */
+  receivedAt?: string | null
   expiryDate: string | null
   available: number
 }
@@ -525,15 +865,16 @@ export type FifoLotAvailability = {
 // after every dated one), then batch_number/id for a stable tiebreak.
 export async function readFifoLotAvailability(db: D1Compat, productId: number, branchId: number): Promise<FifoLotAvailability[]> {
   const rows = await db.prepare(`
-    SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date, bbs.quantity AS available
+    SELECT pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available
     FROM product_batches pb
     JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
     WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
     ORDER BY (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
-  `).all<{ batch_id: number; lot_code: string | null; expiry_date: string | null; available: number }>({ productId, branchId })
+  `).all<{ batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number }>({ productId, branchId })
   return rows.map((row) => ({
     batchId: Number(row.batch_id),
     lotCode: row.lot_code ?? null,
+    receivedAt: row.received_at ?? null,
     expiryDate: row.expiry_date ?? null,
     available: Math.max(0, Number(row.available) || 0),
   }))
@@ -557,7 +898,7 @@ export async function readFifoLotAvailabilityForCart(
   // product ids (branches are few, usually one POS branch).
   const rows = await selectInChunks(productIds, branchIds.length, (chunk) => db.prepare(`
     SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id,
-           pb.id AS batch_id, pb.lot_code, pb.expiry_date, bbs.quantity AS available
+           pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available
     FROM product_batches pb
     JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id IN (${chunk.map(() => '?').join(',')})
@@ -565,13 +906,14 @@ export async function readFifoLotAvailabilityForCart(
       AND pb.is_active = 1 AND bbs.quantity > 0
     ORDER BY pb.variant_product_id ASC, bbs.branch_id ASC,
              (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
-  `).all<{ product_id: number; branch_id: number; batch_id: number; lot_code: string | null; expiry_date: string | null; available: number }>([...chunk, ...branchIds]))
+  `).all<{ product_id: number; branch_id: number; batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number }>([...chunk, ...branchIds]))
   for (const row of rows) {
     const key = `${Number(row.product_id)}:${Number(row.branch_id)}`
     const list = map.get(key) || []
     list.push({
       batchId: Number(row.batch_id),
       lotCode: row.lot_code ?? null,
+      receivedAt: row.received_at ?? null,
       expiryDate: row.expiry_date ?? null,
       available: Math.max(0, Number(row.available) || 0),
     })
@@ -580,7 +922,7 @@ export async function readFifoLotAvailabilityForCart(
   return map
 }
 
-export type FifoLotTake = { batchId: number; lotCode: string | null; expiryDate: string | null; quantity: number }
+export type FifoLotTake = { batchId: number; lotCode: string | null; receivedAt?: string | null; expiryDate: string | null; quantity: number }
 
 // Pure split of `quantity` across the lots in the given (already FIFO)
 // order, clamped to each lot's availability. Any remainder beyond what the
@@ -594,7 +936,12 @@ export function allocateAcrossLots(lots: FifoLotAvailability[], quantity: number
     if (remaining <= 0) break
     const take = Math.min(lot.available, remaining)
     if (take <= 0) continue
-    takes.push({ batchId: lot.batchId, lotCode: lot.lotCode, expiryDate: lot.expiryDate, quantity: take })
+    const allocation: FifoLotTake = { batchId: lot.batchId, lotCode: lot.lotCode, expiryDate: lot.expiryDate, quantity: take }
+    // Keep optional metadata absent when the caller supplied no received-date
+    // field. This preserves the pure allocator's minimal shape while real DB
+    // rows still carry their nullable receivedAt value for audit/returns.
+    if (lot.receivedAt !== undefined) allocation.receivedAt = lot.receivedAt
+    takes.push(allocation)
     remaining -= take
   }
   return { takes, uncovered: remaining }
@@ -653,22 +1000,52 @@ export async function removeStockAcrossBatches(db: D1Compat, input: {
   productId: number
   branchId: number
   quantity: number
+  /** Exact FIFO allocation captured by a caller that must bind metadata to it. */
+  allocations?: Array<{ batchId: number; quantity: number }>
 }): Promise<{ batchIds: number[]; batchQuantities: { batchId: number; quantity: number }[]; drained: number; remainder: number }> {
-  const batches = await listBatchesForProduct(db, input.productId, input.branchId, { onlyAvailable: true })
-
   let remaining = input.quantity
   const touched: { batchId: number; take: number }[] = []
-  for (const batch of batches) {
-    if (remaining <= 0) break
-    const take = Math.min(remaining, Number(batch.quantity) || 0)
-    if (take <= 0) continue
-    touched.push({ batchId: batch.id, take })
-    remaining -= take
+  if (input.allocations) {
+    const ids = new Set<number>()
+    for (const allocation of input.allocations) {
+      const batchId = Number(allocation.batchId)
+      const take = Number(allocation.quantity)
+      if (!Number.isSafeInteger(batchId) || batchId <= 0 || !Number.isFinite(take) || !(take > 0) || ids.has(batchId)) {
+        throw new Error('The captured received-date allocation is invalid. Refresh and try again.')
+      }
+      ids.add(batchId)
+      touched.push({ batchId, take })
+      remaining -= take
+    }
+    if (remaining < -0.000000001) throw new Error('The captured received-date allocation exceeds the stock removal.')
+    remaining = Math.max(0, remaining)
+  } else {
+    const batches = await listBatchesForProduct(db, input.productId, input.branchId, { onlyAvailable: true })
+    for (const batch of batches) {
+      if (remaining <= 0) break
+      const take = Math.min(remaining, Number(batch.quantity) || 0)
+      if (take <= 0) continue
+      touched.push({ batchId: batch.id, take })
+      remaining -= take
+    }
   }
   const drained = input.quantity - remaining
 
   if (touched.length) {
     await db.batch([
+      // The exact pre-read allocation and its cost snapshot travel together.
+      // Fail the entire D1 batch before any decrement if a concurrent write
+      // consumed/deleted/reassigned one of those lots. A newly inserted FIFO
+      // lot is deliberately irrelevant: this call applies only captured IDs.
+      ...(input.allocations ? touched.map(({ batchId, take }) => ({
+        sql: `SELECT CASE WHEN EXISTS(
+          SELECT 1 FROM branch_batch_stock bbs
+          JOIN product_batches pb ON pb.id=bbs.batch_id
+          WHERE bbs.batch_id=@batchId AND bbs.branch_id=@branchId
+            AND pb.variant_product_id=@productId AND pb.is_active=1 AND bbs.quantity>=@quantity
+        ) THEN 1 ELSE json_extract('captured_batch_allocation_conflict','$') END AS allocation_guard`,
+        params: { batchId, branchId: input.branchId, productId: input.productId, quantity: take },
+      })) : []),
       ...touched.map(({ batchId, take }) => decrementBatchStockStatement(batchId, input.branchId, take)),
       {
         sql: `UPDATE branch_stock SET quantity = MAX(0, quantity - @quantity) WHERE product_id = @productId AND branch_id = @branchId`,

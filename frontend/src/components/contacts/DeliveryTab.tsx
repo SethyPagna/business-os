@@ -17,7 +17,10 @@ import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.t
 import type { QueryParams } from '../../api/query.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
 import Modal from '../shared/Modal'
+import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
+import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
@@ -26,6 +29,7 @@ import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countA
 import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
+import { createSeparateContactDecision, readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -105,7 +109,8 @@ interface DeliveryPayload {
   gender?: string | null
   userId?: string | number | null
   userName?: string | null
-  confirmDuplicate?: boolean
+  duplicateDecision?: ContactDuplicateDecision
+  __rename_cascade?: 'carry' | 'record_only'
 }
 
 interface DeliveryMutationResult {
@@ -133,6 +138,7 @@ interface DeliveryApi {
   createDeliveryContact: (payload: DeliveryPayload) => Promise<DeliveryMutationResult | unknown>
   updateDeliveryContact: (id: number | string, payload: DeliveryPayload) => Promise<DeliveryMutationResult | unknown>
   deleteDeliveryContact: (id: number | string) => Promise<DeliveryMutationResult | unknown>
+  getDeliveryContactRenameImpact: (id: number | string, to: string) => Promise<import('../../api/renameCascadeTransport.ts').RenameImpact>
 }
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
@@ -162,6 +168,7 @@ function getDeliveryApi(): DeliveryApi {
     createDeliveryContact: async (payload) => (await loadContactWriteTransportModule()).createDeliveryContact(payload as Record<string, unknown>),
     updateDeliveryContact: async (id, payload) => (await loadContactWriteTransportModule()).updateDeliveryContact(id, payload as Record<string, unknown>),
     deleteDeliveryContact: async (id) => (await loadContactWriteTransportModule()).deleteDeliveryContact(id),
+    getDeliveryContactRenameImpact: async (id, to) => (await loadContactWriteTransportModule()).getDeliveryContactRenameImpact(id, to),
   }
 }
 
@@ -179,6 +186,26 @@ function isSectionRow(row: DeliveryDisplayRow | null | undefined): row is Sectio
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
+}
+
+// P4-4b item 6 (parity): handleSave's edit path used to call
+// load({ silent: true }) after every update -- a full re-search of the
+// current filtered/sorted/paginated Delivery contacts page just to reflect
+// one row changing. updateDeliveryContact's PUT response already IS that
+// one row (routes/contacts.ts's PUT handler: `SELECT * FROM
+// delivery_contacts WHERE id = @id`), so this patches it into place
+// instead -- same pattern CustomersTab.tsx's patchCustomerRow and
+// SuppliersTab.tsx's patchSupplierRow use. Returns null (asking the caller
+// to fall back to a full load) when the id isn't present on the
+// currently-loaded page.
+function patchDeliveryContact(rows: DeliveryContact[], id: number | string, patch: Record<string, unknown>): DeliveryContact[] | null {
+  let matched = false
+  const next = rows.map((row) => {
+    if (Number(row.id) !== Number(id)) return row
+    matched = true
+    return { ...row, ...patch }
+  })
+  return matched ? next : null
 }
 
 // ?€?€ Options helpers ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -203,42 +230,43 @@ interface OptionEditorProps {
   total: number
   onChange: (option: ContactOption) => void
   onRemove: () => void
+  t: TranslateFn
 }
 
-function OptionEditor({ option, index, total, onChange, onRemove }: OptionEditorProps) {
+function OptionEditor({ option, index, total, onChange, onRemove, t }: OptionEditorProps) {
   const set = (key: keyof ContactOption, value: string) => onChange({ ...option, [key]: value })
   const fieldId = (field: string) => `delivery-option-${index}-${field}`
   return (
     <div className="border border-gray-200 dark:border-zinc-600 rounded-xl p-3 space-y-2 bg-gray-50 dark:bg-zinc-800/60">
       <div className="flex items-center gap-2">
         <span className="text-xs font-bold text-gray-400 w-5 flex-shrink-0">#{index + 1}</span>
-        <label htmlFor={fieldId('label')} className="sr-only">Delivery option label</label>
+        <label htmlFor={fieldId('label')} className="sr-only">{t('delivery_option_label_sr') || 'Delivery option label'}</label>
         <input
           id={fieldId('label')}
           name={fieldId('label')}
           autoComplete="off"
           className="input text-xs py-1 flex-1"
-          placeholder="Label (e.g. Morning Shift, Zone A)"
+          placeholder={t('delivery_option_label_placeholder') || 'Label (e.g. Morning Shift, Zone A)'}
           value={option.label}
           onChange={e => set('label', e.target.value)}
         />
         {total > 1 && (
-          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600 text-xs px-1.5 py-1 rounded flex-shrink-0" aria-label="Remove delivery option">x</button>
+          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600 text-xs px-1.5 py-1 rounded flex-shrink-0" aria-label={t('delivery_option_remove_aria') || 'Remove delivery option'}>x</button>
         )}
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label htmlFor={fieldId('name')} className="block text-xs text-gray-400 mb-0.5">Name</label>
-          <input id={fieldId('name')} name={fieldId('name')} autoComplete="name" className="input text-xs py-1" placeholder="Driver / rider name" value={option.name} onChange={e => set('name', e.target.value)} />
+          <label htmlFor={fieldId('name')} className="block text-xs text-gray-400 mb-0.5">{t('name') || 'Name'}</label>
+          <input id={fieldId('name')} name={fieldId('name')} autoComplete="name" className="input text-xs py-1" placeholder={t('delivery_option_name_placeholder') || 'Driver / rider name'} value={option.name} onChange={e => set('name', e.target.value)} />
         </div>
         <div>
-          <label htmlFor={fieldId('phone')} className="block text-xs text-gray-400 mb-0.5">Phone</label>
-          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" className="input text-xs py-1" placeholder="Phone number" value={option.phone} onChange={e => set('phone', e.target.value)} />
+          <label htmlFor={fieldId('phone')} className="block text-xs text-gray-400 mb-0.5">{t('phone') || 'Phone'}</label>
+          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" inputMode="tel" className="input text-xs py-1" placeholder={t('phone_number') || 'Phone number'} value={option.phone} onChange={e => set('phone', formatPhoneInputElement(e.currentTarget))} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => set('phone', phone))} onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (phone) => set('phone', phone))} />
         </div>
       </div>
       <div>
-        <label htmlFor={fieldId('area')} className="block text-xs text-gray-400 mb-0.5">Area / Zone</label>
-        <input id={fieldId('area')} name={fieldId('area')} autoComplete="off" className="input text-xs py-1" placeholder="Coverage area or zone" value={option.area} onChange={e => set('area', e.target.value)} />
+        <label htmlFor={fieldId('area')} className="block text-xs text-gray-400 mb-0.5">{t('area_zone') || 'Area / Zone'}</label>
+        <input id={fieldId('area')} name={fieldId('area')} autoComplete="off" className="input text-xs py-1" placeholder={t('delivery_option_area_placeholder') || 'Coverage area or zone'} value={option.area} onChange={e => set('area', e.target.value)} />
       </div>
     </div>
   )
@@ -248,13 +276,16 @@ function OptionEditor({ option, index, total, onChange, onRemove }: OptionEditor
 interface DeliveryFormProps {
   contact?: DeliveryContact | null
   onSave: (payload: DeliveryPayload) => Promise<unknown> | unknown
+  onUseExisting: (match: ContactDuplicateMatch) => void | Promise<void>
   onClose: () => void
   t: TranslateFn
 }
 
-function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
+function DeliveryForm({ contact, onSave, onUseExisting, onClose, t }: DeliveryFormProps) {
   const init: DeliveryPayload = contact ? { ...contact } : { name: '', phone: '', area: '', address: '', notes: '', gender: '' }
   const [form, setForm] = useState<DeliveryPayload>(init)
+  // S4-21: dismissing this modal with edits raises the discard prompt.
+  const { dirty: formDirty } = useFormDirty(form, String(contact?.id ?? 'new'))
   const [options, setOptions] = useState(() => {
     const parsed = parseDeliveryOptions(init.address)
     if (parsed.length) return parsed
@@ -263,23 +294,29 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const set = (key: keyof DeliveryPayload, value: string) => setForm((current) => ({ ...current, [key]: value }))
-  const addOption = () => setOptions((current) => {
-    if (current.length >= CONTACT_OPTION_LIMIT) return current
-    return [...current, BLANK_OPTION()]
-  })
-  const updateOption = (index: number, nextOption: ContactOption) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option)))
-  const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
+  const [serverDuplicateCheck, setServerDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
+  const [pendingDuplicateCheck, setPendingDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
+  const clearServerDuplicateCheck = () => setServerDuplicateCheck(null)
+  const set = (key: keyof DeliveryPayload, value: string) => { clearServerDuplicateCheck(); setForm((current) => ({ ...current, [key]: value })) }
+  const addOption = () => {
+    clearServerDuplicateCheck()
+    setOptions((current) => current.length >= CONTACT_OPTION_LIMIT ? current : [...current, BLANK_OPTION()])
+  }
+  const updateOption = (index: number, nextOption: ContactOption) => { clearServerDuplicateCheck(); setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option))) }
+  const removeOption = (index: number) => { clearServerDuplicateCheck(); setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index)) }
   const livePrimaryOption = getPrimaryContactOption(options, {
     fallback: { name: form.name || '', phone: form.phone || '', area: form.area || '' },
   })
-  const duplicateMatches = useContactDuplicateFlag(
+  const duplicateCheck = useContactDuplicateFlag(
     'delivery_contacts',
     livePrimaryOption.name || form.name || '',
-    livePrimaryOption.phone || form.phone || '',
+    [form.phone || '', ...options.map((option) => option.phone)],
     contact?.id,
   )
+  const activeDuplicateCheck = serverDuplicateCheck || duplicateCheck
+  const duplicateMatches = activeDuplicateCheck.matches
   const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
+  const pendingExactMatch = pendingDuplicateCheck?.matches.find((match) => match.severity === 'exact_match')
 
   // Part 563: validate, then open the review dialog; commitDelivery saves on
   // confirm. The exact-duplicate window.confirm() is folded into the dialog
@@ -292,6 +329,7 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
       return
     }
     setLocalError('')
+    setPendingDuplicateCheck(exactMatch ? activeDuplicateCheck : null)
     setConfirmOpen(true)
   }
 
@@ -312,15 +350,23 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
     })
     setSaving(true)
     try {
-      await Promise.resolve(onSave({
+      const duplicateDecision = pendingDuplicateCheck ? createSeparateContactDecision(pendingDuplicateCheck) : null
+      const result = await Promise.resolve(onSave({
         ...form,
         name: primaryOption.name || form.name || '',
         phone: primaryOption.phone || form.phone || '',
         area: primaryOption.area || form.area || '',
         address: serializeDeliveryOptions(options),
         gender: form.gender || '',
-        confirmDuplicate: !!exactMatch,
+        ...(duplicateDecision ? { duplicateDecision } : {}),
       }))
+      const nextCheck = (result as { duplicateDecisionRequired?: ContactDuplicateCheck } | null)?.duplicateDecisionRequired
+      if (nextCheck) {
+        setServerDuplicateCheck(nextCheck)
+        setLocalError(t('contact_duplicate_review_changed') || 'Review the current possible duplicate records before saving.')
+      } else if (duplicateDecision && (result as { success?: boolean } | null)?.success === true) {
+        resolveContactDuplicateSyncError(pendingDuplicateCheck)
+      }
     } finally {
       setSaving(false)
     }
@@ -330,7 +376,8 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
     <Modal
       title={contact ? `Edit Delivery Contact` : `Add Delivery Contact`}
       onClose={onClose}
-    >
+    
+      unsavedChanges={{ dirty: formDirty }}>
       <div className="space-y-3">
         <div>
           <label htmlFor="delivery-form-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -357,6 +404,7 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
                 total={options.length}
                 onChange={(nextOption) => updateOption(index, nextOption)}
                 onRemove={() => removeOption(index)}
+                t={t}
               />
             ))}
           </div>
@@ -384,7 +432,7 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
           <label htmlFor="delivery-form-notes" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('notes')||'Notes'}</label>
           <textarea id="delivery-form-notes" name="delivery_notes" autoComplete="off" className="input resize-none" rows={2} value={form.notes||''} onChange={e => set('notes', e.target.value)} />
         </div>
-        <p className="text-xs text-gray-400">Provide driver name or phone number.</p>
+        <p className="text-xs text-gray-400">{t('delivery_option_hint') || 'Provide driver name or phone number.'}</p>
 
         {localError ? (
           <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
@@ -392,7 +440,7 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
           </div>
         ) : null}
 
-        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="delivery contact" />
+        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="delivery contact" onUseExisting={onUseExisting} t={t} />
 
         {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx/
             CustomerFormModal.tsx's own fix. */}
@@ -407,9 +455,9 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
           title={contact ? 'Edit Delivery Contact' : 'Add Delivery Contact'}
           message={(livePrimaryOption.name || form.name || '').trim()}
           items={buildDeliveryReviewItems()}
-          note={exactMatch ? `"${exactMatch.name}" already has this exact name and phone number. Create a separate delivery contact anyway?` : undefined}
-          danger={!!exactMatch}
-          confirmLabel={t('save') || 'Save'}
+          note={pendingExactMatch ? (t('contact_duplicate_possible_message') || 'A contact already has this name and phone number. Use the existing record or create a separate one.') : undefined}
+          danger={!!pendingExactMatch}
+          confirmLabel={pendingExactMatch ? (t('contact_duplicate_create_separately') || 'Create separately') : (t('save') || 'Save')}
           cancelLabel={t('cancel') || 'Cancel'}
           working={saving}
           workingLabel={t('saving') || 'Saving...'}
@@ -461,9 +509,16 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   // 'block'.
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
+  const canBulkContacts = can('contacts', 'bulk')
+  const canBulkContactsRef = useRef(canBulkContacts)
+  canBulkContactsRef.current = canBulkContacts
+  const canImportContacts = canBulkContacts && can('contacts', 'import')
+  const canImportContactsRef = useRef(canImportContacts)
+  canImportContactsRef.current = canImportContacts
   // Client-side export gated by the modeled 'contacts:export' action, matching
   // the Customers/Suppliers tabs and the Products precedent.
   const canExportContacts = can('contacts', 'export')
+  const canViewFinancialHistory = can('contacts', 'financial_history')
 
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -479,6 +534,20 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }, [isKhmer, t])
+  // Rename prompt, same flow as CustomersTab/SuppliersTab: the save awaits
+  // the user's carry / only-this-one choice before the PUT goes out.
+  const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
+  const renameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
+  const askRenameChoice = (request: RenameCascadeRequest) => new Promise<RenameCascadeChoice>((resolve) => {
+    renameResolveRef.current = resolve
+    setRenameRequest(request)
+  })
+  const handleRenameChoice = (choice: RenameCascadeChoice) => {
+    setRenameRequest(null)
+    const resolve = renameResolveRef.current
+    renameResolveRef.current = null
+    resolve?.(choice)
+  }
   const [contacts, setContacts] = useState<DeliveryContact[]>([])
   const [search,   setSearch]   = useState('')
   const appliedInitialSearchRef = useRef<string | undefined>(undefined)
@@ -488,6 +557,9 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     setSearch(initialSearch)
   }, [initialSearch])
   const [modal,    setModal]    = useState<DeliveryModal>(null)
+  useEffect(() => {
+    if (!canViewFinancialHistory) setModal((current) => current === 'report' ? 'detail' : current)
+  }, [canViewFinancialHistory])
   const [selected, setSelected] = useState<DeliveryContact | null>(null)
   const [loading,  setLoading]  = useState(true)
   // Y1: true while ANY load is in flight (incl. silent search refetches)
@@ -591,7 +663,26 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     [collapsedSections, filteredSections],
   )
 
-  const { selectedIds, setSelectedIds, toggleOne, selectAllProp, selectionModeActive, getRowLongPressState } = useContactSelection(visibleContacts)
+  const contactSelection = useContactSelection(visibleContacts)
+  const { setSelectedIds, getRowLongPressState } = contactSelection
+  const selectedIds = canBulkContacts ? contactSelection.selectedIds : new Set<number>()
+  const selectionModeActive = canBulkContacts && contactSelection.selectionModeActive
+  const toggleOne = (id: unknown) => {
+    if (!canBulkContactsRef.current) return
+    contactSelection.toggleOne(id)
+  }
+  const selectAllProp = {
+    ...contactSelection.selectAllProp,
+    onChange: (checked: boolean) => {
+      if (!canBulkContactsRef.current) return
+      contactSelection.selectAllProp.onChange(checked)
+    },
+  }
+  useEffect(() => {
+    if (canImportContacts) return
+    setSelectedIds((current) => current.size ? new Set<number>() : current)
+    setModal((current) => current === 'import' ? null : current)
+  }, [canImportContacts, setSelectedIds])
   // H1+X5 (Part 402): exports go through the shared options dialog.
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
@@ -650,6 +741,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   const isSectionFullySelected = (ids: Array<number | string> = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
   const isSectionPartiallySelected = (ids: Array<number | string> = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
   const toggleSectionSelection = (ids: Array<number | string>, checked: boolean) => {
+    if (!canBulkContactsRef.current) return
     ids.forEach((id) => {
       const numericId = Number(id)
       const isSelected = selectedIds.has(numericId)
@@ -666,6 +758,9 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     gender: contact.gender || '',
     userId: user?.id,
     userName: user?.name,
+    // Undo/redo replays a rename the user already decided on; carry keeps
+    // the linked sales in step (same as CustomersTab's builder).
+    __rename_cascade: 'carry',
   }), [user?.id, user?.name])
 
   const runDeliveryMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<DeliveryMutationResult> => (
@@ -773,7 +868,19 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     }
     try {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
-      const payload = { ...form, userId: user?.id, userName: user?.name }
+      const payload: DeliveryPayload = { ...form, userId: user?.id, userName: user?.name }
+      const oldName = selected ? String(selected.name || '').trim() : ''
+      const newName = String(form.name || '').trim()
+      if (selected && oldName && oldName.toLowerCase() !== newName.toLowerCase()) {
+        const impact = await getDeliveryApi().getDeliveryContactRenameImpact(selected.id, newName)
+        if (impact.target_exists) {
+          notify(`"${newName}" already exists. Use Conflicts to choose which delivery contact to keep.`, 'warning')
+          return
+        }
+        const choice = await askRenameChoice({ kind: 'delivery_contact', from: oldName, to: newName, impact, choices: ['carry', 'only'] })
+        if (choice === 'cancel') return
+        payload.__rename_cascade = choice === 'carry' ? 'carry' : 'record_only'
+      }
       const res = selected
         ? await runDeliveryMutation(() => getDeliveryApi().updateDeliveryContact(selected.id, payload), 'Update delivery contact')
         : await runDeliveryMutation(() => getDeliveryApi().createDeliveryContact(payload), 'Create delivery contact')
@@ -828,9 +935,47 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       } else {
         notify(selected ? (t('delivery_contact_updated')||'Updated') : (t('delivery_contact_added')||'Added'))
       }
-      setModal(null); setSelected(null); await load({ silent: true, label: 'Delivery contacts after save' })
-    } catch (error: unknown) { notify(getErrorMessage(error, 'Failed'), 'error') }
+      setModal(null); setSelected(null)
+      // P4-4b item 6 (parity): patch the edited row in place instead of the
+      // full load() -- same "patch only when the target position is
+      // already known" rule CustomersTab.tsx/SuppliersTab.tsx use; a create
+      // still needs the full load() since its page/sort slot can't be
+      // derived from the response alone.
+      if (selected && res && typeof res === 'object') {
+        const patched = patchDeliveryContact(contacts, selected.id, res as Record<string, unknown>)
+        if (patched) {
+          setContacts(patched)
+        } else {
+          await load({ silent: true, label: 'Delivery contacts after save' })
+        }
+      } else {
+        await load({ silent: true, label: 'Delivery contacts after save' })
+      }
+      return { success: true }
+    } catch (error: unknown) {
+      const duplicateCheck = readContactDuplicateDecisionError(error)
+      if (duplicateCheck) return { duplicateDecisionRequired: duplicateCheck }
+      notify(getErrorMessage(error, 'Failed'), 'error')
+      return { success: false }
+    }
     finally { finishSingleAction(saveInFlightRef) }
+  }
+
+  const handleUseExisting = async (match: ContactDuplicateMatch) => {
+    try {
+      const data = await withLoaderTimeout(
+        () => getDeliveryApi().getDeliveryContacts({ ids: [String(match.id)] }),
+        'Load existing delivery contact',
+        12000,
+      )
+      const existing = normalizeDeliveryRows(data).find((contact) => Number(contact.id) === Number(match.id))
+      if (!existing) throw new Error('The existing delivery contact could not be loaded')
+      setSelected(existing)
+      setModal('detail')
+      resolveContactDuplicateSyncError(match)
+    } catch (error) {
+      notify(getErrorMessage(error, t('contact_duplicate_existing_load_failed') || 'Could not load the existing record. Try again.'), 'error')
+    }
   }
 
   const handleDelete = async (c: DeliveryContact) => {
@@ -871,7 +1016,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
+    if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
     if (!confirm(`Delete ${selectedIds.size} delivery contact(s)?`)) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
@@ -896,6 +1041,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         actionHistory.pushAction({
           label: `Delete ${deletedCount} delivery contact${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
+            if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot: DeliveryContact) => {
               const result = await runDeliveryMutation(() => getDeliveryApi().createDeliveryContact({
                 name: snapshot.name || '',
@@ -913,6 +1059,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             await load({ silent: true, label: 'Delivery contacts restore deleted' })
           },
           redo: async () => {
+            if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
             const redoRun = await runConcurrentTasks(idsToDelete, async (id: number) => (
               runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(id), 'Redo bulk delivery contact delete')
@@ -940,6 +1087,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           Manage per the ordering used on Products. */}
       <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel dense />
+        {(canImportContacts || canExportContacts) ? (
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName="min-w-0 flex-1"
@@ -956,7 +1104,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             </button>
           )}
           items={([
-            { label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => setModal('import'), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+            ...(canImportContacts ? [{ label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => { if (!canImportContactsRef.current) return; setModal('import') }, color: 'blue' as const, icon: <Download className="h-4 w-4 shrink-0" /> }] : []),
             ...(canExportContacts ? [{
               label: tr('export', 'Export', 'នាំចេញ'),
               color: 'green',
@@ -984,6 +1132,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             }] : []),
           ] as PortalMenuItem[])}
         />
+        ) : null}
         <button
           className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
           onClick={() => { setSelected(null); setModal('form') }}
@@ -1004,7 +1153,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           pins. No separate select-all row here: ContactTable renders its
           own selectAll control inside the table header via the `selectAll`
           prop below. */}
-      <div className="sticky top-2 z-30 -mx-1 flex min-w-0 items-center gap-2 bg-gray-50/95 pb-2 pt-1 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 flex min-w-0 items-center gap-2 bg-gray-50 pb-2 pt-1 dark:bg-gray-900 sm:mx-0">
         <div className="flex gap-2 items-center flex-1 min-w-0">
           <SearchInput
             id="delivery-search"
@@ -1025,7 +1174,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
               {tr('retry', 'Retry')}
             </button>
           ) : null}
-          {selectedIds.size > 0 && canBulkDeleteContacts && (
+          {canBulkContacts && selectedIds.size > 0 && canBulkDeleteContacts && (
             <button
               className="btn-secondary text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-60"
               onClick={handleBulkDelete}
@@ -1114,7 +1263,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           })
           const rowLongPressState = getRowLongPressState(Number(contact.id))
           const rowLongPress = createLongPressHandlers(rowLongPressState, {
-            disabled: selectionModeActive,
+            disabled: !canBulkContacts || selectionModeActive,
             onLongPress: () => {
               if (!selectedIds.has(Number(contact.id))) toggleOne(contact.id)
             },
@@ -1124,7 +1273,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           <tr
             key={contact.id}
             className={`table-row cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(contact.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
-            {...(selectionModeActive ? {} : rowLongPress)}
+            {...(canBulkContacts && !selectionModeActive ? rowLongPress : {})}
             onClickCapture={(event) => {
               // Swallow the ghost click that follows a fired long-press.
               if (consumeLongPressClick(rowLongPressState)) {
@@ -1190,7 +1339,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           })
           const cardLongPressState = getRowLongPressState(Number(contact.id))
           const cardLongPress = createLongPressHandlers(cardLongPressState, {
-            disabled: selectionModeActive,
+            disabled: !canBulkContacts || selectionModeActive,
             onLongPress: () => {
               if (!selectedIds.has(Number(contact.id))) toggleOne(contact.id)
             },
@@ -1207,7 +1356,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             key={contact.id}
             className={`card p-3 flex cursor-pointer select-none items-center gap-3 ${selectedIds.has(Number(contact.id)) ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}
             onClick={() => handleContactCellClick(contact)}
-            {...(selectionModeActive ? {} : cardLongPress)}
+            {...(canBulkContacts && !selectionModeActive ? cardLongPress : {})}
             onClickCapture={(event) => {
               if (consumeLongPressClick(cardLongPressState)) {
                 event.preventDefault()
@@ -1240,8 +1389,8 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         }}
       />
 
-      {modal === 'form'   && <DeliveryForm contact={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} />}
-      {modal === 'import' ? (
+      {modal === 'form'   && <DeliveryForm contact={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} />}
+      {canImportContacts && modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="deliveryContact" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Delivery contacts after import' })} />
         </Suspense>
@@ -1264,7 +1413,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             ]
           })()}
           onEdit={() => setModal('form')} onDelete={canDeleteContact ? () => handleDelete(selected) : undefined} onClose={() => { setModal(null); setSelected(null) }} t={t}
-          extraButtons={[{ label: tr('delivery_report', 'Deliveries'), onClick: () => setModal('report') }]} />
+          extraButtons={canViewFinancialHistory ? [{ label: tr('delivery_report', 'Deliveries'), onClick: () => setModal('report') }] : []} />
       )}
       {exportDialog ? (
         <Suspense fallback={null}>
@@ -1282,7 +1431,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       ) : null}
       {/* X3: the per-courier totals drill -- the same pattern as the supplier
           Purchases modal, backed by /api/sales/delivery-contact-report. */}
-      {modal === 'report' && selected ? (
+      {canViewFinancialHistory && modal === 'report' && selected ? (
         <Suspense fallback={null}>
           <DeliveryContactReportModal
             contactId={selected.id as number}
@@ -1292,6 +1441,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           />
         </Suspense>
       ) : null}
+      <RenameCascadeModal request={renameRequest} busy={false} t={(key, fallback) => tr(key, fallback || key)} onChoose={handleRenameChoice} />
     </div>
   )
 }

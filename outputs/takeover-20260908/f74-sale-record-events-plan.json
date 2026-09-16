@@ -1,0 +1,228 @@
+{
+  "schema_version": 4,
+  "status": "proposed_for_final_review",
+  "migration": "0140_sale_record_events.sql",
+  "table": {
+    "name": "sale_record_events",
+    "columns": [
+      "id TEXT PRIMARY KEY",
+      "sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE RESTRICT",
+      "source_kind TEXT NOT NULL",
+      "source_id TEXT NOT NULL",
+      "generation INTEGER NOT NULL",
+      "kind TEXT NOT NULL",
+      "via TEXT NOT NULL",
+      "subject TEXT",
+      "actor_id INTEGER",
+      "actor_username TEXT",
+      "occurred_at TEXT NOT NULL",
+      "changes_json TEXT NOT NULL",
+      "request_digest TEXT",
+      "response_json TEXT"
+    ],
+    "identity": {
+      "unique": ["source_kind", "source_id", "generation", "sale_id"],
+      "id_formula": "crypto.randomUUID() generated before the atomic batch and enforced as a lowercase RFC 4122 version-4 UUID by SQL; id is an opaque row identifier, while the composite unique key is the retry identity",
+      "rule": "kind is payload under the unique act identity and cannot create a second record for one act. Do not concatenate unescaped tuple parts into id."
+    },
+    "checks": [
+      "source_kind is one of sale_status, sale_customer, sale_settlement, sale_bulk_status, sale_bulk_update, return_create, return_edit, return_bulk",
+      "source_id length is 1..180",
+      "generation is an integer from 0 through 1000000",
+      "kind is one of the frozen F74 kinds except legacy_sale_change, which is synthesized only from legacy rows and is never appended to this table",
+      "via is apply, undo, or redo",
+      "actor_username is null or at most 120 characters",
+      "subject is null or at most 240 characters",
+      "occurred_at is non-empty and at most 40 characters",
+      "changes_json is a valid JSON array with 1..12 elements and at most 65536 UTF-8 bytes; the migration measures bytes with length(CAST(changes_json AS BLOB))",
+      "request_digest is null or a 64-character lowercase SHA-256 hex string",
+      "response_json is null or a valid JSON object no larger than 65536 UTF-8 bytes, measured with length(CAST(response_json AS BLOB))",
+      "source_kind and kind are an allowed writer pair, and generation/via are coupled: generation zero is apply; only replay-capable receipt sources permit later generations, with odd generations undo and even generations redo"
+    ],
+    "index": [
+      "sale_id, occurred_at, id",
+      "UNIQUE(source_kind,source_id,generation) WHERE source_kind IN ('sale_status','sale_customer','return_edit') prevents one direct request identity from targeting two sales"
+    ],
+    "backfill": "none"
+  },
+  "return_edit_receipt_table": {
+    "name": "return_mutation_receipts",
+    "purpose": "Actor-scoped exact retry for customer-return edits, including valid edits that do not change the parent sale status and therefore must not invent a Sales Records event.",
+    "columns": [
+      "id TEXT PRIMARY KEY",
+      "actor_id INTEGER NOT NULL",
+      "return_id INTEGER NOT NULL REFERENCES returns(id) ON DELETE RESTRICT",
+      "sale_id INTEGER REFERENCES sales(id) ON DELETE RESTRICT",
+      "mutation_kind TEXT NOT NULL CHECK(mutation_kind='edit')",
+      "request_id TEXT NOT NULL",
+      "request_digest TEXT NOT NULL",
+      "request_json TEXT NOT NULL",
+      "response_json TEXT NOT NULL",
+      "occurred_at TEXT NOT NULL"
+    ],
+    "identity_and_indexes": [
+      "id is crypto.randomUUID() generated before the atomic edit batch and SQL-enforced as a lowercase RFC 4122 version-4 UUID",
+      "UNIQUE(actor_id,mutation_kind,request_id) prevents concurrent duplicate execution and cross-return reuse for one actor",
+      "INDEX(return_id,occurred_at,id) supports exact retry/diagnostic lookup without scanning"
+    ],
+    "sql_checks": [
+      "actor_id and return_id are positive SQLite integers; sale_id is null or a positive SQLite integer",
+      "request_id is trimmed non-empty text of at most 120 UTF-8 bytes",
+      "request_digest is exactly 64 lowercase SHA-256 hexadecimal characters",
+      "request_json is a valid JSON object at most 131072 UTF-8 bytes measured by length(CAST(request_json AS BLOB))",
+      "response_json is a valid JSON object at most 65536 UTF-8 bytes measured by length(CAST(response_json AS BLOB)); it has exactly positive integer id and non-empty updated_at text of at most 40 UTF-8 bytes",
+      "occurred_at is non-empty text of at most 40 characters"
+    ],
+    "immutability": "BEFORE UPDATE always aborts. BEFORE DELETE aborts unless maintenance mode is restore or sale_record_events_reset_guard contains mode reset and a non-empty token. No ordinary retention/pruning path may update or delete receipts.",
+    "server_validation": [
+      "Require client_request_id matching the existing bounded client-id normalizer and expected_updated_at for every PATCH /returns/:id edit before any write.",
+      "Build a normalized canonical request only from the route target and accepted client intent available before mutable domain reads: return_id, expected_updated_at, submitted items in order, and reason/return_type/notes/refund/branch presence and submitted values. Preserve meaningful missing versus null with explicit presence booleans. Never include server-derived refund prices, current sale items, current customer/contact values, or any other mutable database result in the digest/request_json; those facts remain in the domain rows.",
+      "Hash the canonical JSON with SHA-256. Lookup by actor_id, mutation_kind edit, and request_id before the stale revision check; exact digest returns the stored response, while any digest or target mismatch returns 409 idempotency_conflict.",
+      "Allow response_json only as exactly {id: positive integer, updated_at: bounded non-empty text}; do not retain contact data, arbitrary errors, nested values, or the response body beyond these scalars."
+    ],
+    "atomic_handler_order": [
+      "Read the return and parent sale, capture return_write_revision, sale_write_revision, exact parent status, and normalized request before any write.",
+      "Compute the projected parent status from other active customer returns plus the proposed item set, using sale_item_id first and product fallback allocation without double-counting duplicate products.",
+      "Put return revision guard and sale revision/current-status guard first in the existing compensated edit batch.",
+      "Put the return row/item rewrite and every return_item_batch_allocations insert in that same batch with strict per-line sequencing: INSERT one return_item, immediately INSERT every allocation for that line using (SELECT id FROM return_items WHERE return_id=@return_id ORDER BY id DESC LIMIT 1), then move to the next return_item. Never defer allocations until after another return_item insert; never reuse last_insert_rowid() after an allocation insert.",
+      "Put the guarded parent sales update next only when its status changes, followed by the conditional immutable return_edit event whose before/after matches the guarded snapshot.",
+      "Insert return_mutation_receipts last in the same batch, with its UUID also used as the conditional event source_id, so no receipt can exist without every essential edit effect. response_json.updated_at is the exact mutationStamp bound to returns.updated_at in the same batch.",
+      "After a successful batch, only operational audit/cache/broadcast work may remain. On any batch failure, SQLite rolls back return, allocations, parent status, event, and receipt together; the existing catch compensates only pre-batch lot/damaged writes. Remove the old post-batch allocation and sale-status writes."
+    ],
+    "conditional_event": "Emit one return_edit/status_changed event only when the guarded parent sale status changes. Generation is 0, via apply, source_id is return_mutation_receipts.id, subject is the historical return number, actor/time are captured, and the one sale_status change is exact known_value before/after. If status is unchanged or the return has no parent sale, persist the receipt but emit no event.",
+    "required_focused_tests": [
+      "Two edited return items that each have multiple allocations map every allocation to its own immediately preceding item.",
+      "Status-unchanged and no-parent edits commit one receipt and zero sale events.",
+      "Exact retry after mutable sale/item/return data changes returns the stored response because the digest depends only on frozen client intent.",
+      "Same actor/request against another return returns 409 idempotency_conflict; a different actor may use the same request id.",
+      "Concurrent duplicate execution yields one complete outcome; injected event or receipt constraint failure yields zero event/receipt/domain mutation and compensates every pre-batch stock write.",
+      "Generated scoped and full backups restore receipts with FK checks on; factory, sales, all, and products+includeSales reset scopes delete receipts under the guard."
+    ],
+    "lifecycle": [
+      "BACKUP_TABLES: insert return_mutation_receipts after returns and before sale_record_events, preserving parent-first restore order; include it in SALE_REPLAY_RESTORE_BUNDLE so every scoped sales/returns/events backup widens to include it.",
+      "Reverse restore deletion deletes sale_record_events before return_mutation_receipts before returns/sales. Restore insertion restores returns/sales before return_mutation_receipts before sale_record_events.",
+      "FACTORY_RESET_TABLES and reset-data products+includeSales, sales, and all scopes delete sale_record_events first, then return_mutation_receipts, then return/items/sales, under the same fresh atomic reset guard token.",
+      "Backup dependency validation must require returns and sales when a receipt is present, and generated scoped/full FK-on backup restore tests must include one receipt with and without a linked sale.",
+      "Ordinary audit retention, action-history retention, and any 21-day pruning exclude return_mutation_receipts."
+    ]
+  },
+  "server_validation_before_sql": {
+    "max_events_per_statement": 25,
+    "max_changes_per_event": 12,
+    "max_changes_bytes": 65536,
+    "max_events_json_bytes": 131072,
+    "rules": [
+      "Reject unknown source_kind, kind, via, field, or field-for-kind combinations.",
+      "Require each change to contain exactly field, before, and after.",
+      "Require each side to be exactly known_value with value, known_none without value, or unknown without value.",
+      "Reject duplicate fields and equal before/after states.",
+      "Validate nested customer, membership, driver, item, item-list, payment, and payment-details shapes and scalar bounds. New customer values permit only stable id and display name; phone and address are forbidden. Existing undo receipts may retain their pre-existing private fields internally, but projection into changes_json removes them.",
+      "When response_json is used for direct-request idempotency, permit only the endpoint's fixed success/id/status/timestamp response keys and their exact scalar types. Never persist a request body, contact details, nested objects, arrays, or arbitrary error payload in response_json.",
+      "Require the complete serialized @events array to be at most 131072 UTF-8 bytes.",
+      "Serialize only the validated normalized structure; never serialize request bodies or arbitrary audit variables."
+    ],
+    "batch_insert": "One INSERT...SELECT FROM json_each(@events) statement writes all changed members. A 25-member bulk action or replay therefore adds exactly one D1 batch statement, not 25. saleBulkStatus, saleBulkUpdate, and returnBulkAction each change their bounded helper to receive eventsBytes and require eventsBytes <= 131072, snapshotBytes + eventsBytes <= 512000, and the final statement count <= 500 after the event statement is added."
+  },
+  "writer_matrix": [
+    {
+      "writer": "PATCH /sales/:id/status ordinary status or cancellation",
+      "source_kind": "sale_status",
+      "source_id": "actor:<actor_id>:request:<client_request_id>",
+      "generation": 0,
+      "kind": "status_changed or cancelled",
+      "idempotency": "Require a stable client_request_id for every non-noop status request. The canonical digest includes the target sale id plus status, notes, cancellation, settlement, expected revision, and other accepted semantic fields. Save SHA-256 digest and response_json in the event. An exact retry returns response_json; reuse with another digest or sale id is 409. Event and sale/audit/stock writes share one guarded batch."
+    },
+    {
+      "writer": "PATCH /sales/:id/customer legacy direct endpoint",
+      "source_kind": "sale_customer",
+      "source_id": "actor:<actor_id>:request:<client_request_id>",
+      "generation": 0,
+      "kind": "customer_changed",
+      "idempotency": "Require a stable client_request_id. The canonical digest includes the target sale id, target customer id, and expected revision. Save canonical digest and response. Exact retry returns the saved response; conflicting reuse or sale id is 409. F72's active UI continues to use sale_bulk_update."
+    },
+    {
+      "writer": "sale settlement/payment correction Apply, Undo, Redo",
+      "source_kind": "sale_settlement",
+      "source_id": "sale_mutation_receipts.id",
+      "generation": "0 for Apply; old generation + 1 for each guarded replay",
+      "kind": "payment_settled or payment_changed",
+      "idempotency": "Existing actor-scoped request receipt and generation guard are stable before the batch. Append event in the same batch as receipt creation or generation increment."
+    },
+    {
+      "writer": "sale bulk status Apply, Undo, Redo",
+      "source_kind": "sale_bulk_status",
+      "source_id": "sale_bulk_operations.id",
+      "generation": "0 for Apply; old generation + 1 for replay",
+      "kind": "status_changed or cancelled",
+      "idempotency": "Existing actor/request receipt and generation guard. One validated json_each event insert covers up to 25 changed sale members atomically."
+    },
+    {
+      "writer": "sale bulk customer/payment/driver Apply, Undo, Redo",
+      "source_kind": "sale_bulk_update",
+      "source_id": "sale_bulk_operations.id",
+      "generation": "0 for Apply; old generation + 1 for replay",
+      "kind": "customer_changed, payment_changed, or driver_changed",
+      "idempotency": "Existing actor/request receipt and generation guard. One validated json_each event insert covers up to 25 changed sale members atomically."
+    },
+    {
+      "writer": "customer return creation",
+      "source_kind": "return_create",
+      "source_id": "return:<returns.id>",
+      "generation": 0,
+      "kind": "status_changed",
+      "idempotency": "The return's required client_request_id resolves to one durable returns.id before retry. Append the sale-status event in the same guarded batch as the status update; an existing return retry creates no second event. Supplier returns emit no sale event."
+    },
+    {
+      "writer": "customer return edit",
+      "source_kind": "return_edit",
+      "source_id": "return_mutation_receipts.id",
+      "generation": 0,
+      "kind": "status_changed",
+      "idempotency": "Require a stable client_request_id and expected_updated_at for edits. Lookup the actor-scoped return_mutation_receipts row before stale checking. The normalized canonical digest includes the target return id, expected timestamp, ordered item inputs, and every accepted reason/type/notes/refund/branch semantic field with meaningful missing/null presence. Exact retry returns the fixed stored response; conflicting reuse or another target is 409. The return and sale revision/current-status guards, complete return rewrite and allocations, conditional event, and receipt commit in one batch. Supplier returns remain refused by this route."
+    },
+    {
+      "writer": "return bulk status Apply, Undo, Redo",
+      "source_kind": "return_bulk",
+      "source_id": "return_bulk_operations.id",
+      "generation": "0 for Apply; old generation + 1 for replay",
+      "kind": "status_changed",
+      "idempotency": "Existing actor/request receipt and generation guard. Compute one before/after sale status per distinct affected sale after the return statements and insert all events with one validated json_each statement. Supplier returns and non-status bulk fields emit no sale event."
+    }
+  ],
+  "legacy_cutover": {
+    "detail": "Load durable events first. Every post-cutover writer stamps its existing audit/action-history twin with the same source_kind, source_id, generation, and sale_id; existing receipt rows already expose that identity. Suppress a legacy candidate only when both it and an event expose an exact four-key match. Keep every old row with no exact tuple, including unknown legacy_sale_change.",
+    "count": "Count sale_record_events directly. Each legacy receipt family contributes max(0, 1 + generation - exact matching event count for that source_kind/source_id/sale_id and generation range). Audit/return candidates use NOT EXISTS on the same four-key identity. No actor, state, status, or timestamp proximity matching.",
+    "parity": "The detail and count paths share the same source-kind mapping and four-key anti-join test in focused SQLite fixtures."
+  },
+  "immutability_and_lifecycle": {
+    "trigger": "sale_record_events and return_mutation_receipts each have a BEFORE UPDATE trigger that always aborts. Each BEFORE DELETE aborts unless either the existing system_flags key maintenance has JSON mode restore, or the dedicated system_flags key sale_record_events_reset_guard has JSON mode reset and a non-empty token. Restore only needs DELETE plus INSERT, so it never weakens either UPDATE guard.",
+    "reset_sequence": "Each reset uses one D1 batch whose first statement inserts sale_record_events_reset_guard with mode reset and a fresh non-empty token, whose next applicable statement deletes sale_record_events before sales, whose existing statements preserve child-first order, and whose last statement token-guards deletion of sale_record_events_reset_guard. A failed D1 batch rolls back the guard and every delete. The ordinary maintenance parser remains restore-only; the reset guard is internal and cannot outlive or expose a partially completed atomic batch.",
+    "backup": [
+      "Add return_mutation_receipts after returns and before sale_record_events in BACKUP_TABLES, so restore inserts its sale/return parents first and reverse-deletes the event child then the receipt.",
+      "Add return_mutation_receipts and sale_record_events to SALE_REPLAY_RESTORE_BUNDLE so scoped restore cannot split events from sales/returns/receipts.",
+      "The existing maintenance mode restore bypass permits reverse-order child deletion; event UPDATE remains forbidden."
+    ],
+    "factory_reset": "Add sale_record_events then return_mutation_receipts before returns/sales in FACTORY_RESET_TABLES and wrap that existing atomic batch with the dedicated reset guard statements.",
+    "reset_data": "Add sale_record_events then return_mutation_receipts before returns/sales in products+includeSales, sales, and all delete lists; wrap each existing atomic delete batch with the dedicated reset guard statements. The delete scope remains child-first and narrow. createSectionBackup automatically widens any section touching a sales/replay table to the complete SALE_REPLAY_RESTORE_BUNDLE in BACKUP_TABLES parent-first order, so the mandatory recovery artifact passes the same dependency preflight used by restore.",
+    "retention": "No ephemeral-retention path references sale_record_events or return_mutation_receipts. Ordinary 21-day audit and action-history pruning cannot erase either table."
+  },
+  "permissions_and_audit": {
+    "permissions": "No new mutation route. Each append runs only inside its existing authorized writer/replay path after that path's permission check.",
+    "audit": "Existing audit logs remain. Record events add immutable display provenance and do not replace security/audit logging."
+  },
+  "frontend_prerequisites": [
+    "The ordinary sale-status caller must create one client_request_id when the user begins an action, persist it through unknown responses, and replace it only after a terminal success or a deliberate new action.",
+    "The legacy direct-customer caller, if retained, and customer-return edit caller must follow the same stable client_request_id lifecycle. Return edit must continue sending expected_updated_at. Older queued edits with no persisted id are quarantined as refresh_required without mutation; the server never invents an id after an unknown outcome.",
+    "Do not enable a backend requirement until these callers and focused unknown-response retry tests are integrated in the same release candidate."
+  ],
+  "required_tests": [
+    "Native SQLite Apply/Undo/Redo for settlement, sale bulk status, sale bulk update, and return bulk status.",
+    "Native SQLite create/edit customer return sale-status before/after and supplier non-event.",
+    "Stable retry returns prior response; conflicting request-id reuse fails; concurrent revision loses atomically.",
+    "Maximum 25-member bulk fixtures prove exactly one added statement and remain below existing 500/512000 bounds.",
+    "Malformed kind/field/state/nested value, legacy_sale_change insertion, 13 changes, per-event oversized JSON, aggregate events JSON over 131072 bytes, combined snapshot plus events over 512000 bytes, duplicate field, and equal-state events fail before SQL.",
+    "One direct client_request_id cannot target two sales or returns, even concurrently; each canonical digest includes its route target id.",
+    "Migration CHECKs, append-only triggers, reset maintenance order, backup/restore dependency coverage, factory reset, sales reset, all reset, products includeSales.",
+    "Audit pruning leaves every new event and exact legacy fallback; count equals detail for mixed pre/post migration history."
+  ]
+}

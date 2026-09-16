@@ -116,9 +116,22 @@ await check('source lock: the apply composes guarded groups for both additive br
   assert.ok(/action_key = @ak/.test(engineSrc), 'guards are scoped by action_key')
   const guardChecks = engineSrc.match(/appliedRowGuards\.has\(`row:\$\{r\.rowNumber\}`\)/g) || []
   assert.ok(guardChecks.length >= 2, `both the products additive branch and the inventory branch must consult the guards (found ${guardChecks.length})`)
-  const guardFirst = engineSrc.match(/= \[rowGuardStatement\(r\.rowNumber\)\]/g) || []
-  assert.ok(guardFirst.length >= 2, 'each guarded group must LEAD with its guard row so it commits with the writes')
-  assert.ok(/if \(guardedGroups\.length\) await runD1BatchGroupsInChunks\(db, guardedGroups\)/.test(engineSrc), 'guarded groups must run through the group-atomic runner')
+  assert.ok(
+    /const group: Array<\{ sql: string; params: Record<string, unknown> \}> = \[rowGuardStatement\(r\.rowNumber\), \.\.\.rowWriteGroup\]\s+rowWriteGroup = group/.test(engineSrc),
+    'a product additive row must prepend its guard to the same rowWriteGroup as the product and stock writes',
+  )
+  assert.ok(
+    /const group: Array<\{ sql: string; params: Record<string, unknown> \}> = \[rowGuardStatement\(r\.rowNumber\)\]\s+group\.push\(\{\s+sql: `INSERT INTO inventory_movements/.test(engineSrc),
+    'an inventory additive row must lead its movement/write group with the guard',
+  )
+  assert.ok(
+    /if \(productStatementGroups\.length\) await runD1BatchGroupsInChunks\(importWriteDb, productStatementGroups\)/.test(engineSrc),
+    'product row groups must run through the canonical-branch-guarded group-atomic runner',
+  )
+  assert.ok(
+    /if \(guardedGroups\.length\) await runD1BatchGroupsInChunks\(importWriteDb, guardedGroups\)/.test(engineSrc),
+    'inventory guarded groups must run through the canonical-branch-guarded group-atomic runner',
+  )
 })
 
 await check('source lock: the guard rides the generic import_stock_action_guards ledger keyed by row', () => {

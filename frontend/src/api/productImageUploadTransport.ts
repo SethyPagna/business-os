@@ -1,5 +1,7 @@
 import { getSyncServerUrl, requireLiveServerWrite } from './http.ts'
 import { compressImageFile } from '../utils/imageCompression.ts'
+import { canonicalizePersistedMediaPath } from '../utils/mediaUpload.ts'
+import { assertActorSessionDispatchAllowed, captureActorReadScope } from './actorReadScope.ts'
 
 type ImageUploadPayload = {
   file?: File
@@ -8,6 +10,26 @@ type ImageUploadPayload = {
   productId?: string | number
   /** Product name to rename the stored file to when it matches ("same image name = same product name"). */
   productName?: string
+}
+
+type ProductImageUploadResponse = Record<string, unknown> & {
+  public_path?: unknown
+  path?: unknown
+  asset?: (Record<string, unknown> & { public_path?: unknown }) | null
+}
+
+function normalizeStoredImageResponse(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const record = value as ProductImageUploadResponse
+  const rawPath = record.public_path || record.path || record.asset?.public_path || ''
+  const publicPath = canonicalizePersistedMediaPath(rawPath)
+  if (!publicPath) return record
+  return {
+    ...record,
+    public_path: publicPath,
+    path: publicPath,
+    ...(record.asset ? { asset: { ...record.asset, public_path: publicPath } } : {}),
+  }
 }
 
 function dataUrlToBlob(dataUrl: string): Blob {
@@ -25,6 +47,7 @@ export async function uploadProductImage({
   filePath,
   productName,
 }: ImageUploadPayload): Promise<unknown> {
+  const scope = captureActorReadScope('products')
   requireLiveServerWrite('products:uploadImage', {
     offlineMessage: 'Server is offline. Product image uploads are invalid until the server reconnects.',
     notConfiguredMessage: 'Server is not connected. Product image uploads are invalid until a live server is configured.',
@@ -55,6 +78,7 @@ export async function uploadProductImage({
   }
 
   const base = getSyncServerUrl().replace(/\/$/, '')
+  assertActorSessionDispatchAllowed(scope)
   const res = await fetch(`${base}/api/products/upload-image`, {
     method: 'POST',
     headers: { 'bypass-tunnel-reminder': 'true' },
@@ -73,5 +97,5 @@ export async function uploadProductImage({
     throw new Error(record.error || record.message || `Image upload failed (${res.status})`)
   }
   const record = data as { data?: unknown }
-  return record.data || data
+  return normalizeStoredImageResponse(record.data || data)
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { isSafeLinkUrl } from '../../utils/safeLinkUrl.ts'
 import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical.js'
 import ImageIcon from 'lucide-react/dist/esm/icons/image.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -6,6 +7,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Modal from '../shared/Modal'
 import AppSelect from '../shared/AppSelect.tsx'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { useApp } from '../../AppContext.tsx'
 import type { AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import {
@@ -192,6 +194,10 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
     if (!form.title.trim()) return 'Title is required'
     if (form.link_type === 'product' && !form.link_product_id) return 'Choose a product to link to'
     if (form.link_type === 'url' && !form.link_url.trim()) return 'Enter a link URL'
+    // Same allowlist the Worker enforces (cloudflare/src/lib/safeLinkUrl.ts):
+    // http(s) or a site-relative path. Checked here so the author is told
+    // what is wrong with their link instead of getting a bare 400 back.
+    if (form.link_type === 'url' && !isSafeLinkUrl(form.link_url)) return 'Enter a link URL that starts with http:// or https://'
     if (form.starts_at && form.ends_at && form.starts_at > form.ends_at) return 'End date must be after start date'
     return null
   }
@@ -269,7 +275,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
   const isEditing = editingId !== null
 
   return (
-    <Modal title="Announcement Strip" onClose={onClose} size="lg">
+    <Modal title="Announcement Strip" onClose={onClose} size="lg" unsavedChanges={{ dirty: editingId !== null }}>
       <div className="flex flex-col gap-4 overflow-y-auto p-5">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           Small, quick banner cards that scroll horizontally at the very top of the public catalog page —
@@ -428,21 +434,26 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
 
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium text-gray-700 dark:text-gray-300">Show from (optional)</span>
-                <input
-                  type="date"
+                {/* Typed, not a native picker (Sep 3) -- app-wide rule. */}
+                <DateEntryInput
+                  bare
+                  t={t}
+                  ariaLabel="Show from"
                   value={form.starts_at}
-                  onChange={(e) => setForm((p) => ({ ...p, starts_at: e.target.value }))}
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+                  onChange={(iso) => setForm((p) => ({ ...p, starts_at: iso }))}
+                  className="rounded-lg border border-gray-300 px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
                 />
               </label>
 
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium text-gray-700 dark:text-gray-300">Show until (optional)</span>
-                <input
-                  type="date"
+                <DateEntryInput
+                  bare
+                  t={t}
+                  ariaLabel="Show until"
                   value={form.ends_at}
-                  onChange={(e) => setForm((p) => ({ ...p, ends_at: e.target.value }))}
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+                  onChange={(iso) => setForm((p) => ({ ...p, ends_at: iso }))}
+                  className="rounded-lg border border-gray-300 px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
                 />
               </label>
 

@@ -59,7 +59,9 @@ export function getTimeParts(value: unknown): TimeParts {
     monthLabel: parsed.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
     monthKey: `${year}-${String(month).padStart(2, '0')}`,
     dayKey: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-    dayLabel: parsed.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }),
+    // dd/mm/yyyy day-first (Sep 4 2026). dayKey/monthKey above stay ISO --
+    // they are sort and grouping keys, not display text.
+    dayLabel: `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`,
   }
 }
 

@@ -28,6 +28,39 @@ type SettingsConflictError = Error & {
   currentSettings?: SettingsPayload
 }
 
+export type PaymentMethodRenameScope = 'settings_only' | 'linked'
+
+export interface PaymentMethodImpact {
+  configured?: boolean
+  configured_methods?: string[]
+  from: string
+  historical_snapshots_preserved?: string[]
+  linked_records: number
+  live_snapshots?: {
+    payment_detail_lines?: number
+    sales?: number
+  }
+  settings_updated_at?: string | null
+  target_exists?: boolean
+  to: string
+}
+
+export interface PaymentMethodReplacePayload {
+  expected_updated_at?: string
+  from: string
+  scope: PaymentMethodRenameScope
+  to: string
+}
+
+export interface PaymentMethodReplaceResult {
+  linkedDetails?: number
+  linkedSales?: number
+  methods: string[]
+  scope?: PaymentMethodRenameScope
+  settings_updated_at?: string | null
+  success?: boolean
+}
+
 let settingsSaveQueue: Promise<unknown> = Promise.resolve()
 
 function asSettingsPayload(value: unknown): SettingsPayload {
@@ -194,11 +227,38 @@ export function saveSettings(updates: SettingsPayload = {}, options: SettingsOpt
   return queuedSave
 }
 
-export function getPaymentMethodImpact(from: string, to: string): Promise<unknown> {
+export function getPaymentMethodImpact(from: string, to: string): Promise<PaymentMethodImpact> {
   const query = new URLSearchParams({ from, to })
-  return apiFetch('GET', `/api/settings/payment-methods/impact?${query.toString()}`)
+  return apiFetch('GET', `/api/settings/payment-methods/impact?${query.toString()}`) as Promise<PaymentMethodImpact>
 }
 
-export function replacePaymentMethod(payload: { from: string; to: string; scope: 'settings_only' | 'linked' }): Promise<unknown> {
-  return apiFetch('POST', '/api/settings/payment-methods/replace', payload)
+export async function replacePaymentMethod(payload: PaymentMethodReplacePayload): Promise<PaymentMethodReplaceResult> {
+  const result = asSettingsPayload(await apiFetch('POST', '/api/settings/payment-methods/replace', payload))
+  if (!Array.isArray(result.methods) || !result.methods.every((method) => typeof method === 'string')) {
+    throw new Error('Payment method rename returned no canonical method list')
+  }
+  return result as unknown as PaymentMethodReplaceResult
+}
+
+/**
+ * Methods money has actually come in through that nobody ever added to the
+ * configured list.
+ *
+ * The POS method field is a free-text datalist, so a cashier can type "ACLEDA"
+ * at the till, the sale records it, and Settings never hears about it. That is
+ * the gap the owner hit: the list of choices was shorter than the list of
+ * things the shop is paid with, so the next cashier typed it again by hand,
+ * slightly differently, and the day's report grew two columns for one method.
+ *
+ * Read-only -- it reports, it does not write. The write is the explicit
+ * `backfillPaymentMethods` below, so nothing lands in the checkout list
+ * without someone deciding it should.
+ */
+export function getUnregisteredPaymentMethods(): Promise<unknown> {
+  return apiFetch('GET', '/api/settings/payment-methods/unregistered')
+}
+
+/** Append every method already used on a sale to the configured list. */
+export function backfillPaymentMethods(): Promise<unknown> {
+  return apiFetch('POST', '/api/settings/payment-methods/backfill', {})
 }

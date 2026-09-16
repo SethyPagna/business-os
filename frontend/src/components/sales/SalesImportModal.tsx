@@ -247,7 +247,7 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
   }
 
   return (
-    <Modal title={tr('sales_import_title', 'Import Sales', 'នាំចូលការលក់')} onClose={onClose} draggable>
+    <Modal title={tr('sales_import_title', 'Import Sales', 'នាំចូលការលក់')} onClose={onClose} draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
       {reviewJob ? (
         <ServerImportReviewScreen
           jobId={reviewJob.id}
@@ -275,8 +275,8 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {tr(
             'sales_import_stock_help',
-            "This just records history and links each line to a product -- it never changes stock on its own. The one exception is sale_status \"returned\" / \"partial_return\": that restocks the returned_quantity (batch_label optional, to restock a specific lot).",
-            'នេះគ្រាន់តែកត់ត្រាប្រវត្តិ ហើយភ្ជាប់ជួរនីមួយៗទៅផលិតផល -- វាមិនផ្លាស់ប្តូរស្តុកដោយខ្លួនឯងទេ។ករណីលើកលែងតែមួយគត់គឺ sale_status "returned" / "partial_return"៖ វានឹងបន្ថែម returned_quantity ត្រឡប់ទៅស្តុកវិញ (batch_label ជាជម្រើស សម្រាប់ត្រឡប់ទៅឡូតជាក់លាក់)។',
+            "This just records history and links each line to a product -- it never changes stock on its own. The one exception is sale_status \"returned\" / \"partial_return\": that restocks the returned_quantity (batch_label optional, to restock a specific received date).",
+            'នេះគ្រាន់តែកត់ត្រាប្រវត្តិ ហើយភ្ជាប់ជួរនីមួយៗទៅផលិតផល -- វាមិនផ្លាស់ប្តូរស្តុកដោយខ្លួនឯងទេ។ករណីលើកលែងតែមួយគត់គឺ sale_status "returned" / "partial_return"៖ វានឹងបន្ថែម returned_quantity ត្រឡប់ទៅស្តុកវិញ (batch_label ជាជម្រើស សម្រាប់ត្រឡប់ទៅថ្ងៃចូលជាក់លាក់)។',
           )}
         </p>
         <CsvImportPreview

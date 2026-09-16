@@ -18,6 +18,8 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
+// Load the actual dependency before any permissive per-module shim is active.
+const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
@@ -40,7 +42,44 @@ function loadUndoAppliers(d1) {
     },
     batch: (stmts) => d1.batch(stmts),
   }
+  // N13: the actor snapshot kernel, loaded for REAL -- it is pure, and what
+  // it decides (username, never the display name) is the point of it.
+  const { outputText: actorOut } = ts.transpileModule(fs.readFileSync(path.join(LIB_DIR, 'actorSnapshot.ts'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: 'actorSnapshot.ts',
+  })
+  const actorModule = { exports: {} }
+  new Function('exports', 'require', 'module', actorOut)(actorModule.exports, require, actorModule)
+  const { outputText: productMergeOut } = ts.transpileModule(fs.readFileSync(path.join(LIB_DIR, 'productMerge.ts'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: 'productMerge.ts',
+  })
+  const productMergeModule = { exports: {} }
+  new Function('exports', 'require', 'module', productMergeOut)(productMergeModule.exports, (request) => request === './moneyPrecision' ? moneyPrecision : require(request), productMergeModule)
   const stubs = {
+    './actorSnapshot': actorModule.exports,
+    './productMerge': productMergeModule.exports,
+    // Bulk status replay is outside this suite; fail if it is invoked.
+    './saleBulkStatus': {
+      replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-supplier-backfill-undo-pure.cjs') },
+    },
+    './saleBulkUpdate': {
+      BULK_UPDATE_KIND: 'sale.fields.bulk',
+      BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk',
+      replaySaleBulkUpdate: () => { throw new Error('Unexpected bulk sale update replay in test-supplier-backfill-undo-pure.cjs') },
+    },
+    './returnBulkAction': {
+      RETURN_BULK_ACTION_KIND: 'return.fields.bulk',
+      replayReturnBulkAction: () => { throw new Error('Unexpected return bulk replay in test-supplier-backfill-undo-pure.cjs') },
+    },
+    './saleSettlementAction': {
+      SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement',
+      replaySaleSettlementAction: () => { throw new Error('Unexpected settlement replay in supplier fixture; use test-payment-fx-pure.cjs') },
+    },
+    './stockSession': {
+      STOCK_SESSION_KIND: 'stock.session',
+      replayStockSession: () => { throw new Error('Unexpected stock replay in supplier fixture; use test-stock-session-undo.cjs') },
+    },
     '../index': {},
     './auth': {},
     './db': { getDb: () => dbAdapter },
@@ -48,14 +87,70 @@ function loadUndoAppliers(d1) {
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' },
+    // S4-24b: the 'sale.add_items' applier's planners. This file exercises
+    // the supplier-backfill applier only, so these stubs exist to let the
+    // module load; the real planners are driven against a live schema by
+    // test-sale-add-items-pure.cjs.
+    './saleLineAddition': {
+      buildAllocationStatements: () => [],
+      planSaleLineAddition: () => ({ lines: [], statements: [], saleItemStatementIndexByLine: [], deductions: [], deductedUnits: 0, addedSubtotalUsd: 0 }),
+      planSaleLineRemoval: () => ({ statements: [], restoredUnits: 0 }),
+      plannedLineFromRecord: (record) => record,
+      saleMoneyUpdateStatement: () => ({ sql: 'SELECT 1', params: {} }),
+    },
+    // S4-30: the same applier also appends an amendment-ledger entry now, so
+    // an undone addition leaves a visible trail rather than a hole. Stubbed
+    // for the same reason -- the real statement builder and the append-only
+    // triggers behind it are driven against a live schema by
+    // test-sale-amendments-pure.cjs.
+    './saleAmendments': {
+      amendmentEntryStatement: () => ({ sql: 'SELECT 1', params: {} }),
+    },
+    // F65 registers product.remove in the shared undo module. This harness
+    // exercises supplier backfill only, so removal replay remains inert.
+    './productDelete': {
+      PRODUCT_REMOVE_ACTION_KIND: 'product.remove',
+      parseProductRemoveSnapshot: (value) => value,
+      productRemovePlanDigest: async () => '',
+      productRemoveReplayStatements: () => [],
+    },
   }
+  // Register the real newly imported undo branch, including its TS dependencies.
+  // Existing DB/effect adapters remain in force; no fake monetary exports.
+  const dependencyModules = new Map()
+  function loadDependency(filename) {
+    if (dependencyModules.has(filename)) return dependencyModules.get(filename).exports
+    const dependency = { exports: {} }
+    dependencyModules.set(filename, dependency)
+    const { outputText } = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+      fileName: filename,
+    })
+    const dependencyRequire = (request) => {
+      if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+      if (request === './moneyPrecision' || request === './moneyPrecision.ts') return moneyPrecision
+      if (request.startsWith('.')) {
+        return loadDependency(path.resolve(path.dirname(filename), request.endsWith('.ts') ? request : request + '.ts'))
+      }
+      return require(request)
+    }
+    new Function('exports', 'require', 'module', outputText)(dependency.exports, dependencyRequire, dependency)
+    return dependency.exports
+  }
+  stubs['./customerGenderRestoration'] = loadDependency(path.join(LIB_DIR, 'customerGenderRestoration.ts'))
+  // undoAppliers.ts now imports the exact sale money kernel; it depends only on
+  // moneyPrecision, so the dependency loader resolves it against the real lib.
+  stubs['./saleMoneyPrecision'] = loadDependency(path.join(LIB_DIR, 'saleMoneyPrecision.ts'))
+  stubs['./productMergeLineage'] = loadDependency(path.join(LIB_DIR, 'productMergeLineage.ts'))
+  stubs['./promotionRules'] = loadDependency(path.join(LIB_DIR, 'promotionRules.ts'))
+  stubs['./saleItemPricing'] = loadDependency(path.join(LIB_DIR, 'saleItemPricing.ts'))
   const src = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(src, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
     fileName: 'undoAppliers.ts',
   })
   const original = Module._load
-  Module._load = (request, parent, isMain) =>
+  Module._load = (request, parent, isMain) => ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision :
     Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : original.call(Module, request, parent, isMain)
   const mod = { exports: {} }
   try {

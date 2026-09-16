@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
+import { useCopyFloat } from '../../shared/CopyFloat.tsx'
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { buildBatchPreview } from '../../../utils/productBatches.ts'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
+import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
 
 type BranchId = string | number
 type Translate = (key: string, fallback?: string, khmerFallback?: string) => string
@@ -22,6 +24,7 @@ type ProductLike = {
   discount_ends_at?: unknown
   selling_price_usd?: unknown
   selling_price_khr?: unknown
+  branch_stock?: Array<{ branch_id?: unknown; branch_name?: unknown; quantity?: unknown }>
 }
 
 type ProductPromotion = {
@@ -59,6 +62,7 @@ type ProductDetailsCellProps = {
   renderMetaPill: (item: MetaPill) => ReactNode
   tr: Translate
   fmtUSD: MoneyFormatter
+  navigateTo?: EntityNavigate
 }
 
 export function ProductDiscountBadge({
@@ -101,9 +105,9 @@ export function ProductBatchPreview({
     <div className={`flex flex-wrap items-center gap-1 ${compact ? 'mt-1' : 'mt-1.5'}`}>
       {preview.items.map((batch) => {
         const batchId = String(batch.id || batch.batch_id || 'batch')
-        // Z1a: a date-derived lot code reads as its mm/dd/yyyy date; a real
+        // Z1a: a date-derived lot code reads as its dd/mm/yyyy date; a real
         // custom code stays a code.
-        const lotCode = batchDisplayLabel({ id: String(batch.id ?? batch.batch_id ?? 'batch'), lot_code: (batch.lot_code as string) ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, tr('batch', 'Batch', 'Batch'))
+        const lotCode = batchDisplayLabel({ id: String(batch.id ?? batch.batch_id ?? 'batch'), lot_code: (batch.lot_code as string) ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, tr('batch', 'Received date', 'ថ្ងៃចូល'))
         const expiryDate = String(batch.expiry_date || tr('no_expiry', 'No expiry', 'No expiry'))
         const quantity = Number(batch.quantity || 0)
         return (
@@ -134,14 +138,22 @@ export function ProductDetailsCell({
   renderMetaPill,
   tr,
   fmtUSD,
+  navigateTo,
 }: ProductDetailsCellProps) {
+  // Supplier is the one of the four copyable product fields (name, brand,
+  // supplier, barcode) that renders in THIS cell -- the Products list keeps
+  // name and brand in its name cell and dropped barcode from here when it
+  // moved to that cell's meta line. Those three are wired where they are
+  // actually drawn: Products.tsx for the desktop row and the mobile card,
+  // and both product detail modals. The POS product sheet is another
+  // lane's file and is handed over as an addendum.
+  const copy = useCopyFloat(tr)
   const detailPills: MetaPill[] = []
-  if (selectedBranchName) {
-    detailPills.push({ key: 'branch', label: selectedBranchName, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' })
-  }
-  if (branchLabel) {
-    detailPills.push({ key: 'branches', label: branchLabel, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' })
-  }
+  const branchRows = selectedBranchName
+    ? [String(selectedBranchName)]
+    : Array.isArray(product.branch_stock) && product.branch_stock.length
+      ? product.branch_stock.map((entry) => `${String(entry.branch_name || entry.branch_id || 'Branch')}: ${Number(entry.quantity || 0)}`)
+      : branchLabel ? [String(branchLabel)] : []
   if (product.sku) {
     detailPills.push({ key: 'sku', label: product.sku, className: 'bg-indigo-50 font-mono text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200' })
   }
@@ -155,11 +167,30 @@ export function ProductDetailsCell({
   }
 
   return (
-    <div className="min-h-[4.25rem] max-w-[17rem]">
-      <div className="flex flex-wrap items-center gap-1">
-        {detailPills.map((item) => renderMetaPill(item))}
+    <div className="min-h-[4.25rem] min-w-0">
+      {branchRows.length ? (
+        <div className="mb-1 flex min-w-0 flex-wrap gap-1">
+          {branchRows.map((label, index) => (
+            <div key={`${label}-${index}`} className="max-w-full whitespace-normal break-words rounded-lg bg-cyan-50 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200">
+              {label}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
+        {detailPills.map((item) => (item.key === 'supplier' ? (
+          // The pill itself is drawn by the caller's renderMetaPill (which
+          // stringifies its label, so the affordance cannot go inside it);
+          // this wrapper carries the gesture attributes and no box of its
+          // own beyond the inline-flex the pill already sat in.
+          <span key="supplier-copy" className="inline-flex min-w-0 max-w-full" {...copy(product.supplier)}>
+            <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="contacts" anchor="hub:contacts:suppliers" search={product.supplier} navigate={navigateTo} title={tr('open_supplier', 'Open supplier', 'បើកអ្នកផ្គត់ផ្គង់')}>
+              {renderMetaPill(item)}
+            </EntityLink>
+          </span>
+        ) : renderMetaPill(item)))}
         <ProductDiscountBadge product={product} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'Discounts')} />
-        {!detailPills.length && !promotion?.active ? <span className="text-xs text-gray-300">N/A</span> : null}
+        {!branchRows.length && !detailPills.length && !promotion?.active ? <span className="text-xs text-gray-300">N/A</span> : null}
       </div>
       <ProductBatchPreview product={product} branchId={selectedBranchId} tr={tr} />
     </div>

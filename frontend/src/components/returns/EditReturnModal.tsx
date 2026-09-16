@@ -5,9 +5,22 @@ import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getLoaderErrorMessage, withLoaderTimeout } from '../../utils/loaders.ts'
-import { STOCK_ACTION_OPTIONS, normalizeStockAction, type ReturnStockAction } from './helpers/returnOptions.ts'
+import { STOCK_ACTION_OPTIONS, normalizeStockAction, type ReturnStockAction, type DamagedDisposition } from './helpers/returnOptions.ts'
+import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
+import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
+import { useFormDirty } from '../../utils/formDirty.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import {
+  directMutationOutcomeIsUnknown,
+  freezeDirectMutationBody,
+  loadPendingDirectMutation,
+  pendingDirectMutationForScope,
+  savePendingDirectMutation,
+} from '../../utils/directMutationRequest.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
 
@@ -38,18 +51,28 @@ interface EditableReturnItem {
   // legacy boolean) by normalizeStockAction.
   stock_action?: ReturnStockAction
   branch_id?: number | string | null
+  // P4-3: return_items has no persisted condition_tag/damaged_disposition
+  // column (only damaged_stock_lots/inventory_movements do), so there is
+  // nothing to seed here on open -- these always start at the defaults
+  // (DEFAULT_STOCK_CONDITION_TAG / 'keep') and only matter for a NEW
+  // 'damaged' choice made in this edit.
+  condition_tag?: string
+  damaged_disposition?: DamagedDisposition
 }
 
 interface ExistingReturnItem extends Omit<EditableReturnItem, 'returnQty'> {}
 
 interface ExistingReturn {
   id: number | string
+  money_precision_version?: number | string | null
+  total_refund_usd?: number | string | null
   return_number?: string | null
   reason?: string | null
   return_type?: ReturnType | null
   notes?: string | null
   branch_id?: number | string | null
   items?: ExistingReturnItem[] | null
+  updated_at?: string | null
 }
 
 interface ReturnUpdatePayload extends Record<string, unknown> {
@@ -102,9 +125,14 @@ function loadReturnsTransport(): Promise<ReturnsTransportModule> {
   return returnsTransportPromise
 }
 
-async function updateReturnRequest(id: number | string, payload: ReturnUpdatePayload): Promise<unknown> {
-  const { updateReturn } = await loadReturnsTransport()
-  return updateReturn(id, payload)
+async function prepareReturnRequest(id: number | string, payload: ReturnUpdatePayload): Promise<PreparedReturnUpdateRequest> {
+  const { prepareReturnUpdateRequest } = await loadReturnsTransport()
+  return prepareReturnUpdateRequest(id, payload)
+}
+
+async function updateReturnRequest(id: number | string, payload: PreparedReturnUpdateRequest): Promise<unknown> {
+  const { submitReturnUpdateRequest } = await loadReturnsTransport()
+  return submitReturnUpdateRequest(id, payload)
 }
 
 function toNumber(value: number | string | null | undefined): number {
@@ -143,8 +171,15 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     existingItems.map((item) => ({ ...item, returnQty: toNumber(item.quantity), stock_action: normalizeStockAction(item as { stock_action?: unknown; return_to_stock?: unknown }) })),
   )
   const [submitting,   setSubmitting]   = useState(false)
+  const [pendingRequest, setPendingRequest] = useState(() => loadPendingDirectMutation<PreparedReturnUpdateRequest>('return-edit', user?.id, ret.id))
+  const activePendingRequest = pendingDirectMutationForScope(pendingRequest, user?.id, ret.id)
+    || loadPendingDirectMutation<PreparedReturnUpdateRequest>('return-edit', user?.id, ret.id)
   const submitInFlightRef = useRef(false)
   const isKnownReason = RETURN_REASONS.includes(reason)
+
+  useEffect(() => {
+    setPendingRequest(loadPendingDirectMutation<PreparedReturnUpdateRequest>('return-edit', user?.id, ret.id))
+  }, [ret.id, user?.id])
 
   useEffect(() => {
     if (!reason || reason === OTHER_LABEL || isKnownReason) return
@@ -158,14 +193,45 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     i === idx ? { ...it, returnQty: clampReturnQuantity(qty, toNumber(it.quantity)) } : it
   ))
   const updateAction = (idx: number, action: ReturnStockAction) => setItems(prev => prev.map((it, i) =>
-    i === idx ? { ...it, stock_action: action, return_to_stock: action === 'restock' } : it
+    i === idx
+      ? {
+          ...it, stock_action: action, return_to_stock: action === 'restock',
+          ...(action === 'damaged' && !it.condition_tag
+            ? { condition_tag: DEFAULT_STOCK_CONDITION_TAG, damaged_disposition: 'keep' as DamagedDisposition }
+            : null),
+        }
+      : it
+  ))
+  // P4-3: same remove-stock choice as the create flow -- '' means keep the
+  // default tag/held row, a tag string means "remove entirely, tagged
+  // <tag>" for the write-off's reason/audit trail.
+  const updateItemDamagedChoice = (idx: number, value: string) => setItems(prev => prev.map((it, i) =>
+    i === idx
+      ? value === ''
+        ? { ...it, damaged_disposition: 'remove' as DamagedDisposition }
+        : { ...it, condition_tag: value, damaged_disposition: 'keep' as DamagedDisposition }
+      : it
   ))
 
   const activeItems    = items.filter(it => it.returnQty > 0)
   const totalRefund    = activeItems.reduce((sum, it) => sum + toNumber(it.applied_price_usd) * it.returnQty, 0)
   const totalRefundKhr = activeItems.reduce((sum, it) => sum + toNumber(it.applied_price_khr) * it.returnQty, 0)
 
+  const clearPendingRequest = (): boolean => {
+    try {
+      savePendingDirectMutation('return-edit', user?.id, ret.id, null)
+      setPendingRequest(null)
+      return true
+    } catch (error) {
+      notify(getLoaderErrorMessage(error), 'error')
+      return false
+    }
+  }
+
   const handleSubmit = async (): Promise<void> => {
+    // Temporary create-only checkpoint: never reprice a v1 return through the
+    // legacy edit request. Its original pending requests remain untouched.
+    if (Number(ret.money_precision_version) === 1) return
     if (!finalReason.trim()) { notify(T('return_reason','Please provide a reason'), 'error'); return }
     if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
@@ -190,13 +256,26 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           return_to_stock:   it.return_to_stock !== false,
           stock_action:      it.stock_action || 'restock',
           branch_id:         it.branch_id || ret.branch_id || null,
+          // P4-3: same shared remove-stock tag/disposition as the create
+          // flow, only meaningful when stock_action is 'damaged'.
+          ...(it.stock_action === 'damaged'
+            ? { condition_tag: it.condition_tag || DEFAULT_STOCK_CONDITION_TAG, damaged_disposition: it.damaged_disposition || 'keep' }
+            : null),
         })),
       }
+      const prepared = activePendingRequest?.body || freezeDirectMutationBody(await prepareReturnRequest(ret.id, {
+        ...payload,
+        expected_updated_at: ret.updated_at || undefined,
+      }))
+      if (!activePendingRequest) {
+        setPendingRequest(savePendingDirectMutation('return-edit', user?.id, ret.id, prepared))
+      }
       const result = await withLoaderTimeout(
-        () => updateReturnRequest(ret.id, payload),
+        () => updateReturnRequest(ret.id, prepared),
         'Update return',
         RETURN_UPDATE_TIMEOUT_MS,
       )
+      if (!clearPendingRequest()) return
       notify(T('success','Return updated successfully'))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
@@ -205,9 +284,11 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
       onClose()
     } catch (error) {
       if (isWriteConflict(error)) {
+        clearPendingRequest()
         onSuccess?.()
         return
       }
+      if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') clearPendingRequest()
       notify((T('error','Error') || 'Error') + ': ' + getLoaderErrorMessage(error), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
@@ -220,9 +301,35 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   // InventoryBatchModal.tsx already use for this exact reason (only the
   // Save button here was disabled during `submitting`; the other three
   // close paths could still unmount the modal mid-request).
+  // S4-21: an EDIT form, so "dirty" means "differs from the return as it
+  // was opened". The comparison uses `finalReason` -- the value that would
+  // actually be saved -- rather than the raw reason/customReason pair,
+  // because a stored reason outside RETURN_REASONS is PRESENTED as Other
+  // plus custom text (see the state init and the back-fill effect above).
+  // The same saved value therefore has two on-screen shapes, and comparing
+  // the raw pair would call a return dirty for re-reaching the reason it
+  // already had.
+  const editDirty = useFormDirty(
+    { finalReason, returnType, notes, items: items.map((item) => ({ id: item.id, returnQty: item.returnQty, stock_action: item.stock_action })) },
+    ret.id ?? null,
+  )
+  const closeGuard = useCloseGuard({ dirty: editDirty.dirty }, onClose)
+
+  // The backdrop, the ✕ and Cancel all land here.
   const closeIfIdle = () => {
-    if (!submitting) onClose()
+    if (!submitting) closeGuard.requestClose()
   }
+
+  if (Number(ret.money_precision_version) === 1) return createPortal(
+    <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 sm:items-center sm:p-4">
+      <div role="dialog" aria-modal="true" aria-label={T('edit_return', 'Edit Return')} className="modal-panel-safe w-full rounded-t-2xl bg-white p-4 dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl">
+        <h2 className="text-lg font-bold">{T('edit_return', 'Edit Return')}</h2>
+        <p className="my-4 text-sm" role="status">{T('return_v1_edit_unavailable', 'This net-refund return cannot be edited in this version. Its saved refund remains unchanged.')}</p>
+        <div className="mb-4 flex justify-between"><span>{T('refund', 'Refund')}</span><span>{fmtUSD(toNumber(ret.total_refund_usd))}</span></div>
+        <button type="button" className="btn-secondary w-full" onClick={onClose}>{T('close', 'Close')}</button>
+      </div>
+    </div>, document.body,
+  )
 
   return createPortal(
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={closeIfIdle}>
@@ -235,11 +342,18 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
             <div className="text-xs text-gray-400 font-mono mt-0.5">{ret.return_number}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <button type="button" onClick={handleSubmit} disabled={submitting || !finalReason.trim()} className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden">{submitting ? `⏳ ${T('saving_label','Saving…')}` : `✓ ${T('save','Save')}`}</button>
             <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={T('close', 'Close')} className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center disabled:opacity-50"><X className="h-4 w-4" /></button>
           </div>
         </div>
 
+        {activePendingRequest ? (
+          <div role="status" data-needs-reconciliation={activePendingRequest.needsReconciliation || undefined} className="mx-4 mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
+            {activePendingRequest.needsReconciliation
+              ? T('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.')
+              : T('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}
+          </div>
+        ) : null}
+        <fieldset disabled={submitting || !!activePendingRequest} className="contents">
         <div className="modal-scroll p-4 space-y-4">
           {/* Warning */}
           <div className="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-3 text-xs text-orange-700 dark:text-orange-400">
@@ -318,6 +432,25 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
                           </span>
                         </div>
                       )}
+                      {isActive && item.stock_action === 'damaged' && (
+                        <div className="mt-1.5 space-y-1">
+                          {/* P4-3: the SAME remove-stock chooser (StockConditionTagRow,
+                              mode='remove') -- keep as a tagged, held row (default)
+                              or destroy immediately as a booked loss. */}
+                          <StockConditionTagRow
+                            mode="remove"
+                            value={item.damaged_disposition === 'remove' ? '' : (item.condition_tag || DEFAULT_STOCK_CONDITION_TAG)}
+                            onChange={(next) => updateItemDamagedChoice(idx, next)}
+                            tr={(key, fallback) => T(key, fallback ?? key)}
+                            id={`return-edit-damaged-tag-${idx}`}
+                          />
+                          <div className="text-[10px] text-orange-500 dark:text-orange-400">
+                            {item.damaged_disposition === 'remove'
+                              ? T('stock_action_damaged_remove_hint', 'Destroyed immediately -- booked as a loss at cost.')
+                              : T('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -365,19 +498,36 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
             </div>
           )}
 
-          {/* Buttons */}
-          <div className="hidden gap-2 pt-1 sm:flex">
-            <button onClick={closeIfIdle} disabled={submitting} className="btn-secondary text-sm flex-1 disabled:opacity-50">
-              {T('cancel','Cancel')}
-            </button>
+        </div>
+        </fieldset>
+        {/* S4-20: the actions live at the END of the form and nowhere else.
+            Outside .modal-scroll, so they are the last thing in the panel
+            without being the last thing behind a scroll. */}
+        <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+          <button onClick={closeIfIdle} disabled={submitting} className="btn-secondary text-sm flex-1 disabled:opacity-50">
+            {T('cancel','Cancel')}
+          </button>
+          {activePendingRequest ? (
+            <>
+              <button onClick={handleSubmit} disabled={submitting} className="btn-primary text-sm flex-1 disabled:opacity-50">
+                {submitting ? `⏳ ${T('saving_label','Saving…')}` : T('retry_original_request', 'Retry original request')}
+              </button>
+              <button type="button" disabled={submitting} className="btn-secondary text-sm flex-1 disabled:opacity-50" onClick={() => {
+                if (window.confirm(T('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) clearPendingRequest()
+              }}>
+                {T('discard_retry', 'Discard retry')}
+              </button>
+            </>
+          ) : (
             <button onClick={handleSubmit}
               disabled={submitting || !finalReason.trim()}
               className="btn-primary text-sm flex-1 disabled:opacity-50">
               {submitting ? `⏳ ${T('saving_label','Saving…')}` : `✓ ${T('save','Save Changes')}`}
             </button>
-          </div>
+          )}
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

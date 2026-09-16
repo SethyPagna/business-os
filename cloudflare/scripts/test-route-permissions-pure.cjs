@@ -38,6 +38,41 @@ execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${
 const lib = require(path.join(tmpDir, 'permissions.js'))
 const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getPermissionTier } = lib
 
+{
+  const viewOnly = { username: 'viewer', role_code: 'viewer', permissions: JSON.stringify({ sales: 'view' }) }
+  assert.equal(hasAnyPermission(viewOnly, ['pos', 'sales']), false, 'Sales view-only cannot open Shifts')
+  const shiftsSource = fs.readFileSync(path.join(__dirname, '..', 'src/routes/shifts.ts'), 'utf8')
+  assert.match(shiftsSource, /hasAnyPermission\(user, \['pos', 'sales'\]\)/, 'Shift entry must continue to require full POS or Sales')
+}
+
+// Execute each bulk library's real permission function, including the same
+// function reused during Undo/Redo, with independently revoked action grants.
+{
+  const ts = require('typescript')
+  const readGuard = (name) => {
+    const file = path.join(__dirname, '..', 'src/lib', name)
+    const source = fs.readFileSync(file, 'utf8')
+    const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
+    const statement = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'permission')
+    assert.ok(statement)
+    const output = ts.transpileModule(`${statement.getText(ast)}\nmodule.exports = permission`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+    const mod = { exports: null }
+    class Denied extends Error { constructor(message, status) { super(message); this.status = status } }
+    new Function('module', 'getActionTier', 'SaleBulkError', 'fail', output)(mod, getActionTier, Denied, (message, status) => { throw new Denied(message, status) })
+    return mod.exports
+  }
+  const statusGuard = readGuard('saleBulkStatus.ts'), fieldGuard = readGuard('saleBulkUpdate.ts')
+  const staff = permissions => ({ id: 7, username: 'employee', role_code: 'employee', permissions: JSON.stringify(permissions) })
+  for (const denied of ['bulk', 'status']) assert.throws(() => statusGuard(staff({ sales: true, [`sales:${denied}`]: false })), error => error.status === 403)
+  for (const kind of ['customer', 'payment_method', 'delivery_contact']) {
+    const underlying = kind === 'customer' ? 'customer' : 'amend'
+    for (const denied of ['bulk', underlying]) assert.throws(() => fieldGuard(staff({ sales: true, [`sales:${denied}`]: false }), { kind }, 2), error => error.status === 403)
+    assert.doesNotThrow(() => fieldGuard(staff({ sales: true }), { kind }, 2))
+  }
+  assert.doesNotThrow(() => fieldGuard(staff({ sales: true, 'sales:bulk': false }), { kind: 'customer' }, 1), 'single customer assignment retains its independently granted authority')
+  console.log('PASS executable single/multi/Undo permission intersection for status, customer, payment and driver changes')
+}
+
 // ---- scenario: POS-only cashier (role grants { pos: true } only) ----
 {
   const posOnlyUser = { role_permissions: JSON.stringify({ pos: true }), permissions: null, username: 'cashier1', role_code: 'cashier' }
@@ -109,7 +144,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
 {
   const branchReviewer = { role_permissions: JSON.stringify({ branches: 'review' }), permissions: null, username: 'br1', role_code: 'reviewer' }
   const inventoryReviewer = { role_permissions: JSON.stringify({ inventory: 'review' }), permissions: null, username: 'ir1', role_code: 'reviewer' }
-  const mayReadTransferHistory = (user) => getPermissionTier(user, 'inventory') !== 'none' || getPermissionTier(user, 'branches') !== 'none'
+  const mayReadTransferHistory = (user) => getActionTier(user, 'inventory', 'view') !== 'none' || getActionTier(user, 'branches', 'view') !== 'none'
   assert.equal(mayReadTransferHistory(branchReviewer), true)
   assert.equal(mayReadTransferHistory(inventoryReviewer), true)
   assert.equal(mayReadTransferHistory({ role_permissions: '{}', permissions: null, username: 'none', role_code: 'staff' }), false)
@@ -129,7 +164,21 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
 // ---- source lock-in: routes/sales.ts and routes/returns.ts actually call these ----
 {
   const salesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
-  assert.match(salesSrc, /hasAnyPermission\(c\.get\('user'\), \['pos', 'sales'\]\)/, 'POST / (create sale) must check hasAnyPermission([pos, sales])')
+  // N13: POST / binds the session user once (`const user = c.get('user')`)
+  // because the sale header, its movement rows, the search blob and the
+  // Telegram line must all name the SAME account. Both spellings of the check
+  // are accepted; what is pinned is that the value checked comes from the
+  // session and not from the request body.
+  assert.match(salesSrc, /hasAnyPermission\((?:c\.get\('user'\)|user), \['pos', 'sales'\]\)/, 'POST / (create sale) must check hasAnyPermission([pos, sales])')
+  // Anchored to the POST '/' handler's own slice. Matched against the whole
+  // file this assertion is vacuous -- a dozen other handlers already bind the
+  // session that way, so it would stay green if POST / stopped doing it.
+  const postSaleStart = salesSrc.indexOf("app.post('/', async (c)")
+  assert.ok(postSaleStart > 0, "sales.ts no longer declares a POST '/' handler under that signature")
+  const afterPostSale = salesSrc.slice(postSaleStart + 1).search(/\napp\.(get|post|put|patch|delete)\(/)
+  assert.ok(afterPostSale > 0, "could not find the end of the POST '/' handler slice")
+  const postSaleSrc = salesSrc.slice(postSaleStart, postSaleStart + 1 + afterPostSale)
+  assert.match(postSaleSrc, /const user = c\.get\('user'\)/, 'POST / must take its actor from the session')
   // Part 557 view-tier: sales READS moved from the strict hasPermission('sales')
   // boolean to the tier-aware canReadSales() (getPermissionTier(...,'sales') !==
   // 'none') so a read-only 'view' grant can list/report without a write grant;
@@ -220,23 +269,25 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   const branchesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'branches.ts'), 'utf8')
   assert.doesNotMatch(branchesSrc, /import \{ hasPermission[^}]*\} from '\.\.\/lib\/permissions'/, "branches.ts should no longer import the strict hasPermission() -- every check must be tier-aware via getPermissionTier('branches')")
   assert.doesNotMatch(branchesSrc, /if \(!hasPermission\(/, 'branches.ts should have no remaining strict hasPermission() gate checks')
-  assert.match(branchesSrc, /getPermissionTier\(c\.get\('user'\), 'branches'\) === 'none'/, 'branches.ts GET /summary must be tier-aware so a Review Required user can still view it')
-  assert.match(branchesSrc, /maybeQueueForReview\(c\.env, user, 'branches', \{\s*\n\s*actionType: 'create'/, "branches.ts POST / must queue for review via maybeQueueForReview when the user's tier is 'review'")
+  assert.match(branchesSrc, /getActionTier\(c\.get\('user'\), 'branches', 'view'\) === 'none'/, 'branches.ts GET /summary must honor effective view while retaining Review Required reads')
+  assert.doesNotMatch(branchesSrc, /maybeQueueForReview\(c\.env, user, 'branches', \{\s*\n\s*actionType: 'create'/, 'fixed branch identities must never queue a create')
   assert.match(branchesSrc, /maybeQueueForReview\(c\.env, user, 'branches', \{\s*\n\s*actionType: 'update'/, 'branches.ts PUT /:id must queue for review too')
-  assert.match(branchesSrc, /maybeQueueForReview\(c\.env, user, 'branches', \{\s*\n\s*actionType: 'delete'/, 'branches.ts DELETE /:id must queue for review too, not apply directly for a Review Required user')
+  assert.doesNotMatch(branchesSrc, /maybeQueueForReview\(c\.env, user, 'branches', \{\s*\n\s*actionType: 'delete'/, 'fixed branch identities must never queue a delete')
+  assert.equal((branchesSrc.match(/CANONICAL_BRANCH_IDENTITY_CODE \}, 409\)/g) || []).length, 3, 'authorized create/delete and invalid identity updates must return the stable canonical-identity refusal')
+  assert.ok(branchesSrc.indexOf('prepareCanonicalBranchUpdate(current, body)') < branchesSrc.indexOf("actionType: 'update'"), 'invalid identity updates must fail before review queueing')
   assert.match(branchesSrc, /transferTier === 'review'\)\s*\{\s*\n\s*return c\.json\(\{ error: 'Transferring stock requires Full Access/, 'branches.ts POST /transfer must explicitly block Review Required rather than leave it reachable')
   assert.match(branchesSrc, /bulkTransferTier === 'review'\)\s*\{\s*\n\s*return c\.json\(\{ error: 'Transferring stock requires Full Access/, 'branches.ts POST /transfer-bulk must explicitly block Review Required too')
   assert.match(branchesSrc, /tier === 'review'\)\s*\{\s*\n\s*return c\.json\(\{ success: false, error: 'Repairing stock integrity requires Full Access/, 'branches.ts POST /stock-integrity/repair must explicitly block Review Required too')
-  console.log("PASS routes/branches.ts's permission checks are now tier-aware under its own 'branches' key, with create/update/delete queued for review and the three live-stock-movement routes explicitly blocked for Review Required")
+  console.log("PASS routes/branches.ts keeps permission checks ahead of fixed-identity refusals, queues metadata updates only, and blocks Review Required live-stock movement")
 }
 {
   const reviewApplySrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'reviewApply.ts'), 'utf8')
   assert.match(reviewApplySrc, /registerApplier\('branches', 'create', 'branch'/, 'reviewApply.ts must register an applier for branches/create/branch')
   assert.match(reviewApplySrc, /registerApplier\('branches', 'update', 'branch'/, 'reviewApply.ts must register an applier for branches/update/branch')
   assert.match(reviewApplySrc, /registerApplier\('branches', 'delete', 'branch'/, 'reviewApply.ts must register an applier for branches/delete/branch')
-  assert.match(reviewApplySrc, /if \(branch\.is_default\) throw new Error/, "the branches/delete/branch applier must re-check the not-default rule against the row's CURRENT state at approval time, not just trust the request-time check")
-  assert.match(reviewApplySrc, /if \(stockCheck && Number\(stockCheck\.total\) > 0\) \{\s*\n\s*throw new Error/, 'the branches/delete/branch applier must re-check the no-stock-left rule at approval time too')
-  console.log('PASS lib/reviewApply.ts has appliers registered for all three branches action types, with the delete applier re-validating live state at approval time rather than trusting the original request')
+  assert.equal((reviewApplySrc.match(/assertCanonicalBranchSetMutationAllowed\(\)/g) || []).length, 2, 'historical create and delete approvals must both fail closed')
+  assert.match(reviewApplySrc, /SELECT id, name, is_active FROM branches WHERE id = @id[\s\S]*branchUpdateStatements\(id, body, current\)/, 'reviewed metadata updates must reload and guard the current identity')
+  console.log('PASS lib/reviewApply.ts keeps historical action registration while refusing create/delete and guarding canonical metadata updates')
 }
 {
   const permissionsLibSrc = fs.readFileSync(permissionsSrcPath, 'utf8')
@@ -281,7 +332,8 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
 {
   const compatSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
   const dashboardChecks = compatSrc.match(/denyUnless\(c, 'dashboard'\)/g) || []
-  assert.equal(dashboardChecks.length, 3, `expected exactly 3 denyUnless(c, 'dashboard') call sites (GET /dashboard, GET /analytics, GET /dashboard/startup), found ${dashboardChecks.length}`)
+  assert.equal(dashboardChecks.length, 4, `expected exactly 4 denyUnless(c, 'dashboard') call sites (GET /dashboard, GET /dashboard/stock-alerts, GET /analytics, GET /dashboard/startup), found ${dashboardChecks.length}`)
+  assert.match(compatSrc, /app\.get\('\/dashboard\/stock-alerts', async \(c\) => \{\s*const denied = denyUnless\(c, 'dashboard'\)\s*if \(denied\) return denied/, 'paginated stock alerts must enforce the dashboard permission before querying stock')
   // Was asserting the literal `app.use('/dashboard*', requireAuth)` form.
   // That form is DEAD -- Hono does not treat a bare trailing `*` as a
   // wildcard, so all thirteen of compat.ts's guards matched nothing (proved
@@ -290,7 +342,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   // the form Hono actually matches, which also covers the bare `/prefix`.
   assert.match(compatSrc, /for \(const prefix of \[[\s\S]*?'\/dashboard'[\s\S]*?\]\) \{\s*\n\s*app\.use\(`\$\{prefix\}\/\*`, requireAuth\)/, "compat.ts must require a session on the /dashboard subtree using the `${prefix}/*` form Hono actually matches")
   assert.doesNotMatch(compatSrc, /^app\.use\('\/[a-z-]+\*',/m, "compat.ts must not use the bare-trailing-`*` middleware form -- it matches nothing in Hono and silently leaves routes unguarded")
-  assert.match(compatSrc, /app\.get\('\/transfers', async \(c\) => \{[\s\S]*?getPermissionTier\(user, 'inventory'\) === 'none' && getPermissionTier\(user, 'branches'\) === 'none'/, 'compat.ts GET /transfers must admit either tier-aware read permission while denying users with neither')
+  assert.match(compatSrc, /app\.get\('\/transfers', async \(c\) => \{[\s\S]*?getActionTier\(user, 'inventory', 'view'\) === 'none' && getActionTier\(user, 'branches', 'view'\) === 'none'/, 'compat.ts GET /transfers must admit either effective read permission while honoring view revocations')
   console.log("PASS routes/compat.ts's dashboard/analytics/dashboard-startup endpoints all check the 'dashboard' permission")
 }
 
@@ -333,7 +385,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   assert.match(contactsSrc, /isAdminControlUser\(user\) \|\| hasPermission\(user, 'contacts_suppliers'\)/, 'contacts.ts must gate suppliers on admin-control OR contacts_suppliers')
   assert.match(contactsSrc, /app\.use\('\/suppliers', requireSupplierAccess\)\s*\n\s*app\.use\('\/suppliers\/\*', requireSupplierAccess\)/, 'the supplier gate must cover both /suppliers and /suppliers/*')
   assert.match(contactsSrc, /c\.req\.query\('fields'\) \|\| ''\) === 'names'\) return next\(\)/, 'the fields=names carve-out must exist for the name-only pickers')
-  assert.match(contactsSrc, /SELECT id, name FROM \$\{config\.table\} ORDER BY/, 'the fields=names list must select id + name ONLY -- it is reachable without the suppliers grant')
+  assert.match(contactsSrc, /SELECT id, name FROM \$\{config\.table\} \$\{config\.table === 'customers' \? `WHERE \$\{customerIsProfileSql\(\)\}` : ''\} ORDER BY lower\(name\) ASC/, 'the fields=names list must select id + name only and exclude the reserved anonymous customer inside the query')
 
   const notificationsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'notifications.ts'), 'utf8')
   assert.match(notificationsSrc, /preferences\.supplierCreditEnabled && isAdminControlUser\(user\)/, 'supplier-credit reminders (money owed) must be admin-control only')

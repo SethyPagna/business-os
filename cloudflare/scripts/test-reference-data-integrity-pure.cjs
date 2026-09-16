@@ -36,7 +36,8 @@ check('contact rename validates first then commits the contact and every live ca
   const end = source.indexOf("app.delete(`${config.path}/:id`", start)
   const edit = source.slice(start, end)
   assert.ok(start >= 0 && end > start, 'contact edit route is present')
-  assert.ok(edit.indexOf('const duplicateBlock') < edit.indexOf('await db.batch(statements)'), 'duplicate validation precedes the atomic write')
+  assert.ok(edit.indexOf('const duplicateDecision') < edit.indexOf('await db.batch(statements)'), 'duplicate validation precedes the atomic write')
+  assert.ok(edit.indexOf('if (duplicateGuard) statements.push(duplicateGuard)') < edit.indexOf('statements.push(contactUpdate)'), 'the concurrent duplicate guard is the first contact write guard')
   assert.match(edit, /const statements: Array<\{ sql: string; params: Record<string, unknown> \}> = \[\]/)
   assert.match(edit, /if \(statements\.length\) await db\.batch\(statements\)/)
   assert.doesNotMatch(edit, /applyRenameCarry/, 'no supplier write can happen before the contact batch')
@@ -49,8 +50,14 @@ check('payment method replacement previews then updates exact summaries/details 
   assert.match(source, /payment-methods\/impact/)
   assert.match(source, /payment-methods\/replace/)
   assert.match(source, /scope === 'linked'/)
-  assert.match(source, /lower\(trim\(COALESCE\(payment_method,''\)\)\) = @from/)
-  assert.doesNotMatch(source.match(/app\.post\('\/payment-methods\/replace'[\s\S]*?return c\.json\(\{ success: true/)?.[0] || '', /LIKE/i)
+  assert.match(source, /paymentMethodKey\(label\)/, 'the shared JS identity discovers every exact historical spelling, including Unicode case variants')
+  assert.match(source, /PAYMENT_METHOD_VARIANT_LIMIT/, 'the distinct spelling set is bounded independently of linked sale count')
+  assert.match(source, /json_each\(@sourceVariants\)/, 'SQL matches only the reviewed exact source spellings')
+  assert.match(source, /json_each\(@identityVariants\)/, 'summary/detail rebuilding canonicalizes source and existing target variants together')
+  const replace = source.match(/app\.post\('\/payment-methods\/replace'[\s\S]*?return c\.json\(\{ success: true/)?.[0] || ''
+  assert.match(replace, /expectedSaleRevisionSum/, 'the linked transaction rejects sales changed during its bounded scan')
+  assert.match(replace, /expectedRaw: setting\.raw/, 'the configuration write is guarded by the exact reviewed raw value')
+  assert.doesNotMatch(replace, /LIKE/i)
 })
 
 check('inventory reasons and expense labels use preview + exact normalized replacement', () => {

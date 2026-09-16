@@ -23,8 +23,10 @@
 // UPDATE (this session, correcting the paragraph above -- it had gone
 // stale and was actively misleading, having sent a full trace down a path
 // that turned out to already be built): products import DOES have a real
-import { normalizeProductGroupName, productDetailSignature, productIdentitySignature, resolveMergedPricing } from './productDetailRule'
+import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing, barcodeIdentityMatches, clusterRowsByBarcodeIdentity, rankBarcodeIdentityWinner, isRealBarcode } from './productDetailRule'
+import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
+import { planReconcileBranchSnapshot } from './productBatches'
 // per-row mode system now, just via a different channel than
 // decisionsByRowNumber/policy_json -- BulkImportModal.tsx's review step
 // bakes the reviewer's per-row choice (IMPORT_DECISION_OPTIONS) directly
@@ -54,6 +56,8 @@ import { sanitizeImportedDescription } from './productDescriptionSections'
 
 import type { Env } from '../index'
 import { getDb, type D1Compat } from './db'
+import { freePlanRefusalSuffix, getPlanLimits } from './planTier'
+import { chunkRowsForAttempt, dispatchImportWork } from './queueDispatch'
 import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
 import {
   parseCsvRows,
@@ -67,22 +71,37 @@ import {
   findBlankHeaderIndexes,
   type ParsedCsvRow,
 } from './importCsv'
-import { parseImportNumericValue, normalizeImportMoney } from './importNumbers'
-import { buildImportedContactState } from './contactOptions'
+import { parseImportNumericValue, normalizeImportMoney, normalizeImportCost4, normalizeImportSellingPrice } from './importNumbers'
+import { createMembershipNumberAllocator, membershipGlob } from './membershipNumber'
+import { buildImportedContactState, contactDisplayAddress } from './contactOptions'
+import { collectContactPhones, contactDuplicateWriteGuardStatement, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
+import { canonicalizePhone } from './phone'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
-import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
+import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
+import { getActionTier, hasPermission, isActionBlocked } from './permissions'
+import type { SessionUser } from './auth'
+import { sanitizeMediaPath } from './media'
+import { resolveProductImagePathIdentities } from './productImagePermission'
 import { classifyUnifiedStockActions, type StockActionImportResult } from './stockActionCatalog'
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
-import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, type UnifiedStockSaleLine } from './stockActionCommit'
+import { applyUnifiedStockAdd, applyUnifiedStockSale, batchIdentity, ensureUnifiedStockProduct, unifiedStockReceiptRefusal, type UnifiedStockSaleLine } from './stockActionCommit'
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
+import { branchCanSell } from './branchRoles'
+import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
+import {
+  indexCanonicalImportBranches,
+  resolveCanonicalImportBranch,
+  validateCanonicalImportBranchIds,
+  withCanonicalImportBranchWriteGuard,
+  type CanonicalImportBranchRow,
+} from './importBranchAuthority'
 import {
   normalizeImageMatchKey,
-  MAX_IMAGES_PER_PRODUCT,
   matchImagesToProducts,
   buildAutoRenamePlan,
   type UploadedImageRef,
@@ -99,6 +118,65 @@ export type ImportType = 'products' | 'customers' | 'suppliers' | 'delivery_cont
 
 export type RowAction = 'create' | 'update' | 'skip' | 'error'
 
+type ImportApplyJob = {
+  id: string
+  type: ImportType
+  policy_json: string | null
+  summary_json?: string | null
+}
+
+export class ImportApplyAuthorizationError extends Error {
+  readonly code = 'import_apply_permission_revoked'
+  readonly permission: string
+
+  constructor(permission: string, message: string) {
+    super(message)
+    this.name = 'ImportApplyAuthorizationError'
+    this.permission = permission
+  }
+}
+
+export function isImportApplyAuthorizationError(error: unknown): error is ImportApplyAuthorizationError {
+  return error instanceof ImportApplyAuthorizationError
+    || (!!error && typeof error === 'object' && (error as { code?: unknown }).code === 'import_apply_permission_revoked')
+}
+
+function parsePolicyObject(text: string | null | undefined): Record<string, any> {
+  if (!text) return {}
+  try {
+    const parsed = JSON.parse(text)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch (_) {
+    return {}
+  }
+}
+
+function permissionsForImportType(type: ImportType): string[] {
+  if (type === 'stock_actions') return ['products', 'inventory', 'sales']
+  if (type === 'customers' || type === 'suppliers' || type === 'delivery_contacts') return ['contacts']
+  if (type === 'inventory') return ['inventory']
+  if (type === 'sales') return ['sales']
+  return ['products']
+}
+
+function importActionSection(type: ImportType): string {
+  if (type === 'customers' || type === 'suppliers' || type === 'delivery_contacts') return 'contacts'
+  if (type === 'inventory' || type === 'stock_actions') return 'inventory'
+  if (type === 'sales') return 'sales'
+  return 'products'
+}
+
+async function loadImportApplyActor(db: D1Compat, actorId: number): Promise<SessionUser | null> {
+  const actor = await db.prepare(`
+    SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
+           r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name
+    FROM users u
+    LEFT JOIN roles r ON r.id = u.role_id
+    WHERE u.id = @id AND u.is_active = 1 AND u.deleted_at IS NULL
+  `).get<SessionUser>({ id: actorId })
+  return actor ?? null
+}
+
 // Stable machine-readable tag for a row warning, distinct from `message`
 // (the human-readable sentence). Grouping/reporting code (see
 // summarizeImportWarnings below and GET /:id/warnings-summary in
@@ -108,9 +186,25 @@ export type RowAction = 'create' | 'update' | 'skip' | 'error'
 // callsite that doesn't bother threading a specific kind through; the
 // report still counts and lists it, just under a generic bucket instead of
 // silently dropping it from the summary.
-export type ImportWarningKind = 'negative_stock' | 'unreadable_batch_date' | 'barcode_collision' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'stock_action_conflict' | 'other'
+export type ImportWarningKind = 'negative_stock' | 'unreadable_batch_date' | 'barcode_collision' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'stock_action_conflict' | 'cost_outlier' | 'other'
 
 export type ImportRowWarning = { kind: ImportWarningKind; message: string }
+
+// The sentence a REFUSED cost average shows the operator (see
+// resolveMergedCostDetail's similarity guard). Written once here because two
+// separate sites can fold two costs together -- a file row merging into an
+// existing catalog product, and two rows of the SAME file merging into each
+// other -- and the operator must not see the same event described two ways.
+// Without this warning the guard would be exactly as invisible as the bug it
+// exists to prevent: a stored cost quietly different from every figure in the
+// file.
+export function costOutlierWarning(outlier: MergedCostOutlier): ImportRowWarning {
+  const currency = outlier.field === 'cost_price_khr' ? 'KHR' : 'USD'
+  return {
+    kind: 'cost_outlier',
+    message: `Costs ${outlier.min} and ${outlier.max} (${currency}) are more than ${COST_OUTLIER_RATIO}x apart, so they were NOT averaged -- the higher one (${outlier.max}) was kept. Check whether one of them is a typo.`,
+  }
+}
 
 export type ImportRowResult = {
   rowNumber: number
@@ -137,6 +231,140 @@ export type ImportRowResult = {
   // update + branch_stock quantity REPLACE), so old imports and every
   // other row shape keep writing exactly as before.
   plannedMode?: 'merge_stock' | 'override_add' | 'override_replace'
+  // Contacts-only write snapshot. Apply reclassifies each chunk immediately
+  // before writing, then verifies this exact value in the same D1 batch as
+  // the UPDATE so a concurrent manual edit cannot be overwritten.
+  expectedUpdatedAt?: string | null
+  // Contacts-only review payload for an exact-name collision that has more
+  // than one current candidate. IDs are sorted and carried explicitly so a
+  // reviewer chooses the intended record; classification never inherits the
+  // database driver's unordered last row.
+  contactMatchCandidates?: Array<{
+    id: number
+    name: string | null
+    phone: string | null
+    membership_number?: string | null
+  }>
+  contactMatchTargetInvalid?: boolean
+}
+
+// Shared by the synchronous approval/retry routes and every asynchronous
+// apply invocation. Reading the analyzed plan plus the current catalog is
+// what distinguishes an unchanged image identity from a real image write;
+// merely seeing an image_path column is not enough because legacy encoded
+// aliases can resolve to the same stored asset.
+export async function productImportChangesImages(env: Env, job: ImportApplyJob): Promise<boolean> {
+  if (job.type !== 'products') return false
+  const db = getDb(env)
+  const policy = parsePolicyObject(job.policy_json)
+  const decisions = policy.decisionsByRowNumber && typeof policy.decisionsByRowNumber === 'object'
+    ? policy.decisionsByRowNumber
+    : {}
+  const summary = parsePolicyObject(job.summary_json)
+  const rows = await db.staging.prepare(`
+    SELECT row_number, action, result_json
+    FROM import_job_rows
+    WHERE job_id = @id AND phase = 'analyze' AND action IN ('create', 'update')
+  `).all<{ row_number: number; action: string; result_json: string }>({ id: job.id })
+
+  const parsedRows = rows.map((row) => ({ row, result: parsePolicyObject(row.result_json) as ImportRowResult }))
+  let lateImagePaths: Map<number, string> | null = null
+  const imageOverridesChanged = policy.imageOverrides && typeof policy.imageOverrides === 'object' && Object.keys(policy.imageOverrides).length > 0
+  const limitDecisionsChanged = policy.imageLimitDecisions && typeof policy.imageLimitDecisions === 'object' && Object.keys(policy.imageLimitDecisions).length > 0
+  if (policy.wire_images === true && (!summary.imageMatch || imageOverridesChanged || limitDecisionsChanged)) {
+    const sourceRows = parsedRows.flatMap(({ row, result }) => result?.data
+      ? [{ ...(result.data as Record<string, unknown>), _rowNumber: row.row_number }]
+      : [])
+    const match = await computeImportImageMatch(db, job.id, sourceRows, job.policy_json)
+    lateImagePaths = match.rowImagePaths
+  }
+
+  const effectiveResults: ImportRowResult[] = []
+  for (const { row, result } of parsedRows) {
+    if (decisions[String(row.row_number)]?.action === 'skip') continue
+    if (!result?.data) continue
+    result.action = row.action as RowAction
+    const latePath = lateImagePaths?.get(row.row_number)
+    if (latePath) result.data.image_path = latePath
+    effectiveResults.push(result)
+  }
+  return productImportResultsChangeImages(db, effectiveResults, job.policy_json)
+}
+
+export async function productImportResultsChangeImages(
+  db: D1Compat,
+  results: ImportRowResult[],
+  policyJson: string | null,
+): Promise<boolean> {
+  const policy = parsePolicyObject(policyJson)
+  const updates: Array<{ id: number; imagePath: string }> = []
+  for (const result of results) {
+    if (result.action !== 'create' && result.action !== 'update') continue
+    const nextImagePath = sanitizeMediaPath(result.data?.image_path, '')
+    if (!nextImagePath) continue
+    const existingId = Number(result.existingId)
+    if (result.action === 'create' || !Number.isInteger(existingId) || existingId <= 0) return true
+    if (result.plannedMode === 'merge_stock') continue
+    if (policy.import_mode === 'replace_columns') {
+      const replaceColumns = getProductImportReplaceColumns(policyJson)
+      if (replaceColumns.length && !replaceColumns.includes('image_path')) continue
+    }
+    updates.push({ id: existingId, imagePath: nextImagePath })
+  }
+  if (!updates.length) return false
+
+  const currentById = new Map<number, string>()
+  const ids = [...new Set(updates.map((entry) => entry.id))]
+  for (let offset = 0; offset < ids.length; offset += 90) {
+    const chunk = ids.slice(offset, offset + 90)
+    const placeholders = chunk.map(() => '?').join(',')
+    const currentRows = await db.prepare(`SELECT id, image_path FROM products WHERE id IN (${placeholders})`)
+      .all<{ id: number; image_path: string | null }>(chunk)
+    for (const current of currentRows) currentById.set(Number(current.id), sanitizeMediaPath(current.image_path, ''))
+  }
+  const identities = await resolveProductImagePathIdentities(db, [
+    ...updates.map((entry) => entry.imagePath),
+    ...currentById.values(),
+  ])
+  return updates.some((entry) => {
+    const currentPath = currentById.get(entry.id) || ''
+    return (identities.get(currentPath) || currentPath) !== (identities.get(entry.imagePath) || entry.imagePath)
+  })
+}
+
+export function stripProductImportImageFields(results: ImportRowResult[]): void {
+  for (const result of results) {
+    if (result.data && typeof result.data === 'object') delete result.data.image_path
+  }
+}
+
+export async function assertCurrentImportApplyAuthority(
+  env: Env,
+  job: ImportApplyJob,
+): Promise<{ actor: SessionUser; allowProductImageWrites: boolean }> {
+  const policy = parsePolicyObject(job.policy_json)
+  const actorId = Number(policy.apply_authorized_by_id)
+  if (!Number.isInteger(actorId) || actorId <= 0) {
+    throw new ImportApplyAuthorizationError('import', 'The user who authorized this import is missing. Retry it with a currently authorized user.')
+  }
+  const actor = await loadImportApplyActor(getDb(env), actorId)
+  if (!actor) {
+    throw new ImportApplyAuthorizationError('import', 'The user who authorized this import is no longer active. Retry it with a currently authorized user.')
+  }
+  const missingPermission = permissionsForImportType(job.type).find((permission) => !hasPermission(actor, permission))
+  if (missingPermission) {
+    throw new ImportApplyAuthorizationError(missingPermission, `The user who authorized this import no longer has ${missingPermission} permission.`)
+  }
+  const section = importActionSection(job.type)
+  if (section === 'contacts' && isActionBlocked(actor, 'contacts', 'bulk')) {
+    throw new ImportApplyAuthorizationError('contacts:bulk', 'The user who authorized this import no longer has contacts:bulk permission.')
+  }
+  if (isActionBlocked(actor, section, 'import')) {
+    throw new ImportApplyAuthorizationError(`${section}:import`, `The user who authorized this import no longer has ${section}:import permission.`)
+  }
+
+  const allowProductImageWrites = job.type !== 'products' || getActionTier(actor, 'products', 'image') === 'full'
+  return { actor, allowProductImageWrites }
 }
 
 // Human-readable label for each warning kind, used as the group heading in
@@ -145,7 +373,7 @@ export type ImportRowResult = {
 // the wording only needs to change in one place.
 export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
   negative_stock: 'Negative stock (clamped to 0)',
-  unreadable_batch_date: 'Batch date unreadable (received as today)',
+  unreadable_batch_date: 'Received date unreadable (received as today)',
   barcode_collision: 'Same barcode, different name',
   sku_collision: 'Same SKU, different name',
   name_match: 'Matched an existing contact by name',
@@ -153,6 +381,7 @@ export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
   membership_phone_conflict: 'Membership number and phone number belong to different customers on file',
   duplicate_row_match: 'Two rows in this file matched the same existing contact',
   stock_action_conflict: 'Stock action needs explicit confirmation',
+  cost_outlier: 'Costs too far apart to average (highest kept)',
   other: 'Other warning',
 }
 
@@ -160,7 +389,7 @@ export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
 // specifically (as opposed to a routine "just so you know") -- used to
 // decide what surfaces in the import report / dashboard / audit log
 // without the caller needing its own copy of this list.
-export const SERIOUS_IMPORT_WARNING_KINDS: ReadonlySet<ImportWarningKind> = new Set(['negative_stock', 'unreadable_batch_date', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict'])
+export const SERIOUS_IMPORT_WARNING_KINDS: ReadonlySet<ImportWarningKind> = new Set(['negative_stock', 'unreadable_batch_date', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict', 'cost_outlier'])
 
 // Counts DISTINCT rows that carry at least one warning whose kind is in
 // `kinds` -- NOT the sum of summarizeImportWarnings' per-kind group counts.
@@ -226,7 +455,15 @@ export function summarizeImportWarnings(rows: Array<{ rowNumber: number; warning
 // match (those identify a specific real account; a name match is only ever
 // this app's best guess, and the reviewer may know two different people
 // really do share a name).
-export type RowDecision = { action?: 'apply' | 'skip' | 'force_create'; field_overrides?: Record<string, unknown> }
+export type RowDecision = {
+  action?: 'apply' | 'skip' | 'force_create'
+  field_overrides?: Record<string, unknown>
+  // Contacts only: the exact existing record explicitly selected for a
+  // name-match merge. Revalidated against the live candidate set on every
+  // analyze/apply classification, so a later rename/delete cannot redirect
+  // the import to a different same-name row.
+  target_existing_id?: number
+}
 
 // Keep the materialized/chunked path at least as large as the stock-action
 // route's documented direct-import allowance below. The migration pack's
@@ -264,7 +501,11 @@ export const ROWS_PER_IMPORT_CHUNK = 600
 // response), so it only ever classifies a bounded sample for a quick
 // sanity check. The real, authoritative, complete pass is the (chunked)
 // analyze phase that runs after POST /:id/start.
-export const PREFLIGHT_MAX_ROWS = 500
+//
+// The sample size itself moved to lib/planTier.ts (preflightMaxRows: paid
+// 500, free 125) and is read per request at that route. It is NOT kept as a
+// second exported copy here: this route was its only reader, and an export
+// nobody reads is a number that drifts from the one in force.
 
 // Phase timing, stored on the job row (summary_json.timings) so a slow
 // import can actually be diagnosed after the fact -- which pipeline phase
@@ -286,20 +527,62 @@ export function makeStopwatch() {
   }
 }
 
-// Reserved marker (not a valid branch name a CSV could realistically
-// contain) used in ImportRowResult.data.branch_name_pending to mean "no
-// branch was named for this row AND no default branch exists yet" --
-// distinct from a real pending name, which means "this specific name
-// needs to be created". See resolveAndCreateBranches in runImportApply.
-const DEFAULT_BRANCH_SENTINEL = '\u0000__default_branch__'
-
-
 function str(value: unknown): string {
   return value == null ? '' : String(value).trim()
 }
 
 function lower(value: unknown): string {
   return str(value).toLowerCase()
+}
+
+export type ImportRestockBatch = {
+  id: number
+  variant_product_id: number
+  batch_key: string
+  lot_code: string | null
+  received_at: string | null
+  is_active: number
+}
+
+export type ImportRestockBatchIndex = {
+  byExactKey: Map<string, ImportRestockBatch>
+  byNormalizedLot: Map<string, ImportRestockBatch>
+}
+
+// Additive product imports must see inactive lots as well as active ones.
+// An inactive row still owns its (product,batch_key) UNIQUE identity, and a
+// deliberate receipt into that identity reactivates it instead of creating a
+// replacement. Exact stored batch_key is authoritative; normalized lot_code
+// remains a compatibility fallback for older rows whose key/display differed.
+export function indexImportRestockBatches(rows: ImportRestockBatch[]): ImportRestockBatchIndex {
+  const byExactKey = new Map<string, ImportRestockBatch>()
+  const byNormalizedLot = new Map<string, ImportRestockBatch>()
+  for (const batch of rows) {
+    byExactKey.set(`${batch.variant_product_id}\u0001${batch.batch_key}`, batch)
+    if (!str(batch.lot_code)) continue
+    const normalizedLotKey = `${batch.variant_product_id}\u0001${lower(batch.lot_code)}`
+    const current = byNormalizedLot.get(normalizedLotKey)
+    // Prefer an already-active representative when several historical rows
+    // share a display-equivalent lot code. Stable id order makes the legacy
+    // fallback deterministic; exact unique-key selection still wins below.
+    if (!current || Number(batch.is_active) > Number(current.is_active)
+      || (Number(batch.is_active) === Number(current.is_active) && batch.id < current.id)) {
+      byNormalizedLot.set(normalizedLotKey, batch)
+    }
+  }
+  return { byExactKey, byNormalizedLot }
+}
+
+export function findImportRestockBatch(
+  index: ImportRestockBatchIndex,
+  productId: number,
+  importedLotCode: unknown,
+): ImportRestockBatch | null {
+  const lotCode = str(importedLotCode)
+  if (!lotCode) return null
+  return index.byExactKey.get(`${productId}\u0001${lotCode}`)
+    || index.byNormalizedLot.get(`${productId}\u0001${lower(lotCode)}`)
+    || null
 }
 
 function toBool01(value: unknown, fallback = 1): number {
@@ -954,7 +1237,7 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
   const isDone = window.done || cappedEarly
 
   await saveMaterializeState(db, jobId, state, isDone)
-  await env.IMPORT_QUEUE.send({ jobId, kind })
+  await dispatchImportWork(env, { jobId, kind })
   return true
 }
 
@@ -1105,7 +1388,7 @@ export type ProductImportMode = 'merge' | 'replace_all' | 'replace_columns' | 'f
 export const PRODUCT_REPLACE_COLUMNS = [
   'name', 'sku', 'barcode', 'category', 'categories', 'unit', 'description',
   'brand', 'brands', 'supplier',
-  'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr',
+  'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr',
   'cost_price_usd', 'cost_price_khr',
   'low_stock_threshold', 'out_of_stock_threshold',
   'discount_enabled', 'discount_type', 'discount_percent', 'discount_amount_usd', 'discount_amount_khr',
@@ -1171,6 +1454,16 @@ export function getProductImportReplaceColumns(policyJson: string | null | undef
   }
 }
 
+// The wholesale tier used to be merged here, by a local
+// resolveMergedWholesalePricing that duplicated resolveMergedPricing's
+// max-wins loop over wholesale_price_usd/khr. It existed only because
+// productDetailRule.ts still named the retired special_price_* pair and the
+// lane that added it did not own that file. S4-32 re-pointed the shared rule
+// at wholesale_price_*, so the shared helper now merges the tier itself and
+// the local copy would have been a second implementation of one rule -- the
+// exact drift hazard productDetailRuleParity.test.ts exists to prevent. Every
+// call site below now passes through resolveMergedPricing alone.
+
 // ---------------------------------------------------------------------------
 // Per-type classification. Each function takes the already CSV-parsed rows
 // and existing DB rows (loaded once, up front) and returns a classification
@@ -1203,8 +1496,8 @@ export async function classifyProducts(
   // query shape doesn't fork, and so `match`'s type stays the same
   // regardless of which mode a given import job happens to be running.
   const existing = await db
-    .prepare(`SELECT id, sku, barcode, name, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr, category, categories, brand, brands, unit, supplier, description, low_stock_threshold, special_price_usd, special_price_khr, out_of_stock_threshold, discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at, expiry_date, expiry_alert_days, is_active, image_path FROM products`)
-    .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; cost_price_usd: number | null; cost_price_khr: number | null; selling_price_usd: number | null; selling_price_khr: number | null; category: string | null; categories: string | null; brand: string | null; brands: string | null; unit: string | null; supplier: string | null; description: string | null; low_stock_threshold: number | null; special_price_usd: number | null; special_price_khr: number | null; out_of_stock_threshold: number | null; discount_enabled: number | null; discount_type: string | null; discount_percent: number | null; discount_amount_usd: number | null; discount_amount_khr: number | null; discount_label: string | null; discount_badge_color: string | null; discount_starts_at: string | null; discount_ends_at: string | null; expiry_date: string | null; expiry_alert_days: number | null; is_active: number | null; image_path: string | null }>()
+    .prepare(`SELECT id, sku, barcode, name, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr, category, categories, brand, brands, unit, supplier, description, low_stock_threshold, wholesale_price_usd, wholesale_price_khr, out_of_stock_threshold, discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at, expiry_date, expiry_alert_days, is_active, image_path FROM products`)
+    .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; cost_price_usd: number | null; cost_price_khr: number | null; selling_price_usd: number | null; selling_price_khr: number | null; category: string | null; categories: string | null; brand: string | null; brands: string | null; unit: string | null; supplier: string | null; description: string | null; low_stock_threshold: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; out_of_stock_threshold: number | null; discount_enabled: number | null; discount_type: string | null; discount_percent: number | null; discount_amount_usd: number | null; discount_amount_khr: number | null; discount_label: string | null; discount_badge_color: string | null; discount_starts_at: string | null; discount_ends_at: string | null; expiry_date: string | null; expiry_alert_days: number | null; is_active: number | null; image_path: string | null }>()
   const bySku = new Map<string, typeof existing[number]>()
   // One barcode can now legitimately map to SEVERAL distinct products (see
   // the barcode-collision guard below) -- keep every candidate per barcode,
@@ -1223,7 +1516,10 @@ export async function classifyProducts(
   for (const record of existing) {
     if (str(record.sku)) bySku.set(lower(record.sku), record)
     if (str(record.barcode)) {
-      const key = lower(record.barcode)
+      // Folded, not merely lowercased: re-importing the supplier file is how
+      // a merged-away leading-zero twin comes back, because the raw key never
+      // matched the survivor and the row was created again.
+      const key = identityBarcodeKey(record.barcode)
       if (!byBarcode.has(key)) byBarcode.set(key, [])
       byBarcode.get(key)!.push(record)
     }
@@ -1239,8 +1535,9 @@ export async function classifyProducts(
   // barcode and batch may top that lot up while its own movement/received
   // cost remains historical. Read only lot codes named by this window.
   const requestedLotCodes = [...new Set(rows.map((row) => {
-    const raw = str(row['batch(mm/dd/yyyy)'] || row.batch || row.date || row.received_date)
-    const iso = normalizeToIsoDate(raw) || (!raw ? todayIso() : '')
+    // The column header decides day-first vs month-first -- readBatchDateCell.
+    const { raw, order } = readBatchDateCell(row as Record<string, unknown>)
+    const iso = normalizeToIsoDate(raw, order) || (!raw ? todayIso() : '')
     return iso ? lower(dateToBatchCode(iso)) : ''
   }).filter(Boolean))]
   const productsByActiveLot = new Map<string, Set<number>>()
@@ -1263,9 +1560,7 @@ export async function classifyProducts(
   // classifyInventory's lookup below) so runImportApply always has one to
   // write, instead of leaving new products branchless the way this used to.
   const branchRows = await db.prepare(`SELECT id, name, is_default FROM branches WHERE is_active = 1`).all<{ id: number; name: string; is_default: number }>()
-  const importBranchByName = new Map<string, number>()
-  for (const branch of branchRows) importBranchByName.set(lower(branch.name), branch.id)
-  const importDefaultBranchId = (branchRows.find((b) => b.is_default) || branchRows[0] || null)?.id ?? null
+  const canonicalImportBranches = indexCanonicalImportBranches(branchRows)
 
   const results: ImportRowResult[] = []
   for (const row of rows) {
@@ -1334,14 +1629,14 @@ export async function classifyProducts(
       brand: brandParts[0] || null,
       brands: brandParts.length ? dedupeJoin(brandParts) : null,
       supplier: str(row.supplier) || null,
-      selling_price_usd: normalizeImportMoney(row.selling_price_usd ?? row.price_usd),
-      selling_price_khr: normalizeImportMoney(row.selling_price_khr ?? row.price_khr),
+      selling_price_usd: normalizeImportSellingPrice(row.selling_price_usd ?? row.price_usd),
+      selling_price_khr: normalizeImportSellingPrice(row.selling_price_khr ?? row.price_khr),
       // Accepts the current cost_price_usd/khr header, plus older
       // purchase_price_usd/khr and cost_usd/khr headers from files
       // exported before the product-cost fields were consolidated (see
       // migration 0016) -- an old export must still re-import cleanly.
-      cost_price_usd: normalizeImportMoney(rawCostUsd),
-      cost_price_khr: normalizeImportMoney(rawCostKhr),
+      cost_price_usd: normalizeImportCost4(rawCostUsd),
+      cost_price_khr: normalizeImportCost4(rawCostKhr),
       // Internal receipt-evidence flags: normalized product columns use 0
       // for a blank money cell, but batch/movement history must distinguish
       // "no recorded receipt cost" from an actual zero-cost receipt.
@@ -1364,22 +1659,36 @@ export async function classifyProducts(
     // mirroring frontend/productImportPlanner.ts's normalizeProductImportRow
     // defaults so a CSV row and the manual Add/Edit form produce the same
     // stored values for the same input.
-    // VIP price (stored in the special_price_* columns -- the DB name is
-    // unchanged; only the label is "VIP" now). Accepts the new `vip_price_*`
-    // header AND the legacy `special_price_*` one so old export files still
-    // import. A BLANK VIP price stores 0, NOT the selling price: defaulting
-    // to selling silently set VIP = selling on every row without an explicit
-    // value, which is exactly the "import didn't read the special price"
-    // report, and the edit form then wrote that back. Every consumer
-    // (POS, portal, detail) already treats 0 as "no VIP price, use selling",
-    // so 0 is the correct absent value.
-    const vipUsdRaw = row.vip_price_usd ?? row.special_price_usd
-    const vipKhrRaw = row.vip_price_khr ?? row.special_price_khr
-    data.special_price_usd = vipUsdRaw !== undefined && str(vipUsdRaw) !== ''
-      ? normalizeImportMoney(vipUsdRaw)
+    // Wholesale price (products.wholesale_price_usd/khr -- migration 0111).
+    // The tier this app used to call "VIP" and stored in special_price_*
+    // was never a VIP price: the owner ruled it always held the WHOLESALE
+    // number, so 0111 copied special_price_* into wholesale_price_* and
+    // zeroed the old columns. special_price_* is dead here -- never read,
+    // never written -- and wholesale_price_* is the only discounted tier.
+    //
+    // The legacy `vip_price_*` and `special_price_*` headers are still
+    // ACCEPTED and land in wholesale_price_*: by that same ruling a sheet
+    // headed "VIP price" is a wholesale sheet, and silently dropping the
+    // column would throw away the operator's real wholesale numbers on
+    // every re-import of a file exported before the rename. An explicit
+    // `wholesale_price_*` header wins when a file carries both, because it
+    // is the one header that unambiguously names the tier it means.
+    // (Same precedence order as productImportPlanner.ts's
+    // normalizeProductImportRow: wholesale, then vip, then special.)
+    //
+    // A BLANK wholesale price stores 0, NOT the selling price: defaulting
+    // to selling silently set the tier = selling on every row without an
+    // explicit value, which is exactly the "import didn't read the special
+    // price" report, and the edit form then wrote that back. Every consumer
+    // (POS, portal, detail) already treats 0 as "no discounted price, use
+    // selling", so 0 is the correct absent value.
+    const wholesaleUsdRaw = row.wholesale_price_usd ?? row.vip_price_usd ?? row.special_price_usd
+    const wholesaleKhrRaw = row.wholesale_price_khr ?? row.vip_price_khr ?? row.special_price_khr
+    data.wholesale_price_usd = wholesaleUsdRaw !== undefined && str(wholesaleUsdRaw) !== ''
+      ? normalizeImportSellingPrice(wholesaleUsdRaw)
       : 0
-    data.special_price_khr = vipKhrRaw !== undefined && str(vipKhrRaw) !== ''
-      ? normalizeImportMoney(vipKhrRaw)
+    data.wholesale_price_khr = wholesaleKhrRaw !== undefined && str(wholesaleKhrRaw) !== ''
+      ? normalizeImportSellingPrice(wholesaleKhrRaw)
       : 0
     data.out_of_stock_threshold = parseImportNumericValue(row.out_of_stock_threshold, 0, { allowNegative: false, field: 'out_of_stock_threshold' })
     data.discount_enabled = toBool01(row.discount_enabled ?? row.promotion_enabled ?? row.on_promotion, 0)
@@ -1422,16 +1731,28 @@ export async function classifyProducts(
     // broken by the rename. Either way, a blank cell still means
     // "received now" -- see the comment above on why this can't just be
     // null.
-    // Normalize to ISO before storing: the cell is TYPED mm/dd/yyyy (the
-    // column header says so) but received_at is a DATE column every reader
+    // Normalize to ISO before storing: the cell is typed in whatever order
+    // its own column header names -- `batch(mm/dd/yyyy)` month-first,
+    // `batch(dd/mm/yyyy)` day-first, bare `batch`/`date`/`received_date`
+    // month-first because they name no format and must keep the only meaning
+    // they have ever had (readBatchDateCell). received_at is a DATE column every reader
     // compares/sorts/groups with SQL date functions -- storing the raw
     // display string put "08/24/2026" verbatim into 6,031 production lots
     // (Aug-28 catalog import), where date() returns NULL and ordering is
     // lexicographic garbage. Migration 0077 repairs the stored rows; this
     // keeps new ones ISO. An unreadable non-blank cell falls back to today
     // WITH a visible warning below, never silently.
-    const rawReceivedDate = str(row['batch(mm/dd/yyyy)'] || row.batch || row.date || row.received_date)
-    data.received_date = normalizeToIsoDate(rawReceivedDate) || todayIso()
+    const { raw: rawReceivedDate, order: receivedDateOrder, header: receivedDateHeader } = readBatchDateCell(row as Record<string, unknown>)
+    // ONE read of the cell, whose result the unreadable-date warning below
+    // is derived from. It used to be read TWICE -- here with the header's
+    // own order and again in the warning guard with normalizeToIsoDate's
+    // bare (month-first) default -- so every readable day-first cell whose
+    // day was > 12 (25/12/2026 under the template's own batch(dd/mm/yyyy)
+    // header) was stored correctly AND reported "unreadable, received as
+    // today". Both halves of that message were false. A single parse cannot
+    // disagree with itself.
+    const parsedReceivedDate = normalizeToIsoDate(rawReceivedDate, receivedDateOrder)
+    data.received_date = parsedReceivedDate || todayIso()
     // The stored/displayed batch code is always derived from
     // received_date directly above, never from a separately-typed label
     // -- "lot code can be removed... batch column is just a translated
@@ -1469,8 +1790,13 @@ export async function classifyProducts(
       const displayValue = str(rawStockValue).replace(/^'/, '')
       rowWarnings.push({ kind: 'negative_stock', message: `Stock quantity "${displayValue}" is negative; imported as 0 (negative stock isn't supported).` })
     }
-    if (rawReceivedDate && !normalizeToIsoDate(rawReceivedDate)) {
-      rowWarnings.push({ kind: 'unreadable_batch_date', message: `Batch date "${rawReceivedDate}" is not a readable mm/dd/yyyy date; the batch was received as today instead.` })
+    if (rawReceivedDate && !parsedReceivedDate) {
+      // Name the header AND the order it dictates: "not a readable date" on
+      // its own leaves the operator guessing which way round their own
+      // column is read, and a fixed "mm/dd/yyyy" was a lie under the
+      // day-first header the template ships.
+      const expected = receivedDateOrder === 'day-first' ? 'dd/mm/yyyy' : 'mm/dd/yyyy'
+      rowWarnings.push({ kind: 'unreadable_batch_date', message: `Received date "${rawReceivedDate}" is not a readable date for the ${receivedDateHeader} column, which is read ${expected}; the stock was received as today instead.` })
     }
     // Only set image_path when this row actually resolved one, and only
     // then if the row didn't explicitly ask to keep whatever the existing
@@ -1485,88 +1811,92 @@ export async function classifyProducts(
       if (resolvedImage) data.image_path = resolvedImage
     }
     const importBranchName = str(row.branch_name || row.branch)
-    const explicitImportBranchId = importBranchName ? importBranchByName.get(lower(importBranchName)) ?? null : null
-    // Extra keys here (branch_id, branch_id_explicit, branch_name_pending)
-    // ride along in `data` purely for runImportApply to read -- they
-    // aren't products columns, so the UPDATE/INSERT statements built from
-    // named @placeholders simply never reference them.
-    //
-    // Three cases, matching the "create it if it's genuinely new, reuse
-    // it if it's just a different case, fall back to default (creating
-    // one if needed) if no branch was named at all" rule:
-    // 1. CSV named a branch that already exists (case-insensitively) ->
-    //    use its id, nothing to create.
-    // 2. CSV named a branch that does NOT exist yet -> branch_id stays
-    //    null here and branch_name_pending carries the name so
-    //    runImportApply (the only place with write access -- see its own
-    //    "no data-table writes" comment on analyze) can create it for
-    //    real and resolve the id before building the INSERT/UPDATE batch.
-    // 3. CSV named no branch at all -> use the org's default branch; if
-    //    there isn't one yet either (brand-new deployment, zero branches),
-    //    branch_name_pending is set to the reserved DEFAULT_BRANCH_SENTINEL
-    //    so apply-time creates a first "Main Branch" and uses it.
-    if (importBranchName && explicitImportBranchId == null) {
-      data.branch_id = null
-      data.branch_id_explicit = 1
-      data.branch_name_pending = importBranchName
-    } else if (!importBranchName && importDefaultBranchId == null) {
-      data.branch_id = null
-      data.branch_id_explicit = 0
-      data.branch_name_pending = DEFAULT_BRANCH_SENTINEL
-    } else {
-      data.branch_id = explicitImportBranchId ?? importDefaultBranchId
-      data.branch_id_explicit = explicitImportBranchId != null ? 1 : 0
-    }
-
-    const skuMatch = sku ? bySku.get(lower(sku)) || null : null
-    const barcodeCandidates = !skuMatch && barcode ? byBarcode.get(lower(barcode)) || null : null
-    // Prefer the candidate (if any) whose name is actually compatible with
-    // this row -- when a barcode has been legitimately split across
-    // several distinct products (see the guard below), this is what lets a
-    // re-import correctly find "this specific one" back instead of only
-    // ever seeing whichever candidate happened to be last in the list.
-    const sameNameBarcodeCandidates = barcodeCandidates
-      ? barcodeCandidates.filter((c) => normalizeProductGroupName(c.name) === normalizeProductGroupName(name))
-      : []
-    const barcodeMatch = sameNameBarcodeCandidates[0] || barcodeCandidates?.[0] || null
-    const incomingDetails = productDetailSignature(data as Record<string, unknown>)
-    const isExactIdentity = (candidate: typeof existing[number] | null | undefined) => Boolean(candidate)
-      && normalizeProductGroupName(candidate?.name) === normalizeProductGroupName(name)
-      && productDetailSignature(candidate as unknown as Record<string, unknown>) === incomingDetails
-    let match = isExactIdentity(skuMatch) ? skuMatch : null
-    if (!match) match = sameNameBarcodeCandidates.find(isExactIdentity) || null
-
-    // A blank cost is unknown, not evidence that the cost is zero. It may
-    // inherit only when name+barcode identifies exactly one catalog row;
-    // multiple cost children stay ambiguous and are never guessed.
-    const sameNameSameBarcode = (byName.get(normalizeProductGroupName(name)) || [])
-      .filter((candidate) => lower(candidate.barcode) === lower(barcode))
-    if (!match && costWasBlank && sameNameSameBarcode.length === 1) {
-      match = sameNameSameBarcode[0]
-    }
-
-    const activeLotProductIds = productsByActiveLot.get(lower(data.lot_code)) || new Set<number>()
-    const sameBatchCandidates = !match && barcode && activeLotProductIds.size
-      ? sameNameBarcodeCandidates.filter((candidate) => activeLotProductIds.has(Number(candidate.id)))
-      : []
-    // Never let iteration order choose an option when damaged/legacy data
-    // has attached the same active lot code to multiple same-name+barcode
-    // product rows. That is insufficient evidence for receipt ownership;
-    // the operator must reconcile the duplicates before any stock write.
-    if (sameBatchCandidates.length > 1) {
+    const importBranch = resolveCanonicalImportBranch(canonicalImportBranches, importBranchName)
+    if (!importBranch) {
       results.push({
         rowNumber: row._rowNumber,
         action: 'error',
         identifier: sku || barcode || name,
         existingId: null,
-        message: `Batch "${String(data.lot_code)}" belongs to ${sameBatchCandidates.length} products with this name and barcode; merge the exact duplicate batch ownership before importing.`,
+        message: importBranchName
+          ? `Branch "${importBranchName}" must uniquely match an existing active Shop or Warehouse.`
+          : 'A blank branch requires exactly one active canonical default Shop or Warehouse.',
         changes: {},
-        data,
+        data: row,
       })
       continue
     }
-    const sameBatchCandidate = sameBatchCandidates[0] || null
-    if (sameBatchCandidate) match = sameBatchCandidate
+    data.branch_id = Number(importBranch.id)
+    data.branch_id_explicit = importBranchName ? 1 : 0
+
+    const skuMatch = sku ? bySku.get(lower(sku)) || null : null
+    const barcodeCandidates = !skuMatch && barcode ? byBarcode.get(identityBarcodeKey(barcode)) || null : null
+    // Prefer the candidate (if any) whose name is actually compatible with
+    // this row -- when a barcode has been legitimately split across
+    // several distinct products (see the guard below), this is what lets a
+    // re-import correctly find "this specific one" back instead of only
+    // ever seeing whichever candidate happened to be last in the list.
+    //
+    // Wildcard-aware (Sep 15 2026 ruling): narrowed from the SAME-NAME pool
+    // directly (byName), not only the raw-barcode Map above -- that Map
+    // cannot surface a real-barcode candidate when this row's barcode is
+    // broken/empty, or a broken-barcode candidate when this row's barcode
+    // is real. barcodeIdentityMatches decides membership either way.
+    const sameNameCandidates = byName.get(normalizeProductGroupName(name)) || []
+    const sameNameBarcodeCandidates = !skuMatch && barcode
+      ? sameNameCandidates.filter((c) => barcodeIdentityMatches(c.barcode, barcode))
+      : []
+    const barcodeMatch = sameNameBarcodeCandidates[0] || barcodeCandidates?.[0] || null
+    const isExactIdentity = (candidate: typeof existing[number] | null | undefined) => Boolean(candidate)
+      && normalizeProductGroupName(candidate?.name) === normalizeProductGroupName(name)
+      && barcodeIdentityMatches(candidate?.barcode, barcode)
+    const activeLotProductIds = productsByActiveLot.get(lower(data.lot_code)) || new Set<number>()
+    // True only when the active lot is what picked this product out of a set
+    // of same-identity candidates -- the receipt evidence the old same-batch
+    // exception carried, and the reason such a row adds stock instead of
+    // restating the catalog.
+    let matchedByLotEvidence = false
+    let match = isExactIdentity(skuMatch) ? skuMatch : null
+    if (!match) {
+      // Since Sep 4 2026 identity is name + barcode, so EVERY candidate here
+      // has the same identity as this row and as each other: a catalog that
+      // offers more than one is carrying exact duplicates, left over from
+      // when a differing cost forked a child row.
+      //
+      // This used to be refused outright ("merge the exact duplicate batch
+      // ownership before importing") on the grounds that iteration order
+      // must never pick which product receives stock. The first half of that
+      // still holds and is honoured below; the refusal itself no longer
+      // does. Under the new rule the candidates ARE one product, awaiting a
+      // merge, and the products this fires on are exactly the ones the rule
+      // change exists to heal -- refusing would block restocks on precisely
+      // those. So the row is received, by evidence and never by chance:
+      // the active lot's owner when the batch names exactly one of them,
+      // otherwise the oldest row, which is the same survivor the
+      // merge-duplicates tool keeps.
+      const identical = sameNameBarcodeCandidates.filter(isExactIdentity)
+      const lotOwners = activeLotProductIds.size
+        ? identical.filter((candidate) => activeLotProductIds.has(Number(candidate.id)))
+        : []
+      matchedByLotEvidence = lotOwners.length === 1 && identical.length > 1
+      match = (lotOwners.length === 1 ? lotOwners[0] : null)
+        || identical.slice().sort((a, b) => Number(a.id) - Number(b.id))[0]
+        || null
+    }
+
+    // A blank cost is unknown, not evidence that the cost is zero. It may
+    // inherit only when name+barcode identifies exactly one catalog row
+    // (wildcard-aware, Sep 15 2026 ruling); multiple cost children stay
+    // ambiguous and are never guessed.
+    const sameNameSameBarcode = sameNameCandidates.filter((candidate) => barcodeIdentityMatches(candidate.barcode, barcode))
+    if (!match && costWasBlank && sameNameSameBarcode.length === 1) {
+      match = sameNameSameBarcode[0]
+    }
+
+    // (The same-batch receipt exception that used to sit here is folded into
+    // the match resolution above. It could only ever fire when no candidate
+    // shared this row's name and barcode -- which, now that those two fields
+    // ARE the identity, is the same condition as having no candidate at all.)
 
     // An SKU match is no longer trusted unconditionally. Previously, a
     // matched SKU with a differing name was treated as a deliberate
@@ -1641,24 +1971,54 @@ export async function classifyProducts(
     // row named just gets its own branch_stock entry on that single product
     // via the existing update-path write below.
     if (!match) {
-      const candidates = byName.get(normalizeProductGroupName(name)) || []
-      for (const candidate of candidates) {
-        if (productDetailSignature(candidate as unknown as Record<string, unknown>) === incomingDetails) { match = candidate; break }
+      for (const candidate of sameNameCandidates) {
+        if (barcodeIdentityMatches(candidate.barcode, barcode)) { match = candidate; break }
       }
     }
 
-    // Selling and special price are NOT identity (see productDetailRule.ts):
+    // Selling and wholesale price are NOT identity (see productDetailRule.ts):
     // they are what we plan to charge, not what the item is. When this row
     // merges into an existing product and the two disagree, the HIGHEST of
     // each wins -- merging must never quietly drop a product below a price
     // one of the merged rows expected to charge. Applied before the changes
     // diff and before the write, so the reviewer sees the value that will
-    // actually be stored.
+    // actually be stored. The wholesale tier rides the SAME resolver: since
+    // S4-32, resolveMergedPricing's field list is selling_price_* +
+    // wholesale_price_* (migration 0111 moved the discounted tier off the dead
+    // special_price_* columns), so there is one implementation of max-wins.
     if (match) {
       Object.assign(data, resolveMergedPricing([
         match as unknown as Record<string, unknown>,
         data,
       ]))
+    }
+
+    // Cost stopped being identity on Sep 4 2026, so a row whose cost differs
+    // from the matched product now merges into it instead of forking a child
+    // row -- and the stored cost becomes the mean of the distinct costs.
+    //
+    // Only when the row actually states a cost of its own, though. Two older
+    // rules own the other two cases and neither is being reopened here: a
+    // BLANK cost cell keeps the product's existing cost (see
+    // preserveExistingMoneyOnBlankCells and the 61-product cost wipe it was
+    // written for), and an explicit 0 in the file still lands as 0. Averaging
+    // is for costs that were recorded -- resolveMergedCost reads a 0 as "not
+    // recorded", which is right when folding two catalog rows and wrong as an
+    // answer to an operator who typed the zero.
+    const rowStatesACost = !costWasBlank
+      && ((Number(data.cost_price_usd) || 0) > 0 || (Number(data.cost_price_khr) || 0) > 0)
+    if (match && rowStatesACost) {
+      // resolveMergedCostDetail, not resolveMergedCost: when the file's cost
+      // and the product's stored cost are more than COST_OUTLIER_RATIO apart
+      // the rule refuses to average them and keeps the higher one, and the
+      // reviewer has to be able to SEE that on the row -- it is the one case
+      // where the stored cost matches neither figure they can point at.
+      const costMerge = resolveMergedCostDetail([
+        match as unknown as Record<string, unknown>,
+        data,
+      ])
+      Object.assign(data, costMerge.merged)
+      for (const outlier of costMerge.outliers) rowWarnings.push(costOutlierWarning(outlier))
     }
 
     // Reconcile the "Details" field-rule preset (see applyProductDetailFieldRules'
@@ -1718,9 +2078,20 @@ export async function classifyProducts(
       continue
     }
 
+    // A row that states a cost of its own and disagrees with the product it
+    // matched is a fresh receipt, not a restatement of the catalog: before
+    // Sep 4 2026 it would not have matched at all, it would have become its
+    // own child row keeping its own quantity. Now that it lands on the
+    // existing row, it has to ADD -- the default path below replaces the
+    // branch's quantity outright, which would throw the earlier receipt's
+    // units away. A row with a BLANK cost states nothing, so it keeps the
+    // long-standing replace semantics a stock-count file relies on.
+    const statesADifferentCost = Boolean(match) && !costWasBlank
+      && ((Number(data.cost_price_usd) || 0) !== (Number(match?.cost_price_usd) || 0)
+        || (Number(data.cost_price_khr) || 0) !== (Number(match?.cost_price_khr) || 0))
     const plannedMode = match && (requestedRowMode === 'merge_stock' || requestedRowMode === 'override_add' || requestedRowMode === 'override_replace')
       ? (requestedRowMode as 'merge_stock' | 'override_add' | 'override_replace')
-      : sameBatchCandidate && match?.id === sameBatchCandidate.id
+      : matchedByLotEvidence || statesADifferentCost
         ? 'merge_stock' as const
         : undefined
 
@@ -1740,24 +2111,37 @@ export async function classifyProducts(
 }
 
 export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppliers' | 'delivery_contacts', rows: ParsedCsvRow[], policyJson?: string | null): Promise<ImportRowResult[]> {
+  const contactMode = table === 'delivery_contacts' ? 'area' : 'address'
   // Full rows (not just id/name/phone) so a matched row can be merged
   // field-by-field against what's actually stored, per getContactMergePolicy.
-  const existing = await db.prepare(`SELECT * FROM "${table}"`).all<Record<string, unknown> & { id: number; name: string | null; phone: string | null }>()
-  const byPhone = new Map<string, Record<string, unknown> & { id: number; name: string | null; phone: string | null }>()
-  const byName = new Map<string, Record<string, unknown> & { id: number; name: string | null; phone: string | null }>()
+  const existing = await db.prepare(`SELECT * FROM "${table}" ORDER BY id ASC`).all<Record<string, unknown> & { id: number; name: string | null; phone: string | null }>()
+  type ExistingContact = Record<string, unknown> & { id: number; name: string | null; phone: string | null }
+  const byPhone = new Map<string, ExistingContact[]>()
+  const byName = new Map<string, ExistingContact[]>()
   // Customers only -- membership_number is the account's real identifier
   // (see the auto-generation block below), so a re-import that supplies
   // an existing membership_number should match that specific account even
   // if the name/phone on file has since changed, same as re-importing an
   // existing product by barcode does regardless of a name edit.
   const byMembership = table === 'customers'
-    ? new Map<string, Record<string, unknown> & { id: number; name: string | null; phone: string | null }>()
+    ? new Map<string, ExistingContact[]>()
     : null
   for (const record of existing) {
-    if (str(record.phone)) byPhone.set(str(record.phone).replace(/\D/g, ''), record)
-    if (str(record.name)) byName.set(lower(record.name), record)
+    for (const phoneKey of collectContactPhones(record, contactMode)) {
+      const contacts = byPhone.get(phoneKey) || []
+      contacts.push(record)
+      byPhone.set(phoneKey, contacts)
+    }
+    if (str(record.name)) {
+      const contacts = byName.get(lower(record.name)) || []
+      contacts.push(record)
+      byName.set(lower(record.name), contacts)
+    }
     if (byMembership && str((record as { membership_number?: unknown }).membership_number)) {
-      byMembership.set(lower(str((record as { membership_number?: unknown }).membership_number)), record)
+      const membershipKey = lower(str((record as { membership_number?: unknown }).membership_number))
+      const contacts = byMembership.get(membershipKey) || []
+      contacts.push(record)
+      byMembership.set(membershipKey, contacts)
     }
   }
   const policy = getContactMergePolicy(policyJson)
@@ -1769,30 +2153,39 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
 
   // Customers only: "no such thing as no membership id" -- every customer
   // row this import creates, or merges into, ends up with a
-  // membership_number, auto-generated when neither the imported row nor
-  // the matched existing record has one. Same LCMN-XXXXXXXX shape as
-  // routes/contacts.ts's generateMembershipNumber (manual add/edit path),
-  // duplicated here rather than shared because that version is async
-  // (queries D1 per candidate) and needs `env`, neither of which this
-  // synchronous, already-batch-loaded classify pass has reason to add --
-  // uniqueness here is checked against the full `existing` snapshot
-  // already loaded above, plus every number this same pass has already
-  // handed out (so two new customers in the same file, both blank, still
-  // can't collide with each other before either one is written).
-  const usedMembershipNumbers = table === 'customers'
-    ? new Set(existing.map((record) => lower(str((record as { membership_number?: unknown }).membership_number))).filter(Boolean))
-    : null
-  const nextMembershipNumber = (): string => {
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-      const entropy = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}${attempt.toString(36)}`.toUpperCase()
-      const candidate = `LCMN-${entropy.slice(-8)}`
-      if (!usedMembershipNumbers!.has(candidate.toLowerCase())) {
-        usedMembershipNumbers!.add(candidate.toLowerCase())
-        return candidate
-      }
-    }
-    throw new Error('Could not generate a unique membership number')
-  }
+  // membership_number, auto-generated when neither the imported row nor the
+  // matched existing record has one.
+  //
+  // This used to be a SECOND, independent `LCMN-XXXXXXXX` random generator
+  // duplicating routes/contacts.ts's. Two minters on one column is a
+  // collision waiting for the day someone imports a spreadsheet while a
+  // cashier registers a walk-in. Both now come from lib/membershipNumber.ts:
+  // one house format (`LC-#####`), one gap-fill rule. The allocator is the
+  // synchronous flavour, seeded from the full `existing` snapshot this pass
+  // already loaded (no D1 round trip per row) plus all supplied IDs, and
+  // remembers every number it hands out so blank rows cannot take a later
+  // row's ID either. The partial UNIQUE index from migration 0015 stays the
+  // final arbiter at write time.
+  //
+  // The seed must ALSO union portal_accounts.membership_id, same as
+  // mintMembershipNumber() does for every other minting path (manual add,
+  // storefront signup): a bulk import never WRITES portal_accounts, but a
+  // portal signup can reserve a slot in it with no matching customer row yet
+  // (e.g. a signup whose contact fold failed) -- that slot is a real
+  // reservation in the ONE shared sequence, not something only the customers
+  // table gets a say over, so an import that never consulted it could hand a
+  // blank row the exact number a pending portal account already holds.
+  const portalTaken = table === 'customers'
+    ? (await db.prepare(`SELECT membership_id FROM portal_accounts WHERE ${membershipGlob('membership_id')}`).all<{ membership_id: string }>())
+      .map((record) => record.membership_id)
+    : []
+  const nextMembershipNumber = table === 'customers'
+    ? createMembershipNumberAllocator([
+        ...existing.map((record) => (record as { membership_number?: unknown }).membership_number),
+        ...rows.map((row) => row.membership_number),
+        ...portalTaken,
+      ])
+    : (): string => { throw new Error('Membership numbers are customers-only') }
 
   // Same-name-can't-coexist rule applies within one file too, not just
   // against the existing DB: if two rows in the same import both end up
@@ -1803,6 +2196,13 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   // written -- so later duplicates get folded into that pending row's
   // `data` directly instead of pointing at an existingId).
   const pendingCreateByName = new Map<string, number>()
+  const pendingCreateByPhone = new Map<string, { index: number; rowNumber: number; name: string }>()
+  const pendingCreateByMembership = new Map<string, { index: number; rowNumber: number; name: string }>()
+  const rememberPendingPhones = (index: number, rowNumber: number, data: Record<string, unknown>) => {
+    for (const phoneKey of collectContactPhones(data, contactMode)) {
+      if (!pendingCreateByPhone.has(phoneKey)) pendingCreateByPhone.set(phoneKey, { index, rowNumber, name: str(data.name) })
+    }
+  }
 
   // Same idea as pendingCreateByName, but for rows that DO match an
   // existing DB record: two rows in this file that both resolve to the
@@ -1819,56 +2219,51 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   const results: ImportRowResult[] = []
   for (const row of rows) {
     const name = str(row.name)
-    const phone = str(row.phone)
+    const contactState = buildImportedContactState(row, contactMode)
+    const phone = formatPhoneP8(contactState.primary.phone || str(row.phone))
+    const address = formatContactOptionPhones(contactState.serialized || str(row.address) || null, contactMode) as string | null
+    const phoneKey = canonicalizePhone(phone)
+    const phoneKeys = collectContactPhones({ phone, address }, contactMode)
     if (!name) {
       results.push({ rowNumber: row._rowNumber, action: 'error', identifier: phone || null, existingId: null, message: 'Missing required field: name', changes: {}, data: row })
       continue
     }
-    // Match priority for customers: membership_number (the account's real
-    // id -- a re-import that supplies it should always find that exact
-    // account, even if the name/phone on file has since changed) -> phone
-    // -> name. Phone WAS deliberately excluded from customer matching in
-    // an earlier revision on the theory that phone isn't unique per
-    // customer (shared households etc.) -- superseded: contactDuplicates.ts
-    // enforces phone as hard-unique across every contact table already (see
-    // findContactDuplicates/findDuplicateContactClusters), and manual
-    // add/edit already blocks on it. Excluding phone here just meant CSV
-    // import was the one path that could still slip a colliding phone
-    // number past that rule. Phone match is restored for customers, same
-    // priority position suppliers/delivery contacts already used.
+    // Membership identifies an existing customer. A phone may identify the
+    // same-name contact, but a phone-only/different-name collision is never
+    // auto-merged: manual add/edit hard-blocks that shape, so import refuses
+    // the row and leaves it visible for review too.
     const membershipRaw = table === 'customers' ? str(row.membership_number) : ''
-    const membershipMatch = table === 'customers' && byMembership && membershipRaw ? byMembership.get(lower(membershipRaw)) || null : null
-    // For suppliers/delivery contacts, phone IS a real match key (a shared
-    // phone reliably means "the same business/driver re-submitted"). For
-    // customers it deliberately is NOT a match key -- a shared phone number
-    // commonly belongs to two different real people (a household, a family
-    // plan), so matching on it here could silently merge two different
-    // customers into one record. See customerPhoneMatch below for the
-    // narrower thing customers DO get from phone: a review flag, not a
-    // silent merge.
-    const phoneMatch = table !== 'customers' && phone ? byPhone.get(phone.replace(/\D/g, '')) || null : null
-    // Phone is still a hard-unique identifier for the app as a whole -- see
-    // lib/contactDuplicates.ts's findContactDuplicates/
-    // findDuplicateContactClusters, which block on a colliding phone for
-    // the manual add/edit path and surface it in the Duplicates review
-    // panel. CSV import used to have no equivalent check at all for
-    // customers -- a phone already on file could import onto (or as) a
-    // second customer with zero warning, the one path that could slip a
-    // colliding number past that rule. Fixed here as a REVIEW FLAG only
-    // (never auto-merges/auto-blocks, unlike phoneMatch above) so the
-    // household-sharing case above still isn't broken by it -- just made
-    // visible when it happens.
-    const customerPhoneMatch = table === 'customers' && phone ? byPhone.get(phone.replace(/\D/g, '')) || null : null
-    const rawNameMatch = !membershipMatch && !phoneMatch ? byName.get(lower(name)) || null : null
+    const membershipMatches = table === 'customers' && byMembership && membershipRaw ? byMembership.get(lower(membershipRaw)) || [] : []
+    const membershipMatch = membershipMatches.length === 1 ? membershipMatches[0] : null
+    const phoneMatches = [...new Map(phoneKeys.flatMap((key) => byPhone.get(key) || []).map((candidate) => [Number(candidate.id), candidate])).values()]
+    const compatiblePhoneMatches = phoneMatches.filter((candidate) => normalizeContactName(candidate.name) === normalizeContactName(name))
+    const phoneMatch = compatiblePhoneMatches.length === 1 ? compatiblePhoneMatches[0] : null
+    const rowDecision = decisions[String(row._rowNumber)]
+    const selectedTargetValue = rowDecision?.target_existing_id
+    const hasSelectedTarget = typeof selectedTargetValue === 'number'
+      && Number.isSafeInteger(selectedTargetValue)
+      && selectedTargetValue > 0
+    const selectedTargetId = hasSelectedTarget ? selectedTargetValue : NaN
+    const rawNameMatches = !membershipMatch && !phoneMatch
+      ? [...(byName.get(lower(name)) || [])].sort((a, b) => Number(a.id) - Number(b.id))
+      : []
     // A name match is this app's best guess, not a real identifier the way
     // phone (suppliers/delivery contacts) or membership_number (customers)
     // is -- the reviewer can override it with a 'force_create' decision on
     // this row if two genuinely different people happen to share a name,
     // rather than this import silently merging them. Never overridable for
     // a membership/phone match, which identify one specific real account.
-    const forceCreate = decisions[String(row._rowNumber)]?.action === 'force_create'
-    const nameMatch = forceCreate ? null : rawNameMatch
+    const forceCreate = rowDecision?.action === 'force_create'
+    const selectedNameMatch = hasSelectedTarget
+      ? rawNameMatches.find((candidate) => Number(candidate.id) === selectedTargetId) || null
+      : null
+    const nameMatch = forceCreate
+      ? null
+      : hasSelectedTarget ? selectedNameMatch : rawNameMatches.length === 1 ? rawNameMatches[0] : null
     const match = membershipMatch || phoneMatch || nameMatch
+    const phoneConflictMatch = match
+      ? phoneMatches.find((candidate) => Number(candidate.id) !== Number(match.id)) || null
+      : phoneMatches.find((candidate) => normalizeContactName(candidate.name) !== normalizeContactName(name)) || null
     // membership_number is the strongest identifier for a customer (see
     // the match-priority comment above), so an explicit number on the row
     // always wins the match itself -- there's no way for this row to
@@ -1884,28 +2279,16 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     // surfaced so a reviewer can catch the "this really is someone else's
     // number" case before it merges in silently.
     const membershipNameMismatch = !!(membershipMatch && name && str(membershipMatch.name) && lower(name) !== lower(str(membershipMatch.name)))
-    // True whenever this row's phone belongs to a customer OTHER than the
-    // one this row itself resolved to (whichever match, if any, `match`
-    // below ends up being -- including no match at all, i.e. a plain
-    // 'create'). Covers both defense-in-depth cases in one flag: a
-    // membership_number match whose phone actually belongs to someone else
-    // (likely a typo'd/copy-pasted number), and a brand-new/name-matched
-    // row whose phone was already on file under a different customer.
-    const customerPhoneConflict = !!(
-      table === 'customers' && customerPhoneMatch && Number(customerPhoneMatch.id) !== Number(membershipMatch?.id ?? rawNameMatch?.id ?? NaN)
-    )
     // Contact Options (up to 3 extra name/phone/email/address-or-area
     // entries per contact -- see contactOptions.ts) come from either the
     // legacy indexed contact_label_1../contact_address_1.. CSV columns or a
     // single contact_options JSON cell matching serializeContactOptions()'s
     // own output. Falls back to the plain phone/email/address(/area)
     // columns when a row has neither, so existing CSVs import unchanged.
-    const contactMode = table === 'delivery_contacts' ? 'area' : 'address'
-    const contactState = buildImportedContactState(row, contactMode)
     const data: Record<string, unknown> = {
       name,
-      phone: contactState.primary.phone || phone || null,
-      address: contactState.serialized || str(row.address) || null,
+      phone: phone || null,
+      address,
       notes: str(row.notes) || null,
     }
     // Historical join/creation date -- see the Created/created_date/
@@ -1933,6 +2316,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     })()
     if (table === 'customers') {
       data.email = contactState.primary.email || str(row.email) || null
+      data.phone_normalized = phoneKey
       data.membership_number = str(row.membership_number) || null
       data.gender = normalizeContactGender(row.gender)
       // New customer, no membership_number on the row -- assign one now
@@ -1951,6 +2335,67 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
       data.area = contactState.primary.area || str(row.area) || null
       data.gender = normalizeContactGender(row.gender)
     }
+    const reviewCandidates = rawNameMatches.length
+      ? rawNameMatches
+      : (membershipMatch || phoneMatch) ? [membershipMatch || phoneMatch] as ExistingContact[] : []
+    const contactMatchCandidates = reviewCandidates.map((candidate) => ({
+      id: Number(candidate.id),
+      name: str(candidate.name) || null,
+      phone: str(candidate.phone) || null,
+      ...(table === 'customers' ? { membership_number: str(candidate.membership_number) || null } : {}),
+    }))
+    const selectedStrongMatchDrift = hasSelectedTarget
+      && !forceCreate
+      && !!(membershipMatch || phoneMatch)
+      && Number((membershipMatch || phoneMatch)?.id) !== selectedTargetId
+    const selectedNameMatchDrift = hasSelectedTarget && !forceCreate && !membershipMatch && !phoneMatch && !selectedNameMatch
+    const ambiguousNameMatch = !forceCreate && !membershipMatch && !phoneMatch && rawNameMatches.length > 1 && !selectedNameMatch
+    if (selectedStrongMatchDrift || selectedNameMatchDrift || ambiguousNameMatch) {
+      const message = ambiguousNameMatch && !hasSelectedTarget
+        ? `"${name}" matches ${rawNameMatches.length} existing ${table === 'customers' ? 'customers' : table === 'suppliers' ? 'suppliers' : 'delivery contacts'}. Choose the exact record before importing; no match was guessed.`
+        : `The selected contact id ${selectedTargetId} is no longer a current match for "${name}". Review this row again; no contact was changed.`
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: phone || name,
+        existingId: null,
+        message,
+        warnings: [{ kind: 'name_match', message }],
+        changes: {},
+        data,
+        contactMatchCandidates,
+        contactMatchTargetInvalid: true,
+      })
+      continue
+    }
+    if (membershipMatches.length > 1) {
+      const message = `Membership number "${membershipRaw}" resolves to ${membershipMatches.length} existing customers after trim/case normalization. This row was refused for review; no membership number was changed.`
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: membershipRaw || phone || name,
+        existingId: null,
+        message,
+        warnings: [{ kind: 'membership_mismatch', message }],
+        changes: {},
+        data,
+      })
+      continue
+    }
+    if (phoneConflictMatch) {
+      const message = `Phone "${phone}" already belongs to a different ${table === 'customers' ? 'customer' : table === 'suppliers' ? 'supplier' : 'delivery contact'}, "${phoneConflictMatch.name}" (id ${phoneConflictMatch.id}). This row was refused instead of merging or creating a duplicate.`
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: phone || name,
+        existingId: phoneConflictMatch.id,
+        message,
+        warnings: [{ kind: 'membership_phone_conflict', message }],
+        changes: {},
+        data,
+      })
+      continue
+    }
     if (match) {
       // A name-only match (no phone match) means this row and the
       // existing record agree on name but nothing else was used to find
@@ -1964,9 +2409,6 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
         : []
       if (membershipNameMismatch) {
         matchWarnings.push({ kind: 'membership_mismatch', message: `Membership number "${membershipRaw}" belongs to "${match.name}" on file, but this row's name is "${name}" -- double-check this is the same person before applying.` })
-      }
-      if (customerPhoneConflict) {
-        matchWarnings.push({ kind: 'membership_phone_conflict', message: `Phone "${phone}" already belongs to a different customer, "${customerPhoneMatch!.name}" (id ${customerPhoneMatch!.id}), not "${match.name}" (id ${match.id}) that this row matched -- double-check before applying, this row's phone will not be applied to the wrong account.` })
       }
       if (policy.conflictMode === 'skip') {
         results.push({
@@ -1988,15 +2430,10 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
       }
       // name is required regardless of rule -- fall back to whichever side has it.
       if (!str(merged.name)) merged.name = data.name || match.name
-      // customerPhoneConflict means this row's phone provably belongs to a
-      // DIFFERENT existing customer than the one this row matched -- never
-      // write it onto `match` regardless of conflictMode/fieldRules, or
-      // import would either create a second customer sharing that phone (a
-      // hard-unique field) or silently steal the number from its real
-      // owner. The row's other fields still apply normally; only `phone`
-      // is pinned to whatever `match` already has, and the warning above
-      // tells the reviewer why.
-      if (customerPhoneConflict) merged.phone = match.phone ?? null
+      if (table === 'customers') {
+        merged.membership_number = match.membership_number ?? null
+        merged.phone_normalized = canonicalizePhone(merged.phone)
+      }
       // Deliberately NOT auto-assigned on the merge path (only on true
       // creation, just above) -- a matched existing customer keeps
       // whatever membership_number it already had, blank or not; this
@@ -2023,6 +2460,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
           pendingData[key] = resolveContactFieldValue(pendingData[key], data[key], policy.fieldRules[key], defaultRule)
         }
         if (!str(pendingData.name)) pendingData.name = data.name || match.name
+        if (table === 'customers') pendingData.phone_normalized = canonicalizePhone(pendingData.phone)
         pending.changes = diffFields(match as unknown as Record<string, unknown>, pendingData)
         const dupWarning: ImportRowWarning = { kind: 'duplicate_row_match', message: `Also matched "${match.name}" (id ${match.id}), already being updated earlier in this file (row ${pending.rowNumber}) -- merged into that row instead of applying separately.` }
         pending.warnings = [...(pending.warnings || []), dupWarning]
@@ -2048,6 +2486,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
         warnings: matchWarnings,
         changes: diffFields(match as unknown as Record<string, unknown>, merged),
         data: merged,
+        expectedUpdatedAt: str(match.updated_at) || null,
       })
       continue
     }
@@ -2057,7 +2496,44 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     // own 'force_create' override says these are genuinely two different
     // people who happen to share a name (same override as the DB-match
     // case above).
-    const pendingIndex = forceCreate ? null : pendingCreateByName.get(lower(name))
+    const membershipKey = table === 'customers' ? lower(str(data.membership_number)) : ''
+    const pendingMembership = membershipKey ? pendingCreateByMembership.get(membershipKey) : null
+    if (pendingMembership && normalizeContactName(pendingMembership.name) !== normalizeContactName(name)) {
+      const message = `Membership number "${data.membership_number}" already belongs to a different customer being created earlier in this file (row ${pendingMembership.rowNumber}, "${pendingMembership.name}"). This row was refused for review.`
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: membershipKey,
+        existingId: null,
+        message,
+        warnings: [{ kind: 'membership_mismatch', message }],
+        changes: {},
+        data,
+      })
+      continue
+    }
+    const pendingPhone = phoneKeys.map((key) => pendingCreateByPhone.get(key)).find((candidate) => candidate != null) || null
+    if (pendingPhone && normalizeContactName(pendingPhone.name) !== normalizeContactName(name)) {
+      const message = `Phone "${phone}" already belongs to a different contact being created earlier in this file (row ${pendingPhone.rowNumber}, "${pendingPhone.name}"). This row was refused.`
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: phone || name,
+        existingId: null,
+        message,
+        warnings: [{ kind: 'membership_phone_conflict', message }],
+        changes: {},
+        data,
+      })
+      continue
+    }
+    // A reviewer's force_create decision only overrides a tentative name
+    // match. Phone and membership are stronger identities, so identical
+    // rows sharing either one still fold into their earlier pending create
+    // instead of queuing a write that manual add would refuse.
+    const pendingIndex = pendingMembership?.index
+      ?? pendingPhone?.index
+      ?? (forceCreate ? null : pendingCreateByName.get(lower(name)))
     if (pendingIndex != null) {
       const pending = results[pendingIndex]
       const pendingData = pending.data as Record<string, unknown>
@@ -2066,6 +2542,11 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
       // the earlier row in the file wins on anything both rows set.
       for (const key of Object.keys(data)) {
         if (!str(pendingData[key]) && str((data as Record<string, unknown>)[key])) pendingData[key] = (data as Record<string, unknown>)[key]
+      }
+      if (table === 'customers') pendingData.phone_normalized = canonicalizePhone(pendingData.phone)
+      rememberPendingPhones(pendingIndex, pending.rowNumber, pendingData)
+      if (table === 'customers' && str(pendingData.membership_number)) {
+        pendingCreateByMembership.set(lower(str(pendingData.membership_number)), { index: pendingIndex, rowNumber: pending.rowNumber, name: str(pendingData.name) })
       }
       results.push({
         rowNumber: row._rowNumber,
@@ -2083,18 +2564,13 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     // was a same-name match/collision this row bypassed) -- kept as a
     // (non-serious) warning purely for the applied-results audit trail, not
     // to re-prompt review of something the reviewer just explicitly decided.
-    const forcedNote: ImportRowWarning[] = forceCreate && (rawNameMatch || pendingCreateByName.has(lower(name)))
+    const forcedNote: ImportRowWarning[] = forceCreate && (rawNameMatches.length > 0 || pendingCreateByName.has(lower(name)))
       ? [{ kind: 'other', message: `Created as a separate contact from "${name}" on file/record, per reviewer override.` }]
       : []
-    // Brand-new customer whose phone is already on file under a different
-    // customer -- not blocked (could be a legitimate shared household
-    // number), but flagged so a reviewer notices instead of it silently
-    // creating what might really be a duplicate account.
-    const createPhoneConflictNote: ImportRowWarning[] = customerPhoneConflict
-      ? [{ kind: 'membership_phone_conflict', message: `Phone "${phone}" already belongs to an existing customer, "${customerPhoneMatch!.name}" (id ${customerPhoneMatch!.id}) -- this row is still being created as a new, separate customer. Double-check this isn't the same person before applying.` }]
-      : []
-    const createWarnings = [...forcedNote, ...createPhoneConflictNote]
+    const createWarnings = [...forcedNote]
     if (!forceCreate) pendingCreateByName.set(lower(name), results.length)
+    rememberPendingPhones(results.length, row._rowNumber, data)
+    if (table === 'customers' && membershipKey) pendingCreateByMembership.set(membershipKey, { index: results.length, rowNumber: row._rowNumber, name })
     results.push({
       rowNumber: row._rowNumber,
       action: 'create',
@@ -2127,11 +2603,134 @@ export function getInventoryImportAction(policyJson: string | null | undefined):
   }
 }
 
+export interface InventoryMovementCostSnapshot {
+  unitCostUsd: number | null
+  unitCostKhr: number | null
+  totalCostUsd: number | null
+  totalCostKhr: number | null
+}
+
+// Resolve once while the import row is classified. The returned values travel
+// inside the persisted/apply plan, so a product price edit between review and
+// apply cannot rewrite the history that this action records. `undefined`
+// means the file left the cell blank and therefore uses the then-current
+// product fallback; numeric zero is an explicit, preserved value.
+export function inventoryMovementCostSnapshot(input: {
+  explicitUsd?: number
+  explicitKhr?: number
+  fallbackUsd?: number | null
+  fallbackKhr?: number | null
+  quantity: number
+}): InventoryMovementCostSnapshot {
+  const finiteOrNull = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === '') return null
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed)) {
+      throw new Error('Inventory movement cost is outside the supported numeric range. Correct the cost and analyze the import again.')
+    }
+    return parsed
+  }
+  const unitCostUsd = input.explicitUsd !== undefined ? finiteOrNull(input.explicitUsd) : finiteOrNull(input.fallbackUsd)
+  const unitCostKhr = input.explicitKhr !== undefined ? finiteOrNull(input.explicitKhr) : finiteOrNull(input.fallbackKhr)
+  const magnitude = Math.abs(Number(input.quantity) || 0)
+  const totalCostUsd = unitCostUsd === null ? null : unitCostUsd * magnitude
+  const totalCostKhr = unitCostKhr === null ? null : unitCostKhr * magnitude
+  if ((totalCostUsd !== null && !Number.isFinite(totalCostUsd))
+    || (totalCostKhr !== null && !Number.isFinite(totalCostKhr))) {
+    throw new Error('Inventory movement cost is outside the supported numeric range. Correct the cost and analyze the import again.')
+  }
+  return {
+    unitCostUsd,
+    unitCostKhr,
+    totalCostUsd,
+    totalCostKhr,
+  }
+}
+
+const INVENTORY_MOVEMENT_COST_FIELDS = [
+  'unit_cost_usd', 'unit_cost_khr', 'total_cost_usd', 'total_cost_khr',
+] as const
+
+export function applyAnalyzedInventoryCostSnapshots(
+  results: ImportRowResult[],
+  analyzedByRow: Map<number, ImportRowResult>,
+): ImportRowResult[] {
+  return results.map((result) => {
+    if (result.action !== 'create') return result
+    const analyzed = analyzedByRow.get(result.rowNumber)
+    if (!analyzed || analyzed.action !== 'create') {
+      throw new Error(`Inventory import row ${result.rowNumber} was not an approved stock action. Analyze the import again before applying.`)
+    }
+    const plannedData = analyzed.data as Record<string, unknown>
+    const currentData = result.data as Record<string, unknown>
+    const numericPlanFields = ['product_id', 'branch_id', 'quantity', 'signedQuantity'] as const
+    const staleNumericField = numericPlanFields.find((field) => Number(plannedData[field]) !== Number(currentData[field]))
+    const staleMovementType = String(plannedData.movement_type ?? '') !== String(currentData.movement_type ?? '')
+    if (staleNumericField || staleMovementType) {
+      throw new Error(`Inventory import row ${result.rowNumber} changed product, branch, direction, or quantity after review. Analyze the import again before applying.`)
+    }
+    const missingCostField = INVENTORY_MOVEMENT_COST_FIELDS.find((field) => !Object.prototype.hasOwnProperty.call(plannedData, field))
+    if (missingCostField) {
+      throw new Error(`Inventory import row ${result.rowNumber} has no reviewed cost snapshot. Analyze the import again before applying.`)
+    }
+    const plannedCosts = inventoryMovementCostSnapshot({
+      explicitUsd: plannedData.unit_cost_usd === null ? undefined : Number(plannedData.unit_cost_usd),
+      explicitKhr: plannedData.unit_cost_khr === null ? undefined : Number(plannedData.unit_cost_khr),
+      fallbackUsd: null,
+      fallbackKhr: null,
+      quantity: Number(plannedData.quantity),
+    })
+    if (plannedCosts.totalCostUsd !== plannedData.total_cost_usd || plannedCosts.totalCostKhr !== plannedData.total_cost_khr) {
+      throw new Error(`Inventory import row ${result.rowNumber} has an invalid reviewed cost total. Analyze the import again before applying.`)
+    }
+    const nextData = { ...currentData }
+    for (const field of INVENTORY_MOVEMENT_COST_FIELDS) {
+      nextData[field] = plannedData[field]
+    }
+    return { ...result, data: nextData }
+  })
+}
+
+async function preserveAnalyzedInventoryCostSnapshots(
+  db: D1Compat,
+  jobId: string,
+  results: ImportRowResult[],
+): Promise<ImportRowResult[]> {
+  const rowNumbers = results.map((result) => Number(result.rowNumber)).filter((value) => Number.isSafeInteger(value))
+  if (!rowNumbers.length) return results
+  const analyzedByRow = new Map<number, ImportRowResult>()
+  for (const slice of chunkForBinding(rowNumbers, 1)) {
+    const { sql, params } = buildInClause('r', slice)
+    const rows = await db.staging.prepare(`
+      SELECT row_number, result_json FROM import_job_rows
+      WHERE job_id = @id AND phase = 'analyze' AND row_number IN (${sql})
+    `).all<{ row_number: number; result_json: string }>({ ...params, id: jobId })
+    for (const row of rows) analyzedByRow.set(Number(row.row_number), parsePolicyObject(row.result_json) as ImportRowResult)
+  }
+  return applyAnalyzedInventoryCostSnapshots(results, analyzedByRow)
+}
+
+// Picks the ONE product a wildcard-collapsed same-name cluster (see
+// clusterRowsByBarcodeIdentity) resolves an import row to. Ranking has to
+// run over the REAL-barcode rows first, never the whole cluster: a cluster
+// already carries its broken/empty-barcode rows folded in, and ranking the
+// full mixed list by id could hand the import row to a broken row whose id
+// happens to be lower than the real row's -- the opposite of the rule
+// ("use the one with actual barcode"). Only when the cluster holds no real
+// barcode at all (every row is broken/empty, "both is empty merge into one
+// empty") does ranking fall back to the whole cluster.
+function pickIdentityClusterWinner<T extends { barcode?: unknown; id?: unknown; stock_quantity?: unknown; live_stock_quantity?: unknown }>(
+  cluster: readonly T[],
+): T {
+  const real = cluster.filter((row) => isRealBarcode(row.barcode))
+  return rankBarcodeIdentityWinner(real.length ? real : cluster)
+}
+
 export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inventoryAction?: InventoryImportAction | null): Promise<ImportRowResult[]> {
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, stock_quantity, cost_price_usd, cost_price_khr FROM products`)
     .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
-  const branches = await db.prepare(`SELECT id, name FROM branches`).all<{ id: number; name: string }>()
+  const branches = await db.prepare(`SELECT id, name, is_default, is_active FROM branches`).all<CanonicalImportBranchRow>()
   // Identity rule (same shape as classifyProducts): an sku/barcode can be
   // legitimately reused across DIFFERENT-name products, so these maps hold
   // every candidate instead of last-write-wins, and a row that names its
@@ -2140,16 +2739,18 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
   // product happened to load last -- wrong-product stock changes with no
   // error.
   const bySku = new Map<string, (typeof products)[number][]>()
-  const byBarcode = new Map<string, (typeof products)[number][]>()
-  const byName = new Map<string, (typeof products)[number] | null>() // null = ambiguous (several products share the name)
+  // Every product of an exact name, not a single-or-null marker: the
+  // wildcard rule (Sep 15 2026 ruling) needs the WHOLE group to decide
+  // whether it is one identity (at most one real barcode present) or a
+  // genuine ambiguity (2+ distinct real barcodes) -- see the name-only
+  // fallback below.
+  const byNameAll = new Map<string, (typeof products)[number][]>()
   for (const product of products) {
     if (str(product.sku)) { const k = lower(product.sku); bySku.set(k, [...(bySku.get(k) || []), product]) }
-    if (str(product.barcode)) { const k = lower(product.barcode); byBarcode.set(k, [...(byBarcode.get(k) || []), product]) }
     const nameKey = normalizeProductGroupName(product.name)
-    if (nameKey) byName.set(nameKey, byName.has(nameKey) ? null : product)
+    if (nameKey) { const list = byNameAll.get(nameKey) || []; list.push(product); byNameAll.set(nameKey, list) }
   }
-  const branchByName = new Map<string, number>()
-  for (const branch of branches) branchByName.set(lower(branch.name), branch.id)
+  const canonicalImportBranches = indexCanonicalImportBranches(branches)
 
   const pickCompatible = (candidates: (typeof products)[number][] | undefined, rowName: string): { product: (typeof products)[number] | null; message: string | null } => {
     if (!candidates?.length) return { product: null, message: null }
@@ -2176,7 +2777,22 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       if (picked.message) resolveError = `SKU "${sku}": ${picked.message}`
     }
     if (!product && !resolveError && barcode) {
-      const picked = pickCompatible(byBarcode.get(lower(barcode)), rowName)
+      // Wildcard-aware (Sep 15 2026 ruling): scans by IDENTITY match, not a
+      // raw-key Map, so a real incoming code also matches an existing
+      // broken/empty-barcode row of a compatible name and vice versa. Same
+      // fold as stockActionImport.ts's matchProduct and the create/edit
+      // duplicate guard -- one comparison, never a second hand-copy of it.
+      //
+      // The wildcard reach is scoped to "same name" (the owner's ruling
+      // opens "for same name 100% products"); with NO name on this row
+      // there is no group to scope it to, so it falls back to an EXACT
+      // real-barcode key match only -- never every broken-barcode product
+      // in the whole catalog regardless of name (matchProduct's own guard,
+      // mirrored here).
+      const barcodeMatches = rowName
+        ? products.filter((candidate) => barcodeIdentityMatches(candidate.barcode, barcode))
+        : products.filter((candidate) => identityBarcodeKey(candidate.barcode) === identityBarcodeKey(barcode) && identityBarcodeKey(barcode))
+      const picked = pickCompatible(barcodeMatches, rowName)
       product = picked.product
       if (picked.message) resolveError = `Barcode "${barcode}": ${picked.message}`
     }
@@ -2185,9 +2801,21 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     // matched nothing (or a different-name product) is a different identity,
     // not "close enough".
     if (!product && !resolveError && !sku && !barcode && rowName) {
-      product = byName.get(normalizeProductGroupName(rowName)) || null
-      if (!product && byName.get(normalizeProductGroupName(rowName)) === null) {
-        resolveError = `Name "${rowName}" matches several products -- add the barcode so the right one is chosen.`
+      const group = byNameAll.get(normalizeProductGroupName(rowName)) || []
+      if (group.length === 1) {
+        product = group[0]
+      } else if (group.length > 1) {
+        // Wildcard-aware: several same-name catalog rows still resolve to ONE
+        // product when at most one of them carries a real barcode (the rest
+        // are broken/empty/tagged rows the rule folds into it) -- only 2+
+        // DISTINCT real barcodes stay a genuine ambiguity requiring the
+        // sheet to carry a barcode.
+        const clusters = clusterRowsByBarcodeIdentity(group)
+        if (clusters.length === 1) {
+          product = pickIdentityClusterWinner(clusters[0])
+        } else {
+          resolveError = `Name "${rowName}" matches several products -- add the barcode so the right one is chosen.`
+        }
       }
     }
     if (!product) {
@@ -2242,12 +2870,22 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     }
 
     const branchName = str(row.branch_name || row.branch)
-    const matchedBranchId = branchName ? branchByName.get(lower(branchName)) ?? null : null
-    // Same three-case rule as classifyProducts above: a named branch that
-    // doesn't exist yet gets created at apply time (branch_id null +
-    // branch_name_pending set) rather than the movement silently landing
-    // with no branch at all, which is what happened before -- a typo'd or
-    // new branch name in the CSV used to just disappear from the record.
+    const matchedBranch = resolveCanonicalImportBranch(canonicalImportBranches, branchName)
+    if (!matchedBranch) {
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: sku || barcode || rowName,
+        existingId: product.id,
+        message: branchName
+          ? `Branch "${branchName}" must uniquely match an existing active Shop or Warehouse.`
+          : 'A blank branch requires exactly one active canonical default Shop or Warehouse.',
+        changes: {},
+        data: row,
+      })
+      continue
+    }
+    const matchedBranchId = Number(matchedBranch.id)
     // Optional per-row date -- same inline parse-and-validate pattern as
     // classifyContacts' `created_at` and classifySales' `sale_date`: an
     // unparseable or blank cell just leaves this null, which
@@ -2266,16 +2904,32 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       product_id: product.id,
       product_name: product.name,
       branch_id: matchedBranchId,
-      branch_name: matchedBranchId ? branchName : null,
+      branch_name: matchedBranch.name,
       movement_type: movementType,
       quantity: Math.abs(signedQuantity),
       signedQuantity,
       reason: str(row.reason) || 'import',
       created_at: movementDate,
     }
-    if (branchName && matchedBranchId == null) {
-      data.branch_name_pending = branchName
+    const normalizedExplicitCost = (value: unknown): number => {
+      const parsed = normalizeImportMoney(value)
+      return Object.is(parsed, -0) ? 0 : parsed
     }
+    const explicitCostUsd = inventoryAction === 'add' && row.unit_cost_usd != null && str(row.unit_cost_usd) !== ''
+      ? normalizedExplicitCost(row.unit_cost_usd) : undefined
+    const explicitCostKhr = inventoryAction === 'add' && row.unit_cost_khr != null && str(row.unit_cost_khr) !== ''
+      ? normalizedExplicitCost(row.unit_cost_khr) : undefined
+    const movementCosts = inventoryMovementCostSnapshot({
+      explicitUsd: explicitCostUsd,
+      explicitKhr: explicitCostKhr,
+      fallbackUsd: product.cost_price_usd,
+      fallbackKhr: product.cost_price_khr,
+      quantity: Math.abs(signedQuantity),
+    })
+    data.unit_cost_usd = movementCosts.unitCostUsd
+    data.unit_cost_khr = movementCosts.unitCostKhr
+    data.total_cost_usd = movementCosts.totalCostUsd
+    data.total_cost_khr = movementCosts.totalCostKhr
     // 'add' only: an optional unit cost on the row updates the product's
     // cost price, same as receiving stock at a manual product edit
     // would -- blank cells leave the existing price untouched. 'remove'/
@@ -2283,10 +2937,8 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     // recounting stock doesn't change what it's worth), so this never
     // fires for them regardless of what a raw API caller might send.
     if (inventoryAction === 'add') {
-      const costUsd = row.unit_cost_usd != null && str(row.unit_cost_usd) !== '' ? normalizeImportMoney(row.unit_cost_usd) : null
-      const costKhr = row.unit_cost_khr != null && str(row.unit_cost_khr) !== '' ? normalizeImportMoney(row.unit_cost_khr) : null
-      if (costUsd != null) data.cost_price_usd = costUsd
-      if (costKhr != null) data.cost_price_khr = costKhr
+      if (explicitCostUsd !== undefined) data.cost_price_usd = explicitCostUsd
+      if (explicitCostKhr !== undefined) data.cost_price_khr = explicitCostKhr
     }
     results.push({
       rowNumber: row._rowNumber,
@@ -2400,23 +3052,22 @@ export function parseSalesImportDateTime(value: unknown): string | null {
 
 export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise<ImportRowResult[]> {
   const products = await db
-    .prepare(`SELECT id, sku, barcode, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products`)
-    .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
+    .prepare(`SELECT id, sku, barcode, name, stock_quantity, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products`)
+    .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
   // Same collision-aware identity resolution as classifyInventory above
-  // (and classifyProducts): sku/barcode maps keep every candidate, and a
-  // row that names its product only attaches to a name-compatible one --
-  // the old single-value byBarcode put a sale line on whichever
-  // same-barcode product loaded last. byName keys use
-  // normalizeProductGroupName so "same name" means the same thing here as
-  // in every other import path.
+  // (and classifyProducts): sku maps keep every candidate, and a row that
+  // names its product only attaches to a name-compatible one -- the old
+  // single-value byBarcode put a sale line on whichever same-barcode
+  // product loaded last. byNameAll keys use normalizeProductGroupName so
+  // "same name" means the same thing here as in every other import path.
   const bySku = new Map<string, (typeof products)[number][]>()
-  const byBarcode = new Map<string, (typeof products)[number][]>()
-  const byName = new Map<string, (typeof products)[number] | null>()
+  // Every product of an exact name (see classifyInventory's own byNameAll
+  // for why this replaced a single-or-null marker under the wildcard rule).
+  const byNameAll = new Map<string, (typeof products)[number][]>()
   for (const product of products) {
     if (str(product.sku)) { const k = lower(product.sku); bySku.set(k, [...(bySku.get(k) || []), product]) }
-    if (str(product.barcode)) { const k = lower(product.barcode); byBarcode.set(k, [...(byBarcode.get(k) || []), product]) }
     const nameKey = normalizeProductGroupName(product.name)
-    if (nameKey) byName.set(nameKey, byName.has(nameKey) ? null : product)
+    if (nameKey) { const list = byNameAll.get(nameKey) || []; list.push(product); byNameAll.set(nameKey, list) }
   }
   const pickSaleProduct = (candidates: (typeof products)[number][] | undefined, rowName: string): (typeof products)[number] | null => {
     if (!candidates?.length) return null
@@ -2424,10 +3075,28 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     const compatible = candidates.filter((candidate) => normalizeProductGroupName(candidate.name) === normalizeProductGroupName(rowName))
     return compatible.length === 1 ? compatible[0] : null
   }
+  // Name-only fallback, wildcard-aware (Sep 15 2026 ruling): several
+  // same-name catalog rows still resolve to ONE product when at most one of
+  // them carries a real barcode -- only 2+ distinct real barcodes stay a
+  // genuine ambiguity ("Product not found", same as today).
+  const pickSaleProductByName = (rowName: string): (typeof products)[number] | null => {
+    const group = byNameAll.get(normalizeProductGroupName(rowName)) || []
+    if (group.length === 1) return group[0]
+    if (group.length > 1) {
+      const clusters = clusterRowsByBarcodeIdentity(group)
+      if (clusters.length === 1) return pickIdentityClusterWinner(clusters[0])
+    }
+    return null
+  }
 
-  const branches = await db.prepare(`SELECT id, name FROM branches`).all<{ id: number; name: string }>()
-  const branchByName = new Map<string, number>()
-  for (const branch of branches) branchByName.set(lower(branch.name), branch.id)
+  const branches = await db.prepare(`SELECT id, name, is_active FROM branches`).all<{ id: number; name: string; is_active?: number | null }>()
+  const branchByName = new Map<string, Array<(typeof branches)[number]>>()
+  for (const branch of branches) {
+    if (Number(branch.is_active ?? 1) !== 1) continue
+    const key = lower(branch.name)
+    branchByName.set(key, [...(branchByName.get(key) || []), branch])
+  }
+  const activeShopBranches = branches.filter((branch) => Number(branch.is_active ?? 1) === 1 && branchCanSell(branch.name))
 
   // Track F parity: routes/sales.ts POST / (manual checkout) resolves and
   // stores a real customer_id whenever the cashier picked a customer at
@@ -2446,12 +3115,21 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
   // classifyContacts' byPhone/byName maps, only ever MATCHES an existing
   // customer, never creates one (a sales-history file isn't a customer
   // import; an unmatched name/phone just stays free text, same as today).
-  const customers = await db.prepare(`SELECT id, name, phone FROM customers`).all<{ id: number; name: string | null; phone: string | null }>()
-  const customerByPhone = new Map<string, number>()
+  const customers = await db.prepare(`SELECT id, name, phone, phone_normalized, is_anonymous FROM customers`).all<{ id: number; name: string | null; phone: string | null; phone_normalized?: string | null; is_anonymous?: number | null }>()
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]))
+  const customerByPhone = new Map<string, number | null>() // null = ambiguous normalized phone
   const customerByName = new Map<string, number | null>() // null = ambiguous (>1 customer shares this name)
+  const anonymousCustomerIds = new Set<number>()
+  const anonymousCustomerNames = new Set<string>()
   for (const customer of customers) {
-    const phoneDigits = str(customer.phone).replace(/\D/g, '')
-    if (phoneDigits) customerByPhone.set(phoneDigits, customer.id)
+    if (Number(customer.is_anonymous || 0) === 1) {
+      anonymousCustomerIds.add(customer.id)
+      const anonymousNameKey = lower(customer.name)
+      if (anonymousNameKey) anonymousCustomerNames.add(anonymousNameKey)
+      continue
+    }
+    const phoneKey = canonicalizePhone(customer.phone)
+    if (phoneKey) customerByPhone.set(phoneKey, customerByPhone.has(phoneKey) ? null : customer.id)
     const nameKey = lower(customer.name)
     if (nameKey) customerByName.set(nameKey, customerByName.has(nameKey) ? null : customer.id)
   }
@@ -2510,16 +3188,19 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
   // sales-history file would be backwards: batches are receiving records
   // (lib/productBatches.ts's receiveBatchStock), and a sale/return can only
   // ever reference stock that was actually received under a real lot at
-  // some point. An unmatched label just means this line's restock (if any)
-  // lands at the plain branch level instead of a specific batch -- same as
-  // any row with no batch_label at all -- not an error.
+  // some point. An explicitly supplied label must resolve for that exact
+  // product. A blank label remains an ordinary unallocated historical line,
+  // but a wrong label is refused instead of being silently rewritten to NULL.
   const batches = await db
     .prepare(`SELECT id, variant_product_id, lot_code, expiry_date FROM product_batches WHERE is_active = 1`)
     .all<{ id: number; variant_product_id: number; lot_code: string | null; expiry_date: string | null }>()
-  const batchByProductAndLot = new Map<string, { id: number; expiry_date: string | null }>()
+  const batchesByProductAndLot = new Map<string, Array<{ id: number; expiry_date: string | null }>>()
   for (const batch of batches) {
     if (!str(batch.lot_code)) continue
-    batchByProductAndLot.set(`${batch.variant_product_id}\u0001${lower(batch.lot_code)}`, { id: batch.id, expiry_date: batch.expiry_date })
+    const key = `${batch.variant_product_id}\u0001${lower(batch.lot_code)}`
+    const matches = batchesByProductAndLot.get(key) || []
+    matches.push({ id: batch.id, expiry_date: batch.expiry_date })
+    batchesByProductAndLot.set(key, matches)
   }
 
   // `rows` may be the whole file (loadAndClassify's bounded/synchronous
@@ -2570,17 +3251,63 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     }
 
     const branchName = str(first.branch || first.branch_name)
-    const matchedBranchId = branchName ? branchByName.get(lower(branchName)) ?? null : null
+    // A legacy file may omit the branch column entirely. It can safely use
+    // the one active canonical Shop; any explicit value is authoritative and
+    // must match that same Shop rather than being guessed or auto-created.
+    const namedBranchMatches = branchName ? branchByName.get(lower(branchName)) || [] : []
+    const matchedBranch = branchName
+      ? namedBranchMatches.length === 1 ? namedBranchMatches[0] : null
+      : activeShopBranches.length === 1 ? activeShopBranches[0] : null
+    const matchedBranchId = matchedBranch?.id ?? null
+    // Historical receipts are still real sales: every line must belong to
+    // the active canonical Shop, exactly like POS/manual sale writes. Refuse
+    // blank, unknown, inactive, Warehouse, and other branch names while this
+    // function is still read-only. Previously an unknown name became
+    // branch_name_pending, so runImportApply created and backfilled a branch
+    // before applyHistoricalSaleImport later rejected the receipt.
+    if (!matchedBranch || Number(matchedBranch.is_active ?? 1) !== 1 || !branchCanSell(matchedBranch.name)) {
+      results.push({
+        rowNumber: first._rowNumber,
+        action: 'error',
+        identifier,
+        existingId: null,
+        message: branchName
+          ? `${WAREHOUSE_NOT_SELLABLE_ERROR} Imported branch "${branchName}" is not the active Shop.`
+          : `${WAREHOUSE_NOT_SELLABLE_ERROR} The imported receipt has no branch.`,
+        changes: {},
+        data: first,
+      })
+      continue
+    }
 
     // Phone first (more precise/unique -- and cheap to get right, unlike a
     // shared name), name only as a fallback; an ambiguous name (>1 customer
     // shares it, see the `null` case above) intentionally resolves to no
     // match rather than guessing -- same as leaving it unmatched today.
-    const rowCustomerPhoneDigits = str(first.customer_phone).replace(/\D/g, '')
+    const rowCustomerPhoneRaw = str(first.customer_phone).trim()
+    const rowCustomerPhoneKey = canonicalizePhone(rowCustomerPhoneRaw)
     const rowCustomerNameKey = lower(first.customer_name)
-    const matchedCustomerId = (rowCustomerPhoneDigits && customerByPhone.get(rowCustomerPhoneDigits))
-      || (rowCustomerNameKey && customerByName.get(rowCustomerNameKey))
-      || null
+    const explicitCustomerId = Number(first.customer_id)
+    const explicitlyAnonymous = toBool01(first.customer_is_anonymous, 0) === 1
+      || (Number.isSafeInteger(explicitCustomerId) && explicitCustomerId > 0 && anonymousCustomerIds.has(explicitCustomerId))
+    // A phone match remains authoritative even if its display name is also
+    // used by an anonymous checkout identity. With no phone, that shared name
+    // is ambiguous and stays unlinked; choosing the unmarked profile would
+    // turn a historical General sale into a real customer's purchase.
+    const matchedCustomerId = explicitlyAnonymous
+      ? null
+      : rowCustomerPhoneRaw
+        ? rowCustomerPhoneKey ? customerByPhone.get(rowCustomerPhoneKey) ?? null : null
+        : (rowCustomerNameKey && !anonymousCustomerNames.has(rowCustomerNameKey) && customerByName.get(rowCustomerNameKey)) || null
+    const matchedCustomer = matchedCustomerId == null ? null : customerById.get(matchedCustomerId) || null
+    const customerMatchBasis = matchedCustomer
+      ? rowCustomerPhoneKey ? 'phone' : 'name'
+      : null
+    const customerMatchKey = customerMatchBasis === 'phone'
+      ? rowCustomerPhoneKey
+      : customerMatchBasis === 'name'
+        ? rowCustomerNameKey
+        : null
 
     // Resolve cashier_name -> user id. Reviewed aliases take precedence over a
     // direct username/name match: an old label can intentionally map away from
@@ -2613,9 +3340,18 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       const sku = str(row.sku || row.product_sku)
       const barcode = str(row.barcode)
       const productName = str(row.name || row.product_name)
+      // The wildcard reach (Sep 15 2026 ruling) is scoped to "same name";
+      // with no product name on the row there is no group to scope it to,
+      // so an unnamed barcode falls back to an EXACT real-barcode match
+      // only -- never every broken-barcode product catalog-wide.
+      const barcodeCandidates = barcode
+        ? (productName
+          ? products.filter((candidate) => barcodeIdentityMatches(candidate.barcode, barcode))
+          : products.filter((candidate) => identityBarcodeKey(candidate.barcode) === identityBarcodeKey(barcode) && identityBarcodeKey(barcode)))
+        : []
       const product = (sku ? pickSaleProduct(bySku.get(lower(sku)), productName) : null)
-        || (barcode ? pickSaleProduct(byBarcode.get(lower(barcode)), productName) : null)
-        || (productName ? byName.get(normalizeProductGroupName(productName)) || null : null)
+        || (barcode ? pickSaleProduct(barcodeCandidates, productName) : null)
+        || (productName ? pickSaleProductByName(productName) : null)
       if (!product) {
         error = `Product not found for sku/barcode/name "${sku || barcode || productName}"`
         break
@@ -2690,7 +3426,15 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       }
 
       const batchLabel = str(row.batch_label || row.lot_code)
-      const batchMatch = batchLabel ? batchByProductAndLot.get(`${product.id}\u0001${lower(batchLabel)}`) : null
+      const batchMatches = batchLabel ? batchesByProductAndLot.get(`${product.id}\u0001${lower(batchLabel)}`) || [] : []
+      const batchMatch = batchMatches.length === 1 ? batchMatches[0] : null
+      if (batchLabel && batchMatches.length !== 1) {
+        error = `Batch/lot "${batchLabel}" was not found for product "${product.name || sku || barcode}". The receipt was refused so the requested batch identity is not discarded.`
+        if (batchMatches.length > 1) {
+          error = `Batch/lot "${batchLabel}" is ambiguous for product "${product.name || sku || barcode}". The receipt was refused so no batch is selected by database row order.`
+        }
+        break
+      }
 
       items.push({
         product_id: product.id, product_name: product.name, sku: product.sku,
@@ -2722,7 +3466,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
         // per-line status override, for the same reason.
         branch_id: matchedBranchId,
         batch_id: batchMatch?.id ?? null,
-        batch_label: batchMatch ? batchLabel : null,
+        batch_label: batchLabel || null,
         batch_expiry_date: batchMatch?.expiry_date ?? null,
       })
     }
@@ -2799,9 +3543,22 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       branch_id: matchedBranchId,
       branch_name: matchedBranchId ? branchName : null,
       customer_id: matchedCustomerId,
-      customer_name: str(first.customer_name) || null,
-      customer_phone: str(first.customer_phone) || null,
-      customer_address: str(first.customer_address) || null,
+      customer_name: explicitlyAnonymous ? null : str(first.customer_name) || null,
+      customer_phone: explicitlyAnonymous ? null : str(first.customer_phone) || null,
+      // N21: a CSV exported by a build older than the address fix carries the
+      // Contact Options JSON in this column, and importing it would put machine
+      // text back into sales.customer_address. A plainly typed address -- the
+      // ordinary case, including a numeric house number -- passes through.
+      customer_address: explicitlyAnonymous ? null : contactDisplayAddress(str(first.customer_address)) || null,
+      customer_is_anonymous: explicitlyAnonymous ? 1 : 0,
+      // Private review evidence. Apply rechecks this exact profile and match
+      // basis in the same D1 batch as the sale; it never resolves the name or
+      // phone again after the operator has reviewed the import.
+      customer_match_basis: customerMatchBasis,
+      customer_match_key: customerMatchKey,
+      customer_match_name_snapshot: matchedCustomer?.name ?? null,
+      customer_match_phone_snapshot: matchedCustomer?.phone ?? null,
+      customer_match_phone_normalized_snapshot: matchedCustomer?.phone_normalized ?? null,
       payment_method: str(first.payment_method) || 'Cash',
       payment_currency: str(first.payment_currency) || 'USD',
       exchange_rate: exchangeRate,
@@ -2834,13 +3591,6 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       created_at: createdAt,
       items,
     }
-    // Same three-case branch-resolution rule classifyProducts/classifyInventory
-    // use -- a named branch that doesn't exist yet gets created at apply time
-    // (branch_id null + branch_name_pending set) rather than the order
-    // silently landing with no branch, and resolveAndCreateBranches below is
-    // reused as-is for sales too (see runImportApply's sales dispatch).
-    if (branchName && matchedBranchId == null) data.branch_name_pending = branchName
-
     results.push({ rowNumber: first._rowNumber, action: 'create', identifier, existingId: null, message, changes: {}, data })
   }
   return results
@@ -2921,7 +3671,7 @@ function applyProductDetailFieldRules(data: Record<string, unknown>, match: Reco
 // (does nothing for an unmatched row: `match` is null, nothing to compare
 // against, so the CSV's own value is used and the row creates a new
 // product exactly like 'merge' mode would). Deliberately does not touch
-// stock_quantity/branch_id/branch_id_explicit/branch_name_pending or any
+// stock_quantity/branch_id/branch_id_explicit or any
 // other non-PRODUCT_REPLACE_COLUMNS key still sitting in `data` -- those
 // aren't in the allow-list this function iterates, so they pass through
 // untouched here; materializeImportChunk's own 'fill_blank' branch is
@@ -2962,8 +3712,12 @@ function applyFillBlankOnlyMode(data: Record<string, unknown>, match: Record<str
 export const PRODUCT_MONEY_FIELD_SOURCES: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
   ['selling_price_usd', ['selling_price_usd', 'price_usd']],
   ['selling_price_khr', ['selling_price_khr', 'price_khr']],
-  ['special_price_usd', ['vip_price_usd', 'special_price_usd']],
-  ['special_price_khr', ['vip_price_khr', 'special_price_khr']],
+  // Wholesale is the only discounted tier now (migration 0111). The legacy
+  // vip_price_*/special_price_* headers stay in the source list so an old
+  // sheet that fills the tier under its old name still counts as "provided"
+  // and is not overwritten by the existing wholesale value.
+  ['wholesale_price_usd', ['wholesale_price_usd', 'vip_price_usd', 'special_price_usd']],
+  ['wholesale_price_khr', ['wholesale_price_khr', 'vip_price_khr', 'special_price_khr']],
   ['cost_price_usd', ['cost_price_usd', 'purchase_price_usd', 'cost_usd']],
   ['cost_price_khr', ['cost_price_khr', 'purchase_price_khr', 'cost_khr']],
 ]
@@ -3192,7 +3946,7 @@ async function applyCrossChunkProductDedupe(
 
 function previewProductSignature(d: Record<string, unknown>): string {
   // Mirrors productImportRowSignature exactly so analyze and apply agree:
-  // name + barcode + cost is identity; selling/VIP price is mergeable data.
+  // name + barcode + cost is identity; selling/wholesale price is mergeable data.
   // A non-blank barcode + explicit lot code is the receipt-only exception:
   // later rows for that exact lot top up the first option without replacing
   // its catalog cost, while their own receipt costs remain on the batch and
@@ -3431,7 +4185,8 @@ async function readSalesGroupWindow(
   `).all<{ group_key: string; first_seq: number }>({ id: jobId, limit, cursor })
   if (!keyRows.length) return []
 
-  // `limit` is ROWS_PER_IMPORT_CHUNK (150), so this list is always over
+  // `limit` is the caller's per-tier rowsPerImportChunk (600 paid / 150
+  // free -- see lib/planTier.ts), so this list is always over
   // D1's 100-parameter ceiling on its own -- chunked, with @id reserved.
   const dataRows: Array<{ group_key: string; data_json: string }> = []
   for (const slice of chunkForBinding(keyRows.map((row) => row.group_key), 1)) {
@@ -3528,8 +4283,16 @@ async function persistChunkResults(db: D1Compat, jobId: string, phase: 'analyze'
 // awaiting_review. queue.ts acks the CURRENT message after this returns
 // either way -- the continuation is a separate, fresh message, not a retry
 // of this one.
-export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?: number): Promise<void> {
+export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?: number, attempt?: number): Promise<void> {
   const db = getDb(env)
+  // Per-request shadow of the module-level ceilings. The exported constants
+  // keep their Paid values, so every existing reader and test is unaffected;
+  // THIS is what the running code uses, so a Free deployment actually gets
+  // the Free-sized numbers instead of throwing partway through a chunk.
+  // See lib/planTier.ts.
+  const limits = getPlanLimits(env)
+  // ...narrowed further on a redelivery: see chunkRowsForAttempt.
+  const chunkRows = chunkRowsForAttempt(limits.rowsPerImportChunk, attempt)
   const sw = makeStopwatch()
   const jobRow = await db.prepare(`SELECT status, cancel_requested FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number }>({ id: jobId })
   if (!jobRow) throw new Error('Import job not found')
@@ -3588,10 +4351,17 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     // a chance. RECONCILE keeps the strict cap (its delta math needs one
     // live-stock snapshot -- see applyStockActionsJob's own guard).
     const stockActionRowCap = meta.type === 'stock_actions'
-      ? (getUnifiedStockMode(meta.policyJson) === 'direct' ? STOCK_ACTION_DIRECT_MAX_ROWS : STOCK_ACTION_MAX_ROWS)
+      ? (getUnifiedStockMode(meta.policyJson) === 'direct' ? STOCK_ACTION_DIRECT_MAX_ROWS : limits.stockActionMaxRows)
       : Infinity
     if (meta.type === 'stock_actions' && meta.totalRows > stockActionRowCap) {
-      throw new Error(`This stock import has ${meta.totalRows} rows; split it into files of at most ${stockActionRowCap} rows before importing.`)
+      // Same code + suffix as the apply-side refusals (applyStockActionsJob),
+      // so the UI translates it. The direct-mode cap is data-bound, not a
+      // tier limit, and keeps a plain message.
+      const tierCap = stockActionRowCap === limits.stockActionMaxRows
+      throw Object.assign(
+        new Error(`This stock import has ${meta.totalRows} rows; split it into files of at most ${stockActionRowCap} rows before importing.${tierCap ? freePlanRefusalSuffix(env) : ''}`),
+        tierCap ? { code: 'stock_import_over_tier_cap' } : {},
+      )
     }
     const { cursor, state } = await getChunkState(db, jobId)
     const decisions = getDecisionMap(meta.policyJson)
@@ -3603,7 +4373,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     // shape on the import path.
     const totalUnits = isSales ? await countSalesGroups(db, jobId) : meta.totalRows
     const windowEntries = isSales
-      ? await readSalesGroupWindow(db, jobId, decisions, cursor, ROWS_PER_IMPORT_CHUNK)
+      ? await readSalesGroupWindow(db, jobId, decisions, cursor, chunkRows)
       : null
 
     let imageMatchCache = state.imageMatch
@@ -3614,7 +4384,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
 
     const windowRows = windowEntries
       ? windowEntries.flatMap(([, rows]) => rows)
-      : await readMaterializedWindow(db, jobId, cursor, ROWS_PER_IMPORT_CHUNK, decisions)
+      : await readMaterializedWindow(db, jobId, cursor, chunkRows, decisions)
     const groupIndexByRowNumber = windowEntries
       ? new Map(windowEntries.flatMap(([, rows], i) => rows.map((r) => [r._rowNumber, cursor + i] as const)))
       : undefined
@@ -3662,7 +4432,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
       await db.prepare(`UPDATE import_jobs SET total_rows = @total, processed_rows = @processed, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
         .run({ id: jobId, total: totalUnits, processed: nextCursor })
       console.log('[import-timing] analyze chunk', jobId, { cursor, nextCursor, totalUnits, ...sw.marks })
-      await env.IMPORT_QUEUE.send({ jobId, kind: 'analyze' })
+      await dispatchImportWork(env, { jobId, kind: 'analyze' })
       return
     }
 
@@ -3763,96 +4533,21 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
 // matching the original's own per-row-group commit shape rather than one
 // giant single-table lock across types).
 
-// Creates any branches that classifyProducts/classifyInventory flagged as
-// missing (via data.branch_name_pending), then mutates `actionable` in
-// place so every row ends up with a real branch_id. Only called from
-// runImportApply -- analyze must stay writes-free (see its own comment),
-// so a CSV that names an unrecognized branch shows up in the preview with
-// a null branch_id and only gets a real row once the operator actually
-// applies the import.
-//
-// Re-checks the DB immediately before inserting (not just the branchRows
-// snapshot classify took earlier) so two rows naming the same new branch
-// -- or a branch someone else created by hand between analyze and apply
-// -- don't produce two rows for what should be one branch. Names are
-// deduped case-insensitively among themselves too, preserving whichever
-// casing appeared first in the file.
-// Gives every already-existing active product an explicit 0 row at a
-// just-created branch.
-//
-// Without this, a branch created part-way through an import is invisible to
-// every product created before it: runImportApply seeds "all other active
-// branches at 0" from a branch list loaded once per chunk, so a product
-// written in chunk 1 never learns about a branch that first appeared in
-// chunk 5. Measured on a real 8,727-row file, which names three branches:
-// exactly one product -- the very first row -- ended up with no row for the
-// last branch to be created. Small, but it violates "auto creates for all
-// standalone and child rows, no exceptions", and a product with no
-// branch_stock row is invisible to any branch-filtered POS/Inventory view
-// rather than showing an honest 0.
-//
-// Mirrors routes/branches.ts's identical back-fill on the manual
-// create-branch path; awaited rather than fire-and-forget because an import
-// is already a background job and a partially-seeded catalog is exactly the
-// silent partial write the project's rules forbid.
-async function backfillBranchStockForNewBranch(db: D1Compat, branchId: number): Promise<void> {
-  await db.prepare(`
-    INSERT INTO branch_stock (product_id, branch_id, quantity)
-    SELECT p.id, @branchId, 0 FROM products p
-    WHERE p.is_active = 1
-      AND NOT EXISTS (SELECT 1 FROM branch_stock bs WHERE bs.product_id = p.id AND bs.branch_id = @branchId)
-  `).run({ branchId })
-}
-
-async function resolveAndCreateBranches(db: D1Compat, actionable: ImportRowResult[]): Promise<void> {
-  const pendingNames = new Map<string, string>() // lower(name) -> first-seen-casing name
-  let needsDefault = false
-  for (const r of actionable) {
-    const pending = (r.data as Record<string, unknown>).branch_name_pending as string | undefined
-    if (!pending) continue
-    if (pending === DEFAULT_BRANCH_SENTINEL) needsDefault = true
-    else if (!pendingNames.has(lower(pending))) pendingNames.set(lower(pending), pending)
+// Analyze resolves only existing active canonical branches. Revalidate the
+// selected ids immediately before apply so an imported row can never create
+// a branch, fall back to a synthetic Main Branch, or write after its branch
+// identity was deactivated/renamed/duplicated during review.
+export async function validateResolvedImportBranches(db: D1Compat, actionable: ImportRowResult[]): Promise<void> {
+  if (!actionable.length) return
+  const branchIds: number[] = []
+  for (const result of actionable) {
+    const data = result.data as Record<string, unknown>
+    if (data.branch_name_pending != null) throw new Error('Import contains an unresolved branch; review it before applying.')
+    const branchId = Number(data.branch_id)
+    branchIds.push(branchId)
   }
-  if (!pendingNames.size && !needsDefault) return
-
-  const resolvedByLowerName = new Map<string, number>()
-  for (const [lowerName, name] of pendingNames) {
-    const existing = await db.prepare(`SELECT id FROM branches WHERE lower(name) = @name LIMIT 1`).get<{ id: number }>({ name: lowerName })
-    if (existing) {
-      resolvedByLowerName.set(lowerName, existing.id)
-      continue
-    }
-    const inserted = await db.prepare(`INSERT INTO branches (name, is_active) VALUES (@name, 1)`).run({ name })
-    resolvedByLowerName.set(lowerName, inserted.lastInsertRowid)
-    await backfillBranchStockForNewBranch(db, inserted.lastInsertRowid)
-  }
-
-  let defaultBranchId: number | null = null
-  if (needsDefault) {
-    const existingDefault = await db.prepare(`SELECT id FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC LIMIT 1`).get<{ id: number }>()
-    if (existingDefault) {
-      defaultBranchId = existingDefault.id
-    } else {
-      const inserted = await db.prepare(`INSERT INTO branches (name, is_default, is_active) VALUES ('Main Branch', 1, 1)`).run()
-      defaultBranchId = inserted.lastInsertRowid
-      await backfillBranchStockForNewBranch(db, defaultBranchId)
-    }
-  }
-
-  for (const r of actionable) {
-    const d = r.data as Record<string, unknown>
-    const pending = d.branch_name_pending as string | undefined
-    if (!pending) continue
-    if (pending === DEFAULT_BRANCH_SENTINEL) {
-      d.branch_id = defaultBranchId
-    } else {
-      const resolvedId = resolvedByLowerName.get(lower(pending)) ?? null
-      d.branch_id = resolvedId
-      if ('branch_id_explicit' in d) d.branch_id_explicit = resolvedId != null ? 1 : 0
-      if ('branch_name' in d) d.branch_name = resolvedId != null ? pending : null
-    }
-    delete d.branch_name_pending
-  }
+  const error = await validateCanonicalImportBranchIds(db, branchIds)
+  if (error) throw new Error(`${error} Review the import before applying.`)
 }
 
 // Same-batch duplicate merge: two brand-new rows in ONE file with no
@@ -3883,18 +4578,22 @@ export type ProductImportSignatureInput = {
 // normal update-path write once the second row resolves to the first's
 // pre-allocated id below), not two products.
 //
-// The shared identity rule is exact and deliberately excludes selling/VIP
-// price: same normalized name + barcode + cost merges; a barcode OR cost
-// difference creates a sibling row. Branch never participates. A non-blank
-// barcode + explicit lot code is a narrowly scoped receipt exception: rows
-// for that exact batch share the first product option, without allowing the
-// later receipt to replace its catalog cost.
+// The shared identity rule is exact and deliberately excludes selling/wholesale
+// price AND cost: same normalized name + barcode merges, and only a barcode
+// difference creates a sibling row. Branch never participates.
+//
+// This used to carry its own exception -- a non-blank barcode plus an
+// explicit lot code returned a name|barcode|batch key -- so that two
+// receipts of one batch at two costs could share a product option back when
+// a cost difference otherwise forked a row. Cost stopped being identity on
+// Sep 4 2026, so that branch could no longer merge anything: all it could
+// still do was SPLIT one barcode into a row per lot code, which is exactly
+// what the user's rule forbids ("only diffeerent barcode creates new child
+// row... rest merge"). Lot codes belong to product_batches, which hang off
+// one product row by variant_product_id -- a batch was never a child row.
+// So the signature is now the identity rule, unmodified, and the apply path
+// creates or tops up one batch per lot beneath the single row.
 export function productImportRowSignature(d: ProductImportSignatureInput): string {
-  const barcode = String(d.barcode ?? '').trim().toLowerCase()
-  const lotCode = String(d.lot_code ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
-  if (barcode && lotCode) {
-    return `${normalizeProductGroupName(d.name)}|bc:${barcode}|batch:${lotCode}`
-  }
   return productIdentitySignature(d)
 }
 
@@ -4015,6 +4714,7 @@ type DuplicateProductSnapshotGroup = {
   branch_id: number
   expected_quantity: number
   created_in_job: number
+  received_date: string
 }
 
 // A catalog snapshot may legitimately contain more than one row for the same
@@ -4039,6 +4739,7 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
         ) AS INTEGER) AS product_id,
         CAST(json_extract(result_json, '$.data.branch_id') AS INTEGER) AS branch_id,
         CAST(COALESCE(json_extract(result_json, '$.data.stock_quantity'), 0) AS REAL) AS quantity,
+        json_extract(result_json, '$.data.received_date') AS received_date,
         action
       FROM import_job_rows
       WHERE job_id = @id
@@ -4050,6 +4751,7 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
       product_id,
       branch_id,
       SUM(quantity) AS expected_quantity,
+      MIN(received_date) AS received_date,
       SUM(CASE WHEN action = 'create' THEN 1 ELSE 0 END) AS created_in_job
     FROM normalized
     WHERE product_id IS NOT NULL AND branch_id IS NOT NULL
@@ -4058,38 +4760,17 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
   `).all<DuplicateProductSnapshotGroup>({ id: jobId })
 
   if (!groups.length) return 0
+  const branchIds = groups.map((group) => Number(group.branch_id))
+  const branchAuthorityError = await validateCanonicalImportBranchIds(db, branchIds)
+  if (branchAuthorityError) throw new Error(branchAuthorityError)
+  const guardedDb = withCanonicalImportBranchWriteGuard(db, branchIds)
 
-  const branchStatements = groups.map((group) => ({
-    sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
-          ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = excluded.quantity`,
-    params: { productId: group.product_id, branchId: group.branch_id, quantity: group.expected_quantity },
-  }))
-  await runD1BatchInChunks(db, branchStatements)
-
-  // Only a product created by this job owns an opening "Received via product
-  // import" lot from this write path. Existing-product snapshot updates have
-  // intentionally never fabricated/rewritten lots, so keep that contract.
-  const openingLotStatements = groups
-    .filter((group) => group.created_in_job > 0)
-    .map((group) => ({
-      sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
-            SELECT id, @branchId, @quantity
-            FROM product_batches
-            WHERE variant_product_id = @productId AND notes = 'Received via product import'
-            ORDER BY id ASC LIMIT 1
-            ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = excluded.quantity, updated_at = datetime('now')`,
-      params: { productId: group.product_id, branchId: group.branch_id, quantity: group.expected_quantity },
-    }))
-  if (openingLotStatements.length) await runD1BatchInChunks(db, openingLotStatements)
-
-  const productStatements = [...new Set(groups.map((group) => group.product_id))].map((productId) => ({
-    sql: `UPDATE products
-          SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId),
-              updated_at = CURRENT_TIMESTAMP
-          WHERE id = @productId`,
-    params: { productId },
-  }))
-  await runD1BatchInChunks(db, productStatements)
+  // Duplicate snapshot rows use the same atomic lot/branch reconciliation
+  // as an ordinary matched row, including products that predate this job.
+  await runD1BatchGroupsInChunks(guardedDb, groups.map((group) => planReconcileBranchSnapshot({
+    productId: Number(group.product_id), branchId: Number(group.branch_id),
+    quantity: Number(group.expected_quantity), receivedDate: group.received_date,
+  }).map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> }))))
   return groups.length
 }
 
@@ -4172,7 +4853,14 @@ async function finalizeImportApply(
 // per-invocation dispatch window (see the dispatch loop), so raising it
 // widens how much one continuation invocation dispatches -- budgeted in
 // the subrequest math above.
-export const STOCK_ACTION_MAX_ROWS = 1920 // 240 maximum groups x the writer's 8-line receipt ceiling
+// 1920 = the 240-group ceiling this cap was set against x the writer's 8-line
+// receipt ceiling. It was NOT re-derived when STOCK_ACTION_MAX_UNITS went 240
+// -> 480 in the same A4 pass (the two were raised separately and this
+// comment was left saying 240), so at 480 units the row cap is the binding
+// one for sheets averaging more than 4 lines per receipt -- deliberate, and
+// still a safe Paid-side ceiling. Recorded here rather than silently
+// "corrected" to 3840, which would raise a live ceiling nobody measured.
+export const STOCK_ACTION_MAX_ROWS = 1920
 export const STOCK_ACTION_MAX_UNITS = 480
 // DIRECT-mode continuation (M4): a direct sheet is not capped at the unit
 // ceiling at all -- it classifies and dispatches in windows across
@@ -4235,6 +4923,25 @@ async function dispatchStockActionSingle(
   const plan = resolved.plan!
   if (plan.kind === 'noop') { r.action = 'skip'; return }
   const branchNameById = new Map(resolved.branchRefs.map((ref) => [ref.branchId, ref.branchName]))
+  const supplierName = String(resolved.supplier || '').trim() || null
+  // applyUnifiedStockAdd is the wire and runs the gate for every add; this
+  // asks the SAME question early for one case only -- a CREATE that also
+  // receives stock. Refused inside the writer, that row would already have
+  // inserted its product, and the re-import that follows the fix carries a
+  // new job id, so the orphan becomes a duplicate rather than being reused.
+  // A create has no lot yet, so nothing can be inherited and both halves of
+  // the gate apply in full. A create whose branch columns are an explicit 0
+  // writes no receipt at all, so there is nothing here for a supplier or a
+  // cost to describe and the gate must not touch it.
+  const receivesStock = plan.branchActions.some((a) => a.direction === 'add' && a.quantity > 0)
+  if (plan.kind === 'create' && receivesStock) {
+    // sheetCostPriceUsd, not costPriceUsd: a create has no catalog row to
+    // inherit a cost from anyway, but the gate must ask the same question
+    // applyUnifiedStockAdd asks below -- what the sheet's own cell said, not
+    // what a fallback happened to backfill (sibling:F13 verifier round 2).
+    const refusal = unifiedStockReceiptRefusal({ supplierName, unitCostUsd: resolved.sheetCostPriceUsd, freeGoods: resolved.freeGoods })
+    if (refusal) throw new Error(refusal)
+  }
   let productId = resolved.productId ?? 0
   if (plan.kind === 'create') {
     const ensured = await ensureUnifiedStockProduct(db, {
@@ -4243,7 +4950,7 @@ async function dispatchStockActionSingle(
       productName: resolved.productName,
       barcode: resolved.barcode || null,
       sellingPriceUsd: resolved.sellingPriceUsd,
-      vipPriceUsd: resolved.vipPriceUsd,
+      wholesalePriceUsd: resolved.wholesalePriceUsd,
       costPriceUsd: resolved.costPriceUsd,
     })
     productId = ensured.productId
@@ -4253,7 +4960,6 @@ async function dispatchStockActionSingle(
   // A create is an add that also inserts the product; both dispatch the
   // row's positive per-branch quantities through the same atomic writer.
   const adds = plan.branchActions.filter((a) => a.direction === 'add' && a.quantity > 0)
-  const supplierName = String(resolved.supplier || '').trim() || null
   const supplierId = supplierName ? await resolveSupplierId(supplierName) : null
   for (const add of adds) {
     await applyUnifiedStockAdd(db, {
@@ -4267,10 +4973,12 @@ async function dispatchStockActionSingle(
       date: resolved.date,
       batchLabel: resolved.batchLabel,
       sellingPriceUsd: resolved.sellingPriceUsd,
-      vipPriceUsd: resolved.vipPriceUsd,
+      wholesalePriceUsd: resolved.wholesalePriceUsd,
       costPriceUsd: resolved.costPriceUsd,
+      sheetCostPriceUsd: resolved.sheetCostPriceUsd,
       supplierName,
       supplierId,
+      freeGoods: resolved.freeGoods,
     })
   }
 }
@@ -4283,6 +4991,7 @@ async function dispatchStockActionSaleGroup(
   jobId: string,
   saleGroupKey: string,
   groupRows: StockActionImportResult[],
+  actor: SessionUser,
 ): Promise<'applied' | 'skipped'> {
   const first = groupRows[0].data as unknown as UnifiedStockResolvedRow
   const lines: UnifiedStockSaleLine[] = []
@@ -4307,7 +5016,7 @@ async function dispatchStockActionSaleGroup(
     }
   }
   if (!lines.length) return 'skipped'
-  await applyUnifiedStockSale(db, { jobId, saleGroupKey, date: first.date, lines })
+  await applyUnifiedStockSale(db, { jobId, saleGroupKey, date: first.date, lines, actor, recordedAt: new Date().toISOString() })
   return 'applied'
 }
 
@@ -4338,6 +5047,7 @@ export async function applyStockActionsJob(
   policyJson: string | null,
   sw: ReturnType<typeof makeStopwatch>,
   queueLatencyMs: number | undefined,
+  actor: SessionUser,
 ): Promise<{ applied: number; failed: number }> {
   const startedAtMs = Date.now()
   // Same materialize-first contract as the generic apply path: this
@@ -4360,16 +5070,25 @@ export async function applyStockActionsJob(
   // across self-enqueued continuation invocations — no total-unit ceiling,
   // only per-invocation budgets, with the writers' idempotency seals making
   // crash/redelivery resume exact.
+  const limits = getPlanLimits(env)
   if (getUnifiedStockMode(policyJson) === 'reconcile') {
-    if (totalRows > STOCK_ACTION_MAX_ROWS) {
-      throw new Error(`This stock import has ${totalRows} rows; reconcile mode checks every row against one live-stock snapshot, so split it into files of at most ${STOCK_ACTION_MAX_ROWS} rows before importing.`)
+    if (totalRows > limits.stockActionMaxRows) {
+      // Refuse, never truncate. Reconcile's deltas are computed against ONE
+      // live-stock snapshot, so applying the first N rows of an oversized
+      // sheet is not a partial import, it is a wrong one. The code is what
+      // the UI translates (lang/*.json has a key of the same name); the
+      // message stays English because a queue invocation has no locale.
+      throw Object.assign(
+        new Error(`This stock import has ${totalRows} rows; reconcile mode checks every row against one live-stock snapshot, so split it into files of at most ${limits.stockActionMaxRows} rows before importing.${freePlanRefusalSuffix(env)}`),
+        { code: 'stock_import_over_tier_cap' },
+      )
     }
-    return await applyStockActionsSinglePass(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs)
+    return await applyStockActionsSinglePass(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, actor)
   }
   if (totalRows > STOCK_ACTION_DIRECT_MAX_ROWS) {
     throw new Error(`This stock import has ${totalRows} rows; the ceiling is ${STOCK_ACTION_DIRECT_MAX_ROWS} rows per file — split it before importing.`)
   }
-  return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows)
+  return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows, actor)
 }
 
 // The original single-pass engine, now reconcile-only. Classifies the whole
@@ -4383,6 +5102,7 @@ async function applyStockActionsSinglePass(
   sw: ReturnType<typeof makeStopwatch>,
   queueLatencyMs: number | undefined,
   startedAtMs: number,
+  actor: SessionUser,
 ): Promise<{ applied: number; failed: number }> {
   const decisions = getDecisionMap(policyJson)
   const rows = await readAllMaterializedRows(db, jobId, decisions)
@@ -4424,8 +5144,15 @@ async function applyStockActionsSinglePass(
   }
 
   const unitCount = saleGroups.size + singles.length
-  if (unitCount > STOCK_ACTION_MAX_UNITS) {
-    throw new Error(`This stock import resolves to ${unitCount} actions; split it into files of at most ${STOCK_ACTION_MAX_UNITS} actions before importing.`)
+  const singlePassMaxUnits = getPlanLimits(env).stockActionMaxUnits
+  if (unitCount > singlePassMaxUnits) {
+    // Same refusal, one level down: rows became actions (a receipt is one
+    // action however many lines it has), so a sheet inside the row cap can
+    // still be outside the action cap.
+    throw Object.assign(
+      new Error(`This stock import resolves to ${unitCount} actions; split it into files of at most ${singlePassMaxUnits} actions before importing.${freePlanRefusalSuffix(env)}`),
+      { code: 'stock_import_over_tier_cap' },
+    )
   }
 
   const fail = (r: StockActionImportResult, message: string) => { r.action = 'error'; r.message = message }
@@ -4447,7 +5174,7 @@ async function applyStockActionsSinglePass(
       continue
     }
     try {
-      const outcome = await dispatchStockActionSaleGroup(db, jobId, saleGroupKey, groupRows)
+      const outcome = await dispatchStockActionSaleGroup(db, jobId, saleGroupKey, groupRows, actor)
       if (outcome === 'skipped') for (const r of groupRows) r.action = 'skip'
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Sale group failed'
@@ -4507,7 +5234,11 @@ async function applyStockActionsContinuation(
   queueLatencyMs: number | undefined,
   startedAtMs: number,
   totalRows: number,
+  actor: SessionUser,
 ): Promise<{ applied: number; failed: number }> {
+  // Per-invocation dispatch budget, tier-aware -- see lib/planTier.ts. The
+  // module-level STOCK_ACTION_* exports keep their Paid values.
+  const limits = getPlanLimits(env)
   const decisions = getDecisionMap(policyJson)
   const { cursor, state } = await getChunkState(db, jobId)
   if (!state.startedAtMs) state.startedAtMs = startedAtMs
@@ -4598,7 +5329,7 @@ async function applyStockActionsContinuation(
     await db.prepare(`UPDATE import_jobs SET processed_rows = @n, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
       .run({ id: jobId, n: Math.min(nextCursor, totalRows) })
     console.log('[import-timing] stock-action classify window', jobId, { cursor, nextCursor, totalRows, classifyDone, ...sw.marks })
-    await env.IMPORT_QUEUE.send({ jobId, kind: 'apply' })
+    await dispatchImportWork(env, { jobId, kind: 'apply' })
     return { applied: 0, failed: 0 }
   }
 
@@ -4616,6 +5347,26 @@ async function applyStockActionsContinuation(
   let after = stock.dispatchAfterRow
   let moreRows = true
   const pendingAdds: Array<Promise<void>> = []
+  // Two add rows sharing one lot (same product + batchIdentity) must never be
+  // IN FLIGHT together: applyUnifiedStockAdd's gate reads the lot's current
+  // supplier once, at the top of its own call, before either write lands --
+  // so two concurrent adds into the SAME lot, one supplied and one blank,
+  // race that read and accept or refuse depending on which promise's INSERT
+  // happens to land first. Tracking the lot keys already dispatched in this
+  // flush window and forcing a flush before a repeat lets each lot's adds
+  // still run serially (correct) while unrelated lots keep the concurrency
+  // this queue exists for.
+  const pendingLotKeys = new Set<string>()
+  const addLotKey = (resolved: UnifiedStockResolvedRow): string => {
+    try {
+      return `${resolved.productId}:${batchIdentity(resolved.date, resolved.batchLabel).batchKey}`
+    } catch {
+      // An unparsable date/label fails inside applyUnifiedStockAdd itself
+      // (caught by runSingle below); give it a key nothing else can share so
+      // it neither blocks nor is blocked by a sibling row.
+      return `invalid:${resolved.rowNumber}`
+    }
+  }
   const runSingle = async (r: StockActionImportResult) => {
     try {
       await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
@@ -4631,9 +5382,10 @@ async function applyStockActionsContinuation(
   const flushAdds = async () => {
     if (!pendingAdds.length) return
     await Promise.all(pendingAdds.splice(0, pendingAdds.length))
+    pendingLotKeys.clear()
   }
 
-  outer: while (unitsDispatched < STOCK_ACTION_MAX_UNITS) {
+  outer: while (unitsDispatched < limits.stockActionMaxUnits) {
     const batch = await db.staging.prepare(`
       SELECT row_number, group_index, result_json FROM import_job_rows
       WHERE job_id = @id AND phase = 'apply' AND row_number > @after
@@ -4642,7 +5394,7 @@ async function applyStockActionsContinuation(
     if (!batch.length) { moreRows = false; break }
 
     for (const record of batch) {
-      if (unitsDispatched >= STOCK_ACTION_MAX_UNITS) break outer
+      if (unitsDispatched >= limits.stockActionMaxUnits) break outer
       after = record.row_number
       const r = parseRow(record.result_json)
       if (!r) continue
@@ -4676,7 +5428,7 @@ async function applyStockActionsContinuation(
           continue
         }
         try {
-          const outcome = await dispatchStockActionSaleGroup(db, jobId, plan.saleGroupKey, groupResults)
+          const outcome = await dispatchStockActionSaleGroup(db, jobId, plan.saleGroupKey, groupResults, actor)
           if (outcome === 'skipped') markGroup((row) => { row.action = 'skip' })
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Sale group failed'
@@ -4688,8 +5440,15 @@ async function applyStockActionsContinuation(
       // Single unit: create / add / noop.
       unitsDispatched += 1
       if (plan.kind === 'add') {
+        const lotKey = addLotKey(resolved)
+        // A second row of an already-in-flight lot must wait for the first
+        // to land -- flush everything pending rather than pick out just the
+        // one conflicting promise, since Promise.all is already the unit of
+        // ordering this queue uses.
+        if (pendingLotKeys.has(lotKey)) await flushAdds()
+        pendingLotKeys.add(lotKey)
         pendingAdds.push(runSingle(r))
-        if (pendingAdds.length >= STOCK_ACTION_ADD_CONCURRENCY) await flushAdds()
+        if (pendingAdds.length >= limits.stockActionAddConcurrency) await flushAdds()
       } else {
         // Create/noop paths remain ordered. A create can establish identity
         // used by a later row, while a noop has no I/O to parallelize.
@@ -4707,7 +5466,7 @@ async function applyStockActionsContinuation(
   if (moreRows) {
     await saveChunkState(db, jobId, cursor, state)
     console.log('[import-timing] stock-action dispatch window', jobId, { after, unitsDispatched, ...sw.marks })
-    await env.IMPORT_QUEUE.send({ jobId, kind: 'apply' })
+    await dispatchImportWork(env, { jobId, kind: 'apply' })
     return { applied: 0, failed: 0 }
   }
 
@@ -4850,8 +5609,12 @@ export async function runD1BatchGroupsInChunks(
 // needed beyond the existing in-window same-batch dedup below (which only
 // has to cover duplicates within one ~150-row window, same as it always
 // covered duplicates within one batch).
-export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: number): Promise<{ applied: number; failed: number }> {
+export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: number, attempt?: number): Promise<{ applied: number; failed: number }> {
   const db = getDb(env)
+  // Same per-request shadow as runImportAnalyze -- see its comment -- and
+  // the same redelivery back-off.
+  const limits = getPlanLimits(env)
+  const chunkRows = chunkRowsForAttempt(limits.rowsPerImportChunk, attempt)
   const sw = makeStopwatch()
   const jobRow = await db.prepare(`SELECT status, cancel_requested, started_at FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number; started_at: string | null }>({ id: jobId })
   if (!jobRow) throw new Error('Import job not found')
@@ -4876,6 +5639,21 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   }
 
   try {
+    // Cancellation is already an authoritative request to perform no import
+    // work. Honor it without requiring a now-stale approving actor; the only
+    // write here is the terminal job status itself.
+    if (jobRow.cancel_requested) {
+      await db.prepare(`UPDATE import_jobs SET status = 'cancelled', phase = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
+      return { applied: 0, failed: 0 }
+    }
+    const job = await db.prepare(`SELECT id, type, policy_json, summary_json FROM import_jobs WHERE id = @id`).get<ImportApplyJob>({ id: jobId })
+    if (!job) throw new Error('Import job not found')
+    // The HTTP approval/retry request is only the enqueue boundary. A role
+    // can be edited or revoked while the message waits, and every later
+    // chunk is a fresh queue invocation. Resolve the persisted approving
+    // actor from live users/roles before this invocation changes job/chunk
+    // state or composes any catalog, stock, sales, or image write.
+    const authority = await assertCurrentImportApplyAuthority(env, job)
     if (jobRow.status !== 'applying') {
       // Reclaim 'applying' status on every entry that isn't already an
       // in-progress continuation -- see runImportAnalyze's identical block
@@ -4886,13 +5664,6 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     if (isFreshStart) {
       await resetChunkState(db, jobId, 'apply')
     }
-    if (jobRow.cancel_requested) {
-      await db.prepare(`UPDATE import_jobs SET status = 'cancelled', phase = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
-      return { applied: 0, failed: 0 }
-    }
-
-    const job = await db.prepare(`SELECT type, policy_json FROM import_jobs WHERE id = @id`).get<{ type: ImportType; policy_json: string | null }>({ id: jobId })
-    if (!job) throw new Error('Import job not found')
     // Unified stock actions have their own dedicated, isolated apply path --
     // each add/sale/create is committed by stockActionCommit.ts's atomic,
     // idempotent, oversell-proof writer. It deliberately never reaches the
@@ -4900,7 +5671,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // would mutate sales tables with the wrong row shape. Returns here with
     // its own {applied, failed}; the lease is released in the shared finally.
     if (job.type === 'stock_actions') {
-      return await applyStockActionsJob(env, db, jobId, job.policy_json, sw, queueLatencyMs)
+      return await applyStockActionsJob(env, db, jobId, job.policy_json, sw, queueLatencyMs, authority.actor)
     }
 
     const stillMaterializing = await ensureSourceRowsMaterialized(env, db, jobId, 'apply')
@@ -4921,13 +5692,20 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const isSalesJob = job.type === 'sales'
     const totalUnits = isSalesJob ? await countSalesGroups(db, jobId) : totalRows.n
     const groupEntries = isSalesJob
-      ? await readSalesGroupWindow(db, jobId, decisions, cursor, ROWS_PER_IMPORT_CHUNK)
+      ? await readSalesGroupWindow(db, jobId, decisions, cursor, chunkRows)
       : null
 
     let imageMatchCache = state.imageMatch
-    if (job.type === 'products' && !imageMatchCache && shouldWireImages(job.policy_json)) {
+    let deniedImagePaths: Map<number, string> | undefined
+    if (job.type === 'products' && authority.allowProductImageWrites && !imageMatchCache && shouldWireImages(job.policy_json)) {
       const allRows = await readAllMaterializedRows(db, jobId, decisions)
       imageMatchCache = await computeAndCacheImageMatch(db, jobId, allRows, job.policy_json, cursor, state)
+    } else if (job.type === 'products' && !authority.allowProductImageWrites && shouldWireImages(job.policy_json)) {
+      // Compute the current invocation's effective paths without caching or
+      // renaming anything. The result is used only to decide whether this
+      // chunk contains a real image mutation after authority was revoked.
+      const allRows = await readAllMaterializedRows(db, jobId, decisions)
+      deniedImagePaths = (await computeImportImageMatch(db, jobId, allRows, job.policy_json)).rowImagePaths
     }
 
     // Auto-rename matched images now that this job is actually committing
@@ -4935,7 +5713,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // match becomes final). Renames are keyed by fileId, global to the
     // job -- not row-window-scoped -- so this only needs to run once, on
     // this run's first chunk, not repeated per window.
-    if (isFreshStart && job.type === 'products' && imageMatchCache?.hasRenamePlan) {
+    if (isFreshStart && job.type === 'products' && authority.allowProductImageWrites && imageMatchCache?.hasRenamePlan) {
       // Read here rather than carried in chunk state: this runs on the first
       // chunk only, so serialising the whole plan on all ~58 of them paid for
       // something used once.
@@ -4963,16 +5741,44 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // Already windowed by readSalesGroupWindow's LIMIT/OFFSET -- slicing by
     // `cursor` again here would window it twice and skip whole receipts.
     const windowEntries = groupEntries
-    const windowRows = windowEntries ? windowEntries.flatMap(([, rows]) => rows) : await readMaterializedWindow(db, jobId, cursor, ROWS_PER_IMPORT_CHUNK, decisions)
+    const windowRows = windowEntries ? windowEntries.flatMap(([, rows]) => rows) : await readMaterializedWindow(db, jobId, cursor, chunkRows, decisions)
     const windowUnitCount = windowEntries ? windowEntries.length : windowRows.length
     const groupIndexByRowNumber = windowEntries
       ? new Map(windowEntries.flatMap(([, rows], i) => rows.map((r) => [r._rowNumber, cursor + i] as const)))
       : undefined
 
-    const rowImagePaths = imageMatchCache ? await readRowImagePaths(db, jobId, windowRows) : undefined
-    const results = job.type === 'products'
+    const rowImagePaths = authority.allowProductImageWrites && imageMatchCache
+      ? await readRowImagePaths(db, jobId, windowRows)
+      : deniedImagePaths
+    let results = job.type === 'products'
       ? await classifyProducts(db, windowRows, jobId, job.policy_json, rowImagePaths)
       : await classifyRows(db, job.type, windowRows, jobId, job.policy_json)
+    for (const result of results) {
+      const decision = decisions[String(result.rowNumber)]
+      if (decision?.action === 'skip') result.action = 'skip'
+    }
+    if (job.type === 'inventory') {
+      // Identity/availability is still revalidated against live state, but
+      // historical valuation is the snapshot the operator reviewed. Do not
+      // let a catalogue edit between Analyze and Apply silently change it.
+      results = await preserveAnalyzedInventoryCostSnapshots(db, jobId, results)
+    }
+    if (['customers', 'suppliers', 'delivery_contacts'].includes(job.type)) {
+      const unresolvedTarget = results.find((result) => result.action === 'error' && result.contactMatchTargetInvalid)
+      if (unresolvedTarget) {
+        throw new Error(`Contact import row ${unresolvedTarget.rowNumber} has an ambiguous or changed merge target. Review the row again before applying.`)
+      }
+    }
+    if (job.type === 'products' && !authority.allowProductImageWrites) {
+      if (await productImportResultsChangeImages(db, results, job.policy_json)) {
+        throw new ImportApplyAuthorizationError('products:image', 'The user who authorized this import no longer has permission to change product images.')
+      }
+      // This invocation's effective results resolve to unchanged images.
+      // Remove the field anyway: equality is
+      // permission to continue the non-image import, not permission to
+      // rewrite an alias-equivalent path or touch image bookkeeping.
+      stripProductImportImageFields(results)
+    }
     sw.lap('classifyChunkMs')
 
     // Replace mode (column-level) -- job-level choice, computed once per
@@ -4983,20 +5789,15 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const productImportMode = job.type === 'products' ? getProductImportMode(job.policy_json) : 'merge'
     const productReplaceColumns = productImportMode === 'replace_columns' ? getProductImportReplaceColumns(job.policy_json) : []
 
-    for (const result of results) {
-      const decision = decisions[String(result.rowNumber)]
-      if (decision?.action === 'skip') result.action = 'skip'
-    }
-
     const actionable = results.filter((r) => r.action === 'create' || r.action === 'update')
+    let importWriteDb = db
     if (job.type === 'products' || job.type === 'inventory' || job.type === 'sales') {
-      await resolveAndCreateBranches(db, actionable)
-      // resolveAndCreateBranches only writes the resolved id onto the row's
-      // own data.branch_id (see its comment) -- classifySales' line items
-      // are nested one level deeper (data.items[]), each carrying its own
-      // copy of the same order-level branch_id (see classifySales' "mirrors
-      // the order's single branch column" comment), so that copy needs the
-      // same resolution mirrored onto it explicitly.
+      await validateResolvedImportBranches(db, actionable)
+      if ((job.type === 'products' || job.type === 'inventory') && actionable.length) {
+        importWriteDb = withCanonicalImportBranchWriteGuard(db, actionable.map((result) => Number((result.data as Record<string, unknown>).branch_id)))
+      }
+      // Sales line items are nested one level deeper (data.items[]), each
+      // carrying its own copy of the same validated order-level branch_id.
       if (job.type === 'sales') {
         for (const r of actionable) {
           const d = r.data as Record<string, unknown> & { branch_id: number | null; items: Array<Record<string, unknown>> }
@@ -5023,6 +5824,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // dedupes) stay in the plain `statements` path, re-runnable as before.
     const GENERIC_APPLY_GUARD_ACTION = 'generic_apply'
     const guardedGroups: Array<Array<{ sql: string; params: Record<string, unknown> }>> = []
+    // Product catalog + stock/batch statements for one imported row must
+    // stay in one D1 batch. Besides preserving the row's own invariants,
+    // this prevents a branch identity change between a product INSERT and
+    // its branch_stock/batch writes from leaving a half-applied row.
+    const productStatementGroups: Array<Array<{ sql: string; params: Record<string, unknown> }>> = []
+    let productSeedBranchIds: number[] = []
     const appliedRowGuards = new Set(
       (await db.prepare(`SELECT guard_key FROM import_stock_action_guards WHERE job_id = @id AND action_key = @ak`)
         .all<{ guard_key: string }>({ id: jobId, ak: GENERIC_APPLY_GUARD_ACTION })).map((g) => g.guard_key),
@@ -5077,19 +5884,20 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // "Shop" -- there's no per-row "and also 0 everywhere else" column).
       // Without this, a brand-new imported product ended up with a
       // branch_stock row ONLY at the branch its row happened to name --
-      // every other active branch had no row at all, which every
+      // every other active canonical branch had no row at all, which every
       // branch-filtered view (Products/Inventory/POS) reads as "not
       // tracked here", not as "0 in stock here" (see
       // seedBranchStockForNewProduct in productWrites.ts, which already
       // fixes this same gap for the manual Add Product form -- this
       // mirrors that fix for the bulk-import create path, which never
-      // called it). Fetched once per chunk, not per row -- resolveAndCreateBranches
-      // above may just have created a brand-new branch this same chunk, so
-      // this has to run after it, not reuse classifyProducts' earlier
-      // snapshot.
-      const allActiveBranchIds = createRows.length
-        ? (await db.prepare(`SELECT id FROM branches WHERE is_active = 1`).all<{ id: number }>()).map((b) => b.id)
-        : []
+      // called it). Fetched once per chunk, after the selected canonical
+      // branch ids have been revalidated.
+      if (createRows.length) {
+        const rows = await db.prepare(`SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1`).all<CanonicalImportBranchRow>()
+        const index = indexCanonicalImportBranches(rows)
+        productSeedBranchIds = [...index.byRole.values()]
+          .flatMap((matches) => matches.length === 1 ? [Number(matches[0].id)] : [])
+      }
       // Same pre-allocation reasoning as nextProductId above, for the
       // product_batches row each new-product-with-stock create statement
       // below also inserts -- see that statement's own comment for why a
@@ -5100,7 +5908,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // the create path -- so they need to be counted here too, not just
       // createRows.length, or two such rows in the same chunk would both
       // try to claim the same next id.
-      const updateRowsNeedingBatch = actionable.filter((r) => r.action === 'update' && r.existingId && (r.plannedMode === 'merge_stock' || r.plannedMode === 'override_add'))
+      const updateRowsNeedingBatch = actionable.filter((r) => r.action === 'update' && r.existingId
+        && (r.plannedMode === 'merge_stock' || r.plannedMode === 'override_add' || !r.plannedMode))
       if (createRows.length || updateRowsNeedingBatch.length) {
         const maxBatchIdRow = await db.prepare(`SELECT COALESCE(MAX(id), 0) AS maxId FROM product_batches`).get<{ maxId: number }>()
         nextBatchId = maxBatchIdRow?.maxId || 0
@@ -5114,27 +5923,31 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // used to look anything up, so re-importing the same named batch
       // (e.g. "Batch 12") for a product that already has it created a
       // second, duplicate batch instead of topping up the existing one and
-      // refreshing its received date, unlike every other batch-receiving
+      // preserving its received date, unlike every other batch-receiving
       // path in the app (the manual Receive Stock modal, the mandatory
-      // add-stock picker). Only fetched when there's at least one
-      // lot-code-carrying update row worth matching, and only active
-      // batches (a deactivated lot shouldn't silently reappear via import
-      // any more than it should via a manual receive -- receiveBatchStock
-      // itself DOES reactivate on an explicit id/lot match, so this mirrors
-      // that by reactivating on match below, same as a manual restock of a
-      // previously-emptied lot would).
+      // add-stock picker). Inactive lots MUST participate in this lookup:
+      // the unique key covers (variant_product_id, batch_key) regardless of
+      // is_active, so filtering an emptied/deactivated lot out made the
+      // later INSERT fail with a UNIQUE violation. An explicit additive
+      // receipt is allowed to reactivate that exact lot, and the matched
+      // branch below does so in the same atomic row group before adding
+      // positive branch_batch_stock. Exact batch_key wins over the legacy
+      // normalized lot-code match so a retry cannot drift to a different
+      // row when old data contains two display-equivalent lot codes.
       const lotMatchCandidates = updateRowsNeedingBatch.filter((r) => str((r.data as Record<string, unknown>).lot_code))
-      const batchByProductAndLot = new Map<string, { id: number; received_at: string | null }>()
+      let restockBatchIndex: ImportRestockBatchIndex = { byExactKey: new Map(), byNormalizedLot: new Map() }
       if (lotMatchCandidates.length) {
         const existingBatches = await db
-          .prepare(`SELECT id, variant_product_id, lot_code, received_at FROM product_batches WHERE is_active = 1 AND lot_code IS NOT NULL AND lot_code != ''`)
-          .all<{ id: number; variant_product_id: number; lot_code: string | null; received_at: string | null }>()
-        for (const batch of existingBatches) {
-          if (!str(batch.lot_code)) continue
-          batchByProductAndLot.set(`${batch.variant_product_id}\u0001${lower(batch.lot_code)}`, { id: batch.id, received_at: batch.received_at })
-        }
+          .prepare(`SELECT id, variant_product_id, batch_key, lot_code, received_at, is_active FROM product_batches`)
+          .all<ImportRestockBatch>()
+        restockBatchIndex = indexImportRestockBatches(existingBatches)
       }
-      const inBatchSignatureToId = new Map<string, { id: number; data: Record<string, unknown> }>()
+      // seedCost* is the FIRST row's cost as the file wrote it, kept apart
+      // from `data` because resolveMergedCost below rewrites data's cost to
+      // the running mean -- a third receipt has to be compared against the
+      // original figure, not against the average it is about to change.
+      const inBatchSignatureToId = new Map<string, { id: number; data: Record<string, unknown>; seedCostUsd: number; seedCostKhr: number }>()
+      const rowCost = (row: Record<string, unknown>, field: string): number => Number(row?.[field]) || 0
       for (const r of createRows) {
         const d = r.data as Record<string, unknown> & { branch_id: number | null }
         const signature = productImportRowSignature(d as unknown as ProductImportSignatureInput)
@@ -5145,8 +5958,23 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // Same barcode+batch may share one product option even when the
           // receipt cost differs. The first row seeds the option/lot; later
           // rows are additive receipts, not catalog-field replacements.
-          if (productIdentitySignature(earlier.data as ProductImportSignatureInput) !== productIdentitySignature(d as ProductImportSignatureInput)
-            && str(earlier.data.lot_code) && lower(earlier.data.lot_code) === lower(d.lot_code)) {
+          //
+          // The cost clause is what keeps S4-17 from losing stock. Before
+          // Sep 4 2026 two receipts of one article at two costs were two
+          // product rows, each keeping its own quantity. Now they fold into
+          // one row, and a fold with no plannedMode falls through to the
+          // legacy path further down, which REPLACES the branch's quantity
+          // instead of adding to it -- receipts of 5 and 3 would store 3.
+          // Two rows that disagree on cost are two receipts, so the fold is
+          // additive. Rows that agree on cost are unchanged from before:
+          // they folded then too, and still replace.
+          const costsDiffer = rowCost(d, 'cost_price_usd') !== earlier.seedCostUsd
+            || rowCost(d, 'cost_price_khr') !== earlier.seedCostKhr
+          // A different lot code is likewise a second receipt, not a
+          // restatement of the first -- and since the signature stopped
+          // splitting on lot code, those rows now land here too.
+          const lotsDiffer = lower(earlier.data.lot_code) !== lower(d.lot_code)
+          if (costsDiffer || lotsDiffer) {
             r.plannedMode = 'merge_stock'
           }
           // 9.2: snapshot the losing row's ORIGINAL values before the
@@ -5154,22 +5982,68 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // they survive.
           autoMergeRecords.push({ productId: earlier.id, rowNumber: r.rowNumber, losingJson: snapshotLosingRow(d) })
           // The identity rule's merge semantics (Part 388): when the twin
-          // rows disagree on selling/VIP price, the HIGHEST wins -- applied
-          // to BOTH rows' data, because the first row's INSERT and this
-          // row's later UPDATE each write their own params and the update
-          // runs last (statement order preserves row order).
-          const merged = resolveMergedPricing([earlier.data, d])
+          // rows disagree on selling/wholesale price, the HIGHEST wins --
+          // applied to BOTH rows' data, because the first row's INSERT and
+          // this row's later UPDATE each write their own params and the
+          // update runs last (statement order preserves row order). Selling
+          // AND wholesale both max through resolveMergedPricing since S4-32.
+          // Cost is the exception: it MEANS rather than maxes (S4-17), so both
+          // resolvers are needed and neither may be dropped.
+          const costMerge = resolveMergedCostDetail([earlier.data, d])
+          const merged = {
+            ...resolveMergedPricing([earlier.data, d]),
+            ...costMerge.merged,
+          }
           Object.assign(earlier.data, merged)
           Object.assign(d, merged)
+          // Two rows of the SAME file whose costs are too far apart to average
+          // (see resolveMergedCostDetail): the fold keeps the higher cost, and
+          // the row that lost says so. `results` is persisted for the apply
+          // phase right after this loop, so the warning reaches the import
+          // report rather than dying with the local variable.
+          for (const outlier of costMerge.outliers) {
+            r.warnings = [...(r.warnings || []), costOutlierWarning(outlier)]
+          }
+          // `message` is the joined human form of `warnings` everywhere else
+          // (see classifyProducts' row result), and several readers show it
+          // directly -- keep the two in step rather than leaving a row whose
+          // structured warning has no sentence.
+          if (costMerge.outliers.length) r.message = (r.warnings || []).map((w) => w.message).join(' ')
           continue
         }
         nextProductId += 1
-        inBatchSignatureToId.set(signature, { id: nextProductId, data: d })
+        inBatchSignatureToId.set(signature, {
+          id: nextProductId,
+          data: d,
+          seedCostUsd: rowCost(d, 'cost_price_usd'),
+          seedCostKhr: rowCost(d, 'cost_price_khr'),
+        })
         d.__importAssignedId = nextProductId
       }
       for (const r of actionable) {
         const d = r.data as Record<string, unknown> & { branch_id: number | null; branch_id_explicit: number }
         const receiptUnitCostUsd = Number(d.__costPriceUsdProvided) === 1 ? d.cost_price_usd : null
+        let rowWriteGroup: Array<{ sql: string; params: Record<string, unknown> }> = []
+        let rowWriteGroupFinished = false
+        const finishProductRowWriteGroup = () => {
+          if (rowWriteGroupFinished) return
+          rowWriteGroupFinished = true
+          const mergeRecords = autoMergeRecords.filter((record) => record.rowNumber === r.rowNumber)
+          for (const record of mergeRecords) {
+            rowWriteGroup.push({
+              sql: `INSERT INTO import_auto_merges (product_id, import_job_id, row_number, losing_json, created_at)
+                    VALUES (@product_id, @import_job_id, @row_number, @losing_json, @created_at)`,
+              params: { product_id: record.productId, import_job_id: jobId, row_number: record.rowNumber, losing_json: record.losingJson, created_at: nowIso },
+            })
+          }
+          if (mergeRecords.length) {
+            rowWriteGroup.push({
+              sql: 'UPDATE products SET auto_merged_count = COALESCE(auto_merged_count, 0) + @count WHERE id = @id',
+              params: { count: mergeRecords.length, id: mergeRecords[0].productId },
+            })
+          }
+          if (rowWriteGroup.length) productStatementGroups.push(rowWriteGroup)
+        }
         // Populates the same name_normalized/unit_normalized/brand_compact
         // columns lib/productWrites.ts's insertRow/updateRow compute for
         // the manual Add/Edit-product path (see migrations/0037_product_
@@ -5209,10 +6083,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // column. Contrast with the legacy/default branch further
             // down, which does write branch_stock for an explicit-branch
             // row.
-            statements.push({
-              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, special_price_usd=@special_price_usd, special_price_khr=@special_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
+            rowWriteGroup.push({
+              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
+            finishProductRowWriteGroup()
             continue
           }
           if (productImportMode === 'replace_columns' && productReplaceColumns.length) {
@@ -5242,11 +6117,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
               const setClause = allSetColumns.map((col) => `${col}=@${col}`).join(', ')
               const params: Record<string, unknown> = { id: r.existingId, updated_at: nowIso }
               for (const col of allSetColumns) params[col] = d[col]
-              statements.push({
+              rowWriteGroup.push({
                 sql: `UPDATE products SET ${setClause}, updated_at=@updated_at WHERE id=@id`,
                 params,
               })
             }
+            finishProductRowWriteGroup()
             continue
           }
           // 'merge_stock' means "only touch quantity/batch, leave every
@@ -5263,8 +6139,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // syncProductImageGallery -- CSV import still only ever sets the
           // single image_path).
           if (mode !== 'merge_stock') {
-            statements.push({
-              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, special_price_usd=@special_price_usd, special_price_khr=@special_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
+            rowWriteGroup.push({
+              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
           }
@@ -5281,7 +6157,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // batch/received-stock row, exactly like a manual Receive
             // Stock action would -- unlike the legacy/default branch
             // below, which replaces the branch's quantity outright and
-            // never touches product_batches. Only fires when the CSV
+            // reconciles product_batches. Only fires when the CSV
             // named an explicit branch (same guard as the legacy path)
             // and actually carries a positive quantity to add; a zero/
             // blank quantity is a no-op, not a request to zero out stock.
@@ -5291,7 +6167,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // and an already-guarded row composes nothing on a retried
             // chunk.
             if (d.branch_id_explicit && d.branch_id != null && (d.stock_quantity as number) > 0 && !appliedRowGuards.has(`row:${r.rowNumber}`)) {
-              const group: Array<{ sql: string; params: Record<string, unknown> }> = [rowGuardStatement(r.rowNumber)]
+              const group: Array<{ sql: string; params: Record<string, unknown> }> = [rowGuardStatement(r.rowNumber), ...rowWriteGroup]
+              rowWriteGroup = group
               group.push({
                 sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)
                       ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + excluded.quantity`,
@@ -5302,19 +6179,16 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 params: { id: r.existingId },
               })
               const importLotCode = str(d.lot_code)
-              const lotKey = importLotCode ? `${r.existingId}\u0001${lower(importLotCode)}` : null
-              const matchedBatch = lotKey ? batchByProductAndLot.get(lotKey) : null
+              const matchedBatch = findImportRestockBatch(restockBatchIndex, Number(r.existingId), importLotCode)
               if (matchedBatch) {
-                // Same lot code already exists (active) on this product --
-                // top it up instead of creating a duplicate, and refresh
-                // its received date to this import's, same as a manual
-                // re-receive of the same lot would (receiveBatchStock
-                // reactivates + lets a fresh call's fields override the
-                // stored ones). Name/received-date now stay consistent
-                // across every import that names the same batch, instead
-                // of forking into a new unrelated row each time.
+                // Same batch key / lot code already exists on this product,
+                // including an inactive emptied lot. Reactivate it before
+                // the positive lot-stock write in this same atomic group,
+                // without replacing its first received date or established
+                // cost identity. A legacy blank may be filled from this
+                // explicit receipt.
                 group.push({
-                  sql: `UPDATE product_batches SET received_at = @receivedAt, is_active = 1,
+                  sql: `UPDATE product_batches SET received_at = COALESCE(NULLIF(received_at,''), @receivedAt), is_active = 1,
                           unit_cost_usd = COALESCE(unit_cost_usd, @unitCostUsd),
                           received_quantity = COALESCE(received_quantity, 0) + @qty,
                           received_cost_usd = COALESCE(received_cost_usd, 0) + (@qty * COALESCE(@unitCostUsd, 0)),
@@ -5371,7 +6245,16 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 // chunk start, so a guarded-skipped row's lot still
                 // matches for its later siblings.)
                 if (importLotCode) {
-                  batchByProductAndLot.set(`${r.existingId}\u0001${lower(importLotCode)}`, { id: batchId, received_at: d.received_date as string })
+                  const createdBatch: ImportRestockBatch = {
+                    id: batchId,
+                    variant_product_id: Number(r.existingId),
+                    batch_key: importLotCode,
+                    lot_code: importLotCode,
+                    received_at: d.received_date as string,
+                    is_active: 1,
+                  }
+                  restockBatchIndex.byExactKey.set(`${r.existingId}\u0001${importLotCode}`, createdBatch)
+                  restockBatchIndex.byNormalizedLot.set(`${r.existingId}\u0001${lower(importLotCode)}`, createdBatch)
                 }
               }
               // One movement per receipt row keeps its own cost even when
@@ -5393,17 +6276,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                   batchId: matchedBatch?.id ?? nextBatchId,
                 },
               })
-              guardedGroups.push(group)
             }
           } else {
             // Legacy/default: no plannedMode was set (every non-products
             // import, every row imported before this feature existed, or
             // any `_action` value this engine doesn't recognize as one of
-            // the three modes above). Unchanged from the original
-            // behavior -- REPLACES the named branch's quantity outright
-            // (not an add) and never touches product_batches. Kept exactly
-            // as-is so existing tests/imports that predate plannedMode
-            // keep writing identically.
+            // the three modes above). This is an absolute branch snapshot;
+            // reconcile dated lots and the aggregate in the same row group.
             //
             // NOTE: stock_quantity is intentionally NOT part of the
             // products UPDATE above. products.stock_quantity is a
@@ -5417,11 +6296,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // aggregate is recomputed below from branch_stock after the
             // branch-specific row is written.
             if (d.branch_id_explicit && d.branch_id != null) {
-              statements.push({
-                sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)
-                      ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = excluded.quantity`,
-                params: { id: r.existingId, branchId: d.branch_id, qty: d.stock_quantity },
-              })
+              // Reserve from the same allocator as new/import-add lots;
+              // auto IDs here could collide with a later row in this chunk.
+              nextBatchId += 1
+              rowWriteGroup.push(...planReconcileBranchSnapshot({
+                productId: Number(r.existingId), branchId: Number(d.branch_id),
+                quantity: Number(d.stock_quantity), receivedDate: String(d.received_date), batchId: nextBatchId,
+              }).map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
             }
             // Re-derive the aggregate total from branch_stock every time
             // (not just when this row touched a branch) so any
@@ -5429,7 +6310,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // as a later statement in the same D1 batch, so it sees the
             // branch_stock write above -- statements in one batch execute
             // sequentially inside a single SQLite transaction.
-            statements.push({
+            rowWriteGroup.push({
               sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id) WHERE id = @id`,
               params: { id: r.existingId },
             })
@@ -5445,8 +6326,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // out_of_stock_threshold's 0 or discount_badge_color's
           // '#e11d48'). normalizeProductImportRow pre-fills those three
           // with the same defaults for exactly this reason.
-          statements.push({
-            sql: `INSERT INTO products (id, name, name_normalized, sku, barcode, category, categories, unit, unit_normalized, description, brand, brands, brand_compact, supplier, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, out_of_stock_threshold, discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at, expiry_date, expiry_alert_days, is_active, image_path, created_at, updated_at) VALUES (@id, @name, @name_normalized, @sku, @barcode, @category, @categories, @unit, @unit_normalized, @description, @brand, @brands, @brand_compact, @supplier, @selling_price_usd, @selling_price_khr, @special_price_usd, @special_price_khr, @cost_price_usd, @cost_price_khr, @stock_quantity, @low_stock_threshold, @out_of_stock_threshold, @discount_enabled, @discount_type, @discount_percent, @discount_amount_usd, @discount_amount_khr, @discount_label, @discount_badge_color, @discount_starts_at, @discount_ends_at, @expiry_date, @expiry_alert_days, @is_active, @image_path, @created_at, @updated_at)`,
+          rowWriteGroup.push({
+            sql: `INSERT INTO products (id, name, name_normalized, sku, barcode, category, categories, unit, unit_normalized, description, brand, brands, brand_compact, supplier, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, out_of_stock_threshold, discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at, expiry_date, expiry_alert_days, is_active, image_path, created_at, updated_at) VALUES (@id, @name, @name_normalized, @sku, @barcode, @category, @categories, @unit, @unit_normalized, @description, @brand, @brands, @brand_compact, @supplier, @selling_price_usd, @selling_price_khr, @wholesale_price_usd, @wholesale_price_khr, @cost_price_usd, @cost_price_khr, @stock_quantity, @low_stock_threshold, @out_of_stock_threshold, @discount_enabled, @discount_type, @discount_percent, @discount_amount_usd, @discount_amount_khr, @discount_label, @discount_badge_color, @discount_starts_at, @discount_ends_at, @expiry_date, @expiry_alert_days, @is_active, @image_path, @created_at, @updated_at)`,
             params: { ...d, id: newId, image_path: d.image_path ?? null, created_at: nowIso, updated_at: nowIso },
           })
           // Every new product gets a branch_stock row -- explicit branch
@@ -5454,7 +6335,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // (resolved in classifyProducts). This is the fix for imported
           // products silently ending up unassigned to any branch.
           if (d.branch_id != null) {
-            statements.push({
+            rowWriteGroup.push({
               sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)
                     ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = excluded.quantity`,
               params: { id: newId, branchId: d.branch_id, qty: d.stock_quantity },
@@ -5465,7 +6346,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // what protects a *second* file (re-importing the same barcode
             // for a different branch, which the update path turns into)
             // from ever depending on which import ran first.
-            statements.push({
+            rowWriteGroup.push({
               sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id) WHERE id = @id`,
               params: { id: newId },
             })
@@ -5492,7 +6373,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // aggregate recompute already queued above.
             nextBatchId += 1
             const batchId = nextBatchId
-            statements.push({
+            rowWriteGroup.push({
                 sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, unit_cost_usd, received_quantity, received_cost_usd, received_branch_id, created_at, updated_at)
                       VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, 1, @unitCostUsd, @qty, (@qty * COALESCE(@unitCostUsd, 0)), @branchId, @createdAt, @createdAt)`,
                 params: {
@@ -5508,15 +6389,25 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                   createdAt: nowIso,
                 },
             })
-            statements.push({
+            rowWriteGroup.push({
                 sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @qty)`,
                 params: { batchId, branchId: d.branch_id, qty: d.stock_quantity },
             })
             if (str(d.lot_code)) {
-              batchByProductAndLot.set(`${newId}\u0001${lower(d.lot_code)}`, { id: batchId, received_at: d.received_date as string })
+              const createdBatch: ImportRestockBatch = {
+                id: batchId,
+                variant_product_id: newId,
+                batch_key: str(d.lot_code),
+                lot_code: str(d.lot_code),
+                received_at: d.received_date as string,
+                is_active: 1,
+              }
+              restockBatchIndex.byExactKey.set(`${newId}\u0001${str(d.lot_code)}`, createdBatch)
+              restockBatchIndex.byNormalizedLot.set(`${newId}\u0001${lower(d.lot_code)}`, createdBatch)
             }
-            // Seed every OTHER active branch at 0 (tracked, not absent) --
-            // see allActiveBranchIds' own comment above for why. Runs
+            // Seed every OTHER unambiguous active canonical branch at 0
+            // (tracked, not absent) -- see productSeedBranchIds above.
+            // Runs
             // AFTER the chosen branch's real-quantity insert above, and
             // uses ON CONFLICT DO NOTHING rather than DO UPDATE: if a
             // later row in this same chunk names one of these branches for
@@ -5527,9 +6418,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // stomp a real value back down to 0. Statements in one D1
             // batch execute sequentially, so "pushed earlier" is
             // guaranteed to mean "applied first" here.
-            for (const branchId of allActiveBranchIds) {
+            for (const branchId of productSeedBranchIds) {
               if (branchId === d.branch_id) continue
-              statements.push({
+              rowWriteGroup.push({
                 sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 0)
                       ON CONFLICT(product_id, branch_id) DO NOTHING`,
                 params: { id: newId, branchId },
@@ -5537,22 +6428,35 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             }
           }
         }
+        finishProductRowWriteGroup()
       }
     } else if (job.type === 'customers' || job.type === 'suppliers' || job.type === 'delivery_contacts') {
       const table = job.type
       const columns = table === 'customers'
-        ? ['name', 'phone', 'address', 'notes', 'email', 'membership_number', 'gender']
+        ? ['name', 'phone', 'phone_normalized', 'address', 'notes', 'email', 'membership_number', 'gender']
         : table === 'suppliers'
           ? ['name', 'phone', 'address', 'notes', 'email', 'company', 'contact_person', 'gender']
           : ['name', 'phone', 'address', 'notes', 'area', 'gender']
       for (const r of actionable) {
         const d = r.data as Record<string, unknown>
+        const group: Array<{ sql: string; params: Record<string, unknown> }> = []
+        const duplicateGuard = contactDuplicateWriteGuardStatement(table, {
+          id: r.action === 'update' ? r.existingId : null,
+          phones: collectContactPhones(d, table === 'delivery_contacts' ? 'area' : 'address'),
+        })
+        if (duplicateGuard) group.push(duplicateGuard)
         if (r.action === 'update' && r.existingId) {
-          const assignments = columns.map((c) => `"${c}"=@${c}`).join(', ')
-          statements.push({ sql: `UPDATE "${table}" SET ${assignments}, updated_at=@updated_at WHERE id=@id`, params: { ...d, id: r.existingId, updated_at: nowIso } })
+          // A saved import review may predate a customer edit. Never replace identity.
+          group.push({
+            sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM "${table}" WHERE id=@id AND updated_at IS @expectedUpdatedAt)
+              THEN 1 ELSE json('CONTACT_IMPORT_STALE_WRITE_GUARD') END AS contact_import_stale_guard`,
+            params: { id: r.existingId, expectedUpdatedAt: r.expectedUpdatedAt ?? null },
+          })
+          const assignments = columns.filter((c) => c !== 'membership_number').map((c) => `"${c}"=@${c}`).join(', ')
+          group.push({ sql: `UPDATE "${table}" SET ${assignments}, updated_at=@updated_at WHERE id=@id`, params: { ...d, id: r.existingId, updated_at: nowIso } })
         } else {
           const cols = [...columns, 'created_at', 'updated_at']
-          statements.push({
+          group.push({
             sql: `INSERT INTO "${table}" (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`,
             // `created_at` on a new row honors an imported date (all three
             // contact tables -- see classifyContacts' own shared
@@ -5568,6 +6472,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             params: { ...d, created_at: (d.created_at as string | null | undefined) || nowIso, updated_at: nowIso },
           })
         }
+        guardedGroups.push(group)
       }
     } else if (job.type === 'inventory') {
       for (const r of actionable) {
@@ -5580,7 +6485,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         if (appliedRowGuards.has(`row:${r.rowNumber}`)) continue
         const group: Array<{ sql: string; params: Record<string, unknown> }> = [rowGuardStatement(r.rowNumber)]
         group.push({
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at) VALUES (@product_id, @product_name, @branch_id, @branch_name, @movement_type, @quantity, @reason, @created_at)`,
+          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at) VALUES (@product_id, @product_name, @branch_id, @branch_name, @movement_type, @quantity, @unit_cost_usd, @unit_cost_khr, @total_cost_usd, @total_cost_khr, @reason, @created_at)`,
           // Honor an imported date (classifyInventory's `movementDate`,
           // spread in via `d.created_at`) when the row supplied one;
           // `nowIso` is only the fallback for a blank/unparseable cell.
@@ -5607,34 +6512,20 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       }
     }
 
-    // 9.2: the auto-merge records ride the SAME atomic batch as the writes
-    // they describe -- appended last so each UPDATE lands after its
-    // product's INSERT (statements execute in order).
-    if (autoMergeRecords.length) {
-      const perProduct = new Map<number, number>()
-      for (const record of autoMergeRecords) {
-        perProduct.set(record.productId, (perProduct.get(record.productId) || 0) + 1)
-        statements.push({
-          sql: `INSERT INTO import_auto_merges (product_id, import_job_id, row_number, losing_json, created_at)
-                VALUES (@product_id, @import_job_id, @row_number, @losing_json, @created_at)`,
-          params: { product_id: record.productId, import_job_id: jobId, row_number: record.rowNumber, losing_json: record.losingJson, created_at: nowIso },
-        })
-      }
-      for (const [productId, count] of perProduct) {
-        statements.push({
-          sql: 'UPDATE products SET auto_merged_count = COALESCE(auto_merged_count, 0) + @count WHERE id = @id',
-          params: { count, id: productId },
-        })
-      }
+    if (job.type === 'products' && productSeedBranchIds.length) {
+      importWriteDb = withCanonicalImportBranchWriteGuard(db, [
+        ...actionable.map((result) => Number((result.data as Record<string, unknown>).branch_id)),
+        ...productSeedBranchIds,
+      ])
     }
-
-    if (statements.length) await runD1BatchInChunks(db, statements)
+    if (productStatementGroups.length) await runD1BatchGroupsInChunks(importWriteDb, productStatementGroups)
+    if (statements.length) await runD1BatchInChunks(importWriteDb, statements)
     // The guarded additive groups run AFTER the plain statements (their
     // UPDATEs may reference products the create statements above insert)
     // and through the group-atomic runner, so each row's guard commits in
     // the same db.batch() as its stock writes -- see guardedGroups'
     // declaration comment.
-    if (guardedGroups.length) await runD1BatchGroupsInChunks(db, guardedGroups)
+    if (guardedGroups.length) await runD1BatchGroupsInChunks(importWriteDb, guardedGroups)
     sw.lap('buildAndWriteStatementsMs')
 
     // Each reviewed receipt is one idempotent D1 transaction: header,
@@ -5646,14 +6537,18 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // Loyalty accrual is the operator's import-time choice (default OFF for
       // historical data). Read it once per chunk from the reviewed policy.
       const accrueLoyalty = getSalesImportAccrueLoyalty(job.policy_json)
-      for (let offset = 0; offset < actionable.length; offset += HISTORICAL_SALES_IMPORT_CONCURRENCY) {
-        const receiptWindow = actionable.slice(offset, offset + HISTORICAL_SALES_IMPORT_CONCURRENCY)
+      // Tier-aware: paid 12, free 6 -- see lib/planTier.ts. The module-level
+      // export keeps its Paid value for existing readers.
+      const historicalSalesConcurrency = limits.historicalSalesImportConcurrency
+      for (let offset = 0; offset < actionable.length; offset += historicalSalesConcurrency) {
+        const receiptWindow = actionable.slice(offset, offset + historicalSalesConcurrency)
         const settled = await Promise.allSettled(receiptWindow.map(async (r) => {
           await applyHistoricalSaleImport(db, {
             jobId,
             rowNumber: r.rowNumber,
             data: r.data as Record<string, unknown> & { items: Array<Record<string, unknown>>; sale_status: string; receipt_number: string | null; created_at: string | null },
             nowIso,
+            actor: authority.actor,
             accrueLoyalty,
           })
         }))
@@ -5678,7 +6573,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       await db.prepare(`UPDATE import_jobs SET processed_rows = processed_rows + @applied, failed_rows = failed_rows + @failed, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
         .run({ id: jobId, applied: actionable.length, failed: chunkFailed })
       console.log('[import-timing] apply chunk', jobId, { cursor, nextCursor, totalUnits, ...sw.marks })
-      await env.IMPORT_QUEUE.send({ jobId, kind: 'apply' })
+      await dispatchImportWork(env, { jobId, kind: 'apply' })
       return { applied: actionable.length, failed: chunkFailed }
     }
 

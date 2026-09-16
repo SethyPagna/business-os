@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { getHubDestinations, hubAnchor, mobileGroupAction, resolveHubSection, navigationHash, needsNavigationGuard } from '../src/components/shared/hubNavigation.ts'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../src/components/shared/navigationConfig.ts'
 
 const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
@@ -78,6 +79,78 @@ await runTest('every nav item has an explicit, matching route-access entry in Ap
     .filter((item) => declaredPermissions.has(item.id) && declaredPermissions.get(item.id) !== item.permission)
     .map((item) => `${item.id} (nav: ${item.permission}, guard: ${declaredPermissions.get(item.id)})`)
   assert.deepEqual(mismatched, [], `nav link visibility and page-load guard disagree for: ${mismatched.join(', ')}`)
+})
+
+await runTest('inline groups expand without navigation; legacy and standalone actions navigate', () => {
+  const access = { getPermissionTier: () => 'full', hasPermission: () => true }
+  const sales = getHubDestinations('sales', access)
+  assert.deepEqual(mobileGroupAction(null, 'sales', sales, true), { expanded: 'sales', navigate: false })
+  assert.deepEqual(mobileGroupAction('sales', 'sales', sales, true), { expanded: null, navigate: false })
+  assert.deepEqual(mobileGroupAction('sales', 'branches', getHubDestinations('branches', access), true), { expanded: 'branches', navigate: false })
+  assert.equal(mobileGroupAction(null, 'sales', sales, false).navigate, true)
+  assert.equal(mobileGroupAction(null, 'pos', [], true).navigate, true)
+})
+
+await runTest('destinations retain section permission gates and never expose unsupported ids', () => {
+  const restricted = (tiers: Record<string, string>, grants: string[] = []) => ({ getPermissionTier: (key: string) => tiers[key] || 'none', hasPermission: (key: string) => grants.includes(key) })
+  const ids = (page: string, tiers: Record<string, string>, grants: string[] = []) => getHubDestinations(page, restricted(tiers, grants)).map((item) => item.id)
+  assert.deepEqual(ids('branches', { inventory: 'view' }), ['products', 'rfid'])
+  assert.deepEqual(ids('sales', { returns: 'review' }), ['returns', 'reports'])
+  assert.deepEqual(ids('settings', { business_identity: 'full', users: 'full' }), ['settings'])
+  assert.deepEqual(ids('settings', { backup: 'view' }, ['all']), ['users', 'backup'])
+  assert.deepEqual(ids('review', { audit_log: 'view' }), ['audit'])
+  assert.deepEqual(ids('review', { audit_log: 'full' }), ['audit', 'deleted'])
+  assert.deepEqual(ids('contacts', {}), [])
+  assert.deepEqual(ids('contacts', { contacts: 'review' }), ['customers', 'delivery', 'duplicates'])
+  assert.deepEqual(ids('contacts', { contacts: 'full' }, ['contacts_suppliers']), ['customers', 'suppliers', 'delivery', 'duplicates'])
+  assert.deepEqual(ids('promotions', { customer_portal: 'view' }), ['loyalty'])
+  assert.deepEqual(ids('promotions', { products: 'review' }), ['discounts'])
+  assert.deepEqual(ids('inventory', { inventory: 'full' }), [])
+
+  // Products' four sections are the compact navigation's only route into
+  // them (N7). Two are gated on a per-ACTION grant inside the page (Stock-in
+  // Sessions on inventory:adjust, Duplicates on products:merge_duplicates),
+  // so getHubDestinations must be able to see actions -- a caller that
+  // cannot answer for actions gets the two ungated sections rather than a
+  // tile the page would then refuse to render.
+  const withActions = (tiers: Record<string, string>, actions: string[]) => ({
+    ...restricted(tiers),
+    can: (permissionKey: string, actionKey: string) => actionKey === 'view'
+      ? !!tiers[permissionKey] && tiers[permissionKey] !== 'none' && !actions.includes(`${permissionKey}:deny_view`)
+      : actions.includes(`${permissionKey}:${actionKey}`),
+  })
+  const actionIds = (tiers: Record<string, string>, actions: string[]) => getHubDestinations('products', withActions(tiers, actions)).map((item) => item.id)
+  assert.deepEqual(ids('products', { products: 'full', inventory: 'full' }), ['products', 'stock_changes'], 'action-gated sections stay hidden from a caller with no per-action grant')
+  assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['inventory:adjust', 'products:merge_duplicates']), ['products', 'stock_changes', 'stock_in_sessions', 'duplicates'])
+  assert.deepEqual(actionIds({ products: 'full' }, ['products:merge_duplicates']), ['products', 'stock_changes', 'duplicates'])
+  assert.deepEqual(actionIds({ inventory: 'full' }, ['inventory:adjust']), [])
+  assert.deepEqual(actionIds({}, []), [])
+  assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['products:deny_view', 'inventory:adjust', 'products:merge_duplicates']), [])
+  assert.deepEqual(getHubDestinations('contacts', withActions({ contacts: 'full' }, ['contacts:deny_view'])), [])
+  assert.deepEqual(
+    getHubDestinations('products', withActions({ products: 'full', inventory: 'full' }, ['inventory:adjust', 'products:merge_duplicates'])).map((item) => item.key),
+    ['products', 'stock_change_ledger', 'stock_in_sessions', 'product_duplicates_section'],
+    'the sheet labels the sections with the keys the page already ships in both packs',
+  )
+})
+
+await runTest('section URLs round-trip, reject hidden/foreign ids, preserve old links and unrelated anchors', () => {
+  const access = { getPermissionTier: () => 'full', hasPermission: () => true, can: () => true }
+  for (const page of ['branches', 'sales', 'settings', 'contacts', 'promotions', 'review', 'products']) {
+    const sections = getHubDestinations(page, access)
+    const ids = sections.map((section) => section.id)
+    for (const section of sections) assert.equal(resolveHubSection(page, `/${page}`, `#${hubAnchor(page, section.id)}`, ids, ids[0]), section.id)
+  }
+  assert.equal(resolveHubSection('sales', '/sales', '#hub:settings:backup', ['sales', 'returns'], 'sales'), 'sales')
+  assert.equal(resolveHubSection('settings', '/settings', '#hub:settings:users', ['backup'], 'users'), 'backup')
+  assert.equal(resolveHubSection('sales', '/returns', '', ['sales', 'returns'], 'sales'), 'returns')
+  assert.equal(resolveHubSection('promotions', '/loyalty-points', '', ['rules', 'loyalty'], 'rules'), 'loyalty')
+  assert.equal(navigationHash('sales', 'contacts', '#hub:sales:fees'), '')
+  assert.equal(navigationHash('settings', 'sales', '#notification-anchor'), '#notification-anchor')
+  assert.equal(navigationHash('sales', 'sales', '#hub:sales:fees', 'hub:sales:returns'), '#hub:sales:returns')
+  assert.equal(needsNavigationGuard('sales', 'sales', '#hub:sales:fees', '#hub:sales:returns'), true)
+  assert.equal(needsNavigationGuard('sales', 'sales', '#hub:sales:fees', '#hub:sales:fees'), false)
+  assert.equal(needsNavigationGuard('settings', 'settings', '#business', '#appearance'), false)
 })
 
 if (failed > 0) {

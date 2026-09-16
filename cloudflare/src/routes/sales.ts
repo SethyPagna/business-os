@@ -1,9 +1,15 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
+import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
+import { hasColumn, tableColumnSet } from '../lib/schemaProbe'
+import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
+import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePricingError } from '../lib/historicalSalePricing'
+import { normalizePromotionRule } from '../lib/promotionRules'
+import { resolveProductMergeLineage, ProductMergeLineageError } from '../lib/productMergeLineage'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { hasPermission, hasAnyPermission, getPermissionTier, getActionTier } from '../lib/permissions'
+import { hasAnyPermission, getPermissionTier, getActionTier, isAdminControlUser } from '../lib/permissions'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
 // every sales list/stat/report but perform no writes. Reads use this
@@ -12,11 +18,106 @@ function canReadSales(user: SessionUser): boolean {
   return getPermissionTier(user, 'sales') !== 'none'
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
-import { getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
-import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
+import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+// The POS payment-method field is free text (a datalist, not a select), so a
+// sale can introduce a method Settings has never heard of. See
+// lib/paymentMethodRegistry.ts for why the merge is server-side and shared by
+// every sale writer rather than done in the POS component.
+import { mergePaymentMethods, parseConfiguredMethods, saleMethodsUsed } from '../lib/paymentMethodRegistry'
+import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSettlement'
+// Sales are Shop-only. The same predicate runs in the UI and here where an
+// offline replay, direct API caller, or stale client cannot bypass it.
+import { firstUnsellableBranch } from '../lib/branchRoleGuards'
+import { branchCanSell } from '../lib/branchRoles'
+import {
+  SALE_SETTLEMENT_ACTION_KIND,
+  buildSaleSettlementAfterState,
+  readSaleSettlementState,
+  saleSettlementRecordEvent,
+  saleMutationGuard,
+  saleSettlementStateStatements,
+  type SaleSettlementSnapshot,
+} from '../lib/saleSettlementAction'
+import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
+import { CUSTOMER_REFUND_JOIN, getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr } from '../lib/salesAnalytics'
+import { readSalesReportSnapshot, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
+import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
+import { allocateAcrossLots, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
+// S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
+// a line, how much stock moves, which lots, what happens to the totals) are
+// all in this one pure module so a test can drive them directly -- see
+// POST /:id/items below and scripts/test-sale-add-items-pure.cjs.
+import {
+  allocateNewSaleLines,
+  planUnlottedSaleLineGuards,
+  buildOperationAllocationStatements,
+  guardSaleLineAddition,
+  planSaleLineAddition,
+  captureSaleLineKhrSnapshot,
+  saleLineKhrSnapshotStatement,
+  resolveExplicitSaleLineBatches,
+  saleMoneyUpdateStatement,
+  saleStatusDeductsStock,
+} from '../lib/saleLineAddition'
+// S4-30: amending a recorded sale, as an append-only ledger. Same discipline
+// as S4-24b above -- every rule about who may amend, for how long, what moves
+// stock, and what happens to the money lives in the pure module, and this file
+// is the I/O around it. See scripts/test-sale-amendments-pure.cjs.
+import {
+  AMENDMENT_WINDOW_SETTING_KEY,
+  amendmentEntryStatement,
+  guardDeliveryAddition,
+  guardDeliveryActualCostAmendment,
+  guardDeliveryFeeAmendment,
+  guardSaleAmendment,
+  planDeliveryFeeChange,
+  planDeliveryAddition,
+  planDeliveryActualCostChange,
+  planLineQuantityDecrease,
+  planLineQuantityIncrease,
+  recomputeSaleMoneyAfterAmendment,
+  resolveAmendedTaxUsd,
+  resolveAmendmentWindowMinutes,
+  resolveTaxSettings,
+  saleAmendmentMovesStock,
+  saleSkipsStock,
+  saleTaxUpdateStatement,
+  summarizeAmendments,
+  taxableBaseUsd,
+  TAX_ENABLED_SETTING_KEY,
+  TAX_RATE_SETTING_KEY,
+  type AmendableSaleRow,
+  type AmendmentPlan,
+  type AmendedTaxResult,
+  type LedgerRow,
+  type LineAllocation,
+  type TaxSettings,
+} from '../lib/saleAmendments'
+import { DELIVERY_AMOUNT_ERROR_MESSAGES, deliveryAmountChanged, parseDeliveryAmountUsd } from '../lib/deliveryAmounts'
+import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
+import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
+import { prepareCustomerAssignments, preparePointsRedemption, isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
+import {
+  buildSaleRecords,
+  buildSaleRecordsCountSql,
+  saleRecordsCountBinds,
+  type SaleRecordReturnAuditRow,
+  type SaleRecordReturnBulkEventRow,
+  type SaleRecordReturnRow,
+  SALE_RECORDS_COUNT_BINDS_PER_ID,
+  SALE_RECORDS_SELF_COUNT,
+  type SaleRecordAuditRow,
+  type SaleRecordBulkRow,
+  type SaleRecordBulkReplayRow,
+  type SaleRecordLedgerRow,
+  type SaleRecordMutationRow,
+  type SaleRecordMutationReplayRow,
+  type SaleRecordSaleRow,
+  type SaleRecordEventRow,
+  type SaleRecordChange,
+} from '../lib/saleRecords'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
-import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
+import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
   allocateReturnedQuantities,
@@ -29,17 +130,89 @@ import {
   type SaleItemAllocation,
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
-import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
-import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
+import { computeSaleTotals, round2, newSaleMoney4, assertCanonicalSaleChildren } from '../lib/saleTotals'
+import { multiplyMoney4, divideMoney4, sumMoney4, subtractMoney4, subtractDecimalSum, sellingPriceCeilCent, MoneyPrecisionError } from '../lib/moneyPrecision'
+import { canonicalMoney4, SaleMoneyContractError, hasRecordedSaleMoneyPrecision } from '../lib/saleMoneyPrecision'
+import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError } from '../lib/saleMutationHeaderQuote'
+import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
+import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { formatSaleTelegramLines, sendTelegramEvent, telegramMoney } from '../lib/telegram'
+import { contactDisplayAddress } from '../lib/contactOptions'
+import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
+import { actorId, actorSnapshot } from '../lib/actorSnapshot'
+import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from '../lib/anonymousCustomer'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+const SHOP_ONLY_SALE_ERROR = 'Sales can only be recorded at the Shop. Transfer Warehouse stock to the Shop first.'
+
+async function saleAllowsPaymentCorrection(db: ReturnType<typeof getDb>, saleId: number): Promise<boolean> {
+  const latest = await db.prepare(`
+    SELECT action, details FROM audit_logs
+    WHERE (entity='sale' OR table_name='sale')
+      AND CAST(COALESCE(entity_id,record_id) AS TEXT)=CAST(@saleId AS TEXT)
+      AND (
+        action='sale_settlement'
+        OR action='sale_payment_correction_opened'
+        OR (
+          action='update'
+          AND json_valid(details)=1
+          AND json_extract(details,'$.newStatus')='awaiting_payment'
+          AND json_extract(details,'$.oldStatus') IN ('completed','awaiting_delivery')
+        )
+      )
+    ORDER BY id DESC LIMIT 1
+  `).get<{ action: string; details: string | null }>({ saleId: String(saleId) })
+  return latest?.action === 'update' || latest?.action === 'sale_payment_correction_opened'
+}
 app.use('*', requireAuth)
 
 const SALES_READ_CACHE_TTL_SECONDS = 20
+
+/**
+ * Fold the methods a sale actually used back into `pos_payment_methods`.
+ *
+ * The ONE I/O wrapper around lib/paymentMethodRegistry -- every sale writer in
+ * this file calls this, so a method typed at the till, a method chosen when a
+ * credit sale is finally settled, and a method that arrives on an imported row
+ * all reach the configured list by the same route.
+ *
+ * Three properties this deliberately has:
+ *
+ * - It NEVER fails the caller. A sale that is already committed must not be
+ *   reported as failed because a settings row would not write, so every error
+ *   is swallowed and logged. Callers hand this to `waitUntil`, off the
+ *   response path.
+ * - It reads and re-writes the whole array rather than appending, because the
+ *   setting IS a JSON array; `mergePaymentMethods` keeps the existing order
+ *   and the operator's own capitalisation, so a concurrent Settings edit can
+ *   only ever lose the append, never reorder or rename what the operator set.
+ * - It writes NOTHING when nothing is new. This runs on every checkout; the
+ *   common case (a known method) must not produce a settings write, or
+ *   `settings.updated_at` would change on every sale and defeat the
+ *   /settings/meta polling that the whole app's refresh cadence is built on.
+ */
+async function registerUsedPaymentMethods(env: Env, sale: { payment_method?: unknown; payment_details?: unknown }): Promise<string[]> {
+  const used = saleMethodsUsed(sale)
+  if (!used.length) return []
+  try {
+    const db = getDb(env)
+    const row = await db.prepare("SELECT value FROM settings WHERE key = 'pos_payment_methods'").get<{ value: string }>()
+    const configured = parseConfiguredMethods(row?.value)
+    const merged = mergePaymentMethods(configured, used)
+    if (!merged.changed) return []
+    await db.prepare(
+      `INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, CURRENT_TIMESTAMP)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+    ).run({ value: JSON.stringify(merged.methods) })
+    return merged.added
+  } catch (error) {
+    console.error('[payment-methods] could not register methods used on a sale', error)
+    return []
+  }
+}
 
 async function getSalesReadCacheVersion(env: Env): Promise<string> {
   // The list/search payload also exposes current customer membership data and
@@ -75,6 +248,11 @@ function appendLocalTimeRange(
 // lib/importEngine.ts's sales import so a third copy doesn't drift too.
 
 type SaleItemInput = {
+  client_line_key?: string
+  pricing_source?: PricingSource
+  display_price_mode?: 'selling'|'wholesale'
+  pricing_quote?: { gross_usd:number; product_discount_usd:number; manual_discount_usd:number; total_usd:number; total_khr:number }
+  selling_price_input_usd?: number
   product_id?: number
   id?: number
   product_name?: string
@@ -105,6 +283,9 @@ type SaleItemInput = {
   batch_id?: number | null
   batch_label?: string | null
   batch_expiry_date?: string | null
+  // Explicit cashier choice for the branch_stock remainder that has no
+  // received-date identity. It is validated below; false/absent keeps FIFO.
+  unlotted_stock?: boolean
   // 11.9 (Part 416): set when the cashier picked the DAMAGE source for
   // this line -- the units come out of this damaged_stock_lots row
   // (quantity_remaining), not out of branch/batch stock.
@@ -132,6 +313,107 @@ function normalizeClientRequestId(value: unknown): string | null {
   return normalized.length > 120 ? normalized.slice(0, 120) : normalized
 }
 
+async function saleMutationDigest(value: unknown): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function saleMoneySchemaReady(db: ReturnType<typeof getDb>): Promise<boolean> {
+  const required = ['money_precision_version','calculated_total_usd','rounding_adjustment_usd']
+  // Was three fresh PRAGMA table_info() round trips on every call (and this
+  // gates several hot POST/GET routes -- see call sites below); each column
+  // set is now memoized per isolate by schemaProbe.ts and the three
+  // independent probes are fetched concurrently rather than one after
+  // another.
+  const [columns, returns, items] = await Promise.all([
+    tableColumnSet(db, 'sales'),
+    tableColumnSet(db, 'returns'),
+    tableColumnSet(db, 'sale_items'),
+  ])
+  return required.every(name => columns.has(name))
+    && ['money_precision_version','calculated_refund_usd','rounding_adjustment_usd'].every(name => returns.has(name))
+    && items.has('pricing_snapshot_json')
+}
+
+function canonicalSaleItemsSql() {
+  const keys = ['id','sale_id','product_id','product_name','sku','quantity','unit','applied_price_usd','applied_price_khr',
+    'cost_price_usd','cost_price_khr','total_usd','total_khr','branch_id','price_mode','product_discount_type',
+    'product_discount_label','product_discount_usd','product_discount_khr','base_price_usd','base_price_khr',
+    'manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','batch_id','batch_label','batch_expiry_date','damaged_lot_id','returned_quantity','pricing_snapshot_json']
+  return `(SELECT json_group_array(json_object(${keys.map(key => `'${key}',i.${key}`).join(',')}))
+    FROM (SELECT * FROM sale_items WHERE sale_id=s.id ORDER BY id) i)`
+}
+
+function canonicalSaleIdentityBindingsSql(){
+  return `(SELECT json_group_array(json_object('sale_id',i.sale_id,'sale_item_id',i.id,
+    'captured_product_id',json_extract(proof.value,'$.captured_product_id'),'current_product_id',i.product_id))
+    FROM sale_items i,json_each(@validatedIdentityBindings) proof
+    WHERE i.sale_id=s.id AND i.id=json_extract(proof.value,'$.sale_item_id')
+      AND i.sale_id=json_extract(proof.value,'$.sale_id') AND i.product_id=json_extract(proof.value,'$.current_product_id'))`
+}
+
+/** Financial snapshot stored inside the mutation transaction, never reconstructed on retry. */
+function canonicalMutationResponseSql(responseSql: string): string {
+  const fields = ['id','receipt_number','sale_status','updated_at','exchange_rate','subtotal_usd','subtotal_khr',
+    'discount_usd','discount_khr','membership_discount_usd','membership_discount_khr','tax_usd','tax_khr',
+    'delivery_fee_usd','delivery_fee_khr','delivery_actual_cost_usd','delivery_actual_cost_khr','is_delivery',
+    'total_usd','total_khr','amount_paid_usd','amount_paid_khr','change_usd','change_khr','change_is_actual',
+    'change_exchange_rate','payment_method','payment_details','payment_currency','money_precision_version',
+    'calculated_total_usd','rounding_adjustment_usd']
+  return `(SELECT json_set(${responseSql},'$.sale',json_object(${fields.map(key => `'${key}',s.${key}`).join(',')},
+    'items',json(${canonicalSaleItemsSql()}),'pricing_identity_bindings',json(${canonicalSaleIdentityBindingsSql()})), '$.moneyPrecisionVersion',s.money_precision_version,
+    '$.calculatedTotalUsd',s.calculated_total_usd,'$.roundingAdjustmentUsd',s.rounding_adjustment_usd)
+    FROM sales s WHERE s.id=@saleId)`
+}
+
+async function committedMutationResponse(db: ReturnType<typeof getDb>, operationId: string) {
+  const receipt = await db.prepare('SELECT response_json FROM sale_mutation_receipts WHERE id=?').get<{response_json:string}>([operationId])
+  if (!receipt) throw new Error('Committed mutation receipt is unavailable; recover using the same request identity.')
+  return JSON.parse(receipt.response_json) as Record<string,unknown>
+}
+
+/** A single SQL snapshot prevents a later edit mixing a header with older lines. */
+async function authoritativeSaleSnapshot(db: ReturnType<typeof getDb>, saleId: number): Promise<(Record<string,unknown> & { items: Record<string,unknown>[] }) | null> {
+  const row = await db.prepare(`SELECT s.*,${canonicalSaleItemsSql()} AS canonical_items
+    FROM sales s WHERE s.id=?`).get<Record<string,unknown>>([saleId])
+  if (!row) return null
+  const { canonical_items, ...sale } = row
+  const snapshot={ ...sale, items: JSON.parse(String(canonical_items || '[]')) }
+  if(Number(sale.money_precision_version)===1){
+    const lineage=await resolveProductMergeLineage(db,saleId,snapshot.items)
+    validateCapturedSaleBasket(snapshot.items,sale,lineage.bindings)
+    if(lineage.bindings.length)await db.prepare(`SELECT CASE WHEN ${lineage.condition} THEN 1 ELSE json_extract('', '$') END`).get(lineage.params)
+    return {...snapshot,pricing_identity_bindings:lineage.bindings}
+  }
+  return snapshot
+}
+
+app.get('/money-precision-capability', async (c) => {
+  if (!hasAnyPermission(c.get('user'), ['pos','sales'])) return c.json({ error: 'Permission denied' }, 403)
+  c.header('Cache-Control','private, no-store')
+  const db=getDb(c.env)
+  return c.json({ money_precision_version: 1, schema_ready: await saleMoneySchemaReady(db), historical_edit_ready:await historicalEditSchemaReady(db) })
+})
+
+async function historicalEditSchemaReady(db:ReturnType<typeof getDb>):Promise<boolean>{
+  return !!await db.prepare("SELECT 1 AS ready FROM sqlite_master WHERE type='trigger' AND name='sales_money_precision_update_0161'").get()
+}
+
+app.get('/create-receipt', async (c) => {
+  c.header('Cache-Control','private, no-store')
+  const user = c.get('user')
+  if (!hasAnyPermission(user,['pos','sales'])) return c.json({ error: 'Permission denied' },403)
+  const requestId = c.req.query('client_request_id') || ''
+  if (!requestId || requestId !== normalizeClientRequestId(requestId)) return c.json({ error: 'A valid request identity is required.' },400)
+  const db = getDb(c.env)
+  const receipt = await db.prepare(`SELECT id FROM sales WHERE client_request_id=? AND client_request_id<>''
+    AND (cashier_id=? OR ?=1) LIMIT 1`).get<{ id:number }>([requestId,Number(user.id),isAdminControlUser(user)?1:0])
+  if (!receipt) return c.json({ committed: false })
+  const sale = await authoritativeSaleSnapshot(db,receipt.id)
+  if (!sale || !sale.items.length) return c.json({ committed: false, code: 'sale_incomplete' })
+  return c.json({ committed: true, response: { id:receipt.id, receiptNumber:sale.receipt_number, duplicate:true, sale } })
+})
+
 app.post('/', async (c) => {
   const db = getDb(c.env)
   // Real gap: this endpoint only checked requireAuth (any logged-in user).
@@ -140,10 +422,15 @@ app.post('/', async (c) => {
   // PAGE_PERMISSIONS) and, potentially, a manual entry from the Sales page
   // itself ('sales' permission) -- so either grant is accepted here rather
   // than requiring both.
-  if (!hasAnyPermission(c.get('user'), ['pos', 'sales'])) {
+  // N13: one binding for the actor snapshot below -- the sale header, its
+  // movement rows, the search blob and the Telegram line all name the SAME
+  // authenticated account, resolved here and never read out of the body.
+  const user = c.get('user')
+  if (!hasAnyPermission(user, ['pos', 'sales'])) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<{
+    money_precision_version?: unknown
     items: SaleItemInput[]
     // Offline replays only: the sale's queue-time moment, honored with
     // bounded trust (lib/clientTimestamp.ts). Online checkouts omit it.
@@ -169,6 +456,9 @@ app.post('/', async (c) => {
     tax_usd?: number
     amount_paid_usd?: number
     amount_paid_khr?: number
+    change_usd?: number | string
+    change_khr?: number | string
+    change_is_actual?: boolean
     receipt_number?: string
     client_request_id?: string
     sale_status?: string
@@ -198,6 +488,7 @@ app.post('/', async (c) => {
     delivery_actual_cost_khr?: number | string | null
   }>()
 
+  try {
   const clientRequestId = normalizeClientRequestId(body.client_request_id)
   if (clientRequestId) {
     const existingSale = await db
@@ -205,10 +496,30 @@ app.post('/', async (c) => {
       // `client_request_id <> ''` from the equality binding, so omitting it
       // turns this idempotency lookup into a full sales-table scan even though
       // idx_sales_client_request_unique_pg already exists.
-      .prepare("SELECT id, receipt_number FROM sales WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1")
-      .get<{ id: number; receipt_number: string }>([clientRequestId])
-    if (existingSale) return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true })
+      .prepare(`SELECT id, receipt_number,
+        (SELECT COUNT(*) FROM sale_items WHERE sale_id = sales.id) AS item_count
+        FROM sales WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1`)
+      .get<{ id: number; receipt_number: string; item_count: number }>([clientRequestId])
+    if (existingSale) {
+      // A prior interrupted checkout can have a durable header but no lines.
+      // Treating that row as a completed idempotent replay clears the client's
+      // offline payload and makes the incomplete sale impossible to retry.
+      if (Number(existingSale.item_count) < 1) {
+        return c.json({
+          error: 'This sale was not completely recorded. Keep the original sale details and ask an administrator to recover it.',
+          code: 'sale_incomplete',
+        }, 409)
+      }
+      return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true, sale: await authoritativeSaleSnapshot(db, existingSale.id) })
+    }
   }
+  if (body.money_precision_version !== 1) return c.json({ error: 'Keep the original pending sale and review it with the current app before recording it.', code: 'money_precision_review_needed' }, 409)
+  if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' }, 503)
+  // Every atomic create needs a stable identity that later statements in the
+  // D1 batch can resolve before the auto-generated sale id is available to JS.
+  // Current POS/offline clients provide client_request_id; the internal key
+  // keeps the legacy direct-API path atomic without making that field required.
+  const saleWriteKey = clientRequestId || `server:${crypto.randomUUID()}`
 
   if (!Array.isArray(body.items) || body.items.length === 0) {
     return c.json({ error: 'Sale items required' }, 400)
@@ -225,6 +536,10 @@ app.post('/', async (c) => {
   const shouldDeductStock = STOCK_DEDUCTED_STATUSES.has(saleStatus)
 
   // ---- 1. Normalize + validate input shape (no DB access yet) ----
+  const saleHeaderBranchId = Number(body.branch_id)
+  if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
+    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+  }
   const normalized: NormalizedItem[] = []
   for (let index = 0; index < body.items.length; index += 1) {
     const item = body.items[index]
@@ -236,12 +551,32 @@ app.post('/', async (c) => {
     if (!Number.isFinite(quantity) || quantity <= 0) {
       return c.json({ error: `Sale item #${index + 1} has an invalid quantity` }, 400)
     }
+    if (item.unlotted_stock !== undefined && typeof item.unlotted_stock !== 'boolean') {
+      return c.json({ error: `Sale item #${index + 1} has an invalid unlotted_stock flag` }, 400)
+    }
+    const lineBranchId = Number(item.branch_id ?? saleHeaderBranchId)
+    if (!Number.isSafeInteger(lineBranchId) || lineBranchId <= 0 || lineBranchId !== saleHeaderBranchId) {
+      return c.json({ error: 'The sale header and every line must use the same Shop branch.' }, 400)
+    }
     normalized.push({
       ...item,
       product_id: productId,
       quantity,
-      branch_id: Number(item.branch_id || body.branch_id) || null,
+      branch_id: lineBranchId,
     })
+  }
+
+  // ---- 1b. The selling branch ----
+  // A line may name its own branch, so this checks the DISTINCT set the cart
+  // actually resolved to rather than trusting body.branch_id alone.
+  const saleBranchIds = [saleHeaderBranchId]
+  const saleBranchRows = await selectInChunks(saleBranchIds, 0, (chunk) => db
+    .prepare(`SELECT id, name, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; name: string | null; is_active: number | null }>(chunk))
+  if (saleBranchRows.length !== saleBranchIds.length
+    || saleBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
+    || firstUnsellableBranch(saleBranchRows)) {
+    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
   }
 
   // ---- 2. Read current prices + stock (plain reads, before any writes) ----
@@ -250,15 +585,15 @@ app.post('/', async (c) => {
   // failure mode is a rejected checkout, not a degraded one.
   const productIds = [...new Set(normalized.map((i) => i.product_id))]
   const products = await selectInChunks(productIds, 0, (chunk) => db
-    .prepare(`SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<{ id: number; name: string; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
+    .prepare(`SELECT * FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
   const productMap = new Map(products.map((p) => [p.id, p]))
 
   // D1's batch() is atomic but cannot branch mid-batch (see lib/db.ts) --
   // validate stock as a plain read first, exactly like the original
   // backend/src/routes/sales.ts's assertSaleStockAvailable does, *before*
   // building the atomic write batch below. Skipped entirely when this sale's
-  // status won't deduct stock yet (e.g. 'awaiting_payment') -- matches
+  // status does not deduct stock -- matches
   // PATCH /:id/status's own wasStockDeducted/willStockBeDeducted gate below.
   //
   // Batched by branch (one query per distinct branch_id in this sale, not
@@ -291,25 +626,103 @@ app.post('/', async (c) => {
     }
   }
 
-  // Batch stock check -- additional to the branch_stock check above, for
-  // any line the cashier picked a specific batch for (see
-  // lib/productBatches.ts for why this is a separate table, not folded
-  // into the branch_stock check). A batch line still counts against the
-  // branch_stock total above too, since branch_stock stays authoritative.
-  const batchCheckItems = stockCheckItems.filter((item) => item.batch_id)
-  if (batchCheckItems.length) {
-    const batchIds = [...new Set(batchCheckItems.map((item) => item.batch_id as number))]
-    const batchStockRows = await selectInChunks(batchIds, 0, (chunk) => db
-      .prepare(`SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN (${chunk.map(() => '?').join(',')})`)
-      .all<{ batch_id: number; branch_id: number; quantity: number }>(chunk))
-    const batchStockMap = new Map(batchStockRows.map((row) => [`${row.batch_id}:${row.branch_id}`, row.quantity]))
-    for (const item of batchCheckItems) {
-      const available = batchStockMap.get(`${item.batch_id}:${item.branch_id}`) || 0
-      if (item.quantity > available) {
-        const name = productMap.get(item.product_id)?.name || `product #${item.product_id}`
-        return c.json({ error: `Insufficient batch stock for ${name}: requested ${item.quantity}, available ${available}` }, 409)
+  // Resolve every explicit batch against the authoritative PRODUCT + Shop
+  // BRANCH + active-lot identity before retaining any caller-supplied batch
+  // metadata. The previous check only keyed branch_batch_stock by
+  // batch_id+branch_id, so a caller could attach another product's lot to a
+  // line and persist a plausible-looking label/expiry snapshot. This is the
+  // same resolver used by POST /:id/items, including cumulative availability
+  // across repeated lines that name the same lot.
+  //
+  // Read all ordinary lines once. The same mutable map is reserved by
+  // explicit picks below, then consumed by FIFO for unpicked lines, so an
+  // explicit and automatic line cannot both plan the same units.
+  const lotsByProductBranch = await readFifoLotAvailabilityForCart(
+    db,
+    normalized
+      .filter((item) => !item.damaged_lot_id && item.branch_id)
+      .map((item) => ({ productId: item.product_id, branchId: item.branch_id as number })),
+  )
+  // A selected unlotted remainder is a factual claim, not an escape hatch:
+  // the branch must hold more aggregate stock than EVERY positive recorded
+  // lot, including inactive lots that remain attributable in the ledger.
+  // Reserve the remainder across repeated lines before checkout writes.
+  const requestedUnlottedByKey = new Map<string, { productId: number; branchId: number; quantity: number }>()
+  for (const item of normalized) {
+    if (!item.unlotted_stock) continue
+    if (item.batch_id || item.damaged_lot_id || !item.branch_id) return c.json({ error: 'Unrecorded stock must be a regular Shop sale line.' }, 400)
+    const key = `${item.product_id}:${item.branch_id}`
+    const requested = requestedUnlottedByKey.get(key)
+    requestedUnlottedByKey.set(key, requested
+      ? { ...requested, quantity: requested.quantity + item.quantity }
+      : { productId: item.product_id, branchId: item.branch_id, quantity: item.quantity })
+  }
+  const knownLotQuantityByKey = new Map<string, number>()
+  const unlottedRequestsByBranch = new Map<number, number[]>()
+  for (const request of requestedUnlottedByKey.values()) {
+    const productIds = unlottedRequestsByBranch.get(request.branchId) || []
+    if (!productIds.includes(request.productId)) productIds.push(request.productId)
+    unlottedRequestsByBranch.set(request.branchId, productIds)
+  }
+  for (const [branchId, productIds] of unlottedRequestsByBranch.entries()) {
+    const rows = await selectInChunks(productIds, 1, (chunk) => db.prepare(`
+      SELECT pb.variant_product_id AS product_id, bbs.branch_id, SUM(bbs.quantity) AS quantity
+      FROM branch_batch_stock bbs
+      JOIN product_batches pb ON pb.id = bbs.batch_id
+      WHERE bbs.branch_id = ?
+        AND pb.variant_product_id IN (${chunk.map(() => '?').join(',')})
+        AND bbs.quantity > 0
+      GROUP BY pb.variant_product_id, bbs.branch_id
+    `).all<{ product_id: number; branch_id: number; quantity: number }>([branchId, ...chunk]))
+    for (const row of rows) knownLotQuantityByKey.set(`${row.product_id}:${row.branch_id}`, Number(row.quantity) || 0)
+  }
+  for (const [key, request] of requestedUnlottedByKey.entries()) {
+    const aggregate = stockByBranch.get(request.branchId)?.get(request.productId) || 0
+    const knownLots = knownLotQuantityByKey.get(key) || 0
+    const available = Math.max(0, aggregate - knownLots)
+    if (request.quantity > available) return c.json({ error: `Insufficient unrecorded stock: requested ${request.quantity}, available ${available}` }, 409)
+  }
+
+  const explicitBatchResolution = resolveExplicitSaleLineBatches(
+    normalized.map((item) => {
+      const product = productMap.get(item.product_id)
+      return {
+        productId: item.product_id,
+        productName: product?.name || `product #${item.product_id}`,
+        quantity: item.quantity,
+        branchId: item.branch_id,
+        unitPriceUsd: Number(item.applied_price_usd ?? product?.selling_price_usd ?? 0),
+        costPriceUsd: Number(product?.cost_price_usd || 0),
+        costPriceKhr: Number(product?.cost_price_khr || 0),
+        batchId: item.damaged_lot_id ? null : item.batch_id,
+        batchLabel: item.damaged_lot_id ? null : item.batch_label,
+        batchExpiryDate: item.damaged_lot_id ? null : item.batch_expiry_date,
       }
+    }),
+    lotsByProductBranch,
+  )
+  if (!explicitBatchResolution.ok) {
+    return c.json({ error: explicitBatchResolution.error }, 409)
+  }
+  for (const [itemIndex, resolved] of explicitBatchResolution.lines.entries()) {
+    const item = normalized[itemIndex]
+    if (item.damaged_lot_id || !item.branch_id) continue
+    if (!resolved.batchId) {
+      // A label/expiry without a real picked id is not lot identity. FIFO
+      // below may replace these with a server-owned single-lot snapshot;
+      // a multi/untracked line must stay blank rather than persisting client
+      // text that looks attributable when it is not.
+      item.batch_id = undefined
+      item.batch_label = undefined
+      item.batch_expiry_date = undefined
+      continue
     }
+    item.batch_id = resolved.batchId || undefined
+    item.batch_label = resolved.batchLabel || undefined
+    item.batch_expiry_date = resolved.batchExpiryDate || undefined
+    const lot = (lotsByProductBranch.get(`${item.product_id}:${item.branch_id}`) || [])
+      .find((entry) => entry.batchId === Number(resolved.batchId))
+    if (lot) lot.available -= item.quantity
   }
 
   // 11.9: damaged-source availability (plain read, same validate-then-write
@@ -346,22 +759,18 @@ app.post('/', async (c) => {
   // batch_id NULL and records per-lot allocation rows instead. Units beyond
   // what the lot ledger tracks (legacy stock) stay unlotted -- the sale
   // still proceeds on branch_stock, exactly as before this pass existed.
-  // Runs for non-deducting statuses too (awaiting_payment): the attribution
-  // is recorded now (released_quantity = quantity, nothing physically out),
-  // so the later deducting transition draws the same lots.
+  // Runs for non-deducting statuses too: the attribution is recorded now
+  // (released_quantity = quantity, nothing physically out), so a later
+  // deducting transition draws the same lots.
   const autoAllocationsByItemIndex = new Map<number, FifoLotTake[]>()
   {
     // One batched read of every unlotted line's FIFO availability instead of
     // a round-trip per line -- the grouped Map is still mutated in place
     // below so a second line of the same product can't double-take a lot.
-    const fifoPairs = normalized
-      .filter((item) => !item.batch_id && !item.damaged_lot_id && item.branch_id)
-      .map((item) => ({ productId: item.product_id, branchId: item.branch_id as number }))
-    const lotsByKey = await readFifoLotAvailabilityForCart(db, fifoPairs)
     for (const [itemIndex, item] of normalized.entries()) {
-      if (item.batch_id || item.damaged_lot_id || !item.branch_id) continue
+      if (item.batch_id || item.unlotted_stock || item.damaged_lot_id || !item.branch_id) continue
       const key = `${item.product_id}:${item.branch_id}`
-      const lots = lotsByKey.get(key) || []
+      const lots = lotsByProductBranch.get(key) || []
       const { takes } = allocateAcrossLots(lots, item.quantity)
       if (!takes.length) continue
       // Consume the shared availability so a second line of the same
@@ -394,64 +803,54 @@ app.post('/', async (c) => {
     `SELECT value FROM settings WHERE key = 'change_exchange_rate'`,
   ).get<{ value: string }>()
   const changeExchangeRateSetting = changeRateRow?.value
-  let customer: { id: number; name: string | null; membership_number: string | null } | null = null
+  let customer: { id: number; name: string | null; membership_number: string | null; is_anonymous: number } | null = null
   if (body.customer_id) {
-    customer = await db.prepare('SELECT id, name, membership_number FROM customers WHERE id = ?').get([body.customer_id]) || null
+    customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE id = ?').get([body.customer_id]) || null
   } else if (body.customer_membership_number) {
-    customer = await db.prepare('SELECT id, name, membership_number FROM customers WHERE lower(trim(membership_number)) = lower(trim(?))').get([body.customer_membership_number]) || null
+    customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) AND COALESCE(is_anonymous,0)=0').get([body.customer_membership_number]) || null
   }
+  const customerStateGuard = customer ? {
+    id: customer.id,
+    isAnonymous: isAnonymousCustomer(customer) ? 1 : 0,
+  } : null
+  // New sales store General as the canonical null assignment. A persisted
+  // legacy anonymous identity remains readable on old rows, but it is never
+  // copied forward as if it were a customer profile.
+  const anonymousCustomerSelected = isAnonymousCustomer(customer)
+  if (anonymousCustomerSelected) customer = null
+  const saleCustomerName = anonymousCustomerSelected ? null : body.customer_name || customer?.name || null
+  const saleCustomerPhone = anonymousCustomerSelected ? null : body.customer_phone || null
+  const saleCustomerAddress = anonymousCustomerSelected ? null : contactDisplayAddress(body.customer_address) || null
 
   const membershipPointsRedeemed = Math.max(0, Number(body.membership_points_redeemed) || 0)
-  let membershipDiscountUsd = round2(Math.max(0, Number(body.membership_discount_usd) || 0))
-  let membershipDiscountKhr = round2(Math.max(0, Number(body.membership_discount_khr) || 0))
+  let membershipDiscountUsd = newSaleMoney4(body.membership_discount_usd)
+  let membershipDiscountKhr = newSaleMoney4(body.membership_discount_khr)
+
+  // The owner's membership-points master switch (user, Sep 4 2026), read as a
+  // SETTING and never from the request -- a stale till that still shows the
+  // points panel must not be able to accrue or spend against a programme the
+  // shop has switched off. Absent = on, matching buildPortalConfig's default.
+  const loyaltyEnabledRow = await db.prepare(
+    `SELECT value FROM settings WHERE key = 'loyalty_points_enabled'`,
+  ).get<{ value: string }>()
+  const loyaltyPointsEnabled = !['0', 'false', 'no', 'off'].includes(String(loyaltyEnabledRow?.value ?? '').trim().toLowerCase())
+  let redemptionGuard: Awaited<ReturnType<typeof preparePointsRedemption>> | null = null
 
   if (membershipPointsRedeemed > 0) {
     if (!customer) {
       return c.json({ error: 'A membership customer is required to redeem points' }, 400)
     }
-    const settingsRows = await db.prepare(
-      `SELECT key, value FROM settings WHERE key IN ('customer_portal_points_basis', 'customer_portal_points_per_usd')`,
-    ).all<{ key: string; value: string }>()
-    const settingsMap = Object.fromEntries(settingsRows.map((r) => [r.key, r.value]))
-    const pointsBasis = String(settingsMap.customer_portal_points_basis || 'usd').toLowerCase() === 'khr' ? 'khr' : 'usd'
-    const pointsPerUsd = Number(settingsMap.customer_portal_points_per_usd) || 1
-    const pointsPerKhr = pointsPerUsd > 0 && exchangeRate > 0 ? pointsPerUsd / exchangeRate : 0
-
-    const salesAgg = await db.prepare(
-      `SELECT
-         COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment') AND COALESCE(loyalty_accrual, 1) = 1 THEN total_usd ELSE 0 END), 0) AS earned_usd,
-         COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment') AND COALESCE(loyalty_accrual, 1) = 1 THEN total_khr ELSE 0 END), 0) AS earned_khr,
-         COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment') THEN membership_points_redeemed ELSE 0 END), 0) AS redeemed
-       FROM sales WHERE customer_id = ?`,
-    ).get<{ earned_usd: number; earned_khr: number; redeemed: number }>([customer.id])
-    const returnsAgg = await db.prepare(
-      `SELECT
-         COALESCE(SUM(CASE WHEN COALESCE(status, 'completed') != 'cancelled' THEN total_refund_usd ELSE 0 END), 0) AS refund_usd,
-         COALESCE(SUM(CASE WHEN COALESCE(status, 'completed') != 'cancelled' THEN total_refund_khr ELSE 0 END), 0) AS refund_khr
-       FROM returns WHERE customer_id = ?`,
-    ).get<{ refund_usd: number; refund_khr: number }>([customer.id])
-    const rewardedAgg = await db.prepare(
-      `SELECT COALESCE(SUM(reward_points), 0) AS rewarded FROM customer_share_submissions WHERE customer_id = ? AND status = 'approved'`,
-    ).get<{ rewarded: number }>([customer.id])
-    // Manual awards (Part-77, MEDIUM): summarizePoints -- the balance POS
-    // DISPLAYS -- adds loyalty_point_adjustments, but this re-validation
-    // didn't, so a customer whose points were manually awarded saw a
-    // redeemable balance and then got "Insufficient points balance" at
-    // checkout. Same term, same sign (adjustments are positive awards by
-    // CHECK constraint).
-    const adjustedAgg = await db.prepare(
-      `SELECT COALESCE(SUM(points), 0) AS adjusted FROM loyalty_point_adjustments WHERE customer_id = ?`,
-    ).get<{ adjusted: number }>([customer.id])
-
-    const earned = pointsBasis === 'khr' ? (salesAgg?.earned_khr || 0) * pointsPerKhr : (salesAgg?.earned_usd || 0) * pointsPerUsd
-    const deducted = pointsBasis === 'khr' ? (returnsAgg?.refund_khr || 0) * pointsPerKhr : (returnsAgg?.refund_usd || 0) * pointsPerUsd
-    const alreadyRedeemed = salesAgg?.redeemed || 0
-    const rewarded = rewardedAgg?.rewarded || 0
-    const manuallyAwarded = adjustedAgg?.adjusted || 0
-    const balance = Math.max(0, earned - deducted - alreadyRedeemed + rewarded + manuallyAwarded)
-
-    if (membershipPointsRedeemed > balance + 0.005) {
-      return c.json({ error: `Insufficient points balance: requested ${membershipPointsRedeemed}, available ${Math.floor(balance)}` }, 409)
+    // Refused, not silently ignored. Dropping the redemption would charge the
+    // customer the FULL total while the cashier's screen still showed the
+    // discount -- a money difference at the counter is worse than an error.
+    if (!loyaltyPointsEnabled) {
+      return c.json({ error: 'Membership points are turned off in Settings, so points cannot be redeemed.' }, 400)
+    }
+    try {
+      redemptionGuard = await preparePointsRedemption(db, customer.id, membershipPointsRedeemed)
+    } catch (error) {
+      if (error instanceof SaleBulkError) return c.json({ error: error.message, code: 'loyalty_redemption_conflict' }, error.statusCode)
+      throw error
     }
   } else {
     membershipDiscountUsd = 0
@@ -459,24 +858,76 @@ app.post('/', async (c) => {
   }
 
   // ---- 3. Calculate totals (pure computation, no I/O) ----
+  // Capture complete active-rule membership, not only the displayed winner.
+  // Source CAS below rejects concurrent product/rule changes before any write.
+  const pricingRuleRows = await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>()
+  if (pricingRuleRows.length > 100) return c.json({error:'Too many active promotion rules to capture safely.',code:'sale_item_pricing_limit'},409)
+  const capturedRules = pricingRuleRows.map(row => normalizePromotionRule(row,1))
+  if (capturedRules.some(rule => !rule)) return c.json({error:'Promotion configuration needs review.',code:'sale_item_pricing_invalid'},409)
+  const pricingPool: CapturedPricingPool = {
+    version:1,pool_key:crypto.randomUUID(),evaluation_time:new Date().toISOString(),exchange_rate:exchangeRate,
+    rules:capturedRules as CapturedPricingPool['rules'],
+    lines:normalized.map(item => {
+      const product=productMap.get(item.product_id)
+      if (!product || typeof item.client_line_key !== 'string' || !item.pricing_source)
+        throw new SaleMoneyContractError('money_precision_pricing_intent_required')
+      // Original raw catalogue fields remain in the source CAS. The snapshot
+      // explicitly captures the fresh selling-cent policy at its input boundary.
+      const capturedProduct={...capturePricingProduct(product),
+        selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),
+        wholesale_price_usd:product.wholesale_price_usd == null ? null : sellingPriceCeilCent(Number(product.wholesale_price_usd))}
+      return {line_key:item.client_line_key,source:item.pricing_source,product:capturedProduct,
+        ...(item.display_price_mode===undefined?{}:{display_price_mode:item.display_price_mode}),
+        selling_price_input_usd:item.selling_price_input_usd ?? null,
+        manual:{type:item.manual_discount_type == null ? 'none' : item.manual_discount_type as 'fixed'|'percent',
+          value:item.manual_discount_type === 'percent' ? item.manual_discount_value ?? 0 : newSaleMoney4(item.manual_discount_value)}}
+    }),
+  }
+  const pricingQuantities=Object.fromEntries(normalized.map(item=>[item.client_line_key!,item.quantity]))
+  const exactPricing=evaluateCapturedPricingPool(pricingPool,pricingQuantities)
+  const capturedSourceGuard=pricingSourceGuard(products,pricingRuleRows)
+  for (const item of normalized) {
+    const exact=exactPricing.get(item.client_line_key!)!
+    const quote=item.pricing_quote
+    if (!quote || ['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'].some(name =>
+      quote[name as keyof typeof quote] !== exact[name as keyof typeof quote])) {
+      return c.json({error:'Pricing changed. Review the current quote before saving.',code:'sale_pricing_quote_conflict',
+        pricing_quotes:normalized.map(line=>({client_line_key:line.client_line_key,...exactPricing.get(line.client_line_key!)}))},409)
+    }
+  }
   let subtotalUsd = 0
   const priced = normalized.map((item) => {
     const product = productMap.get(item.product_id)
-    const unitPriceUsd = Number(item.applied_price_usd ?? product?.selling_price_usd ?? 0)
-    const lineTotalUsd = round2(unitPriceUsd * item.quantity)
+    const exact=exactPricing.get(item.client_line_key!)!
+    const manualUnit=divideMoney4(exact.manual_discount_usd,item.quantity)
+    const money={basePriceUsd:exact.base_price_usd,basePriceKhr:exact.base_price_khr,
+      appliedPriceUsd:exact.applied_price_usd,appliedPriceKhr:exact.applied_price_khr,
+      manualDiscountUsd:manualUnit,manualDiscountKhr:multiplyMoney4(manualUnit,exchangeRate)}
+    const unitPriceUsd = money.appliedPriceUsd
+    const lineTotalUsd = exact.total_usd
     subtotalUsd += lineTotalUsd
     return {
       ...item,
+      ...capturedPricingMetadata(pricingPool,item.client_line_key!,exact),
       product_name: item.product_name || item.name || product?.name || `product #${item.product_id}`,
       unitPriceUsd,
       lineTotalUsd,
-      costPriceUsd: Number(product?.cost_price_usd || 0),
-      costPriceKhr: Number(product?.cost_price_khr || 0),
+      canonicalMoney: money,
+      canonicalDiscountValue: item.manual_discount_type === 'percent' ? item.manual_discount_value ?? 0 : newSaleMoney4(item.manual_discount_value),
+      pricing_snapshot_json:'',
+      product_discount_usd: divideMoney4(exact.product_discount_usd,item.quantity),
+      product_discount_khr: multiplyMoney4(divideMoney4(exact.product_discount_usd,item.quantity),exchangeRate),
+      costPriceUsd: product?.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd),
+      costPriceKhr: product?.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
     }
   })
-  const discountUsd = round2(Number(body.discount_usd) || 0)
-  const discountKhr = round2(Number(body.discount_khr) || discountUsd * exchangeRate)
-  const taxUsd = round2(Number(body.tax_usd) || 0)
+  subtotalUsd = sumMoney4(priced.map(line => line.lineTotalUsd))
+  const discountUsd = newSaleMoney4(body.discount_usd)
+  const discountKhr = body.discount_khr === undefined ? multiplyMoney4(discountUsd,exchangeRate) : newSaleMoney4(body.discount_khr)
+  const taxUsd = newSaleMoney4(body.tax_usd)
+  const allocationContext={version:1 as const,lines:priced.map(line=>({line_key:line.client_line_key!,amount:line.lineTotalUsd})),
+    discount_usd:discountUsd,membership_discount_usd:membershipDiscountUsd,tax_usd:taxUsd}
+  for (const line of priced) line.pricing_snapshot_json=serializeSaleItemPricing(pricingPool,pricingQuantities,line.client_line_key!,allocationContext)
 
   // Delivery scalars are resolved here, above the totals, because the
   // customer-paid portion of the fee is PART of the total. They used to be
@@ -485,21 +936,26 @@ app.post('/', async (c) => {
   // bugs that caused and why this arithmetic now lives in one pure,
   // directly-tested function instead of inline here.
   const isDelivery = Boolean(body.is_delivery)
-  const deliveryFeeUsd = round2(Number(body.delivery_fee_usd) || 0)
-  const deliveryFeeKhr = Math.round(Number(body.delivery_fee_khr) || deliveryFeeUsd * exchangeRate)
+  const deliveryFeeUsd = newSaleMoney4(body.delivery_fee_usd)
+  const deliveryFeeKhr = multiplyMoney4(deliveryFeeUsd,exchangeRate)
   const deliveryFeePaidBy = String(body.delivery_fee_paid_by || 'customer')
   // P6: what the delivery ACTUALLY cost the shop (courier money out) --
   // staff-only, never on receipts. NULL when not entered, so stats can
   // tell "recorded as zero" apart from "never recorded".
   const rawActualCost = Number(body.delivery_actual_cost_usd)
   const deliveryActualCostUsd = isDelivery && Number.isFinite(rawActualCost) && rawActualCost >= 0 && body.delivery_actual_cost_usd !== undefined && body.delivery_actual_cost_usd !== null && String(body.delivery_actual_cost_usd) !== ''
-    ? round2(rawActualCost)
+    ? newSaleMoney4(rawActualCost)
     : null
-  const deliveryActualCostKhr = deliveryActualCostUsd != null ? Math.round(Number(body.delivery_actual_cost_khr) || deliveryActualCostUsd * exchangeRate) : null
+  const deliveryActualCostKhr = deliveryActualCostUsd != null ? multiplyMoney4(deliveryActualCostUsd,exchangeRate) : null
 
   // Membership discount reduces the recorded total (previously dropped, so a
   // points-redeemed sale recorded more than the customer actually paid).
-  const { totalUsd, totalKhr, amountPaidUsd, amountPaidKhr, changeUsd, changeKhr } = computeSaleTotals({
+  const {
+    totalUsd, totalKhr, amountPaidUsd, amountPaidKhr,
+    calculatedTotalUsd, roundingAdjustmentUsd,
+    changeUsd: fallbackChangeUsd, changeKhr: fallbackChangeKhr,
+  } = computeSaleTotals({
+    moneyPrecisionVersion: 1,
     subtotalUsd,
     discountUsd,
     membershipDiscountUsd,
@@ -512,6 +968,26 @@ app.post('/', async (c) => {
     rawAmountPaidUsd: body.amount_paid_usd,
     rawAmountPaidKhr: body.amount_paid_khr,
   })
+  let nativeChange
+  try {
+    nativeChange = planNativeSaleChange({
+      actualIntent: body.change_is_actual,
+      rawChangeUsd: body.change_usd,
+      rawChangeKhr: body.change_khr,
+      amountPaidUsd,
+      amountPaidKhr,
+      totalUsd,
+      exchangeRate,
+      changeExchangeRate: changeExchangeRateSetting,
+      fallbackChangeUsd,
+      fallbackChangeKhr,
+    })
+  } catch (error) {
+    if (error instanceof NativeSaleChangeValidationError) {
+      return c.json({ error: error.message, code: error.code }, error.statusCode)
+    }
+    throw error
+  }
   const paymentDetails = Array.isArray(body.payment_details)
     ? body.payment_details
       .slice(0, 12)
@@ -535,9 +1011,15 @@ app.post('/', async (c) => {
   // YYYYMMDD-HHMMSS in Phnom Penh wall-clock time -- the receipt id encodes
   // the sale's own date+time (user, Aug 30 2026), with NO prefix (user,
   // Aug 31 2026: "Receipt no need RCP"; returns keep RET-/SRET-).
-  // Client-provided numbers (offline replays, imports) are preserved
-  // untouched -- historical RCP- ids stay as minted.
-  const receiptNumber = body.receipt_number?.trim() || await uniqueBusinessDateTimeNumber(
+  // A client-provided number (an offline replay whose id was already printed
+  // for the customer at queue time) is honored ONLY when it is a real
+  // business receipt id -- historical RCP- ids still pass. Anything else,
+  // including the old system's `NNNNNN@YYYY-MM-DD` form that the 2026-09-02
+  // reconciliation pack wrote onto 15,004 rows (repaired by migration 0107),
+  // is dropped and replaced by the server-minted id. Normalise rather than
+  // 400: see normalizeClientReceiptNumber for why rejecting an offline
+  // replay would strand a sale that really happened in the outbox forever.
+  const receiptNumber = normalizeClientReceiptNumber(body.receipt_number) || await uniqueBusinessDateTimeNumber(
     '',
     async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate])),
   )
@@ -559,72 +1041,173 @@ app.post('/', async (c) => {
   // ---- 4. Insert the sale header (single statement -- see lib/db.ts's
   // batch() docs for why this can't be the same atomic unit as step 5) ----
   const branchRow = body.branch_id ? await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]) : null
-  const saleInsert = await db
-    .prepare(`
+  let creationSnapshotJson: string
+  try {
+    creationSnapshotJson = buildSaleCreationSnapshot({
+      moneyPrecisionVersion: 1, calculatedTotalUsd, roundingAdjustmentUsd,
+      origin: clientCreatedAt ? 'offline_replay' : 'pos',
+      recordedAt: new Date().toISOString(),
+      saleAt: clientCreatedAt,
+      receiptNumber,
+      actor: user,
+      cashierId: actorId(user) ?? (body.cashier_id || null),
+      cashierName: actorSnapshot(user),
+      saleStatus,
+      items: priced.map((item) => ({
+        product_id: item.product_id,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        unitPriceUsd: item.unitPriceUsd,
+        lineTotalUsd: item.lineTotalUsd,
+      })),
+      totalUsd,
+      paymentMethod,
+      paymentDetails: effectivePaymentDetails,
+      amountPaidUsd,
+      amountPaidKhr,
+      changeUsd: nativeChange.changeUsd,
+      changeKhr: nativeChange.changeKhr,
+      isDelivery,
+      deliveryContactName: deliveryContact?.name,
+      deliveryContactPhone: deliveryContact?.phone,
+      deliveryFeeUsd,
+      deliveryActualCostUsd,
+      customerSnapshot: customer || String(saleCustomerName ?? '').trim() ? {
+        id: customer?.id ?? null,
+        name: saleCustomerName,
+      } : null,
+      membershipSnapshot: customer?.membership_number ? {
+        number: customer.membership_number,
+        discountUsd: membershipDiscountUsd,
+        discountKhr: membershipDiscountKhr,
+        pointsRedeemed: membershipPointsRedeemed,
+      } : null,
+    })
+  } catch (error) {
+    if (error instanceof SaleCreationSnapshotError) return c.json({ error: error.message }, 400)
+    throw error
+  }
+  const saleInsertStatement = {
+    sql: `
       INSERT INTO sales (
         receipt_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name,
         customer_id, customer_name, customer_phone, customer_address,
         payment_method, payment_details, payment_currency, exchange_rate,
         subtotal_usd, subtotal_khr, discount_usd, discount_khr, tax_usd, tax_khr, total_usd, total_khr,
-        amount_paid_usd, amount_paid_khr, change_usd, change_khr,
+        money_precision_version, calculated_total_usd, rounding_adjustment_usd,
+        amount_paid_usd, amount_paid_khr, change_usd, change_khr, change_is_actual, change_exchange_rate,
         membership_discount_usd, membership_discount_khr, membership_points_redeemed,
         is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone, delivery_contact_address,
         delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
         delivery_actual_cost_usd, delivery_actual_cost_khr,
-        loyalty_accrual, sale_status, search_normalized, created_at, updated_at
-      ) VALUES (@receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
+        loyalty_accrual, sale_status, search_normalized, items, creation_snapshot_json, created_at, updated_at
+      ) SELECT @receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
         @subtotal_usd, @subtotal_khr, @discount_usd, @discount_khr, @tax_usd, @tax_khr, @total_usd, @total_khr,
-        @amount_paid_usd, @amount_paid_khr, @change_usd, @change_khr,
+        1, @calculated_total_usd, @rounding_adjustment_usd,
+        @amount_paid_usd, @amount_paid_khr, @change_usd, @change_khr, @change_is_actual, @change_exchange_rate,
         @membership_discount_usd, @membership_discount_khr, @membership_points_redeemed,
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
         @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-        @loyalty_accrual, @sale_status, @search_normalized, COALESCE(@created_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
-    `)
-    .run({
+        @loyalty_accrual, @sale_status, @search_normalized, @items, @creation_snapshot_json, COALESCE(@created_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP
+      WHERE @customer_guard_id IS NULL OR EXISTS (
+        SELECT 1 FROM customers
+        WHERE id = @customer_guard_id
+          AND COALESCE(is_anonymous, 0) = @customer_guard_is_anonymous
+      )
+    `,
+    params: {
       receipt_number: receiptNumber,
+      calculated_total_usd: calculatedTotalUsd,
+      rounding_adjustment_usd: roundingAdjustmentUsd,
       created_at: clientCreatedAt,
-      client_request_id: clientRequestId,
-      cashier_id: body.cashier_id || null,
-      cashier_name: body.cashier_name || null,
+      client_request_id: saleWriteKey,
+      // N13: the cashier snapshot is the AUTHENTICATED session's account, not
+      // whatever the client put in the body. Before this, POST /api/sales was
+      // the one history writer that trusted a client string outright
+      // (`cashier_name: body.cashier_name`), so the actor stored on a sale was
+      // whatever the caller sent -- and the frontend call sites disagreed about
+      // whether to send the username or the full name. Both halves of the pair
+      // come from the session so the id and the name can never describe two
+      // different people (the rename cascade in lib/userIdentity.ts joins them
+      // on cashier_id). body.cashier_id survives only as the fallback for a
+      // request that somehow arrives without a session user.
+      cashier_id: actorId(user) ?? (body.cashier_id || null),
+      cashier_name: actorSnapshot(user),
       branch_id: body.branch_id || null,
       branch_name: branchRow?.name || null,
       customer_id: customer?.id || null,
-      customer_name: body.customer_name || customer?.name || null,
-      customer_phone: body.customer_phone || null,
-      customer_address: body.customer_address || null,
+      customer_guard_id: customerStateGuard?.id ?? null,
+      customer_guard_is_anonymous: customerStateGuard?.isAnonymous ?? null,
+      customer_name: saleCustomerName,
+      customer_phone: saleCustomerPhone,
+      // N21: normalized, not trusted. The POS sends the display address now,
+      // but an out-of-date shell -- or a sale it queued offline and replayed
+      // after the update -- still sends the raw Contact Options JSON out of
+      // customers.address, and the server is the only place that catches that.
+      // A plainly typed address passes through untouched.
+      customer_address: saleCustomerAddress,
       // Write-time diacritic fold of this sale's own searchable text fields
       // (migration 0082) -- the same normalizeSearchText the typed query is
       // run through, so folded queries match folded storage. Read additively
       // by buildSalesSearchWhere; membership_number is joined from customers
       // at read time, so it stays out of this per-row blob.
       search_normalized: normalizeSearchText(
-        [receiptNumber, body.cashier_name, body.customer_name || customer?.name, body.customer_phone, branchRow?.name, paymentMethod]
+        [receiptNumber, actorSnapshot(user), saleCustomerName, saleCustomerPhone, branchRow?.name, paymentMethod]
           .filter(Boolean)
           .join(' '),
       ),
+      creation_snapshot_json: creationSnapshotJson,
+      // Keep the legacy compatibility projection in sync with the canonical
+      // sale_items rows.  The Sales list joins sale_items directly, but the
+      // dashboard/export compatibility endpoint still reads this column for
+      // older clients.  Build it from server-priced values so stale or
+      // client-supplied totals can never leak into the compatibility view.
+      items: JSON.stringify(priced.map((item) => ({
+        product_id: item.product_id,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        applied_price_usd: item.canonicalMoney.appliedPriceUsd,
+        applied_price_khr: item.canonicalMoney.appliedPriceKhr,
+        base_price_usd: item.canonicalMoney.basePriceUsd,
+        base_price_khr: item.canonicalMoney.basePriceKhr,
+        product_discount_usd: Number(item.product_discount_usd) || 0,
+        product_discount_khr: Number(item.product_discount_khr) || 0,
+        manual_discount_usd: item.canonicalMoney.manualDiscountUsd,
+        manual_discount_khr: item.canonicalMoney.manualDiscountKhr,
+        total_usd: item.lineTotalUsd,
+        total_khr: multiplyMoney4(item.lineTotalUsd,exchangeRate),
+        cost_price_usd: item.costPriceUsd,
+        cost_price_khr: item.costPriceKhr,
+        branch_id: item.branch_id,
+        batch_id: item.batch_id || null,
+        batch_label: item.batch_label || null,
+        batch_expiry_date: item.batch_expiry_date || null,
+      }))),
       payment_method: paymentMethod,
       payment_details: JSON.stringify(effectivePaymentDetails),
       payment_currency: body.payment_currency || 'USD',
       exchange_rate: exchangeRate,
-      // Only an EXPLICIT false opts a sale out of earning points -- absent or
-      // any other value keeps the long-standing auto-accrual behavior, so an
-      // older cached POS build cannot silently stop customers earning points.
-      loyalty_accrual: body.loyalty_accrual === false ? 0 : 1,
-      subtotal_usd: round2(subtotalUsd),
-      subtotal_khr: Math.round(subtotalUsd * exchangeRate),
+      // An explicit per-sale boolean wins in either direction. Missing or
+      // non-boolean values inherit the current setting. Persist that choice
+      // so a later default change cannot retroactively change this sale.
+      loyalty_accrual: (typeof body.loyalty_accrual === 'boolean' ? body.loyalty_accrual : loyaltyPointsEnabled) ? 1 : 0,
+      subtotal_usd: subtotalUsd,
+      subtotal_khr: multiplyMoney4(subtotalUsd,exchangeRate),
       discount_usd: discountUsd,
       discount_khr: discountKhr,
       tax_usd: taxUsd,
-      tax_khr: Math.round(taxUsd * exchangeRate),
+      tax_khr: multiplyMoney4(taxUsd,exchangeRate),
       total_usd: totalUsd,
       total_khr: totalKhr,
       amount_paid_usd: amountPaidUsd,
       amount_paid_khr: amountPaidKhr,
-      change_usd: changeUsd,
-      change_khr: changeKhr,
+      change_usd: nativeChange.changeUsd,
+      change_khr: nativeChange.changeKhr,
+      change_is_actual: nativeChange.changeIsActual,
+      change_exchange_rate: nativeChange.changeExchangeRate,
       membership_discount_usd: membershipDiscountUsd,
       membership_discount_khr: membershipDiscountKhr,
       membership_points_redeemed: membershipPointsRedeemed,
@@ -641,104 +1224,227 @@ app.post('/', async (c) => {
       delivery_actual_cost_usd: deliveryActualCostUsd,
       delivery_actual_cost_khr: deliveryActualCostKhr,
       sale_status: saleStatus,
-    })
-  const saleId = saleInsert.lastInsertRowid
-
-  // 11.9: draw the damaged lots FIRST (each consumeDamagedLot is its own
-  // atomic, self-guarding statement -- see the kernel); anything that
-  // fails after this point restores them in its error path, the same
-  // compensation shape the returns route uses for receiveBatchStock.
-  const consumedDamagedLots: Array<{ lotId: number; quantity: number }> = []
-  const restoreConsumedDamagedLots = async () => {
-    for (const consumed of consumedDamagedLots) {
-      try { await restoreDamagedLot(db, { lotId: consumed.lotId, quantity: consumed.quantity }) } catch { /* compensation is best-effort; the lot ledger still holds the draw */ }
-    }
+    },
   }
-  if (shouldDeductStock) {
-    for (const item of damagedItems) {
-      try {
-        await consumeDamagedLot(db, { lotId: Number(item.damaged_lot_id), productId: item.product_id, quantity: item.quantity })
-        consumedDamagedLots.push({ lotId: Number(item.damaged_lot_id), quantity: item.quantity })
-      } catch (error) {
-        await restoreConsumedDamagedLots()
-        await db.prepare('DELETE FROM sales WHERE id = ?').run([saleId])
-        const status = error instanceof DamagedLotShortfallError ? 409 : 400
-        return c.json({ error: (error as Error).message }, status)
+
+  // ---- 5. Atomically write the sale header, items, allocations, stock,
+  // movement log, and creation audit. A stable write key lets every statement
+  // resolve the new auto-generated sale id inside the same D1 transaction. ----
+  let saleId = 0
+  let recoveredCommittedCreate = false
+  let resolvedReceiptNumber = receiptNumber
+  try {
+    const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
+      capturedSourceGuard,
+      ...(redemptionGuard ? [redemptionGuard] : []),
+      saleInsertStatement,
+      {
+        // D1 batch rolls back only on an exception, not a zero-row INSERT.
+        // Fail the transaction if the guarded header SELECT saw a customer
+        // state change and therefore did not create the target sale.
+        sql: `SELECT CASE WHEN EXISTS (
+                SELECT 1 FROM sales
+                WHERE client_request_id = @sale_write_key AND client_request_id <> ''
+              ) THEN 1 ELSE json_extract('customer_state_conflict', '$') END`,
+        params: { sale_write_key: saleWriteKey },
+      },
+    ]
+    // Damaged stock is stock too: guard and consume each lot inside the same
+    // batch instead of relying on a best-effort compensation write.
+    if (shouldDeductStock) {
+      for (const item of damagedItems) {
+        statements.push({
+          sql: `SELECT CASE WHEN EXISTS (
+                  SELECT 1 FROM damaged_stock_lots
+                  WHERE id = @lot_id AND product_id = @product_id
+                    AND quantity_remaining >= @quantity
+                ) THEN 1 ELSE json_extract('damaged_stock_conflict', '$') END`,
+          params: {
+            lot_id: Number(item.damaged_lot_id),
+            product_id: item.product_id,
+            quantity: item.quantity,
+          },
+        }, {
+          sql: `UPDATE damaged_stock_lots
+                SET quantity_remaining = quantity_remaining - @quantity, updated_at = datetime('now')
+                WHERE id = @lot_id AND product_id = @product_id AND quantity_remaining >= @quantity`,
+          params: {
+            lot_id: Number(item.damaged_lot_id),
+            product_id: item.product_id,
+            quantity: item.quantity,
+          },
+        })
       }
     }
-  }
-
-  // ---- 5. Atomically write items + stock deduction + movement log.
-  // If ANY of this fails, none of it is applied (D1 batch() semantics) --
-  // and we then delete the orphaned sale header from step 4, so the caller
-  // never sees a "sale" with no items. ----
-  try {
-    const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
-    // Index into `statements` of each item's own sale_items INSERT, in the
-    // same order as `priced` -- D1's batch() returns one result per
-    // statement (with meta.last_row_id for inserts), so this is how we find
-    // out each sale_item's real id *after* the atomic batch below commits,
-    // without being able to branch mid-batch (see lib/db.ts's batch() docs).
-    // Only needed for lines with a batch_id -- see the allocation-recording
-    // step after the batch commits.
-    const saleItemStatementIndexByItemIndex: number[] = []
+    // The preflight above improves the cashier response, but it cannot guard
+    // a concurrent lot attribution/update. Re-evaluate the exact same
+    // aggregate-minus-all-positive-known-lots predicate in this D1 batch
+    // before any sale/item/stock write. Inactive lots intentionally count:
+    // their stock is still known provenance and cannot be sold as unrecorded.
+    if (shouldDeductStock) {
+      for (const request of requestedUnlottedByKey.values()) {
+        statements.push({
+          sql: `SELECT CASE WHEN
+                  COALESCE((SELECT quantity FROM branch_stock
+                            WHERE product_id = @product_id AND branch_id = @branch_id), 0)
+                  - COALESCE((SELECT SUM(bbs.quantity)
+                              FROM branch_batch_stock bbs
+                              JOIN product_batches pb ON pb.id = bbs.batch_id
+                              WHERE pb.variant_product_id = @product_id
+                                AND bbs.branch_id = @branch_id
+                                AND bbs.quantity > 0), 0)
+                  >= @quantity
+                THEN 1 ELSE json_extract('unlotted_stock_conflict', '$') END`,
+          params: { product_id: request.productId, branch_id: request.branchId, quantity: request.quantity },
+        })
+      }
+    }
+    const allocationReleasedAt = shouldDeductStock ? null : new Date().toISOString()
     for (const [itemIndex, item] of priced.entries()) {
-      saleItemStatementIndexByItemIndex[itemIndex] = statements.length
       statements.push({
-        sql: `INSERT INTO sale_items (
+        sql: `WITH current_batch AS (
+                SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date
+                FROM product_batches pb
+                JOIN branch_batch_stock bbs
+                  ON bbs.batch_id = pb.id
+                 AND bbs.branch_id = @branch_id
+                 AND bbs.quantity >= @quantity
+                WHERE pb.id = @batch_id
+                  AND pb.variant_product_id = @product_id
+                  AND pb.is_active = 1
+                LIMIT 1
+              ), current_line AS (
+                SELECT b.id AS branch_id,
+                       cb.batch_id, cb.lot_code, cb.expiry_date
+                FROM branches b
+                JOIN products p ON p.id = @product_id
+                LEFT JOIN current_batch cb ON 1 = 1
+                WHERE b.id = @branch_id
+                  AND COALESCE(b.is_active, 1) = 1
+                  AND lower(trim(b.name)) = 'shop'
+                  AND (@batch_id IS NULL OR cb.batch_id IS NOT NULL)
+                LIMIT 1
+              )
+              INSERT INTO sale_items (
                 sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr,
                 cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id,
                 price_mode, product_discount_type, product_discount_label, product_discount_usd, product_discount_khr,
                 base_price_usd, base_price_khr, manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr,
-                batch_id, batch_label, batch_expiry_date, damaged_lot_id
+                batch_id, batch_label, batch_expiry_date, damaged_lot_id, pricing_snapshot_json
               )
               VALUES (
-                @sale_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr,
+                CASE WHEN EXISTS (SELECT 1 FROM current_line) THEN (
+                  SELECT id FROM sales
+                  WHERE client_request_id = @sale_write_key AND client_request_id <> ''
+                ) ELSE NULL END,
+                @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr,
                 @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @branch_id,
                 @price_mode, @product_discount_type, @product_discount_label, @product_discount_usd, @product_discount_khr,
                 @base_price_usd, @base_price_khr, @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr,
-                @batch_id, @batch_label, @batch_expiry_date, @damaged_lot_id
+                (SELECT batch_id FROM current_line),
+                (SELECT lot_code FROM current_line),
+                (SELECT expiry_date FROM current_line),
+                @damaged_lot_id, @pricing_snapshot_json
               )`,
         params: {
-          sale_id: saleId,
+          sale_write_key: saleWriteKey,
           product_id: item.product_id,
           product_name: item.product_name,
           quantity: item.quantity,
-          applied_price_usd: item.unitPriceUsd,
-          applied_price_khr: Math.round(item.unitPriceUsd * exchangeRate),
+          applied_price_usd: item.canonicalMoney.appliedPriceUsd,
+          applied_price_khr: item.canonicalMoney.appliedPriceKhr,
           cost_price_usd: item.costPriceUsd,
           cost_price_khr: item.costPriceKhr,
           total_usd: item.lineTotalUsd,
-          total_khr: Math.round(item.lineTotalUsd * exchangeRate),
+          total_khr: multiplyMoney4(item.lineTotalUsd,exchangeRate),
           branch_id: item.branch_id,
           price_mode: item.price_mode || 'selling',
           product_discount_type: item.product_discount_type || null,
           product_discount_label: item.product_discount_label || null,
-          product_discount_usd: Number(item.product_discount_usd) || 0,
-          product_discount_khr: Number(item.product_discount_khr) || 0,
-          // base_price defaults to the applied price itself when a client
-          // doesn't send it (e.g. an older frontend build, or a direct API
-          // caller) -- that reads as "no manual discount" rather than a
-          // misleading base of 0, and keeps this purely additive.
-          base_price_usd: Number(item.base_price_usd) || item.unitPriceUsd,
-          base_price_khr: Number(item.base_price_khr) || Math.round(item.unitPriceUsd * exchangeRate),
+          product_discount_usd: newSaleMoney4(item.product_discount_usd),
+          product_discount_khr: newSaleMoney4(item.product_discount_khr),
+          // The canonical helper has already resolved missing/legacy paired
+          // prices and derived both manual discount currencies from USD. Do
+          // not trust client KHR snapshots here: stale cached carts are one
+          // of the inputs this boundary must repair before persistence.
+          base_price_usd: item.canonicalMoney.basePriceUsd,
+          base_price_khr: item.canonicalMoney.basePriceKhr,
           manual_discount_type: item.manual_discount_type || null,
-          manual_discount_value: Number(item.manual_discount_value) || 0,
-          manual_discount_usd: Number(item.manual_discount_usd) || 0,
-          manual_discount_khr: Number(item.manual_discount_khr) || 0,
+          manual_discount_value: item.canonicalDiscountValue,
+          manual_discount_usd: item.canonicalMoney.manualDiscountUsd,
+          manual_discount_khr: item.canonicalMoney.manualDiscountKhr,
           batch_id: item.batch_id || null,
-          batch_label: item.batch_label || null,
-          batch_expiry_date: item.batch_expiry_date || null,
           damaged_lot_id: item.damaged_lot_id || null,
+          pricing_snapshot_json:item.pricing_snapshot_json,
         },
       })
+      // Persist exact lot lineage immediately after this line and before the
+      // next sale_item INSERT. D1 executes this statement list sequentially
+      // in one transaction, so the latest item for this new sale is the row
+      // directly above. A NOT NULL/constraint failure here now aborts the
+      // same batch as item, stock, and movement writes; returns/cancels can
+      // never lose their lot source while checkout still succeeds.
+      const allocationTakes = item.batch_id && item.branch_id
+        ? [{
+            batchId: item.batch_id,
+            lotCode: item.batch_label || null,
+            expiryDate: item.batch_expiry_date || null,
+            quantity: item.quantity,
+          } as FifoLotTake]
+        : autoAllocationsByItemIndex.get(itemIndex) || []
+      if (item.branch_id && !item.damaged_lot_id) {
+        for (const take of allocationTakes) {
+          statements.push({
+            sql: `WITH current_batch AS (
+                    SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date
+                    FROM product_batches pb
+                    JOIN branch_batch_stock bbs
+                      ON bbs.batch_id = pb.id
+                     AND bbs.branch_id = @branch_id
+                     AND bbs.quantity >= @quantity
+                    JOIN branches b
+                      ON b.id = bbs.branch_id
+                     AND COALESCE(b.is_active, 1) = 1
+                     AND lower(trim(b.name)) = 'shop'
+                    WHERE pb.id = @batch_id
+                      AND pb.variant_product_id = @product_id
+                      AND pb.is_active = 1
+                    LIMIT 1
+                  )
+                  INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date, released_quantity, released_at)
+                  VALUES (
+                    CASE WHEN EXISTS (SELECT 1 FROM current_batch)
+                      THEN (SELECT id FROM sale_items WHERE sale_id = (
+                        SELECT id FROM sales
+                        WHERE client_request_id = @sale_write_key AND client_request_id <> ''
+                      ) ORDER BY id DESC LIMIT 1)
+                      ELSE NULL END,
+                    (SELECT batch_id FROM current_batch),
+                    @branch_id, @quantity,
+                    (SELECT lot_code FROM current_batch),
+                    (SELECT expiry_date FROM current_batch),
+                    @released_quantity, @released_at
+                  )`,
+            params: {
+              sale_write_key: saleWriteKey,
+              product_id: item.product_id,
+              batch_id: take.batchId,
+              branch_id: item.branch_id,
+              quantity: take.quantity,
+              released_quantity: shouldDeductStock ? 0 : take.quantity,
+              released_at: allocationReleasedAt,
+            },
+          })
+        }
+      }
       // A damaged-source line's stock ALREADY moved (the lot draw above);
       // only its ledger entry rides this batch. Regular branch/batch
       // deductions never apply to it.
       if (item.damaged_lot_id && item.branch_id && shouldDeductStock) {
         statements.push({
           sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reference_id, user_id, user_name)
-                VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_OUT_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reference_id, @user_id, @user_name)`,
+                VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_OUT_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr,
+                  (SELECT id FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''), @user_id, @user_name)`,
           params: {
             product_id: item.product_id,
             product_name: item.product_name,
@@ -746,9 +1452,9 @@ app.post('/', async (c) => {
             quantity: -item.quantity,
             unit_cost_usd: item.costPriceUsd,
             unit_cost_khr: item.costPriceKhr,
-            reference_id: saleId,
-            user_id: body.cashier_id || null,
-            user_name: body.cashier_name || null,
+            sale_write_key: saleWriteKey,
+            user_id: actorId(user),
+            user_name: actorSnapshot(user),
           },
         })
       }
@@ -792,7 +1498,8 @@ app.post('/', async (c) => {
           || (autoTakes.length === 1 && autoTakes[0].quantity === item.quantity ? autoTakes[0].batchId : null)
         statements.push({
           sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reference_id, user_id, user_name, batch_id)
-                VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reference_id, @user_id, @user_name, @batch_id)`,
+                VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr,
+                  (SELECT id FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''), @user_id, @user_name, @batch_id)`,
           params: {
             product_id: item.product_id,
             product_name: item.product_name,
@@ -800,9 +1507,9 @@ app.post('/', async (c) => {
             quantity: -item.quantity,
             unit_cost_usd: item.costPriceUsd,
             unit_cost_khr: item.costPriceKhr,
-            reference_id: saleId,
-            user_id: body.cashier_id || null,
-            user_name: body.cashier_name || null,
+            sale_write_key: saleWriteKey,
+            user_id: actorId(user),
+            user_name: actorSnapshot(user),
             batch_id: movementBatchId,
           },
         })
@@ -817,72 +1524,92 @@ app.post('/', async (c) => {
         })
       }
     }
-    const batchResults = await db.batch(statements)
-
-    // Record which batch each sale line actually drew from, now that we
-    // know each sale_item's real id (from the batch's own results, matched
-    // back up via saleItemStatementIndexByItemIndex). Deliberately a
-    // second, non-atomic pass: stock is already correctly decremented by
-    // the atomic batch above (that only ever needed batch_id/branch_id,
-    // known up front) -- this is bookkeeping for reporting/returns, not
-    // stock-accuracy-critical, so a failure here is logged and swallowed
-    // rather than rolling back an otherwise-successful sale.
-    // Z0: one row per lot a line drew from -- single-lot lines (explicit
-    // pick OR an auto-allocation one lot fully covered) and multi-lot
-    // auto-allocated lines alike. released_quantity starts at 0 for a
-    // deducting sale (units are OUT with the sale) and at the full take for
-    // a non-deducting one (awaiting_payment -- nothing physically left, the
-    // later deducting transition consumes released_quantity back down).
-    const allocationItems = priced
-      .map((item, itemIndex) => ({
-        item,
-        itemIndex,
-        takes: item.batch_id && item.branch_id
-          ? [{ batchId: item.batch_id, lotCode: item.batch_label || null, expiryDate: item.batch_expiry_date || null, quantity: item.quantity } as FifoLotTake]
-          : autoAllocationsByItemIndex.get(itemIndex) || [],
-      }))
-      .filter(({ item, takes }) => takes.length && item.branch_id && !item.damaged_lot_id)
-    if (allocationItems.length) {
-      try {
-        const allocationStatements = allocationItems.flatMap(({ item, itemIndex, takes }) => {
-          const statementIndex = saleItemStatementIndexByItemIndex[itemIndex]
-          const saleItemId = Number(batchResults[statementIndex]?.meta?.last_row_id || 0)
-          if (!(saleItemId > 0)) return []
-          return takes.map((take) => ({
-            sql: `INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date, released_quantity, released_at)
-                  VALUES (@sale_item_id, @batch_id, @branch_id, @quantity, @lot_code, @expiry_date, @released_quantity, @released_at)`,
-            params: {
-              sale_item_id: saleItemId,
-              batch_id: take.batchId,
-              branch_id: item.branch_id,
-              quantity: take.quantity,
-              lot_code: take.lotCode || null,
-              expiry_date: take.expiryDate || null,
-              released_quantity: shouldDeductStock ? 0 : take.quantity,
-              released_at: shouldDeductStock ? null : new Date().toISOString(),
-            },
-          }))
-        })
-        if (allocationStatements.length) await db.batch(allocationStatements)
-      } catch (allocationError) {
-        console.error('[sales] failed to record sale_item_batch_allocations (stock already deducted correctly)', allocationError)
-      }
-    }
+    statements.push(
+      {sql:'DELETE FROM sale_mutation_guards',params:{}},
+      canonicalSaleChildrenGuard(saleWriteKey),
+      {sql:'DELETE FROM sale_mutation_guards',params:{}},
+      {
+      sql: `SELECT CASE WHEN COALESCE((
+              SELECT COUNT(*) FROM sale_items WHERE sale_id = (
+                SELECT id FROM sales
+                WHERE client_request_id = @sale_write_key AND client_request_id <> ''
+              )
+            ), 0) = @item_count
+            THEN 1 ELSE json_extract('sale_create_incomplete', '$') END`,
+      params: { sale_write_key: saleWriteKey, item_count: priced.length },
+    }, {
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+            SELECT @user_id,@user_name,'create','sale_creation',CAST(id AS TEXT),@details,'sales',CAST(id AS TEXT),@details
+            FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''`,
+      params: {
+        user_id: actorId(user),
+        user_name: actorSnapshot(user),
+        details: JSON.stringify({
+          kind: 'sale.creation',
+          receiptNumber,
+          itemCount: priced.length,
+          totalUsd,
+          saleStatus,
+          origin: clientCreatedAt ? 'offline_replay' : 'pos',
+        }),
+        sale_write_key: saleWriteKey,
+      },
+    })
+    await db.batch(statements)
+    const createdSale = await db.prepare(`SELECT id,receipt_number FROM sales
+      WHERE client_request_id=@sale_write_key AND client_request_id<>'' LIMIT 1`)
+      .get<{ id: number; receipt_number: string }>({ sale_write_key: saleWriteKey })
+    if (!createdSale?.id) throw new Error('sale_create_identity_missing')
+    saleId = Number(createdSale.id)
   } catch (error) {
-    // The atomic batch rolled back, so nothing here was applied; delete the
-    // orphaned header written in step 4 so the caller never sees an itemless
-    // sale. Damaged-lot draws happened before the batch -- hand them back.
-    await restoreConsumedDamagedLots()
-    await db.prepare('DELETE FROM sales WHERE id = ?').run([saleId])
     const message = (error as Error).message || ''
-    // A CHECK(quantity >= 0) failure means a concurrent sale consumed the
-    // stock between this request's availability read and its write -- report
-    // it as the same 409 an up-front shortage gets, not an opaque 500, so the
-    // client retries/refreshes rather than treating it as a server fault.
-    if (/CHECK constraint|constraint failed/i.test(message)) {
-      return c.json({ error: 'Insufficient stock: another sale took the last units while this one was being recorded. Refresh and try again.', code: 'stock_conflict' }, 409)
+    // If D1 committed the batch but its response was lost, its retry can hit
+    // the unique write key. Reconcile only a sale with durable lines; an old
+    // header-only row is never promoted to a successful replay.
+    const committedSale = await db.prepare(`SELECT id,receipt_number,
+      (SELECT COUNT(*) FROM sale_items WHERE sale_id=sales.id) AS item_count
+      FROM sales WHERE client_request_id=@sale_write_key AND client_request_id<>'' LIMIT 1`)
+      .get<{ id: number; receipt_number: string; item_count: number }>({ sale_write_key: saleWriteKey })
+    if (committedSale && Number(committedSale.item_count) > 0) {
+      saleId = Number(committedSale.id)
+      resolvedReceiptNumber = committedSale.receipt_number
+      recoveredCommittedCreate = true
+    } else {
+      if (committedSale) {
+        return c.json({
+          error: 'This sale was not completely recorded. Keep the original sale details and ask an administrator to recover it.',
+          code: 'sale_incomplete',
+        }, 409)
+      }
+      if (/malformed JSON/i.test(message)) {
+        try { await db.prepare(capturedSourceGuard.sql).get(capturedSourceGuard.params) }
+        catch { return c.json({error:'Pricing changed before the sale was saved. Review the current quote.',code:'sale_pricing_quote_conflict'},409) }
+      }
+      if (redemptionGuard && /malformed JSON/i.test(message)) {
+        return c.json({ error: 'Membership points or checkout state changed before the sale was recorded. Refresh and try again.', code: 'loyalty_redemption_conflict' }, 409)
+      }
+      if (customerStateGuard) {
+        const currentCustomer = await db.prepare('SELECT is_anonymous FROM customers WHERE id=?')
+          .get<{ is_anonymous: number | null }>([customerStateGuard.id])
+        if (!currentCustomer || Number(currentCustomer.is_anonymous || 0) !== customerStateGuard.isAnonymous) {
+          return c.json({ error: 'The selected customer changed before the sale was saved. Review the customer and try again.', code: 'customer_state_conflict' }, 409)
+        }
+      }
+      if (/NOT NULL constraint failed:\s*(?:sale_items\.sale_id|sale_item_batch_allocations\.sale_item_id)/i.test(message)) {
+        return c.json({
+          error: 'The Shop or batch changed while this sale was being recorded. Refresh the sale and pick the current batch before trying again.',
+          code: 'sale_identity_conflict',
+        }, 409)
+      }
+      // A CHECK(quantity >= 0) failure means a concurrent sale consumed the
+      // stock between this request's availability read and its write -- report
+      // it as the same 409 an up-front shortage gets, not an opaque 500, so the
+      // client retries/refreshes rather than treating it as a server fault.
+      if (/CHECK constraint|constraint failed|malformed JSON/i.test(message)) {
+        return c.json({ error: 'Insufficient stock: another sale took the last units while this one was being recorded. Refresh and try again.', code: 'stock_conflict' }, 409)
+      }
+      return c.json({ error: `Failed to record sale items: ${message}` }, 500)
     }
-    return c.json({ error: `Failed to record sale items: ${message}` }, 500)
   }
 
   // Invalidate the 20s /api/products/search cache (see lib/cache.ts) so
@@ -894,6 +1621,17 @@ app.post('/', async (c) => {
     bumpVersion(c.env, 'products'),
     bumpVersion(c.env, 'sales'),
   ]))
+  if (recoveredCommittedCreate) {
+    return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true, sale: await authoritativeSaleSnapshot(db,saleId) })
+  }
+  // A method typed at the till joins the configured list (user, Sep 4 2026).
+  // Off the response path: the sale is already recorded and must not be held
+  // up, or failed, by a settings write. `settings` is bumped only when the
+  // merge actually added something, so a normal checkout costs no invalidation.
+  c.executionCtx.waitUntil(
+    registerUsedPaymentMethods(c.env, { payment_method: paymentMethod, payment_details: effectivePaymentDetails })
+      .then((added) => (added.length ? bumpVersion(c.env, 'settings') : undefined)),
+  )
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'sales',
     // Receipt-summary shape (lib/telegram.ts formatSaleTelegramLines): status,
@@ -903,11 +1641,11 @@ app.post('/', async (c) => {
       status: saleStatus,
       createdAt: clientCreatedAt,
       receiptNumber,
-      cashier: body.cashier_name || c.get('user')?.name || c.get('user')?.username || null,
-      customer: body.customer_name || customer?.name || null,
-      phone: body.customer_phone || null,
+      cashier: actorSnapshot(user),
+      customer: saleCustomerName,
+      phone: saleCustomerPhone,
       branch: branchRow?.name || null,
-      items: priced.map((item) => ({ name: item.product_name, quantity: item.quantity, unitPriceUsd: item.unitPriceUsd, basePriceUsd: Number(item.base_price_usd) || null, lineTotalUsd: item.lineTotalUsd })),
+      items: priced.map((item) => ({ name: item.product_name, quantity: item.quantity, unitPriceUsd: item.unitPriceUsd, basePriceUsd: Number(item.base_price_usd) || null, lineTotalUsd: item.lineTotalUsd, promotionLabel: item.product_discount_label || null })),
       exchangeRate,
       isDelivery,
       deliveryFeeUsd,
@@ -920,8 +1658,8 @@ app.post('/', async (c) => {
       totalKhr,
       paidUsd: amountPaidUsd,
       paidKhr: amountPaidKhr,
-      changeUsd,
-      changeKhr,
+      changeUsd: nativeChange.changeUsd,
+      changeKhr: nativeChange.changeKhr,
       paymentMethod,
     }),
   }).catch((error) => console.error('[telegram] sale notification failed', error)))
@@ -929,7 +1667,11 @@ app.post('/', async (c) => {
   return c.json({
     id: saleId,
     receiptNumber,
-    subtotalUsd: round2(subtotalUsd),
+    sale: await authoritativeSaleSnapshot(db, saleId),
+    moneyPrecisionVersion: 1,
+    calculatedTotalUsd,
+    roundingAdjustmentUsd,
+    subtotalUsd,
     discountUsd,
     membershipDiscountUsd,
     membershipDiscountKhr,
@@ -937,11 +1679,17 @@ app.post('/', async (c) => {
     taxUsd,
     totalUsd,
     totalKhr,
-    changeUsd,
-    changeKhr,
+    changeUsd: nativeChange.changeUsd,
+    changeKhr: nativeChange.changeKhr,
+    changeIsActual: nativeChange.changeIsActual,
+    changeExchangeRate: nativeChange.changeExchangeRate,
     saleStatus,
     itemCount: priced.length,
   })
+  } catch (error) {
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code }, 400)
+    throw error
+  }
 })
 
 // PATCH /api/sales/:id/status -- change a sale's lifecycle status
@@ -950,8 +1698,8 @@ app.post('/', async (c) => {
 //
 // Rebuilt in Part 383 on lib/saleTransitions.ts's held() invariant: per
 // line, held(status) = quantity - alreadyReturned for statuses where the
-// goods are out (completed/awaiting_delivery/partial_return/returned) and
-// 0 for awaiting_payment/cancelled; every transition moves exactly
+// goods are out or reserved (completed/awaiting_payment/awaiting_delivery/
+// partial_return/returned) and 0 only for cancelled; every transition moves exactly
 // held(new) - held(old) on branch stock, the product total, AND the
 // line's batch, as new movements (never by editing old ones). That closed
 // the old boolean was/willBeDeducted logic's holes: partial_return ->
@@ -972,6 +1720,114 @@ type SaleItemRow = {
   branch_id: number | null
   batch_id: number | null
 }
+
+app.post('/bulk-status', async (c) => {
+  try {
+    const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json())
+    c.executionCtx.waitUntil(notifyBulkStatus(c.env))
+    return c.json(result)
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
+  }
+})
+
+app.post('/bulk-update', async (c) => {
+  try {
+    const result = await applySaleBulkUpdate(c.env, c.get('user'), await c.req.json())
+    c.executionCtx.waitUntil(notifySaleBulkUpdate(c.env, result.action?.kind))
+    return c.json(result)
+  } catch (error) {
+    if (isLoyaltyAssignmentError(error)) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
+    return c.json({ error: (error as Error).message }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
+  }
+})
+
+// The receipt lookup and mutation must hash precisely the same request.
+export function saleStatusReceiptCanonical(id: number, body: Record<string, unknown>): Record<string, unknown> {
+  const saleStatus = String(body.sale_status || '')
+  if (body.payment_details !== undefined) return {
+    sale_id: id, sale_status: saleStatus, payment_details: body.payment_details,
+    expected_exchange_rate: body.expected_exchange_rate,
+    replace_existing_payment: body.replace_existing_payment === true,
+  }
+  return {
+    sale_id: id, sale_status: saleStatus,
+    expected_updated_at: getExpectedUpdatedAt(body) ?? null,
+    notes_present: body.notes !== undefined,
+    notes: body.notes === undefined ? null : body.notes == null ? null : String(body.notes),
+    cancel_reason: saleStatus === 'cancelled' ? normalizeCancelReason(body.cancel_reason) : null,
+    cancel_note: saleStatus === 'cancelled' ? String(body.cancel_note || '').trim() || null : null,
+    cancel_fee_usd: saleStatus === 'cancelled' ? round2(Math.max(0, Number(body.cancel_fee_usd) || 0)) : 0,
+    cancel_fee_khr: saleStatus === 'cancelled' ? Math.max(0, Math.round(Number(body.cancel_fee_khr) || 0)) : 0,
+    cancel_fee_note: saleStatus === 'cancelled' ? String(body.cancel_fee_note || '').trim() || null : null,
+    skip_stock: body.skip_stock === true || String(body.skip_stock ?? '') === 'true',
+  }
+}
+
+// POST carries the frozen body privately, but this endpoint only reads receipts.
+// A missing receipt is unresolved: the original request may still be running.
+app.post('/:id/status-receipt', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'sales', 'status') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const body = await c.req.json<Record<string, unknown>>()
+  const requestId = normalizeClientRequestId(body.client_request_id)
+  const id = Number(c.req.param('id'))
+  if (!requestId || !Number.isSafeInteger(id) || id <= 0) return c.json({ error: 'A sale and request identity are required.' }, 400)
+  const db = getDb(c.env)
+  const settlement = body.payment_details !== undefined
+  const digest = await saleMutationDigest(saleStatusReceiptCanonical(id, body))
+  const receipt = settlement
+    ? await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts WHERE actor_id=@actor AND mutation_kind='settlement' AND request_id=@request`)
+      .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: requestId })
+    : await db.prepare(`SELECT request_digest,response_json FROM sale_record_events WHERE source_kind='sale_status' AND source_id=@source AND generation=0`)
+      .get<{ request_digest: string; response_json: string }>({ source: `actor:${Number(user.id)}:request:${requestId}` })
+  c.header('Cache-Control', 'no-store')
+  if (!receipt) return c.json({ committed: false })
+  if (receipt.request_digest !== digest) return c.json({ error: 'Request identity was used for different sale data.', code: 'idempotency_conflict' }, 409)
+  return c.json({ committed: true, response: JSON.parse(receipt.response_json || '{}') })
+})
+
+export function saleLineReceiptCanonical(id: number, kind: 'add_items' | 'amendment', body: Record<string, unknown>): Record<string, unknown> {
+  const shared = { notes: String(body.notes || '').trim().slice(0, 500) || null, expected_exchange_rate: body.expected_exchange_rate,
+    ...(Object.prototype.hasOwnProperty.call(body,'expected_header_quote') ? {expected_header_quote:body.expected_header_quote}:{}),
+    ...(Object.prototype.hasOwnProperty.call(body,'pricing_quote') ? {pricing_quote:body.pricing_quote}:{}),
+    ...(Object.prototype.hasOwnProperty.call(body,'money_precision_version') ? { money_precision_version: body.money_precision_version } : {}),
+    ...(Object.prototype.hasOwnProperty.call(body,'selling_price_input_usd') ? { selling_price_input_usd: body.selling_price_input_usd } : {}),
+  }
+  const optional = (key: string): { present: boolean; value: unknown } => ({
+    present: Object.prototype.hasOwnProperty.call(body, key),
+    value: Object.prototype.hasOwnProperty.call(body, key) ? body[key] : null,
+  })
+  if (kind === 'add_items') return { sale_id: id, items: body.items ?? null, ...shared }
+  return {
+    sale_id: id, kind: String(body.kind || ''), sale_item_id: body.sale_item_id ?? null,
+    quantity: body.quantity ?? null, applied_price_usd: body.applied_price_usd ?? null,
+    base_price_usd: optional('base_price_usd'),
+    manual_discount_type: optional('manual_discount_type'),
+    manual_discount_value: optional('manual_discount_value'),
+    manual_discount_usd: optional('manual_discount_usd'),
+    delivery_fee_usd: body.delivery_fee_usd ?? null, delivery_actual_cost_usd: body.delivery_actual_cost_usd ?? null,
+    delivery_contact_id: body.delivery_contact_id ?? null, replacement: body.replacement ?? null, ...shared,
+  }
+}
+
+app.post('/:id/line-receipt/:kind', async (c) => {
+  const kind = c.req.param('kind')
+  if (kind !== 'add_items' && kind !== 'amendment') return c.json({ error: 'Invalid receipt kind.' }, 400)
+  const user = c.get('user')
+  if (getActionTier(user, 'sales', kind === 'add_items' ? 'add_items' : 'amend') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const body = await c.req.json<Record<string, unknown>>()
+  const id = Number(c.req.param('id'))
+  const requestId = normalizeClientRequestId(body.client_request_id)
+  if (!requestId || !Number.isSafeInteger(id) || id <= 0) return c.json({ error: 'A sale and request identity are required.' }, 400)
+  const digest = await saleMutationDigest(saleLineReceiptCanonical(id, kind, body))
+  const receipt = await getDb(c.env).prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts WHERE actor_id=@actor AND mutation_kind=@kind AND request_id=@request`)
+    .get<{ request_digest: string; response_json: string }>({ actor: user.id, kind, request: requestId })
+  c.header('Cache-Control', 'no-store')
+  if (!receipt) return c.json({ committed: false })
+  if (receipt.request_digest !== digest) return c.json({ error: 'Request identity was used for different sale data.', code: 'idempotency_conflict' }, 409)
+  return c.json({ committed: true, response: JSON.parse(receipt.response_json || '{}') })
+})
 
 app.patch('/:id/status', async (c) => {
   const db = getDb(c.env)
@@ -999,15 +1855,77 @@ app.patch('/:id/status', async (c) => {
     payment_details?: Array<{ method?: string; amount_usd?: number | string; amount_khr?: number | string }>
     amount_paid_usd?: number | string
     amount_paid_khr?: number | string
+    client_request_id?: string
+    expected_exchange_rate?: number | string
+    replace_existing_payment?: boolean
+    // S4-2: admin-only "Don't touch stock" -- change the status and move
+    // NO stock (see lib/saleTransitions.ts's planSaleStockTransition for
+    // why, and why it is sticky once set).
+    skip_stock?: boolean
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
   const saleStatus = String(body.sale_status || '')
+
+  // S4-2, server side. The UI hides the toggle behind an admin check AND a
+  // lock, but a hidden control is not a permission: the flag is refused
+  // here for anyone who is not an administrator, using the same
+  // isAdminControlUser() gate that guards user management, device approval
+  // and loyalty awards (reserved `admin` username, `admin` role code, or an
+  // explicit permissions.all grant). Refused loudly -- never silently
+  // downgraded to a normal stock-moving transition, which would deduct
+  // units the caller explicitly said not to touch.
+  const skipStockRequested = body.skip_stock === true || String(body.skip_stock ?? '') === 'true'
+  if (skipStockRequested && !isAdminControlUser(user)) {
+    return c.json({ error: 'Administrator access required to change a sale status without touching stock.' }, 403)
+  }
 
   if (!saleStatus || !VALID_SALE_STATUSES.includes(saleStatus)) {
     return c.json({ error: `Invalid status. Must be one of: ${VALID_SALE_STATUSES.join(', ')}` }, 400)
   }
 
-  const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get<Record<string, unknown> & {
+  const paymentFieldsSent = body.payment_method !== undefined
+    || body.payment_details !== undefined
+    || body.amount_paid_usd !== undefined
+    || body.amount_paid_khr !== undefined
+  if (body.payment_method !== undefined || body.amount_paid_usd !== undefined || body.amount_paid_khr !== undefined) {
+    return c.json({ error: 'Send the full payment_details snapshot; payment totals and summary are derived by the server.', code: 'unsupported_payment_aggregate' }, 400)
+  }
+  const settlementRequestId = paymentFieldsSent ? normalizeClientRequestId(body.client_request_id) : null
+  if (paymentFieldsSent && !settlementRequestId) {
+    return c.json({ error: 'client_request_id is required when settling a sale.', code: 'client_request_id_required' }, 400)
+  }
+  const statusRequestId = paymentFieldsSent ? null : normalizeClientRequestId(body.client_request_id)
+  const statusSourceId = statusRequestId ? `actor:${Number(user.id)}:request:${statusRequestId}` : null
+  const statusCanonical = statusRequestId ? JSON.stringify(saleStatusReceiptCanonical(Number(id), body)) : null
+  const statusDigest = statusCanonical ? await saleMutationDigest(JSON.parse(statusCanonical)) : null
+  if (statusSourceId && statusDigest) {
+    const previous = await db.prepare(`
+      SELECT request_digest,response_json FROM sale_record_events
+      WHERE source_kind='sale_status' AND source_id=@source AND generation=0
+    `).get<{ request_digest: string | null; response_json: string | null }>({ source: statusSourceId })
+    if (previous) {
+      if (previous.request_digest !== statusDigest) {
+        return c.json({ error: 'client_request_id was already used with different sale status data.', code: 'idempotency_conflict' }, 409)
+      }
+      return c.json(JSON.parse(previous.response_json || '{}') as Record<string, unknown>)
+    }
+  }
+  const settlementCanonical = paymentFieldsSent ? JSON.stringify(saleStatusReceiptCanonical(Number(id), body)) : null
+  const settlementDigest = settlementCanonical ? await saleMutationDigest(JSON.parse(settlementCanonical)) : null
+  if (settlementRequestId && settlementDigest) {
+    const previous = await db.prepare(`
+      SELECT request_digest,response_json FROM sale_mutation_receipts
+      WHERE actor_id=@actor AND mutation_kind='settlement' AND request_id=@request
+    `).get<{ request_digest: string; response_json: string }>({ actor: user.id, request: settlementRequestId })
+    if (previous) {
+      if (previous.request_digest !== settlementDigest) {
+        return c.json({ error: 'client_request_id was already used with different settlement data.', code: 'idempotency_conflict' }, 409)
+      }
+      return c.json(JSON.parse(previous.response_json) as Record<string, unknown>)
+    }
+  }
+
+  const sale = await db.prepare('SELECT s.*, COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM sales s WHERE id = ?').get<Record<string, unknown> & {
     id: number
     sale_status: string | null
     updated_at: string | null
@@ -1015,6 +1933,8 @@ app.patch('/:id/status', async (c) => {
     receipt_number: string | null
     status_before_cancel: string | null
     cancel_fee_id: number | null
+    // migration 0114; absent (undefined) on a database that has not run it.
+    stock_skipped: number | null
   }>([id])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
@@ -1029,8 +1949,15 @@ app.patch('/:id/status', async (c) => {
   }
 
   const oldStatus = sale.sale_status || 'completed'
-  if (oldStatus === saleStatus) {
+  if (oldStatus === saleStatus && !paymentFieldsSent) {
     return c.json({ id: Number(id), sale_status: saleStatus, updated_at: sale.updated_at || null })
+  }
+  if (!paymentFieldsSent && !statusRequestId) {
+    return c.json({
+      error: 'Refresh this app before changing a sale status, then try again.',
+      code: 'client_request_id_required',
+      action: 'refresh_required',
+    }, 400)
   }
 
   // Which transitions are legal at all (returns-flow ownership of
@@ -1038,6 +1965,16 @@ app.patch('/:id/status', async (c) => {
   // see lib/saleTransitions.ts.
   const guard = guardSaleStatusTransition(oldStatus, saleStatus, sale.status_before_cancel || null)
   if (!guard.ok) return c.json({ error: guard.error }, 400)
+
+  // S4-2: is this transition outside the stock ledger? Either the admin
+  // asked for it now, or this sale was ALREADY marked stock-skipped by an
+  // earlier transition. The second half is the important one: a sale that
+  // reached `completed` without the system deducting anything must never
+  // later "give back" units it never took (a cancel would compute
+  // delta = 0 - held(completed) and invent stock). Once skipped, always
+  // skipped -- see the long note on planSaleStockTransition.
+  const saleAlreadyStockSkipped = Number(sale.stock_skipped || 0) === 1
+  const skipStock = skipStockRequested || saleAlreadyStockSkipped
 
   // Cancelling requires its reason (Mistake / Buyer didn't buy / Other +
   // note), and may carry the lost fee -- e.g. a delivery fee the shop
@@ -1120,11 +2057,19 @@ app.patch('/:id/status', async (c) => {
     }
   }
   const damagedTransitionOps: Array<{ lotId: number; productId: number; productName: string | null; branchId: number | null; delta: number }> = []
+  let skippedDamagedUnits = 0
   for (const item of items) {
     if (!item.damaged_lot_id || !item.product_id) continue
     const returned = Math.max(0, Number(returnedByItem.get(item.id)) || 0)
     const delta = heldQuantity(saleStatus, item.quantity, returned) - heldQuantity(oldStatus, item.quantity, returned)
     if (delta === 0) continue
+    // S4-2: a damaged lot is stock too -- "don't touch stock" means all of
+    // it, so these ops (and their damage movements) are counted and then
+    // NOT queued, rather than half-applying the transition.
+    if (skipStock) {
+      skippedDamagedUnits += Math.abs(delta)
+      continue
+    }
     damagedTransitionOps.push({ lotId: Number(item.damaged_lot_id), productId: item.product_id, productName: item.product_name, branchId: item.branch_id, delta })
   }
 
@@ -1136,8 +2081,10 @@ app.patch('/:id/status', async (c) => {
     returnedByItem,
     reason: movementReason,
     userId: user?.id ?? null,
-    userName: user?.name ?? null,
+    userName: actorSnapshot(user),
+    skipStock,
   })
+  const totalSkippedUnits = plan.skippedUnits + skippedDamagedUnits
 
   // Pre-flight availability for anything the plan TAKES (plain read; the
   // CHECK(quantity >= 0) constraints below remain the real race guard,
@@ -1151,52 +2098,111 @@ app.patch('/:id/status', async (c) => {
     }
   }
 
-  const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
-  const updates = ['sale_status = @sale_status', 'updated_at = CURRENT_TIMESTAMP']
-  const updateParams: Record<string, unknown> = { sale_status: saleStatus, id }
-  if (body.notes !== undefined) {
+  const mutationStamp = new Date().toISOString()
+  // Stable identity shared by the generic status audit and any richer audit
+  // emitted for this same request. Records suppresses a twin only by this
+  // identity; actor/status/timestamp proximity is not proof of one act.
+  const statusOperationId = statusSourceId || crypto.randomUUID()
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = [saleRevisionGuard(Number(id), Number(sale.write_revision))]
+  const updates = ['sale_status = @sale_status', 'updated_at = @updated_at']
+  const updateParams: Record<string, unknown> = { sale_status: saleStatus, id, updated_at: mutationStamp }
+  const emptySettlementNote = paymentFieldsSent && body.notes !== undefined && !String(body.notes ?? '').trim()
+  if (body.notes !== undefined && !emptySettlementNote) {
     updates.push('notes = @notes')
     updateParams.notes = body.notes
+  }
+
+  // S4-2: WRITE DOWN that stock was deliberately not moved (migration
+  // 0114). Without this a sale whose deduction was skipped on purpose is
+  // indistinguishable, next month, from one whose deduction was lost to a
+  // bug -- and the flag is also what makes the skip sticky, so the sale's
+  // later transitions cannot invent the units back. Stamped once, on the
+  // transition that first skipped; re-marking is a no-op.
+  if (skipStockRequested && !saleAlreadyStockSkipped) {
+    updates.push(
+      'stock_skipped = 1',
+      "stock_skipped_at = datetime('now')",
+      'stock_skipped_by_name = @stock_skipped_by_name',
+    )
+    updateParams.stock_skipped_by_name = actorSnapshot(user)
   }
 
   // Y10: the payment for an awaiting-payment sale is decided when it is
   // completed -- accept it here, on exactly that transition. Same
   // normalization rules as POST /. Payment fields on any other transition
   // are refused rather than silently dropped.
-  const paymentFieldsSent = body.payment_method !== undefined
-    || body.payment_details !== undefined
-    || body.amount_paid_usd !== undefined
-    || body.amount_paid_khr !== undefined
+  let settlementSnapshot: SaleSettlementSnapshot | null = null
+  let settlementResponse: Record<string, unknown> | null = null
+  let settlementOperationId: string | null = null
+  let settlementHistoryIndex = -1
+  let settlementEventBytes = 0
+  let statusEventBytes = 0
+  let directStatusResponse: Record<string, unknown> | null = null
+  let settlementLineStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
+  let paymentCorrection = false
   if (paymentFieldsSent) {
     const isDeferredPaymentSettle = oldStatus === 'awaiting_payment'
       && (saleStatus === 'completed' || saleStatus === 'awaiting_delivery')
     if (!isDeferredPaymentSettle) {
       return c.json({ error: 'Payment can only be recorded when completing an awaiting-payment sale.' }, 400)
     }
-    const paidUsd = round2(Math.max(0, Number(body.amount_paid_usd) || 0))
-    const paidKhr = Math.round(Math.max(0, Number(body.amount_paid_khr) || 0))
-    const details = Array.isArray(body.payment_details)
-      ? body.payment_details
-        .slice(0, 12)
-        .map((detail) => ({
-          method: String(detail?.method || '').trim().slice(0, 80),
-          amount_usd: round2(Math.max(0, Number(detail?.amount_usd) || 0)),
-          amount_khr: Math.round(Math.max(0, Number(detail?.amount_khr) || 0)),
-        }))
-        .filter((detail) => detail.method && (detail.amount_usd > 0 || detail.amount_khr > 0))
-      : []
-    const effectiveDetails = details.length
-      ? details
-      : [{ method: String(body.payment_method || 'Cash').trim().slice(0, 80) || 'Cash', amount_usd: paidUsd, amount_khr: paidKhr }]
-    const methodSummary = Array.from(new Set(effectiveDetails.map((detail) => detail.method))).join(' + ')
-    const rate = Number(sale.exchange_rate) > 0 ? Number(sale.exchange_rate) : 4100
-    const paidCombinedUsd = paidUsd + paidKhr / rate
-    // Exact overpay kept for the riel conversion below -- same
-    // order-of-operations rule as lib/saleTotals.ts (round2 first shifts
-    // whole tens of riel off what the cashier was shown).
-    const overpayExactUsd = Math.max(0, paidCombinedUsd - (Number(sale.total_usd) || 0))
-    const overpayUsd = round2(overpayExactUsd)
+    const paymentCorrectionRequested = body.replace_existing_payment === true
+    if (paymentCorrectionRequested) {
+      paymentCorrection = await saleAllowsPaymentCorrection(db, Number(id))
+      if (!paymentCorrection) {
+        return c.json({ error: 'Recorded payment can only be replaced after a completed sale is moved back to Awaiting payment.', code: 'payment_correction_not_allowed' }, 409)
+      }
+    }
+    if ((body.notes !== undefined && !emptySettlementNote) || skipStockRequested) {
+      return c.json({ error: 'Settle payment separately from notes or stock overrides.' }, 400)
+    }
+    const settingRows = await db.prepare(`
+      SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate','pos_payment_methods')
+    `).all<{ key: string; value: string }>()
+    const settingMap = Object.fromEntries(settingRows.map((row) => [row.key, row.value]))
+    const recordedMoney=hasRecordedSaleMoneyPrecision(sale as Parameters<typeof hasRecordedSaleMoneyPrecision>[0])
+    const latestRate = recordedMoney ? Number(sale.exchange_rate) : Number(settingMap.exchange_rate || 4100)
+    const reviewedRate = Number(body.expected_exchange_rate)
+    if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
+      return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed settlement.', code: 'expected_exchange_rate_required', current_exchange_rate: latestRate }, 400)
+    }
+    if (!Number.isFinite(latestRate) || latestRate <= 0 || (recordedMoney ? reviewedRate !== latestRate : Math.abs(reviewedRate - latestRate) > 0.0000001)) {
+      return c.json({ error: 'The exchange rate changed. Review the payment again.', code: 'exchange_rate_changed', current_exchange_rate: latestRate, current: { exchange_rate: latestRate } }, 409)
+    }
+    let settlementPlan
+    try {
+      settlementPlan = planSaleSettlement({
+        moneyPrecisionVersion: recordedMoney ? 1 : 0,
+        configuredMethodsRaw: settingMap.pos_payment_methods,
+        paymentDetailsRaw: body.payment_details,
+        existingPaidUsd: paymentCorrection ? 0 : sale.amount_paid_usd,
+        existingPaidKhr: paymentCorrection ? 0 : sale.amount_paid_khr,
+        existingPaymentDetailsRaw: paymentCorrection ? null : sale.payment_details,
+        existingPaymentMethodRaw: paymentCorrection ? null : sale.payment_method,
+        totalUsd: sale.total_usd,
+        exchangeRate: latestRate,
+        changeExchangeRateRaw: settingMap.change_exchange_rate,
+      })
+    } catch (error) {
+      if (error instanceof SettlementValidationError) return c.json({ error: error.message, code: error.code }, error.statusCode)
+      throw error
+    }
+    const before = await readSaleSettlementState(db, Number(id))
+    if (!before) return c.json({ error: 'Sale not found' }, 404)
+    const lineMoneyRows = await db.prepare(`
+      SELECT id,applied_price_usd,total_usd,product_discount_usd,
+             base_price_usd,manual_discount_usd
+      FROM sale_items WHERE sale_id=@id ORDER BY id
+    `).all<Record<string, unknown>>({ id: Number(id) })
+    const after = buildSaleSettlementAfterState(before, sale, lineMoneyRows, saleStatus, settlementPlan)
     updates.push(
+      'exchange_rate = @exchange_rate',
+      'subtotal_khr = @subtotal_khr',
+      'discount_khr = @discount_khr',
+      'tax_khr = @tax_khr',
+      'total_khr = @total_khr',
+      'delivery_fee_khr = @delivery_fee_khr',
+      'membership_discount_khr = @membership_discount_khr',
       'payment_method = @payment_method',
       'payment_details = @payment_details',
       'payment_currency = @payment_currency',
@@ -1204,19 +2210,45 @@ app.patch('/:id/status', async (c) => {
       'amount_paid_khr = @amount_paid_khr',
       'change_usd = @change_usd',
       'change_khr = @change_khr',
+      'change_is_actual = @change_is_actual',
+      'change_exchange_rate = @change_exchange_rate',
+      'search_normalized = @search_normalized',
     )
-    updateParams.payment_method = methodSummary
-    updateParams.payment_details = JSON.stringify(effectiveDetails)
-    updateParams.payment_currency = paidUsd > 0 && paidKhr > 0 ? 'MIXED' : paidKhr > 0 ? 'KHR' : 'USD'
-    updateParams.amount_paid_usd = paidUsd
-    updateParams.amount_paid_khr = paidKhr
-    updateParams.change_usd = overpayUsd
-    // Same Part-534 rule as sale creation: KHR change converts at the
-    // configured change rate, falling back to this sale's own rate.
-    const changeRateRow = await db.prepare(
-      `SELECT value FROM settings WHERE key = 'change_exchange_rate'`,
-    ).get<{ value: string }>()
-    updateParams.change_khr = Math.round(overpayExactUsd * resolveChangeExchangeRate(changeRateRow?.value, rate))
+    Object.assign(updateParams, { ...after, lines: undefined })
+    settlementLineStatements = saleSettlementStateStatements(Number(id), after, mutationStamp).slice(1)
+    settlementOperationId = crypto.randomUUID()
+    settlementSnapshot = { version: 1, operationId: settlementOperationId, saleId: Number(id), receiptNumber: sale.receipt_number == null ? null : String(sale.receipt_number), before, after }
+    settlementResponse = {
+      id: Number(id),
+      sale_status: saleStatus,
+      updated_at: mutationStamp,
+      exchange_rate: after.exchange_rate,
+      payment_method: after.payment_method,
+      payment_details: after.payment_details,
+      payment_currency: after.payment_currency,
+      amount_paid_usd: after.amount_paid_usd,
+      amount_paid_khr: after.amount_paid_khr,
+      change_usd: after.change_usd,
+      change_khr: after.change_khr,
+      change_is_actual: after.change_is_actual,
+      change_exchange_rate: after.change_exchange_rate,
+      actionKind: SALE_SETTLEMENT_ACTION_KIND,
+      paymentCorrection,
+      operationId: settlementOperationId,
+      currentReplayGeneration: 0,
+    }
+    statements.unshift(
+      { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+      saleMutationGuard(`
+        COALESCE((SELECT value FROM settings WHERE key='exchange_rate'),'')=@exchangeRate
+        AND COALESCE((SELECT value FROM settings WHERE key='change_exchange_rate'),'')=@changeRate
+        AND COALESCE((SELECT value FROM settings WHERE key='pos_payment_methods'),'')=@paymentMethods
+      `, {
+        exchangeRate: settingMap.exchange_rate ?? '',
+        changeRate: settingMap.change_exchange_rate ?? '',
+        paymentMethods: settingMap.pos_payment_methods ?? '',
+      }),
+    )
   }
   if (saleStatus === 'cancelled') {
     updates.push(
@@ -1228,7 +2260,7 @@ app.patch('/:id/status', async (c) => {
     )
     updateParams.cancel_reason = cancelReason
     updateParams.cancel_note = cancelNote
-    updateParams.cancelled_by_name = user?.name ?? null
+    updateParams.cancelled_by_name = actorSnapshot(user)
     updateParams.status_before_cancel = oldStatus
   } else if (oldStatus === 'cancelled') {
     // Un-cancel: the cancellation record clears, and its linked lost-fee
@@ -1247,36 +2279,114 @@ app.patch('/:id/status', async (c) => {
       statements.push({ sql: 'DELETE FROM fees WHERE id = @feeId', params: { feeId: sale.cancel_fee_id } })
     }
   }
+  // Keep cancellation money and lifecycle state in the same transaction.
+  // The former post-commit insert could leave a cancelled/restocked sale with
+  // no linked fee, which also made a later un-cancel impossible to reverse
+  // exactly. last_insert_rowid() is consumed by the immediately following
+  // sale UPDATE in this one D1 batch.
+  if (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) {
+    const cancellationBranchId = Number(sale.branch_id)
+    if (!Number.isSafeInteger(cancellationBranchId) || cancellationBranchId <= 0) {
+      return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    }
+    const cancellationBranch = await db.prepare(
+      'SELECT id,name FROM branches WHERE id=@id AND COALESCE(is_active,1)=1 LIMIT 1',
+    ).get<{ id: number; name: string | null }>({ id: cancellationBranchId })
+    if (!cancellationBranch || !branchCanSell(cancellationBranch.name)) {
+      return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    }
+    statements.push({
+      sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
+            VALUES ('expense', @label, @amount_usd, @amount_khr, date('now'), @sale_id, @branch_id, @notes, @created_by, @created_by_name)`,
+      params: {
+        label: `Cancelled sale ${sale.receipt_number || id} -- lost fee`,
+        amount_usd: cancelFeeUsd,
+        amount_khr: cancelFeeKhr,
+        sale_id: Number(id),
+        branch_id: cancellationBranchId,
+        notes: cancelFeeNote || `Fee lost to cancellation (${cancelReasonLabel(cancelReason!)})`,
+        created_by: user?.id ?? null,
+        created_by_name: actorSnapshot(user),
+      },
+    })
+    updates.push('cancel_fee_id = last_insert_rowid()')
+  }
   statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
+  if (!paymentFieldsSent && statusSourceId && statusDigest) {
+    directStatusResponse = {
+      id: Number(id), sale_status: saleStatus, updated_at: mutationStamp,
+      ...(skipStock ? { stock_skipped: 1 } : {}),
+    }
+    const statusChanges: Array<{
+      field: 'sale_status' | 'cancel_reason' | 'cancel_note'
+      before: { state: 'known_value'; value: string } | { state: 'known_none' }
+      after: { state: 'known_value'; value: string } | { state: 'known_none' }
+    }> = [{
+      field: 'sale_status',
+      before: { state: 'known_value', value: oldStatus },
+      after: { state: 'known_value', value: saleStatus },
+    }]
+    const cancellationTransition = oldStatus === 'cancelled' || saleStatus === 'cancelled'
+    if (cancellationTransition) {
+      const cancellationState = (value: unknown): { state: 'known_none' } | { state: 'known_value'; value: string } => {
+        const normalized = value == null ? '' : String(value).trim()
+        return normalized ? { state: 'known_value', value: normalized } : { state: 'known_none' }
+      }
+      const reasonBefore = cancellationState(sale.cancel_reason)
+      const reasonAfter = cancellationState(saleStatus === 'cancelled' ? cancelReason : null)
+      if (JSON.stringify(reasonBefore) !== JSON.stringify(reasonAfter)) {
+        statusChanges.push({ field: 'cancel_reason', before: reasonBefore, after: reasonAfter })
+      }
+      const noteBefore = cancellationState(sale.cancel_note)
+      const noteAfter = cancellationState(saleStatus === 'cancelled' ? cancelNote : null)
+      if (JSON.stringify(noteBefore) !== JSON.stringify(noteAfter)) {
+        statusChanges.push({ field: 'cancel_note', before: noteBefore, after: noteAfter })
+      }
+    }
+    const statusEvent = buildSaleRecordEventsInsert([{
+      saleId: Number(id), sourceKind: 'sale_status', sourceId: statusSourceId,
+      generation: 0, kind: oldStatus === 'cancelled' || saleStatus === 'cancelled' ? 'cancelled' : 'status_changed', via: 'apply',
+      subject: sale.receipt_number == null ? null : String(sale.receipt_number),
+      actorId: user.id, actorUsername: actorSnapshot(user), occurredAt: mutationStamp,
+      changes: statusChanges, requestDigest: statusDigest, response: directStatusResponse,
+    }])!
+    statusEventBytes = statusEvent.eventsBytes
+    statements.push(statusEvent.statement)
+  }
+  if (saleStatus === 'awaiting_payment' && (oldStatus === 'completed' || oldStatus === 'awaiting_delivery')) {
+    statements.push({
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+            VALUES(@actor,@actorName,'sale_payment_correction_opened','sale',@saleId,@details,'sale',@saleId,@details)`,
+      params: {
+        actor: user.id,
+        actorName: actorSnapshot(user),
+        saleId: String(id),
+        details: JSON.stringify({
+          operationId: statusOperationId,
+          oldStatus,
+          newStatus: saleStatus,
+          reason: 'completed_sale_reopened_for_payment_correction',
+        }),
+      },
+    })
+  }
+  statements.push(...settlementLineStatements)
   statements.push(...plan.statements)
 
-  // Damaged-lot moves first (each statement self-guards; see the kernel).
-  // If the atomic batch below then fails, these reverse in its catch --
-  // same compensation shape POST / uses.
-  const appliedDamagedOps: Array<{ lotId: number; productId: number; delta: number }> = []
-  const reverseAppliedDamagedOps = async () => {
-    for (const op of appliedDamagedOps) {
-      try {
-        if (op.delta > 0) await restoreDamagedLot(db, { lotId: op.lotId, quantity: op.delta })
-        else await consumeDamagedLot(db, { lotId: op.lotId, productId: op.productId, quantity: -op.delta })
-      } catch { /* best-effort compensation */ }
-    }
-  }
+  // A provisional restore can be spent by another request before a status
+  // conflict is discovered. Keep damaged stock and its ledger in the SAME
+  // revision-guarded batch as regular stock, with the bulk path's identity
+  // and quantity bounds. Any failure rolls back the entire transition.
   for (const op of damagedTransitionOps) {
-    try {
-      if (op.delta > 0) {
-        // stock goes OUT with the sale again (e.g. un-cancel)
-        await consumeDamagedLot(db, { lotId: op.lotId, productId: op.productId, quantity: op.delta })
-      } else {
-        // stock comes BACK to the lot (e.g. cancel)
-        await restoreDamagedLot(db, { lotId: op.lotId, quantity: -op.delta })
-      }
-      appliedDamagedOps.push({ lotId: op.lotId, productId: op.productId, delta: op.delta })
-    } catch (error) {
-      await reverseAppliedDamagedOps()
-      const status = error instanceof DamagedLotShortfallError ? 409 : 400
-      return c.json({ error: (error as Error).message }, status)
-    }
+    const lotParams = { lot: op.lotId, product: op.productId, branch: op.branchId, q: -op.delta }
+    statements.push(bulkAssertion(
+      'EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lot AND product_id=@product AND branch_id IS @branch AND quantity_remaining+@q BETWEEN 0 AND quantity)',
+      lotParams,
+    ))
+    statements.push({
+      sql: `UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@q, updated_at=datetime('now') WHERE id=@lot`,
+      params: lotParams,
+    })
     statements.push({
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
             VALUES (@product_id, @product_name, @branch_id, '${op.delta > 0 ? DAMAGE_OUT_MOVEMENT : DAMAGE_IN_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name)`,
@@ -1288,16 +2398,131 @@ app.patch('/:id/status', async (c) => {
         reason: movementReason,
         reference_id: id,
         user_id: user?.id ?? null,
-        user_name: user?.name ?? null,
+        user_name: actorSnapshot(user),
       },
     })
   }
 
+  if (settlementSnapshot && settlementResponse && settlementOperationId && settlementRequestId && settlementDigest && settlementCanonical) {
+    const historyPayload = JSON.stringify({
+      applier: SALE_SETTLEMENT_ACTION_KIND,
+      operation_id: settlementOperationId,
+      generation: 0,
+    })
+    settlementHistoryIndex = statements.length
+    statements.push({
+      sql: `INSERT INTO action_history(
+              scope,entity,entity_id,label,undo_label,redo_label,reversible,status,
+              undo_payload,redo_payload,created_by_id,created_by_name
+            ) VALUES(
+              'sales','sale',@saleId,@label,@undoLabel,@redoLabel,1,'undoable',
+              @payload,@payload,@actor,@actorName
+            )`,
+      params: {
+        saleId: String(id),
+        label: `${paymentCorrection ? 'Corrected payment for' : 'Settled'} sale ${sale.receipt_number || `#${id}`}`,
+        undoLabel: `Undo ${paymentCorrection ? 'payment correction for' : 'settlement of'} sale ${sale.receipt_number || `#${id}`}`,
+        redoLabel: `Redo ${paymentCorrection ? 'payment correction for' : 'settlement of'} sale ${sale.receipt_number || `#${id}`}`,
+        payload: historyPayload,
+        actor: user.id,
+        actorName: actorSnapshot(user),
+      },
+    })
+    statements.push({
+      sql: `INSERT INTO sale_mutation_receipts(
+              id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_json,
+              before_json,after_json,response_json,history_id,generation,sale_revision,updated_at
+            ) VALUES(
+              @operation,@actor,@saleId,'settlement',@request,@digest,@requestJson,
+              @beforeJson,@afterJson,json_set(@responseJson,'$.actionHistoryId',last_insert_rowid()),
+              last_insert_rowid(),0,
+              COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),@stamp
+            )`,
+      params: {
+        operation: settlementOperationId,
+        actor: user.id,
+        saleId: Number(id),
+        request: settlementRequestId,
+        digest: settlementDigest,
+        requestJson: settlementCanonical,
+        beforeJson: JSON.stringify(settlementSnapshot.before),
+        afterJson: JSON.stringify(settlementSnapshot.after),
+        responseJson: JSON.stringify(settlementResponse),
+        stamp: mutationStamp,
+      },
+    })
+    const recordEvent = saleSettlementRecordEvent({
+      snapshot: settlementSnapshot,
+      kind: paymentCorrection ? 'payment_changed' : 'payment_settled',
+      generation: 0,
+      via: 'apply',
+      before: settlementSnapshot.before,
+      after: settlementSnapshot.after,
+      actorId: user.id,
+      actorUsername: actorSnapshot(user),
+      occurredAt: mutationStamp,
+      requestDigest: settlementDigest,
+    })
+    settlementEventBytes = recordEvent.eventsBytes
+    statements.push(recordEvent.statement)
+    statements.push({
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+            VALUES(@actor,@actorName,'sale_settlement','sale',@saleId,@details,'sale',@saleId,@details)`,
+      params: {
+        actor: user.id,
+        actorName: actorSnapshot(user),
+        saleId: String(id),
+        details: JSON.stringify({
+          operationId: settlementOperationId,
+          paymentCorrection,
+          before: settlementSnapshot.before,
+          after: settlementSnapshot.after,
+          record_event: {
+            source_kind: 'sale_settlement', source_id: settlementOperationId,
+            generation: 0, sale_id: Number(id),
+          },
+        }),
+      },
+    })
+  }
+
+  statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
+  if (settlementSnapshot) statements.push({ sql: 'DELETE FROM sale_mutation_guards', params: {} })
+  if (settlementSnapshot || directStatusResponse) {
+    assertSaleRecordBatchBounds(statements.length, settlementSnapshot || {
+      saleId: Number(id), before: oldStatus, after: saleStatus, response: directStatusResponse,
+    }, settlementEventBytes + statusEventBytes)
+  }
   try {
-    await db.batch(statements)
+    const results = await db.batch(statements)
+    if (settlementResponse && settlementHistoryIndex >= 0) {
+      settlementResponse.actionHistoryId = Number(results[settlementHistoryIndex]?.meta?.last_row_id || 0)
+    }
   } catch (error) {
-    await reverseAppliedDamagedOps()
     const message = (error as Error).message || ''
+    if (settlementRequestId && settlementDigest) {
+      const retry = await db.prepare(`
+        SELECT request_digest,response_json FROM sale_mutation_receipts
+        WHERE actor_id=@actor AND mutation_kind='settlement' AND request_id=@request
+      `).get<{ request_digest: string; response_json: string }>({ actor: user.id, request: settlementRequestId })
+      if (retry) {
+        if (retry.request_digest === settlementDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+        return c.json({ error: 'client_request_id was already used with different settlement data.', code: 'idempotency_conflict' }, 409)
+      }
+    }
+    if (statusSourceId && statusDigest) {
+      const retry = await db.prepare(`
+        SELECT request_digest,response_json FROM sale_record_events
+        WHERE source_kind='sale_status' AND source_id=@source AND generation=0
+      `).get<{ request_digest: string | null; response_json: string | null }>({ source: statusSourceId })
+      if (retry) {
+        if (retry.request_digest === statusDigest) return c.json(JSON.parse(retry.response_json || '{}') as Record<string, unknown>)
+        return c.json({ error: 'client_request_id was already used with different sale status data.', code: 'idempotency_conflict' }, 409)
+      }
+    }
+    if (/guard_value/i.test(message)) {
+      return c.json({ error: 'This sale changed while the status update was being prepared. Refresh and try again.', code: 'write_conflict' }, 409)
+    }
     // Same race guard as POST /: a CHECK(quantity >= 0) failure means a
     // concurrent sale consumed the stock (or the line's specific lot)
     // between the availability read above and this write. The batch rolled
@@ -1309,49 +2534,49 @@ app.patch('/:id/status', async (c) => {
     throw error
   }
 
-  // The lost-fee expense row is written AFTER the transition commits (a
-  // failed transition must never leave a stray loss on the books), then
-  // linked back via cancel_fee_id so un-cancelling can find and remove it.
-  let feeWarning: string | null = null
-  if (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) {
-    try {
-      const feeResult = await db.prepare(`
-        INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
-        VALUES ('expense', @label, @amount_usd, @amount_khr, date('now'), @sale_id, @branch_id, @notes, @created_by, @created_by_name)
-      `).run({
-        label: `Cancelled sale ${sale.receipt_number || id} -- lost fee`,
-        amount_usd: cancelFeeUsd,
-        amount_khr: cancelFeeKhr,
-        sale_id: Number(id),
-        branch_id: sale.branch_id ?? null,
-        notes: cancelFeeNote || `Fee lost to cancellation (${cancelReasonLabel(cancelReason!)})`,
-        created_by: user?.id ?? null,
-        created_by_name: user?.name ?? null,
-      })
-      const feeId = Number(feeResult.lastInsertRowid) || null
-      if (feeId) await db.prepare('UPDATE sales SET cancel_fee_id = @feeId WHERE id = @id').run({ feeId, id })
-    } catch {
-      feeWarning = 'The sale was cancelled and stock added back, but recording the lost fee failed -- add it on the Fees page.'
-    }
-  }
-
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', id, {
-    oldStatus,
-    newStatus: saleStatus,
-    ...(cancelReason ? { cancelReason, cancelNote, cancelFeeUsd, cancelFeeKhr } : {}),
-    ...(oldStatus === 'cancelled' && sale.cancel_fee_id ? { removedCancelFeeId: sale.cancel_fee_id } : {}),
-    restoredUnits: plan.restoredUnits,
-    deductedUnits: plan.deductedUnits,
-  })
-  // Same cache-invalidation reasoning as POST / above -- a status change
-  // here can deduct or restore stock.
+  // P4-4a: the response below (built from settlementResponse/directStatusResponse/
+  // the re-read `updated` row) does not read anything audit() writes, so the
+  // audit insert can run after the response is sent -- same reasoning as the
+  // bumpVersion/broadcast calls already deferred into this waitUntil.
   c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', id, {
+      operationId: settlementOperationId || statusOperationId,
+      ...(!paymentFieldsSent && statusSourceId ? { record_event: {
+        source_kind: 'sale_status', source_id: statusSourceId, generation: 0, sale_id: Number(id),
+      } } : {}),
+      oldStatus,
+      newStatus: saleStatus,
+      ...(cancelReason ? { cancelReason, cancelNote, cancelFeeUsd, cancelFeeKhr } : {}),
+      ...(oldStatus === 'cancelled' && sale.cancel_fee_id ? { removedCancelFeeId: sale.cancel_fee_id } : {}),
+      restoredUnits: plan.restoredUnits,
+      deductedUnits: plan.deductedUnits,
+      // S4-2: the second half of "record that stock was deliberately
+      // skipped" -- the sale carries the flag, the audit trail carries WHO,
+      // WHEN, HOW MANY units were not moved, and whether this transition
+      // asked for it or merely inherited an earlier skip.
+      ...(skipStock ? {
+        stockSkipped: true,
+        stockSkippedUnits: totalSkippedUnits,
+        stockSkipSource: skipStockRequested ? 'requested' : 'sale_already_stock_skipped',
+      } : {}),
+    }),
     bumpVersion(c.env, 'products'),
     bumpVersion(c.env, 'sales'),
+    ...((sale.cancel_fee_id || (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)))
+      ? [broadcast(c.env, 'fees', { action: 'update' })]
+      : []),
   ]))
-
   const updated = await db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get<{ id: number; sale_status: string; updated_at: string }>([id])
-  const payload = updated || { id: Number(id), sale_status: saleStatus }
+  const payload = settlementResponse || directStatusResponse || updated || { id: Number(id), sale_status: saleStatus }
+  // S4-6: name who made the change. The actor is the request's authenticated
+  // user (requireAuth, above) -- known synchronously here regardless of
+  // whether it is ALSO persisted for later in-app display (that is S4-11b's
+  // job, a separate action_history column). Same name/username fallback as
+  // the sale-recorded message's Cashier line (line ~954) and the same
+  // omit-the-line-if-unknown idiom `by` already uses in
+  // formatStockChangeTelegramLines/formatTransferTelegramLines/
+  // formatReturnTelegramLines, rather than printing "By: undefined".
+  const actorName = actorSnapshot(user)
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'status',
     lines: [
@@ -1359,10 +2584,17 @@ app.patch('/:id/status', async (c) => {
       `Status: ${oldStatus.replace(/_/g, ' ')} → ${saleStatus.replace(/_/g, ' ')}`,
       sale.customer_name ? `Customer: ${sale.customer_name}` : '',
       cancelReason ? `Reason: ${cancelReasonLabel(cancelReason)}` : '',
+      // S4-2: say it out loud on the shop's channel too -- a status change
+      // that moved no stock must not look like a normal one.
+      skipStock ? `Stock: not changed (${totalSkippedUnits} unit${totalSkippedUnits === 1 ? '' : 's'} deliberately skipped)` : '',
       cancelFeeUsd || cancelFeeKhr ? `Lost fee: ${telegramMoney(cancelFeeUsd, cancelFeeKhr)}` : '',
+      actorName ? `By: ${actorName}` : '',
     ],
   }).catch((error) => console.error('[telegram] sale status notification failed', error)))
-  return c.json(feeWarning ? { ...payload, warning: feeWarning } : payload)
+  // S4-2: echo the skip back so the client can badge the sale immediately
+  // (and so a scripted caller can assert the flag actually took effect).
+  const statusPayload = skipStock ? { ...payload, stock_skipped: 1 } : payload
+  return c.json(statusPayload)
 })
 
 // PATCH /api/sales/:id/customer -- attach/detach a customer or membership on
@@ -1374,13 +2606,75 @@ app.patch('/:id/customer', async (c) => {
   const user = c.get('user')
   // Same reasoning as PATCH /:id/status above -- only reachable from the
   // 'sales'-gated Sales page (Sales.tsx's attachSaleCustomer caller).
-  if (getActionTier(user, 'sales', 'customer') !== 'full') {
+  if (getActionTier(user, 'sales', 'customer') !== 'full' || getActionTier(user, 'sales', 'customer_reassign') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const saleId = c.req.param('id')
-  const body = await c.req.json<{ customerId?: number; membershipNumber?: string; clearAssignment?: boolean; [key: string]: unknown }>().catch(() => ({} as Record<string, unknown>))
+  const saleId = Number(c.req.param('id'))
+  if (!Number.isSafeInteger(saleId) || saleId <= 0) return c.json({ error: 'Sale not found' }, 404)
+  const body = await c.req.json<{
+    customerId?: number
+    membershipNumber?: string
+    clearAssignment?: boolean
+    client_request_id?: string
+    expected_updated_at?: string | null
+    expectedUpdatedAt?: string | null
+    [key: string]: unknown
+  }>().catch(() => ({} as Record<string, unknown>))
+  const requestId = normalizeClientRequestId(body.client_request_id)
+  const expectedUpdatedAt = getExpectedUpdatedAt(body)
+  if (!requestId || expectedUpdatedAt == null) {
+    return c.json({
+      error: 'Refresh this app before changing a sale customer, then try again.',
+      code: !requestId ? 'client_request_id_required' : 'expected_updated_at_required',
+      action: 'refresh_required',
+    }, 400)
+  }
+  const currentActorId = actorId(user)
+  if (!currentActorId) return c.json({ error: 'Authenticated user id is required.', code: 'actor_required' }, 400)
+  const shouldClear = Boolean(body.clearAssignment)
+  const requestedCustomerId = Number(body.customerId)
+  const requestedMembership = String(body.membershipNumber || '').trim()
+  const canonicalRequest = {
+    sale_id: saleId,
+    expected_updated_at: expectedUpdatedAt,
+    target: shouldClear
+      ? { kind: 'clear' }
+      : Number.isSafeInteger(requestedCustomerId) && requestedCustomerId > 0
+        ? { kind: 'customer_id', id: requestedCustomerId }
+        : { kind: 'membership_number', number: requestedMembership.toLowerCase() },
+  }
+  const requestDigest = await saleMutationDigest(canonicalRequest)
+  const sourceId = `actor:${currentActorId}:request:${requestId}`
+  const prior = await db.prepare(`
+    SELECT request_digest,response_json FROM sale_record_events
+    WHERE source_kind='sale_customer' AND source_id=@source_id AND generation=0
+  `).get<{ request_digest: string | null; response_json: string | null }>({ source_id: sourceId })
+  if (prior) {
+    if (prior.request_digest !== requestDigest) {
+      return c.json({ error: 'client_request_id was already used with different sale customer data.', code: 'idempotency_conflict' }, 409)
+    }
+    return c.json(JSON.parse(prior.response_json || '{}') as Record<string, unknown>)
+  }
 
-  const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get<Record<string, unknown> & { id: number; customer_id: number | null; updated_at: string | null }>([saleId])
+  const sale = await db.prepare(`
+    SELECT s.*,COALESCE(v.revision,0) AS write_revision,
+      source_customer.id AS source_customer_exists,
+      source_customer.membership_number AS source_membership_number,
+      source_customer.is_anonymous AS source_customer_is_anonymous
+    FROM sales s
+    LEFT JOIN sale_write_revisions v ON v.sale_id=s.id
+    LEFT JOIN customers source_customer ON source_customer.id=s.customer_id
+    WHERE s.id=?
+  `).get<Record<string, unknown> & {
+    id: number
+    customer_id: number | null
+    customer_name: string | null
+    updated_at: string | null
+    write_revision: number
+    source_customer_exists: number | null
+    source_membership_number: string | null
+    source_customer_is_anonymous: number | null
+  }>([saleId])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
   try {
@@ -1393,57 +2687,2395 @@ app.patch('/:id/customer', async (c) => {
     throw error
   }
 
-  const shouldClear = Boolean(body.clearAssignment)
-  let customer: { id: number; name: string | null; membership_number: string | null; phone: string | null; address: string | null } | undefined
+  let customer: { id: number; name: string | null; membership_number: string | null; phone: string | null; address: string | null; is_anonymous: number } | undefined
   if (!shouldClear) {
-    if (body.customerId) {
-      customer = await db.prepare('SELECT id, name, membership_number, phone, address FROM customers WHERE id = ?').get([body.customerId])
+    if (Number.isSafeInteger(requestedCustomerId) && requestedCustomerId > 0) {
+      customer = await db.prepare('SELECT id, name, membership_number, phone, address, is_anonymous FROM customers WHERE id = ?').get([requestedCustomerId])
     } else {
-      const membership = String(body.membershipNumber || '').trim()
-      if (membership) {
-        customer = await db.prepare('SELECT id, name, membership_number, phone, address FROM customers WHERE lower(trim(membership_number)) = lower(trim(?))').get([membership])
+      if (requestedMembership) {
+        customer = await db.prepare('SELECT id, name, membership_number, phone, address, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(?))').get([requestedMembership])
       }
     }
     if (!customer) return c.json({ error: 'Customer or membership number not found' }, 404)
+    if (isAnonymousCustomer(customer)) return c.json({ error: ANONYMOUS_CUSTOMER_MUTATION_ERROR, code: ANONYMOUS_CUSTOMER_ERROR_CODE }, 400)
   }
 
-  await db.batch([
-    {
-      sql: `UPDATE sales SET customer_id = @customer_id, customer_name = @customer_name, customer_phone = @customer_phone, customer_address = @customer_address, updated_at = CURRENT_TIMESTAMP WHERE id = @id`,
+  const currentName = String(sale.customer_name || '').trim()
+  const sourceIsAnonymous = isAnonymousCustomer({ is_anonymous: sale.source_customer_is_anonymous })
+  const assignmentUnchanged = customer
+    ? Number(sale.customer_id) === customer.id
+    : (sale.customer_id == null && !currentName) || sourceIsAnonymous
+  if (assignmentUnchanged) {
+    return c.json({ id: saleId, updated_at: sale.updated_at || expectedUpdatedAt })
+  }
+  let assignmentPlan: Awaited<ReturnType<typeof prepareCustomerAssignments>>
+  try {
+    assignmentPlan = await prepareCustomerAssignments(db, [{ id: saleId, sourceId: sale.customer_id, targetId: customer?.id ?? null }])
+  } catch (error) {
+    if (isLoyaltyAssignmentError(error)) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
+    throw error
+  }
+
+  const identityState = (id: number | null, name: string | null): SaleRecordChange['before'] => {
+    const normalizedName = String(name || '').trim() || null
+    return id == null && normalizedName == null
+      ? { state: 'known_none' }
+      : { state: 'known_value', value: { id, name: normalizedName } }
+  }
+  const membershipState = (number: string | null): SaleRecordChange['before'] => {
+    const normalized = String(number || '').trim() || null
+    return normalized
+      ? { state: 'known_value', value: { number: normalized, discount_usd: null, discount_khr: null, points_redeemed: null } }
+      : { state: 'known_none' }
+  }
+  const beforeCustomer = sourceIsAnonymous ? { state: 'known_none' } as const : identityState(sale.customer_id, sale.customer_name)
+  const afterCustomer = identityState(customer?.id ?? null, customer?.name ?? null)
+  const beforeMembership: SaleRecordChange['before'] = sale.customer_id == null || sourceIsAnonymous
+    ? { state: 'known_none' }
+    : sale.source_customer_exists == null
+      ? { state: 'unknown' }
+      : membershipState(sale.source_membership_number)
+  const afterMembership = membershipState(customer?.membership_number ?? null)
+  const changes: SaleRecordChange[] = []
+  if (JSON.stringify(beforeCustomer) !== JSON.stringify(afterCustomer)) {
+    changes.push({ field: 'customer', before: beforeCustomer, after: afterCustomer })
+  }
+  if (JSON.stringify(beforeMembership) !== JSON.stringify(afterMembership)) {
+    changes.push({ field: 'membership', before: beforeMembership, after: afterMembership })
+  }
+  const mutationStamp = new Date().toISOString()
+  const response = { id: saleId, updated_at: mutationStamp }
+  const eventInsert = buildSaleRecordEventsInsert([{
+    saleId,
+    sourceKind: 'sale_customer',
+    sourceId,
+    generation: 0,
+    kind: 'customer_changed',
+    via: 'apply',
+    subject: sale.receipt_number == null ? null : String(sale.receipt_number),
+    actorId: currentActorId,
+    actorUsername: actorSnapshot(user),
+    occurredAt: mutationStamp,
+    changes,
+    requestDigest,
+    response,
+  }])!
+  assertSaleRecordBatchBounds(7, { beforeCustomer, afterCustomer, beforeMembership, afterMembership }, eventInsert.eventsBytes)
+
+  const customerSearchNormalized = normalizeSearchText([
+    sale.receipt_number,
+    sale.cashier_name,
+    customer?.name,
+    customer?.phone,
+    sale.branch_name,
+    sale.payment_method,
+  ].filter(Boolean).join(' '))
+  const customerReferenceGuard = customer
+    ? bulkAssertion("EXISTS(SELECT 1 FROM customers WHERE id=@id AND COALESCE(name,'')=COALESCE(@name,'') AND COALESCE(phone,'')=COALESCE(@phone,'') AND COALESCE(address,'')=COALESCE(@address,'') AND COALESCE(membership_number,'')=COALESCE(@membership_number,'') AND COALESCE(is_anonymous,0)=0)", {
+      id: customer.id,
+      name: customer.name,
+      phone: customer.phone,
+      address: customer.address,
+      membership_number: customer.membership_number,
+    })
+    : null
+  const sourceReferenceGuard = sale.customer_id == null
+    ? null
+    : sale.source_customer_exists == null
+      ? bulkAssertion('NOT EXISTS(SELECT 1 FROM customers WHERE id=@id)', { id: sale.customer_id })
+      : bulkAssertion("EXISTS(SELECT 1 FROM customers WHERE id=@id AND COALESCE(membership_number,'')=COALESCE(@membership_number,'') AND COALESCE(is_anonymous,0)=@is_anonymous)", {
+        id: sale.customer_id,
+        membership_number: sale.source_membership_number,
+        is_anonymous: sourceIsAnonymous ? 1 : 0,
+      })
+
+  try {
+    await db.batch([
+      ...(assignmentPlan ? [assignmentPlan.pre] : []),
+      saleRevisionGuard(Number(saleId), Number(sale.write_revision)),
+      ...(sourceReferenceGuard ? [sourceReferenceGuard] : []),
+      ...(customerReferenceGuard ? [customerReferenceGuard] : []),
+      {
+      sql: `UPDATE sales SET customer_id = @customer_id, customer_name = @customer_name, customer_phone = @customer_phone, customer_address = @customer_address, search_normalized = @search_normalized, updated_at = @updated_at WHERE id = @id`,
       params: {
         customer_id: customer?.id ?? null,
         customer_name: customer?.name ?? null,
         customer_phone: customer?.phone ?? null,
-        customer_address: customer?.address ?? null,
+        // N21: the sale snapshots the DISPLAY address, never the Contact
+        // Options JSON customers.address actually holds -- that JSON was what
+        // the receipt and the sale detail were printing. The reference guard
+        // above still compares the RAW column, because that is what it is
+        // asserting has not changed underneath us.
+        customer_address: contactDisplayAddress(customer?.address) || null,
+        search_normalized: customerSearchNormalized,
+        updated_at: mutationStamp,
         id: saleId,
       },
-    },
-    {
-      sql: `UPDATE returns SET customer_id = @customer_id, customer_name = @customer_name, updated_at = CURRENT_TIMESTAMP WHERE sale_id = @sale_id`,
-      params: { customer_id: customer?.id ?? null, customer_name: customer?.name ?? null, sale_id: saleId },
-    },
-  ])
+      },
+      {
+      sql: `UPDATE returns SET customer_id = @customer_id, customer_name = @customer_name, updated_at = @updated_at WHERE sale_id = @sale_id`,
+      params: { customer_id: customer?.id ?? null, customer_name: customer?.name ?? null, updated_at: mutationStamp, sale_id: saleId },
+      },
+      ...(assignmentPlan ? [assignmentPlan.post] : []),
+      eventInsert.statement,
+      { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+    ])
+  } catch (error) {
+    if (assignmentPlan && /malformed JSON/i.test(String(error))) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
+    if (/constraint/i.test(String(error))) {
+      const replay = await db.prepare(`
+        SELECT request_digest,response_json FROM sale_record_events
+        WHERE source_kind='sale_customer' AND source_id=@source_id AND generation=0
+      `).get<{ request_digest: string | null; response_json: string | null }>({ source_id: sourceId })
+      if (replay) {
+        if (replay.request_digest === requestDigest) return c.json(JSON.parse(replay.response_json || '{}') as Record<string, unknown>)
+        return c.json({ error: 'client_request_id was already used with different sale customer data.', code: 'idempotency_conflict' }, 409)
+      }
+      return c.json({ error: 'This sale or one of its linked returns changed. Refresh and try again.', code: 'write_conflict' }, 409)
+    }
+    throw error
+  }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', saleId, {
-    previous_customer_id: sale.customer_id ?? null,
-    next_customer_id: customer?.id ?? null,
-    membership_number: customer?.membership_number ?? null,
-    cleared: shouldClear,
-  })
-
+  // P4-4a: `response` is already fully built above and does not read the
+  // audit row, so defer it the same way as the bumpVersion calls below.
   c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env, 'sales'),
-    bumpVersion(c.env, 'returns'),
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', saleId, {
+      record_event: { source_kind: 'sale_customer', source_id: sourceId, generation: 0, sale_id: saleId },
+      previous_customer_id: sale.customer_id ?? null,
+      next_customer_id: customer?.id ?? null,
+      membership_number: customer?.membership_number ?? null,
+      cleared: shouldClear,
+    }),
+    bumpVersions(c.env, ['sales', 'returns']),
   ]))
 
-  const updated = await db.prepare('SELECT id, customer_id, customer_name, updated_at FROM sales WHERE id = ?').get<{ id: number; customer_id: number | null; customer_name: string | null; updated_at: string }>([saleId])
-  return c.json({
-    ...(updated || { id: Number(saleId) }),
-    customer: customer
-      ? { id: customer.id, name: customer.name || null, membership_number: customer.membership_number || null, phone: customer.phone || null, address: customer.address || null }
-      : null,
-  })
+  return c.json(response)
 })
+
+// ---------------------------------------------------------------------------
+// POST /api/sales/:id/items -- add product lines to a sale that already
+// exists (S4-24b).
+//
+// Until now the Sales page could change a sale's status, its customer and
+// its membership, but never its CONTENTS: a customer who asked for one more
+// item right after paying had to be rung up as a second, unrelated sale.
+//
+// Every rule this endpoint applies -- which statuses accept a line, how many
+// units leave the shelf, which lots they come from, and what happens to the
+// totals -- lives in lib/saleLineAddition.ts, which a pure test drives
+// against a real in-memory schema (scripts/test-sale-add-items-pure.cjs).
+// This handler is the I/O around it: gate, read, plan, one atomic batch,
+// bookkeeping, undo record.
+//
+// It deliberately does NOT touch the PATCH /:id/status handler above or its
+// transition planner -- a line added here is a NEW held quantity, computed
+// by the same heldQuantity() invariant that route moves stock by, not a
+// status change.
+//
+// PERMISSION (decision 5): the granular `sales -> add_items` action at FULL
+// tier, server-side. Adding goods to a recorded sale moves stock and raises
+// what the customer owes, so it is not covered by the coarse 'sales' grant
+// (a view-tier bookkeeper must not reach it) and it is not the same act as
+// changing a status, so it is not folded into `sales.status` either. The
+// undo applier declares the identical permission+action, so a replay cannot
+// be the one path that writes this section more loosely than the route.
+//
+// NOT BUILT here, on purpose: damaged-lot sourcing (POST /'s damaged_lot_id
+// path), per-line manual/product discounts, and membership point redemption
+// against the added line. Each is its own money rule and none of them has a
+// place to be entered on this surface yet.
+app.post('/:id/items', async (c) => {
+  const db = getDb(c.env)
+  const user = c.get('user')
+  if (getActionTier(user, 'sales', 'add_items') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+
+  const id = c.req.param('id')
+  const body = await c.req.json<{
+    items?: Array<{
+      product_id?: number
+      id?: number
+      quantity?: number
+      applied_price_usd?: number
+      branch_id?: number
+      batch_id?: number | null
+      batch_label?: string | null
+      batch_expiry_date?: string | null
+      unlotted_stock?: boolean
+    }>
+    notes?: string
+    client_request_id?: string
+    expected_exchange_rate?: number | string
+    [key: string]: unknown
+  }>().catch(() => ({} as Record<string, unknown>))
+
+  try {
+  const addItemsRequestId = normalizeClientRequestId(body.client_request_id)
+  if (!addItemsRequestId) return c.json({ error: 'client_request_id is required when adding sale items.', code: 'client_request_id_required' }, 400)
+  const addItemsCanonical = JSON.stringify(saleLineReceiptCanonical(Number(id), 'add_items', body))
+  const addItemsDigest = await saleMutationDigest(JSON.parse(addItemsCanonical))
+  const priorAddition = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
+    WHERE actor_id=@actor AND mutation_kind='add_items' AND request_id=@request`)
+    .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: addItemsRequestId })
+  if (priorAddition) {
+    if (priorAddition.request_digest !== addItemsDigest) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
+    return c.json(JSON.parse(priorAddition.response_json) as Record<string, unknown>)
+  }
+  if (body.money_precision_version !== 1) return c.json({ error: 'Preserve the pending request and review this basket with the current app.', code: 'money_precision_review_needed' },409)
+  if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' },503)
+
+  const rawItems = Array.isArray(body.items) ? body.items : []
+  if (!rawItems.length) return c.json({ error: 'Sale items required' }, 400)
+  // Bounded so one request cannot build a D1 batch of unbounded size; the
+  // POS cart itself is the place for a large order.
+  if (rawItems.length > 50) return c.json({ error: 'Add at most 50 lines at a time.' }, 400)
+
+  const sale = await db.prepare('SELECT s.*,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM sales s WHERE s.id = ?').get<Record<string, unknown> & {
+    id: number
+    sale_status: string | null
+    updated_at: string | null
+    branch_id: number | null
+    receipt_number: string | null
+    write_revision: number
+  }>([id])
+  if (!sale) return c.json({ error: 'Sale not found' }, 404)
+
+  try {
+    assertUpdatedAtMatch('sale', sale, getExpectedUpdatedAt(body))
+  } catch (error) {
+    if (error instanceof WriteConflictError) {
+      const { body: conflictBody, status } = writeConflictResponse(error)
+      return c.json(conflictBody, status)
+    }
+    throw error
+  }
+
+  const saleId = Number(sale.id)
+  const saleStatus = String(sale.sale_status || 'completed')
+  const precisionBasket = await capturePrecisionBasket(db,sale)
+  const moneySettings = await readAmendmentMoneySettings(db)
+  const exchangeRate = Number(sale.exchange_rate)
+  if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new SaleMoneyContractError('money_precision_invalid_rate')
+  const reviewedRate = Number(body.expected_exchange_rate)
+  if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
+    return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed item addition.', code: 'expected_exchange_rate_required', current: { exchange_rate: exchangeRate } }, 400)
+  }
+  if (reviewedRate !== exchangeRate) {
+    return c.json({ error: 'The exchange rate changed. Review the added items again.', code: 'exchange_rate_changed', current_exchange_rate: exchangeRate, current: { exchange_rate: exchangeRate } }, 409)
+  }
+
+  // A sale can carry real return records while its status row says something
+  // else (imported/legacy rows), so the guard is given the evidence, not
+  // just the label -- see guardSaleLineAddition's own comment.
+  const returnedRow = await db.prepare(`
+    SELECT 1 AS found FROM return_items ri
+    JOIN returns r ON r.id = ri.return_id
+    WHERE r.sale_id = ? AND COALESCE(r.status, 'completed') != 'cancelled'
+    LIMIT 1
+  `).get<{ found: number }>([saleId])
+  const guard = guardSaleLineAddition(saleStatus, !!returnedRow)
+  if (!guard.ok) return c.json({ error: guard.error }, 400)
+
+  // ---- Normalize (no DB access yet), same shape as POST /'s step 1 ----
+  const requested: Array<{
+    productId: number
+    quantity: number
+    branchId: number | null
+    appliedPriceUsd: number | null
+    batchId: number | null
+    batchLabel: string | null
+    batchExpiryDate: string | null
+    unlottedStock: boolean
+  }> = []
+  const saleHeaderBranchId = Number(sale.branch_id)
+  if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
+    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+  }
+  for (let index = 0; index < rawItems.length; index += 1) {
+    const item = rawItems[index] || {}
+    if (item.unlotted_stock !== undefined && typeof item.unlotted_stock !== 'boolean') {
+      return c.json({ error: `Added item #${index + 1} has an invalid unlotted_stock flag` }, 400)
+    }
+    if (item.unlotted_stock === true && item.batch_id != null) {
+      return c.json({ error: `Added item #${index + 1} cannot select both a received date and stock without a received date` }, 400)
+    }
+    const productId = Number(item.product_id || item.id)
+    if (!Number.isFinite(productId) || productId <= 0) {
+      return c.json({ error: `Added item #${index + 1} is missing a product` }, 400)
+    }
+    const quantity = Number(item.quantity)
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return c.json({ error: `Added item #${index + 1} has an invalid quantity` }, 400)
+    }
+    const rawPrice = Number(item.applied_price_usd)
+    const lineBranchId = Number(item.branch_id ?? saleHeaderBranchId)
+    if (!Number.isSafeInteger(lineBranchId) || lineBranchId <= 0 || lineBranchId !== saleHeaderBranchId) {
+      return c.json({ error: 'The sale header and every added line must use the same Shop branch.' }, 400)
+    }
+    requested.push({
+      productId,
+      quantity,
+      // A line inherits the sale's branch unless it names its own, exactly
+      // as a checkout line does -- the stock has to come off the shelf the
+      // sale was rung up at.
+      branchId: lineBranchId,
+      appliedPriceUsd: Number.isFinite(rawPrice) && rawPrice >= 0 && item.applied_price_usd !== undefined && item.applied_price_usd !== null
+        ? rawPrice
+        : null,
+      batchId: Number(item.batch_id) || null,
+      batchLabel: item.batch_label ? String(item.batch_label) : null,
+      batchExpiryDate: item.batch_expiry_date ? String(item.batch_expiry_date) : null,
+      unlottedStock: item.unlotted_stock === true,
+    })
+  }
+
+  // Added lines are sold exactly like checkout lines, so they answer to the
+  // same selling-branch rule.
+  const addedBranchIds = [saleHeaderBranchId]
+  const addedBranchRows = await selectInChunks(addedBranchIds, 0, (chunk) => db
+    .prepare(`SELECT id, name, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; name: string | null; is_active: number | null }>(chunk))
+  if (addedBranchRows.length !== addedBranchIds.length
+    || addedBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
+    || firstUnsellableBranch(addedBranchRows)) {
+    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+  }
+
+  // ---- Current prices/costs, chunked for D1's parameter ceiling ----
+  const productIds = [...new Set(requested.map((item) => item.productId))]
+  const products = await selectInChunks(productIds, 0, (chunk) => db
+    .prepare(`SELECT * FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
+  const productMap = new Map(products.map((product) => [product.id, product]))
+  for (const item of requested) {
+    if (!productMap.has(item.productId)) {
+      return c.json({ error: `Product #${item.productId} no longer exists.` }, 400)
+    }
+  }
+
+  // S4-2 + S4-3: the status is only half the question. A sale carrying the
+  // sticky `stock_skipped` flag is permanently outside the stock ledger, and
+  // adding a line to it must not take units the system never took. Before
+  // S4-3 this hole was invisible -- the only stock_skipped sales were
+  // migrated ones sitting in awaiting_payment, which held nothing anyway --
+  // but now that awaiting_payment holds, the flag is the ONLY thing standing
+  // between a migrated sale and a deduction it must never make.
+  const skipStock = saleSkipsStock(sale as AmendableSaleRow)
+  const deductsStock = saleStatusDeductsStock(saleStatus) && !skipStock
+
+  // ---- Plan the lines: FIFO lots first (the checkout's own rule, called) --
+  const lotsByKey = await readFifoLotAvailabilityForCart(
+    db,
+    requested
+      .filter((item) => item.branchId)
+      .map((item) => ({ productId: item.productId, branchId: item.branchId as number })),
+  )
+  const addRuleRows=await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>()
+  const addSourceGuard=pricingSourceGuard(products,addRuleRows)
+  const addedPool:CapturedPricingPool={version:1,pool_key:crypto.randomUUID(),evaluation_time:new Date().toISOString(),exchange_rate:exchangeRate,rules:[],
+    lines:requested.map((item,index)=>{
+      const raw=rawItems[index] as SaleItemInput, product=productMap.get(item.productId)!
+      if (!raw.client_line_key || !['selling','wholesale','manual'].includes(raw.pricing_source || ''))
+        throw new SaleMoneyContractError('money_precision_pricing_intent_required')
+      return {line_key:raw.client_line_key,source:raw.pricing_source!,product:{...capturePricingProduct(product),
+        selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),wholesale_price_usd:product.wholesale_price_usd==null?null:sellingPriceCeilCent(Number(product.wholesale_price_usd))},
+        selling_price_input_usd:raw.selling_price_input_usd??null,
+        ...(raw.display_price_mode===undefined?{}:{display_price_mode:raw.display_price_mode}),
+        manual:{type:raw.manual_discount_type==null?'none':raw.manual_discount_type as 'fixed'|'percent',
+          value:raw.manual_discount_type==='percent'?raw.manual_discount_value??0:newSaleMoney4(raw.manual_discount_value)}}
+    })}
+  const addedQuantities=Object.fromEntries(requested.map((line,index)=>[addedPool.lines[index].line_key,line.quantity]))
+  const addedPricing=evaluateCapturedPricingPool(addedPool,addedQuantities)
+  const provisionalAllocation={version:1 as const,lines:addedPool.lines.map(line=>({line_key:line.line_key,amount:addedPricing.get(line.line_key)!.total_usd})),discount_usd:0,membership_discount_usd:0,tax_usd:0}
+  const existingPricing=Number(sale.money_precision_version)===1?validateCapturedSaleBasket(precisionBasket.lines,sale,precisionBasket.identityBindings):[]
+  if (addedPool.lines.some(line=>existingPricing.some(old=>old.line_key===line.line_key))) throw new SaleMoneyContractError('money_precision_invalid_snapshot')
+  for (const [index,line] of addedPool.lines.entries()) {
+    const quote=(rawItems[index] as SaleItemInput).pricing_quote, exact=addedPricing.get(line.line_key)!
+    if (!quote || ['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'].some(k=>quote[k as keyof typeof quote]!==exact[k as keyof typeof quote]))
+      return c.json({error:'Review the current added-item quote.',code:'sale_pricing_quote_conflict',pricing_quotes:[...addedPricing].map(([client_line_key,amounts])=>({client_line_key,...amounts}))},409)
+  }
+  const candidateLines = requested.map((item,index) => {
+    const product = productMap.get(item.productId)
+    const lineKey=addedPool.lines[index].line_key
+    const unitPriceUsd=addedPricing.get(lineKey)!.applied_price_usd
+    return {
+      pricingSnapshotJson:serializeSaleItemPricing(addedPool,addedQuantities,lineKey,provisionalAllocation),
+      moneyPrecisionVersion: 1 as const,
+      productId: item.productId,
+      productName: product?.name || `product #${item.productId}`,
+      quantity: item.quantity,
+      branchId: item.branchId,
+      unitPriceUsd,
+      costPriceUsd: product?.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd),
+      costPriceKhr: product?.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
+      batchId: item.batchId,
+      batchLabel: item.batchLabel,
+      batchExpiryDate: item.batchExpiryDate,
+      unlottedStock: item.unlottedStock,
+    }
+  })
+  const explicitBatchResolution = resolveExplicitSaleLineBatches(candidateLines, lotsByKey)
+  if (!explicitBatchResolution.ok) {
+    return c.json({ error: explicitBatchResolution.error }, 409)
+  }
+  const planned = allocateNewSaleLines(
+    explicitBatchResolution.lines,
+    lotsByKey,
+    saleStatus,
+    skipStock,
+  )
+
+  let plan = planSaleLineAddition({
+    saleId,
+    saleStatus,
+    lines: planned,
+    exchangeRate,
+    userId: user?.id ?? null,
+    userName: actorSnapshot(user),
+  })
+
+  // ---- Pre-flight availability, plain reads, exactly like POST /'s step 2:
+  // D1's batch() is atomic but cannot branch mid-batch, so a shortage has to
+  // be reported before the write is built. The CHECK(quantity >= 0)
+  // constraints below remain the real race guard. ----
+  if (plan.deductions.length) {
+    const branchIds = [...new Set(plan.deductions.map((entry) => entry.branch_id))]
+    for (const branchId of branchIds) {
+      const idsForBranch = [...new Set(plan.deductions.filter((entry) => entry.branch_id === branchId).map((entry) => entry.product_id))]
+      const rows = await selectInChunks(idsForBranch, 1, (chunk) => db
+        .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
+        .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
+      const available = new Map(rows.map((row) => [row.product_id, row.quantity]))
+      for (const entry of plan.deductions.filter((item) => item.branch_id === branchId)) {
+        const have = available.get(entry.product_id) || 0
+        if (entry.quantity > have) {
+          const name = productMap.get(entry.product_id)?.name || `product #${entry.product_id}`
+          return c.json({ error: `Insufficient stock for ${name}: requested ${entry.quantity}, available ${have}` }, 409)
+        }
+      }
+    }
+  }
+
+  // ---- Totals (decision 3). Subtotal is re-summed from the sale's OWN
+  // lines rather than added onto the stored column, so a row whose stored
+  // subtotal had drifted is corrected instead of carrying the drift. Both
+  // discounts and the tender stay frozen; TAX follows the lines when the sale
+  // was taxed at the rate `settings.tax_rate` holds today (S4-30 DECISION 4a).
+  // See lib/saleLineAddition.ts and lib/saleAmendments.ts. ----
+  const existingSubtotalRow = await db
+    .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
+    .get<{ subtotal: number }>([saleId])
+  const subtotalBeforeUsd = Number(sale.money_precision_version)===0?Number(sale.subtotal_usd):sumMoney4(precisionBasket.lines.map(line => Number(line.total_usd)))
+  const subtotalAfterUsd = sumMoney4([subtotalBeforeUsd,plan.addedSubtotalUsd])
+  const taxPlan = planAmendedTax({
+    saleId,
+    sale: sale as AmendableSaleRow,
+    settings: moneySettings.tax,
+    subtotalBeforeUsd,
+    subtotalAfterUsd,
+    exchangeRate,
+  })
+  const money = recomputeSaleMoneyAfterAmendment({
+    moneyPrecisionVersion: 1,
+    sale: sale as AmendableSaleRow,
+    subtotalUsd: subtotalAfterUsd,
+    taxUsdOverride: taxPlan.taxUsdOverride,
+    changeExchangeRate: moneySettings.changeExchangeRate,
+    exchangeRateOverride: exchangeRate,
+  })
+  const addItemsStamp = new Date().toISOString()
+  const addItemsOperationId = crypto.randomUUID()
+  const lineMoneyRowsBefore = await db.prepare(`
+    SELECT id,applied_price_usd,applied_price_khr,total_usd,total_khr,
+           product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,
+           manual_discount_usd,manual_discount_khr,pricing_snapshot_json
+    FROM sale_items WHERE sale_id=? ORDER BY id
+  `).all<Record<string, unknown>>([saleId])
+  const lineMoneyBefore = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
+  const lineMoneyAfter = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
+  const moneyBefore = amendmentMoneyBefore(sale)
+  const moneyAfter = amendmentMoneyAfter(
+    sale,
+    money,
+    exchangeRate,
+    addItemsStamp,
+    taxPlan.outcome.taxUsd,
+    Number(sale.delivery_fee_usd) || 0,
+  )
+  const addHeaderConflict=reviewSaleHeaderQuote(body,sale,moneyAfter,moneySettings,taxPlan.outcome.taxUsd)
+  if(addHeaderConflict)return c.json(addHeaderConflict,409)
+  const finalAllocation={version:1 as const,lines:[...existingPricing.map(line=>({line_key:line.line_key,amount:line.amounts.total_usd})),...provisionalAllocation.lines],
+    discount_usd:Number(sale.discount_usd),membership_discount_usd:Number(sale.membership_discount_usd),tax_usd:taxPlan.outcome.taxUsd}
+  for (const [index,line] of planned.entries()) line.pricingSnapshotJson=serializeSaleItemPricing(addedPool,addedQuantities,addedPool.lines[index].line_key,Number(sale.money_precision_version)===1?finalAllocation:provisionalAllocation)
+  plan=planSaleLineAddition({saleId,saleStatus,lines:planned,exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)})
+  for (const row of lineMoneyAfter) {
+    if(Number(sale.money_precision_version)!==1)continue
+    const old=parseSaleItemPricing(row.pricing_snapshot_json)!
+    row.pricing_snapshot_json=serializeSaleItemPricing(old.pool,old.quantities,old.line_key,finalAllocation)
+  }
+
+  // ---- The amendment ledger entries for this addition (S4-30).
+  //
+  // S4-24b's endpoint is SUBSUMED by the ledger rather than sitting beside it:
+  // there is ONE way to add a line to a recorded sale, and it leaves ONE audit
+  // trail. A second addition path with its own trail would make the feature
+  // worse than not having it.
+  //
+  // The entries go in the SAME atomic batch as the lines they describe. That
+  // costs one thing -- sale_item_id is not knowable until the batch returns
+  // its last_row_ids, so these entries carry NULL there and identify the line
+  // by product instead. That is the right trade: an added line whose audit
+  // entry silently failed afterwards is a worse outcome than an entry without
+  // a foreign key, and the line id is secondary anyway (a removed line's id
+  // dangles by design -- the ledger snapshots the product name for exactly
+  // this reason).
+  //
+  // One request is one act, so every line shares a group_id.
+  const additionGroupId = crypto.randomUUID()
+  const ledgerStatements = plan.lines.map((line) => {
+    const totalBeforeUsd = moneyBefore.total_usd
+    const totalAfterUsd = moneyAfter.total_usd
+    return amendmentEntryStatement({
+      moneyPrecisionVersion: 1,
+      saleId,
+      kind: 'line_added',
+      groupId: additionGroupId,
+      productId: line.productId,
+      productName: line.productName,
+      quantityBefore: 0,
+      quantityAfter: line.quantity,
+      before: precisionRecordMoney(moneyBefore),
+      after: precisionRecordMoney(moneyAfter),
+      totalBeforeUsd,
+      totalAfterUsd,
+      unitsMoved: -line.heldUnits || 0,
+      stockSkipped: skipStock,
+      note: String(body.notes || '').trim().slice(0, 500) || null,
+      userId: user?.id ?? null,
+      userName: actorSnapshot(user),
+    })
+  })
+
+  const baseResponse: Record<string, unknown> = {
+    id: saleId,
+    receiptNumber: sale.receipt_number || null,
+    saleStatus,
+    addedLines: plan.lines.length,
+    unitsDeducted: plan.deductedUnits,
+    stockMoved: deductsStock,
+    subtotalUsd: moneyAfter.subtotal_usd,
+    totalUsd: moneyAfter.total_usd,
+    totalKhr: moneyAfter.total_khr,
+    outstandingUsd: round2(Math.max(0, moneyAfter.total_usd - (Number(sale.amount_paid_usd) || 0) - (Number(sale.amount_paid_khr) || 0) / exchangeRate)),
+    exchangeRate,
+    undoActionId: null,
+    actionHistoryId: null,
+    operationId: addItemsOperationId,
+    currentReplayGeneration: 0,
+    updated_at: addItemsStamp,
+  }
+  const reversal = {
+    saleId,
+    receiptNumber: sale.receipt_number || null,
+    saleStatus,
+    exchangeRate,
+    moneyBefore,
+    moneyAfter,
+    lineMoneyBefore,
+    lineMoneyAfter,
+    operationId: addItemsOperationId,
+    lines: plan.lines.map((line) => ({
+      pricingSnapshotJson:line.pricingSnapshotJson,
+      saleItemId: 0,
+      productId: line.productId,
+      productName: line.productName,
+      quantity: line.quantity,
+      branchId: line.branchId,
+      heldUnits: line.heldUnits,
+      unitPriceUsd: line.unitPriceUsd,
+      lineTotalUsd: line.lineTotalUsd,
+      moneyPrecisionVersion: 1 as const,
+      costPriceUsd: line.costPriceUsd,
+      costPriceKhr: line.costPriceKhr,
+      takes: line.takes,
+    })),
+  }
+
+  const statementsForPlan: StatementList = []
+  const lineOrdinalByStatement = new Map(plan.saleItemStatementIndexByLine.map((statementIndex, ordinal) => [statementIndex, ordinal]))
+  for (const [statementIndex, statement] of plan.statements.entries()) {
+    statementsForPlan.push(statement)
+    const ordinal = lineOrdinalByStatement.get(statementIndex)
+    if (ordinal !== undefined) {
+      statementsForPlan.push({
+        sql: `INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal)
+              VALUES(@operation,'sale_item',last_insert_rowid(),@ordinal)`,
+        params: { operation: addItemsOperationId, ordinal },
+      })
+    }
+  }
+  let snapshotExpression = '@payload'
+  for (let ordinal = 0; ordinal < plan.lines.length; ordinal += 1) {
+    snapshotExpression = `json_set(${snapshotExpression},'$.lines[${ordinal}].saleItemId',COALESCE((SELECT entity_id FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=${ordinal}),0))`
+  }
+  snapshotExpression = `json_set(${snapshotExpression},'$.saleStateRevision',COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0))`
+  const saleLabel = sale.receipt_number || `#${saleId}`
+  const lineCount = plan.lines.length
+  const auditDetails = JSON.stringify({
+    action: 'add_items', operation_id: addItemsOperationId,
+    receipt_number: sale.receipt_number || null, sale_status: saleStatus,
+    lines: lineCount, units_deducted: plan.deductedUnits,
+    subtotal_before: moneyBefore.subtotal_usd, subtotal_after: moneyAfter.subtotal_usd,
+    total_before: moneyBefore.total_usd, total_after: moneyAfter.total_usd,
+    exchange_rate_before: sale.exchange_rate ?? null, exchange_rate_after: exchangeRate,
+    notes: String(body.notes || '').trim().slice(0, 500) || null,
+  })
+
+  // Receipt, core rows, lot allocations, ledger, snapshot and action history
+  // commit as one D1 transaction. Every dynamic row id is captured through
+  // last_insert_rowid() into the operation member table before it is needed.
+  let batchResults: Array<{ meta?: { last_row_id?: number } }> = []
+  let historyStatementIndex = -1
+  try {
+    const atomicStatements: StatementList = [
+      { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+      { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      amendmentSettingsGuard(moneySettings),
+      saleRevisionGuard(saleId, Number(sale.write_revision)),
+      precisionBasket.guard,
+      addSourceGuard,
+      saleMutationReceiptStatement({
+        operationId: addItemsOperationId, actorId: Number(user.id), saleId, kind: 'add_items',
+        requestId: addItemsRequestId, requestDigest: addItemsDigest, requestJson: addItemsCanonical,
+        before: { money: moneyBefore, lines: lineMoneyBefore },
+        after: { money: moneyAfter, lines: lineMoneyAfter },
+        response: baseResponse, stamp: addItemsStamp,
+        identityBindings:precisionBasket.identityBindings,
+      }),
+      ...planUnlottedSaleLineGuards(plan.lines),
+      ...statementsForPlan,
+      ...buildOperationAllocationStatements(plan.lines, addItemsOperationId, addItemsStamp),
+      ...taxPlan.statements,
+      saleLineKhrSnapshotStatement(saleId,lineMoneyAfter),
+      canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
+      saleMoneyUpdateStatement(saleId, moneyAfter),
+      ...ledgerStatements,
+      {
+        sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
+              VALUES('sale.add_items','applied',${snapshotExpression},@byId,@byName)`,
+        params: { payload: JSON.stringify(reversal), operation: addItemsOperationId, saleId, byId: user.id, byName: actorSnapshot(user) },
+      },
+      {
+        sql: `INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal)
+              VALUES(@operation,'undo_snapshot',last_insert_rowid(),0)`,
+        params: { operation: addItemsOperationId },
+      },
+    ]
+    historyStatementIndex = atomicStatements.length
+    atomicStatements.push({
+      sql: `INSERT INTO action_history(scope,entity,entity_id,label,undo_label,redo_label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
+            SELECT 'sales','sale',@entityId,@label,@undoLabel,@redoLabel,1,'undoable',
+                   json_object('applier','sale.add_items','snapshot_id',entity_id,'operation_id',@operation,'generation',0),
+                   json_object('applier','sale.add_items','snapshot_id',entity_id,'operation_id',@operation,'generation',0),@byId,@byName
+            FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='undo_snapshot' AND ordinal=0`,
+      params: {
+        operation: addItemsOperationId, entityId: String(saleId),
+        label: `Added ${lineCount} item${lineCount === 1 ? '' : 's'} to sale ${saleLabel}`,
+        undoLabel: `Undo items added to sale ${saleLabel}`,
+        redoLabel: `Redo items added to sale ${saleLabel}`,
+        byId: user.id, byName: actorSnapshot(user),
+      },
+    })
+    atomicStatements.push(
+      {
+        sql: `UPDATE sale_mutation_receipts SET history_id=last_insert_rowid(),generation=0,
+              sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),
+              response_json=${canonicalMutationResponseSql("json_set(response_json,'$.undoActionId',last_insert_rowid(),'$.actionHistoryId',last_insert_rowid())")},updated_at=@stamp
+              WHERE id=@operation`,
+        params: { operation: addItemsOperationId, saleId, stamp: addItemsStamp,validatedIdentityBindings:JSON.stringify(precisionBasket.identityBindings) },
+      },
+      {
+        sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+              VALUES(@userId,@userName,'update','sale',@saleId,@details,'sale',@saleId,@details)`,
+        params: { userId: user.id, userName: actorSnapshot(user), saleId: String(saleId), details: auditDetails },
+      },
+      { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+      { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+    )
+    batchResults = await db.batch(atomicStatements) as typeof batchResults
+  } catch (error) {
+    const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
+      WHERE actor_id=@actor AND mutation_kind='add_items' AND request_id=@request`)
+      .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: addItemsRequestId })
+    if (retry?.request_digest === addItemsDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+    if (retry) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
+    const message = (error as Error).message || ''
+    if (/malformed JSON/i.test(message)) {
+      try { await db.prepare(addSourceGuard.sql).get(addSourceGuard.params) }
+      catch { return c.json({error:'Pricing changed before the added items were saved.',code:'sale_pricing_quote_conflict'},409) }
+    }
+    if (/CHECK constraint|constraint failed/i.test(message)) {
+      return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review the added items again.', code: 'write_conflict' }, 409)
+    }
+    return c.json({ error: `Failed to add sale items: ${message}` }, 500)
+  }
+
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env, 'products'),
+    bumpVersion(c.env, 'sales'),
+  ]))
+
+  const committed = await db.prepare('SELECT response_json FROM sale_mutation_receipts WHERE id=?')
+    .get<{ response_json: string }>([addItemsOperationId])
+  if (!committed) return c.json({ error: 'The added items committed without a durable receipt.', code: 'receipt_missing' }, 500)
+  const response = JSON.parse(committed.response_json) as Record<string, unknown>
+  const historyId = Number(batchResults[historyStatementIndex]?.meta?.last_row_id || 0)
+  if (historyId > 0) response.actionHistoryId = response.undoActionId = historyId
+  return c.json(response)
+  } catch (error) {
+    if (error instanceof SaleHeaderQuoteError) return c.json({error:error.message,code:error.code},400)
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError) return c.json({ error: error.message, code: error.code },409)
+    throw error
+  }
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/sales/:id/amendments -- the sale's audit trail (S4-30).
+//
+// This is the STAFF-facing read, and it is the whole point of the feature: the
+// original value plus every amendment on top of it, each with what changed, by
+// how much, who did it and when. The customer-facing receipt reads none of
+// this -- it renders the net state off `sale_items` + the `sales` row, exactly
+// as it always did.
+//
+// Read-gated, not write-gated: a view-tier bookkeeper who can see the sale can
+// see how it got that way. Hiding the trail from the people who reconcile the
+// books would defeat it.
+// ---------------------------------------------------------------------------
+app.get('/delivery-options', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'sales', 'amend') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const search = String(c.req.query('search') || '').trim().toLowerCase()
+  const pattern = `%${search.replace(/[%_]/g, '\\$&')}%`
+  const rows = await getDb(c.env).prepare(`
+    SELECT id,name,phone,area,address
+    FROM delivery_contacts
+    WHERE @search=''
+      OR lower(COALESCE(name,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(phone,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(area,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(address,'')) LIKE @pattern ESCAPE '\\'
+    ORDER BY lower(COALESCE(name,'')) ASC, id ASC
+    LIMIT 25
+  `).all<Record<string, unknown>>({ search, pattern })
+  return c.json({ items: rows })
+})
+
+// ---------------------------------------------------------------------------
+app.get('/:id/amendments', async (c) => {
+  const db = getDb(c.env)
+  if (!canReadSales(c.get('user'))) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const saleId = Number(c.req.param('id'))
+  if (!Number.isFinite(saleId) || saleId <= 0) return c.json({ error: 'Sale not found' }, 404)
+
+  // Oldest first -- the detail view reads top-to-bottom as a story, and this
+  // is the (sale_id, id) index migration 0115 creates.
+  const entries = await db.prepare(`
+    SELECT id, kind, group_id, sale_item_id, product_id, product_name,
+      quantity_before, quantity_after, quantity_delta,
+      amount_before_usd, amount_after_usd, amount_delta_usd,
+      total_before_usd, total_after_usd,
+      units_moved, stock_skipped, via, reverses_amendment_id, undo_action_id,
+      note, before_json, after_json, user_id, user_name, created_at
+    FROM sale_amendments WHERE sale_id = ? ORDER BY id ASC
+  `).all<LedgerRow>([saleId])
+
+  return c.json({ saleId, entries, summary: summarizeAmendments(entries) })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/sales/:id/records -- every change anybody ever made to this sale, as
+// ONE list (N41).
+//
+// The owner, Sep 6 2026: "one line called Records with total records when press
+// it pops up a float with who made changes in this sales record".
+//
+// This is NOT GET /:id/amendments with a different name. That endpoint reads
+// one table and answers "how was this sale corrected". A sale is changed by
+// five writers that each record themselves somewhere else -- the amendment
+// ledger, audit_logs, the bulk-operation receipt, the returns that rewrite
+// sales.sale_status, and the act of ringing the sale up at all -- and a reader
+// who only sees the ledger is told nothing about the sale that was cancelled in
+// a bulk action or refunded this morning, which is precisely the change they
+// came to ask about. lib/saleRecords.ts holds the meaning and every
+// classification rule; this route holds only the five reads.
+//
+// Read-gated exactly like /:id/amendments: whoever may view the sale may see
+// how it got that way. Hiding the trail from the people who reconcile the books
+// would defeat the feature.
+// ---------------------------------------------------------------------------
+app.get('/:id/records', async (c) => {
+  const db = getDb(c.env)
+  if (!canReadSales(c.get('user'))) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const saleId = Number(c.req.param('id'))
+  if (!Number.isFinite(saleId) || saleId <= 0) return c.json({ error: 'Sale not found' }, 404)
+
+  // status_before_return is what the sale was BEFORE a return moved it, and it
+  // is the only "before" the returns source can honestly report.
+  const sale = await db.prepare(`
+    SELECT id, receipt_number, sale_status, status_before_return, status_before_cancel,
+      cashier_name, total_usd,
+      payment_method, payment_details, amount_paid_usd, amount_paid_khr,
+      change_usd, change_khr, creation_snapshot_json, created_at, updated_at
+    FROM sales WHERE id = ?
+  `).get<SaleRecordSaleRow>([saleId])
+  if (!sale) return c.json({ error: 'Sale not found' }, 404)
+
+  const eventRows = await db.prepare(`
+    SELECT id,sale_id,source_kind,source_id,generation,kind,via,subject,
+      actor_username,occurred_at,changes_json
+    FROM sale_record_events
+    WHERE sale_id = ?
+    ORDER BY occurred_at ASC,id ASC
+  `).all<SaleRecordEventRow>([saleId])
+
+  const ledger = await db.prepare(`
+    SELECT id, kind, group_id, product_name,
+      quantity_before, quantity_after, amount_before_usd, amount_after_usd,
+      total_before_usd, total_after_usd, units_moved, stock_skipped, via,
+      note, before_json, after_json, user_name, created_at
+    FROM sale_amendments WHERE sale_id = ? ORDER BY id ASC
+  `).all<SaleRecordLedgerRow>([saleId])
+
+  // entity_id is a TEXT column; binding the integer id matches nothing. Same
+  // trap the count query documents, and the reason both sides go through
+  // saleRecordsCountBinds / this explicit String().
+  const auditRows = await db.prepare(`
+    SELECT id, action, details, old_value, new_value, user_name, created_at
+    FROM audit_logs WHERE entity = 'sale' AND entity_id = ? ORDER BY id ASC
+  `).all<SaleRecordAuditRow>([String(saleId)])
+
+  // The bulk gap: a bulk status change or field update writes ONE audit row
+  // keyed by the OPERATION id, so the query above cannot see it. Membership in
+  // sale_bulk_members is what says this sale actually moved (both bulk writers
+  // insert a member only when `changed`), and the operation's action_history
+  // row is the only place its timestamp and actor live -- sale_bulk_members has
+  // neither column.
+  const bulk = await db.prepare(`
+    SELECT o.id AS operation_id, o.request_json, o.receipt_json, o.history_id, o.generation,
+      h.created_at AS created_at, h.created_by_name AS created_by_name, h.label AS label
+    FROM sale_bulk_members m
+    JOIN sale_bulk_operations o ON o.id = m.operation_id
+    LEFT JOIN action_history h ON h.id = o.history_id
+    WHERE m.sale_id = ?
+  `).all<SaleRecordBulkRow>([saleId])
+
+  const bulkReplays = await db.prepare(`
+    SELECT o.id AS operation_id, a.id AS audit_id, a.action, a.user_name, a.created_at
+    FROM sale_bulk_members m
+    JOIN sale_bulk_operations o ON o.id=m.operation_id
+    JOIN audit_logs a ON a.entity='sale' AND a.entity_id=o.id
+      AND a.action IN ('action_undo','action_redo')
+    WHERE m.sale_id=?
+    ORDER BY a.created_at ASC, a.id ASC
+  `).all<SaleRecordBulkReplayRow>([saleId])
+
+  // Monetary mutation receipts are permanent and carry the exact pre-write
+  // snapshot. Audit retention must not make a settled sale's current tender
+  // masquerade as its creation tender.
+  const mutations = await db.prepare(`
+    SELECT r.id, r.mutation_kind, r.request_json, r.before_json, r.after_json,
+      r.generation, r.created_at, h.created_at AS history_created_at,
+      h.created_by_name AS history_created_by_name
+    FROM sale_mutation_receipts r
+    LEFT JOIN action_history h ON h.id = r.history_id
+    WHERE r.sale_id = ?
+    ORDER BY r.created_at ASC, r.id ASC
+  `).all<SaleRecordMutationRow>([saleId])
+
+  const mutationReplays = await db.prepare(`
+    SELECT r.id AS operation_id, a.id AS audit_id, a.action, a.user_name, a.created_at
+    FROM sale_mutation_receipts r
+    JOIN audit_logs a ON a.entity='sale' AND a.entity_id=r.id
+      AND a.action IN ('action_undo','action_redo')
+    WHERE r.sale_id = ?
+    ORDER BY a.created_at ASC, a.id ASC
+  `).all<SaleRecordMutationReplayRow>([saleId])
+
+  // The return row supplies immutable creation fallback data when its older
+  // audit event has aged out. Current mutable status/refund values are never
+  // presented as that original event's before/after snapshot.
+  const returnRows = await db.prepare(`
+    SELECT r.id, r.return_number, r.return_scope, r.cashier_name, r.created_at
+    FROM returns r
+    WHERE r.sale_id = ? AND COALESCE(r.return_scope,'customer') = 'customer'
+    ORDER BY r.id ASC
+  `).all<SaleRecordReturnRow>([saleId])
+
+  // Individual return writes preserve the acting account and event time in
+  // audit_logs. The returns row itself carries only the creator, so using it
+  // for a later edit would attribute that edit to the wrong person.
+  const returnAuditRows = await db.prepare(`
+    SELECT a.id AS audit_id, r.id AS return_id, a.action, a.details,
+      a.user_name, a.created_at, r.return_number
+    FROM audit_logs a
+    JOIN returns r ON a.entity = 'return' AND a.entity_id = CAST(r.id AS TEXT)
+    WHERE r.sale_id = ?
+      AND COALESCE(r.return_scope,'customer') = 'customer'
+      AND a.action IN ('create','update')
+    ORDER BY a.id ASC
+  `).all<SaleRecordReturnAuditRow>([saleId])
+
+  // Grouped cancel/restore and its undo/redo keep one immutable receipt plus
+  // one audit row per act. Joining both is what gives this sale's return the
+  // exact before/after pair and the actor of this particular replay.
+  const returnBulkRows = await db.prepare(`
+    SELECT * FROM (
+      SELECT 'history:' || h.id AS audit_id, o.id AS operation_id, m.return_id,
+        'return_fields_bulk' AS action, o.request_json, o.receipt_json, NULL AS details,
+        h.created_by_name AS user_name, h.created_at, r.return_number, o.generation
+      FROM return_bulk_members m
+      JOIN return_bulk_operations o ON o.id = m.operation_id
+      JOIN returns r ON r.id = m.return_id
+      JOIN action_history h ON h.id = o.history_id
+      WHERE m.sale_id = ?
+        AND COALESCE(r.return_scope,'customer') = 'customer'
+      UNION ALL
+      SELECT 'audit:' || a.id AS audit_id, o.id AS operation_id, m.return_id,
+        a.action, o.request_json, o.receipt_json, a.details, a.user_name, a.created_at,
+        r.return_number, o.generation
+      FROM return_bulk_members m
+      JOIN return_bulk_operations o ON o.id = m.operation_id
+      JOIN returns r ON r.id = m.return_id
+      JOIN audit_logs a ON a.entity = 'return' AND a.entity_id = o.id
+      WHERE m.sale_id = ?
+        AND COALESCE(r.return_scope,'customer') = 'customer'
+        AND a.action IN ('action_undo','action_redo')
+        AND json_valid(a.details)
+        AND json_extract(a.details, '$.kind') = 'return.fields.bulk'
+    ) ordered_return_bulk
+    ORDER BY created_at ASC, audit_id ASC
+  `).all<SaleRecordReturnBulkEventRow>([saleId, saleId])
+
+  const records = buildSaleRecords({
+    sale,
+    events: eventRows,
+    ledger,
+    audit: auditRows,
+    bulk,
+    bulkReplays,
+    returns: returnRows,
+    returnAudit: returnAuditRows,
+    returnBulk: returnBulkRows,
+    mutations,
+    mutationReplays,
+  })
+  return c.json({ saleId, records, count: records.length })
+})
+
+// ---------------------------------------------------------------------------
+// POST /api/sales/:id/amendments -- change a recorded sale (S4-30).
+//
+// The shop owner's ask: "sometimes we input wrong delivery cost, or customers
+// change their mind and want to add or replace products... we do an add on
+// top, so we know we added."
+//
+// Kinds handled here: increase a line, decrease a line, remove a line, replace
+// one product with another, and correct the delivery fee. ADDING a brand-new
+// line is POST /:id/items above -- that endpoint already exists, already has
+// its own tested stock kernel and its own undo applier, and it now writes a
+// `line_added` entry into this same ledger. Reimplementing it here would be
+// the second path this feature must not have.
+//
+// PERMISSION: the granular `sales -> amend` action at FULL tier. Amending a
+// recorded sale moves stock and changes what the customer owes, so it is not
+// covered by the coarse 'sales' grant, and it is a different act from adding
+// goods (`add_items`) or changing a status (`status`) -- a shop may well want
+// a senior cashier who can add a forgotten item but cannot take one off.
+//
+// Manual and membership discounts, tax, and the tender remain separate
+// concerns. A line's final selling price and quantity are corrected together
+// through `line_updated`, so the resulting sale total is recomputed once.
+// ---------------------------------------------------------------------------
+const AMENDMENT_REQUEST_KINDS = new Set(['line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'line_updated', 'line_replaced', 'delivery_fee_changed', 'delivery_actual_cost_changed', 'delivery_added'])
+
+app.post('/:id/amendments', async (c) => {
+  const db = getDb(c.env)
+  const user = c.get('user')
+  if (getActionTier(user, 'sales', 'amend') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+
+  const body = await c.req.json<{
+    kind?: string
+    sale_item_id?: number
+    quantity?: number
+    applied_price_usd?: number | string
+    base_price_usd?: number | string
+    manual_discount_type?: string | null
+    manual_discount_value?: number | string
+    manual_discount_usd?: number | string
+    delivery_fee_usd?: number
+    delivery_actual_cost_usd?: number | string | null
+    delivery_contact_id?: number
+    replacement?: SaleItemInput
+    notes?: string
+    client_request_id?: string
+    expected_exchange_rate?: number | string
+    [key: string]: unknown
+  }>().catch(() => ({} as Record<string, unknown>))
+
+  try {
+  const kind = String(body.kind || '')
+  if (!AMENDMENT_REQUEST_KINDS.has(kind)) {
+    return c.json({ error: `Unknown amendment "${kind}".` }, 400)
+  }
+  if (kind === 'delivery_added') {
+    const allowed = new Set([
+      'kind', 'delivery_contact_id', 'delivery_fee_usd', 'delivery_actual_cost_usd',
+      'notes', 'client_request_id', 'expected_exchange_rate', 'expected_updated_at', 'expectedUpdatedAt',
+      'clientTime', 'deviceTz', 'deviceName',
+      'money_precision_version', 'expected_header_quote',
+    ])
+    const unexpected = Object.keys(body).filter((key) => !allowed.has(key))
+    if (unexpected.length) {
+      return c.json({ error: `Unexpected delivery amendment field: ${unexpected[0]}.` }, 400)
+    }
+  }
+
+  const amendmentRequestId = normalizeClientRequestId(body.client_request_id)
+  if (!amendmentRequestId) return c.json({ error: 'client_request_id is required for a sale amendment.', code: 'client_request_id_required' }, 400)
+  const amendmentCanonical = JSON.stringify(saleLineReceiptCanonical(Number(c.req.param('id')), 'amendment', body))
+  const amendmentDigest = await saleMutationDigest(JSON.parse(amendmentCanonical))
+  const priorAmendment = await db.prepare(`
+    SELECT request_digest,response_json FROM sale_mutation_receipts
+    WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request
+  `).get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
+  if (priorAmendment) {
+    if (priorAmendment.request_digest !== amendmentDigest) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+    return c.json(JSON.parse(priorAmendment.response_json) as Record<string, unknown>)
+  }
+  if (body.money_precision_version !== 1) return c.json({ error: 'Preserve the pending request and review this amendment with the current app.', code: 'money_precision_review_needed' },409)
+  if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' },503)
+
+  const sale = await db.prepare('SELECT s.*,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM sales s WHERE s.id = ?').get<AmendableSaleRow & {
+    id: number
+    sale_status: string | null
+    updated_at: string | null
+    branch_id: number | null
+    receipt_number: string | null
+    created_at: string | null
+    total_usd: number | null
+    amount_paid_usd: number | null
+    amount_paid_khr: number | null
+    write_revision: number
+  }>([c.req.param('id')])
+  if (!sale) return c.json({ error: 'Sale not found' }, 404)
+
+  const saleHeaderBranchId = Number(sale.branch_id)
+  if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
+    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+  }
+  const amendmentBranch = await db.prepare('SELECT id, name, is_active FROM branches WHERE id = ?')
+    .get<{ id: number; name: string | null; is_active: number | null }>([saleHeaderBranchId])
+  if (!amendmentBranch
+    || Number(amendmentBranch.is_active ?? 1) !== 1
+    || firstUnsellableBranch([amendmentBranch])) {
+    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+  }
+
+  try {
+    assertUpdatedAtMatch('sale', sale, getExpectedUpdatedAt(body))
+  } catch (error) {
+    if (error instanceof WriteConflictError) {
+      const { body: conflictBody, status } = writeConflictResponse(error)
+      return c.json(conflictBody, status)
+    }
+    throw error
+  }
+
+  const saleId = Number(sale.id)
+  const saleStatus = String(sale.sale_status || 'completed')
+  const moneySettings = await readAmendmentMoneySettings(db)
+  const exchangeRate = Number(sale.exchange_rate)
+  if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new SaleMoneyContractError('money_precision_invalid_rate')
+  const reviewedRate = Number(body.expected_exchange_rate)
+  if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
+    return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed amendment.', code: 'expected_exchange_rate_required', current: { exchange_rate: exchangeRate } }, 400)
+  }
+  if (reviewedRate !== exchangeRate) {
+    return c.json({ error: 'The exchange rate changed. Review the amendment again.', code: 'exchange_rate_changed', current_exchange_rate: exchangeRate, current: { exchange_rate: exchangeRate } }, 409)
+  }
+
+  // A sale can carry real return records while its status row says something
+  // else (imported/legacy rows), so the guard is given the EVIDENCE, not the
+  // label -- the identical read S4-24b's addition guard uses, applied to every
+  // amendment kind rather than only to additions.
+  const returnedRow = await db.prepare(`
+    SELECT 1 AS found FROM return_items ri
+    JOIN returns r ON r.id = ri.return_id
+    WHERE r.sale_id = ? AND COALESCE(r.status, 'completed') != 'cancelled'
+    LIMIT 1
+  `).get<{ found: number }>([saleId])
+
+  const windowRow = await db.prepare('SELECT value FROM settings WHERE key = ?').get<{ value: string }>([AMENDMENT_WINDOW_SETTING_KEY])
+  const guard = guardSaleAmendment({
+    saleStatus,
+    hasRecordedReturns: !!returnedRow,
+    saleCreatedAt: sale.created_at,
+    windowMinutes: resolveAmendmentWindowMinutes(windowRow?.value),
+    isAdmin: isAdminControlUser(user),
+  })
+  if (!guard.ok) return c.json({ error: guard.error, code: guard.code }, 400)
+
+  const movesStock = saleAmendmentMovesStock(sale)
+  let precisionBasket:Awaited<ReturnType<typeof capturePrecisionBasket>>|null=null
+  if(kind==='delivery_actual_cost_changed'){
+    try{precisionBasket=await capturePrecisionBasket(db,sale as Record<string,unknown>)}
+    catch(error){if(!(error instanceof SaleMoneyContractError||error instanceof SaleItemPricingError||error instanceof ProductMergeLineageError||error instanceof MoneyPrecisionError))throw error}
+  }else precisionBasket=await capturePrecisionBasket(db,sale as Record<string,unknown>)
+  const stockSkipped = saleSkipsStock(sale)
+  const note = String(body.notes || '').trim().slice(0, 500) || null
+  const subtotalRow = await db
+    .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
+    .get<{ subtotal: number }>([saleId])
+  const subtotalBeforeUsd = Number((sale as Record<string,unknown>).money_precision_version)===0?Number((sale as Record<string,unknown>).subtotal_usd):precisionBasket ? sumMoney4(precisionBasket.lines.map(line => Number(line.total_usd))) : Number((sale as unknown as Record<string, unknown>).subtotal_usd)
+  const totalBeforeUsd = Number(sale.total_usd) || 0
+  const lineMoneyRowsBefore = await db.prepare(`
+    SELECT id,applied_price_usd,applied_price_khr,total_usd,total_khr,
+           product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,
+           manual_discount_usd,manual_discount_khr,pricing_snapshot_json
+    FROM sale_items WHERE sale_id=? ORDER BY id
+  `).all<Record<string, unknown>>([saleId])
+  const lineMoneyBefore = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
+  let lineMoneyAfterAtLatestRate = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
+  const mutationStamp = new Date().toISOString()
+  const mutationOperationId = crypto.randomUUID()
+  const moneyBeforeSnapshot = amendmentMoneyBefore(sale)
+
+  // ---- Add delivery to a sale that was recorded as a counter sale. Driver,
+  // customer fee and optional courier cost are one reviewed act and therefore
+  // one atomic write, one immutable ledger row and one idempotency receipt.
+  if (kind === 'delivery_added') {
+    const deliveryGuard = guardDeliveryAddition(sale)
+    if (!deliveryGuard.ok) return c.json({ error: deliveryGuard.error }, 400)
+    const contactId = body.delivery_contact_id
+    if (typeof contactId !== 'number' || !Number.isSafeInteger(contactId) || contactId <= 0) {
+      return c.json({ error: 'Choose a delivery driver for this sale.' }, 400)
+    }
+    const contactRow = await db.prepare(`
+      SELECT id,name,phone,COALESCE(NULLIF(TRIM(address),''),area) AS delivery_address
+      FROM delivery_contacts WHERE id=?
+    `).get<{ id: number; name: string | null; phone: string | null; delivery_address: string | null }>([contactId])
+    if (!contactRow) return c.json({ error: 'That delivery driver no longer exists. Choose another driver.' }, 409)
+
+    const feeRaw = body.delivery_fee_usd
+    if (typeof feeRaw !== 'number' && typeof feeRaw !== 'string') {
+      return c.json({ error: 'Delivery amount must be a number.' }, 400)
+    }
+    const costRaw = body.delivery_actual_cost_usd
+    if (costRaw !== null && costRaw !== undefined && typeof costRaw !== 'number' && typeof costRaw !== 'string') {
+      return c.json({ error: 'Delivery amount must be a number.' }, 400)
+    }
+    const feeParsed = parseDeliveryAmountUsd(feeRaw,1)
+    if (!feeParsed.ok) return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[feeParsed.code] }, 400)
+    const costParsed = parseDeliveryAmountUsd(costRaw,1)
+    if (!costParsed.ok && costParsed.code !== 'blank') {
+      return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[costParsed.code] }, 400)
+    }
+    const actualCostUsd = costParsed.ok ? costParsed.usd : null
+    const deliveryPlan = planDeliveryAddition({
+      moneyPrecisionVersion: 1,
+      saleId,
+      sale,
+      contact: {
+        id: Number(contactRow.id),
+        name: contactRow.name ?? null,
+        phone: contactRow.phone ?? null,
+        address: contactRow.delivery_address ?? null,
+      },
+      feeUsd: feeParsed.usd,
+      actualCostUsd,
+      exchangeRate,
+      stamp: mutationStamp,
+    })
+    const taxPlan = planAmendedTax({
+      saleId, sale, settings: moneySettings.tax,
+      subtotalBeforeUsd, subtotalAfterUsd: subtotalBeforeUsd, exchangeRate,
+    })
+    const money = recomputeSaleMoneyAfterAmendment({
+      moneyPrecisionVersion: 1,
+      sale,
+      subtotalUsd: subtotalBeforeUsd,
+      deliveryFeeUsdOverride: feeParsed.usd,
+      isDeliveryOverride: true,
+      deliveryFeePaidByOverride: 'customer',
+      taxUsdOverride: taxPlan.taxUsdOverride,
+      changeExchangeRate: moneySettings.changeExchangeRate,
+      exchangeRateOverride: exchangeRate,
+    })
+    const moneyAfterSnapshot = amendmentMoneyAfter(
+      sale, money, exchangeRate, mutationStamp, taxPlan.outcome.taxUsd, feeParsed.usd,
+    )
+    const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,taxPlan.outcome.taxUsd,{is_delivery:true,delivery_fee_usd:feeParsed.usd,delivery_fee_paid_by:'customer'})
+    if(headerConflict)return c.json(headerConflict,409)
+    const recordBefore = {
+      ...deliveryPlan.before,
+      total_usd: totalBeforeUsd,
+      total_khr: nullableNumber(sale.total_khr),
+    }
+    const recordAfter = {
+      ...deliveryPlan.after,
+      total_usd: money.totalUsd,
+      total_khr: money.totalKhr,
+    }
+    const response = {
+      ...buildAmendmentResponsePayload({
+        saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0,
+        stockSkipped, tax: taxPlan.outcome,
+      }, mutationStamp),
+      isDelivery: 1,
+      deliveryContactId: contactRow.id,
+      deliveryContactName: contactRow.name ?? null,
+      deliveryContactPhone: contactRow.phone ?? null,
+      deliveryContactAddress: contactRow.delivery_address ?? null,
+      deliveryFeeUsd: feeParsed.usd,
+      deliveryFeeKhr: receiptKhrFromUsd(feeParsed.usd, exchangeRate),
+      deliveryFeePaidBy: 'customer',
+      deliveryActualCostUsd: actualCostUsd,
+      deliveryActualCostKhr: actualCostUsd === null ? null : receiptKhrFromUsd(actualCostUsd, exchangeRate),
+    }
+    const contactReferenceGuard = bulkAssertion(`EXISTS(
+      SELECT 1 FROM delivery_contacts
+      WHERE id=@id
+        AND COALESCE(name,'')=COALESCE(@name,'')
+        AND COALESCE(phone,'')=COALESCE(@phone,'')
+        AND COALESCE(NULLIF(TRIM(address),''),area,'')=COALESCE(@address,'')
+    )`, {
+      id: contactRow.id,
+      name: contactRow.name,
+      phone: contactRow.phone,
+      address: contactRow.delivery_address,
+    })
+    try {
+      await db.batch([
+        { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+        { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+        amendmentSettingsGuard(moneySettings),
+        contactReferenceGuard,
+        saleRevisionGuard(saleId, Number(sale.write_revision)),
+        precisionBasket!.guard,
+        ...deliveryPlan.statements,
+        ...taxPlan.statements,
+        canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
+        saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
+        amendmentEntryStatement({
+          moneyPrecisionVersion: 1,
+          saleId,
+          kind: 'delivery_added',
+          totalBeforeUsd,
+          totalAfterUsd: money.totalUsd,
+          stockSkipped,
+          note,
+          before: {...recordBefore,...precisionRecordMoney(moneyBeforeSnapshot)},
+          after: {...recordAfter,...precisionRecordMoney(moneyAfterSnapshot)},
+          userId: user?.id ?? null,
+          userName: actorSnapshot(user),
+        }),
+        saleMutationReceiptStatement({
+          operationId: mutationOperationId,
+          actorId: Number(user.id),
+          saleId,
+          kind: 'amendment',
+          requestId: amendmentRequestId,
+          requestDigest: amendmentDigest,
+          requestJson: amendmentCanonical,
+          before: { money: moneyBeforeSnapshot, lines: lineMoneyBefore, delivery: recordBefore },
+          after: { money: moneyAfterSnapshot, lines: lineMoneyAfterAtLatestRate, delivery: recordAfter },
+          identityBindings:precisionBasket!.identityBindings,
+          response,
+          stamp: mutationStamp,
+        }),
+        { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+        { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      ])
+    } catch (error) {
+      const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
+        WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
+        .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
+      if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+      if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+      if (/constraint/i.test(String(error))) {
+        return c.json({ error: 'The sale, driver, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
+      }
+      return c.json({ error: `Failed to add delivery: ${(error as Error).message || ''}` }, 500)
+    }
+    await auditAmendment(c, user, saleId, sale, {
+      kind,
+      before: recordBefore,
+      after: recordAfter,
+      outside_window: guard.outsideWindow,
+      notes: note,
+    })
+    return c.json(await committedMutationResponse(db,mutationOperationId))
+  }
+
+  // ---- The actual courier cost: a reporting-only amendment. It deliberately
+  // does NOT recompute the sale total: this is what the shop paid the driver,
+  // not what the customer was charged. The same immutable ledger records the
+  // before/after amount so reports and staff can explain a corrected margin.
+  if (kind === 'delivery_actual_cost_changed') {
+    const costGuard = guardDeliveryActualCostAmendment(sale)
+    if (!costGuard.ok) return c.json({ error: costGuard.error }, 400)
+    // One rule, one implementation: lib/deliveryAmounts.ts is the acceptance
+    // test for BOTH delivery money fields and is mirrored in the browser
+    // (utils/deliveryAmounts.ts, pinned by tests/deliveryAmountParity.test.ts),
+    // so a form that accepts a number this route refuses cannot exist. Blank
+    // is the one refusal this field forgives: clearing the box is how a cost
+    // recorded by mistake goes back to "not recorded", which is a different
+    // fact from "the courier was free".
+    const costParsed = parseDeliveryAmountUsd(body.delivery_actual_cost_usd,1)
+    if (!costParsed.ok && costParsed.code !== 'blank') {
+      return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[costParsed.code] }, 400)
+    }
+    const costUsd = costParsed.ok ? costParsed.usd : null
+    const costPlan = planDeliveryActualCostChange({
+      moneyPrecisionVersion: 1,
+      saleId,
+      sale,
+      newCostUsd: costUsd,
+      exchangeRate,
+      stamp: mutationStamp,
+    })
+    if (!deliveryAmountChanged(costPlan.costBeforeUsd, costPlan.costAfterUsd,1)) {
+      return c.json({ error: 'That is already the actual delivery cost on this sale.' }, 400)
+    }
+    const money = {
+      subtotalUsd: moneyBeforeSnapshot.subtotal_usd,
+      totalUsd: moneyBeforeSnapshot.total_usd,
+      totalKhr: moneyBeforeSnapshot.total_khr || 0,
+      subtotalKhr: moneyBeforeSnapshot.subtotal_khr || 0,
+    }
+    const response = {
+      ...buildAmendmentResponsePayload({
+        saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0,
+        stockSkipped, tax: { taxUsd: Number(sale.tax_usd) || 0, recomputed: false, reason: 'not_applicable' },
+      }, mutationStamp),
+      deliveryActualCostUsd: costPlan.costAfterUsd,
+      deliveryActualCostKhr: costPlan.costAfterUsd === null ? null : receiptKhrFromUsd(costPlan.costAfterUsd, exchangeRate),
+    }
+    const moneyBeforeWithCost = { ...moneyBeforeSnapshot, delivery_actual_cost_usd: costPlan.costBeforeUsd, delivery_actual_cost_khr: sale.delivery_actual_cost_khr ?? null }
+    const moneyAfterWithCost = { ...moneyBeforeWithCost, delivery_actual_cost_usd: costPlan.costAfterUsd, delivery_actual_cost_khr: response.deliveryActualCostKhr, updated_at: mutationStamp }
+    try {
+      await db.batch([
+        { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+        { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+        amendmentSettingsGuard(moneySettings),
+        saleRevisionGuard(saleId, Number(sale.write_revision)),
+        ...(precisionBasket?[precisionBasket.guard]:[]),
+        ...costPlan.statements,
+        amendmentEntryStatement({
+          moneyPrecisionVersion: 1,
+          saleId,
+          kind: 'delivery_actual_cost_changed',
+          amountBeforeUsd: costPlan.costBeforeUsd,
+          amountAfterUsd: costPlan.costAfterUsd,
+          totalBeforeUsd,
+          totalAfterUsd: totalBeforeUsd,
+          note,
+          userId: user?.id ?? null,
+          userName: actorSnapshot(user),
+        }),
+        saleMutationReceiptStatement({
+          operationId: mutationOperationId,
+          actorId: Number(user.id),
+          saleId,
+          kind: 'amendment',
+          requestId: amendmentRequestId,
+          requestDigest: amendmentDigest,
+          requestJson: amendmentCanonical,
+          before: { money: moneyBeforeWithCost, lines: lineMoneyBefore },
+          after: { money: moneyAfterWithCost, lines: lineMoneyAfterAtLatestRate },
+          response,
+          stamp: mutationStamp,
+          identityBindings:precisionBasket?.identityBindings??[],
+          canonicalAvailable:precisionBasket!==null,
+        }),
+        { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+        { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      ])
+    } catch (error) {
+      const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
+        WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
+        .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
+      if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+      if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+      if (/constraint/i.test(String(error))) return c.json({ error: 'The sale or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
+      return c.json({ error: `Failed to amend the actual delivery cost: ${(error as Error).message || ''}` }, 500)
+    }
+    await auditAmendment(c, user, saleId, sale, {
+      kind, actual_cost_before: costPlan.costBeforeUsd, actual_cost_after: costPlan.costAfterUsd,
+      total_before: totalBeforeUsd, total_after: totalBeforeUsd,
+      exchange_rate_before: sale.exchange_rate ?? null, exchange_rate_after: exchangeRate,
+      outside_window: guard.outsideWindow, notes: note,
+    })
+    return c.json(await committedMutationResponse(db,mutationOperationId))
+  }
+
+  // ---- The delivery fee: its own short path, because it touches no line and
+  // moves no stock. "$1.50, then we add another $0.50" -> the sale row holds
+  // $2.00 (what the receipt prints) and the ledger holds both. ----
+  if (kind === 'delivery_fee_changed') {
+    const feeGuard = guardDeliveryFeeAmendment(sale)
+    if (!feeGuard.ok) return c.json({ error: feeGuard.error }, 400)
+    // Same one rule as the courier cost above -- lib/deliveryAmounts.ts -- but
+    // blank is NOT forgiven here: the fee is part of what the customer owes,
+    // so "no value" would have to mean zero, and silently charging zero
+    // because a box was empty is not a decision this route may make for
+    // somebody.
+    const feeParsed = parseDeliveryAmountUsd(body.delivery_fee_usd,1)
+    if (!feeParsed.ok) {
+      return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[feeParsed.code] }, 400)
+    }
+    const feePlan = planDeliveryFeeChange({ moneyPrecisionVersion:1, saleId, sale, newFeeUsd: feeParsed.usd, exchangeRate })
+    if (feePlan.feeDeltaUsd === 0) {
+      return c.json({ error: 'That is already the delivery fee on this sale.' }, 400)
+    }
+    // A fee correction changes no line, so the taxable base is unchanged and
+    // planAmendedTax emits no write -- but it is still asked, so the response
+    // can say whether tax followed or was kept, in the same words every other
+    // amendment kind uses.
+    const feeTaxPlan = planAmendedTax({
+      saleId, sale, settings: moneySettings.tax,
+      subtotalBeforeUsd, subtotalAfterUsd: subtotalBeforeUsd, exchangeRate,
+    })
+    const money = recomputeSaleMoneyAfterAmendment({
+      moneyPrecisionVersion: 1,
+      sale,
+      subtotalUsd: subtotalBeforeUsd,
+      deliveryFeeUsdOverride: feePlan.feeAfterUsd,
+      taxUsdOverride: feeTaxPlan.taxUsdOverride,
+      changeExchangeRate: moneySettings.changeExchangeRate,
+      exchangeRateOverride: exchangeRate,
+    })
+    const moneyAfterSnapshot = amendmentMoneyAfter(
+      sale,
+      money,
+      exchangeRate,
+      mutationStamp,
+      feeTaxPlan.outcome.taxUsd,
+      feePlan.feeAfterUsd,
+    )
+    const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,feeTaxPlan.outcome.taxUsd,{delivery_fee_usd:feePlan.feeAfterUsd})
+    if(headerConflict)return c.json(headerConflict,409)
+    const response = buildAmendmentResponsePayload({
+      saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped, tax: feeTaxPlan.outcome,
+    }, mutationStamp)
+    try {
+      await db.batch([
+        { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+        { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+        amendmentSettingsGuard(moneySettings),
+        saleRevisionGuard(saleId, Number(sale.write_revision)),
+        precisionBasket!.guard,
+        ...feePlan.statements,
+        ...feeTaxPlan.statements,
+        canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
+        saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
+        amendmentEntryStatement({
+          moneyPrecisionVersion: 1,
+          saleId,
+          kind: 'delivery_fee_changed',
+          before: precisionRecordMoney(moneyBeforeSnapshot),
+          after: precisionRecordMoney(moneyAfterSnapshot),
+          amountBeforeUsd: feePlan.feeBeforeUsd,
+          amountAfterUsd: feePlan.feeAfterUsd,
+          totalBeforeUsd,
+          totalAfterUsd: money.totalUsd,
+          note,
+          userId: user?.id ?? null,
+          userName: actorSnapshot(user),
+        }),
+        saleMutationReceiptStatement({
+          operationId: mutationOperationId,
+          actorId: Number(user.id),
+          saleId,
+          kind: 'amendment',
+          requestId: amendmentRequestId,
+          requestDigest: amendmentDigest,
+          requestJson: amendmentCanonical,
+          before: { money: moneyBeforeSnapshot, lines: lineMoneyBefore },
+          after: { money: moneyAfterSnapshot, lines: lineMoneyAfterAtLatestRate },
+          identityBindings:precisionBasket!.identityBindings,
+          response,
+          stamp: mutationStamp,
+        }),
+        { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+        { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      ])
+    } catch (error) {
+      const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
+        WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
+        .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
+      if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+      if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+      if (/constraint/i.test(String(error))) return c.json({ error: 'The sale or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
+      return c.json({ error: `Failed to amend the delivery fee: ${(error as Error).message || ''}` }, 500)
+    }
+    await auditAmendment(c, user, saleId, sale, {
+      kind, fee_before: feePlan.feeBeforeUsd, fee_after: feePlan.feeAfterUsd,
+      total_before: totalBeforeUsd, total_after: money.totalUsd,
+      exchange_rate_before: sale.exchange_rate ?? null, exchange_rate_after: exchangeRate,
+      outside_window: guard.outsideWindow, notes: note,
+    })
+    return c.json(await committedMutationResponse(db,mutationOperationId))
+  }
+
+  // ---- Every other kind acts on ONE existing line. ----
+  const lineId = Number(body.sale_item_id)
+  if (!Number.isFinite(lineId) || lineId <= 0) return c.json({ error: 'Which line is being amended?' }, 400)
+  const line = await db.prepare(`
+    SELECT id, product_id, product_name, quantity, applied_price_usd, applied_price_khr,
+      cost_price_usd, cost_price_khr, branch_id, base_price_usd, base_price_khr,
+      product_discount_usd, product_discount_khr, manual_discount_type,
+      manual_discount_value, manual_discount_usd, manual_discount_khr, price_mode,
+      total_usd, total_khr
+    FROM sale_items WHERE id = ? AND sale_id = ?
+  `).get<{ id: number; product_id: number | null; product_name: string | null; quantity: number; applied_price_usd: number; applied_price_khr: number; cost_price_usd: number; cost_price_khr: number; branch_id: number | null; base_price_usd?: number; base_price_khr?: number; product_discount_usd?: number; product_discount_khr?: number; manual_discount_type?: string | null; manual_discount_value?: number; manual_discount_usd?: number; manual_discount_khr?: number; price_mode?: string | null; total_usd?: number; total_khr?: number }>([lineId, saleId])
+  if (!line) return c.json({ error: 'That line is not on this sale.' }, 404)
+  if (Number(line.branch_id) !== saleHeaderBranchId) {
+    return c.json({ error: 'The sale header and every amended line must use the same Shop branch.' }, 400)
+  }
+
+  // Draw order (id ASC) -- the decrease walk relies on it to hand units back
+  // to the lots they came from, last-drawn first.
+  const allocations = await db.prepare(`
+    SELECT id, batch_id, branch_id, quantity, released_quantity
+    FROM sale_item_batch_allocations WHERE sale_item_id = ? ORDER BY id ASC
+  `).all<LineAllocation>([lineId])
+
+  const statements: StatementList = []
+  const ledgerEntries: Array<Parameters<typeof amendmentEntryStatement>[0]> = []
+  const groupId = crypto.randomUUID()
+  let subtotalDeltaUsd = 0
+  let historicalSubtotalTerms: number[] | null = null
+  let unitsMoved = 0
+  let pricingRowsAfter=precisionBasket!.lines.map(row=>({...row}))
+  const repricedPools=new Map<string,{pool:CapturedPricingPool;quantities:Record<string,number>}>()
+  const historicalBasket=Number((sale as Record<string,unknown>).money_precision_version)===0
+  const historicalBaseline=historicalBasket?recordedHistoricalLineTotal(line as Record<string,unknown>):null
+  if(historicalBaseline?.derived&&body.expected_recorded_line_total_usd!==historicalBaseline.amount)
+    return c.json({error:'Review the charge derived from this historical line’s recorded unit price.',code:'historical_line_total_review_needed',expected_recorded_line_total_usd:historicalBaseline.amount,proven_uncommitted:true},409)
+  const isLineUpdate=kind==='line_updated'||kind==='line_quantity_increased'||kind==='line_quantity_decreased'
+  const capturedLineUpdate=!historicalBasket&&isLineUpdate
+  if(historicalBasket&&isLineUpdate){
+    const original=precisionBasket!.lines.find(row=>Number(row.id)===Number(line.id))!
+    const currentQuantity=Number(line.quantity),entered=body.quantity===undefined?currentQuantity:Number(body.quantity)
+    if(!Number.isFinite(entered)||entered<=0)return c.json({error:'Enter a positive quantity.'},400)
+    const exactNext=kind==='line_quantity_increased'?subtractDecimalSum(currentQuantity,[-entered])
+      :kind==='line_quantity_decreased'?subtractDecimalSum(currentQuantity,[entered]):String(entered)
+    const nextQuantity=Number(exactNext)
+    if(subtractDecimalSum(nextQuantity,[exactNext])!=='0')throw new HistoricalSalePricingError()
+    const historical=planHistoricalSaleLine(original,body,nextQuantity,exchangeRate)
+    if(!historical.changed)return c.json({error:'Enter a new quantity, selling price, or discount.'},400)
+    const expected=body.pricing_quote as Record<string,unknown>|undefined
+    if(!expected||Object.entries(historical.quote!).some(([key,value])=>expected[key]!==value))
+      return c.json({error:'Review the recorded sale price.',code:'sale_pricing_quote_conflict',pricing_quote:historical.quote,proven_uncommitted:true},409)
+    const delta=Number(subtractDecimalSum(nextQuantity,[currentQuantity]))
+    if(delta!==0){
+      const workingLine={...line,applied_price_usd:Number(historical.row.applied_price_usd)}
+      const quantityPlan=delta>0?planLineQuantityIncrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,addedQuantity:delta,
+        lots:line.branch_id?(await readFifoLotAvailabilityForCart(db,[{productId:Number(line.product_id),branchId:line.branch_id}])).get(`${line.product_id}:${line.branch_id}`)||[]:[],
+        exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)})
+        :planLineQuantityDecrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,removedQuantity:-delta,allocations,exchangeRate,
+          reason:`Quantity changed on sale #${saleId}`,userId:user?.id??null,userName:actorSnapshot(user)})
+      statements.push(...quantityPlan.statements);unitsMoved+=quantityPlan.unitsMoved
+    }
+    const changedFields=Object.keys(historical.row).filter(key=>historical.row[key]!==original[key])
+    if(changedFields.some(key=>!['quantity','total_usd','total_khr','base_price_usd','base_price_khr','manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','applied_price_usd','applied_price_khr'].includes(key)))throw new Error('Unexpected historical price column')
+    statements.push({sql:`UPDATE sale_items SET ${changedFields.map(key=>`${key}=@${key}`).join(',')} WHERE id=@itemId AND sale_id=@saleId`,
+      params:{...Object.fromEntries(changedFields.map(key=>[key,historical.row[key]])),itemId:line.id,saleId}})
+    pricingRowsAfter=pricingRowsAfter.map(row=>row.id===line.id?historical.row:row)
+    historicalSubtotalTerms=[subtotalBeforeUsd,-historicalBaseline!.amount,Number(historical.row.total_usd)]
+    ledgerEntries.push({saleId,kind:kind as 'line_updated',groupId,saleItemId:line.id,productId:line.product_id,productName:line.product_name,
+      quantityBefore:currentQuantity,quantityAfter:nextQuantity,amountBeforeUsd:Number(line.applied_price_usd),amountAfterUsd:Number(historical.row.applied_price_usd),
+      totalBeforeUsd,totalAfterUsd:0,unitsMoved,stockSkipped,note,before:original,after:historical.row,userId:user?.id??null,userName:actorSnapshot(user)})
+  }
+  let replacementLines: ReturnType<typeof allocateNewSaleLines> | null = null
+  if (kind==='line_removed' && pricingRowsAfter.length<=1) return c.json({error:'Cancel the sale instead of removing its last priced line.',code:'sale_last_line_remove_refused'},409)
+
+  // A single reviewed edit can change the line's quantity and its final
+  // selling price. Quantity movement still uses the exact FIFO/stock plans
+  // below; the price statement then rewrites the line's canonical charge and
+  // clears stale discount metadata so totals and discount reporting cannot
+  // disagree with the price the cashier explicitly entered.
+  if (capturedLineUpdate) {
+    const originalSnapshot=parseSaleItemPricing(precisionBasket!.lines.find(row=>row.id===line.id)!.pricing_snapshot_json as string)!
+    const pool=structuredClone(originalSnapshot.pool), quantities={...originalSnapshot.quantities}
+    const target=pool.lines.find(row=>row.line_key===originalSnapshot.line_key)!
+    const currentQuantity=Number(line.quantity)
+    const enteredQuantity=body.quantity===undefined?currentQuantity:Number(body.quantity)
+    if (kind!=='line_updated' && (!Number.isFinite(enteredQuantity)||enteredQuantity<=0)) return c.json({error:'Enter a positive quantity change.'},400)
+    const exactNextQuantity=kind==='line_quantity_increased'?subtractDecimalSum(currentQuantity,[-enteredQuantity]):kind==='line_quantity_decreased'?subtractDecimalSum(currentQuantity,[enteredQuantity]):String(enteredQuantity)
+    const nextQty=Number(exactNextQuantity)
+    if (subtractDecimalSum(nextQty,[exactNextQuantity])!=='0') throw new SaleItemPricingError()
+    if (!Number.isFinite(nextQty) || nextQty<=0) return c.json({error:'Use Remove when a line should be taken off the sale.'},400)
+    const quantityChanged=nextQty!==currentQuantity
+    quantities[target.line_key]=nextQty
+    if (body.selling_price_input_usd!==undefined) {
+      sellingPriceCeilCent(body.selling_price_input_usd as number)
+      target.source='manual'; target.selling_price_input_usd=body.selling_price_input_usd as number
+    }
+    if (body.manual_discount_type!==undefined) {
+      if (body.manual_discount_type!==null && body.manual_discount_type!=='fixed' && body.manual_discount_type!=='percent')
+        return c.json({error:'Invalid manual discount mode.'},400)
+      target.manual.type=body.manual_discount_type===null?'none':body.manual_discount_type
+    }
+    if (target.manual.type==='none') target.manual.value=0
+    else if (body.manual_discount_value!==undefined) target.manual.value=target.manual.type==='percent'?Number(body.manual_discount_value):newSaleMoney4(body.manual_discount_value)
+    const evaluated=evaluateCapturedPricingPool(pool,quantities), targetMoney=evaluated.get(target.line_key)!
+    const quote=body.pricing_quote as SaleItemInput['pricing_quote']
+    if (!quote || ['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'].some(k=>quote[k as keyof typeof quote]!==targetMoney[k as keyof typeof quote]))
+      return c.json({error:'Review the recalculated captured-pricing pool.',code:'sale_pricing_quote_conflict',pricing_quotes:[...evaluated].map(([client_line_key,amounts])=>({client_line_key,...amounts}))},409)
+    if (!quantityChanged && JSON.stringify(target)===JSON.stringify(originalSnapshot.pool.lines.find(row=>row.line_key===target.line_key)))
+      return c.json({error:'Enter a new quantity, selling price, or discount.'},400)
+    const nextPrice=targetMoney.applied_price_usd
+    const workingLine = { ...line, applied_price_usd: nextPrice }
+    let quantityPlan: AmendmentPlan | null = null
+    if (quantityChanged) {
+      const exactDelta=subtractDecimalSum(nextQty,[currentQuantity])
+      const quantityDelta = Number(exactDelta)
+      if (subtractDecimalSum(quantityDelta,[exactDelta])!=='0') throw new SaleItemPricingError()
+      if (quantityDelta > 0) {
+        const lots = line.branch_id
+          ? (await readFifoLotAvailabilityForCart(db, [{ productId: Number(line.product_id), branchId: line.branch_id }])).get(`${line.product_id}:${line.branch_id}`) || []
+          : []
+        if (movesStock && line.branch_id) {
+          const have = await db.prepare('SELECT quantity FROM branch_stock WHERE branch_id = ? AND product_id = ?')
+            .get<{ quantity: number }>([line.branch_id, line.product_id])
+          if (quantityDelta > (Number(have?.quantity) || 0)) {
+            return c.json({ error: `Insufficient stock for ${line.product_name || 'this product'}: requested ${quantityDelta}, available ${Number(have?.quantity) || 0}` }, 409)
+          }
+        }
+        quantityPlan = planLineQuantityIncrease({
+          moneyPrecisionVersion: 1,
+          saleId, sale, line: workingLine, addedQuantity: quantityDelta, lots, exchangeRate,
+          userId: user?.id ?? null, userName: actorSnapshot(user),
+        })
+      } else {
+        const removed = Math.abs(quantityDelta)
+        if (removed >= currentQuantity) return c.json({ error: 'Use Remove when a line should be taken off the sale.' }, 400)
+        quantityPlan = planLineQuantityDecrease({
+          moneyPrecisionVersion: 1,
+          saleId, sale, line: workingLine, removedQuantity: removed, allocations, exchangeRate,
+          reason: `Quantity changed on sale #${saleId}`,
+          userId: user?.id ?? null, userName: actorSnapshot(user),
+        })
+      }
+      statements.push(...quantityPlan.statements)
+      unitsMoved += quantityPlan.unitsMoved
+    }
+
+
+    repricedPools.set(pool.pool_key,{pool,quantities})
+    for (const row of pricingRowsAfter) {
+      const prior=parseSaleItemPricing(row.pricing_snapshot_json as string)!
+      if (prior.pool.pool_key!==pool.pool_key) continue
+      const amounts=evaluated.get(prior.line_key)!
+      subtotalDeltaUsd=sumMoney4([subtotalDeltaUsd,subtractMoney4(amounts.total_usd,Number(row.total_usd))])
+      ledgerEntries.push({
+        saleId,kind:row.id===line.id&&kind==='line_quantity_increased'?'line_quantity_increased':row.id===line.id&&kind==='line_quantity_decreased'?'line_quantity_decreased':'line_updated',groupId,saleItemId:Number(row.id),productId:Number(row.product_id),productName:String(row.product_name||''),
+        quantityBefore:Number(row.quantity),quantityAfter:quantities[prior.line_key],
+        amountBeforeUsd:Number(row.applied_price_usd),amountAfterUsd:amounts.applied_price_usd,totalBeforeUsd,totalAfterUsd:0,
+        unitsMoved:row.id===line.id?unitsMoved:0,stockSkipped,note,
+        before:{quantity:row.quantity,total_usd:row.total_usd,unit_price_usd:row.applied_price_usd,pool_key:pool.pool_key},
+        after:{quantity:quantities[prior.line_key],total_usd:amounts.total_usd,unit_price_usd:amounts.applied_price_usd,pool_key:pool.pool_key},
+        userId:user?.id??null,userName:actorSnapshot(user),
+      })
+      row.quantity=quantities[prior.line_key]; row.total_usd=amounts.total_usd; row.total_khr=amounts.total_khr
+    }
+  }
+
+  // --- increase / the "add to existing" case, and the add half of a replace ---
+  const needsLots = kind === 'line_quantity_increased' && !isLineUpdate
+  if (needsLots) {
+    const requested = Math.max(0, Number(body.quantity) || 0)
+    if (!(requested > 0)) return c.json({ error: 'How many more units?' }, 400)
+    const lots = line.branch_id
+      ? (await readFifoLotAvailabilityForCart(db, [{ productId: Number(line.product_id), branchId: line.branch_id }])).get(`${line.product_id}:${line.branch_id}`) || []
+      : []
+    // Pre-flight, plain reads, exactly like POST /'s and POST /:id/items's:
+    // D1's batch() is atomic but cannot branch mid-batch, so a shortage is
+    // reported before the write is built. The CHECK(quantity >= 0) constraints
+    // remain the real race guard.
+    if (movesStock && line.branch_id) {
+      const have = await db.prepare('SELECT quantity FROM branch_stock WHERE branch_id = ? AND product_id = ?')
+        .get<{ quantity: number }>([line.branch_id, line.product_id])
+      if (requested > (Number(have?.quantity) || 0)) {
+        return c.json({ error: `Insufficient stock for ${line.product_name || 'this product'}: requested ${requested}, available ${Number(have?.quantity) || 0}` }, 409)
+      }
+    }
+    const plan = planLineQuantityIncrease({
+      moneyPrecisionVersion: 1,
+      saleId, sale, line, addedQuantity: requested, lots, exchangeRate,
+      userId: user?.id ?? null, userName: actorSnapshot(user),
+    })
+    statements.push(...plan.statements)
+    subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
+    unitsMoved += plan.unitsMoved
+    ledgerEntries.push({
+      saleId, kind: 'line_quantity_increased', groupId,
+      saleItemId: line.id, productId: line.product_id, productName: line.product_name,
+      quantityBefore: plan.quantityBefore, quantityAfter: plan.quantityAfter,
+      totalBeforeUsd, totalAfterUsd: 0, unitsMoved: plan.unitsMoved, stockSkipped,
+      note, userId: user?.id ?? null, userName: actorSnapshot(user),
+    })
+  }
+
+  // --- decrease / remove, and the remove half of a replace ---
+  if (kind === 'line_removed' || kind === 'line_replaced') {
+    const requested = Number(line.quantity) || 0
+    if (!(requested > 0)) return c.json({ error: 'How many units are coming off?' }, 400)
+    if (requested > (Number(line.quantity) || 0)) {
+      return c.json({ error: `This line only has ${line.quantity}.` }, 400)
+    }
+    const plan = planLineQuantityDecrease({
+      moneyPrecisionVersion: 1,
+      saleId, sale, line, removedQuantity: requested, allocations, exchangeRate,
+      reason: kind === 'line_replaced'
+        ? `Line replaced on sale #${saleId}`
+        : `Line ${kind === 'line_removed' ? 'removed from' : 'reduced on'} sale #${saleId}`,
+      userId: user?.id ?? null, userName: actorSnapshot(user),
+    })
+    statements.push(...plan.statements)
+    subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
+    unitsMoved += plan.unitsMoved
+    ledgerEntries.push({
+      saleId,
+      kind: plan.quantityAfter <= 0 ? 'line_removed' : 'line_quantity_decreased',
+      groupId,
+      saleItemId: line.id, productId: line.product_id, productName: line.product_name,
+      quantityBefore: plan.quantityBefore, quantityAfter: plan.quantityAfter,
+      totalBeforeUsd, totalAfterUsd: 0, unitsMoved: plan.unitsMoved, stockSkipped,
+      note, userId: user?.id ?? null, userName: actorSnapshot(user),
+    })
+  }
+
+  // --- the add half of a replace: the removed line's product swapped for
+  // another. Deliberately NOT a sixth amendment kind: a replace is a removal
+  // plus an addition, which is exactly what it does to stock, and both halves
+  // share one group_id so the detail view can render them as the single act
+  // the cashier performed. ---
+  if (kind === 'line_replaced') {
+    const replacement: Partial<SaleItemInput> =
+      (body.replacement && typeof body.replacement === 'object') ? body.replacement : {quantity:0}
+    const productId = Number(replacement.product_id)
+    const quantity = Math.max(0, Number(replacement.quantity) || 0)
+    if (!Number.isFinite(productId) || productId <= 0) return c.json({ error: 'Which product is replacing it?' }, 400)
+    if (!(quantity > 0)) return c.json({ error: 'How many of the replacement?' }, 400)
+
+    const product = await db.prepare('SELECT * FROM products WHERE id = ?')
+      .get<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>([productId])
+    if (!product) return c.json({ error: `Product #${productId} no longer exists.` }, 400)
+
+    const branchId = Number(replacement.branch_id ?? saleHeaderBranchId)
+    if (!Number.isSafeInteger(branchId) || branchId <= 0 || branchId !== saleHeaderBranchId) {
+      return c.json({ error: 'The sale header and replacement line must use the same Shop branch.' }, 400)
+    }
+    if (!replacement.client_line_key || !['selling','wholesale','manual'].includes(replacement.pricing_source || ''))
+      throw new SaleMoneyContractError('money_precision_pricing_intent_required')
+    if (precisionBasket!.lines.some(row=>parseSaleItemPricing(row.pricing_snapshot_json as string)?.line_key===replacement.client_line_key))
+      throw new SaleItemPricingError()
+    const replacementRules=await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>()
+    statements.unshift(pricingSourceGuard([product],replacementRules))
+    const replacementPool:CapturedPricingPool={version:1,pool_key:crypto.randomUUID(),evaluation_time:new Date().toISOString(),exchange_rate:exchangeRate,rules:[],lines:[{
+      line_key:replacement.client_line_key,source:replacement.pricing_source!,product:{...capturePricingProduct(product),selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),
+        wholesale_price_usd:product.wholesale_price_usd==null?null:sellingPriceCeilCent(Number(product.wholesale_price_usd))},
+      selling_price_input_usd:replacement.selling_price_input_usd??null,
+      ...(replacement.display_price_mode===undefined?{}:{display_price_mode:replacement.display_price_mode}),
+      manual:{type:replacement.manual_discount_type==null?'none':replacement.manual_discount_type as 'fixed'|'percent',value:replacement.manual_discount_type==='percent'?replacement.manual_discount_value??0:newSaleMoney4(replacement.manual_discount_value)}
+    }]}
+    const replacementQuantities={[replacement.client_line_key]:quantity}
+    const replacementPricing=evaluateCapturedPricingPool(replacementPool,replacementQuantities).get(replacement.client_line_key)!
+    const quote=replacement.pricing_quote
+    if (!quote || (['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'] as const).some(key=>quote[key]!==replacementPricing[key]))
+      return c.json({error:'Replacement pricing changed. Review the authoritative quote.',code:'sale_pricing_quote_conflict',quotes:{[replacement.client_line_key]:replacementPricing}},409)
+    const replacementJson=serializeSaleItemPricing(replacementPool,replacementQuantities,replacement.client_line_key,{version:1,lines:[{line_key:replacement.client_line_key,amount:replacementPricing.total_usd}],discount_usd:0,membership_discount_usd:0,tax_usd:0})
+    const unitPriceUsd = replacementPricing.applied_price_usd
+
+    const lotsByKey = branchId
+      ? await readFifoLotAvailabilityForCart(db, [{ productId, branchId }])
+      : new Map()
+    // The replacement line is planned by S4-24b's own addition kernel --
+    // called, not re-implemented -- so a replaced-in product draws its lots by
+    // the same FIFO rule and emits the same unclamped statements a checkout
+    // would. `movesStock` (status AND the sticky stock_skipped flag) is passed
+    // as the kernel's explicit skipStock argument.
+    //
+    // S4-3: this used to pass a literal 'awaiting_payment' as a stand-in for
+    // "hold nothing". That was only ever true by coincidence, and the moment
+    // awaiting_payment started holding stock the stand-in would have inverted
+    // -- planning a FULL deduction for precisely the stock_skipped sales that
+    // must never move a unit. The kernel now takes the fact, not a status
+    // that happens to imply it.
+    const plannedLines = allocateNewSaleLines([{
+      moneyPrecisionVersion: 1,
+      pricingSnapshotJson:replacementJson,
+      productId, productName: product.name || `product #${productId}`, quantity, branchId,
+      unitPriceUsd, costPriceUsd: product.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd), costPriceKhr: product.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
+      batchId: null, batchLabel: null, batchExpiryDate: null,
+    }], lotsByKey, saleStatus, !movesStock)
+
+    if (movesStock && branchId) {
+      const have = await db.prepare('SELECT quantity FROM branch_stock WHERE branch_id = ? AND product_id = ?')
+        .get<{ quantity: number }>([branchId, productId])
+      if (quantity > (Number(have?.quantity) || 0)) {
+        return c.json({ error: `Insufficient stock for ${product.name}: requested ${quantity}, available ${Number(have?.quantity) || 0}` }, 409)
+      }
+    }
+
+    // The plan works purely off each line's heldUnits (already 0 when this
+    // sale moves no stock), so the status is carried for the record only --
+    // no second sentinel.
+    const additionPlan = planSaleLineAddition({
+      saleId, saleStatus, lines: plannedLines,
+      exchangeRate, userId: user?.id ?? null, userName: actorSnapshot(user),
+    })
+    replacementLines=plannedLines
+    pricingRowsAfter.push(materializeCapturedPricingRow({id:0,product_id:productId,product_name:product.name,quantity,branch_id:branchId,cost_price_usd:plannedLines[0].costPriceUsd,cost_price_khr:plannedLines[0].costPriceKhr},
+      replacementPool,replacementQuantities,replacement.client_line_key,parseSaleItemPricing(replacementJson)!.allocation_context))
+    subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,additionPlan.addedSubtotalUsd])
+    unitsMoved += -additionPlan.deductedUnits || 0
+    ledgerEntries.push({
+      saleId, kind: 'line_added', groupId,
+      productId, productName: product.name,
+      quantityBefore: 0, quantityAfter: quantity,
+      totalBeforeUsd, totalAfterUsd: 0, unitsMoved: -additionPlan.deductedUnits || 0, stockSkipped,
+      note, userId: user?.id ?? null, userName: actorSnapshot(user),
+    })
+  }
+
+  if (kind==='line_removed' || kind==='line_replaced') {
+    pricingRowsAfter=pricingRowsAfter.filter(row=>row.id!==line.id)
+    if(!historicalBasket){
+    const removed=parseSaleItemPricing(precisionBasket!.lines.find(row=>row.id===line.id)!.pricing_snapshot_json as string)!
+    const pool=structuredClone(removed.pool), quantities={...removed.quantities}
+    pool.lines=pool.lines.filter(member=>member.line_key!==removed.line_key); delete quantities[removed.line_key]
+    if (pool.lines.length) {
+      repricedPools.set(pool.pool_key,{pool,quantities})
+      const evaluated=evaluateCapturedPricingPool(pool,quantities)
+      for (const row of pricingRowsAfter) {
+        const prior=parseSaleItemPricing(row.pricing_snapshot_json as string)!
+        if (prior.pool.pool_key!==pool.pool_key) continue
+        const amounts=evaluated.get(prior.line_key)!
+        ledgerEntries.push({saleId,kind:'line_updated',groupId,saleItemId:Number(row.id),productId:Number(row.product_id),productName:String(row.product_name||''),
+          quantityBefore:Number(row.quantity),quantityAfter:Number(row.quantity),amountBeforeUsd:Number(row.applied_price_usd),amountAfterUsd:amounts.applied_price_usd,
+          totalBeforeUsd,totalAfterUsd:0,unitsMoved:0,stockSkipped,note,userId:user?.id??null,userName:actorSnapshot(user),
+          before:{total_usd:row.total_usd,pool_key:pool.pool_key},after:{total_usd:amounts.total_usd,pool_key:pool.pool_key}})
+        row.total_usd=amounts.total_usd; row.total_khr=amounts.total_khr
+      }
+    }
+    }
+    if(historicalBasket)historicalSubtotalTerms=[subtotalBeforeUsd,-historicalBaseline!.amount,...pricingRowsAfter.filter(row=>Number(row.id)===0).map(row=>Number(row.total_usd))]
+    else subtotalDeltaUsd=subtractMoney4(sumMoney4(pricingRowsAfter.map(row=>Number(row.total_usd))),subtotalBeforeUsd)
+  }
+
+  // ---- Money. Captured baskets use their authoritative line totals. Recorded
+  // historical baskets retain the saved header residual: sum the original
+  // header, removed charge, and replacement charge before rounding once.
+  // Both discounts and the tender stay
+  // FROZEN by S4-24b's recompute, which is CALLED here rather than
+  // re-implemented, so an amendment cannot round differently from a checkout.
+  // TAX follows the new base when this sale was taxed at today's configured
+  // rate, and is kept verbatim with a stated reason when it was not
+  // (DECISION 4a in lib/saleAmendments.ts). ----
+  const subtotalAfterUsd = sumMoney4(historicalSubtotalTerms??[subtotalBeforeUsd,subtotalDeltaUsd])
+  const taxPlan = planAmendedTax({
+    saleId, sale, settings: moneySettings.tax,
+    subtotalBeforeUsd, subtotalAfterUsd, exchangeRate,
+  })
+  const money = recomputeSaleMoneyAfterAmendment({
+    moneyPrecisionVersion: 1,
+    sale,
+    subtotalUsd: subtotalAfterUsd,
+    taxUsdOverride: taxPlan.taxUsdOverride,
+    changeExchangeRate: moneySettings.changeExchangeRate,
+    exchangeRateOverride: exchangeRate,
+  })
+  const moneyAfterSnapshot = amendmentMoneyAfter(
+    sale,
+    money,
+    exchangeRate,
+    mutationStamp,
+    taxPlan.outcome.taxUsd,
+    Number(sale.delivery_fee_usd) || 0,
+  )
+  const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,taxPlan.outcome.taxUsd)
+  if(headerConflict)return c.json(headerConflict,409)
+  if (isLineUpdate || kind==='line_removed' || kind==='line_replaced') {
+    if(!historicalBasket){
+    const allocation={version:1 as const,lines:pricingRowsAfter.map(row=>({line_key:parseSaleItemPricing(row.pricing_snapshot_json as string)!.line_key,amount:Number(row.total_usd)})),
+      discount_usd:Number(sale.discount_usd),membership_discount_usd:Number(sale.membership_discount_usd),tax_usd:taxPlan.outcome.taxUsd}
+    pricingRowsAfter=pricingRowsAfter.map(row=>{
+      const original=parseSaleItemPricing(row.pricing_snapshot_json as string)!, changed=repricedPools.get(original.pool.pool_key)
+      return materializeCapturedPricingRow(row,changed?.pool??original.pool,changed?.quantities??original.quantities,original.line_key,allocation)
+    })
+    validateCapturedSaleBasket(pricingRowsAfter,{...sale,...moneyAfterSnapshot,tax_usd:taxPlan.outcome.taxUsd},precisionBasket!.identityBindings)
+    const existingPricingRows=pricingRowsAfter.filter(row=>Number(row.id)>0)
+    if (existingPricingRows.length) statements.push(pricingRowsStatement(saleId,existingPricingRows))
+    }
+    if (replacementLines) {
+      replacementLines[0].pricingSnapshotJson=String(pricingRowsAfter.find(row=>Number(row.id)===0)!.pricing_snapshot_json)
+      const finalPlan=planSaleLineAddition({saleId,saleStatus,lines:replacementLines,exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)})
+      statements.push(...planUnlottedSaleLineGuards(finalPlan.lines))
+      for (const [index,statement] of finalPlan.statements.entries()) {
+        statements.push(statement)
+        const ordinal=finalPlan.saleItemStatementIndexByLine.indexOf(index)
+        if (ordinal>=0) statements.push({sql:`INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES(@operation,'sale_item',last_insert_rowid(),@ordinal)`,params:{operation:mutationOperationId,ordinal}})
+      }
+      statements.push(...buildOperationAllocationStatements(finalPlan.lines,mutationOperationId,mutationStamp))
+    }
+    lineMoneyAfterAtLatestRate=captureSaleLineKhrSnapshot(pricingRowsAfter)
+  }
+
+  // Every ledger entry in this act ends at the sale's real new total; the
+  // intermediate ones would be arithmetic nobody performed.
+  for (const entry of ledgerEntries) {
+    entry.totalAfterUsd = money.totalUsd; entry.moneyPrecisionVersion = 1
+    entry.before = {...entry.before,...precisionRecordMoney(moneyBeforeSnapshot)}
+    entry.after = {...entry.after,...precisionRecordMoney(moneyAfterSnapshot)}
+  }
+
+  const response = buildAmendmentResponsePayload({
+    saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome,
+  }, mutationStamp)
+
+  // ---- One atomic batch: the line change, its stock, the sale's money, and
+  // the ledger entries recording all three. A committed line change whose
+  // audit entry failed separately would be exactly the silent gap this feature
+  // exists to close. ----
+  try {
+    await db.batch([
+      { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+      { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      amendmentSettingsGuard(moneySettings),
+      saleRevisionGuard(saleId, Number(sale.write_revision)),
+      precisionBasket!.guard,
+      ...statements,
+      ...taxPlan.statements,
+      canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
+      saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
+      ...ledgerEntries.map(amendmentEntryStatement),
+      saleMutationReceiptStatement({
+        operationId: mutationOperationId,
+        actorId: Number(user.id),
+        saleId,
+        kind: 'amendment',
+        requestId: amendmentRequestId,
+        requestDigest: amendmentDigest,
+        requestJson: amendmentCanonical,
+        before: { money: moneyBeforeSnapshot, lines: lineMoneyBefore },
+        after: { money: moneyAfterSnapshot, lines: lineMoneyAfterAtLatestRate },
+        identityBindings:precisionBasket!.identityBindings,
+        response,
+        stamp: mutationStamp,
+      }),
+      ...(replacementLines ? [{sql:`UPDATE sale_mutation_receipts SET after_json=json_set(after_json,@path,
+        (SELECT entity_id FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=0)) WHERE id=@operation`,
+        params:{operation:mutationOperationId,path:`$.lines[${lineMoneyAfterAtLatestRate.findIndex(row=>row.id===0)}].id`}}] : []),
+      { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+      { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+    ])
+  } catch (error) {
+    const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
+      WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
+      .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
+    if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+    if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+    const message = (error as Error).message || ''
+    if (/CHECK constraint|constraint failed|malformed JSON/i.test(message)) {
+      return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
+    }
+    return c.json({ error: `Failed to amend this sale: ${message}` }, 500)
+  }
+
+  await auditAmendment(c, user, saleId, sale, {
+    kind,
+    sale_item_id: lineId,
+    product_id: line.product_id,
+    entries: ledgerEntries.map((entry) => entry.kind),
+    units_moved: unitsMoved,
+    stock_skipped: stockSkipped,
+    subtotal_before: subtotalBeforeUsd,
+    subtotal_after: money.subtotalUsd,
+    total_before: totalBeforeUsd,
+    total_after: money.totalUsd,
+    tax_after: taxPlan.outcome.taxUsd,
+    tax_recomputed: taxPlan.outcome.recomputed,
+    tax_reason: taxPlan.outcome.reason,
+    exchange_rate_before: sale.exchange_rate ?? null,
+    exchange_rate_after: exchangeRate,
+    outside_window: guard.outsideWindow,
+    notes: note,
+  })
+
+  return c.json(await committedMutationResponse(db,mutationOperationId))
+  } catch (error) {
+    if (error instanceof SaleHeaderQuoteError || error instanceof HistoricalSalePricingError) return c.json({error:error.message,code:error.code},400)
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError) return c.json({ error: error.message, code: error.code },409)
+    throw error
+  }
+})
+
+type StatementList = Array<{ sql: string; params: Record<string, unknown> }>
+
+function canonicalSaleChildrenGuard(saleId: number | string, version=1): StatementList[number] {
+  if(version===0)return saleMutationGuard(`(SELECT COUNT(*) FROM sale_items WHERE sale_id=@canonicalSale) BETWEEN 1 AND 200
+    AND NOT EXISTS(SELECT 1 FROM sale_items WHERE sale_id=@canonicalSale AND (quantity<=0 OR quantity IS NULL))`,{canonicalSale:saleId},3)
+  const identity = typeof saleId === 'string' ? '(SELECT id FROM sales WHERE client_request_id=@canonicalSale)' : '@canonicalSale'
+  const amount = (key: string) => `(typeof(i.${key}) IN ('real','integer') AND i.${key} BETWEEN 0 AND 100000000000
+    AND i.${key}=CAST(ROUND(i.${key}*10000) AS INTEGER)/10000.0)`
+  const keys = ['applied_price_usd','applied_price_khr','total_usd','total_khr','product_discount_usd','product_discount_khr',
+    'base_price_usd','base_price_khr','manual_discount_usd','manual_discount_khr']
+  return saleMutationGuard(`(SELECT COUNT(*) FROM sale_items WHERE sale_id=${identity}) BETWEEN 1 AND 200
+    AND NOT EXISTS(SELECT 1 FROM sale_items i WHERE i.sale_id=${identity} AND NOT COALESCE((
+      ${keys.map(amount).join(' AND ')}
+      AND (i.cost_price_usd IS NULL OR ${amount('cost_price_usd')}) AND (i.cost_price_khr IS NULL OR ${amount('cost_price_khr')})
+      AND typeof(i.quantity) IN ('real','integer') AND i.quantity>0 AND i.quantity<=1.7976931348623157e308
+      AND i.pricing_snapshot_json IS NOT NULL AND json_valid(i.pricing_snapshot_json)=1
+      AND json_extract(i.pricing_snapshot_json,'$.version')=1
+      AND (i.manual_discount_type IS NOT 'fixed' OR ${amount('manual_discount_value')})
+    ),0))`,{ canonicalSale:saleId }, 3)
+}
+
+async function capturePrecisionBasket(db: ReturnType<typeof getDb>, sale: Record<string,unknown>) {
+  const lines = await db.prepare('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id').all<Record<string,unknown>>([Number(sale.id)])
+  const captured=Number(sale.money_precision_version)===1
+  if (!lines.length || lines.length>200) throw new SaleMoneyContractError('money_precision_basket_review_needed')
+  let lineage:Awaited<ReturnType<typeof resolveProductMergeLineage>>={bindings:[],condition:'1=1',params:{}}
+  if(captured){
+    assertCanonicalSaleChildren(lines)
+    lineage=await resolveProductMergeLineage(db,Number(sale.id),lines)
+    validateCapturedSaleBasket(lines,sale,lineage.bindings)
+    for (const key of ['subtotal_usd','discount_usd','membership_discount_usd','tax_usd','delivery_fee_usd']) canonicalMoney4(sale[key],true)
+  }else if(Number(sale.money_precision_version)!==0){
+    throw new SaleMoneyContractError('money_precision_invalid_snapshot')
+  }else if(!await historicalEditSchemaReady(db)){
+    throw new SaleMoneyContractError('historical_sale_schema_not_ready')
+  }
+  const header = { ...sale }; delete header.write_revision
+  const headerJson = JSON.stringify(header), lineJson = JSON.stringify(lines)
+  if (new TextEncoder().encode(headerJson + lineJson).byteLength > 500_000)
+    throw new SaleMoneyContractError('money_precision_basket_review_needed')
+  const keys = (row: Record<string,unknown>) => Object.keys(row).map(key => {
+    if (!/^[a-z][a-z0-9_]*$/.test(key)) throw new SaleMoneyContractError('money_precision_invalid_snapshot')
+    return key
+  })
+  const all=(terms:readonly string[]):string=>{
+    if(!terms.length)return '1=1'
+    if(terms.length===1)return terms[0]
+    const middle=Math.floor(terms.length/2)
+    return `(${all(terms.slice(0,middle))} AND ${all(terms.slice(middle))})`
+  }
+  const guard = saleMutationGuard(`EXISTS(SELECT 1 FROM sales s WHERE s.id=@precisionSale AND ${all(keys(header).map(key => `s.${key} IS json_extract(@precisionHeader,'$.${key}')`))})
+    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@precisionSale)=json_array_length(@precisionLines)
+    AND NOT EXISTS(SELECT 1 FROM json_each(@precisionLines) j WHERE NOT EXISTS(
+      SELECT 1 FROM sale_items i WHERE i.sale_id=@precisionSale AND ${all(keys(lines[0]).map(key => `i.${key} IS json_extract(j.value,'$.${key}')`))})) AND (${lineage.condition})`,
+    { precisionSale: Number(sale.id), precisionHeader: headerJson, precisionLines: lineJson,...lineage.params }, 2)
+  return { lines, guard,identityBindings:lineage.bindings }
+}
+
+function precisionRecordMoney(value: Record<string,unknown>): Record<string,unknown> {
+  return Object.fromEntries(['money_precision_version','calculated_total_usd','rounding_adjustment_usd']
+    .filter(key => Object.prototype.hasOwnProperty.call(value,key)).map(key => [key,value[key]]))
+}
+
+function nullableNumber(value: unknown): number | null {
+  return value == null ? null : Number(value) || 0
+}
+
+function receiptKhrFromUsd(value: unknown, exchangeRate: number): number | null {
+  if (value == null) return null
+  return multiplyMoney4(value as number,exchangeRate)
+}
+
+function amendmentMoneyBefore(sale: Record<string, unknown>) {
+  return {
+    ...(sale.money_precision_version === undefined ? {} : {
+      money_precision_version: Number(sale.money_precision_version) as 0 | 1,
+      calculated_total_usd: sale.calculated_total_usd == null ? null : Number(sale.calculated_total_usd),
+      rounding_adjustment_usd: Number(sale.rounding_adjustment_usd),
+    }),
+    exchange_rate: nullableNumber(sale.exchange_rate),
+    updated_at: sale.updated_at == null ? null : String(sale.updated_at),
+    subtotal_usd: Number(sale.subtotal_usd) || 0,
+    subtotal_khr: nullableNumber(sale.subtotal_khr),
+    total_usd: Number(sale.total_usd) || 0,
+    total_khr: nullableNumber(sale.total_khr),
+    change_usd: Number(sale.change_usd) || 0,
+    change_khr: nullableNumber(sale.change_khr),
+    change_is_actual: Number(sale.change_is_actual) === 1 ? 1 : 0,
+    change_exchange_rate: nullableNumber(sale.change_exchange_rate),
+    discount_khr: nullableNumber(sale.discount_khr),
+    tax_khr: nullableNumber(sale.tax_khr),
+    delivery_fee_khr: nullableNumber(sale.delivery_fee_khr),
+    membership_discount_khr: nullableNumber(sale.membership_discount_khr),
+  }
+}
+
+function reviewSaleHeaderQuote(body:Record<string,unknown>,sale:Record<string,unknown>,after:Record<string,unknown>,settings:Awaited<ReturnType<typeof readAmendmentMoneySettings>>,taxUsd:number,
+  overrides:Parameters<typeof quoteSaleMutationHeader>[3]={}) {
+  const quote=quoteSaleMutationHeader(sale,Number(after.subtotal_usd),{tax_enabled:settings.taxEnabledRaw,tax_rate:settings.taxRateRaw},overrides)
+  if(quote.tax_usd!==taxUsd||(['subtotal_usd','exchange_rate','calculated_total_usd','rounding_adjustment_usd','total_usd','total_khr'] as const).some(key=>quote[key]!==after[key]))
+    throw new Error('Exact header quote disagrees with the guarded mutation plan')
+  return compareSaleHeaderQuote(body.expected_header_quote,quote)==='match'?null:{error:'Review the exact sale total before saving.',code:'sale_header_quote_conflict',header_quote:quote,proven_uncommitted:true}
+}
+
+function amendmentMoneyAfter(
+  sale: Record<string, unknown>,
+  money: { subtotalUsd: number; subtotalKhr: number; totalUsd: number; totalKhr: number; changeUsd: number; changeKhr: number; moneyPrecisionVersion?: 1; calculatedTotalUsd?: number; roundingAdjustmentUsd?: number },
+  exchangeRate: number,
+  stamp: string,
+  taxUsd: number,
+  deliveryFeeUsd: number,
+) {
+  return {
+    ...(money.moneyPrecisionVersion === 1 ? {
+      money_precision_version: Number(sale.money_precision_version)===0?0 as const:1 as const,
+      calculated_total_usd: money.calculatedTotalUsd!,
+      rounding_adjustment_usd: money.roundingAdjustmentUsd!,
+    } : sale.money_precision_version === undefined ? {} : {
+      money_precision_version: Number(sale.money_precision_version) as 0 | 1,
+      calculated_total_usd: sale.calculated_total_usd == null ? null : Number(sale.calculated_total_usd),
+      rounding_adjustment_usd: Number(sale.rounding_adjustment_usd),
+    }),
+    exchange_rate: exchangeRate,
+    updated_at: stamp,
+    subtotal_usd: money.subtotalUsd,
+    subtotal_khr: Number(sale.money_precision_version)===0&&money.subtotalUsd===sale.subtotal_usd?sale.subtotal_khr as number:money.subtotalKhr,
+    total_usd: money.totalUsd,
+    total_khr: money.totalKhr,
+    change_usd: Number(sale.change_is_actual) === 1 ? Number(sale.change_usd) || 0 : money.changeUsd,
+    change_khr: Number(sale.change_is_actual) === 1 ? nullableNumber(sale.change_khr) : money.changeKhr,
+    change_is_actual: Number(sale.change_is_actual) === 1 ? 1 : 0,
+    change_exchange_rate: Number(sale.change_is_actual) === 1 ? nullableNumber(sale.change_exchange_rate) : null,
+    discount_khr: Number(sale.money_precision_version)===0?nullableNumber(sale.discount_khr):receiptKhrFromUsd(sale.discount_usd, exchangeRate),
+    tax_khr: Number(sale.money_precision_version)===0&&taxUsd===sale.tax_usd?nullableNumber(sale.tax_khr):receiptKhrFromUsd(taxUsd, exchangeRate),
+    delivery_fee_khr: Number(sale.money_precision_version)===0&&deliveryFeeUsd===sale.delivery_fee_usd?nullableNumber(sale.delivery_fee_khr):receiptKhrFromUsd(deliveryFeeUsd, exchangeRate),
+    membership_discount_khr: Number(sale.money_precision_version)===0?nullableNumber(sale.membership_discount_khr):receiptKhrFromUsd(sale.membership_discount_usd, exchangeRate),
+  }
+}
+
+function saleMutationReceiptStatement(input: {
+  operationId: string
+  actorId: number
+  saleId: number
+  kind: 'add_items' | 'amendment'
+  requestId: string
+  requestDigest: string
+  requestJson: string
+  before: unknown
+  after: unknown
+  response: Record<string, unknown>
+  stamp: string
+  identityBindings: readonly import('../lib/saleItemPricing').CapturedProductIdentityBinding[]
+  canonicalAvailable?:boolean
+}): StatementList[number] {
+  return {
+    sql: `INSERT INTO sale_mutation_receipts(
+            id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_json,
+            before_json,after_json,response_json,generation,sale_revision,updated_at
+          ) VALUES(
+            @operation,@actor,@saleId,@kind,@request,@digest,@requestJson,
+            @beforeJson,@afterJson,${input.canonicalAvailable===false?"json_set(@responseJson,'$.canonical_receipt_available',json('false'))":canonicalMutationResponseSql('@responseJson')},0,
+            COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),@stamp
+          )`,
+    params: {
+      operation: input.operationId,
+      actor: input.actorId,
+      saleId: input.saleId,
+      kind: input.kind,
+      request: input.requestId,
+      digest: input.requestDigest,
+      requestJson: input.requestJson,
+      beforeJson: JSON.stringify(input.before),
+      afterJson: JSON.stringify(input.after),
+      responseJson: JSON.stringify(input.response),
+      validatedIdentityBindings:JSON.stringify(input.identityBindings),
+      stamp: input.stamp,
+    },
+  }
+}
+
+function amendmentSettingsGuard(settings: Awaited<ReturnType<typeof readAmendmentMoneySettings>>): StatementList[number] {
+  return saleMutationGuard(`
+    COALESCE((SELECT value FROM settings WHERE key='exchange_rate'),'')=@exchangeRate
+    AND COALESCE((SELECT value FROM settings WHERE key='change_exchange_rate'),'')=@changeRate
+    AND COALESCE((SELECT value FROM settings WHERE key=@taxEnabledKey),'')=@taxEnabled
+    AND COALESCE((SELECT value FROM settings WHERE key=@taxRateKey),'')=@taxRate
+  `, {
+    exchangeRate: settings.exchangeRateRaw ?? '',
+    changeRate: settings.changeExchangeRateRaw ?? '',
+    taxEnabledKey: TAX_ENABLED_SETTING_KEY,
+    taxEnabled: settings.taxEnabledRaw ?? '',
+    taxRateKey: TAX_RATE_SETTING_KEY,
+    taxRate: settings.taxRateRaw ?? '',
+  })
+}
+
+type AmendmentContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
+
+/**
+ * The three settings every amendment's money depends on, read in ONE query.
+ *
+ * `change_exchange_rate` is Part 534's; `tax_enabled` + `tax_rate` are the
+ * owner's tax switch (2026-09-04). Reading them together means a single path
+ * decides tax for additions, line changes and fee corrections alike -- three
+ * separate reads is how the three paths later disagree about whether tax moved.
+ */
+async function readAmendmentMoneySettings(db: ReturnType<typeof getDb>): Promise<{
+  exchangeRate: number
+  exchangeRateRaw: string | undefined
+  changeExchangeRate: string | undefined
+  changeExchangeRateRaw: string | undefined
+  taxEnabledRaw: string | undefined
+  taxRateRaw: string | undefined
+  tax: TaxSettings
+}> {
+  // Bound, not interpolated. These three are module constants today, but a key
+  // name spliced into SQL is a shape that stops being safe the moment someone
+  // makes one configurable, and this file should not be the place that teaches
+  // that habit.
+  const rows = await db.prepare(
+    'SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?)',
+  ).all<{ key: string; value: string }>(['exchange_rate', 'change_exchange_rate', TAX_ENABLED_SETTING_KEY, TAX_RATE_SETTING_KEY])
+  const map = Object.fromEntries(rows.map((row) => [row.key, row.value]))
+  return {
+    exchangeRate: Number(map.exchange_rate) > 0 ? Number(map.exchange_rate) : 4100,
+    exchangeRateRaw: map.exchange_rate,
+    changeExchangeRate: map.change_exchange_rate,
+    changeExchangeRateRaw: map.change_exchange_rate,
+    taxEnabledRaw: map[TAX_ENABLED_SETTING_KEY],
+    taxRateRaw: map[TAX_RATE_SETTING_KEY],
+    tax: resolveTaxSettings(map[TAX_ENABLED_SETTING_KEY], map[TAX_RATE_SETTING_KEY], 1),
+  }
+}
+
+/**
+ * Tax for one amendment: the outcome to report, the override the totals need,
+ * and the statement (if any) that writes it back.
+ *
+ * The write is emitted ONLY when the amount actually moves, so a delivery-fee
+ * correction -- which changes no line and therefore no taxable base -- does not
+ * rewrite `tax_usd` with the value it already holds. Every non-recomputing case
+ * still reports its reason, because "your tax line did not move, and here is
+ * why" is information a shop needs at closing rather than a silence.
+ */
+function planAmendedTax(input: {
+  saleId: number
+  sale: AmendableSaleRow
+  settings: TaxSettings
+  subtotalBeforeUsd: number
+  subtotalAfterUsd: number
+  exchangeRate: number
+}): { outcome: AmendedTaxResult; taxUsdOverride: number | null; statements: StatementList } {
+  const outcome = resolveAmendedTaxUsd({
+    moneyPrecisionVersion: 1,
+    sale: input.sale,
+    taxableBaseBeforeUsd: taxableBaseUsd(input.sale, input.subtotalBeforeUsd, 1),
+    taxableBaseAfterUsd: taxableBaseUsd(input.sale, input.subtotalAfterUsd, 1),
+    settings: input.settings,
+  })
+  const storedTax = Number(input.sale.tax_usd) || 0
+  const moved = outcome.recomputed && outcome.taxUsd !== storedTax
+  return {
+    outcome,
+    taxUsdOverride: outcome.recomputed ? outcome.taxUsd : null,
+    statements: moved ? [saleTaxUpdateStatement(input.saleId, outcome.taxUsd, input.exchangeRate, 1)] : [],
+  }
+}
+
+/**
+ * One audit row per amendment, on top of the ledger entry.
+ *
+ * Not a duplicate of the ledger: `sale_amendments` is the SALE's history, read
+ * on that sale's own screen; `audit` is the SYSTEM's history, read by whoever
+ * is asking what a given user did last Tuesday. Both are wanted, and the same
+ * pairing already exists for POST /:id/items.
+ */
+async function auditAmendment(
+  c: AmendmentContext,
+  user: SessionUser | undefined,
+  saleId: number,
+  sale: { receipt_number?: unknown; sale_status?: unknown },
+  details: Record<string, unknown>,
+): Promise<void> {
+  // P4-4a: every caller `await`s auditAmendment() only to build its response
+  // afterward from the mutation's own committed receipt (committedMutationResponse)
+  // or from the mutationStamp it already computed in JS -- neither reads this
+  // audit row, so it can run alongside the cache bumps below instead of being
+  // its own separate round trip on the request's critical path.
+  c.executionCtx.waitUntil(Promise.all([
+    audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', saleId, {
+      action: 'amend',
+      receipt_number: sale.receipt_number ?? null,
+      sale_status: sale.sale_status ?? null,
+      ...details,
+    }),
+    bumpVersion(c.env, 'products'),
+    bumpVersion(c.env, 'sales'),
+  ]))
+}
+
+function buildAmendmentResponsePayload(
+  input: {
+    saleId: number
+    sale: { amount_paid_usd?: unknown; amount_paid_khr?: unknown; receipt_number?: unknown }
+    money: { totalUsd: number; totalKhr: number; subtotalUsd: number }
+    exchangeRate: number
+    stockMoved: boolean
+    unitsMoved: number
+    stockSkipped: boolean
+    tax: AmendedTaxResult
+  },
+  updatedAt: string | null,
+): Record<string, unknown> {
+  return {
+    id: input.saleId,
+    // DECISION 6: an amended sale keeps its ORIGINAL receipt number, and a
+    // reprint is a reprint -- settled by the owner on 2026-09-04. One sale,
+    // one number, so no revenue report can count it twice.
+    receiptNumber: input.sale.receipt_number ?? null,
+    subtotalUsd: input.money.subtotalUsd,
+    totalUsd: input.money.totalUsd,
+    totalKhr: input.money.totalKhr,
+    outstandingUsd: round2(Math.max(0, input.money.totalUsd - (Number(input.sale.amount_paid_usd) || 0) - (Number(input.sale.amount_paid_khr) || 0) / input.exchangeRate)),
+    stockMoved: input.stockMoved,
+    unitsMoved: input.unitsMoved,
+    stockSkipped: input.stockSkipped,
+    // Tax, reported rather than left to be inferred. `taxRecomputed: false`
+    // with a reason is the interesting case: a shop that sees its total move
+    // while the tax line stands still deserves to be told why on the screen,
+    // not to discover it at closing. Reasons are in lib/saleAmendments.ts's
+    // DECISION 4a; 'no_tax_on_sale' simply means this sale never had tax, so
+    // there is no tax row to show at all.
+    taxUsd: input.tax.taxUsd,
+    taxRecomputed: input.tax.recomputed,
+    taxReason: input.tax.reason,
+    // Both discounts genuinely are frozen: absolute amounts with no stored
+    // rate, and changing one is a money decision rather than a correction.
+    discountFrozen: true,
+    exchangeRate: input.exchangeRate,
+    updated_at: updatedAt,
+  }
+}
 
 type SaleRow = {
   id: number
@@ -1498,7 +5130,10 @@ type SaleRow = {
 // but was never actually searched) and, via a join from sale_items back
 // to products on product_id, barcode and brand (neither sale_items nor
 // return_items stores those directly -- they're snapshotted onto the
-// products table, not copied onto the line-item row at sale time).
+// products table, not copied onto the line-item row at sale time), PLUS
+// s.legacy_receipt_number (migration 0107) so a sale whose old-system
+// `NNNNNN@YYYY-MM-DD` label was rewritten to the business format is still
+// findable by the number printed on the customer's old paper receipt.
 // Deliberately still a LIKE scan, not FTS5 -- see buildLikeAliasClause's
 // own comment in lib/searchMatch.ts for why that's a considered choice
 // for this table, not an oversight.
@@ -1525,7 +5160,8 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
   // migration's own comment for why there is no data backfill.
   const flatHaystack = `(
     COALESCE(s.search_normalized, '') || ' ' ||
-    COALESCE(s.receipt_number, '') || ' ' || COALESCE(s.cashier_name, '') || ' ' ||
+    COALESCE(s.receipt_number, '') || ' ' || COALESCE(s.legacy_receipt_number, '') || ' ' ||
+    COALESCE(s.cashier_name, '') || ' ' ||
     COALESCE(s.customer_name, '') || ' ' || COALESCE(s.customer_phone, '') || ' ' ||
     COALESCE(s.branch_name, '') || ' ' || COALESCE(s.payment_method, '') || ' ' ||
     COALESCE(s.notes, '') || ' ' || COALESCE(c.membership_number, '')
@@ -1671,9 +5307,31 @@ app.get('/', async (c) => {
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
 
     const sales = await db.prepare(`
-      SELECT s.*, c.membership_number AS customer_membership_number
+      SELECT s.*,
+        CASE WHEN COALESCE(c.is_anonymous,0)=1 THEN NULL ELSE c.membership_number END AS customer_membership_number,
+        COALESCE(c.is_anonymous,0) AS customer_is_anonymous,
+        dc.name AS linked_driver_name, dc.phone AS linked_driver_phone,
+        CASE WHEN COALESCE(s.sale_status,'completed')='awaiting_payment'
+          AND COALESCE((
+            SELECT CASE WHEN a.action IN ('update','sale_payment_correction_opened') THEN 1 ELSE 0 END
+            FROM audit_logs a
+            WHERE (a.entity='sale' OR a.table_name='sale')
+              AND CAST(COALESCE(a.entity_id,a.record_id) AS TEXT)=CAST(s.id AS TEXT)
+              AND (
+                a.action='sale_settlement'
+                OR a.action='sale_payment_correction_opened'
+                OR (
+                  a.action='update'
+                  AND json_valid(a.details)=1
+                  AND json_extract(a.details,'$.newStatus')='awaiting_payment'
+                  AND json_extract(a.details,'$.oldStatus') IN ('completed','awaiting_delivery')
+                )
+              )
+            ORDER BY a.id DESC LIMIT 1
+          ),0)=1 THEN 1 ELSE 0 END AS payment_correction_allowed
       FROM sales s
       LEFT JOIN customers c ON c.id = s.customer_id
+      LEFT JOIN delivery_contacts dc ON dc.id = s.delivery_contact_id AND COALESCE(s.is_delivery, 0) <> 0
       WHERE ${where.join(' AND ')}
       ORDER BY ${orderSql}
       LIMIT @limit OFFSET @offset
@@ -1686,51 +5344,149 @@ app.get('/', async (c) => {
   // one `?limit=101` away from the same crash GET /api/products hit.
     const saleIds = sales.map((s) => s.id)
 
-    const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-      SELECT si.*, b.name AS branch_name, p.barcode AS barcode, p.category AS category
+    // itemRows, refundRows and recordsBySale are three independent read
+    // chains off the same saleIds -- none reads a value the others produce
+    // -- so they fan out with Promise.all instead of running one after
+    // another. Each keeps its own chunking (selectInChunks/chunkForBinding)
+    // exactly as before; only the sequencing between the three changed.
+    const [itemsBySale, refundsBySale, recordsBySale] = await Promise.all([
+      (async () => {
+        const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
+      SELECT si.*, b.name AS branch_name, p.barcode AS barcode, p.category AS category,
+        p.unit AS unit, p.supplier AS supplier,
+        -- A single received date is factual only for an explicit lot or a
+        -- fully allocated single-lot line. Keep multi-lot lines unsummarized;
+        -- lot_allocation_count below remains their separate UI indicator.
+        COALESCE(pb.received_at, (
+          SELECT CASE WHEN COUNT(DISTINCT sia.batch_id) = 1 AND SUM(sia.quantity) >= si.quantity
+            THEN MAX(allocated_batch.received_at) ELSE NULL END
+          FROM sale_item_batch_allocations sia
+          JOIN product_batches allocated_batch ON allocated_batch.id = sia.batch_id
+            AND allocated_batch.variant_product_id = si.product_id
+          WHERE sia.sale_item_id = si.id AND sia.quantity > 0
+        )) AS batch_received_at,
+        COALESCE((
+          SELECT SUM(ri.quantity)
+          FROM return_items ri
+          JOIN returns item_return ON item_return.id = ri.return_id
+          WHERE ri.sale_item_id = si.id
+            AND COALESCE(item_return.status, 'completed') != 'cancelled'
+            AND COALESCE(item_return.return_scope, 'customer') = 'customer'
+        ), 0) AS returned_quantity,
+        -- Does this line still know which lot(s) it drew from? A multi-lot
+        -- line carries batch_id NULL and keeps the answer here instead, so a
+        -- return of it must NOT be treated as "lot unknown" and asked to pick
+        -- one -- that would collapse a real split onto a single lot. Reads
+        -- the (sale_item_id, released_at) index; a legacy line predating lot
+        -- tracking correctly answers 0.
+        (SELECT COUNT(*) FROM sale_item_batch_allocations sia
+          WHERE sia.sale_item_id = si.id AND sia.quantity > COALESCE(sia.released_quantity, 0)) AS lot_allocation_count
       FROM sale_items si
       LEFT JOIN branches b ON b.id = si.branch_id
       LEFT JOIN products p ON p.id = si.product_id
+      LEFT JOIN product_batches pb ON pb.id = si.batch_id AND pb.variant_product_id = si.product_id
       WHERE si.sale_id IN (${chunk.map(() => '?').join(',')})
       ORDER BY si.id ASC
     `).all<{ sale_id: number; [key: string]: unknown }>(chunk))
-    const itemsBySale = new Map<number, unknown[]>()
-    for (const row of itemRows) {
-      if (!itemsBySale.has(row.sale_id)) itemsBySale.set(row.sale_id, [])
-      itemsBySale.get(row.sale_id)!.push(row)
-    }
-
-  // GROUP BY sale_id, and every row for one sale lands in the chunk that
-  // holds that sale's id -- so a chunked aggregate is still a complete
-  // aggregate per sale, with no cross-chunk re-summing needed.
-    const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-      SELECT sale_id, COUNT(*) AS return_count, COALESCE(SUM(total_refund_usd), 0) AS refund_usd, COALESCE(SUM(total_refund_khr), 0) AS refund_khr
+        const map = new Map<number, unknown[]>()
+        for (const row of itemRows) {
+          if (!map.has(row.sale_id)) map.set(row.sale_id, [])
+          map.get(row.sale_id)!.push(row)
+        }
+        return map
+      })(),
+      (async () => {
+        // Was a fresh `PRAGMA table_info(returns)` every GET /api/sales
+        // cache miss just to learn whether money_precision_version exists;
+        // hasColumn() memoizes the column set per isolate instead.
+        const returnVersion = await hasColumn(db, 'returns', 'money_precision_version')
+          ? 'money_precision_version' : '0 AS money_precision_version'
+        // Read recorded operands, never SQLite binary-money SUM. A bounded page
+        // must refuse excessive linked history rather than silently omit refunds.
+        const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
+      SELECT id,sale_id,total_refund_usd,total_refund_khr,${returnVersion}
       FROM returns
       WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
-      GROUP BY sale_id
-    `).all<{ sale_id: number; return_count: number; refund_usd: number; refund_khr: number }>(chunk))
-    const refundsBySale = new Map(refundRows.map((r) => [r.sale_id, r]))
+      ORDER BY id LIMIT ${REPORT_MONEY_MAX_ROWS+1}
+    `).all<Record<string,unknown>>(chunk))
+        if(refundRows.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
+        const map=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal}>()
+        for(const row of refundRows){
+          const id=Number(row.sale_id),group=map.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero()}
+          group.count++;group.usd=group.usd.add(stripMoney(row,'total_refund_usd'));group.khr=group.khr.add(stripMoney(row,'total_refund_khr'))
+          map.set(id,group)
+        }
+        return map
+      })(),
+      (async () => {
+        // "Records n" on every row. ONE statement per chunk over three tables
+        // rather than a query per sale -- a 500-row page would otherwise fire 500
+        // reads. chunkForBinding is told the real cost (each id is bound into
+        // three IN lists, not one) so a full page cannot trip D1's 100-parameter
+        // ceiling the way GET /api/products once did.
+        const map = new Map<number, number>()
+        for (const chunk of chunkForBinding(saleIds, 0, SALE_RECORDS_COUNT_BINDS_PER_ID)) {
+          const placeholders = chunk.map(() => '?').join(',')
+          const countRows = await db.prepare(buildSaleRecordsCountSql(placeholders))
+            .all<{ sale_id: number; n: number }>(saleRecordsCountBinds(chunk))
+          for (const row of countRows) map.set(Number(row.sale_id), Number(row.n) || 0)
+        }
+        return map
+      })(),
+    ])
 
-    return sales.map((sale) => {
+    return Promise.all(sales.map(async(sale) => {
+      const { linked_driver_name, linked_driver_phone, ...snapshot } = sale
       const refund = refundsBySale.get(sale.id)
-      const refundUsd = refund?.refund_usd || 0
-      const refundKhr = refund?.refund_khr || 0
-      return {
-        ...sale,
-        items: itemsBySale.get(sale.id) || [],
-        refund_usd: refundUsd,
-        refund_khr: refundKhr,
-        return_count: refund?.return_count || 0,
-        total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0),
-        total_discount_khr: (sale.discount_khr || 0) + (sale.membership_discount_khr || 0),
-        net_total_usd: (sale.total_usd || 0) - refundUsd,
-        net_total_khr: (sale.total_khr || 0) - refundKhr,
+      const refundUsd = refund?.usd??ReportExactDecimal.zero()
+      const refundKhr = refund?.khr??ReportExactDecimal.zero()
+      const items=itemsBySale.get(sale.id)||[]
+      let pricingIdentity:Record<string,unknown>={}
+      if(Number(sale.money_precision_version)===1){
+        const lineage=await resolveProductMergeLineage(db,Number(sale.id),items as Record<string,unknown>[])
+        validateCapturedSaleBasket(items as Record<string,unknown>[],sale,lineage.bindings)
+        if(lineage.bindings.length)await db.prepare(`SELECT CASE WHEN ${lineage.condition} THEN 1 ELSE json_extract('', '$') END`).get(lineage.params)
+        pricingIdentity={pricing_identity_bindings:lineage.bindings}
       }
-    })
+      return {
+        ...snapshot,
+        ...pricingIdentity,
+        delivery_contact_name: String(sale.delivery_contact_name ?? '').trim() ? sale.delivery_contact_name : linked_driver_name ?? null,
+        delivery_contact_phone: String(sale.delivery_contact_phone ?? '').trim() ? sale.delivery_contact_phone : linked_driver_phone ?? null,
+        items,
+        refund_usd: refundUsd.toNumber(4),
+        refund_khr: refundKhr.toNumber(4),
+        return_count: refund?.count || 0,
+        // Never 0: a sale always has at least the fact that it happened, and
+        // that is the record every later one is relative to.
+        records_count: (recordsBySale.get(sale.id) || 0) + SALE_RECORDS_SELF_COUNT,
+        total_discount_usd: stripMoney(sale,'discount_usd').add(stripMoney(sale,'membership_discount_usd')).toNumber(4),
+        total_discount_khr: stripMoney(sale,'discount_khr').add(stripMoney(sale,'membership_discount_khr')).toNumber(4),
+        net_total_usd: stripMoney(sale,'total_usd').subtract(refundUsd).toNumber(4),
+        net_total_khr: stripMoney(sale,'total_khr').subtract(refundKhr).toNumber(4),
+      }
+    }))
   })
 
-  return c.json(payload)
+  return c.json(payload.map(row=>projectOperationalSaleCosts(row as Record<string,unknown>,c.get('user'))))
 })
+
+/** Cache entries are actor-neutral. Apply current authority only after read. */
+export function projectOperationalSaleCosts(row:Record<string,unknown>,user:SessionUser):Record<string,unknown> {
+  if(isAdminControlUser(user))return row
+  const {creation_snapshot_json,items,...publicRow}=row
+  // The opaque historical envelope is not needed by the editor and must not
+  // become an alternative disclosure path. Never mutate the shared cache row.
+  if(getActionTier(user,'sales','amend')!=='full'){
+    delete publicRow.delivery_actual_cost_usd
+    delete publicRow.delivery_actual_cost_khr
+  }
+  return {...publicRow,items:Array.isArray(items)?items.map(item=>{
+    if(!item||typeof item!=='object'||Array.isArray(item))return item
+    const {cost_price_usd,cost_price_khr,...publicItem}=item as Record<string,unknown>
+    return publicItem
+  }):items}
+}
 
 // GET /api/sales/stats -- Sales page header revenue figure. The list
 // endpoint above caps results at `limit` (default 100, max 500), and
@@ -1738,8 +5494,8 @@ app.get('/', async (c) => {
 // a small/default view, silently wrong (and silently *smaller* than
 // reality, with no indication anything was cut off) once a filtered date
 // range or search matched more rows than the cap. This computes the same
-// "net_total_usd (fallback total_usd), excluding cancelled/awaiting_payment"
-// revenue definition Sales.tsx already uses per-row, but as a single SQL
+// recognized-sale revenue definition (all statuses except cancelled) that
+// Sales.tsx already uses per-row, but as a single SQL
 // aggregate over every matching row, not just the page that was fetched.
 app.get('/stats', async (c) => {
   const query = c.req.query()
@@ -1794,65 +5550,34 @@ app.get('/stats', async (c) => {
   const searchClause = buildSalesSearchWhere(query, params)
   if (searchClause) where.push(searchClause)
 
-  // ONE aggregate, not "read every matching row, then chunk a refund
-  // lookup over their ids". The old shape pulled the entire result set
-  // into the Worker and then issued a sequential D1 statement per 100
-  // sale ids (chunkForBinding caps an IN list at D1's 100 bound
-  // parameters), so the page's own unfiltered header -- the request the
-  // Sales page fires on load -- cost ~150 round trips against production's
-  // 14.9k receipts for three numbers SQLite computes in a single pass.
-  // Refunds join as a PRE-AGGREGATED derived table so a sale carrying two
-  // returns still subtracts once, exactly as the per-sale Map did.
-  //
-  // buildSalesSearchWhere's flat clause references `c.membership_number`,
-  // so this query needs the same customers join GET / already has --
-  // without it, a search including a membership-number term would silently
-  // 500 (unknown column c.membership_number) instead of just finding zero
-  // matches, and revenue stats would disagree with the list view for that
-  // exact query shape (the drift risk buildSalesSearchWhere exists to
-  // prevent in the first place).
-  //
-  // COALESCE(NULLIF(s.sale_status, ''), 'completed') is the SQL spelling of
-  // the JS `sale_status || 'completed'` it replaces: BOTH an empty string
-  // and NULL mean completed, so a blank status keeps counting as revenue
-  // rather than silently dropping out of the total. A plain COALESCE alone
-  // would leave '' unmatched and quietly lose those sales.
-  //
-  // Revenue basis = NET SALES (subtotal net of both discounts), minus customer
-  // refunds -- the canonical definition (user directive Sep 1 2026), computed
-  // byte-for-byte identically to salesAnalytics.ts's deriveTotals so this header
-  // and the Reports kernel/Dashboard can never disagree. Tax and delivery fees
-  // are pass-through, NOT revenue, so total_usd (which folds tax in) is no
-  // longer the base here. Awaiting-payment (unpaid credit) uses the same net
-  // basis but is reported separately as pending, never folded into revenue.
+  // Preserve the list's complete cohort, but delegate financial policy and
+  // rounding to the exact shared reducer. Its bounded coherent keyset reads
+  // replace the former SQL floating-money aggregate; no third revenue or
+  // refund formula is maintained in this route.
   const cacheVersion = await getSalesReadCacheVersion(c.env)
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
-    const totals = await db.prepare(`
-    SELECT
-      COUNT(*) AS total_count,
-      COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') NOT IN ('cancelled', 'awaiting_payment') THEN 1 ELSE 0 END), 0) AS revenue_count,
-      COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') NOT IN ('cancelled', 'awaiting_payment')
-        THEN (COALESCE(s.subtotal_usd, 0) - COALESCE(s.discount_usd, 0) - COALESCE(s.membership_discount_usd, 0)) - COALESCE(r.refund_usd, 0) ELSE 0 END), 0) AS revenue_usd,
-      COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') = 'awaiting_payment'
-        THEN (COALESCE(s.subtotal_usd, 0) - COALESCE(s.discount_usd, 0) - COALESCE(s.membership_discount_usd, 0)) ELSE 0 END), 0) AS pending_revenue_usd
-    FROM sales s
-    LEFT JOIN customers c ON c.id = s.customer_id
-    LEFT JOIN (
-      SELECT sale_id, SUM(total_refund_usd) AS refund_usd
-      FROM returns
-      WHERE COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
-      GROUP BY sale_id
-    ) r ON r.sale_id = s.id
-    WHERE ${where.join(' AND ')}
-  `).get<{ total_count: number; revenue_count: number; revenue_usd: number; pending_revenue_usd: number }>(params)
-
-    const totalCount = Number(totals?.total_count) || 0
+    const scopedParams:Record<string,string|number|null>={}
+    const scopedWhere=where.join(' AND ').replace(/\bs\./g,'matched_sale.').replace(/@([A-Za-z][A-Za-z0-9_]*)/g,(_match,key:string)=>{
+      const value=params[key]
+      if(typeof value!=='string'&&typeof value!=='number'&&value!==null)throw new ReportMoneyPrecisionError('unsupported_row')
+      scopedParams[`reportScope_${key}`]=value
+      return `@reportScope_${key}`
+    })
+    // Preserve the list's rich, server-built predicates, including the LEFT
+    // customer join and item-branch search. The shared reader applies this
+    // immutable scope to every header/child query in both coherent passes.
+    const snapshot=await readSalesReportSnapshot(c.env,{},false,alias=>({
+      sql:`${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`,
+      params:scopedParams,
+    }))
+    const totals=salesTotalsFromSnapshot(snapshot)
+    const totalCount=snapshot.sales.length+snapshot.voidSales.length
     const listLimit = Math.max(1, Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 200))
     return {
       total_count: totalCount,
-      revenue_count: Number(totals?.revenue_count) || 0,
-      revenue_usd: round2(Number(totals?.revenue_usd) || 0),
-      pending_revenue_usd: round2(Number(totals?.pending_revenue_usd) || 0),
+      revenue_count: snapshot.sales.length,
+      revenue_usd: totals.revenue_usd,
+      pending_revenue_usd: totals.pending_revenue_usd,
       // This now means "more pages exist", not "the data was discarded".
       truncated_in_list: totalCount > listLimit,
     }
@@ -1868,6 +5593,52 @@ app.get('/stats', async (c) => {
 // range+branch scoped only, NOT list-filter scoped: the strip answers "how
 // was this period", the list header keeps answering "what does this filter
 // match".
+// Match reports.ts' authority boundary without importing a route module. Apply
+// after shared cache reads: private cost fields must never depend on cache owner.
+export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean):Record<string,unknown> {
+  if(isAdmin)return row
+  const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,unvalued_cost_usd,returned_cost_usd,
+    cost,gross_profit,delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,
+    returned_cost_shortfall_usd,cost_missing_snapshot_lines,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,
+    // Stock removed entirely, priced at COST, and the two figures derived from
+    // it. They are cost money and leak the same thing profit_usd does: with
+    // revenue_usd public, revenue_after_losses_usd hands a non-admin the exact
+    // cost of every removal by subtraction. /day-report reaches this gate with
+    // the block populated (getSalesDayReport carries it), so this is a live
+    // path, not a precaution.
+    removal_loss_usd,removal_loss_qty,removal_loss_unvalued_rows,revenue_after_losses_usd,profit_after_losses_usd,
+    ...publicRow}=row
+  return publicRow
+}
+export function gateSalesCourierMoney(row:Record<string,unknown>,isAdmin:boolean):Record<string,unknown> {
+  if(isAdmin)return row
+  const {actual_cost_usd,actual_cost_count,linked_expense_count,linked_expense_usd,linked_expense_khr,last_expense_at,margin_usd,...publicRow}=row
+  return publicRow
+}
+
+async function readStripMoneyRows(db:ReturnType<typeof getDb>,table:'sales'|'returns',where:string,params:Record<string,unknown>) {
+  const version=await hasColumn(db,table,'money_precision_version')?'money_precision_version':'0 AS money_precision_version'
+  const amount=table==='sales'?'total_usd,sale_status':'total_refund_usd'
+  const rows:Record<string,unknown>[]=[]
+  let after=0
+  for(;;){
+    const page=await db.prepare(`SELECT id,${amount},${version} FROM ${table} WHERE ${where} AND id>@stripAfter ORDER BY id LIMIT ${REPORT_MONEY_PAGE_SIZE}`)
+      .all<Record<string,unknown>>({...params,stripAfter:after})
+    for(const row of page){
+      const id=Number(row.id)
+      if(!Number.isSafeInteger(id)||id<=after)throw new ReportMoneyPrecisionError('duplicate_row')
+      after=id;rows.push(row)
+      if(rows.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
+    }
+    if(page.length<REPORT_MONEY_PAGE_SIZE)return rows
+  }
+}
+function stripMoney(row:Record<string,unknown>,field:string):ReportExactDecimal {
+  const version=Number(row.money_precision_version??0)
+  if(version!==0&&version!==1)throw new ReportMoneyPrecisionError('unsupported_precision_version')
+  return ReportExactDecimal.money((version===0?(row[field]??0):row[field]) as number,version)
+}
+
 app.get('/stats-strip', async (c) => {
   if (!canReadSales(c.get('user'))) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
@@ -1890,9 +5661,7 @@ app.get('/stats-strip', async (c) => {
     endTime: hasTimeRange ? endTime : null,
   }
   const rangeParams: Record<string, unknown> = { startDate, endDate }
-  // Status mix counts EVERY status (the kernel's whereActiveSales excludes
-  // cancelled/awaiting on purpose for money figures; the mix card exists
-  // precisely to show those too).
+  // Status mix includes cancelled sales, unlike recognized-money cohorts.
   const statusClauses = [localDateRangeClause('created_at')]
   if (hasTimeRange) {
     statusClauses.push(localTimeRangeClause('created_at'))
@@ -1902,27 +5671,53 @@ app.get('/stats-strip', async (c) => {
   if (query.branchId) { statusClauses.push('branch_id = @branchId'); rangeParams.branchId = query.branchId }
   const cacheVersion = await getSalesReadCacheVersion(c.env)
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
-    const [totals, byPayment, byStatus, returnsRow] = await Promise.all([
-      getSalesTotals(c.env, filters),
-      getPaymentMethodBreakdown(c.env, filters),
-      db.prepare(`
-        SELECT COALESCE(NULLIF(TRIM(sale_status), ''), 'completed') AS sale_status,
-               COUNT(*) AS count, ROUND(COALESCE(SUM(total_usd), 0), 2) AS total_usd
-        FROM sales
-        WHERE ${statusClauses.join(' AND ')}
-        GROUP BY COALESCE(NULLIF(TRIM(sale_status), ''), 'completed')
-        ORDER BY count DESC
-      `).all<{ sale_status: string; count: number; total_usd: number }>(rangeParams),
-      db.prepare(`
-        SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd
-        FROM returns
-        WHERE ${localDateRangeClause('created_at')}
+    // RETURN-DATE ACTIVITY, not a revenue term. Every figure below is scoped
+    // by the date the RETURN was created, which answers "what did the returns
+    // desk do in this window". The kernel reverses a refund in the period of
+    // the SALE it belongs to, so these two totals differ whenever a return
+    // crosses a period boundary, and they are not interchangeable. Nothing may
+    // subtract this from a revenue, profit or collected figure -- doing so
+    // takes refunds off twice, on mismatched bases, and can drive a period
+    // below zero. The sale-basis reversal is SalesTotals.refund_usd.
+    const returnWhere=`${localDateRangeClause('created_at')}
           ${hasTimeRange ? `AND ${localTimeRangeClause('created_at')}` : ''}
           AND COALESCE(return_scope, 'customer') = 'customer'
           AND COALESCE(status, 'completed') <> 'cancelled'
-          ${query.branchId ? 'AND branch_id = @branchId' : ''}
-      `).get<{ count: number; refund_usd: number }>(rangeParams),
+          ${query.branchId ? 'AND branch_id = @branchId' : ''}`
+    const readActivity=async()=>{
+      const status=await readStripMoneyRows(db,'sales',statusClauses.join(' AND '),rangeParams)
+      const returns=await readStripMoneyRows(db,'returns',returnWhere,rangeParams)
+      if(status.length+returns.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
+      return {status,returns}
+    }
+    // Both activity images enclose the shared reader's own coherent snapshot.
+    // Refuse mixed images rather than combining money from different reads.
+    const before=await readActivity()
+    // Same admin-only stock-removal block getSalesTotals attaches (F2, Sep 15
+    // 2026: this strip previously never queried it at all, so the Sales page
+    // never showed the excluding/including pair the day-report and Dashboard
+    // already carry for the identical range). `filters` here is the plain
+    // date/branch/time window removalLossWindowApplies expects -- no status
+    // or paymentMethod filter reaches this endpoint -- so the block is never
+    // silently dropped.
+    const [snapshot,loss]=await Promise.all([
+      readSalesReportSnapshot(c.env,filters),
+      removalLossesFor(c.env,filters),
     ])
+    const after=await readActivity()
+    if(JSON.stringify(before)!==JSON.stringify(after))throw new ReportMoneyPrecisionError('snapshot_changed')
+    const totals=withRemovalLosses(salesTotalsFromSnapshot(snapshot),loss)
+    const byPayment=paymentMethodBreakdownFromSnapshot(snapshot)
+    const statuses=new Map<string,{count:number,total:ReportExactDecimal}>()
+    for(const row of before.status){
+      const status=String(row.sale_status??'').trim()||'completed'
+      const group=statuses.get(status)??{count:0,total:ReportExactDecimal.zero()}
+      group.count++;group.total=group.total.add(stripMoney(row,'total_usd'));statuses.set(status,group)
+    }
+    const byStatus=[...statuses].map(([sale_status,value])=>({sale_status,count:value.count,total_usd:value.total.toNumber()}))
+      .sort((a,b)=>b.count-a.count||a.sale_status.localeCompare(b.sale_status))
+    let refund=ReportExactDecimal.zero()
+    for(const row of before.returns)refund=refund.add(stripMoney(row,'total_refund_usd'))
     return {
       startDate,
       endDate,
@@ -1931,10 +5726,10 @@ app.get('/stats-strip', async (c) => {
       totals,
       by_payment: byPayment,
       by_status: byStatus || [],
-      returns: { count: Number(returnsRow?.count || 0), refund_usd: Number(returnsRow?.refund_usd || 0) },
+      returns: { count: before.returns.length, refund_usd: refund.toNumber() },
     }
   })
-  return c.json(payload)
+  return c.json({...payload,totals:gateSalesReportMoney(payload.totals as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))})
 })
 
 // ---- Phase X (Part 395): the daily report ---------------------------------
@@ -1962,7 +5757,7 @@ app.get('/daily-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   }, 'day')
-  return c.json({ startDate, endDate, days })
+  return c.json({ startDate, endDate, days:days.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))) })
 })
 
 // GET /api/sales/day-report?date&branchId -- the click-a-day drill: the
@@ -1987,7 +5782,10 @@ app.get('/day-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
-  return c.json(report)
+  const isAdmin=isAdminControlUser(c.get('user'))
+  return c.json({...report,totals:gateSalesReportMoney(report.totals as unknown as Record<string,unknown>,isAdmin),
+    sales:report.sales.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,isAdmin)),
+    delivery_contacts:report.delivery_contacts.map(row=>gateSalesCourierMoney(row as unknown as Record<string,unknown>,isAdmin))})
 })
 
 // GET /api/sales/delivery-contact-report?startDate&endDate&branchId&contactId
@@ -1996,7 +5794,7 @@ app.get('/day-report', async (c) => {
 // belongs to contacts-granted staff, and the figures are the same ones the
 // sales surfaces already show them per sale.
 app.get('/delivery-contact-report', async (c) => {
-  if (!canReadSales(c.get('user')) && !hasPermission(c.get('user'), 'contacts')) {
+  if (getActionTier(c.get('user'), 'contacts', 'financial_history') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
@@ -2014,14 +5812,14 @@ app.get('/delivery-contact-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
-  return c.json({ startDate, endDate, contacts })
+  return c.json({ startDate, endDate, contacts:contacts.map(row=>gateSalesCourierMoney(row as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))) })
 })
 
 // GET /api/sales/customer-report?customerId&startDate&endDate -- X4: the
 // customer leg of the per-contact drills. Same sales-OR-contacts gate as
 // the courier report (the Customers tab lives behind 'contacts').
 app.get('/customer-report', async (c) => {
-  if (!canReadSales(c.get('user')) && !hasPermission(c.get('user'), 'contacts')) {
+  if (getActionTier(c.get('user'), 'contacts', 'financial_history') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
@@ -2043,7 +5841,7 @@ app.get('/customer-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
-  return c.json({ startDate, endDate, customerId, totals })
+  return c.json({ startDate, endDate, customerId, totals:gateSalesReportMoney(totals as unknown as Record<string,unknown>,isAdminControlUser(c.get('user'))) })
 })
 
 // GET /api/sales/export -- complete, snapshot-stable accounting export.
@@ -2104,6 +5902,24 @@ app.get('/export', async (c) => {
   const afterCreatedAt = String(query.afterCreatedAt || '').trim()
   const afterId = Number(query.afterId)
   if (afterCreatedAt && Number.isSafeInteger(afterId) && afterId > 0) {
+    // sales.created_at is NOT one consistent shape: live inserts are
+    // 'YYYY-MM-DD HH:MM:SS' (sanitizeClientCreatedAt normalizes offline
+    // replays to match the server's CURRENT_TIMESTAMP shape -- see
+    // lib/clientTimestamp.ts) but legacy-import rows are ISO
+    // 'YYYY-MM-DDTHH:MM:SS.sssZ' (lib/*legacy-reports.mjs's
+    // bangkokToUtc/legacyToUtc write .toISOString()), and both eras coexist
+    // on the same calendar days. A raw string compares 'T' (0x54) after ' '
+    // (0x20) at position 10, so a same-day cross-shape raw comparison
+    // misorders -- the datetime() wrap below is required for correctness,
+    // not just inherited caution. What IS safe raw is the first 10 chars
+    // ('YYYY-MM-DD'): identical in both shapes, so a floor on just the date
+    // portion can never exclude a row the exact clause would keep, and it
+    // gives the planner a sargable seek into idx_sales_created_pg instead of
+    // scanning from the start of the table on every later page.
+    if (afterCreatedAt.length >= 10) {
+      detailWhere.push('s.created_at >= @afterCreatedAtFloor')
+      detailParams.afterCreatedAtFloor = afterCreatedAt.slice(0, 10)
+    }
     detailWhere.push(`(datetime(s.created_at) > datetime(@afterCreatedAt) OR (datetime(s.created_at) = datetime(@afterCreatedAt) AND s.id > @afterId))`)
     detailParams.afterCreatedAt = afterCreatedAt
     detailParams.afterId = afterId
@@ -2122,10 +5938,14 @@ app.get('/export', async (c) => {
   }
 
   // Read one extra sale so `has_more` is authoritative without an OFFSET or
-  // another COUNT on every details-only page.
+  // another COUNT on every details-only page. ORDER BY keeps the datetime()
+  // wrap deliberately -- see the mixed-shape note above the keyset cursor --
+  // a raw ORDER BY on created_at would misorder same-day rows that mix the
+  // ISO and space-separated shapes.
   const pageRows = await db.prepare(`
     SELECT s.id, s.receipt_number, s.created_at, s.branch_name, s.cashier_name,
-           s.customer_name, s.customer_phone, s.customer_address,
+           CASE WHEN EXISTS (SELECT 1 FROM customers ic WHERE ic.id=s.customer_id AND ic.is_anonymous=1) THEN '' ELSE s.customer_name END AS customer_name,
+           CASE WHEN EXISTS (SELECT 1 FROM customers ic WHERE ic.id=s.customer_id AND ic.is_anonymous=1) THEN '' ELSE s.customer_phone END AS customer_phone, s.customer_address,
            s.payment_method, s.payment_currency, s.exchange_rate, s.sale_status,
            s.subtotal_usd, s.subtotal_khr, s.discount_usd, s.discount_khr,
            s.membership_discount_usd, s.membership_discount_khr, s.membership_points_redeemed,
@@ -2171,7 +5991,10 @@ app.get('/export', async (c) => {
       branch: index === 0 ? sale.branch_name : '',
       customer_name: index === 0 ? sale.customer_name : '',
       customer_phone: index === 0 ? sale.customer_phone : '',
-      customer_address: index === 0 ? sale.customer_address : '',
+      // Rows written before N21 still hold the raw options JSON, so the
+      // export renders through the same kernel the screens do rather than
+      // shipping a CSV cell full of machine text.
+      customer_address: index === 0 ? contactDisplayAddress(sale.customer_address) : '',
       cashier_name: index === 0 ? sale.cashier_name : '',
       name: item.product_name ?? '', sku: item.sku ?? '', barcode: item.barcode ?? '', quantity: item.quantity ?? 1,
       unit_price_usd: item.applied_price_usd ?? 0, unit_price_khr: item.applied_price_khr ?? 0,
@@ -2203,7 +6026,7 @@ app.get('/export', async (c) => {
 
   const totalMatchingRow = await db.prepare(`
     SELECT COUNT(*) AS total,
-           SUM(CASE WHEN COALESCE(s.sale_status, 'completed') = 'completed' THEN 1 ELSE 0 END) AS completed
+           SUM(CASE WHEN ${saleStatusExpr('s.')} = 'completed' THEN 1 ELSE 0 END) AS completed
     FROM sales s
     WHERE ${snapshotWhere.join(' AND ')}
   `).get<{ total: number; completed: number }>(snapshotParams)
@@ -2216,28 +6039,117 @@ app.get('/export', async (c) => {
     maxSaleId: snapshotMaxId,
   })
 
-  // Full-snapshot ranking. This must not be derived from the current detail
-  // page or a product can disappear simply because its receipts are on a later
-  // export page. Top-100 is an explicit ranking output, not a hidden history.
-  const byProduct = await db.prepare(`
-    SELECT si.product_id, si.product_name,
-           COALESCE(SUM(si.quantity), 0) AS qty_sold,
-           COALESCE(SUM(si.total_usd), 0) AS revenue_usd
-    FROM sale_items si
-    JOIN sales s ON s.id = si.sale_id
+  // Full-snapshot product allocation. Sale-level discounts and customer
+  // refunds belong to the receipt, so joining that receipt to several item
+  // rows and summing either the header or the raw lines would duplicate or
+  // omit money. Aggregate each product's lines first, then allocate the ONE
+  // canonical per-sale revenue value by its share of that sale's recorded
+  // line value. `sale_line_totals` is the allocation denominator rather than
+  // the header subtotal: healthy receipts have the same value in both places,
+  // while a damaged historical receipt can still be partitioned without the
+  // product rows inventing or losing part of the canonical header value.
+  type ProductBreakdownRow = {
+    product_id: number | null; product_name: string | null
+    qty_sold: number; revenue_usd: number
+  }
+  const productRows = await db.prepare(`
+    WITH sale_product_lines AS (
+      SELECT si.sale_id, si.product_id, si.product_name,
+             COALESCE(SUM(si.quantity), 0) AS qty_sold,
+             COALESCE(SUM(si.total_usd), 0) AS line_value_usd
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id
+      WHERE ${snapshotWhere.join(' AND ')}
+        AND ${recognizedExpr('s.')}
+      GROUP BY si.sale_id, si.product_id, si.product_name
+    ), sale_line_totals AS (
+      SELECT sale_id, COALESCE(SUM(line_value_usd), 0) AS line_value_usd
+      FROM sale_product_lines
+      GROUP BY sale_id
+    -- Grouped by product_id (COALESCE(pl.product_id, 0), falling back to a
+    -- normalized name key only for NULL-id/no-link legacy lines) -- NOT by
+    -- (product_id, product_name). sale_product_lines groups within one sale,
+    -- where a product's name snapshot is stable, but a product merge
+    -- (migration 0165+) keeps one keeper id while different sales still
+    -- carry different pre-merge product_name snapshots; grouping across
+    -- sales by the pair split one merged product's export row back into N.
+    -- The display name is read live from products (COALESCE(MAX(p.name),
+    -- MAX(pl.product_name))) so a renamed/merged product exports its
+    -- current name; the snapshot is only a fallback for a deleted
+    -- product_id. Same id-only grouping shape as this file's dashboard
+    -- sibling (routes/compat.ts's topProducts/topProductsQty) and
+    -- lib/salesAnalytics.ts's top-products kernel.
+    ), product_totals AS (
+      SELECT pl.product_id, COALESCE(MAX(p.name), MAX(pl.product_name)) AS product_name,
+           COALESCE(SUM(pl.qty_sold), 0) AS qty_sold,
+           COALESCE(SUM(
+             CASE WHEN lt.line_value_usd <> 0
+               THEN pl.line_value_usd / lt.line_value_usd
+                 * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
+               ELSE 0
+             END
+           ), 0) AS revenue_usd
+      FROM sales s
+      JOIN sale_product_lines pl ON pl.sale_id = s.id
+      JOIN sale_line_totals lt ON lt.sale_id = s.id
+      LEFT JOIN products p ON p.id = pl.product_id
+      ${CUSTOMER_REFUND_JOIN}s.id
+      WHERE ${snapshotWhere.join(' AND ')}
+        AND ${recognizedExpr('s.')}
+      GROUP BY COALESCE(pl.product_id, 0), CASE WHEN pl.product_id IS NULL THEN lower(trim(COALESCE(pl.product_name, ''))) ELSE '' END
+    ), unallocated_sales AS (
+    -- A recognized legacy receipt can have no usable line-value denominator.
+    -- Its header revenue remains real and visible in the canonical summary,
+    -- so preserve it explicitly instead of shrinking the product breakdown.
+    SELECT NULL AS product_id, 'Unallocated sales' AS product_name,
+           0 AS qty_sold,
+           COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
+    FROM sales s
+    LEFT JOIN sale_line_totals lt ON lt.sale_id = s.id
+    ${CUSTOMER_REFUND_JOIN}s.id
     WHERE ${snapshotWhere.join(' AND ')}
-      AND COALESCE(s.sale_status, 'completed') <> 'cancelled'
-    GROUP BY si.product_id, si.product_name
+      AND ${recognizedExpr('s.')}
+      AND COALESCE(lt.line_value_usd, 0) = 0
+    HAVING COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) <> 0
+    ), ranked_products AS (
+      SELECT product_id, product_name, qty_sold, revenue_usd,
+             ROW_NUMBER() OVER (
+               ORDER BY revenue_usd DESC, qty_sold DESC,
+                        COALESCE(product_name, ''), COALESCE(product_id, 0)
+             ) AS rank
+      FROM product_totals
+    ), product_limit AS (
+      -- Keep the response at 100 rows. Reserve one row for Unallocated when
+      -- it exists, then one for the overflow aggregate when it is needed.
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM unallocated_sales) THEN 98 ELSE 99 END AS named_limit
+    )
+    SELECT rp.product_id, rp.product_name, rp.qty_sold, rp.revenue_usd
+    FROM ranked_products rp
+    CROSS JOIN product_limit lim
+    WHERE rp.rank <= lim.named_limit
+    UNION ALL
+    SELECT NULL AS product_id, 'Other products' AS product_name,
+           COALESCE(SUM(rp.qty_sold), 0) AS qty_sold,
+           COALESCE(SUM(rp.revenue_usd), 0) AS revenue_usd
+    FROM ranked_products rp
+    CROSS JOIN product_limit lim
+    WHERE rp.rank > lim.named_limit
+    HAVING COUNT(*) > 0
+    UNION ALL
+    SELECT product_id, product_name, qty_sold, revenue_usd
+    FROM unallocated_sales
     ORDER BY revenue_usd DESC, qty_sold DESC
-    LIMIT 100
-  `).all<{ product_id: number | null; product_name: string | null; qty_sold: number; revenue_usd: number }>(snapshotParams)
+  `).all<ProductBreakdownRow>(snapshotParams)
 
   const byStatusRows = await db.prepare(`
-    SELECT COALESCE(s.sale_status, 'completed') AS status, COUNT(*) AS count,
-           COALESCE(SUM(s.total_usd), 0) AS revenue
+    SELECT ${saleStatusExpr('s.')} AS status, COUNT(*) AS count,
+           COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')}
+             THEN ${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}
+             ELSE 0 END), 0) AS revenue
     FROM sales s
+    ${CUSTOMER_REFUND_JOIN}s.id
     WHERE ${snapshotWhere.join(' AND ')}
-    GROUP BY COALESCE(s.sale_status, 'completed')
+    GROUP BY ${saleStatusExpr('s.')}
   `).all<{ status: string; count: number; revenue: number }>(snapshotParams)
 
   // Canonical SalesTotals.revenue_usd is already NET of customer refunds.
@@ -2264,10 +6176,41 @@ app.get('/export', async (c) => {
     avg_order_usd: salesTotals.avg_order_usd,
   }
 
+  // SQL allocates at full precision. The JSON contract is cents, so rounding
+  // every bucket independently can make the displayed buckets miss the
+  // displayed headline by a cent. Largest-remainder allocation changes no
+  // underlying value: it only decides which buckets receive the residual
+  // cents already present in the rounded canonical total.
+  const reconcileRevenueCents = <T extends Record<string, unknown>>(
+    rows: T[], key: keyof T, targetUsd: number,
+  ): T[] => {
+    if (!rows.length) return rows
+    const parts = rows.map((row, index) => {
+      const rawCents = Number(row[key] || 0) * 100
+      const cents = Math.floor(rawCents)
+      return { row, index, cents, remainder: rawCents - cents }
+    })
+    const residual = Math.round(targetUsd * 100) - parts.reduce((sum, part) => sum + part.cents, 0)
+    const ranked = [...parts].sort((a, b) => residual >= 0
+      ? b.remainder - a.remainder || a.index - b.index
+      : a.remainder - b.remainder || a.index - b.index)
+    const step = residual >= 0 ? 1 : -1
+    for (let i = 0; i < Math.abs(residual); i += 1) ranked[i % ranked.length].cents += step
+    return parts.map((part) => ({ ...part.row, [key]: part.cents / 100 }))
+  }
+  const byStatus = reconcileRevenueCents(
+    byStatusRows.map((row) => ({ status: row.status, count: Number(row.count) || 0, revenue: Number(row.revenue) || 0 })),
+    'revenue', netRevenueUsd,
+  )
+  const byProduct = reconcileRevenueCents(
+    productRows.map((row) => ({ ...row, qty_sold: round2(Number(row.qty_sold) || 0), revenue_usd: Number(row.revenue_usd) || 0 })),
+    'revenue_usd', netRevenueUsd,
+  )
+
   return c.json({
     period, summary,
-    by_status: byStatusRows.map((row) => ({ status: row.status, count: Number(row.count) || 0, revenue: round2(Number(row.revenue) || 0) })),
-    by_product: byProduct.map((row) => ({ ...row, qty_sold: round2(Number(row.qty_sold) || 0), revenue_usd: round2(Number(row.revenue_usd) || 0) })),
+    by_status: byStatus,
+    by_product: byProduct,
     sales: detailRows,
     total_matching: totalMatching,
     snapshot_max_id: snapshotMaxId,

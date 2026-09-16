@@ -1,0 +1,496 @@
+// Drives POST /api/sales against the real route and fully migrated SQLite.
+// It proves two checkout invariants that a planner-only test cannot:
+//   1. an explicit batch belongs to the line's product + Shop branch, and
+//      only authoritative lot metadata reaches sale_items;
+//   2. allocation lineage commits in the same D1 batch as the line, stock,
+//      product rollup, and movement. A forced allocation failure leaves none.
+
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const ts = require('typescript')
+const { openDb } = require('./harness/d1compat.cjs')
+const { loadAll } = require('./harness/load_migrations.cjs')
+
+const migrationsDir = path.join(__dirname, '..', 'migrations')
+const legacyMigrationsThrough0153 = fs.readdirSync(migrationsDir)
+  .filter((file) => file.endsWith('.sql') && Number.parseInt(file.slice(0, 4), 10) <= 153)
+  .sort()
+  .map((file) => fs.readFileSync(path.join(migrationsDir, file), 'utf8'))
+
+const moduleCache = new Map()
+const USER = {
+  id: 51,
+  username: 'lot_cashier',
+  name: 'Lot Cashier',
+  permissions: JSON.stringify({ pos: true }),
+}
+
+const overrides = {
+  '../lib/db': { getDb: (env) => env.DB },
+  '../lib/auth': {
+    requireAuth: async (c, next) => {
+      c.set('user', USER)
+      return next()
+    },
+  },
+  '../lib/audit': { audit: async () => {} },
+  '../durable-objects/broadcastHub': { broadcast: async () => {} },
+  '../lib/cache': {
+    bumpVersion: async () => {},
+    getVersionWithFallback: async () => 0,
+    cachedJsonResponse: async (_request, _context, _key, _ttl, loader) => loader(),
+  },
+  '../lib/paymentMethodRegistry': {
+    saleMethodsUsed: () => [],
+    parseConfiguredMethods: () => [],
+    mergePaymentMethods: (methods) => ({ methods, added: [], changed: false }),
+  },
+  '../lib/telegram': {
+    formatSaleTelegramLines: () => [],
+    sendTelegramEvent: async () => {},
+    telegramMoney: (value) => String(value ?? ''),
+  },
+}
+
+function load(rel) {
+  if (moduleCache.has(rel)) return moduleCache.get(rel).exports
+  const sourcePath = path.join(__dirname, '..', 'src', rel)
+  const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: sourcePath,
+  }).outputText
+  const mod = { exports: {} }
+  moduleCache.set(rel, mod)
+  const localRequire = (request) => {
+    if (Object.prototype.hasOwnProperty.call(overrides, request)) return overrides[request]
+    if (!request.startsWith('.')) return require(request)
+    const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(rel), request))
+    return load(resolved.endsWith('.ts') ? resolved : `${resolved}.ts`)
+  }
+  new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
+  return mod.exports
+}
+
+const app = load('routes/sales.ts').default
+const executionCtx = {
+  waitUntil(promise) { promise?.catch?.(() => {}) },
+  passThroughOnException() {},
+}
+
+function run(db, sql, params = {}) { return db.prepare(sql).run(params) }
+function get(db, sql, params = {}) { return db.prepare(sql).get(params) }
+function all(db, sql, params = {}) { return db.prepare(sql).all(params) }
+
+// The shared node:sqlite shim exposes D1's raw meta shape. Production's
+// getDb wrapper promotes changes/last_row_id to the D1Compat result fields
+// routes consume, so mirror that thin boundary here while keeping the real
+// SQL engine and transactional batch underneath.
+function routeDb(db, hooks = {}) {
+  const api = {
+    prepare(sql) {
+      const statement = db.prepare(sql)
+      return {
+        all: (params) => statement.all(params),
+        get: (params) => statement.get(params),
+        run: async (params) => {
+          const result = statement.run(params)
+          return {
+            ...result,
+            changes: Number(result.meta?.changes || 0),
+            lastInsertRowid: Number(result.meta?.last_row_id || 0),
+          }
+        },
+      }
+    },
+    batch: async (statements) => {
+      if (hooks.beforeBatch) await hooks.beforeBatch({ rawDb: db, statements })
+      return db.batch(statements)
+    },
+    exec: (sql) => db.exec(sql),
+  }
+  api.staging = api
+  return api
+}
+
+async function postSale(db, items, suffix, overrides = {}, hooks = {}) {
+  const body = {
+    branch_id: 1,
+    money_precision_version: 1,
+    items: items.map((item, index) => {
+      const unitUsd = item.product_id === 11 ? 6 : 5
+      const totalUsd = unitUsd * Number(item.quantity)
+      return {
+        ...item,
+        client_line_key: `lot-line-${index}`,
+        pricing_source: 'selling',
+        pricing_quote: {
+          gross_usd: totalUsd,
+          product_discount_usd: 0,
+          manual_discount_usd: 0,
+          total_usd: totalUsd,
+          total_khr: totalUsd * 4000,
+        },
+      }
+    }),
+    exchange_rate: 4000,
+    payment_method: 'Cash',
+    payment_currency: 'USD',
+    amount_paid_usd: 100,
+    client_request_id: `lot-atomic-${suffix}`,
+    ...overrides,
+  }
+  const response = await app.request('/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }, { DB: routeDb(db, hooks) }, executionCtx)
+  const text = await response.text()
+  return { status: response.status, body: text ? JSON.parse(text) : null }
+}
+
+function fixture({ legacyThrough0153 = false } = {}) {
+  // routes/sales.ts is loaded (and module-cached) ONCE for this whole file,
+  // so its real lib/schemaProbe.ts import is also a singleton whose
+  // per-isolate column-set cache would otherwise leak across fixture() calls
+  // -- a fully-migrated db from an earlier case would permanently answer
+  // "money_precision_version exists" for every later db this file creates,
+  // including the deliberately-legacy-through-0153 one below. Each
+  // fixture() call models a distinct database, so reset the probe cache here
+  // to match; production never needs this (one isolate == one real D1
+  // database whose schema does not change mid-lifetime).
+  load('lib/schemaProbe.ts').__resetSchemaProbeCacheForTests()
+  const db = openDb(legacyThrough0153 ? legacyMigrationsThrough0153 : loadAll())
+  run(db, `INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)`)
+  run(db, `INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
+           VALUES(10,'Serum','SERUM',10,5,20000,2,8000,1)`)
+  run(db, `INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
+           VALUES(11,'Cream','CREAM',10,6,24000,3,12000,1)`)
+  run(db, `INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,10)`)
+  run(db, `INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(11,1,10)`)
+  run(db, `INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number)
+           VALUES(500,10,'serum-old','SERUM-OLD','2027-01-01','2026-08-01',1,1)`)
+  run(db, `INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number)
+           VALUES(502,10,'serum-new','SERUM-NEW','2027-06-01','2026-08-15',1,2)`)
+  run(db, `INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number)
+           VALUES(501,11,'cream-only','CREAM-LOT','2028-01-01','2026-08-01',1,1)`)
+  run(db, `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,2)`)
+  run(db, `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(502,1,5)`)
+  run(db, `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,10)`)
+  return db
+}
+
+function counts(db) {
+  return {
+    sales: get(db, 'SELECT COUNT(*) AS n FROM sales').n,
+    items: get(db, 'SELECT COUNT(*) AS n FROM sale_items').n,
+    allocations: get(db, 'SELECT COUNT(*) AS n FROM sale_item_batch_allocations').n,
+    movements: get(db, 'SELECT COUNT(*) AS n FROM inventory_movements').n,
+    product: get(db, 'SELECT stock_quantity AS n FROM products WHERE id=10').n,
+    branch: get(db, 'SELECT quantity AS n FROM branch_stock WHERE product_id=10 AND branch_id=1').n,
+    oldLot: get(db, 'SELECT quantity AS n FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1').n,
+    newLot: get(db, 'SELECT quantity AS n FROM branch_batch_stock WHERE batch_id=502 AND branch_id=1').n,
+  }
+}
+
+;(async () => {
+  // Another product's live batch at the same branch is not this line's lot.
+  // The refusal occurs before the sale header, items, or stock can be written.
+  {
+    const db = fixture()
+    const before = counts(db)
+    const result = await postSale(db, [{
+      product_id: 10,
+      quantity: 1,
+      branch_id: 1,
+      batch_id: 501,
+      batch_label: 'forged serum label',
+      batch_expiry_date: '2099-01-01',
+    }], 'wrong-product')
+    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.match(result.body.error, /not an active, available lot/i)
+    assert.deepEqual(counts(db), before)
+  }
+  console.log('PASS 1 -- explicit batches are product + Shop branch identities')
+
+  // The read above is advisory; the write batch itself must still refuse if
+  // an administrator changes the selling branch before the statements run.
+  {
+    const db = fixture()
+    const before = counts(db)
+    const result = await postSale(
+      db,
+      [{ product_id: 10, quantity: 1, branch_id: 1, batch_id: 500 }],
+      'branch-race',
+      {},
+      { beforeBatch: ({ rawDb }) => run(rawDb, "UPDATE branches SET name='Warehouse' WHERE id=1") },
+    )
+    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'sale_identity_conflict')
+    assert.deepEqual(counts(db), before)
+  }
+  console.log('PASS 1b -- Shop identity is rechecked inside the write batch')
+
+  // A product merge/reassignment can move a batch after the route read it.
+  // The write-time product+branch+batch predicate must fail the whole sale.
+  {
+    const db = fixture()
+    const before = counts(db)
+    const result = await postSale(
+      db,
+      [{ product_id: 10, quantity: 1, branch_id: 1, batch_id: 500 }],
+      'batch-owner-race',
+      {},
+      { beforeBatch: ({ rawDb }) => run(rawDb, 'UPDATE product_batches SET variant_product_id=11 WHERE id=500') },
+    )
+    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'sale_identity_conflict')
+    assert.deepEqual(counts(db), before)
+  }
+  console.log('PASS 1c -- lot product ownership is rechecked inside the write batch')
+
+  // Metadata is a current database snapshot, not a stale preflight binding.
+  // A safe rename/expiry correction before commit follows the lot identity.
+  {
+    const db = fixture()
+    const result = await postSale(
+      db,
+      [{ product_id: 10, quantity: 1, branch_id: 1, batch_id: 500 }],
+      'batch-metadata-race',
+      {},
+      {
+        beforeBatch: ({ rawDb }) => run(rawDb, `UPDATE product_batches
+          SET lot_code='SERUM-CURRENT', expiry_date='2030-12-31' WHERE id=500`),
+      },
+    )
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.deepEqual({ ...get(db, 'SELECT batch_label,batch_expiry_date FROM sale_items') }, {
+      batch_label: 'SERUM-CURRENT',
+      batch_expiry_date: '2030-12-31',
+    })
+    assert.deepEqual({ ...get(db, 'SELECT lot_code,expiry_date FROM sale_item_batch_allocations') }, {
+      lot_code: 'SERUM-CURRENT',
+      expiry_date: '2030-12-31',
+    })
+  }
+  console.log('PASS 1d -- lot metadata is selected again inside the write batch')
+
+  // A valid explicit pick persists the database's own label and expiry, not
+  // the caller's text, and records allocation before checkout succeeds.
+  {
+    const db = fixture()
+    const result = await postSale(db, [{
+      product_id: 10,
+      quantity: 1,
+      branch_id: 1,
+      batch_id: 500,
+      batch_label: 'forged label',
+      batch_expiry_date: '2099-01-01',
+    }], 'authoritative')
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.deepEqual({ ...get(db, `SELECT product_id,batch_id,batch_label,batch_expiry_date FROM sale_items`) }, {
+      product_id: 10,
+      batch_id: 500,
+      batch_label: 'SERUM-OLD',
+      batch_expiry_date: '2027-01-01',
+    })
+    assert.deepEqual({ ...get(db, `SELECT batch_id,branch_id,quantity,lot_code,expiry_date,released_quantity,released_at
+                                  FROM sale_item_batch_allocations`) }, {
+      batch_id: 500,
+      branch_id: 1,
+      quantity: 1,
+      lot_code: 'SERUM-OLD',
+      expiry_date: '2027-01-01',
+      released_quantity: 0,
+      released_at: null,
+    })
+    assert.equal(get(db, `SELECT quantity FROM branch_batch_stock WHERE batch_id=500`).quantity, 1)
+  }
+  console.log('PASS 2 -- server-owned lot metadata and allocation are stored')
+
+
+  // An explicit unrecorded line preserves known lot identity. The Shop
+  // aggregate is 10 while its known positive lots total 7, so only 3 are
+  // legitimately unrecorded.
+  {
+    const db = fixture()
+    const result = await postSale(db, [{ product_id: 10, quantity: 3, branch_id: 1, unlotted_stock: true }], 'unlotted-remainder')
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.deepEqual({ ...get(db, 'SELECT batch_id,batch_label FROM sale_items') }, { batch_id: null, batch_label: null })
+    assert.equal(get(db, 'SELECT COUNT(*) AS n FROM sale_item_batch_allocations').n, 0)
+    assert.equal(get(db, 'SELECT quantity AS n FROM branch_batch_stock WHERE batch_id=500').n, 2)
+    assert.equal(get(db, 'SELECT quantity AS n FROM branch_batch_stock WHERE batch_id=502').n, 5)
+    const refused = await postSale(db, [{ product_id: 10, quantity: 4, branch_id: 1, unlotted_stock: true }], 'unlotted-oversell')
+    assert.equal(refused.status, 409, JSON.stringify(refused.body))
+  }
+
+  // Current migration 0154 rejects creation of inactive-positive lots. Keep
+  // that enforcement explicit instead of weakening the fixture to manufacture
+  // an impossible current-schema transition.
+  {
+    const db = fixture()
+    const before = counts(db)
+    assert.throws(
+      () => run(db, 'UPDATE product_batches SET is_active=0 WHERE id=500'),
+      /Cannot deactivate a received lot with positive branch stock/,
+    )
+    assert.equal(get(db, 'SELECT is_active FROM product_batches WHERE id=500').is_active, 1)
+    assert.deepEqual(counts(db), before)
+  }
+
+  // A database through migration 0153 lacks the precision snapshot schema.
+  // Explicit-v1 checkout must fail at that readiness barrier without writes;
+  // the equivalent unlotted provenance refusal remains covered below on the
+  // fully migrated schema.
+  {
+    const db = fixture({ legacyThrough0153: true })
+    const before = counts(db)
+    run(db, 'UPDATE product_batches SET is_active=0 WHERE id=500')
+    const result = await postSale(db, [{ product_id: 10, quantity: 4, branch_id: 1, unlotted_stock: true }], 'unlotted-inactive-known-lot')
+    assert.equal(result.status, 503, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'money_precision_schema_not_ready')
+    assert.deepEqual(counts(db), before)
+  }
+
+  // Warehouse-only provenance is not a Shop lot. The Shop's whole aggregate
+  // remains explicitly unrecorded when it has no positive Shop lot rows.
+  {
+    const db = fixture()
+    run(db, "INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'Warehouse',0,1)")
+    run(db, 'DELETE FROM branch_batch_stock WHERE branch_id=1 AND batch_id IN (500,502)')
+    run(db, 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,2,7)')
+    const result = await postSale(db, [{ product_id: 10, quantity: 10, branch_id: 1, unlotted_stock: true }], 'unlotted-warehouse-only')
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+  }
+
+  // A zero Shop lot row also does not consume remainder. A positive one does;
+  // the aggregate-minus-positive-known-lots result is enforced across repeated
+  // cart lines, full tracked Shop stock, and no Shop stock.
+  {
+    const zeroLot = fixture()
+    run(zeroLot, 'UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (500,502) AND branch_id=1')
+    const zeroResult = await postSale(zeroLot, [{ product_id: 10, quantity: 10, branch_id: 1, unlotted_stock: true }], 'unlotted-zero-shop-lots')
+    assert.equal(zeroResult.status, 200, JSON.stringify(zeroResult.body))
+
+    const repeated = fixture()
+    const repeatedBefore = counts(repeated)
+    const repeatedResult = await postSale(repeated, [
+      { product_id: 10, quantity: 2, branch_id: 1, unlotted_stock: true },
+      { product_id: 10, quantity: 2, branch_id: 1, unlotted_stock: true },
+    ], 'unlotted-repeated-oversell')
+    assert.equal(repeatedResult.status, 409, JSON.stringify(repeatedResult.body))
+    assert.deepEqual(counts(repeated), repeatedBefore)
+
+    const fullTracked = fixture()
+    run(fullTracked, 'UPDATE branch_stock SET quantity=7 WHERE product_id=10 AND branch_id=1')
+    const fullTrackedBefore = counts(fullTracked)
+    const fullTrackedResult = await postSale(fullTracked, [{ product_id: 10, quantity: 1, branch_id: 1, unlotted_stock: true }], 'unlotted-full-tracked')
+    assert.equal(fullTrackedResult.status, 409, JSON.stringify(fullTrackedResult.body))
+    assert.deepEqual(counts(fullTracked), fullTrackedBefore)
+
+    const noShop = fixture()
+    run(noShop, 'UPDATE branch_stock SET quantity=0 WHERE product_id=10 AND branch_id=1')
+    const noShopBefore = counts(noShop)
+    const noShopResult = await postSale(noShop, [{ product_id: 10, quantity: 1, branch_id: 1, unlotted_stock: true }], 'unlotted-no-shop-stock')
+    assert.equal(noShopResult.status, 409, JSON.stringify(noShopResult.body))
+    assert.deepEqual(counts(noShop), noShopBefore)
+  }
+
+  // The preflight is advisory: a positive Shop lot can be attributed after
+  // it succeeds. The first statement of the real D1 batch rechecks the live
+  // remainder and rolls back the sale instead of consuming that known lot.
+  {
+    const db = fixture()
+    run(db, 'DELETE FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1')
+    const before = {
+      sales: get(db, 'SELECT COUNT(*) AS n FROM sales').n,
+      items: get(db, 'SELECT COUNT(*) AS n FROM sale_items').n,
+      allocations: get(db, 'SELECT COUNT(*) AS n FROM sale_item_batch_allocations').n,
+      movements: get(db, 'SELECT COUNT(*) AS n FROM inventory_movements').n,
+      branch: get(db, 'SELECT quantity AS n FROM branch_stock WHERE product_id=10 AND branch_id=1').n,
+      product: get(db, 'SELECT stock_quantity AS n FROM products WHERE id=10').n,
+    }
+    const result = await postSale(
+      db,
+      [{ product_id: 10, quantity: 4, branch_id: 1, unlotted_stock: true }],
+      'unlotted-attribution-race',
+      {},
+      { beforeBatch: ({ rawDb }) => run(rawDb, 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,2)') },
+    )
+    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'stock_conflict')
+    assert.deepEqual({
+      sales: get(db, 'SELECT COUNT(*) AS n FROM sales').n,
+      items: get(db, 'SELECT COUNT(*) AS n FROM sale_items').n,
+      allocations: get(db, 'SELECT COUNT(*) AS n FROM sale_item_batch_allocations').n,
+      movements: get(db, 'SELECT COUNT(*) AS n FROM inventory_movements').n,
+      branch: get(db, 'SELECT quantity AS n FROM branch_stock WHERE product_id=10 AND branch_id=1').n,
+      product: get(db, 'SELECT stock_quantity AS n FROM products WHERE id=10').n,
+    }, before)
+    assert.equal(get(db, 'SELECT quantity AS n FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1').n, 2)
+  }
+  {
+    const db = fixture()
+    const before = counts(db)
+    const result = await postSale(db, [{ product_id: 10, quantity: 1, branch_id: 1, unlotted_stock: 'true' }], 'unlotted-nonboolean')
+    assert.equal(result.status, 400, JSON.stringify(result.body))
+    assert.match(result.body.error, /invalid unlotted_stock flag/i)
+    assert.deepEqual(counts(db), before)
+  }
+  console.log('PASS 2ba -- unrecorded stock requires a boolean opt-in')
+
+  console.log('PASS 2b -- explicit unrecorded remainder preserves all known lots and rejects races')
+
+  // FIFO spanning two lots stays attributable through two allocation rows;
+  // neither the line nor its movement falsely claims one batch.
+  {
+    const db = fixture()
+    const result = await postSale(db, [{
+      product_id: 10,
+      quantity: 4,
+      branch_id: 1,
+      // Metadata without an id is not identity and must not survive.
+      batch_label: 'forged unowned label',
+      batch_expiry_date: '2099-01-01',
+    }], 'multi-lot')
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.deepEqual({ ...get(db, 'SELECT batch_id,batch_label,batch_expiry_date FROM sale_items') }, {
+      batch_id: null,
+      batch_label: null,
+      batch_expiry_date: null,
+    })
+    assert.equal(get(db, "SELECT batch_id FROM inventory_movements WHERE movement_type='sale'").batch_id, null)
+    assert.deepEqual(all(db, `SELECT batch_id,quantity,lot_code FROM sale_item_batch_allocations ORDER BY id`).map((row) => ({ ...row })), [
+      { batch_id: 500, quantity: 2, lot_code: 'SERUM-OLD' },
+      { batch_id: 502, quantity: 2, lot_code: 'SERUM-NEW' },
+    ])
+    assert.deepEqual({ oldLot: counts(db).oldLot, newLot: counts(db).newLot }, { oldLot: 0, newLot: 3 })
+  }
+  console.log('PASS 3 -- multi-lot FIFO keeps exact per-lot lineage')
+
+  // This trigger simulates any allocation-table failure. Because allocation
+  // is in the existing item/stock/movement batch, every sibling write rolls
+  // back and the route's established compensation removes the header.
+  {
+    const db = fixture()
+    run(db, `CREATE TRIGGER force_allocation_failure BEFORE INSERT ON sale_item_batch_allocations
+             BEGIN SELECT RAISE(ABORT, 'forced allocation failure'); END`)
+    const before = counts(db)
+    const result = await postSale(db, [{ product_id: 10, quantity: 1, branch_id: 1, batch_id: 500 }], 'forced-failure')
+    assert.equal(result.status, 500, JSON.stringify(result.body))
+    assert.match(result.body.error, /forced allocation failure/i)
+    assert.deepEqual(counts(db), before)
+  }
+  console.log('PASS 4 -- allocation failure rolls back item, stock, movement, and header')
+
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
+  assert.ok(source.includes('resolveExplicitSaleLineBatches'), 'the shared authoritative resolver is wired')
+  assert.ok(!source.includes('failed to record sale_item_batch_allocations (stock already deducted correctly)'), 'the lineage failure is no longer swallowed')
+  assert.ok(!source.includes('saleItemStatementIndexByItemIndex'), 'no post-commit last_row_id pass remains')
+  console.log('PASS 5 -- source lock excludes the old best-effort lineage pass')
+
+  console.log('\nAll sale lot identity/atomicity tests passed')
+})().catch((error) => {
+  console.error(error)
+  process.exit(1)
+})

@@ -73,3 +73,40 @@ export function subscribeDirtyWork(listener: () => void): () => void {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
 }
+
+// S4-21: the modal close guard reads the SAME registry the navigation
+// guard reads. A form declares its dirtiness ONCE -- here -- and five
+// consumers act on that one declaration: navigateTo() and popstate
+// (AppContext), beforeunload (AppContext), the sidebar's per-page dot,
+// the app-update gate (utils/appUpdate.ts), and now the ✕ on the modal
+// the work actually lives in (utils/closeGuard.ts).
+//
+// Additive only: nothing above changed shape. These exist so closeGuard.ts
+// never keeps its own copy of "is this dirty" -- two dirty models in one
+// app is precisely what this registry was created to prevent.
+
+/** One entry by key, or undefined when nothing is registered under it. */
+export function getWorkEntry(key: string): DirtyWorkEntry | undefined {
+  return entries.get(key)
+}
+
+/** Is the work registered under this key dirty right now? */
+export function isWorkDirty(key: string): boolean {
+  const entry = entries.get(key)
+  if (!entry) return false
+  try { return entry.isDirty() } catch { return false }
+}
+
+/**
+ * Run ONE entry's discard hook -- the same cleanup "Discard & Leave" runs,
+ * so discarding from a modal's ✕ and discarding from the navigation guard
+ * can never disagree about what a discard means (both clear the draft, so
+ * work the operator just discarded cannot resurrect at the next open).
+ * Returns true when an entry existed, whether or not it had a hook.
+ */
+export function discardWork(key: string): boolean {
+  const entry = entries.get(key)
+  if (!entry) return false
+  try { entry.discard?.() } catch { /* closing anyway */ }
+  return true
+}

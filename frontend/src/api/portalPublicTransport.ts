@@ -168,11 +168,15 @@ export function savePortalWishlist(items: unknown[]): Promise<unknown> {
   return portalAuthRequest('/api/portal/account/wishlist', 'PUT', { items })
 }
 
+// N45: this endpoint is no longer public. It requires a bos_portal session
+// and reads the customer off that account, so the request MUST carry the
+// cookie and no longer sends a membership number of its own.
 export async function createPortalSubmission(payload: PortalPayload = {}): Promise<unknown> {
   const base = getPortalBaseUrl()
   const res = await fetchJsonWithTimeout(`${base}/api/portal/submissions`, {
     method: 'POST',
     headers: PORTAL_JSON_HEADERS,
+    credentials: 'include',
     body: JSON.stringify(payload || {}),
   })
   const json = await readJsonObject(res)

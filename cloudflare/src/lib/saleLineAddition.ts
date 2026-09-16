@@ -1,0 +1,905 @@
+// Adding a line to a sale that already exists (S4-24b).
+//
+// The Sales page could change a sale's status, its customer and its
+// membership, but never its CONTENTS -- a customer who came back to the
+// counter two minutes after paying and asked for one more item had to be
+// rung up as a second, unrelated sale, so the receipt the shop keeps and
+// the goods that actually left the shop disagreed.
+//
+// This module is the pure kernel for that write, deliberately separated
+// from routes/sales.ts the same way lib/saleTransitions.ts and
+// lib/saleTotals.ts were: the arithmetic that decides how many units leave
+// the shelf is the part that must be directly testable, not reachable only
+// through a live request. scripts/test-sale-add-items-pure.cjs drives every
+// function here against a real in-memory schema with the same CHECK
+// constraints production has.
+//
+// THE FIVE DECISIONS, stated once, here, because each one is a rule about
+// money or stock and none of them should be inferred from the code:
+//
+// 1. WHICH STATUSES ACCEPT A NEW LINE -- see
+//    SALE_STATUSES_ACCEPTING_NEW_LINES / guardSaleLineAddition below.
+//
+// 2. STOCK -- a line added to a status that holds stock deducted (since
+//    S4-3 that is completed / awaiting_payment / awaiting_delivery, i.e.
+//    STOCK_DEDUCTED_STATUSES) moves stock NOW; a line added to a sale that
+//    holds nothing (cancelled is refused outright, and a stock_skipped sale
+//    passes skipStock) moves none. The units moved are not a
+//    second opinion: they are heldQuantity(status, quantity, 0) straight
+//    out of lib/saleTransitions.ts, the same invariant PATCH /:id/status
+//    moves stock by. The lots are picked by allocateAcrossLots over
+//    readFifoLotAvailability(ForCart) -- the checkout's own FIFO rule,
+//    called, not re-implemented -- and the decrements are the same strict
+//    (unclamped) statements, so branch_stock/branch_batch_stock's
+//    CHECK(quantity >= 0) stays the real race guard.
+//
+// 3. TOTALS -- see recomputeSaleMoneyAfterLineChange below.
+//
+// 4. UNDO -- planSaleLineRemoval below is the exact inverse, and it is what
+//    the 'sale.add_items' undo applier replays. It returns stock to the SAME
+//    lots the addition drew from, in reverse draw order, as new 'return'
+//    movements (the standing rule: add stock back with a note, never edit
+//    the original movements).
+//
+// 5. PERMISSION -- enforced in routes/sales.ts on the sales/add_items action
+//    tier, and declared again by the undo applier, so a replay is gated as
+//    tightly as the forward write.
+
+import { RETURN_STATUSES, STOCK_DEDUCTED_STATUSES } from './salesStatus'
+import { heldQuantity } from './saleTransitions'
+import {
+  allocateAcrossLots,
+  decrementBatchStockStrictStatement,
+  restoreBatchStockStatements,
+  type FifoLotAvailability,
+  type FifoLotTake,
+} from './productBatches'
+import { computeSaleTotals, round2, type SaleTotals } from './saleTotals'
+import { financialCalculationValue } from './financialPrecision'
+import { divideMoney4, multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
+import { validateSaleMoneySnapshot, SaleMoneyContractError } from './saleMoneyPrecision'
+import { capturedPricingMetadata, parseSaleItemPricing } from './saleItemPricing'
+
+export type StockStatement = { sql: string; params: Record<string, unknown> }
+
+// ---------------------------------------------------------------------------
+// DECISION 1: which sale statuses accept new lines.
+//
+//   completed          YES -- the everyday case ("one more of these please",
+//                      seconds after the receipt printed). Stock is out for
+//                      this sale, so the new line's stock goes out too.
+//   awaiting_delivery  YES -- same reasoning: the goods are already
+//                      committed and on their way, and an added line rides
+//                      the same delivery.
+//   awaiting_payment   YES -- and since S4-3 the added line's stock goes out
+//                      too, exactly like `completed`. An unpaid order holds
+//                      its units (they are promised to that buyer), so an
+//                      added line takes its units off the shelf now rather
+//                      than at some later completing transition.
+//   cancelled          NO  -- a cancelled sale is a corrective record of a
+//                      sale that did not happen. Adding goods to it would
+//                      claim a sale nobody made, and un-cancelling would
+//                      then deduct stock for a line no customer ever took.
+//   partial_return     NO  -- these two belong to the returns flow, exactly
+//   returned           as guardSaleStatusTransition says. Every return
+//                      record was written against the line set that existed
+//                      when it was recorded, and held() for the sale is
+//                      computed from that pairing; adding a line underneath
+//                      recorded returns silently changes what "already came
+//                      back" means. The shop's answer for "they returned one
+//                      thing and bought another" is a return plus a new
+//                      sale, which is what the Returns page already does.
+//
+// A sale that has ANY recorded return is refused as well, whatever its
+// status says -- the route passes hasRecordedReturns, so an imported or
+// legacy row still labelled 'completed' underneath real return records
+// cannot slip past the status check.
+// ---------------------------------------------------------------------------
+export const SALE_STATUSES_ACCEPTING_NEW_LINES: ReadonlySet<string> = new Set<string>([
+  'completed',
+  'awaiting_delivery',
+  'awaiting_payment',
+])
+
+export type LineAdditionGuardResult = { ok: true } | { ok: false; error: string }
+
+export function guardSaleLineAddition(status: string, hasRecordedReturns = false): LineAdditionGuardResult {
+  const normalized = String(status || 'completed')
+  if (normalized === 'cancelled') {
+    return { ok: false, error: 'This sale was cancelled, so nothing can be added to it. Un-cancel it first, or record a new sale.' }
+  }
+  if (RETURN_STATUSES.has(normalized) || hasRecordedReturns) {
+    return { ok: false, error: 'This sale has recorded returns, so its contents are managed by the Returns flow. Record a new sale for anything the customer is buying now.' }
+  }
+  if (!SALE_STATUSES_ACCEPTING_NEW_LINES.has(normalized)) {
+    return { ok: false, error: `Items cannot be added to a sale in the "${normalized}" state.` }
+  }
+  return { ok: true }
+}
+
+/**
+ * True when a sale in this status holds its stock deducted.
+ *
+ * STATUS ONLY. A sale carrying S4-2's sticky `stock_skipped` flag holds
+ * nothing regardless of what its status says, and this function cannot see
+ * that -- callers must combine it with saleAmendments.saleSkipsStock(sale),
+ * which is what `skipStock` below exists to carry.
+ */
+export function saleStatusDeductsStock(status: string): boolean {
+  return STOCK_DEDUCTED_STATUSES.has(String(status || 'completed'))
+}
+
+// ---------------------------------------------------------------------------
+// The line as the caller asked for it, and the line once the FIFO allocation
+// has decided which lots it draws from.
+// ---------------------------------------------------------------------------
+
+export type NewSaleLineInput = {
+  pricingSnapshotJson?: string
+  moneyPrecisionVersion?: 0 | 1
+  productId: number
+  productName: string
+  quantity: number
+  branchId: number | null
+  unitPriceUsd: number
+  costPriceUsd: number | null
+  costPriceKhr: number | null
+  /** An explicit lot pick, when the caller had a picker. Null = FIFO. */
+  batchId?: number | null
+  batchLabel?: string | null
+  batchExpiryDate?: string | null
+  unlottedStock?: boolean
+}
+
+export type ExplicitBatchResolution =
+  | { ok: true; lines: NewSaleLineInput[] }
+  | { ok: false; error: string }
+
+/**
+ * Resolve every client-selected lot against the authoritative active stock
+ * read for that product and branch. A missing entry deliberately covers all
+ * unsafe identities (unknown, another product, inactive, or another branch):
+ * none is a sellable lot for this line. Quantities are consumed in a private
+ * availability copy so repeated lines cannot collectively overdraw one lot.
+ * Client lot metadata is never retained.
+ */
+export function resolveExplicitSaleLineBatches(
+  lines: NewSaleLineInput[],
+  lotsByKey: Map<string, FifoLotAvailability[]>,
+): ExplicitBatchResolution {
+  const remaining = new Map<string, number>()
+  const resolved: NewSaleLineInput[] = []
+
+  for (const [index, line] of lines.entries()) {
+    if (line.unlottedStock && line.batchId) return { ok: false, error: `Added item #${index + 1} cannot select both a received date and stock without a received date.` }
+    if (!line.batchId) {
+      resolved.push(line)
+      continue
+    }
+    if (!line.branchId) {
+      return { ok: false, error: `Added item #${index + 1} cannot use a batch without a branch.` }
+    }
+
+    const key = `${line.productId}:${line.branchId}`
+    const batchId = Number(line.batchId)
+    const lot = (lotsByKey.get(key) || []).find((entry) => entry.batchId === batchId)
+    if (!lot) {
+      return { ok: false, error: `Batch #${batchId} is not an active, available lot for added item #${index + 1} at this branch.` }
+    }
+
+    const availabilityKey = `${key}:${batchId}`
+    const available = remaining.has(availabilityKey) ? remaining.get(availabilityKey)! : lot.available
+    const quantity = Math.max(0, Number(line.quantity) || 0)
+    if (quantity > available) {
+      return { ok: false, error: `Insufficient batch stock for added item #${index + 1}: requested ${quantity}, available ${available}.` }
+    }
+    remaining.set(availabilityKey, available - quantity)
+    resolved.push({
+      ...line,
+      batchId,
+      batchLabel: lot.lotCode ?? null,
+      batchExpiryDate: lot.expiryDate ?? null,
+    })
+  }
+
+  return { ok: true, lines: resolved }
+}
+
+export type PlannedSaleLine = NewSaleLineInput & {
+  lineTotalUsd: number
+  /** heldQuantity(status, quantity, 0): the units this line takes off the shelf now. */
+  heldUnits: number
+  /** Which lots it draws from, in draw order. Empty for untracked (legacy) stock. */
+  takes: FifoLotTake[]
+  /**
+   * inventory_movements.batch_id is attributable only when ONE lot covered
+   * the whole line -- identical rule to POST / and planSaleStockTransition
+   * (migration 0084). The per-lot detail lives in
+   * sale_item_batch_allocations.
+   */
+  movementBatchId: number | null
+}
+
+/**
+ * Split each line across the product's FIFO lots at its branch, consuming
+ * the shared availability map as it goes so two lines of the same product in
+ * one request cannot double-take the same units -- the same in-place
+ * mutation POST /'s auto-allocation pass does.
+ *
+ * An explicit batchId short-circuits the FIFO walk (the cashier picked the
+ * lot); a line whose product has no lot ledger at all gets no takes and
+ * simply rides branch_stock, exactly as an untracked checkout line does.
+ *
+ * `skipStock` is S4-2's sticky "this sale is outside the stock ledger" flag,
+ * passed EXPLICITLY rather than smuggled in as a status the caller knows
+ * holds nothing. Callers used to pass a literal 'awaiting_payment' for that,
+ * which was correct only for as long as awaiting_payment happened to hold
+ * nothing -- S4-3 made it hold, and that sentinel would have inverted into a
+ * full deduction on exactly the sales that must never move stock. The plan
+ * takes the fact it needs, not a status stand-in for it.
+ */
+export function allocateNewSaleLines(
+  lines: NewSaleLineInput[],
+  lotsByKey: Map<string, FifoLotAvailability[]>,
+  saleStatus: string,
+  skipStock = false,
+): PlannedSaleLine[] {
+  return lines.map((line) => {
+    const quantity = Math.max(0, Number(line.quantity) || 0)
+    const unitPriceUsd = Number(line.unitPriceUsd) || 0
+    const heldUnits = skipStock ? 0 : heldQuantity(saleStatus, quantity, 0)
+    let takes: FifoLotTake[] = []
+    if (line.branchId && quantity > 0 && !line.unlottedStock) {
+      if (line.batchId) {
+        takes = [{
+          batchId: Number(line.batchId),
+          lotCode: line.batchLabel ?? null,
+          expiryDate: line.batchExpiryDate ?? null,
+          quantity,
+        }]
+        // Keep the shared availability honest for a later line of the same
+        // product, the same way the FIFO branch below does.
+        const lot = (lotsByKey.get(`${line.productId}:${line.branchId}`) || [])
+          .find((entry) => entry.batchId === Number(line.batchId))
+        if (lot) lot.available -= quantity
+      } else {
+        const lots = lotsByKey.get(`${line.productId}:${line.branchId}`) || []
+        const allocated = allocateAcrossLots(lots, quantity)
+        takes = allocated.takes
+        for (const take of takes) {
+          const lot = lots.find((entry) => entry.batchId === take.batchId)
+          if (lot) lot.available -= take.quantity
+        }
+      }
+    }
+    return {
+      ...line,
+      quantity,
+      unitPriceUsd,
+      lineTotalUsd: line.moneyPrecisionVersion === 1
+        ? (parseSaleItemPricing(line.pricingSnapshotJson)?.amounts.total_usd ?? (()=>{throw new SaleMoneyContractError('money_precision_pricing_intent_required')})())
+        : round2(unitPriceUsd * quantity),
+      heldUnits,
+      takes,
+      movementBatchId: takes.length === 1 && takes[0].quantity === quantity ? takes[0].batchId : null,
+    }
+  })
+}
+
+// Recheck every uncovered unit under the same transaction as the deduction.
+// Count inactive lots too: an inactive date does not make its stock unlotted.
+export function planUnlottedSaleLineGuards(lines: PlannedSaleLine[]): StockStatement[] {
+  const requests = new Map<string, { productId: number; branchId: number; quantity: number }>()
+  for (const line of lines) {
+    const uncovered = line.heldUnits > 0 ? Math.max(0, line.heldUnits - line.takes.reduce((sum, take) => sum + take.quantity, 0)) : 0
+    if (!line.branchId || !uncovered) continue
+    const key = `${line.productId}:${line.branchId}`
+    const request = requests.get(key) || { productId: line.productId, branchId: line.branchId, quantity: 0 }
+    request.quantity += uncovered
+    requests.set(key, request)
+  }
+  return [...requests.values()].map((params) => ({
+    sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN
+      COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@productId AND branch_id=@branchId),0)
+      - COALESCE((SELECT SUM(MAX(0,bbs.quantity)) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+        WHERE pb.variant_product_id=@productId AND bbs.branch_id=@branchId),0) >= @quantity THEN 1 ELSE 0 END`,
+    params,
+  }))
+}
+
+export type SaleLineAdditionPlan = {
+  lines: PlannedSaleLine[]
+  /** sale_items INSERTs interleaved with their stock moves, in batch order. */
+  statements: StockStatement[]
+  /** Index into `statements` of each line's own sale_items INSERT, by line index. */
+  saleItemStatementIndexByLine: number[]
+  /** Per product+branch units that must be TAKEN, for the route's pre-flight read. */
+  deductions: Array<{ product_id: number; branch_id: number; quantity: number }>
+  deductedUnits: number
+  addedSubtotalUsd: number
+}
+
+/**
+ * DECISION 2. The whole write for a set of added lines: one sale_items row
+ * each, plus -- only when the sale's status holds stock deducted -- the same
+ * four stock statements a checkout line emits (strict batch decrement, plain
+ * branch_stock subtraction, products.stock_quantity rollup, and the 'sale'
+ * movement). Nothing here is clamped: an oversell has to abort the batch
+ * through the CHECK constraint rather than silently swallow units.
+ */
+export function planSaleLineAddition(input: {
+  saleId: number | string
+  saleStatus: string
+  lines: PlannedSaleLine[]
+  exchangeRate: number
+  userId: number | string | null
+  userName: string | null
+}): SaleLineAdditionPlan {
+  const exchangeRate = Number(input.exchangeRate) || 4100
+  const statements: StockStatement[] = []
+  const saleItemStatementIndexByLine: number[] = []
+  const deductionMap = new Map<string, { product_id: number; branch_id: number; quantity: number }>()
+  let deductedUnits = 0
+  let addedSubtotalUsd = 0
+
+  for (const [lineIndex, line] of input.lines.entries()) {
+    const pricing=line.moneyPrecisionVersion===1 ? parseSaleItemPricing(line.pricingSnapshotJson) : null
+    if (line.moneyPrecisionVersion===1 && (!pricing || pricing.amounts.total_usd!==line.lineTotalUsd || pricing.quantities[pricing.line_key]!==line.quantity))
+      throw new SaleMoneyContractError('money_precision_pricing_intent_required')
+    const captured=pricing?.pool.lines.find(row=>row.line_key===pricing.line_key)
+    addedSubtotalUsd += line.lineTotalUsd
+    saleItemStatementIndexByLine[lineIndex] = statements.length
+    statements.push({
+      sql: `INSERT INTO sale_items (
+              sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr,
+              cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id,
+              price_mode, base_price_usd, base_price_khr, batch_id, batch_label, batch_expiry_date
+              ${pricing?', pricing_snapshot_json, product_discount_type, product_discount_label, product_discount_usd, product_discount_khr, manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr':''}
+            ) VALUES (
+              @sale_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr,
+              @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @branch_id,
+              @price_mode, @base_price_usd, @base_price_khr, @batch_id, @batch_label, @batch_expiry_date
+              ${pricing?', @pricing_snapshot_json, @product_discount_type, @product_discount_label, @product_discount_usd, @product_discount_khr, @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr':''}
+            )`,
+      params: {
+        ...(pricing ? {
+          ...capturedPricingMetadata(pricing.pool,pricing.line_key,pricing.amounts),
+          pricing_snapshot_json:line.pricingSnapshotJson,
+          product_discount_usd:divideMoney4(pricing.amounts.product_discount_usd,line.quantity),
+          product_discount_khr:multiplyMoney4(divideMoney4(pricing.amounts.product_discount_usd,line.quantity),exchangeRate),
+          manual_discount_type:captured!.manual.type==='none'?null:captured!.manual.type,
+          manual_discount_value:captured!.manual.value,
+          manual_discount_usd:divideMoney4(pricing.amounts.manual_discount_usd,line.quantity),
+          manual_discount_khr:multiplyMoney4(divideMoney4(pricing.amounts.manual_discount_usd,line.quantity),exchangeRate),
+        }:{}),
+        sale_id: input.saleId,
+        product_id: line.productId,
+        product_name: line.productName,
+        quantity: line.quantity,
+        applied_price_usd: line.unitPriceUsd,
+        applied_price_khr: convertedKhr(line.unitPriceUsd, exchangeRate,line.moneyPrecisionVersion),
+        cost_price_usd: line.costPriceUsd,
+        cost_price_khr: line.costPriceKhr,
+        total_usd: line.lineTotalUsd,
+        total_khr: convertedKhr(line.lineTotalUsd, exchangeRate,line.moneyPrecisionVersion),
+        branch_id: line.branchId,
+        price_mode: captured?.source ?? 'selling',
+        // Same "no manual discount" default POST / uses: base = applied.
+        base_price_usd: pricing?.amounts.base_price_usd ?? line.unitPriceUsd,
+        base_price_khr: pricing?.amounts.base_price_khr ?? convertedKhr(line.unitPriceUsd, exchangeRate,line.moneyPrecisionVersion),
+        // A single-lot line stamps its lot on the row, identical to an
+        // explicit pick at checkout; a multi-lot split keeps NULL and the
+        // detail lives in sale_item_batch_allocations.
+        batch_id: line.takes.length === 1 && line.takes[0].quantity === line.quantity ? line.takes[0].batchId : null,
+        batch_label: line.takes.length === 1 && line.takes[0].quantity === line.quantity ? (line.takes[0].lotCode ?? null) : null,
+        batch_expiry_date: line.takes.length === 1 && line.takes[0].quantity === line.quantity ? (line.takes[0].expiryDate ?? null) : null,
+      },
+    })
+
+    // heldUnits is 0 only when the sale holds nothing (a stock_skipped
+    // sale): the line is recorded and no stock moves. This is the ONE place
+    // that decides, and it defers to heldQuantity() rather than re-deriving
+    // "does this status deduct".
+    if (!line.branchId || line.heldUnits <= 0) continue
+
+    deductedUnits += line.heldUnits
+    const key = `${line.productId}:${line.branchId}`
+    const existing = deductionMap.get(key)
+    if (existing) existing.quantity += line.heldUnits
+    else deductionMap.set(key, { product_id: line.productId, branch_id: line.branchId, quantity: line.heldUnits })
+
+    for (const take of line.takes) {
+      statements.push(decrementBatchStockStrictStatement(take.batchId, line.branchId, take.quantity))
+    }
+    statements.push({
+      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
+            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity`,
+      params: { product_id: line.productId, branch_id: line.branchId, quantity: line.heldUnits },
+    })
+    statements.push({
+      sql: `UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
+      params: { product_id: line.productId, quantity: line.heldUnits },
+    })
+    statements.push({
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+            VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+      params: {
+        product_id: line.productId,
+        product_name: line.productName,
+        branch_id: line.branchId,
+        quantity: -line.heldUnits,
+        unit_cost_usd: line.costPriceUsd,
+        unit_cost_khr: line.costPriceKhr,
+        reason: `Item added to sale #${input.saleId}`,
+        reference_id: input.saleId,
+        user_id: input.userId,
+        user_name: input.userName,
+        batch_id: line.movementBatchId,
+      },
+    })
+  }
+
+  return {
+    lines: input.lines,
+    statements,
+    saleItemStatementIndexByLine,
+    deductions: [...deductionMap.values()],
+    deductedUnits,
+    addedSubtotalUsd: input.lines.some(line => line.moneyPrecisionVersion === 1) ? sumMoney4(input.lines.map(line => line.lineTotalUsd)) : round2(addedSubtotalUsd),
+  }
+}
+
+/**
+ * The sale_item_batch_allocations rows for the added lines, written once the
+ * atomic batch above has told us each new sale_item's real id. Same
+ * released_quantity convention as POST /: 0 when the units are physically
+ * out with the sale, the full take when they are not (a stock_skipped sale),
+ * so a later transition that does move stock consumes them back down.
+ */
+export function buildAllocationStatements(
+  lines: PlannedSaleLine[],
+  saleItemIdByLine: Array<number | null>,
+): StockStatement[] {
+  const statements: StockStatement[] = []
+  for (const [lineIndex, line] of lines.entries()) {
+    const saleItemId = Number(saleItemIdByLine[lineIndex] || 0)
+    if (!(saleItemId > 0) || !line.branchId || !line.takes.length) continue
+    const deducted = line.heldUnits > 0
+    for (const take of line.takes) {
+      statements.push({
+        sql: `INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date, released_quantity, released_at)
+              VALUES (@sale_item_id, @batch_id, @branch_id, @quantity, @lot_code, @expiry_date, @released_quantity, @released_at)`,
+        params: {
+          sale_item_id: saleItemId,
+          batch_id: take.batchId,
+          branch_id: line.branchId,
+          quantity: take.quantity,
+          lot_code: take.lotCode ?? null,
+          expiry_date: take.expiryDate ?? null,
+          released_quantity: deducted ? 0 : take.quantity,
+          released_at: deducted ? null : new Date().toISOString(),
+        },
+      })
+    }
+  }
+  return statements
+}
+
+// ---------------------------------------------------------------------------
+// DECISION 4: the exact inverse, replayed by the 'sale.add_items' undo
+// applier. This is the shape the undo_snapshots row stores.
+// ---------------------------------------------------------------------------
+
+export type AddedSaleLineRecord = {
+  pricingSnapshotJson?: string
+  moneyPrecisionVersion?: 0 | 1
+  saleItemId: number
+  productId: number
+  productName: string | null
+  quantity: number
+  branchId: number | null
+  /** Units this line actually took off the shelf (0 on a stock_skipped sale). */
+  heldUnits: number
+  unitPriceUsd: number
+  lineTotalUsd: number
+  costPriceUsd: number | null
+  costPriceKhr: number | null
+  takes: FifoLotTake[]
+}
+
+/**
+ * Rebuild the forward plan's line shape from a stored reversal record, so a
+ * REDO re-inserts the line drawing from the EXACT lots the original addition
+ * drew from rather than re-running FIFO against whatever the shelf looks
+ * like now. (Undo restored those units to those lots, so they are the right
+ * ones; if a concurrent sale has since taken them, the strict decrement
+ * aborts the redo, which is the correct answer rather than quietly moving
+ * the sale onto a different lot.)
+ */
+export function plannedLineFromRecord(record: AddedSaleLineRecord): PlannedSaleLine {
+  return {
+    ...(record.pricingSnapshotJson===undefined?{}:{pricingSnapshotJson:record.pricingSnapshotJson}),
+    ...(record.moneyPrecisionVersion === undefined ? {} : {moneyPrecisionVersion:record.moneyPrecisionVersion}),
+    productId: record.productId,
+    productName: record.productName || `product #${record.productId}`,
+    quantity: record.quantity,
+    branchId: record.branchId,
+    unitPriceUsd: record.unitPriceUsd,
+    costPriceUsd: record.costPriceUsd,
+    costPriceKhr: record.costPriceKhr,
+    batchId: null,
+    batchLabel: null,
+    batchExpiryDate: null,
+    lineTotalUsd: record.lineTotalUsd,
+    heldUnits: record.heldUnits,
+    takes: record.takes || [],
+    movementBatchId: (record.takes || []).length === 1 && record.takes[0].quantity === record.quantity
+      ? record.takes[0].batchId
+      : null,
+  }
+}
+
+export type SaleMoneySnapshot = {
+  money_precision_version?: 0 | 1
+  calculated_total_usd?: number | null
+  rounding_adjustment_usd?: number
+  exchange_rate?: number | null
+  updated_at?: string | null
+  subtotal_usd: number
+  subtotal_khr: number | null
+  total_usd: number
+  total_khr: number | null
+  change_usd: number
+  change_khr: number | null
+  change_is_actual?: number
+  change_exchange_rate?: number | null
+  discount_khr?: number | null
+  tax_khr?: number | null
+  delivery_fee_khr?: number | null
+  membership_discount_khr?: number | null
+}
+
+export type SaleAddItemsReversal = {
+  saleId: number
+  receiptNumber: string | null
+  saleStatus: string
+  exchangeRate: number
+  /**
+   * The sale's money columns exactly as they were BEFORE and AFTER the
+   * addition. Both are stored so neither direction has to RE-derive them at
+   * replay time: an undo restores `moneyBefore`, a redo restores
+   * `moneyAfter`. Re-running the arithmetic during a replay would read
+   * whatever the sale's discount/tender columns say at that later moment,
+   * which is not what this action changed.
+   */
+  moneyBefore: SaleMoneySnapshot
+  moneyAfter: SaleMoneySnapshot
+  lineMoneyBefore?: SaleLineKhrSnapshot[]
+  lineMoneyAfter?: SaleLineKhrSnapshot[]
+  lines: AddedSaleLineRecord[]
+}
+
+/** The one UPDATE that writes a money snapshot back onto the sale row. */
+export function saleMoneyUpdateStatement(saleId: number | string, money: SaleMoneySnapshot): StockStatement {
+  const hasPrecision = Object.prototype.hasOwnProperty.call(money, 'money_precision_version')
+  const anyPrecision = ['money_precision_version','calculated_total_usd','rounding_adjustment_usd'].some(key => Object.prototype.hasOwnProperty.call(money,key))
+  if (anyPrecision && (!hasPrecision || !Object.prototype.hasOwnProperty.call(money, 'calculated_total_usd') || !Object.prototype.hasOwnProperty.call(money, 'rounding_adjustment_usd')))
+    throw new SaleMoneyContractError('money_precision_incomplete_snapshot')
+  validateSaleMoneySnapshot(money)
+  return {
+    sql: `UPDATE sales SET exchange_rate = CASE WHEN @has_exchange_rate=1 THEN @exchange_rate ELSE exchange_rate END,
+            subtotal_usd = @subtotal_usd, subtotal_khr = @subtotal_khr,
+            total_usd = @total_usd, total_khr = @total_khr,
+            money_precision_version = CASE WHEN @has_precision=1 THEN @money_precision_version WHEN money_precision_version=0 THEN 0 ELSE json('money_precision_incompatible_snapshot') END,
+            calculated_total_usd = CASE WHEN @has_precision=1 THEN @calculated_total_usd ELSE calculated_total_usd END,
+            rounding_adjustment_usd = CASE WHEN @has_precision=1 THEN @rounding_adjustment_usd ELSE rounding_adjustment_usd END,
+            change_usd = @change_usd, change_khr = @change_khr,
+            change_is_actual = CASE WHEN @has_change_is_actual=1 THEN @change_is_actual ELSE change_is_actual END,
+            change_exchange_rate = CASE WHEN @has_change_exchange_rate=1 THEN @change_exchange_rate ELSE change_exchange_rate END,
+            discount_khr = CASE WHEN @has_discount_khr=1 THEN @discount_khr ELSE discount_khr END,
+            tax_khr = CASE WHEN @has_tax_khr=1 THEN @tax_khr ELSE tax_khr END,
+            delivery_fee_khr = CASE WHEN @has_delivery_fee_khr=1 THEN @delivery_fee_khr ELSE delivery_fee_khr END,
+            membership_discount_khr = CASE WHEN @has_membership_discount_khr=1 THEN @membership_discount_khr ELSE membership_discount_khr END,
+            updated_at = COALESCE(@updated_at, CURRENT_TIMESTAMP)
+          WHERE id = @sale_id`,
+    params: {
+      sale_id: saleId,
+      has_precision: hasPrecision ? 1 : 0,
+      money_precision_version: money.money_precision_version ?? 0,
+      calculated_total_usd: money.calculated_total_usd ?? null,
+      rounding_adjustment_usd: money.rounding_adjustment_usd ?? 0,
+      has_exchange_rate: Object.prototype.hasOwnProperty.call(money, 'exchange_rate') ? 1 : 0,
+      exchange_rate: money.exchange_rate ?? null,
+      updated_at: money.updated_at ?? null,
+      subtotal_usd: money.subtotal_usd,
+      subtotal_khr: money.subtotal_khr,
+      total_usd: money.total_usd,
+      total_khr: money.total_khr,
+      change_usd: money.change_usd,
+      change_khr: money.change_khr,
+      has_change_is_actual: Object.prototype.hasOwnProperty.call(money, 'change_is_actual') ? 1 : 0,
+      change_is_actual: money.change_is_actual ?? null,
+      has_change_exchange_rate: Object.prototype.hasOwnProperty.call(money, 'change_exchange_rate') ? 1 : 0,
+      change_exchange_rate: money.change_exchange_rate ?? null,
+      has_discount_khr: Object.prototype.hasOwnProperty.call(money, 'discount_khr') ? 1 : 0,
+      discount_khr: money.discount_khr ?? null,
+      has_tax_khr: Object.prototype.hasOwnProperty.call(money, 'tax_khr') ? 1 : 0,
+      tax_khr: money.tax_khr ?? null,
+      has_delivery_fee_khr: Object.prototype.hasOwnProperty.call(money, 'delivery_fee_khr') ? 1 : 0,
+      delivery_fee_khr: money.delivery_fee_khr ?? null,
+      has_membership_discount_khr: Object.prototype.hasOwnProperty.call(money, 'membership_discount_khr') ? 1 : 0,
+      membership_discount_khr: money.membership_discount_khr ?? null,
+    },
+  }
+}
+
+/**
+ * Atomic counterpart used when the sale_item ids are created inside the same
+ * D1 batch. The route records each inserted id in sale_mutation_members with
+ * its bounded line ordinal, then these INSERT..SELECT statements attach every
+ * required lot row before the batch can commit.
+ */
+export function buildOperationAllocationStatements(
+  lines: PlannedSaleLine[],
+  operationId: string,
+  releasedAt: string,
+): StockStatement[] {
+  const statements: StockStatement[] = []
+  for (const [lineIndex, line] of lines.entries()) {
+    if (!line.branchId || !line.takes.length) continue
+    const deducted = line.heldUnits > 0
+    for (const take of line.takes) {
+      statements.push({
+        sql: `INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,lot_code,expiry_date,released_quantity,released_at)
+              SELECT entity_id,@batch_id,@branch_id,@quantity,@lot_code,@expiry_date,@released_quantity,@released_at
+              FROM sale_mutation_members
+              WHERE operation_id=@operation_id AND entity_kind='sale_item' AND ordinal=@ordinal`,
+        params: {
+          operation_id: operationId,
+          ordinal: lineIndex,
+          batch_id: take.batchId,
+          branch_id: line.branchId,
+          quantity: take.quantity,
+          lot_code: take.lotCode ?? null,
+          expiry_date: take.expiryDate ?? null,
+          released_quantity: deducted ? 0 : take.quantity,
+          released_at: deducted ? null : releasedAt,
+        },
+      })
+    }
+  }
+  return statements
+}
+
+export type SaleLineKhrSnapshot = {
+  pricing_snapshot_json?: string | null
+  id: number
+  applied_price_khr: number | null
+  total_khr: number | null
+  product_discount_khr: number | null
+  base_price_khr: number | null
+  manual_discount_khr: number | null
+}
+
+function nullableMoney(value: unknown): number | null {
+  return value == null ? null : Number(value) || 0
+}
+
+export function captureSaleLineKhrSnapshot(rows: Array<Record<string, unknown>>): SaleLineKhrSnapshot[] {
+  return rows.map((row) => ({
+    ...(Object.prototype.hasOwnProperty.call(row,'pricing_snapshot_json')?{pricing_snapshot_json:row.pricing_snapshot_json as string|null}:{}),
+    id: Number(row.id),
+    applied_price_khr: nullableMoney(row.applied_price_khr),
+    total_khr: nullableMoney(row.total_khr),
+    product_discount_khr: nullableMoney(row.product_discount_khr),
+    base_price_khr: nullableMoney(row.base_price_khr),
+    manual_discount_khr: nullableMoney(row.manual_discount_khr),
+  }))
+}
+
+function convertedKhr(value: unknown, rate: number, moneyPrecisionVersion: 0 | 1 = 0): number | null {
+  if (value == null) return null
+  if (moneyPrecisionVersion === 1) return multiplyMoney4(value as number,rate)
+  return financialCalculationValue(financialCalculationValue(value as number) * financialCalculationValue(rate))
+}
+
+export function rebaseSaleLineKhrSnapshot(rows: Array<Record<string, unknown>>, exchangeRate: number): SaleLineKhrSnapshot[] {
+  return rows.map((row) => ({
+    id: Number(row.id),
+    applied_price_khr: convertedKhr(row.applied_price_usd, exchangeRate),
+    total_khr: convertedKhr(row.total_usd, exchangeRate),
+    product_discount_khr: convertedKhr(row.product_discount_usd, exchangeRate),
+    base_price_khr: convertedKhr(row.base_price_usd, exchangeRate),
+    manual_discount_khr: convertedKhr(row.manual_discount_usd, exchangeRate),
+  }))
+}
+
+/** One bounded JSON parameter restores every snapshotted line exactly. */
+export function saleLineKhrSnapshotStatement(saleId: number | string, lines: SaleLineKhrSnapshot[]): StockStatement {
+  const pricing=lines.some(line=>Object.prototype.hasOwnProperty.call(line,'pricing_snapshot_json'))
+  if (pricing) for (const line of lines) {
+    if (!Object.prototype.hasOwnProperty.call(line,'pricing_snapshot_json')) throw new SaleMoneyContractError('money_precision_incomplete_snapshot')
+    parseSaleItemPricing(line.pricing_snapshot_json)
+  }
+  return {
+    sql: `UPDATE sale_items SET
+            applied_price_khr=(SELECT json_extract(value,'$.applied_price_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
+            total_khr=(SELECT json_extract(value,'$.total_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
+            product_discount_khr=(SELECT json_extract(value,'$.product_discount_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
+            base_price_khr=(SELECT json_extract(value,'$.base_price_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
+            manual_discount_khr=(SELECT json_extract(value,'$.manual_discount_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id)
+            ${pricing?", pricing_snapshot_json=(SELECT json_extract(value,'$.pricing_snapshot_json') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id)":''}
+          WHERE sale_id=@sale_id AND id IN (SELECT json_extract(value,'$.id') FROM json_each(@lines))`,
+    params: { sale_id: saleId, lines: JSON.stringify(lines) },
+  }
+}
+
+/** Rebase every surviving/new line to one authoritative receipt rate. */
+export function rebaseSaleLineKhrStatement(saleId: number | string, exchangeRate: number): StockStatement {
+  return {
+    sql: `UPDATE sale_items SET
+            applied_price_khr=CASE WHEN applied_price_usd IS NULL THEN NULL ELSE ROUND(applied_price_usd*@rate,4) END,
+            total_khr=CASE WHEN total_usd IS NULL THEN NULL ELSE ROUND(total_usd*@rate,4) END,
+            product_discount_khr=CASE WHEN product_discount_usd IS NULL THEN NULL ELSE ROUND(product_discount_usd*@rate,4) END,
+            base_price_khr=CASE WHEN base_price_usd IS NULL THEN NULL ELSE ROUND(base_price_usd*@rate,4) END,
+            manual_discount_khr=CASE WHEN manual_discount_usd IS NULL THEN NULL ELSE ROUND(manual_discount_usd*@rate,4) END
+          WHERE sale_id=@sale_id`,
+    params: { sale_id: saleId, rate: exchangeRate },
+  }
+}
+
+/**
+ * Undo: hand the units back to the SAME lots, in REVERSE draw order (the
+ * last-drawn units come back first -- the identical walk
+ * planSaleStockTransition's restore branch does), add them back to branch
+ * stock and the product rollup as new 'return' movements, then drop the
+ * allocation rows and the sale_items rows themselves.
+ *
+ * A line whose heldUnits is 0 (added to a stock_skipped sale) moves no
+ * stock on the way out either -- it only loses its rows. Symmetry with the
+ * forward plan is the whole point: whatever heldQuantity said on the way in
+ * is what comes back on the way out.
+ */
+export function planSaleLineRemoval(input: {
+  saleId: number | string
+  lines: AddedSaleLineRecord[]
+  reason: string
+  userId: number | string | null
+  userName: string | null
+}): { statements: StockStatement[]; restoredUnits: number } {
+  const statements: StockStatement[] = []
+  let restoredUnits = 0
+
+  for (const line of input.lines) {
+    if (line.branchId && line.heldUnits > 0) {
+      restoredUnits += line.heldUnits
+      const restoredLots: Array<{ batchId: number; quantity: number }> = []
+      for (let index = line.takes.length - 1; index >= 0; index -= 1) {
+        const take = line.takes[index]
+        if (take.quantity <= 0) continue
+        statements.push(...restoreBatchStockStatements(take.batchId, line.branchId, take.quantity))
+        restoredLots.push({ batchId: take.batchId, quantity: take.quantity })
+      }
+      statements.push({
+        sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)
+              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + @quantity`,
+        params: { product_id: line.productId, branch_id: line.branchId, quantity: line.heldUnits },
+      })
+      statements.push({
+        sql: `UPDATE products SET stock_quantity = stock_quantity + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
+        params: { product_id: line.productId, quantity: line.heldUnits },
+      })
+      statements.push({
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+        params: {
+          product_id: line.productId,
+          product_name: line.productName,
+          branch_id: line.branchId,
+          quantity: line.heldUnits,
+          unit_cost_usd: line.costPriceUsd,
+          unit_cost_khr: line.costPriceKhr,
+          reason: input.reason,
+          reference_id: input.saleId,
+          user_id: input.userId,
+          user_name: input.userName,
+          // Same single-lot attribution rule as everywhere else (0084).
+          batch_id: restoredLots.length === 1 && restoredLots[0].quantity === line.heldUnits ? restoredLots[0].batchId : null,
+        },
+      })
+    }
+    statements.push({
+      sql: 'DELETE FROM sale_item_batch_allocations WHERE sale_item_id = @sale_item_id',
+      params: { sale_item_id: line.saleItemId },
+    })
+    statements.push({
+      sql: 'DELETE FROM sale_items WHERE id = @sale_item_id AND sale_id = @sale_id',
+      params: { sale_item_id: line.saleItemId, sale_id: input.saleId },
+    })
+  }
+
+  return { statements, restoredUnits }
+}
+
+// ---------------------------------------------------------------------------
+// DECISION 3: totals.
+//
+// Subtotal is RECOMPUTED, because subtotal is by definition the sum of the
+// sale's lines and that has to be true again after the insert. (It is read
+// back as SUM(sale_items.total_usd), not as stored_subtotal + added, so a
+// row whose stored subtotal had already drifted is corrected rather than
+// having the drift carried forward.)
+//
+// Discounts, the membership discount, tax and the delivery fee are FROZEN.
+// Not a convenience: none of them is stored as a RATE anywhere in this
+// schema -- `sales.discount_usd`, `membership_discount_usd`, `tax_usd` and
+// `delivery_fee_usd` are all absolute amounts the cashier or the POS
+// computed at checkout, and there is no percentage on the row to re-apply.
+// "Recomputing" one would mean inferring a rate from the old subtotal and
+// then giving the customer a bigger discount (or charging more tax) than
+// anyone agreed to. A delivery fee is per-trip, not per-item, so it does
+// not scale with a line either. A shop that wants the added line discounted
+// edits the discount deliberately, as its own act.
+//
+// Amount paid is FROZEN too -- adding a line does not make the customer hand
+// over more money. The consequence is the correct one and it is already
+// rendered: total rises, so `outstanding = total - paid` becomes positive
+// and SaleDetailModal shows the "Outstanding (on credit)" row. Change is
+// re-derived by computeSaleTotals from the same (frozen) tender, which is
+// the same function POST / uses -- one definition of the money math, so an
+// added line can never round differently from a checkout.
+// ---------------------------------------------------------------------------
+
+export type SaleMoneyRow = {
+  money_precision_version?: unknown
+  discount_usd?: unknown
+  membership_discount_usd?: unknown
+  tax_usd?: unknown
+  is_delivery?: unknown
+  delivery_fee_usd?: unknown
+  delivery_fee_paid_by?: unknown
+  exchange_rate?: unknown
+  amount_paid_usd?: unknown
+  amount_paid_khr?: unknown
+}
+
+export function recomputeSaleMoneyAfterLineChange(input: {
+  moneyPrecisionVersion?: 0 | 1
+  sale: SaleMoneyRow
+  /** SUM(sale_items.total_usd) for the sale AFTER the write. */
+  subtotalUsd: number
+  /** The raw `change_exchange_rate` setting (Part 534). */
+  changeExchangeRate?: unknown
+  exchangeRateOverride?: unknown
+}): SaleTotals & { subtotalUsd: number; subtotalKhr: number } {
+  const sale = input.sale
+  const exchangeRate = Number(input.exchangeRateOverride) || Number(sale.exchange_rate) || 4100
+  const historical=input.moneyPrecisionVersion===1&&Number(sale.money_precision_version)===0
+  const money = historical ? (value:number)=>value : input.moneyPrecisionVersion === 1 ? roundMoney4 : round2
+  const subtotalUsd = money(Number(input.subtotalUsd) || 0)
+  const totals = computeSaleTotals({
+    preserveRecordedTender: input.moneyPrecisionVersion === 1,
+    preserveRecordedBasketOperands: historical,
+    moneyPrecisionVersion: input.moneyPrecisionVersion,
+    subtotalUsd,
+    discountUsd: money(Number(sale.discount_usd) || 0),
+    membershipDiscountUsd: money(Number(sale.membership_discount_usd) || 0),
+    taxUsd: money(Number(sale.tax_usd) || 0),
+    isDelivery: Boolean(Number(sale.is_delivery) || 0),
+    deliveryFeeUsd: money(Number(sale.delivery_fee_usd) || 0),
+    deliveryFeePaidBy: String(sale.delivery_fee_paid_by || 'customer'),
+    exchangeRate,
+    changeExchangeRate: input.changeExchangeRate,
+    // Frozen tender: pass the STORED values through as "supplied", so a
+    // legitimately-zero paid amount stays zero instead of falling back to
+    // the new total (the exact bug lib/saleTotals.ts documents).
+    rawAmountPaidUsd: Number(sale.amount_paid_usd) || 0,
+    rawAmountPaidKhr: Number(sale.amount_paid_khr) || 0,
+  })
+  return {
+    ...totals,
+    totalKhr: input.moneyPrecisionVersion === 1 ? totals.totalKhr : convertedKhr(totals.totalUsd, exchangeRate) ?? 0,
+    subtotalUsd,
+    subtotalKhr: convertedKhr(subtotalUsd, exchangeRate,input.moneyPrecisionVersion) ?? 0,
+  }
+}

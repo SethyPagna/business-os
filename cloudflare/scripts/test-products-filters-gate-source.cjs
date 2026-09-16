@@ -22,7 +22,7 @@ assert.ok(body.indexOf('catalogVocabularyDenialReason') < body.indexOf('loadProd
 const gate = source.match(/function catalogVocabularyDenialReason\(user: SessionUser\): string \| null \{([\s\S]*?)\r?\n\}/)
 assert.ok(gate, 'catalogVocabularyDenialReason must exist')
 for (const surface of ["'products'", "'pos'", "'inventory'"]) assert.ok(gate[1].includes(surface), `gate must accept the ${surface} surface`)
-assert.match(gate[1], /getPermissionTier\(user, 'promotions'\) !== 'none'/, 'gate must accept a promotions grant (the rule editor reads the vocabulary)')
+assert.match(gate[1], /getActionTier\(user, 'promotions', 'view'\) !== 'none'/, 'gate must accept a promotions grant through the shared action-aware read tier')
 assert.match(gate[1], /productSurfaceDenialReason\(user, surface\) === null/, 'gate must reuse the sibling reads\' surface rule, not re-implement it')
 
 console.log('test-products-filters-gate-source: ok')

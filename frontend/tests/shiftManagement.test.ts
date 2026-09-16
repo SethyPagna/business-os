@@ -1,0 +1,468 @@
+import assert from 'node:assert/strict'
+// These transport tests model a browser with readable coordination storage.
+function createReadableStorage(): Storage {
+  const values = new Map<string, string>()
+  return {
+    get length() { return values.size },
+    clear: () => { values.clear() },
+    key: (index: number) => [...values.keys()][index] ?? null,
+    getItem: (key: string) => values.get(String(key)) ?? null,
+    setItem: (key: string, value: string) => { values.set(String(key), String(value)) },
+    removeItem: (key: string) => { values.delete(String(key)) },
+  }
+}
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  amendShift,
+  closeShift,
+  closeShiftById,
+  orderShiftRows,
+  parseShiftCount,
+  pendingShiftMutation,
+  shiftTimestampIsFuture,
+  reopenShift,
+  shiftLocalDateTimeToIso,
+  type AmendShiftInput,
+  type Shift,
+  type ShiftReconciliation,
+} from '../src/api/shiftTransport.ts'
+import {
+  __resetApiHealthForTests,
+  __resetApiWriteDedupeForTests,
+  getSyncServerUrl,
+  setSyncServerUrl,
+} from '../src/api/http.ts'
+
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+const read = (file: string) => fs.readFileSync(path.join(root, file), 'utf8')
+const transport = read('src/api/shiftTransport.ts')
+const settings = read('src/components/utils-settings/Settings.tsx')
+const users = read('src/components/users/Users.tsx')
+const profile = read('src/components/users/UserProfileModal.tsx')
+const panel = read('src/components/shifts/ShiftHistoryPanel.tsx')
+const modal = read('src/components/shifts/ShiftHistoryModal.tsx')
+const summary = read('src/components/shifts/ShiftSummary.tsx')
+const breakdown = read('src/components/shifts/ShiftCashBreakdown.tsx')
+const currentSummary = read('src/components/shifts/CurrentShiftSummary.tsx')
+const sales = read('src/components/sales/Sales.tsx')
+const fees = read('src/components/fees/FeesPage.tsx')
+const reports = read('src/components/sales/ReportsHub.tsx')
+const pos = read('src/components/pos/POS.tsx')
+const gate = read('src/components/pos/ShiftGate.tsx')
+
+let checks = 0
+const ok = (value: unknown, message: string) => { assert.ok(value, message); checks += 1 }
+
+const fixture = (id: number, businessDate: string, openedAt: string, closedAt: string | null): Shift => ({
+  id,
+  shift_code: `S-${id}`,
+  scope_mode: 'per_account',
+  user_id: 4,
+  user_name: 'Cashier',
+  branch_id: 2,
+  branch_name: 'Shop',
+  business_date: businessDate,
+  opened_at: openedAt,
+  opening_float_usd: 10.25,
+  opening_float_khr: 100_000,
+  opening_note: null,
+  closed_at: closedAt,
+  closing_counted_usd: closedAt ? 13.5 : null,
+  closing_counted_khr: closedAt ? 135_000 : null,
+  closing_note: null,
+  closed_by_user_id: closedAt ? 4 : null,
+  closed_by_user_name: closedAt ? 'Cashier' : null,
+  revision: 0,
+  capabilities: { can_edit: false, can_close: !closedAt, can_reopen: !!closedAt, can_cancel: false },
+  cancelled_at: null,
+  cancelled_by_user_id: null,
+  cancelled_by_user_name: null,
+  cancel_reason: null,
+  parent_shift_id: null,
+  reopen_reason: null,
+  reopened_by_user_id: null,
+  reopened_by_user_name: null,
+})
+
+// Behavioral invariants: unresolved historical opens are discoverable first,
+// native differences are independent, and entered shop time becomes exact ISO.
+const ordered = orderShiftRows([
+  fixture(2, '2026-09-05', '2026-09-05T03:00:00.000Z', '2026-09-05T09:00:00.000Z'),
+  fixture(1, '2026-09-04', '2026-09-04T08:11:09.183Z', null),
+  fixture(3, '2026-09-05', '2026-09-05T05:00:00.000Z', '2026-09-05T10:00:00.000Z'),
+])
+assert.deepEqual(ordered.map((row) => row.id), [1, 3, 2])
+checks += 1
+// N5. The drawer difference is counted MINUS EXPECTED, and expected is the
+// server's one reconciliation (opening + cash sales − refunds − expenses −
+// courier). "counted − opening float" was never the shortage a cashier is
+// asked about: on a normal trading day with $40 of cash sales it reports a
+// $3.25 surplus for a drawer that is $28 short. The client reads the server
+// figure and never recomputes it -- a second implementation here is exactly
+// how the app and the Telegram report would come to disagree about one drawer.
+const reconciled: ShiftReconciliation = {
+  opening: { usd: 10.25, khr: 100_000 },
+  cash_sales: { usd: 40, khr: 0 },
+  refunds: { usd: 5, khr: 0 },
+  expenses: { usd: 1.75, khr: 20_000 },
+  courier: { usd: 2, khr: 0 },
+  expected: { usd: 41.5, khr: 80_000 },
+  counted: { usd: 13.5, khr: 135_000 },
+  difference: { usd: -28, khr: 55_000 },
+  needs_review: false,
+  review_codes: [],
+}
+const closedRow = fixture(2, '2026-09-05', '2026-09-05T03:00:00.000Z', '2026-09-05T09:00:00.000Z')
+// The old formula, run on this very row: 13.50 counted minus a 10.25 float
+// is a $3.25 SURPLUS, where the reconciled drawer is $28 SHORT. Both cannot
+// be put in front of a cashier, so the client-side subtraction was deleted
+// rather than repointed -- nothing here recomputes what the server settled.
+const openingFloatFormula = Number((closedRow.closing_counted_usd! - closedRow.opening_float_usd!).toFixed(2))
+assert.equal(openingFloatFormula, 3.25)
+assert.notEqual(openingFloatFormula, reconciled.difference.usd)
+assert.deepEqual(reconciled.difference, { usd: -28, khr: 55_000 })
+ok(!/shiftCashDifference\(/.test(transport),
+  'the transport reads the server difference and computes no drawer figure of its own')
+checks += 3
+assert.equal(shiftLocalDateTimeToIso('2026-09-04T22:30'), '2026-09-04T15:30:00.000Z')
+checks += 1
+assert.throws(() => shiftLocalDateTimeToIso(''), /required/i)
+checks += 1
+assert.equal(parseShiftCount('0'), 0)
+assert.equal(parseShiftCount('12.50'), 12.5)
+assert.equal(parseShiftCount(''), null)
+assert.equal(parseShiftCount('not-a-count'), null)
+assert.equal(parseShiftCount(Number.POSITIVE_INFINITY), null)
+assert.equal(parseShiftCount(-1), null)
+assert.equal(parseShiftCount(false), null)
+checks += 7
+
+for (const capability of ['can_edit', 'can_close', 'can_reopen', 'can_cancel']) {
+  ok(new RegExp(`${capability}: boolean`).test(transport), `Shift consumes server ${capability}`)
+}
+ok(/POST', `\/api\/shifts\/\$\{id\}\/close`/.test(transport), 'transport closes a selected historical shift by exact id')
+ok(/expected_revision: input\.expectedRevision/.test(transport), 'selected close/reopen writes send the loaded revision')
+const amendTransport = transport.slice(transport.indexOf('export async function amendShift'), transport.indexOf('export type CloseShiftByIdInput'))
+ok(/expected_revision: input\.expectedRevision/.test(amendTransport), 'actual amend transport sends the caller-captured revision')
+ok(/closed_at: input\.closedAt/.test(transport), 'historical close sends an explicit ISO timestamp')
+ok(/POST', `\/api\/shifts\/\$\{id\}\/reopen`/.test(transport), 'transport reopens through the linked-segment endpoint')
+ok(/reason: input\.reason/.test(transport.slice(transport.indexOf('export async function reopenShift'))), 'reopen sends a mandatory reason')
+const cancelTransport = transport.slice(transport.indexOf('export async function cancelShift'))
+ok(/POST', `\/api\/shifts\/\$\{id\}\/cancel`/.test(cancelTransport), 'transport soft-cancels the selected shift by exact id')
+ok(/expected_revision: expectedRevision/.test(cancelTransport) && /reason,/.test(cancelTransport), 'cancel sends only revision and the required reason')
+ok(!/closing_counted|opening_float|closed_at/.test(cancelTransport), 'cancel never sends fake cash counts or a fabricated close time')
+
+ok(/<ShiftHistoryModal/.test(panel) && !/<Modal\b/.test(panel), 'compatibility panel is only a popup launcher, never an inline list or nested modal')
+ok((modal.match(/<Modal\b/g) || []).length === 1, 'one Modal owns both list and detail panes')
+ok(/selected \? \(/.test(modal) && /setSelected\(null\)/.test(modal), 'row click and Back switch panes inside that same modal')
+ok(/max-h-\[min\(65vh,38rem\)\][^"\n]*overflow-y-auto/.test(modal), 'the history list is compact and independently scrollable')
+ok(/orderShiftRows\(result\.shifts\)/.test(modal), 'the popup keeps unresolved historical open shifts ahead of closed rows')
+
+const dateIndex = summary.indexOf('fmtDateOnly(shift.business_date)')
+const idIndex = summary.indexOf('{shift.shift_code}')
+ok(dateIndex >= 0 && idIndex > dateIndex, 'every row leads with date and appends the compact shift id inline')
+for (const token of ['fmtClock24(shift.opened_at)', "fmtClock24(shift.closed_at)", 'shift.user_name', 'opening_float_usd', 'opening_float_khr', 'closing_counted_usd', 'closing_counted_khr']) {
+  ok(summary.includes(token), `default row renders ${token}`)
+}
+ok(/<ShiftCashBreakdown/.test(summary) && /shift\.reconciliation/.test(summary), 'detail renders the server reconciliation, never a locally recomputed difference')
+ok(!/shiftCashDifference/.test(summary), 'the summary no longer subtracts the opening float to invent a difference')
+for (const key of ['shift_recon_opening', 'shift_recon_additional_cash', 'shift_recon_cash_sales', 'fees', 'courier', 'shift_recon_expected', 'shift_recon_counted', 'shift_difference']) {
+  ok(breakdown.includes(`'${key}'`), `the breakdown carries the ${key} row`)
+}
+ok(/shift_difference_hint/.test(breakdown) && /shift_recon_review/.test(breakdown), 'the breakdown explains expected and surfaces the server review flag')
+ok(/detail \? \(/.test(summary) && /shift_duration/.test(summary) && /shift_cash_breakdown/.test(summary), 'duration and cash breakdown stay in detail rather than the default row')
+
+for (const capability of ['can_edit', 'can_close', 'can_reopen', 'can_cancel']) {
+  ok(modal.includes(`selected.capabilities.${capability}`), `detail action visibility comes from ${capability}`)
+}
+ok(!/hasPermission|canManage/.test(modal), 'the shift popup never derives actions from Settings permission')
+ok(/expectedRevision: shift\.revision/.test(modal) && /expectedRevision: edit\.expectedRevision/.test(modal), 'the amend draft captures and submits the row revision without a pre-submit refresh')
+// Opening and closing registrations share the per-currency blank/null rule;
+// invalid input is still never coerced.
+ok(/shiftOpeningCounts\(edit\.openingUsd, edit\.openingKhr\)/.test(modal)
+  && /shiftClosingCounts\(close\.closingUsd, close\.closingKhr\)/.test(modal)
+  && !/Number\((?:edit|close|reopen)\.[^)]+\) \|\| 0/.test(modal),
+  'opening and closing blanks remain unknown while invalid input is never coerced')
+// Sep 6 2026: the three shift timestamps moved off <input type="datetime-local">
+// onto the shared typed field (see tests/dateEntrySurfaces.test.ts). The native
+// control's `required` attribute went with it and is not missed -- nothing here
+// submits a <form>, so the only thing that ever gated the save is the
+// closeReason blocker printed beside the button, which is asserted instead.
+ok(/useState<CloseDraft>\(blankClose\)/.test(modal) && /<DateTimeEntryInput[^>]*value=\{close\.closedAt\}/.test(modal), 'historic close uses the shared date+time field and preserves the current local minute by default')
+ok(/const blankClose = \(\): CloseDraft => \(\{ closedAt: dateTimeLocal\(new Date\(\)\.toISOString\(\)\)/.test(modal), 'historic close pre-fills its required timestamp while leaving report-only counts blank')
+ok(/const closeReason = !close\.closedAt \? t\('shift_close_time_required'\)/.test(modal), 'only a missing/invalid close timestamp blocks the save; drawer counts never gate it')
+ok(!/type="datetime-local"/.test(modal), 'no shift timestamp may fall back to the native control that rejects a typed 9032026')
+ok(/shiftLocalDateTimeToIso\(close\.closedAt\)/.test(modal), 'entered historical close time is converted from Phnom Penh wall time to explicit ISO')
+ok(/row\.id !== result\.shift\.id/.test(modal) && /setSelected\(result\.shift\)/.test(modal), 'reopen adds the linked child without replacing the preserved parent')
+ok((modal.match(/await refreshDetails\(result\.shift\)/g) || []).length >= 4 && !/setAmendments\(\[\]\)[\s\S]{0,180}shift_reopen_saved/.test(modal), 'all lifecycle saves reload amendments, including close and reopen')
+ok(/amendmentFields\.filter/.test(modal) && /before\[field\].*after\[field\]/.test(modal), 'amendment detail renders whitelisted before-to-after field changes')
+ok(/selected\.capabilities\.can_cancel/.test(modal) && /maxLength=\{500\}/.test(modal), 'only the server can_cancel capability reveals the bounded reason form')
+ok(/cancelShift\(selected\.id, selected\.revision, cancelReason\.trim\(\), app\.user\?\.id\)/.test(modal), 'cancel submits the selected revision, required reason and authenticated retry scope')
+ok(/refreshMountedShiftState\(\)/.test(modal) && /SHIFT_STATE_CHANGED_EVENT/.test(modal), 'popup lifecycle writes refresh mounted current-shift consumers')
+ok(/status\?\: unknown[\s\S]{0,160}=== 409/.test(modal) && /detailsError[\s\S]{0,500}t\('refresh'\)/.test(modal), 'a stale write exposes an explicit detail reload path')
+ok(/shift\.cancelled_at/.test(summary) && /shift_cancel_preserved_hint/.test(summary), 'cancelled detail is labelled closed out and keeps recorded facts visible')
+
+ok(/branchId=\{branchId\}/.test(currentSummary) && !/setShowHistory|aria-expanded/.test(currentSummary), 'transaction pages launch floating history with their operational branch and never expand inline')
+ok(/<ShiftHistoryModal\b/.test(sales) && /label=\{translateOr\('shift', 'Shift'\)\}/.test(sales), 'Sales retains the compact shared Shift launcher in its stats actions')
+ok(/<ShiftHistoryModal\b/.test(fees) && !/<CurrentShiftSummary\b/.test(fees), 'Expenses uses the compact shared Shift launcher in its stats actions')
+ok(/<ShiftHistoryPanel branchId=\{primaryBranchFilterId\} compact label=\{t\('shift_code'\)\}/.test(pos), 'POS has a persistent branch-scoped Shift button')
+ok(/layer="nested"/.test(profile), 'Profile opens the shared shift popup above its parent modal')
+ok(/userId=\{currentUserId\}/.test(profile) && !/canManage=\{hasPermission/.test(profile), 'Profile shows the signed-in user while actions still come only from server capabilities')
+ok(!/ShiftHistoryPanel|Shift history/.test(settings), 'Settings contains no shift-history import or mount')
+ok(/<ShiftHistoryPanel userId=\{user\.id\}/.test(users), 'each Users row/card opens that user’s own shift history')
+ok(/view\.id === 'shift' \? <ShiftReport/.test(reports) && !/<CurrentShiftSummary\b|<ShiftHistoryPanel\b/.test(reports), 'Reports makes Shift a selectable report and removes the unconditional overview block')
+
+// O8. The POS End shift chain: the button calls the transport, the transport
+// posts to the close route, and the dialog shows the server's breakdown. The
+// route half is proved against a real database in
+// cloudflare/scripts/test-shift-close-chain-pure.cjs.
+ok(/onClick=\{\(\) => void submitClose\(\)\}/.test(gate) && /await closeShift\(\{/.test(gate),
+  'the End shift button submits through the close transport, not a local state flip')
+ok(transport.includes('`/api/shifts/${input.shiftId}/close`'), 'the close transport pins the exact shift route')
+ok(/publish\(next\)/.test(gate) && /if \(next\.shift\) setClosed\(next\.shift\)/.test(gate),
+  'the closed row the server returned is what the summary renders')
+ok(/<ShiftCashBreakdown reconciliation=\{drawerBreakdown\}/.test(gate)
+  && /drawerBreakdown = !shift\?\.reconciliation \? null\s*\n\s*: closed \? shift\.reconciliation/.test(gate),
+  'the close dialog shows the server drawer breakdown before and after the close')
+// One close affordance: the Modal header X. "Back" and "Done" were a second
+// and a third control doing exactly what it already does.
+ok(!/t\('back'\)/.test(gate) && !/t\('done'\)/.test(gate),
+  'the end-shift modal has one close affordance, and its footer only writes')
+ok(!/onClick=\{dismiss\}/.test(gate) && /onClose=\{dismiss\}/.test(gate),
+  'dismissal happens through the modal header alone')
+
+const en = JSON.parse(read('src/lang/en.json')) as Record<string, string>
+const km = JSON.parse(read('src/lang/km.json')) as Record<string, string>
+assert.equal(en.shift_counted_cash, 'Closing cash')
+assert.equal(km.shift_counted_cash, 'សាច់ប្រាក់បិទវេន')
+assert.equal(en.shift_recon_counted, 'Closing cash')
+assert.equal(km.shift_recon_counted, 'សាច់ប្រាក់បិទវេន')
+assert.equal(en.credit_awaiting_payment, 'Not Paid')
+assert.equal(km.credit_awaiting_payment, 'ប្រាក់ជំពាក់')
+checks += 6
+const usedShiftKeys = [...new Set([...`${modal}\n${summary}`.matchAll(/\bt\('([^']+)'\)/g)].map((match) => match[1]).filter((key) => key.startsWith('shift_')))]
+ok(usedShiftKeys.every((key) => key in en || key === 'shift_registered_cash_hint'), 'every popup shift key exists in English or is in the locale handoff')
+ok(usedShiftKeys.every((key) => key in km || key === 'shift_registered_cash_hint'), 'every popup shift key exists in Khmer or is in the locale handoff')
+const breakdownKeys = [...new Set([...breakdown.matchAll(/\bt\('([^']+)'\)/g)].map((match) => match[1]))]
+  .concat([...breakdown.matchAll(/: '([a-z_]+)',$/gm)].map((match) => match[1]))
+ok(breakdownKeys.length >= 12, `expected the breakdown to name its rows through the pack, found ${breakdownKeys.length}`)
+// Language packs are owned by the integration branch. This component's one
+// new key is handed off there and verified after the branches meet.
+const handedOffLocaleKeys = new Set(['shift_difference_informational'])
+ok(breakdownKeys.every((key) => key in en || handedOffLocaleKeys.has(key)), `unexpected breakdown keys missing from English: ${breakdownKeys.filter((key) => !(key in en) && !handedOffLocaleKeys.has(key)).join(', ')}`)
+ok(breakdownKeys.every((key) => key in km || handedOffLocaleKeys.has(key)), `unexpected breakdown keys missing from Khmer: ${breakdownKeys.filter((key) => !(key in km) && !handedOffLocaleKeys.has(key)).join(', ')}`)
+ok(/expected cash/i.test(en.shift_difference_hint) && !/opening cash\./i.test(en.shift_difference_hint),
+  'the difference hint explains the expected drawer, not the old opening-float subtraction')
+
+// Execute the real transport against a deterministic fetch boundary. The
+// server revision advances only on successful writes, so the middle request
+// proves a stale draft reaches the server with its original revision and is
+// rejected instead of silently overwriting the first change.
+const originalFetch = globalThis.fetch
+const originalWindow = globalThis.window
+const sessionValues = new Map<string, string>()
+const warnings: Array<{ errorId: string; channel: string; code: string; outcome?: string }> = []
+const resolvedWarnings: Array<{ errorId: string; channel: string; code: string }> = []
+globalThis.window = Object.assign(new EventTarget(), { localStorage: createReadableStorage(), sessionStorage: {
+  getItem: (key: string) => sessionValues.get(key) ?? null,
+  setItem: (key: string, value: string) => { sessionValues.set(key, value) },
+  removeItem: (key: string) => { sessionValues.delete(key) },
+} }) as unknown as Window & typeof globalThis
+window.addEventListener('sync:error', (event) => warnings.push((event as CustomEvent).detail))
+window.addEventListener('sync:error-resolved', (event) => resolvedWarnings.push((event as CustomEvent).detail))
+const originalServerUrl = getSyncServerUrl()
+const transportCalls: Array<{ url: string; body: Record<string, unknown> }> = []
+let serverRevision = 4
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const body = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>
+  transportCalls.push({ url: String(input), body })
+  if (String(input).endsWith('/api/shifts/17/close')) {
+    return new Response(JSON.stringify({
+      shift: { ...fixture(17, '2026-09-05', '2026-09-05T01:00:00.000Z', '2026-09-05T09:00:00.000Z'), reconciliation: reconciled },
+      policy: { scope_mode: 'per_account', admin_exempt: true },
+      exempt: false, needs_registration: false, is_open: false, can_end: false, already_closed: false,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+  if (body.expected_revision !== serverRevision) {
+    return new Response(JSON.stringify({ error: 'Shift changed concurrently. Reload and try again.', code: 'write_conflict', entity: 'shift_session' }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  serverRevision += 1
+  return new Response(JSON.stringify({
+    shift: { ...fixture(17, '2026-09-05', '2026-09-05T01:00:00.000Z', '2026-09-05T09:00:00.000Z'), revision: serverRevision },
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+}) as typeof fetch
+
+const amendInput: AmendShiftInput = {
+  actorId: 4,
+  expectedRevision: 4,
+  reason: 'Correct count',
+  openedAt: '2026-09-05T01:00:00.000Z',
+  openingFloatUsd: 10,
+  openingFloatKhr: 40_000,
+  openingNote: null,
+  closedAt: '2026-09-05T09:00:00.000Z',
+  closingCountedUsd: 15,
+  closingCountedKhr: 60_000,
+  closingNote: null,
+}
+
+try {
+  __resetApiHealthForTests()
+  __resetApiWriteDedupeForTests()
+  setSyncServerUrl('https://sync.example.test')
+
+  const firstAmend = await amendShift(17, amendInput)
+  assert.equal(firstAmend.shift.revision, 5)
+  await assert.rejects(() => amendShift(17, amendInput), /changed concurrently/i)
+  const latestAmend = await amendShift(17, { ...amendInput, expectedRevision: 5, reason: 'Second correction' })
+  assert.equal(latestAmend.shift.revision, 6)
+  assert.deepEqual(transportCalls.map((call) => call.body.expected_revision), [4, 4, 5])
+  checks += 4
+
+  // The close transport, driven for real: it must POST to the shift close
+  // route and hand back the server's reconciliation untouched.
+  const closedAt = '2026-09-05T09:00:00.000Z'
+  const closeState = await closeShift({ shiftId: 17, expectedRevision: 6, actorId: 4, closedAt, branchId: 2, closingCountedUsd: 13.5, closingCountedKhr: 135_000 })
+  const closeCall = transportCalls[transportCalls.length - 1]
+  assert.ok(closeCall.url.endsWith('/api/shifts/17/close'), `close posted to ${closeCall.url}`)
+  assert.deepEqual(closeCall.body, {
+    expected_revision: 6, closed_at: closedAt, client_request_id: closeCall.body.client_request_id,
+    closing_counted_usd: 13.5, closing_counted_khr: 135_000, closing_note: null,
+  })
+  assert.deepEqual(closeState.shift?.reconciliation, reconciled)
+  assert.deepEqual(closeState.shift?.reconciliation?.difference, { usd: -28, khr: 55_000 })
+  checks += 4
+
+  // Execute the actual transport through lost acknowledgements and reloads.
+  const lostBodies: Record<string, unknown>[] = []
+  const receipts = new Map<string, object>()
+  let effects = 0
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body))
+    lostBodies.push(body)
+    assert.ok(sessionValues.size > 0, 'request is durably frozen before fetch')
+    const requestId = String(body.client_request_id)
+    if (!receipts.has(requestId)) {
+      effects += 1
+      receipts.set(requestId, { shift: { ...fixture(18, '2026-09-05', '2026-09-05T01:00:00.000Z', closedAt), revision: 1 }, already_closed: true, is_open: false })
+      throw new TypeError('Lost response after commit')
+    }
+    return new Response(JSON.stringify(receipts.get(requestId)), { status: 200 })
+  }) as typeof fetch
+  const lostInput = { actorId: 4, expectedRevision: 0, closedAt, closingCountedUsd: null, closingCountedKhr: 0 }
+  const reconciledClose = await closeShiftById(18, lostInput)
+  assert.equal(reconciledClose.shift.id, 18)
+  assert.equal(effects, 1)
+  assert.deepEqual(lostBodies[0], lostBodies[1], 'automatic reconciliation replays the exact identity and body')
+  assert.equal(pendingShiftMutation(4, 18), null, 'proven commit clears the durable retry')
+  globalThis.fetch = (async () => { throw new TypeError('Still offline') }) as typeof fetch
+  await assert.rejects(() => closeShiftById(19, lostInput))
+  const saved = pendingShiftMutation(4, 19)
+  assert.equal(saved?.action, 'close')
+  assert.equal(saved?.body.closing_counted_usd, null)
+  assert.equal(pendingShiftMutation(5, 19), null, 'retry state is isolated from a different signed-in operator')
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body))
+    assert.deepEqual(body, saved?.body, 'reopening the form cannot replace its unresolved request with changed counts')
+    return new Response(JSON.stringify({ shift: { ...fixture(19, '2026-09-05', '2026-09-05T01:00:00.000Z', closedAt), revision: 1 } }), { status: 200 })
+  }) as typeof fetch
+  await closeShiftById(19, { ...lostInput, closingCountedUsd: 999 })
+  assert.equal(pendingShiftMutation(4, 19), null)
+  globalThis.fetch = (async () => { throw new TypeError('No acknowledgement') }) as typeof fetch
+  await assert.rejects(() => closeShiftById(20, lostInput))
+  globalThis.fetch = (async () => new Response(JSON.stringify({ error: 'Reload the changed shift', code: 'shift_request_superseded', outcome: 'rejected' }), { status: 409 })) as typeof fetch
+  await assert.rejects(() => closeShiftById(20, lostInput), (error: any) => error.outcome === 'rejected')
+  assert.equal(pendingShiftMutation(4, 20), null, 'authoritatively superseded CAS releases the pending draft for refresh')
+
+  // A prior unknown must not poison a later final rejection. Drive the real
+  // apiFetch + route path and verify exact warning and actor/request isolation.
+  for (const status of [403, 400, 404]) {
+    const id = 100 + status
+    globalThis.fetch = (async () => { throw new TypeError('No acknowledgement') }) as typeof fetch
+    await assert.rejects(() => closeShiftById(id, lostInput), (error: any) => error.outcome === 'unknown')
+    const priorWarning = warnings.at(-1)!
+    const exactBody = pendingShiftMutation(4, id)!.body
+    await assert.rejects(() => closeShiftById(id, { ...lostInput, actorId: 5 }))
+    const otherActorWarning = warnings.at(-1)!
+    const otherActorBody = pendingShiftMutation(5, id)!.body
+    await assert.rejects(() => closeShiftById(id + 1, lostInput))
+    const otherShiftWarning = warnings.at(-1)!
+    const warningsBefore = warnings.length
+    const resolvedBefore = resolvedWarnings.length
+    let attempts = 0
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      attempts += 1
+      assert.deepEqual(JSON.parse(String(init?.body)), exactBody, 'final rejection uses the saved body, never the changed draft')
+      return new Response(JSON.stringify({ error: 'Shift request rejected', code: `shift_rejected_${status}` }), { status })
+    }) as typeof fetch
+    await assert.rejects(() => closeShiftById(id, { ...lostInput, closingCountedUsd: 999 }),
+      (error: any) => error.status === status && error.outcome === 'rejected' && error.code === `shift_rejected_${status}`)
+    assert.equal(attempts, 1, 'a final rejection is never automatically retried')
+    assert.equal(pendingShiftMutation(4, id), null)
+    assert.deepEqual(pendingShiftMutation(5, id)?.body, otherActorBody)
+    assert.ok(pendingShiftMutation(4, id + 1), 'another endpoint remains pending')
+    assert.deepEqual(resolvedWarnings.slice(resolvedBefore), [{ errorId: priorWarning.errorId, channel: priorWarning.channel, code: priorWarning.code }])
+    assert.ok(!resolvedWarnings.some(row => row.errorId === otherActorWarning.errorId || row.errorId === otherShiftWarning.errorId))
+    assert.ok(warnings.slice(warningsBefore).every(row => row.outcome !== 'unknown'), 'final rejection does not emit another unknown warning')
+    checks += 10
+  }
+  for (const status of [408, 429, 503]) {
+    const id = 1000 + status
+    globalThis.fetch = (async () => { throw new TypeError('No acknowledgement') }) as typeof fetch
+    await assert.rejects(() => closeShiftById(id, lostInput))
+    const savedBody = pendingShiftMutation(4, id)!.body
+    const resolvedBefore = resolvedWarnings.length
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: 'Try later' }), { status })) as typeof fetch
+    await assert.rejects(() => closeShiftById(id, lostInput), (error: any) => error.outcome === 'unknown')
+    assert.deepEqual(pendingShiftMutation(4, id)?.body, savedBody, 'retryable outcome retains exact pending request')
+    assert.equal(resolvedWarnings.length, resolvedBefore, 'retryable outcome cannot resolve a warning')
+    checks += 3
+  }
+  // A newer saved identity in the same slot must survive an older response.
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body))
+    sessionValues.set('businessos_shift_request_v1:4:POST:/api/shifts/9999/close', JSON.stringify({ ...body, client_request_id: 'newer_request_9999' }))
+    return new Response(JSON.stringify({ error: 'Shift request rejected' }), { status: 400 })
+  }) as typeof fetch
+  await assert.rejects(() => closeShiftById(9999, lostInput))
+  assert.equal(pendingShiftMutation(4, 9999)?.body.client_request_id, 'newer_request_9999')
+  checks += 1
+  assert.equal(shiftTimestampIsFuture('2026-09-05T09:01:00.000Z', Date.parse(closedAt)), true)
+  assert.equal(shiftTimestampIsFuture(closedAt, Date.parse(closedAt)), false)
+  assert.throws(() => shiftLocalDateTimeToIso('2026-02-30T12:00'), /Invalid/)
+  await assert.rejects(() => amendShift(19, { ...amendInput, openedAt: new Date(Date.now() + 60_000).toISOString() }), /future/)
+  checks += 16
+
+  const callsBeforeInvalidCounts = transportCalls.length
+  await assert.rejects(
+    () => amendShift(17, { ...amendInput, expectedRevision: 6, openingFloatUsd: '' as unknown as number }),
+    /Opening USD count must be an explicit non-negative number/,
+  )
+  await assert.rejects(
+    () => closeShiftById(17, { expectedRevision: 6, closedAt: amendInput.closedAt!, closingCountedUsd: '' as unknown as number, closingCountedKhr: 1 }),
+    /Closing USD count must be an explicit non-negative number/,
+  )
+  await assert.rejects(
+    () => closeShiftById(17, { expectedRevision: 6, closedAt: amendInput.closedAt!, closingCountedUsd: 1, closingCountedKhr: Number.NaN }),
+    /Closing KHR count must be an explicit non-negative number/,
+  )
+  await assert.rejects(
+    () => reopenShift(17, { expectedRevision: 6, reason: 'Try again', openingFloatUsd: -1, openingFloatKhr: 0 }),
+    /Opening USD count must be an explicit non-negative number/,
+  )
+  assert.equal(transportCalls.length, callsBeforeInvalidCounts, 'invalid counts must fail before fetch')
+  checks += 5
+} finally {
+  globalThis.window = originalWindow
+  globalThis.fetch = originalFetch
+  setSyncServerUrl(originalServerUrl)
+  __resetApiWriteDedupeForTests()
+  __resetApiHealthForTests()
+}
+
+console.log(`shiftManagement: all ${checks} checks passed`)

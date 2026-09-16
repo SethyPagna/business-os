@@ -84,9 +84,22 @@ check('a job created before this existed also needs the button', () => {
 })
 
 // ---- the engine must actually consult it ----
-check('both analyze and apply gate image matching on the flag', () => {
-  const gated = engine.match(/&& shouldWireImages\((?:meta\.policyJson|job\.policy_json)\)/g) || []
-  assert.equal(gated.length, 2, 'analyze and apply must both be gated, or one phase wires and the other does not')
+check('analyze and both apply authority paths gate image matching on the flag', () => {
+  assert.match(
+    engine,
+    /if \(meta\.type === 'products' && !imageMatchCache && shouldWireImages\(meta\.policyJson\)\)/,
+    'analyze must not match images until the job opts in',
+  )
+  assert.match(
+    engine,
+    /if \(job\.type === 'products' && authority\.allowProductImageWrites && !imageMatchCache && shouldWireImages\(job\.policy_json\)\)/,
+    'authorized apply must not match or rename images until the job opts in',
+  )
+  assert.match(
+    engine,
+    /else if \(job\.type === 'products' && !authority\.allowProductImageWrites && shouldWireImages\(job\.policy_json\)\)/,
+    'denied apply must only resolve effective image mutations for an opted-in job',
+  )
   assert.ok(
     !/if \((?:meta|job)\.type === 'products' && !imageMatchCache\) \{/.test(engine),
     'the old ungated branch must be gone',

@@ -1,0 +1,735 @@
+/* reports-surface.css -- the `--ui-*` layer the kit primitives read, plus the
+   Khmer line-box floor for this surface.
+
+   WHY THIS FILE EXISTS
+   --------------------
+   The kit primitives (shared/kit/*) were ported onto the deployed line in
+   732838a5, but `styles/tokens.css` -- the P2-1 file that DECLARES every
+   `--ui-surface` / `--ui-line` / `--ui-row-h` / `--ui-size-body` the kit
+   reads -- lives on the rc/p2-1-kit line and did NOT come with them. An
+   undeclared custom property makes `var(--ui-row-h)` invalid at
+   computed-value time, so on this line the kit was silently rendering with:
+     - `height: var(--ui-row-h)` -> invalid -> `height: auto` (no row rhythm)
+     - `font-size: var(--ui-size-body)` -> invalid -> inherited 14px
+     - `border-color: var(--ui-line)` -> invalid -> currentColor-ish/none
+   i.e. no hairlines, no zebra, no density control at all. Declaring them is
+   a prerequisite for the density work, not a cosmetic extra.
+
+   Only the kit (shared/kit/*), this reports directory and ReportsHub.tsx read
+   any `--ui-<surface|ink-2|ink-3|line|line-2|row-h|size-*|accent-soft|
+   accent-ink|radius-sm|radius-lg|focus|danger|ground>` token -- verified by
+   grep across src/ -- so declaring them at `:root` restyles the reports
+   surface and nothing else. Values are mapped onto the app's EXISTING
+   gray/neutral palette (main.css `:root` / `.dark` --dm-* set) rather than
+   P2-1's ivory/charcoal palette, so Reports keeps looking like the rest of
+   the deployed app instead of importing a second design language.
+
+   DENSITY (user, Part 586: "the tab excel style can be more compact and
+   closer, the fields and value can be closer much closer"). The numbers here
+   are deliberately tighter than P2-1's: row 32px -> 24px, body 13px -> 12px,
+   meta 12px -> 11px, cell padding 12px -> 6px. Compaction is spent on
+   PADDING, never on the line box -- see the Khmer block below for why. */
+
+:root {
+  /* --- surfaces & ink (light) --- */
+  --ui-ground: #f9fafb;          /* main.css body background */
+  --ui-surface: #ffffff;         /* .card background */
+  --ui-surface-2: #f3f4f6;       /* zebra / hover -- gray-100 */
+  --ui-ink: #111827;             /* main.css body color -- gray-900 */
+  --ui-ink-2: #4b5563;           /* gray-600 -- labels, meta */
+  --ui-ink-3: #9ca3af;           /* gray-400 -- placeholders, notes */
+  --ui-line: rgba(17, 24, 39, .10);
+  --ui-line-2: rgba(17, 24, 39, .20);
+  --ui-danger: #b91c1c;
+  --ui-focus: var(--ui-accent, #9c7a3c);
+  --ui-accent-ink: #ffffff;
+  --ui-accent-soft: color-mix(in srgb, var(--ui-accent, #9c7a3c) 12%, transparent);
+  /* Warning tint -- the income statement's awaiting-payment block (S4R3-6).
+     The owner asked for "a yellow-highlighted block at the bottom with the
+     unpaid subtotals on their own", so the tint is load-bearing: it is what
+     stops a theoretical figure being read as a realised one. Amber 50/200/800
+     from the app's existing palette, not a new hue. */
+  --ui-warn-soft: #fffbeb;
+  --ui-warn-line: #fde68a;
+  --ui-warn-ink: #92400e;
+
+  /* --- radii (main.css already owns --ui-radius) --- */
+  --ui-radius-sm: 6px;
+  --ui-radius-lg: 12px;
+
+  /* --- density --- */
+  --ui-size-body: 12px;
+  --ui-size-meta: 11px;
+  --ui-row-h: 36px;
+  /* Cell padding, read by kit DenseTable. The single biggest source of the
+     "fields and value are far apart" complaint: 12px each side put 24px of
+     dead air between a label column and its value column. */
+  --ui-cell-px: 6px;
+  --ui-cell-py: 5px;
+  /* Receipt style: the label/value line box. */
+  --ui-receipt-lh: 16px;
+  --ui-receipt-gap: 0.75rem;
+
+  /* --- page-local stacking (typed mirror: shared/kit/zLayers.ts) --- */
+  --z-sticky: 20;
+  --z-dropdown: 30;
+  --z-fold: 1020;
+  --z-modal: 1050;
+  --z-modal-2: 1060;
+  --z-toast: 1100;
+}
+
+:root.dark,
+.dark {
+  --ui-ground: var(--dm-page, #171717);
+  --ui-surface: var(--dm-card, #262626);
+  --ui-surface-2: var(--dm-card-hover, #303030);
+  --ui-ink: var(--dm-text, #fafafa);
+  --ui-ink-2: var(--dm-text-3, #d4d4d4);
+  --ui-ink-3: var(--dm-text-4, #a3a3a3);
+  --ui-line: var(--dm-border, rgba(82, 82, 82, .6));
+  --ui-line-2: var(--dm-border-strong, #404040);
+  --ui-danger: #f87171;
+  --ui-accent-ink: #1a1a1a;
+  /* Dark mode: the same amber, inverted. A #fffbeb block on a #262626 card
+     would be a white slab, which reads as an error rather than a highlight. */
+  --ui-warn-soft: rgba(180, 83, 9, .18);
+  --ui-warn-line: rgba(217, 119, 6, .45);
+  --ui-warn-ink: #fcd34d;
+}
+
+/* ---------------------------------------------------------------------------
+   The income statement's awaiting-payment block (S4R3-6).
+
+   The excel style is one <table>, so the block cannot be a bordered box the
+   way the receipt style's <div> can -- the rows are tinted instead, and the
+   group's first row takes the top rule that separates theoretical money from
+   the realised total above it. Keyed off the data attribute the Overview
+   writes, so no report row anywhere else picks this up. */
+
+[data-reports-hub] tr[data-statement-group='pending'] > td {
+  background: var(--ui-warn-soft);
+}
+
+[data-reports-hub] tr[data-statement-group='pending'] + tr:not([data-statement-group='pending']) > td,
+[data-reports-hub] tr[data-statement-group='pending']:first-of-type > td {
+  border-top: 1px solid var(--ui-warn-line);
+}
+
+[data-reports-hub] table {
+  font-variant-numeric: tabular-nums;
+}
+
+[data-reports-hub] th,
+[data-reports-hub] td {
+  border-bottom-color: var(--ui-line);
+}
+
+[data-reports-hub] td:not(:first-child),
+[data-reports-hub] th:not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+[data-reports-hub] {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+  /* THE SIDE GUTTER, at every width. Owner, Sep 6: "ios pwa seems very left
+     edged, meaning no margins properly".
+
+     ROOT CAUSE. ReportsHub.tsx rendered
+     `embedded ? 'space-y-2' : 'space-y-2 p-2 sm:p-3'`, and SalesHubPage.tsx
+     -- the only mount point in the app -- always passes `embedded`. The
+     padded branch was dead code, so below 768px (where the first
+     `padding-inline` media query starts) the hub had NO horizontal padding
+     at all. The app shell's `<main>` pads by `env(safe-area-inset-left)`,
+     but that inset is 0px in portrait, which is exactly how a phone holds a
+     PWA -- so on an iPhone in standalone mode nothing stood between the
+     report and the rounded display edge. The fork is gone from the TSX; the
+     gutter lives here, where it can also carry the inset.
+
+     `max()`, not `+`: <main> already pads by the physical inset below md, so
+     adding it again would double it in landscape. This is a FLOOR -- 12px of
+     design gutter normally, the notch inset if that is ever larger (e.g. if
+     this surface is ever hosted outside that shell). The 0px fallbacks
+     matter: a bare `env()` is invalid on a browser without the feature and
+     would drop the whole declaration, reproducing the bug on desktop. */
+  padding-inline: max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-right, 0px));
+  padding-block: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   THE SIZE TOKENS THIS SURFACE OWNS, and the one multiplier Khmer moves.
+
+   Every size in the report is stated as `calc(<latin px> * var(--ui-km-boost))`
+   rather than a flat px. The reason is cascade mechanics, not style: the
+   desktop tier below re-declares `--ui-size-body` at the SAME specificity as
+   this rule, so a Khmer block that set a flat larger px here would simply be
+   overwritten at >=1024 and the boost would vanish on exactly the wide
+   screens the owner reads reports on. A multiplier survives, because the
+   Khmer rule at the bottom of this file (specificity 0-2-1) wins the
+   `--ui-km-boost` lookup on the element while each tier keeps owning its own
+   base size.
+
+   The h2/h3 tokens are declared here for the first time on this line. The
+   kit's SectionHeader/EmptyState/Fold ask for `--ui-size-h2` / `--ui-size-h3`,
+   which were declared NOWHERE -- an undeclared custom property makes
+   `font-size: var(--ui-size-h2)` invalid at computed-value time, so every
+   report section title was silently rendering at inherited body size. Scoped
+   to this surface (not `:root`) so no other kit caller changes size. */
+[data-reports-hub],
+.reports-fold-panel,
+[data-reports-fold] {
+  --ui-km-boost: 1;
+  --ui-size-body: calc(12px * var(--ui-km-boost, 1));
+  --ui-size-meta: calc(11px * var(--ui-km-boost, 1));
+  --ui-size-h2: calc(15px * var(--ui-km-boost, 1));
+  --ui-size-h3: calc(14px * var(--ui-km-boost, 1));
+  /* The receipt sheet's two smallest sizes have their OWN tokens, and are
+     deliberately absent from the >=1024 tier below.
+
+     They used to be hard-coded `text-[11px]` / `text-[10px]`, which Khmer
+     could not follow. Pointing them at `--ui-size-meta` fixed that and broke
+     something else: that token is 11px at the root but 13px from 1024px up, so
+     ENGLISH block meta went 11 -> 13px and the English line note went 10 ->
+     13px on every desktop width -- a change to Latin type in a lane whose
+     mandate was "make the KHMER text larger". Their own boost-aware tokens,
+     declared once, keep English at exactly 11/10px at every width (as at
+     6e3abfea) while Khmer reads 13.2/12px. */
+  --ui-size-receipt-meta: calc(11px * var(--ui-km-boost, 1));
+  --ui-size-note: calc(10px * var(--ui-km-boost, 1));
+  --ui-lh-heading: 1.3;
+  --ui-font-display: inherit;
+}
+
+/* Screen reports are read as documents, so their text and tabular figures
+   run two pixels larger than the original dense spreadsheet scale. Keep the
+   override explicitly screen-only: receipt/report print geometry continues
+   to use the established tokens and line boxes. */
+@media screen {
+  [data-reports-hub],
+  .reports-fold-panel,
+  [data-reports-fold] {
+    --ui-size-body: calc(14px * var(--ui-km-boost, 1));
+    --ui-size-meta: calc(13px * var(--ui-km-boost, 1));
+    --ui-size-h2: calc(17px * var(--ui-km-boost, 1));
+    --ui-size-h3: calc(16px * var(--ui-km-boost, 1));
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   .report-segment -- THE segment shell (owner, Sep 6: "use borders for all
+   segments like up down, left and right, so see line borders").
+
+   One class, applied by ReportFrame (so every report view is a segment
+   exactly once), by the hub's desktop control row and shift block, by the
+   options fold's groups and by every receipt card. Deliberately NOT per-file
+   border utilities: the md+ layouts had already drifted into dropping the
+   frame (`md:border-0 md:bg-transparent` on the receipt sheet), which is the
+   drift a single class prevents.
+
+   The inset is a hairline: enough that the border never touches ink, never
+   enough to read as padding. Compactness is not being spent here -- the extra
+   room on a wide screen goes into the centred column's margins and into type
+   size, per the same message. */
+.report-segment {
+  min-width: 0;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-surface);
+  padding: 5px 7px;
+}
+
+/* A segment's two STATE tints have to be declared HERE, not as Tailwind
+   background utilities on the element.
+
+   `.report-segment` and `.bg-\[var\(--ui-warn-soft\)\]` have identical
+   specificity (0-1-0), so which one paints depends on stylesheet order -- and
+   this file ships in the lazily-imported ReportsHub CSS chunk, whose <link>
+   the browser appends AFTER the main stylesheet that carries the utilities
+   (verified in dist/: `.report-segment` is in ReportsHub-*.css, the two
+   `bg-[var(--ui-*-soft)]` utilities are in index-*.css). The segment
+   background would therefore paint over both tints. That is not cosmetic for
+   the warning one: the awaiting-payment block's tint is load-bearing
+   (S4R3-6) -- it is what stops a theoretical figure being read as a realised
+   one. An attribute selector (0-2-0) settles it by specificity instead of by
+   bundling order.
+
+   (`hover:` utilities are already 0-2-0 and keep working untouched.) */
+.report-segment[data-segment-selected='true'] {
+  background: var(--ui-accent-soft);
+}
+
+.report-segment[data-segment-highlight='true'] {
+  border-color: var(--ui-warn-line);
+  background: var(--ui-warn-soft);
+}
+
+/* The report filter is a compact, spreadsheet-like sheet inside the shared
+   Fold. Its darker grid belongs only to this report surface; the shared Fold
+   and every other caller keep their existing appearance. */
+.reports-filter-fold {
+  max-width: calc(100vw - 16px);
+}
+
+.reports-filter-grid {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--ui-line-2);
+  border-radius: var(--ui-radius);
+  background: var(--ui-line-2);
+}
+
+.reports-filter-group {
+  min-width: 0;
+  padding: 7px 8px;
+  background: var(--ui-surface-2);
+}
+
+.reports-filter-group > div:last-child,
+.reports-filter-group button {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* The trigger stays a high-contrast white surface in light mode even when a
+   count is active. Dark mode follows the scoped surface token. */
+.reports-filter-trigger {
+  min-height: 40px;
+  height: 40px;
+  border-color: var(--ui-ink-2);
+  background: var(--ui-surface);
+  color: var(--ui-ink);
+}
+
+/* IconButton normally takes both dimensions from --ui-control-h. Reports
+   supply their own surface tokens and that shared token is intentionally not
+   one of them, so the compact Filter used to collapse to its 18px glyph
+   width. Give only the icon form the same explicit 40px square as Manage;
+   the labelled desktop button keeps its content-driven width. */
+@media (max-width: 767px) {
+  .reports-filter-trigger {
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    flex: 0 0 40px;
+  }
+}
+
+/* One active report control for every view: the selected option is the
+   heading and sits with Filters + Show. ReportFrame replaces its static
+   title with this row, so Overview never renders a second title beside
+   "Overview (all)". */
+.reports-frame-header > :first-child,
+.reports-frame-header > :first-child > h2,
+.reports-title-actions {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.reports-frame-header { width: 100%; flex-wrap: nowrap; }
+.reports-frame-header > :first-child > h2 { overflow: visible; }
+
+.reports-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.reports-view-picker {
+  display: inline-flex;
+  min-width: 0;
+  width: clamp(5.5rem, 28vw, 14rem);
+  flex: 0 0 clamp(5.5rem, 28vw, 14rem);
+}
+
+.reports-view-picker > [data-app-select-root='true'] { width: 100%; }
+.reports-view-picker [data-app-select-selected='true'] {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  text-overflow: clip;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+.reports-view-picker [data-app-select-selected='true']::-webkit-scrollbar { display: none; }
+.reports-title-actions > :first-child { min-width: 0; }
+.reports-title-actions > :not(:first-child) { flex: 0 0 auto; }
+.reports-show-action { min-height: 40px; height: 40px; flex: 0 0 auto; }
+
+.reports-frame-menu,
+.reports-frame-menu button {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  flex: 0 0 40px;
+}
+
+.reports-frame-secondary-actions {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
+.reports-frame-secondary-actions > * { flex: 0 0 auto; }
+
+/* The kit's overflow menu stays horizontal everywhere else. Reports alone
+   use the vertical convention requested for their export/action menu. */
+[data-reports-hub] .lucide-more-horizontal { transform: rotate(90deg); }
+
+/* Overview breakdowns are navigation-like buttons directly after the filter
+   controls. Long English/Khmer labels scroll inside this strip rather than
+   widening the document or the report frame. */
+.reports-overview-tabs {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding: 1px 0 3px;
+  scrollbar-width: thin;
+}
+
+.reports-overview-tabs > span {
+  flex: 0 0 auto;
+}
+
+.reports-overview-tabs button {
+  min-height: 36px;
+  white-space: nowrap;
+}
+
+/* The live-shift block is the one report segment whose BODY is a component
+   shared with three non-report callers (FeesPage, Sales, ShiftHistoryModal),
+   so ShiftSummary keeps drawing its own rounded gray-200 card and that card
+   cannot be removed at the source. Inside the report the card was a second
+   rectangle nested in the segment hairline, in the wrong ink and at four
+   times the inset -- and the same block drew NO frame at all while loading,
+   on a failed read, or when there is no open shift. The segment now supplies
+   the one frame in every state and this rule takes the private one out.
+
+   By SPECIFICITY (0-3-0), not by utility order: the Tailwind classes on that
+   element are 0-1-0 and their dark: variants 0-2-0, and Tailwind emits
+   .bg-transparent BEFORE .bg-white, .rounded-none before .rounded-xl and .p-0
+   before .p-3 -- so passing those utilities down would have lost three of the
+   four overrides to source order. Same argument as
+   .report-segment[data-segment-*] above.
+
+   Descendant matching cannot over-reach: .report-shift-plain is spelled on
+   exactly one ShiftSummary inside ShiftReport, and specificity is unchanged
+   at 0-3-0. */
+[data-reports-hub] .report-segment .report-shift-plain {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+.reports-mobile-controls {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-ground);
+}
+
+.reports-mobile-primary {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 8px;
+}
+
+.reports-mobile-primary > * { min-width: 0; max-width: 100%; flex: 1 1 10rem; }
+.reports-mobile-primary > :last-child { flex: 2 1 20rem; }
+.reports-mobile-primary input,
+.reports-mobile-primary button { min-height: 44px; height: auto; }
+.reports-mobile-controls input[type='search'] { min-height: 44px; }
+.reports-mobile-primary [data-app-select-selected] {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.reports-mobile-range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  min-height: 44px;
+}
+.reports-mobile-range > span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.reports-mobile-presets {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
+.reports-mobile-preset {
+  min-height: 36px;
+  flex: 0 0 auto;
+  border: 1px solid var(--ui-line-2);
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: var(--ui-surface);
+  color: var(--ui-ink-2);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.reports-mobile-preset[aria-pressed='true'] {
+  border-color: #2f3945;
+  background: #2f3945;
+  color: #fff;
+}
+
+.reports-mobile-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.reports-mobile-actions > span,
+.reports-mobile-actions > span > button { width: 44px; min-width: 44px; height: 44px; }
+.reports-mobile-show { width: auto; min-width: 5.5rem; min-height: 44px; padding-inline: 16px; }
+
+.reports-desktop-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.reports-desktop-primary { flex-direction: row; flex-wrap: wrap; max-width: 100%; }
+.reports-desktop-primary > :first-child { flex: 0 1 auto; }
+.reports-desktop-controls .reports-mobile-presets { flex: 0 1 auto; }
+.reports-desktop-controls .reports-mobile-preset { flex: 0 0 auto; font-size: 13px; }
+
+@media (max-width: 359px) {
+  .reports-mobile-range { font-size: 12px; gap: 4px; padding-inline: 8px; }
+}
+
+/* Embedded reports need a gutter beside the sidebar at tablet widths too.
+   Keep phone density unchanged; wider desktops retain the larger gutter below.
+
+   EVERY tier repeats the `max(..., env(...))` floor, and that repetition is
+   load-bearing rather than defensive. `padding-inline` is a single property:
+   a tier that re-states it as a bare `clamp()` REPLACES the base rule's
+   floored value, so the safe-area inset would be paid below 768px and dropped
+   above it. And 768px is exactly where <main> stops paying it too
+   (App.tsx:1943 `pl-[env(safe-area-inset-left)] ... md:pl-0 md:pr-0`), while
+   the only orientation with a non-zero left/right inset -- landscape -- puts
+   every modern iPhone at >=812px. Bare clamps here reproduced the
+   "very left edged" report one media query higher up. */
+@media (min-width: 768px) {
+  [data-reports-hub] {
+    padding-inline: max(clamp(12px, 2vw, 24px), env(safe-area-inset-left, 0px)) max(clamp(12px, 2vw, 24px), env(safe-area-inset-right, 0px));
+  }
+}
+
+/* Desktop-only, report-local readability. Do not enlarge global UI tokens
+   or reduce the existing mobile/Khmer text and line-height floors. */
+@media (min-width: 1024px) {
+  /* SIZE tokens, shared with the PORTALLED fold.
+
+     A `Fold` renders into document.body, i.e. outside `[data-reports-hub]`, so
+     it inherits nothing from the hub and has to be named on its own. It was
+     named in the root token block and in the Khmer block but NOT here, so a
+     detail fold opened on a desktop report fell back to 12px/11px while the
+     report behind it read at 14px/13px -- the sibling drift, restated in the
+     cascade. Layout stays in the hub-only rule below on purpose: a floating
+     panel does not want a 74rem cap, auto margins or a 56px gutter. */
+  [data-reports-hub],
+  .reports-fold-panel,
+  [data-reports-fold] {
+    /* Boost-aware, never a flat px -- see the token block above: a flat px
+       here would silently cancel the Khmer boost from 1024px up. */
+    --ui-size-body: calc(14px * var(--ui-km-boost, 1));
+    --ui-size-meta: calc(13px * var(--ui-km-boost, 1));
+    --ui-size-h2: calc(17px * var(--ui-km-boost, 1));
+    --ui-size-h3: calc(15px * var(--ui-km-boost, 1));
+    --ui-receipt-lh: 24px;
+  }
+
+  [data-reports-hub] {
+    /* O9 names >=1024 too: the old clamp(20px, 3vw, 48px) gave 30.7px at
+       1024, indistinguishable from the tablet gutter. 3.5vw with a 28px floor
+       reads as a real margin from 1024 and hands over smoothly to the 1280
+       tier (44.8px at 1279 -> 51.2px at 1280). */
+    padding-inline: max(clamp(28px, 3.5vw, 56px), env(safe-area-inset-left, 0px)) max(clamp(28px, 3.5vw, 56px), env(safe-area-inset-right, 0px));
+    /* THE CENTRED DOCUMENT COLUMN (owner, Sep 6: "in small and large screens
+       move them more to the center...compact them").
+
+       This cap used to live in the 1536 tier at 96rem, so 1024-1535 ran the
+       full content width and 1920 still showed a 1536px slab. 74rem (1184px)
+       is a reading width: the widest report table (the compare-on income
+       statement, five columns) still fits inside it without reaching its own
+       horizontal scroller, and every tier from the first desktop breakpoint
+       up is now centred rather than only the widest one.
+
+       `width: 100%` is load-bearing and must stay: `[data-reports-hub]` is a
+       flex item of the page-scroll column, and per CSS Flexbox 9.6 a flex
+       item with an `auto` cross-axis margin is NOT stretched -- it shrinks to
+       fit-content, which made an earlier 96rem cap moot and floated the whole
+       hub at ~414px inside a 1700px column. The explicit width gives the auto
+       margins something to centre. */
+    width: 100%;
+    max-width: 74rem;
+    margin-inline: auto;
+  }
+  [data-reports-hub] .reports-overview-statement {
+    max-width: 34rem;
+    margin-inline: auto;
+  }
+}
+
+@media screen and (min-width: 1024px) {
+  [data-reports-hub],
+  .reports-fold-panel,
+  [data-reports-fold] {
+    --ui-size-body: calc(16px * var(--ui-km-boost, 1));
+    --ui-size-meta: calc(15px * var(--ui-km-boost, 1));
+    --ui-size-h2: calc(19px * var(--ui-km-boost, 1));
+    --ui-size-h3: calc(17px * var(--ui-km-boost, 1));
+  }
+}
+
+/* Wide desktop: the 1024 clamp saturates at 48px from 1600px, which reads as
+   almost no margin once a >=1280 monitor is the norm (user, Sep 6: "more
+   side margin on large screens"). These two tiers only ADD to the 1024 rule
+   above (later, more specific min-width wins the cascade at equal
+   specificity) -- they never touch the 768/1024 gutters or the rounding
+   fix, so tablet and the existing desktop floor are unchanged. */
+@media (min-width: 1280px) {
+  [data-reports-hub] {
+    padding-inline: max(clamp(40px, 4vw, 64px), env(safe-area-inset-left, 0px)) max(clamp(40px, 4vw, 64px), env(safe-area-inset-right, 0px));
+  }
+}
+
+@media (min-width: 1536px) {
+  [data-reports-hub] {
+    /* The width cap and its auto margins moved UP to the 1024 tier (and down
+       from 96rem to 74rem) when the owner asked for the report "more to the
+       center" -- keeping them here as well would only restate what the 1024
+       tier already establishes. What still belongs at this tier is the
+       gutter: the last of the padding ladder, so the widest monitors keep a
+       visible inset between the centred column's border and its own edge. */
+    padding-inline: max(clamp(56px, 4vw, 80px), env(safe-area-inset-left, 0px)) max(clamp(56px, 4vw, 80px), env(safe-area-inset-right, 0px));
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   KHMER: the line box must not be shorter than the cluster's ink extent.
+
+   ROOT CAUSE of "the little up and down of the khmer words are getting cut
+   off" (user, Part 586). A Khmer orthographic cluster stacks vertically: a
+   superscript vowel/diacritic (  ី  ុ  ់  ៊  ៉ ) sits ABOVE the base glyph and a
+   coeng subscript ( ្ក ) or below-vowel (  ុ   ូ ) hangs BELOW it. Its ink extent
+   is roughly 1.55-1.65em, well past Latin's ~1.2em.
+
+   main.css's Aug-31 compaction pass ("khmer versions are not compact
+   enough... the rows") pulled the km line-heights DOWN from 1.68-1.82 to
+   1.38-1.52 (`body.lang-km .text-xs` 1.45, `.text-sm` 1.48, headings 1.38-1.4).
+   Line-height alone only overlaps lines -- it does not clip. The clipping
+   appears where a SHORT line box meets an `overflow: hidden` ancestor, and
+   Tailwind's `.truncate` is exactly that (`overflow:hidden; text-overflow:
+   ellipsis; white-space:nowrap`). The content box is then one short line box
+   tall, and every pixel of ink above/below it is sheared -- the tops and
+   tails the user is describing. Fixed `h-*` boxes and `line-clamp-*` clip the
+   same way. `overflow-x` cannot be clipped independently of `overflow-y` in
+   CSS, so the ONLY correct fix is to give the line box enough height.
+
+   Hence: this surface pays for its compactness with padding, and restores a
+   1.62 line box for Khmer. Scoped to `[data-reports-hub]` -- the app-wide
+   version of this fix is written up for the board rather than applied here,
+   because `body.lang-km .text-xs/.text-sm/.text-base` is global and every
+   other lane is editing the surfaces it would reflow. */
+
+/* KHMER SIZE (owner, Sep 6: "make the khmer text larger, as it is report, and
+   has so much space"). The app-wide compaction pass tuned Khmer for dense
+   operational screens; a report is read as a document and has room to spare,
+   so this surface -- and only this surface -- takes the type back up.
+
+   One multiplier, not a set of flat sizes: see the token block near the top
+   of this file for why (a flat size loses to the >=1024 tier's own
+   declaration). 1.2 lands the body at 14.4px on phone/tablet and 16.8px from
+   1024px up, against 12/14px for Latin, which is unchanged.
+
+   The row height and the receipt line box are DERIVED from the boosted size
+   rather than frozen. That is the Aug-31 clipping root cause restated: the
+   line box must not be shorter than the cluster's ink extent (~1.62em), and a
+   `.truncate`/fixed-height ancestor shears whatever falls outside it. A
+   hard-coded 20px line box chosen for 12px type would clip 14.4px type; a
+   38px row would clip a 27px line box at desktop. Tying both to
+   `--ui-size-body` means the floor moves with the type by construction. */
+body.lang-km [data-reports-hub],
+body.lang-km .reports-fold-panel,
+body.lang-km [data-reports-fold] {
+  --ui-km-boost: 1.2;
+  --ui-row-h: calc(36px * var(--ui-km-boost, 1));
+  --ui-receipt-lh: calc(var(--ui-size-body) * 1.62);
+  --ui-lh-heading: 1.62;
+}
+
+body.lang-km [data-reports-hub],
+body.lang-km [data-reports-hub] th,
+body.lang-km [data-reports-hub] td,
+body.lang-km [data-reports-hub] button,
+body.lang-km [data-reports-hub] input,
+body.lang-km [data-reports-hub] select,
+body.lang-km [data-reports-hub] .truncate,
+body.lang-km .reports-fold-panel,
+body.lang-km .reports-fold-panel button,
+body.lang-km .reports-fold-panel .truncate,
+body.lang-km [data-reports-fold],
+body.lang-km [data-reports-fold] button,
+body.lang-km [data-reports-fold] th,
+body.lang-km [data-reports-fold] td {
+  line-height: 1.62;
+}
+
+/* `.text-xs` / `.text-sm` carry `!important` line-heights in main.css's km
+   block, so matching specificity + !important is required to lift them back
+   over the clip threshold inside this surface only. */
+body.lang-km [data-reports-hub] .text-xs,
+body.lang-km .reports-fold-panel .text-xs,
+body.lang-km [data-reports-fold] .text-xs {
+  line-height: 1.62 !important;
+}
+
+body.lang-km [data-reports-hub] .text-sm,
+body.lang-km .reports-fold-panel .text-sm,
+body.lang-km [data-reports-fold] .text-sm {
+  line-height: 1.6 !important;
+}
+
+/* A truncating cell is the clip site: keep it single-line and elliptical, but
+   let the line box breathe so the ascender/descender ink stays inside it. */
+body.lang-km [data-reports-hub] td.truncate,
+body.lang-km [data-reports-hub] .truncate {
+  padding-block: 2px;
+}
+
+body.lang-km [data-reports-hub] .reports-view-picker [data-app-select-selected='true'] {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+}

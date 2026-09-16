@@ -37,7 +37,22 @@
 #
 #  Usage:
 #    powershell -NoProfile -ExecutionPolicy Bypass -File full-automation.ps1
-#    (normally invoked via run\full-automation.bat, not directly)
+#    powershell -NoProfile -ExecutionPolicy Bypass -File full-automation.ps1 -Plan free
+#    (normally invoked via run\full-automation.bat, not directly -- that
+#     wrapper forwards %* verbatim, so `run\full-automation.bat -Plan free`
+#     reaches this parameter unchanged)
+#
+#  -Plan free|paid  (default: paid) selects WHICH wrangler config the deploy
+#    step uses, and nothing else:
+#      paid -> cloudflare/wrangler.toml       (npm run deploy)
+#      free -> cloudflare/wrangler.free.toml  (npm run deploy:free)
+#    Every step before it -- stray cleanup, install, gate, frontend build,
+#    both remote D1 migrations, secret push -- is identical on either plan,
+#    because the two configs deploy the SAME Worker name against the SAME
+#    database ids, bucket, KV namespace, queues, crons and routes. The
+#    default is deliberately paid: an operator who forgets the flag must not
+#    silently deploy a config that halves every in-app ceiling. See
+#    DEPLOY.md "Free vs paid deploy" and cloudflare/src/lib/planTier.ts.
 #
 #  Env overrides:
 #    BUSINESS_OS_REPO_ROOT   - repo root (default: two levels up from this file)
@@ -48,6 +63,14 @@
 #    BUSINESS_OS_SKIP_INSTALL - set to 1 to skip the dependency-install step
 #                                (e.g. a repeat run right after one that just installed)
 # =============================================================================
+
+param(
+  # PowerShell validates this before the first step runs, which is the point:
+  # a typo like -Plan fre fails immediately instead of falling through to the
+  # paid default after the gate, the build and two remote D1 migrations.
+  [ValidateSet('free', 'paid')]
+  [string]$Plan = 'paid'
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -316,9 +339,15 @@ Invoke-Step "Sync secrets (.dev.vars -> Cloudflare)" {
 }
 
 # ---- 8. Deploy the Worker -------------------------------------------------------
-Invoke-Step "wrangler deploy" {
+# The one step -Plan changes. Both npm scripts run the same scripts/deploy.cjs
+# through with-wrangler-auth.cjs; they differ only in the --config handed to
+# wrangler, and those two configs differ in exactly four documented places (no
+# [limits] block, two consumers at max_batch_size 1, PLAN_TIER = "free").
+# cloudflare/scripts/test-wrangler-config-drift-pure.cjs is what keeps that
+# list honest, so this step cannot quietly deploy a stale free config.
+Invoke-Step "wrangler deploy ($Plan plan)" {
   Push-Location $CloudflareDir
-  npm run deploy
+  if ($Plan -eq 'free') { npm run deploy:free } else { npm run deploy }
   Pop-Location
 }
 

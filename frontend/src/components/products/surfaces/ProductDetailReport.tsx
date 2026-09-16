@@ -11,8 +11,14 @@ import { getProductDetailReport, getStockLedger, getProductSalesDetail, getProdu
 import { movementColorClass, translateMovementType } from '../../inventory/movementGroups.ts'
 import { fmtDate, fmtDateTime24 } from '../../../utils/formatters'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
+// N13: this report's movement rows come from the same /stock-ledger kernel the
+// Stock Change ledger reads, so "Source" names the same record the ledger
+// does. It printed "Sale #742" -- the raw sales.id, which identifies nothing
+// to a person and is not the receipt they would search for.
+import { formatHistoryReference, historyReference } from '../../../utils/historyRowModel.ts'
 import { useApp } from '../../../AppContext'
 import AttributeSupplierModal from './AttributeSupplierModal.tsx'
+import EntityLink from '../../shared/EntityLink.tsx'
 
 // D3 (Part 422; reworked Part 563): the detail page's report sections, per
 // the user's Aug-28 spec -- movement history WITH the running balance, sales
@@ -80,6 +86,9 @@ type LedgerRow = {
   before_qty: number
   after_qty: number
   reference_id?: number | null
+  // N13: resolved server-side (cloudflare/src/lib/movementReference.ts).
+  reference_kind?: 'sale' | 'return' | null
+  reference_label?: string | null
   batch_id?: number | null
   batch_lot_code?: string | null
   batch_received_at?: string | null
@@ -128,7 +137,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
   fmtUSD: (value: unknown) => string
 }) {
   // Supplier attribution (item 3) is a product edit; notify surfaces the result.
-  const { can, notify } = useApp() as { can: (section: string, action: string) => boolean; notify: (message: unknown, type?: string) => void }
+  const { can, notify, navigateTo } = useApp() as { can: (section: string, action: string) => boolean; notify: (message: unknown, type?: string) => void; navigateTo?: (page: string, anchor?: string) => void }
   const canAttributeSupplier = can('products', 'edit')
   const [attributeOpen, setAttributeOpen] = useState(false)
   // Bumped after a backfill to re-pull the detail report so the Suppliers/
@@ -298,8 +307,18 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
           {movements.map((row) => {
             const expanded = openMovementId === row.id
             const typeLabel = translateMovementType(row.movement_type, t as (key: string) => string)
+            // The record this movement belongs to, worded exactly as the Stock
+            // Change ledger words it. Falls back to the raw id only for the
+            // rows that name no record (stock-in session tokens, reverts).
+            const receipt = formatHistoryReference(historyReference(row), {
+              sale: tr('sale', 'Sale'),
+              return: tr('return', 'Return'),
+            })
             const batchLabel = row.batch_id
-              ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })
+              // batchWord is the fallback prefix for a pre-redesign row that has
+              // neither a received_at nor a date-shaped lot code; omitting it
+              // renders the English default 'Batch' to a Khmer user.
+              ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr('batch', 'Received date'))
               : null
             return (
               <div key={row.id}>
@@ -316,7 +335,9 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                     {signed(row)} {typeLabel}
                   </span>
                   <span className="shrink-0 tabular-nums text-gray-500">{row.before_qty}→{row.after_qty}</span>
-                  <span className="detail-scroll-text min-w-0 flex-1 text-gray-400" title={row.reason || ''}>{row.reason || ''}</span>
+                  {/* The receipt leads, the free text follows -- the same
+                      order the Stock Change ledger's Reason cell uses. */}
+                  <span className="detail-scroll-text min-w-0 flex-1 text-gray-400" title={[receipt, row.reason || ''].filter(Boolean).join(' · ')}>{[receipt, row.reason || ''].filter(Boolean).join(' · ')}</span>
                   <ChevronDown className={`h-3 w-3 shrink-0 text-gray-300 transition-transform ${expanded ? 'rotate-180' : ''}`} />
                 </button>
                 {expanded ? (
@@ -328,8 +349,8 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                       <dd className={`font-semibold ${row.signed_quantity > 0 ? 'text-green-600 dark:text-green-300' : row.signed_quantity < 0 ? 'text-red-600 dark:text-red-300' : 'text-gray-600'}`}>{signed(row)} {typeLabel}</dd>
                       <dt className="text-gray-400">{tr('before_after', 'Before → After')}</dt>
                       <dd className="tabular-nums text-gray-700 dark:text-gray-200">{row.before_qty} → {row.after_qty}</dd>
-                      {batchLabel ? (<><dt className="text-gray-400">{tr('batch', 'Batch')}</dt><dd className="text-amber-700 dark:text-amber-300">{batchLabel}</dd></>) : null}
-                      {row.reference_id ? (<><dt className="text-gray-400">{tr('source', 'Source')}</dt><dd className="text-gray-700 dark:text-gray-200">{typeLabel} #{row.reference_id}</dd></>) : null}
+                      {batchLabel ? (<><dt className="text-gray-400">{tr('batch', 'Received date')}</dt><dd className="text-amber-700 dark:text-amber-300">{batchLabel}</dd></>) : null}
+                      {receipt || row.reference_id ? (<><dt className="text-gray-400">{tr('source', 'Source')}</dt><dd className="text-gray-700 dark:text-gray-200">{receipt || `${typeLabel} #${row.reference_id}`}</dd></>) : null}
                       {row.reason ? (<><dt className="text-gray-400">{tr('reason', 'Reason')}</dt><dd className="text-gray-700 dark:text-gray-200">{row.reason}</dd></>) : null}
                     </dl>
                   </div>
@@ -388,7 +409,10 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                     <p className="py-1 text-center text-gray-400">{tr('no_data_found', 'No data found')}</p>
                   ) : drill.map((sale) => (
                     <div key={sale.id} className="flex items-center justify-between gap-2">
-                      <span className="detail-scroll-text min-w-0 flex-1 font-mono text-gray-500" title={sale.customer_name || ''}>{sale.receipt_number || `#${sale.id}`}</span>
+                      <EntityLink page="sales" anchor="hub:sales:sales" navigate={navigateTo} className="detail-scroll-text min-w-0 flex-1 font-mono text-gray-500" title={tr('open_sale', 'Open sale')}>
+                        {sale.receipt_number || `#${sale.id}`}
+                      </EntityLink>
+                      {sale.customer_name ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo} className="detail-scroll-text min-w-0 max-w-[8rem] text-gray-400" title={tr('open_customer', 'Open customer')}>{sale.customer_name}</EntityLink> : null}
                       <span className="shrink-0 whitespace-nowrap text-gray-400">{fmtDateTime24(sale.created_at)}</span>
                       <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{sale.qty}</span>
                       <span className="shrink-0 tabular-nums text-gray-500">{fmtUSD(sale.revenue_usd)}</span>
@@ -418,7 +442,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
       {canAttributeSupplier && unattributedLots.length > 0 ? (
         <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
           <span className="min-w-0">
-            {unattributedLots.length} {tr('lots_without_supplier_lc', 'lot(s) have no supplier')}
+            {unattributedLots.length} {tr('lots_without_supplier_lc', 'received date(s) have no supplier')}
           </span>
           <button
             type="button"
@@ -435,19 +459,25 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
         return (
           <div key={supplier.supplier_key}>
             {/* Click a supplier to open the lots it delivered for THIS product. */}
-            <button type="button" onClick={() => toggleSupplierRow(supplier.supplier_key)} className="w-full rounded-lg bg-gray-50 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-gray-100 dark:bg-gray-800/60 dark:hover:bg-gray-800">
+            <div className="w-full rounded-lg bg-gray-50 px-2.5 py-1.5 text-left text-xs dark:bg-gray-800/60">
               <div className="flex items-center justify-between gap-2">
-                <span className="detail-scroll-text min-w-0 flex-1 font-semibold text-gray-700 dark:text-gray-200">{supplier.supplier_name || tr('unknown', 'Unknown')}</span>
-                <span className="flex shrink-0 items-center gap-2">
-                  <span className="tabular-nums text-gray-500">{supplier.lot_count} {tr('batches', 'Batches').toLowerCase()} · {supplier.current_qty}</span>
+                {supplier.supplier_name ? (
+                  <EntityLink page="contacts" anchor="hub:contacts:suppliers" search={supplier.supplier_name} navigate={navigateTo} className="detail-scroll-text min-w-0 flex-1 font-semibold text-gray-700 dark:text-gray-200" title={tr('open_supplier', 'Open supplier')}>
+                    {supplier.supplier_name}
+                  </EntityLink>
+                ) : (
+                  <span className="detail-scroll-text min-w-0 flex-1 font-semibold text-gray-700 dark:text-gray-200">{tr('unknown', 'Unknown')}</span>
+                )}
+                <button type="button" onClick={() => toggleSupplierRow(supplier.supplier_key)} aria-expanded={open} className="flex shrink-0 items-center gap-2 rounded px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-700">
+                  <span className="tabular-nums text-gray-500">{supplier.lot_count} {tr('batches', 'Received dates').toLowerCase()} · {supplier.current_qty}</span>
                   <ChevronDown className={`h-3 w-3 shrink-0 text-gray-300 transition-transform ${open ? 'rotate-180' : ''}`} />
-                </span>
+                </button>
               </div>
-              <div className="mt-0.5 flex items-center justify-between text-[11px] text-gray-400">
+              <button type="button" onClick={() => toggleSupplierRow(supplier.supplier_key)} className="mt-0.5 flex w-full items-center justify-between text-left text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
                 <span>{supplier.first_received_at ? fmtDate(supplier.first_received_at) : '--'} → {supplier.last_received_at ? fmtDate(supplier.last_received_at) : '--'}</span>
                 {supplier.lots_without_cost > 0 ? <span>{supplier.lots_without_cost} {tr('lots_without_cost', 'without cost')}</span> : null}
-              </div>
-            </button>
+              </button>
+            </div>
             {open ? (
               <div className="mt-0.5 space-y-0.5 rounded-lg bg-gray-100/70 px-2 py-1.5 text-[11px] dark:bg-gray-800/40">
                 {drill === 'loading' || drill === undefined ? (
@@ -458,7 +488,8 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                   <p className="py-1 text-center text-gray-400">{tr('no_data_found', 'No data found')}</p>
                 ) : drill.map((lot) => (
                   <div key={lot.id} className="flex items-center justify-between gap-2">
-                    <span className="detail-scroll-text min-w-0 flex-1 text-gray-500">{batchDisplayLabel({ id: lot.id, lot_code: lot.lot_code, received_at: lot.received_at })}</span>
+                    <span className="detail-scroll-text min-w-0 flex-1 text-gray-500">{batchDisplayLabel({ id: lot.id, lot_code: lot.lot_code, received_at: lot.received_at }, tr('batch', 'Received date'))}</span>
+                    {lot.supplier_name ? <EntityLink page="contacts" anchor="hub:contacts:suppliers" search={lot.supplier_name} navigate={navigateTo} className="detail-scroll-text max-w-[8rem] text-gray-400" title={tr('open_supplier', 'Open supplier')}>{lot.supplier_name}</EntityLink> : null}
                     <span className="shrink-0 whitespace-nowrap text-gray-400">{lot.received_at ? fmtDate(lot.received_at) : '--'}</span>
                     <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{lot.total_qty}</span>
                     <span className="shrink-0 tabular-nums text-gray-500">{lot.unit_cost_usd != null ? fmtUSD(lot.unit_cost_usd) : '--'}</span>

@@ -179,8 +179,14 @@ check('both phases read only their own window, never the whole file', async () =
     !/partitionSalesGroups\(await readAllMaterializedRows/.test(engine),
     'neither analyze nor apply may re-partition the entire file per chunk',
   )
-  const windowCalls = engine.match(/await readSalesGroupWindow\(db, jobId, decisions, cursor, ROWS_PER_IMPORT_CHUNK\)/g) || []
+  // The row cap is per-tier now (getPlanLimits(env).rowsPerImportChunk,
+  // bound to `chunkRows` in both phases) rather than the module constant,
+  // so pin the windowed call AND the fact that its limit came from the
+  // plan-tier table -- a literal or an unbounded read would fail both.
+  const windowCalls = engine.match(/await readSalesGroupWindow\(db, jobId, decisions, cursor, chunkRows\)/g) || []
   assert.equal(windowCalls.length, 2, 'analyze and apply should both use the windowed reader')
+  const chunkRowsBindings = engine.match(/const chunkRows = chunkRowsForAttempt\(limits\.rowsPerImportChunk, attempt\)/g) || []
+  assert.equal(chunkRowsBindings.length, 2, 'both phases must take their window size from the plan-tier limits, narrowed by the redelivery back-off')
 })
 
 check('partitionSalesGroups is still the reference for the bounded preflight path', async () => {

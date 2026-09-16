@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
 import { chunkForBinding } from '../lib/sqlBinding'
+import { loadLowStockConfig, lowStockThresholdSql } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 
@@ -51,12 +52,13 @@ const NOTIFICATION_SETTING_KEYS = [
 ]
 const SUMMARY_SEPARATOR = ' - '
 
-// mm/dd/yyyy for user-facing date text -- the whole app shows this format
-// by request (Aug 25, reaffirmed Part 388). Pure string reorder, no Date
-// parsing (a bare date parses as UTC midnight and can shift a day).
-function formatDateMdy(value: unknown): string {
+// dd/mm/yyyy for user-facing date text -- the whole app shows this format
+// by request (Aug 25 numeric-everywhere, day-first since Sep 4 2026). Pure
+// string reorder, no Date parsing (a bare date parses as UTC midnight and
+// can shift a day).
+function formatDateDmy(value: unknown): string {
   const match = String(value ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return match ? `${match[2]}/${match[3]}/${match[1]}` : String(value ?? '')
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value ?? '')
 }
 
 function normalizeBoolean(value: unknown, fallback = true): boolean {
@@ -141,13 +143,20 @@ async function loadPreferences(env: Env) {
 
 async function buildInventorySection(env: Env): Promise<NotificationSection | null> {
   const db = getDb(env)
+  const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')
+  // The OR is what keeps OUT-OF-STOCK alive when the owner switches the
+  // low-quantity alert off. With the alert off the low fragment is -1, and
+  // this one query fetches BOTH tiers -- so a single `qty <= low` filter
+  // would have silently taken the out-of-stock rows down with the low ones,
+  // which is not what a low-QUANTITY switch means.
   const rows = await db.prepare(`
     SELECT id, name, stock_quantity,
       COALESCE(out_of_stock_threshold, 0) AS out_threshold,
-      COALESCE(low_stock_threshold, 10) AS low_threshold
+      ${lowThresholdSql} AS low_threshold
     FROM products
     WHERE is_active = 1
-      AND COALESCE(stock_quantity, 0) <= COALESCE(low_stock_threshold, 10)
+      AND (COALESCE(stock_quantity, 0) <= ${lowThresholdSql}
+           OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))
     ORDER BY stock_quantity ASC
     LIMIT 5000
   `).all<{ id: number; name: string; stock_quantity: number; out_threshold: number; low_threshold: number }>()
@@ -246,7 +255,10 @@ async function buildExpirySection(env: Env, days: number): Promise<NotificationS
 // Supplier credit reminders (migration 0065; user, Aug 28): a batch received
 // ON CREDIT carries a due date exactly so the admin is reminded — overdue
 // first, then anything due within the window. Marking the batch paid
-// (PATCH /api/batches/:id payment_status='paid') clears it from here.
+// (PATCH /api/batches/:id payment_status='paid') clears it from here. So does
+// reverting every receipt on the lot: the row keeps 'credit' for a possible
+// un-revert, but with nothing received and no money there is nothing owed
+// (lib/productBatches.ts planUnreceiveBatchStock; untracked NULL lots stay).
 async function buildSupplierCreditSection(env: Env, days: number): Promise<NotificationSection | null> {
   const db = getDb(env)
   const rows = await db.prepare(`
@@ -257,6 +269,7 @@ async function buildSupplierCreditSection(env: Env, days: number): Promise<Notif
     JOIN products p ON p.id = pb.variant_product_id
     WHERE pb.is_active = 1
       AND pb.payment_status = 'credit'
+      AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
       AND pb.credit_due_date IS NOT NULL AND trim(pb.credit_due_date) != ''
       AND julianday(pb.credit_due_date) - julianday('now') <= @days
     ORDER BY pb.credit_due_date ASC
@@ -273,8 +286,8 @@ async function buildSupplierCreditSection(env: Env, days: number): Promise<Notif
       id: `supplier-credit-${row.id}`,
       label: `${who} — ${row.product_name}${row.lot_code ? ` (${row.lot_code})` : ''}`,
       meta: daysLeft < 0
-        ? `Overdue ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} — due ${formatDateMdy(row.credit_due_date)}`
-        : `Due in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${formatDateMdy(row.credit_due_date)})`,
+        ? `Overdue ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} — due ${formatDateDmy(row.credit_due_date)}`
+        : `Due in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${formatDateDmy(row.credit_due_date)})`,
       kind: daysLeft < 0 ? 'supplier_credit_overdue' : 'supplier_credit_due',
       tone: daysLeft < 0 ? 'danger' as const : 'warning' as const,
       pageId: 'inventory',
@@ -347,6 +360,12 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
 
 async function buildLoyaltySection(env: Env, threshold: number): Promise<NotificationSection | null> {
   const db = getDb(env)
+  // Membership points can be switched off shop-wide (settings key `loyalty_points_enabled`).
+  // This is the fourth and last site that computes a balance; without the gate the shop keeps
+  // getting "N customers reached X+ points" alerts for a programme it has turned off.
+  const loyaltySwitch = await db.prepare(`SELECT value FROM settings WHERE key = 'loyalty_points_enabled'`)
+    .get<{ value: string }>()
+  if (['0', 'false', 'no', 'off'].includes(String(loyaltySwitch?.value ?? '').trim().toLowerCase())) return null
   const [salesRows, returnRows, rewardRows] = await Promise.all([
     db.prepare(`
       SELECT customer_id,
@@ -366,7 +385,7 @@ async function buildLoyaltySection(env: Env, threshold: number): Promise<Notific
     db.prepare(`
       SELECT customer_id, COALESCE(SUM(COALESCE(reward_points, 0)), 0) AS rewarded
       FROM customer_share_submissions
-      WHERE customer_id IS NOT NULL AND status = 'approved'
+      WHERE customer_id IS NOT NULL AND status = 'approved' AND reward_points_voided_at IS NULL
       GROUP BY customer_id
     `).all<{ customer_id: number; rewarded: number }>(),
   ])

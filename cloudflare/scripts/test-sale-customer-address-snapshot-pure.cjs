@@ -1,0 +1,377 @@
+// N21 -- sales.customer_address holds the DISPLAY address, never the Contact
+// Options JSON that customers.address stores.
+//
+// The owner saw "[]" where a sale's address should be. customers.address holds
+// the array lib/contactOptions.ts serializes, and the sale writers copied that
+// column raw, so the sale detail, the receipt and the CSV export printed the
+// JSON.
+//
+// Two writers are exercised here against the real schema and the real routes,
+// rather than against a source-shape regex:
+//   1. PATCH /sales/:id/customer -- links a customer to an existing sale and
+//      snapshots their address. This is the writer that produced the rows the
+//      owner was looking at.
+//   2. POST /sales -- stores whatever the client sent. The POS now sends the
+//      display address, but an out-of-date shell (or an offline sale queued by
+//      one and replayed later) still sends the raw JSON, so the server
+//      normalizes rather than trusting the caller. That is the same class of
+//      defect as N18: a stale client writing data the server accepted.
+//
+// Both cases are discriminating: with the previous `?? null` raw copy they
+// store the JSON string and fail here.
+//
+// Run: node scripts/test-sale-customer-address-snapshot-pure.cjs
+const fs = require('node:fs')
+const path = require('node:path')
+const assert = require('node:assert/strict')
+const ts = require('typescript')
+const Database = require('better-sqlite3')
+
+const root = path.join(__dirname, '..')
+const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs', 'takeover-20260908', 'f74-sales-records-backend-contract.json'), 'utf8'))
+const user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
+const cache = new Map()
+// contactOptions is on this list deliberately: the loader stubs any relative
+// import it does not name, and a stubbed kernel would make every address here
+// resolve to undefined -- a test that agrees with itself and proves nothing.
+const actual = new Set([
+  'saleCustomerAssignmentGuard',
+  'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate',
+  'saleTransitions', 'saleTotals', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus',
+  'conflictControl', 'searchMatch', 'financialPrecision', 'paymentMethodRegistry',
+  'paymentSettlement', 'saleSettlementAction', 'saleLineAddition', 'saleAmendments',
+  'nativeSaleChange', 'receiptNumber', 'clientTimestamp', 'branchRoleGuards', 'branchRoles',
+  'contactOptions', 'saleCreationSnapshot', 'saleRecordEvents', 'saleRecords', 'anonymousCustomer',
+  'moneyPrecision', 'saleMoneyPrecision', 'saleItemPricing', 'promotionRules',
+  'productMergeLineage', 'saleMutationHeaderQuote', 'reportMoneyPrecision',
+  // Shared per-isolate PRAGMA table_info() memoization saleMoneySchemaReady
+  // now delegates to; no imports of its own, so it is loaded for real.
+  'schemaProbe',
+])
+function load(rel) {
+  if (cache.has(rel)) return cache.get(rel).exports
+  const mod = { exports: {} }; cache.set(rel, mod)
+  const sourcePath = path.join(root, 'src', rel)
+  const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: sourcePath,
+  }).outputText
+  const req = (name) => {
+    if (name === 'hono') return require(name)
+    if (name.endsWith('/auth')) return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
+    if (name.endsWith('/cache')) return { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_request, _ctx, _version, _ttl, fn) => fn() }
+    if (name.endsWith('/broadcastHub')) return { broadcast: async () => {} }
+    if (name.endsWith('/audit')) return { audit: async () => {} }
+    if (name.endsWith('/telegram')) return { formatSaleTelegramLines: () => [], sendTelegramEvent: async () => {}, telegramMoney: () => '' }
+    if (name.endsWith('/undoAppliers')) return { recordSaleAddItemsUndoSnapshot: async () => null }
+    if (rel.endsWith('saleRecordEvents.ts') && name === './saleRecords') return { SALE_RECORD_FIELDS: recordContract.fields, SALE_RECORD_KINDS: recordContract.kinds }
+    if (name.startsWith('.')) {
+      const target = path.posix.normalize(path.posix.join(path.posix.dirname(rel), name)) + '.ts'
+      if (actual.has(path.posix.basename(name))) return load(target)
+      return {}
+    }
+    return require(name)
+  }
+  new Function('require', 'module', 'exports', output)(req, mod, mod.exports)
+  return mod.exports
+}
+
+const sales = load('routes/sales.ts').default
+const { contactDisplayAddress } = load('lib/contactOptions.ts')
+
+// The exact shape customers.address holds for a contact with one address
+// option -- produced by serializeContactOptions, not hand-written here.
+const OPTIONS_JSON = JSON.stringify([
+  { label: 'Default', name: null, phone: '012345678', email: null, address: 'St 271, Phnom Penh', area: null },
+])
+assert.equal(contactDisplayAddress(OPTIONS_JSON), 'St 271, Phnom Penh', 'sanity: the kernel is the real one, not a stub')
+
+function fixture(options = {}) {
+  const sql = new Database(':memory:')
+  let saleInsertIntercepted = false
+  sql.pragma('foreign_keys = OFF')
+  for (const file of fs.readdirSync(path.join(root, 'migrations')).filter((name) => name.endsWith('.sql')).sort()) {
+    sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
+  }
+  const env = { DB: {
+    prepare(text) {
+      return { bind(...params) {
+        return { text, params,
+          async first() { return sql.prepare(text).get(...params) || null },
+          async all() { return { results: sql.prepare(text).all(...params) } },
+          async run() {
+            if (!saleInsertIntercepted && /INSERT\s+INTO\s+sales\s*\(/i.test(text) && options.beforeSaleInsert) {
+              saleInsertIntercepted = true
+              options.beforeSaleInsert(sql)
+            }
+            const r = sql.prepare(text).run(...params)
+            return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } }
+          },
+        }
+      } }
+    },
+    async batch(statements) {
+      if (!saleInsertIntercepted
+        && statements.some((statement) => /INSERT\s+INTO\s+sales\s*\(/i.test(statement.text))
+        && options.beforeSaleInsert) {
+        saleInsertIntercepted = true
+        options.beforeSaleInsert(sql)
+      }
+      return sql.transaction(() => statements.map((statement) => {
+        const r = sql.prepare(statement.text).run(...statement.params)
+        return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } }
+      }))()
+    },
+  } }
+  const executionCtx = { waitUntil() {}, passThroughOnException() {} }
+  const call = async (url, body, method = 'PATCH') => {
+    const requestBody = method === 'POST' ? {
+      ...body,
+      money_precision_version: 1,
+      items: body.items.map((item) => ({
+        ...item,
+        client_line_key: 'address-line',
+        pricing_source: 'manual',
+        selling_price_input_usd: 5,
+        pricing_quote: {
+          gross_usd: 5,
+          product_discount_usd: 0,
+          manual_discount_usd: 0,
+          total_usd: 5,
+          total_khr: 21000,
+        },
+      })),
+    } : body
+    const response = await sales.request(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(requestBody) }, env, executionCtx)
+    return { status: response.status, body: await response.json() }
+  }
+  const read = async (url) => {
+    const response = await sales.request(url, { method: 'GET' }, env, executionCtx)
+    return { status: response.status, body: await response.json() }
+  }
+  sql.exec(`
+    INSERT INTO settings(key,value,updated_at) VALUES
+      ('exchange_rate','4200','s1'),('pos_payment_methods','["Cash"]','s1');
+    INSERT INTO branches(id,name) VALUES(1,'Shop');
+    INSERT INTO products(id,name,stock_quantity) VALUES(1,'Serum',10);
+    INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,8);
+    INSERT INTO sales(
+      id,receipt_number,cashier_name,branch_id,branch_name,payment_method,payment_details,
+      payment_currency,exchange_rate,subtotal_usd,total_usd,amount_paid_usd,sale_status,updated_at
+    ) VALUES(1,'S-1','admin',1,'Shop','Cash','[{"method":"Cash","amount_usd":5,"amount_khr":0}]','USD',4200,5,5,5,'completed','sale-v1');
+  `)
+  // Bound, not inlined: the options JSON carries double quotes.
+  sql.prepare('INSERT INTO customers(id,name,phone,address) VALUES(1,?,?,?)').run('Sok Dara', '012345678', OPTIONS_JSON)
+  return { sql, call, read }
+}
+
+async function run() {
+  // 1. PATCH /sales/:id/customer -- the writer that produced the owner's rows.
+  const f = fixture()
+  const linked = await f.call('/1/customer', { customerId: 1, expected_updated_at: 'sale-v1', client_request_id: 'address-link-1' })
+  assert.equal(linked.status, 200, JSON.stringify(linked))
+  const stored = f.sql.prepare('SELECT customer_id,customer_name,customer_address FROM sales WHERE id=1').get()
+  assert.equal(stored.customer_id, 1)
+  assert.equal(stored.customer_name, 'Sok Dara')
+  assert.equal(
+    stored.customer_address,
+    'St 271, Phnom Penh',
+    'linking a customer must snapshot the display address, not the options JSON',
+  )
+  // The customer row itself is untouched: the Customers page still edits the
+  // full options set, and the route's reference guard compares that raw column.
+  assert.equal(f.sql.prepare('SELECT address FROM customers WHERE id=1').get().address, OPTIONS_JSON)
+  console.log('PASS linking a customer snapshots the display address')
+
+  // 2. POST /sales -- an out-of-date client sending the raw column.
+  const g = fixture()
+  const created = await g.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1,
+    customer_id: 1,
+    customer_name: 'Sok Dara',
+    customer_phone: '012345678',
+    // What a shell built before this change sends -- and what a sale queued
+    // offline by one still replays after it.
+    customer_address: OPTIONS_JSON,
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD',
+    amount_paid_usd: 5,
+    amount_paid_khr: 0,
+    exchange_rate: 4200,
+    client_request_id: 'address-create-1',
+  }, 'POST')
+  assert.equal(created.status, 200, JSON.stringify(created))
+  assert.equal(
+    g.sql.prepare('SELECT customer_address FROM sales WHERE id=?').get(created.body.id).customer_address,
+    'St 271, Phnom Penh',
+    'the server must not store the options JSON a stale client sent',
+  )
+  const directCreation = JSON.parse(g.sql.prepare('SELECT creation_snapshot_json FROM sales WHERE id=?').get(created.body.id).creation_snapshot_json)
+  assert.equal(directCreation.version, 1)
+  assert.equal(directCreation.origin, 'pos')
+  assert.deepEqual(directCreation.actor, { id: 1, username: 'admin' })
+  assert.deepEqual(directCreation.products, [{
+    product_id: 1,
+    product: 'Serum',
+    sku: null,
+    quantity: 1,
+    unit_price_usd: 5,
+    line_total_usd: 5,
+  }])
+  assert.deepEqual(directCreation.payment_details, [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }])
+
+  const nameOnly = fixture()
+  const nameOnlySale = await nameOnly.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1,
+    customer_name: 'Walk-in Dara',
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD', amount_paid_usd: 5, amount_paid_khr: 0, exchange_rate: 4200,
+    client_request_id: 'name-only-create-1',
+  }, 'POST')
+  assert.equal(nameOnlySale.status, 200, JSON.stringify(nameOnlySale))
+  const nameOnlyRow = nameOnly.sql.prepare('SELECT customer_id,customer_name,creation_snapshot_json FROM sales WHERE id=?').get(nameOnlySale.body.id)
+  assert.deepEqual(
+    { customer_id: nameOnlyRow.customer_id, customer_name: nameOnlyRow.customer_name },
+    { customer_id: null, customer_name: 'Walk-in Dara' },
+  )
+  assert.deepEqual(
+    JSON.parse(nameOnlyRow.creation_snapshot_json).customer,
+    { id: null, name: 'Walk-in Dara' },
+    'a direct name-only sale must not be recorded as General',
+  )
+  console.log('PASS a name-only direct sale stays distinct from General')
+
+  const anonymous = fixture()
+  anonymous.sql.prepare('UPDATE customers SET is_anonymous=1,membership_number=? WHERE id=1').run('LEGACY-GENERAL')
+  const anonymousSale = await anonymous.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1,
+    customer_id: 1,
+    customer_name: 'General',
+    customer_phone: '',
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD', amount_paid_usd: 5, amount_paid_khr: 0, exchange_rate: 4200,
+    client_request_id: 'anonymous-create-1',
+  }, 'POST')
+  assert.equal(anonymousSale.status, 200, JSON.stringify(anonymousSale))
+  const anonymousRow = anonymous.sql.prepare('SELECT customer_id,customer_name,creation_snapshot_json FROM sales WHERE id=?').get(anonymousSale.body.id)
+  assert.deepEqual({ customer_id: anonymousRow.customer_id, customer_name: anonymousRow.customer_name }, { customer_id: null, customer_name: null })
+  assert.equal(JSON.parse(anonymousRow.creation_snapshot_json).customer, null)
+  assert.equal(JSON.parse(anonymousRow.creation_snapshot_json).membership, null)
+  console.log('PASS a marked anonymous profile is not copied into a new sale or its membership snapshot')
+
+  const namedGeneral = fixture()
+  namedGeneral.sql.prepare("UPDATE customers SET name='General', is_anonymous=0 WHERE id=1").run()
+  const namedGeneralSale = await namedGeneral.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1, customer_id: 1, customer_name: 'General',
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD', amount_paid_usd: 5, amount_paid_khr: 0, exchange_rate: 4200,
+    client_request_id: 'named-general-create-1',
+  }, 'POST')
+  assert.equal(namedGeneralSale.status, 200, JSON.stringify(namedGeneralSale))
+  assert.deepEqual(
+    namedGeneral.sql.prepare('SELECT customer_id,customer_name FROM sales WHERE id=?').get(namedGeneralSale.body.id),
+    { customer_id: 1, customer_name: 'General' },
+    'a normal customer named General must remain linked unless the server marker says anonymous',
+  )
+
+  const racedAnonymous = fixture({
+    beforeSaleInsert(sql) {
+      sql.prepare('UPDATE customers SET is_anonymous=1 WHERE id=1').run()
+    },
+  })
+  const racedSale = await racedAnonymous.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1, customer_id: 1, customer_name: 'Sok Dara',
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD', amount_paid_usd: 5, amount_paid_khr: 0, exchange_rate: 4200,
+    client_request_id: 'anonymous-race-create-1',
+  }, 'POST')
+  assert.equal(racedSale.status, 409, JSON.stringify(racedSale))
+  assert.equal(racedSale.body.code, 'customer_state_conflict')
+  assert.equal(racedAnonymous.sql.prepare("SELECT COUNT(*) AS n FROM sales WHERE client_request_id='anonymous-race-create-1'").get().n, 0)
+  assert.equal(racedAnonymous.sql.prepare('SELECT COUNT(*) AS n FROM sale_items').get().n, 0)
+  assert.equal(racedAnonymous.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 8)
+  console.log('PASS sale creation atomically rejects a customer marker race with zero sale, item, or stock writes')
+
+  const listed = fixture()
+  listed.sql.prepare("UPDATE customers SET is_anonymous=1,membership_number='LEGACY-GENERAL' WHERE id=1").run()
+  listed.sql.prepare("UPDATE sales SET customer_id=1,customer_name='General' WHERE id=1").run()
+  const listResponse = await listed.read('/?limit=10')
+  assert.equal(listResponse.status, 200, JSON.stringify(listResponse))
+  const listedSale = listResponse.body.find((row) => row.id === 1)
+  assert.equal(listedSale.customer_is_anonymous, 1)
+  assert.equal(listedSale.customer_membership_number, null)
+  assert.equal(listedSale.customer_id, 1, 'the historical persisted id remains intact for exact repair/replay')
+  console.log('PASS list reads mark legacy anonymous identities and mask their joined membership')
+
+  // A plainly typed address is untouched -- the normalization must not eat
+  // ordinary input, including a numeric house number that parses as JSON.
+  for (const [sent, expected] of [['Phnom Penh, Cambodia', 'Phnom Penh, Cambodia'], ['271', '271'], ['[]', null]]) {
+    const h = fixture()
+    const sale = await h.call('/', {
+      items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+      branch_id: 1,
+      customer_address: sent,
+      payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+      payment_currency: 'USD', amount_paid_usd: 5, amount_paid_khr: 0, exchange_rate: 4200,
+      client_request_id: `address-create-${sent || 'blank'}`,
+    }, 'POST')
+    assert.equal(sale.status, 200, JSON.stringify(sale))
+    assert.equal(
+      h.sql.prepare('SELECT customer_address FROM sales WHERE id=?').get(sale.body.id).customer_address,
+      expected,
+      `a sale created with ${JSON.stringify(sent)} must store ${JSON.stringify(expected)}`,
+    )
+  }
+  console.log('PASS a sale created by a stale client stores the display address')
+
+  // Offline replay is the same writer, but records the client sale moment and
+  // a distinct origin. A retry returns the one already-created row and cannot
+  // regenerate or alter the immutable envelope.
+  const offline = fixture()
+  const offlinePayload = {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1,
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD',
+    amount_paid_usd: 5,
+    amount_paid_khr: 0,
+    exchange_rate: 4200,
+    client_request_id: 'offline-create-1',
+    created_at: '2026-09-07T09:30:00.000Z',
+  }
+  const first = await offline.call('/', offlinePayload, 'POST')
+  assert.equal(first.status, 200, JSON.stringify(first))
+  const beforeRetry = offline.sql.prepare('SELECT creation_snapshot_json FROM sales WHERE id=?').get(first.body.id).creation_snapshot_json
+  const replay = await offline.call('/', offlinePayload, 'POST')
+  assert.equal(replay.status, 200, JSON.stringify(replay))
+  assert.equal(replay.body.id, first.body.id)
+  assert.equal(offline.sql.prepare('SELECT COUNT(*) n FROM sales WHERE client_request_id=?').get('offline-create-1').n, 1)
+  assert.equal(offline.sql.prepare('SELECT creation_snapshot_json FROM sales WHERE id=?').get(first.body.id).creation_snapshot_json, beforeRetry)
+  const offlineCreation = JSON.parse(beforeRetry)
+  assert.equal(offlineCreation.origin, 'offline_replay')
+  assert.equal(offlineCreation.sale_at, '2026-09-07 09:30:00')
+  console.log('PASS offline replay keeps one immutable queue-time creation snapshot')
+
+  const failed = fixture()
+  failed.sql.exec("CREATE TRIGGER reject_sale_line BEFORE INSERT ON sale_items BEGIN SELECT RAISE(ABORT, 'forced sale-line failure'); END;")
+  const rejected = await failed.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1,
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD', amount_paid_usd: 5, amount_paid_khr: 0, exchange_rate: 4200,
+    client_request_id: 'snapshot-compensation-1',
+  }, 'POST')
+  assert.ok(rejected.status >= 400, JSON.stringify(rejected))
+  assert.equal(failed.sql.prepare('SELECT COUNT(*) n FROM sales WHERE client_request_id=?').get('snapshot-compensation-1').n, 0)
+  assert.equal(failed.sql.prepare('SELECT COUNT(*) n FROM sales WHERE creation_snapshot_json IS NOT NULL').get().n, 0)
+  console.log('PASS failed direct sale deletes its staged creation snapshot with the sale header')
+}
+
+run().then(() => console.log('test-sale-customer-address-snapshot-pure OK')).catch((error) => {
+  console.error(error)
+  process.exit(1)
+})

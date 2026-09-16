@@ -8,6 +8,26 @@ const DOCUMENT_EXTENSIONS = new Set(['.pdf', '.csv'])
 
 export type MediaType = 'image' | 'video' | 'document' | 'file'
 
+export interface PhysicalStorageSummary {
+  totalBytes: number
+  fileCount: number
+  countsByType: Record<MediaType, number>
+}
+
+export function normalizePhysicalStorageSummary(row: Record<string, unknown> | null | undefined): PhysicalStorageSummary {
+  const count = (value: unknown) => Math.max(0, Number(value) || 0)
+  return {
+    totalBytes: count(row?.total_bytes),
+    fileCount: count(row?.file_count),
+    countsByType: {
+      image: count(row?.image_count),
+      video: count(row?.video_count),
+      document: count(row?.document_count),
+      file: count(row?.other_count),
+    },
+  }
+}
+
 function extname(fileName: string): string {
   const match = /\.[^./\\]+$/.exec(fileName)
   return match ? match[0].toLowerCase() : ''

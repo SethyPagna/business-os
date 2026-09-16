@@ -13,16 +13,10 @@
 //
 // Matching rules, deliberately mirroring conventions already established
 // elsewhere in this app rather than inventing new ones:
-// - Branch: exact case-insensitive name match against `branches`; no
-//   match auto-creates a new active branch with that name -- the same
-//   auto-create-on-miss behavior lib/importEngine.ts's own
-//   resolveAndCreateBranches already applies for every other import in
-//   this app. A dated stock count is reconciling a REAL branch's real
-//   count -- a sheet naming a branch that doesn't exist yet is normally
-//   because it's newly opened, not a typo (a typo is instead something a
-//   human catches from the returned `branchesCreated` list before
-//   confirming the import -- this function only reports what it did, it
-//   doesn't ask first, same as resolveAndCreateBranches).
+// - Branch: resolve only an existing active canonical Shop/Warehouse.
+//   Explicit unknown/non-canonical names remain unresolved. A blank cell
+//   resolves only when exactly one active canonical branch is marked default.
+//   Import analysis never creates branch identity or stock rows.
 // - Product: SKU first (exact, case-insensitive), then barcode (exact),
 //   then exact case-insensitive name -- same priority order
 //   lib/importEngine.ts's classifyProducts already uses for matching an
@@ -39,6 +33,8 @@
 import type { D1Compat } from './db'
 import { buildInClause, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
+import { identityBarcodeClassKey, identityBarcodeKeySql } from './productIdentity'
+import { indexCanonicalImportBranches, resolveCanonicalImportBranch } from './importBranchAuthority'
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -89,14 +85,13 @@ export interface ResolvedDatedCountRow {
   }
 }
 
-export type UnresolvedReason = 'invalid_date' | 'invalid_count' | 'missing_branch' | 'missing_identifier' | 'product_not_found' | 'ambiguous_barcode' | 'ambiguous_name'
+export type UnresolvedReason = 'invalid_date' | 'invalid_count' | 'missing_branch' | 'branch_not_found' | 'missing_identifier' | 'product_not_found' | 'ambiguous_barcode' | 'ambiguous_name'
 
 export interface UnresolvedDatedCountRow {
   rowNumber: number
   reason: UnresolvedReason
   raw: RawDatedCountRow
-  // The branch this row's branchName already resolved to (or was
-  // auto-created as), for reasons that only occur AFTER branch
+  // The branch this row's branchName already resolved to, for reasons that only occur AFTER branch
   // resolution succeeds (product_not_found, ambiguous_barcode,
   // ambiguous_name). Carried through so a follow-up decision-applying
   // step (lib/datedStockCountDecisions.ts) never has to re-derive or
@@ -144,10 +139,11 @@ export async function resolveDatedStockCountRows(
   // at all. Rows that fail here never reach the DB lookups below.
   const candidates: (RawDatedCountRow & { normalizedDate: string })[] = []
   for (const row of rows) {
-    const normalizedDate = normalizeToIsoDate(row.date) || (ISO_DATE_RE.test(String(row.date ?? '')) ? String(row.date) : '')
+    // A hand-mapped spreadsheet column ("any common date format"), not a
+    // field typed into the app -- month-first, stated rather than defaulted.
+    const normalizedDate = normalizeToIsoDate(row.date, 'month-first') || (ISO_DATE_RE.test(String(row.date ?? '')) ? String(row.date) : '')
     if (!normalizedDate) { unresolved.push({ rowNumber: row.rowNumber, reason: 'invalid_date', raw: row, suggestedActions: [] }); continue }
     if (!Number.isFinite(row.count) || row.count < 0) { unresolved.push({ rowNumber: row.rowNumber, reason: 'invalid_count', raw: row, suggestedActions: [] }); continue }
-    if (!lower(row.branchName)) { unresolved.push({ rowNumber: row.rowNumber, reason: 'missing_branch', raw: row, suggestedActions: [] }); continue }
     if (!lower(row.sku) && !lower(row.barcode) && !lower(row.productName)) {
       unresolved.push({ rowNumber: row.rowNumber, reason: 'missing_identifier', raw: row, suggestedActions: [] })
       continue
@@ -156,27 +152,25 @@ export async function resolveDatedStockCountRows(
   }
   if (!candidates.length) return { resolved: [], unresolved, branchesCreated: [] }
 
-  // ---- Branch resolution (auto-create on miss, see file header) ----
-  const branchNamesByLower = new Map<string, string>() // lower(name) -> first-seen casing
-  for (const row of candidates) {
-    const key = lower(row.branchName)
-    if (key && !branchNamesByLower.has(key)) branchNamesByLower.set(key, String(row.branchName).trim())
-  }
-  const branchIdByLower = new Map<string, number>()
-  const branchesCreated: { id: number; name: string }[] = []
-  for (const [lowerName, name] of branchNamesByLower) {
-    const existing = await db.prepare(`SELECT id FROM branches WHERE lower(name) = @name LIMIT 1`).get<{ id: number }>({ name: lowerName })
-    if (existing) { branchIdByLower.set(lowerName, Number(existing.id)); continue }
-    const inserted = await db.prepare(`INSERT INTO branches (name, is_active) VALUES (@name, 1)`).run({ name })
-    const newId = Number(inserted.lastInsertRowid)
-    branchIdByLower.set(lowerName, newId)
-    branchesCreated.push({ id: newId, name })
-  }
+  // ---- Branch resolution (read-only canonical identity) ----
+  const branches = await db.prepare(`SELECT id, name, is_default, is_active FROM branches`).all<{
+    id: number; name: string; is_default: number | null; is_active: number | null
+  }>()
+  const canonicalBranches = indexCanonicalImportBranches(branches)
 
   // ---- Product resolution: sku -> barcode -> exact name, same priority
   // order as importEngine.ts's classifyProducts ----
   const skus = [...new Set(candidates.map((r) => lower(r.sku)).filter(Boolean))]
-  const barcodes = [...new Set(candidates.map((r) => lower(r.barcode)).filter(Boolean))]
+  // FOLDED barcode keys, not raw lowercased text. A dated count sheet
+  // carrying '0748485110011' for the row this catalog stores as
+  // '748485110011' is the SAME article -- the owner's leading-zero rule --
+  // and plain equality left it unresolved for a human to reconcile by hand.
+  // identityBarcodeClassKey/identityBarcodeKeySql are the one CLASS fold
+  // (Sep 15 2026: real barcodes only -- broken/short/word ones fold to '')
+  // importEngine, stockSession and the merge guard already share. A broken
+  // barcode never drives this lookup on its own; the row falls through to
+  // exact-name matching below instead.
+  const barcodes = [...new Set(candidates.map((r) => identityBarcodeClassKey(r.barcode)).filter(Boolean))]
   const names = [...new Set(candidates.map((r) => lower(r.productName)).filter(Boolean))]
 
   // Each of these lists is one column of an uploaded spreadsheet, so all
@@ -195,10 +189,10 @@ export async function resolveDatedStockCountRows(
   if (barcodes.length) {
     const productRows = await selectInChunks(barcodes, 0, (chunk) => {
       const { sql, params } = buildInClause('b', chunk)
-      return db.prepare(`SELECT id, barcode FROM products WHERE lower(barcode) IN (${sql})`).all<{ id: number; barcode: string }>(params)
+      return db.prepare(`SELECT id, barcode FROM products WHERE ${identityBarcodeKeySql('barcode')} IN (${sql})`).all<{ id: number; barcode: string }>(params)
     })
     for (const p of productRows) {
-      const key = lower(p.barcode)
+      const key = identityBarcodeClassKey(p.barcode)
       const bucket = byBarcode.get(key)
       if (bucket) bucket.push(Number(p.id))
       else byBarcode.set(key, [Number(p.id)])
@@ -221,13 +215,21 @@ export async function resolveDatedStockCountRows(
 
   const matched: { row: RawDatedCountRow & { normalizedDate: string }; branchId: number; productId: number }[] = []
   for (const row of candidates) {
-    const branchId = branchIdByLower.get(lower(row.branchName)) ?? null
-    // Should be unreachable (every branch name was just resolved/created
-    // above), but guard rather than crash on an unexpected empty name.
-    if (branchId == null) { unresolved.push({ rowNumber: row.rowNumber, reason: 'missing_identifier', raw: row, suggestedActions: [] }); continue }
+    const requestedBranchName = lower(row.branchName)
+    const branch = resolveCanonicalImportBranch(canonicalBranches, requestedBranchName)
+    if (!branch) {
+      unresolved.push({
+        rowNumber: row.rowNumber,
+        reason: requestedBranchName ? 'branch_not_found' : 'missing_branch',
+        raw: row,
+        suggestedActions: [],
+      })
+      continue
+    }
+    const branchId = Number(branch.id)
 
     const skuKey = lower(row.sku)
-    const barcodeKey = lower(row.barcode)
+    const barcodeKey = identityBarcodeClassKey(row.barcode)
     const nameKey = lower(row.productName)
 
     let productId: number | null = skuKey ? bySku.get(skuKey) ?? null : null
@@ -309,7 +311,7 @@ export async function resolveDatedStockCountRows(
     resolved.push(out)
   }
 
-  return { resolved, unresolved, branchesCreated }
+  return { resolved, unresolved, branchesCreated: [] }
 }
 
 // Request-parsing counterpart to datedStockCountRoute.ts's own

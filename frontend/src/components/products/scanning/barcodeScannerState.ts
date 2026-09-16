@@ -7,7 +7,7 @@ interface ScannerPresentationLabels {
   requestingCamera?: string
   scanUnsupported?: string
   cameraPermissionNeeded?: string
-  cameraPermissionReady?: string
+  cameraPaused?: string
   cameraPermissionBlocked?: string
   startCamera?: string
   requestCameraAccess?: string
@@ -62,8 +62,11 @@ export function deriveScannerPresentation({
       ? labels.cameraPermissionBlocked
       : status === 'dismissed'
         ? promptDismissedMessage
+        // Granted + not scanning can only mean a stream that already ran and
+        // was released (backgrounded page, photo picker). Opening the scanner
+        // goes straight to 'starting', so this is never a first-paint state.
         : permissionState === 'granted'
-          ? labels.cameraPermissionReady
+          ? labels.cameraPaused
           : labels.cameraPermissionNeeded
   )
 

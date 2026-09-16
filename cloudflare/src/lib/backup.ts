@@ -1,4 +1,5 @@
 import type { Env } from '../index'
+import { getPlanLimits } from './planTier'
 import { copyObject, listObjects } from './r2'
 import { streamBackupEvents } from './backupRestoreStream'
 
@@ -136,6 +137,8 @@ export const BACKUP_TABLES = [
   'units',
   'suppliers',
   'customers',
+  'customer_receivables',
+  'supplier_invoices',
   'customer_share_submissions',
   'delivery_contacts',
   'contact_duplicate_dismissals',
@@ -152,14 +155,21 @@ export const BACKUP_TABLES = [
   'promotions',
   'promotion_rules',
   'ai_provider_configs',
+  'shift_sessions',
+  'shift_session_amendments',
   'sales',
   'sale_items',
   'sale_item_batch_allocations',
   'returns',
+  'return_mutation_receipts',
+  'return_create_receipts',
   'return_items',
   'return_item_batch_allocations',
   'return_replacement_items',
   'fees',
+  // Manual-expense retry receipts identify fees and must survive with them;
+  // otherwise a restored browser retry could commit the same expense twice.
+  'fee_operation_receipts',
   'loyalty_point_adjustments',
   'inventory_movements',
   'stock_transfers',
@@ -175,6 +185,44 @@ export const BACKUP_TABLES = [
   'import_stock_action_guards',
   'google_drive_sync_entries',
   'action_history',
+  'transfer_operation_receipts',
+  'transfer_operation_members',
+  'undo_snapshots',
+  // A global conflict review owns its groups and independent-removal
+  // receipts. Keep these after every referenced product/history/snapshot
+  // parent, then restore each review before its children.
+  'product_conflict_action_reviews',
+  'product_conflict_action_groups',
+  'product_conflict_action_group_members',
+  'product_remove_operations',
+  // Selected-conflict run receipts are durable idempotency/continuation state.
+  // Restore the parent run before its product/history-linked case children.
+  'product_conflict_merge_runs',
+  'product_conflict_merge_run_cases',
+  'sale_amendments',
+  'sale_write_revisions',
+  // Durable monetary-mutation receipts reference action_history above; their
+  // members are children of the receipt. sale_mutation_guards is transient.
+  'sale_mutation_receipts',
+  'sale_mutation_members',
+  'sale_incident_recovery_receipts',
+  'sale_incident_recovery_members',
+  'sale_not_paid_stock_recovery_receipts',
+  'sale_not_paid_stock_recovery_members',
+  'sale_bulk_operations',
+  'sale_bulk_members',
+  'return_write_revisions',
+  'return_bulk_operations',
+  'return_bulk_members',
+  // Immutable Sales Records rows reference sales and the durable operation
+  // identities above. This position inserts parents first and reverse-deletes
+  // the events before any parent during restore.
+  'sale_record_events',
+  // Durable stock receipts reference history/snapshots, products/lots and
+  // movements above. Retained revision tombstones must round-trip unchanged.
+  'stock_session_revisions',
+  'stock_session_operations',
+  'stock_session_members',
   'audit_logs',
   'custom_tables',
   'custom_fields',
@@ -436,43 +484,84 @@ export async function listCloudflareBackups(env: Env) {
 // every existing backup file keep working -- only how it is produced
 // changed. Two bounds:
 //   - rows are read a page at a time (TABLE_PAGE_SIZE), never a whole table
-//   - JSON is written into an R2 multipart upload and flushed once a part
-//     is big enough, so at most one part is ever in memory
+//   - JSON is written into an R2 multipart upload in fixed-size parts, so
+//     at most ~two parts (the one filling, the one uploading) are ever in
+//     memory
 const TABLE_PAGE_SIZE = 500
 
-// R2 requires every part except the last to be at least 5MB. 6MB gives
-// headroom over that floor while keeping peak memory small.
-const MIN_R2_PART_BYTES = 6 * 1024 * 1024
+// R2 multipart rules (Cloudflare R2 docs, "Multipart upload" limits and
+// error 10048 "All non-trailing parts must have the same length"):
+//   - every part except the LAST must be exactly the same size -- not
+//     merely >= the S3-style 5 MiB floor. Uploading "at least N bytes, plus
+//     whatever string happened to push it over" therefore works only while
+//     there is a single non-trailing part (<= 2 parts total) and fails at
+//     complete() as soon as the document needs a third part. That is what
+//     broke every scheduled backup once the export crossed ~12 MiB.
+//   - part size min 5 MiB, max 5 GiB; at most 10,000 parts per upload
+//     (8 MiB x 10,000 = 80 GiB of headroom, far beyond a D1 database).
+// So the writer cuts the byte stream into parts of exactly R2_PART_BYTES
+// and only the trailing part may be shorter. Exported for the pure test.
+export const R2_PART_BYTES = 8 * 1024 * 1024
 
-class R2StreamWriter {
+export class R2StreamWriter {
   private parts: R2UploadedPart[] = []
-  private buffer: string[] = []
-  private bufferBytes = 0
+  // The part being filled. Sized to exactly one R2 part so a full buffer
+  // IS the next part, byte for byte -- no join/slice of strings, which is
+  // where the old writer lost the equal-size guarantee.
+  private buffer = new Uint8Array(R2_PART_BYTES)
+  private filled = 0
   private readonly encoder = new TextEncoder()
 
   constructor(private readonly upload: R2MultipartUpload) {}
 
   async write(text: string): Promise<void> {
     if (!text) return
-    this.buffer.push(text)
-    // Measured in BYTES, not characters -- R2's part floor is bytes, and
+    // Measured in BYTES, not characters -- R2's part size is bytes, and
     // this payload is full of non-ASCII (Khmer product names, currency
-    // symbols) where the two differ by up to 3x.
-    this.bufferBytes += this.encoder.encode(text).byteLength
-    if (this.bufferBytes >= MIN_R2_PART_BYTES) await this.flush()
+    // symbols) where the two differ by up to 3x. Copying into a byte
+    // buffer (rather than counting bytes and joining strings) is what lets
+    // a part boundary fall in the middle of a string, or even of a
+    // multi-byte character, without changing any part's length.
+    const bytes = this.encoder.encode(text)
+    let offset = 0
+    while (offset < bytes.byteLength) {
+      const take = Math.min(R2_PART_BYTES - this.filled, bytes.byteLength - offset)
+      this.buffer.set(bytes.subarray(offset, offset + take), this.filled)
+      this.filled += take
+      offset += take
+      if (this.filled === R2_PART_BYTES) await this.flushFullPart()
+    }
   }
 
-  private async flush(): Promise<void> {
-    if (!this.buffer.length) return
-    const body = this.buffer.join('')
-    this.buffer = []
-    this.bufferBytes = 0
+  // Uploads the buffer as one exactly-R2_PART_BYTES part and starts a fresh
+  // one. A new buffer is allocated rather than reused so the bytes handed to
+  // uploadPart are never overwritten while the runtime may still hold them;
+  // peak memory is therefore at most two parts.
+  private async flushFullPart(): Promise<void> {
+    const body = this.buffer
+    this.buffer = new Uint8Array(R2_PART_BYTES)
+    this.filled = 0
+    await this.uploadPart(body)
+  }
+
+  private async uploadPart(body: Uint8Array): Promise<void> {
     const part = await this.upload.uploadPart(this.parts.length + 1, body)
     this.parts.push(part)
   }
 
   async finish(): Promise<void> {
-    await this.flush()
+    // The trailing part may be any size below R2_PART_BYTES, but a
+    // zero-length trailing part is never uploaded: when the document ends
+    // exactly on a part boundary the last full part already IS the trailing
+    // part. (An entirely empty document -- nothing ever written -- completes
+    // with no parts, exactly as the previous writer did; every caller writes
+    // a header first, so that path is unreachable in practice.)
+    if (this.filled > 0) {
+      const body = this.buffer.subarray(0, this.filled)
+      this.buffer = new Uint8Array(0)
+      this.filled = 0
+      await this.uploadPart(body)
+    }
     await this.upload.complete(this.parts)
   }
 
@@ -543,7 +632,12 @@ async function writeBackupDocument(
     // picks up right where this run left off, and so on until the whole
     // snapshot is covered -- no repeated manual "Backup now" clicks
     // needed to reach full asset coverage.
-    const firstSlice = assets.slice(0, MAX_ASSET_BYTES_PER_BACKUP)
+    // Tier-aware cap. Each asset here is an R2 get() + put() = 2 subrequests,
+    // and Free allows 50 external subrequests per invocation -- so the Paid
+    // 100 (~200 subrequests) has to fall back to 20 (~40) on Free or the
+    // continuation dies mid-slice. The module-level export keeps its Paid
+    // value; see lib/planTier.ts's maxAssetsPerBackup.
+    const firstSlice = assets.slice(0, getPlanLimits(env).maxAssetsPerBackup)
     for (const asset of firstSlice) {
       attempts[asset.key] = 1
       try {
@@ -566,7 +660,7 @@ async function writeBackupDocument(
     // still make real progress across the whole catalog instead of
     // repeatedly copying the same first 40.
     const priorCursor = await getAssetCopyCursor(env)
-    const toCopy = selectAssetsToCopy(assets, priorCursor)
+    const toCopy = selectAssetsToCopy(assets, priorCursor, getPlanLimits(env).maxAssetsPerBackup)
     for (const asset of toCopy) {
       try {
         const destKey = `${assetsPrefix}${asset.key.replace(/^uploads\//, '')}`
@@ -708,17 +802,19 @@ async function writeBackupDocument(
 // `restoreCloudflareBackup` above already deletes+restores only whichever
 // tables are present in `payload.tables` and treats `r2.copiedKeys`/
 // `assetsPrefix` as optional, so a manifest with a subset of tables and an
-// empty asset list restores correctly through the exact same code path --
-// no restore-side changes needed. Same manifest format/prefix as a full
-// backup, so it still lists in `listCloudflareBackups` and is restorable
-// from the same UI.
+// empty asset list uses the same restore code path. The dependency preflight
+// must also pass: a partial sales/stock snapshot without its replay history
+// cannot safely replace a newer live database. Same manifest format/prefix
+// as a full backup, so it still lists in `listCloudflareBackups`.
 //
-// The caller is responsible for passing EVERY table its reset will delete:
-// a scoped backup that misses one is a backup that cannot undo the reset
-// it was taken for. routes/system.ts derives both lists from the same
-// place for exactly that reason.
+// The caller is responsible for passing EVERY table its reset will delete.
+// When any sales/replay table is requested, the section is widened to the
+// complete restore bundle because those application-level generation links
+// cannot be restored independently. The reset's delete scope remains narrow.
 export async function createSectionBackup(env: Env, tables: readonly string[], source: 'manual' | 'scheduled' = 'manual') {
-  return writeBackupDocument(env, { tables, includeAssets: false, source })
+  const requested = restoreSafeSectionTables(tables)
+  const ordered = BACKUP_TABLES.filter((table) => requested.has(table))
+  return writeBackupDocument(env, { tables: ordered, includeAssets: false, source })
 }
 
 // Queue consumer entry point (called from queue.ts's handleBackupQueue for
@@ -744,7 +840,7 @@ export async function continueCloudflareBackupAssetCopy(env: Env, backupName: st
     return { key, skipped: true, reason: 'not-resumable' as const, status: state.status }
   }
 
-  const slice = state.pendingKeys.slice(0, MAX_ASSET_BYTES_PER_BACKUP)
+  const slice = state.pendingKeys.slice(0, getPlanLimits(env).maxAssetsPerBackup)
   if (!slice.length) {
     state.status = state.failedKeys.length ? 'failed' : 'finalized'
     if (state.status === 'finalized') state.finalizedAt = new Date().toISOString()
@@ -955,6 +1051,28 @@ export async function maybeRunScheduledBackup(env: Env) {
     console.error('[backup] retention pass failed', error)
   }
 
+  // A full backup walks every backup table and lists the whole R2 bucket.
+  // It is the single heaviest thing this cron does, and a cron trigger gets
+  // the SAME 10 ms CPU budget as a request on the free plan -- it does not
+  // run slowly there, it is killed partway through, and a backup killed
+  // mid-write is worse than one that never started (the lifecycle sidecar is
+  // left claiming a copy is in progress, which then blocks the next run
+  // until STALE_BACKUP_MS elapses). Refuse explicitly instead.
+  //
+  // Deliberately placed AFTER the retention pass above: pruning old backups
+  // is cheap, and it is what keeps R2 under the free tier's storage ceiling,
+  // so it must keep running on both plans. Manual backups from the Backup
+  // screen are also unaffected -- a person can watch one and retry it; an
+  // unattended cron cannot.
+  if (!getPlanLimits(env).scheduledBackupEnabled) {
+    return {
+      skipped: true,
+      reason: 'scheduled-backup-unavailable-free',
+      code: 'scheduled_backup_unavailable_free',
+      latest: newestFinalized ?? null,
+      retention,
+    }
+  }
   if (activeCopyMs && Date.now() - activeCopyMs < STALE_BACKUP_MS) {
     return { skipped: true, reason: 'backup-in-progress', latest: activeCopy, retention }
   }
@@ -995,6 +1113,72 @@ async function openBackupStream(env: Env, key: string): Promise<ReadableStream<U
 // the callback are deliberately not caught: if progress cannot be recorded,
 // the restore's crash-visibility contract is already broken.
 export type RestoreProgress = { phase: 'deleting' | 'inserting' | 'assets'; table?: string; rowsDone?: number }
+
+// Replay snapshots and revision counters have application-level links that
+// SQLite FKs cannot express. Restoring their sales/stock independently can
+// leave a valid-looking undo action pointing at a different generation.
+export const SALE_REPLAY_RESTORE_BUNDLE = [
+  'pending_actions', 'branches', 'suppliers', 'file_assets', 'product_images',
+  'products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots',
+  'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items',
+  'return_item_batch_allocations', 'fees', 'fee_operation_receipts', 'inventory_movements', 'action_history',
+  'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_bulk_operations', 'sale_bulk_members',
+  'sale_mutation_receipts', 'sale_mutation_members',
+  'sale_incident_recovery_receipts', 'sale_incident_recovery_members',
+  'sale_not_paid_stock_recovery_receipts', 'sale_not_paid_stock_recovery_members',
+  'return_write_revisions', 'return_bulk_operations', 'return_bulk_members',
+  'return_mutation_receipts',
+  'return_create_receipts',
+  // Product identity is part of the Sales replay graph. Include every F65
+  // receipt that references products/history so a scoped Sales backup remains
+  // restorable after reviewed conflict actions exist.
+  'product_conflict_action_reviews', 'product_conflict_action_groups',
+  'product_conflict_action_group_members', 'product_remove_operations',
+  'product_conflict_merge_runs', 'product_conflict_merge_run_cases',
+  'sale_record_events',
+  'stock_session_revisions', 'stock_session_operations', 'stock_session_members',
+  'transfer_operation_receipts', 'transfer_operation_members', 'stock_transfers',
+] as const
+
+function restoreSafeSectionTables(tables: readonly string[]): Set<string> {
+  const requested = new Set(tables)
+  if (SALE_REPLAY_RESTORE_BUNDLE.some((table) => requested.has(table))) {
+    for (const table of SALE_REPLAY_RESTORE_BUNDLE) requested.add(table)
+  }
+  return requested
+}
+
+async function restoreDependencyError(env: Env, documentTables: ReadonlySet<string>): Promise<string | null> {
+  const liveTables = new Set<string>()
+  for (const table of BACKUP_TABLES) {
+    if (await tableExists(env, table)) liveTables.add(table)
+  }
+  const restored = new Set([...liveTables].filter(table => documentTables.has(table)))
+  if (restored.size === liveTables.size) return null
+  const missing = new Set<string>()
+  if (SALE_REPLAY_RESTORE_BUNDLE.some(table => restored.has(table))) {
+    for (const table of SALE_REPLAY_RESTORE_BUNDLE) {
+      if (liveTables.has(table) && !restored.has(table)) missing.add(table)
+    }
+  }
+  // Check both ends of declared dependencies among backed-up tables. Missing
+  // children can BLOCK or CASCADE a parent DELETE; missing parents can make
+  // later INSERTs fail. Never clear an absent table to work around either.
+  // Table presence, not current row counts, determines safety: an empty table
+  // can gain rows between validation and restore. Unrelated scoped backups
+  // (e.g. settings alone) still work.
+  for (const table of liveTables) {
+    const references = await env.DB.prepare(`PRAGMA foreign_key_list(${qid(table)})`).all<{ table: string }>()
+    for (const reference of references.results || []) {
+      if (!liveTables.has(reference.table) || restored.has(table) === restored.has(reference.table)) continue
+      missing.add(restored.has(table) ? reference.table : table)
+    }
+  }
+  if (!missing.size) return null
+  return `Cannot restore this backup: missing dependency tables: ${[...missing].sort().join(', ')}. `
+    + 'Choose a complete backup containing the related sales, stock and replay history, or recover this older backup in a separate compatible database. '
+    + 'No database rows have been changed; unbacked live history will not be discarded.'
+}
 
 export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>) {
   const key = resolveBackupKey(source)
@@ -1059,14 +1243,29 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   // the DOCUMENT doesn't carry (an older backup, from before that table
   // joined BACKUP_TABLES) is neither cleared nor restored -- its live rows
   // survive against otherwise-rolled-back data. That can leave e.g. the lot
-  // ledger describing stock the restored branch_stock no longer has. Report
-  // exactly which tables that applies to instead of letting the restore
-  // read as complete.
+  // ledger describing stock the restored branch_stock no longer has. Refuse
+  // unsafe dependency gaps below; report any unrelated omitted tables rather
+  // than letting a scoped restore read as complete.
   const tablesNotInBackup = (BACKUP_TABLES as readonly string[]).filter((t) => !documentTables.has(t))
+
+  // Recheck against the live schema even if the caller already validated the
+  // document. This MUST precede progress callbacks and every DELETE/write.
+  const dependencyError = await restoreDependencyError(env, documentTables)
+  if (dependencyError) throw new Error(dependencyError)
 
   // Order by BACKUP_TABLES (the writer's dependency order) so the reverse
   // delete respects foreign keys regardless of the document's own order.
   const orderedTables: string[] = BACKUP_TABLES.filter((t) => presentTables.includes(t))
+
+  // Pass 2 streams in document order. Reject an out-of-order document BEFORE
+  // any delete, rather than discover a child-before-parent FK error mid-restore.
+  if (presentTables.some((table, index) => table !== orderedTables[index])) {
+    throw new Error('Cannot restore this backup: tables are not in dependency order. No database rows have been changed.')
+  }
+  if (orderedTables.some(table => table.startsWith('stock_session_'))) {
+    const maintenance = await env.DB.prepare("SELECT 1 ok FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore'").first<{ ok: number }>()
+    if (!maintenance) throw new Error('Stock replay restore requires restore maintenance mode to preserve revision counters. No database rows have been changed.')
+  }
 
   let statementCount = 0
   await onProgress?.({ phase: 'deleting' })
@@ -1180,6 +1379,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
 export async function validateCloudflareBackup(env: Env, source: string) {
   const key = resolveBackupKey(source)
   const streamed = await inspectCloudflareBackupStream(await openBackupStream(env, key))
+  const dependencyError = await restoreDependencyError(env, new Set(streamed.tableNames))
   const backupName = key.slice(CLOUDFLARE_BACKUP_PREFIX.length).replace(/\.json$/, '')
   const lifecycle = await getCloudflareBackupState(env, backupName)
   const copiedCount = lifecycle?.copiedKeys.length ?? streamed.r2?.copiedKeys?.length ?? streamed.summary?.assetsBackedUp ?? 0
@@ -1196,7 +1396,8 @@ export async function validateCloudflareBackup(env: Env, source: string) {
     assetCount,
     status: lifecycle?.status || 'finalized',
     failedAssets: lifecycle?.failedKeys.length || 0,
-    restorable: !lifecycle || lifecycle.status === 'finalized',
+    restorable: (!lifecycle || lifecycle.status === 'finalized') && !dependencyError,
+    restoreError: dependencyError || undefined,
   }
 }
 
@@ -1208,6 +1409,7 @@ export type StreamedBackupInspection = {
   r2: BackupPayload['r2'] | null
   tableCount: number
   rowCount: number
+  tableNames: string[]
 }
 
 /**
@@ -1228,8 +1430,9 @@ export async function inspectCloudflareBackupStream(
   let r2: BackupPayload['r2'] | null = null
   let tableCount = 0
   let rowCount = 0
+  const tableNames: string[] = []
   for await (const event of streamBackupEvents(body)) {
-    if (event.type === 'table') tableCount += 1
+    if (event.type === 'table') { tableCount += 1; tableNames.push(event.table) }
     else if (event.type === 'row') rowCount += 1
     else if (event.key === 'format') format = String(event.value || '')
     else if (event.key === 'formatVersion') formatVersion = Number(event.value || 0)
@@ -1248,7 +1451,7 @@ export async function inspectCloudflareBackupStream(
   if (Number(summary.tableCount) !== tableCount || Number(summary.rowCount) !== rowCount) {
     throw new Error('Backup summary counts do not match its streamed table data')
   }
-  return { createdAt, source, runtime, summary, r2, tableCount, rowCount }
+  return { createdAt, source, runtime, summary, r2, tableCount, rowCount, tableNames }
 }
 
 export async function storeSystemJob(env: Env, job: Record<string, unknown>) {

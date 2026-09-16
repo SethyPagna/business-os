@@ -10,6 +10,7 @@ import {
   getLiveSessions,
   getPendingDevices,
   rejectDevice,
+  resetDeviceForReapproval,
   revokeAllUserSessions,
   revokeDevice,
   revokeLiveSession,
@@ -75,11 +76,12 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     load()
   }, [load])
 
-  const runAction = async (id: number, action: 'approve' | 'reject' | 'revoke', successMessage: string) => {
+  const runAction = async (id: number, action: 'approve' | 'reject' | 'revoke' | 'reset', successMessage: string) => {
     setBusyId(id)
     try {
       if (action === 'approve') await approveDevice(id)
       else if (action === 'reject') await rejectDevice(id)
+      else if (action === 'reset') await resetDeviceForReapproval(id)
       else await revokeDevice(id)
       notify(successMessage, 'success')
       await load()
@@ -88,6 +90,16 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     } finally {
       setBusyId(null)
     }
+  }
+
+  const resetForReapproval = (device: TrustedDeviceRecord) => {
+    const confirmed = window.confirm(tr(
+      t,
+      'device_reapproval_reset_confirm',
+      'Remove this rejected device request? This does not approve the device. The person must sign in again, then an administrator must approve the new request.',
+    ))
+    if (!confirmed) return
+    void runAction(device.id, 'reset', tr(t, 'device_reapproval_reset_done', 'Rejected device request removed. It must sign in again for a new approval request.'))
   }
 
   const runSessionRevoke = async (sessionId: number) => {
@@ -358,6 +370,14 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                   <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-300">
                     {tr(t, 'rejected', 'Rejected')}
                   </span>
+                  <button
+                    type="button"
+                    disabled={busyId === device.id}
+                    className="btn-secondary px-2.5 py-1 text-xs"
+                    onClick={() => resetForReapproval(device)}
+                  >
+                    {tr(t, 'device_reapproval_reset', 'Reset for re-approval')}
+                  </button>
                 </div>
               </div>
             ))}

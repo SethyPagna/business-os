@@ -128,7 +128,17 @@ check('storefront and admin rails count identically -- both by name group', asyn
 
 check('the storefront bootstrap rail applies the visibility filter, not a bare is_active', async () => {
   const portal = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'portal.ts'), 'utf8')
-  const railBlock = portal.slice(portal.indexOf('const initials = await db.prepare'))
+  // p6/efficiency-3: buildPortalCatalog fans attachPortalStockStatus out
+  // together with this rail query via Promise.all (they are independent
+  // reads), so the rail's `db.prepare` is no longer a standalone
+  // `const initials = await db.prepare` statement; anchor on the
+  // enclosing function instead and bound the slice to that function only,
+  // since runPortalProductSearch has its own separate rail below it.
+  const funcStart = portal.indexOf('async function buildPortalCatalog')
+  assert.ok(funcStart >= 0, 'buildPortalCatalog not found')
+  const funcEnd = portal.indexOf("app.get('/config'", funcStart)
+  assert.ok(funcEnd > funcStart, 'buildPortalCatalog end marker not found')
+  const railBlock = portal.slice(funcStart, funcEnd)
   // G4 (Part 399): the portal rail indexes BRANDS now -- the visibility
   // rule is unchanged, the letter source moved from p.name to p.brand
   // (blank brands are excluded from the rail; they render under the

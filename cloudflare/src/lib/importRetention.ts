@@ -1,4 +1,5 @@
 import { getDb } from './db'
+import { getPlanLimits } from './planTier'
 import type { Env } from '../index'
 import { audit } from './audit'
 import { deleteObjectsBulk } from './r2'
@@ -49,7 +50,8 @@ const IMPORT_RETENTION_MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
 // so one invocation's D1/R2 work stays finite no matter how large the
 // backlog is (the first production run faces the whole 193MB). The sweep
 // simply continues on later ticks until it reaches steady state.
-const IMPORT_RETENTION_MAX_JOBS_PER_TIER = 20
+// The number itself is plan-sensitive and lives in lib/planTier.ts
+// (importRetentionMaxJobsPerTier: paid 20, free 5), read per run below.
 
 // Terminal = the statuses every writer settles on and nothing resumes
 // from without an explicit /retry (queue.ts, importEngine.ts,
@@ -216,6 +218,11 @@ export async function maybeRunScheduledImportRetention(env: Env): Promise<Import
     const summaryHours = Math.max(summaryDays * 24, detailHours)
 
     const db = getDb(env)
+    // Jobs pruned per tier per tick, tier-aware -- see lib/planTier.ts.
+    // Free gets 5 instead of 20 so one cron invocation stays inside the
+    // 10 ms budget; the sweep continues on later ticks until steady state,
+    // which is already how it is designed to drain a backlog.
+    const maxJobsPerTier = getPlanLimits(env).importRetentionMaxJobsPerTier
     let detailPruned = 0
     let summaryDeleted = 0
     let r2Deleted = 0
@@ -229,7 +236,7 @@ export async function maybeRunScheduledImportRetention(env: Env): Promise<Import
         AND details_pruned_at IS NULL
         AND ${FINISHED_AT_SQL} < @cutoff
       ORDER BY ${FINISHED_AT_SQL} ASC
-      LIMIT ${IMPORT_RETENTION_MAX_JOBS_PER_TIER}
+      LIMIT ${maxJobsPerTier}
     `).all<{ id: string }>({ cutoff: detailCutoff })
 
     for (const job of detailJobs) {
@@ -275,7 +282,7 @@ export async function maybeRunScheduledImportRetention(env: Env): Promise<Import
       WHERE status IN ${TERMINAL_STATUS_SQL}
         AND ${FINISHED_AT_SQL} < @cutoff
       ORDER BY ${FINISHED_AT_SQL} ASC
-      LIMIT ${IMPORT_RETENTION_MAX_JOBS_PER_TIER}
+      LIMIT ${maxJobsPerTier}
     `).all<{ id: string }>({ cutoff: summaryCutoff })
 
     for (const job of summaryJobs) {

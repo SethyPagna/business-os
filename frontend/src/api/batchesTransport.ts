@@ -28,6 +28,14 @@ export type ProductBatch = {
   updated_at?: string | null
 }
 
+export type ProductBatchListResponse = {
+  batches: ProductBatch[]
+  // All positive product_batches at this exact branch, including inactive
+  // rows intentionally omitted from batches. POS uses this only to bound the
+  // explicit-unrecorded remainder; it never makes inactive lots selectable.
+  known_positive_quantity?: number
+}
+
 export type ReceiveBatchPayload = {
   productId: number
   branchId: number
@@ -35,6 +43,9 @@ export type ReceiveBatchPayload = {
   expiryDate?: string | null
   receivedDate?: string | null
   notes?: string | null
+  // P3-L2: the operator's reason for this receipt, stored on the movement as
+  // typed; null keeps the Worker's own "Stock received (<lot>)" label.
+  reason?: string | null
   // D4b: explicit existing lot to top up (the same picker every adjust
   // surface has). When set it always wins over date matching; the server
   // validates the lot belongs to this product and keeps its received_at.
@@ -45,6 +56,9 @@ export type ReceiveBatchPayload = {
   supplierId?: number | null
   supplierName?: string | null
   unitCostUsd?: number | null
+  // N14-D: the explicit "these goods were free" declaration. POST /api/batches
+  // refuses a $0.00 unit cost without it, exactly as /api/inventory/adjust does.
+  freeGoods?: boolean
   paymentStatus?: 'paid' | 'credit' | null
   creditDueDate?: string | null
   sessionId?: number | null
@@ -56,9 +70,18 @@ export type ReceiveBatchPayload = {
 // clamp the cart line (a batch-tracked product's sellable quantity is
 // whichever single lot was picked, not the product's overall stock).
 export type BatchSelection = {
-  batchId: number
-  batchLabel: string | null
-  batchExpiryDate: string | null
+  batchId?: number
+  batchLabel?: string | null
+  batchExpiryDate?: string | null
+  // A selected Shop remainder whose stock has no received-date record. The
+  // backend validates it against branch_stock minus every positive known lot.
+  unlottedStock?: boolean
+  // The lot's own received date, carried so a host that DISPLAYS the picked
+  // intake ("Batch 2 · Received: 09/01/2026" on a staged sale line) does not
+  // have to re-fetch the lot list to find out what it just picked. Optional:
+  // the POS cart line stores the label and the expiry only, and nothing
+  // upstream is required to supply it.
+  batchReceivedAt?: string | null
   quantity: number
 }
 
@@ -93,7 +116,7 @@ export function getTrackedBatchProductIds(branchId?: number | string | null): Pr
 
 // GET /api/batches?productId=&branchId=&onlyAvailable= -- every active
 // batch for one product, FIFO-ordered (soonest expiry first).
-export function getProductBatches(productId: number | string, branchId: number | string, onlyAvailable = false): Promise<{ batches: ProductBatch[] }> {
+export function getProductBatches(productId: number | string, branchId: number | string, onlyAvailable = false): Promise<ProductBatchListResponse> {
   const params = new URLSearchParams({ productId: String(productId), branchId: String(branchId) })
   if (onlyAvailable) params.set('onlyAvailable', '1')
   return route(
@@ -119,27 +142,38 @@ export function getProductBatches(productId: number | string, branchId: number |
   )
 }
 
+// The camelCase ReceiveBatchPayload -> snake_case POST /api/batches wire
+// body, pulled out (P4-B) so FastStockInModal.tsx's batched commit
+// (inventoryWriteTransport.ts's commitFastStockIn) can build the exact same
+// wire shape for its 'receive'-wire lines as this endpoint's own single-line
+// call below, instead of a second hand-written copy that could drift.
+export function receiveBatchWireBody(payload: ReceiveBatchPayload): Record<string, unknown> {
+  return {
+    product_id: payload.productId,
+    branch_id: payload.branchId,
+    quantity: payload.quantity,
+    expiry_date: payload.expiryDate || null,
+    received_date: payload.receivedDate || null,
+    batch_id: payload.batchId ?? null,
+    notes: payload.notes || null,
+    reason: payload.reason || null,
+    supplier_id: payload.supplierId ?? null,
+    supplier_name: payload.supplierName || null,
+    unit_cost_usd: payload.unitCostUsd ?? null,
+    free_goods: payload.freeGoods === true,
+    payment_status: payload.paymentStatus || null,
+    credit_due_date: payload.creditDueDate || null,
+    session_id: payload.sessionId ?? null,
+  }
+}
+
 // POST /api/batches -- receive stock into a batch (creates a new batch, or
 // tops up an existing one when the received date's derived code already
 // matches one on this product -- see cloudflare/src/lib/batchCode.ts).
 export function receiveBatchStock(payload: ReceiveBatchPayload): Promise<{ success: boolean; batchId: number; lotCode?: string }> {
   return route(
     'batches:receive',
-    () => apiFetch('POST', '/api/batches', {
-      product_id: payload.productId,
-      branch_id: payload.branchId,
-      quantity: payload.quantity,
-      expiry_date: payload.expiryDate || null,
-      received_date: payload.receivedDate || null,
-      batch_id: payload.batchId ?? null,
-      notes: payload.notes || null,
-      supplier_id: payload.supplierId ?? null,
-      supplier_name: payload.supplierName || null,
-      unit_cost_usd: payload.unitCostUsd ?? null,
-      payment_status: payload.paymentStatus || null,
-      credit_due_date: payload.creditDueDate || null,
-      session_id: payload.sessionId ?? null,
-    }),
+    () => apiFetch('POST', '/api/batches', receiveBatchWireBody(payload)),
     null,
     true,
   )

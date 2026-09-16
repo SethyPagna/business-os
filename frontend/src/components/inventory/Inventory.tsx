@@ -19,7 +19,7 @@ import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import { toggleMultiValue, isMultiActive, matchesMulti, parseMultiValues } from '../../utils/multiSelect'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
-import PaginationControls, { clampPage } from '../shared/PaginationControls'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
@@ -28,13 +28,17 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 const ProductDetailModal = lazyRetry(() => import('./ProductDetailModal'), 'inventory-product-detail-modal') as any
 const InventoryImportModal = lazyRetry(() => import('./InventoryImportModal'), 'inventory-import') as any
 const InventoryMovementsSurface = lazyRetry(() => import('./InventoryMovementsSurface'), 'inventory-movements-surface') as any
+const InventoryProductsSurface = lazyRetry(() => import('./InventoryProductsSurface'), 'inventory-products-surface') as any
 const InventoryRfidSurface = lazyRetry(() => import('./InventoryRfidSurface'), 'inventory-rfid-surface') as any
 const InventoryStockModals = lazyRetry(() => import('./InventoryStockModals'), 'inventory-stock-modals') as any
 const FastStockInModal = lazyRetry(() => import('./FastStockInModal'), 'inventory-fast-stock-in-modal') as any
-// F3 slice 2: the minimized-work chip's restore path (see
-// utils/minimizedWork.ts -- event for a mounted host, pending for a
-// fresh mount).
-import { RESTORE_WORK_EVENT, consumePendingRestore, markRestoreHandled, minimizeWork } from '../../utils/minimizedWork.ts'
+// Fast Stock-in can still launch here, but its minimized chip resumes through
+// the canonical Products -> Stock Changes host. This retained Inventory body
+// accepts only its own transfer restore, never the Products stock-in event.
+import { FAST_STOCK_IN_RESTORE_HOST, minimizeWork, transferDraftKey, readTransferDraft, writeTransferDraft, discardTransferDraft, completeTransferDraft, parkTransferDraft, RESTORE_WORK_EVENT, peekPendingRestore, reparkDeniedRestore, type MinimizedWorkEntry } from '../../utils/minimizedWork.ts'
+import { clearWorkDraft, scopedWorkDraftKey, writeWorkDraft } from '../../utils/workDrafts.ts'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
+import { STOCK_ADJUST_RESTORE_HOST, stockAdjustDraftKey, type StockAdjustDraft } from '../../utils/stockAdjustDraft.ts'
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'inventory-export-options') as any
 const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
 const InventoryReasonManagerModal = lazyRetry(() => import('./InventoryReasonManagerModal'), 'inventory-reason-manager-modal') as any
@@ -43,11 +47,13 @@ const ExportRangeDialog = lazyRetry(() => import('../shared/ExportRangeDialog'),
 
 import { buildMovementGroups, getMovementGroupPage, movementColorClass, movementColorClassForRecord, movementGroupHaystack, translateMovementType } from './movementGroups'
 import { buildStockHealthSegments } from './stockHealthSummary'
-import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
+import { buildInventoryProductsSearchParams } from './inventoryProductsQuery.ts'
+import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { getSalesStatsStrip } from '../../api/salesTransport.ts'
 import { getReturnsReport } from '../../api/returnsReadTransport.ts'
+import { normalizeDashboardGrossMetrics } from '../../api/dashboardTransport.ts'
 
 // Default quantity the Adjust-stock "Add" form starts with -- see
 // InventoryStockModals.tsx's quick-pick chips (1 / this value / 5 / 10 /
@@ -62,12 +68,17 @@ function todayIsoDate(): string {
 }
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
+import { effectivePermissions } from '../../utils/permissions.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
+import { branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
 import type { QueryParams } from '../../api/query.ts'
+import type { PendingInventoryTransfer } from '../../api/inventoryWriteTransport.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -143,8 +154,10 @@ type AdjustForm = {
   pricingLocked: boolean
   selling_price_usd: InventoryFormValue
   selling_price_khr: InventoryFormValue
-  special_price_usd: InventoryFormValue
-  special_price_khr: InventoryFormValue
+  // Renamed from special_price_* with the tier itself (2026-09-04 ruling);
+  // must stay in lockstep with InventoryStockModals.tsx's own form type.
+  wholesale_price_usd: InventoryFormValue
+  wholesale_price_khr: InventoryFormValue
   discount_enabled: boolean
   discount_type: string
   discount_percent: InventoryFormValue
@@ -165,6 +178,16 @@ type AdjustForm = {
   // trust them; see its comment).
   supplier_id: number | ''
   supplier_name: string
+  // S4-15/S4-16: mirrors InventoryStockModals.tsx's matching receipt fields --
+  // what this stock-in cost per unit and how it was paid. Offered for an 'add'
+  // and for a 'set' that raises the figure (utils/stockReceiptFields.ts).
+  unit_cost_usd: InventoryFormValue
+  // N14-D: the explicit free-goods declaration, mirrored from the shared form.
+  free_goods: boolean
+  payment_status: string
+  credit_due_date: string
+  // P3-L6: mirrors InventoryStockModals.tsx's field of the same name.
+  condition_tag: string
 }
 
 type TransferForm = {
@@ -186,6 +209,7 @@ type InventoryAppContext = {
   fmtKHR: MoneyFormatter
   usdSymbol: string
   exchangeRate?: number
+  navigateTo?: (pageId: string) => void
 }
 
 type InventorySyncContext = {
@@ -289,6 +313,7 @@ const INVENTORY_REASONS_TIMEOUT_MS = 8000
 const INVENTORY_BRANCHES_TIMEOUT_MS = 8000
 const INVENTORY_STATS_TIMEOUT_MS = 12000
 const INVENTORY_MOVEMENTS_TIMEOUT_MS = 15000
+const INVENTORY_PRODUCTS_TIMEOUT_MS = 15000
 const INVENTORY_RFID_TIMEOUT_MS = 8000
 const INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS = 10000
 const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000
@@ -302,7 +327,7 @@ function countActiveFlags(flags: unknown[] = []): number {
 }
 
 const RFID_INVENTORY_WORKFLOWS = [
-  { id: 'receiving', labelKey: 'rfid_workflow_receiving', descriptionKey: 'rfid_workflow_receiving_desc', label: 'Receiving', description: 'Pair EPC tags to new stock, supplier lots, cartons, or individual products before adding inventory.' },
+  { id: 'receiving', labelKey: 'rfid_workflow_receiving', descriptionKey: 'rfid_workflow_receiving_desc', label: 'Receiving', description: 'Pair EPC tags to new stock, supplier received-date records, cartons, or individual products before adding inventory.' },
   { id: 'stock-count', labelKey: 'rfid_workflow_stock_count', descriptionKey: 'rfid_workflow_stock_count_desc', label: 'Stock count', description: 'Walk shelves with a reader, compare reads against on-hand stock, then approve counted differences.' },
   { id: 'transfer', labelKey: 'rfid_workflow_branch_transfer', descriptionKey: 'rfid_workflow_branch_transfer_desc', label: 'Branch transfer', description: 'Scan tags out of one branch and into another so transfer movements keep item identity.' },
   { id: 'pos-verify', labelKey: 'rfid_workflow_pos_verify', descriptionKey: 'rfid_workflow_pos_verify_desc', label: 'POS verify', description: 'Use doorway or counter reads to confirm sold items before bagging and reduce missed scans.' },
@@ -311,7 +336,7 @@ const RFID_INVENTORY_WORKFLOWS = [
 
 const RFID_READER_REQUIREMENTS = [
   { id: 'gateway', key: 'rfid_requirement_gateway', text: 'RFID reader gateway must post reads with EPC / TID, antenna, branch, RSSI, and timestamp.' },
-  { id: 'mapping', key: 'rfid_requirement_mapping', text: 'Each tag must be mapped to a product, variant, lot, carton, or serial-level unit before stock can change.' },
+  { id: 'mapping', key: 'rfid_requirement_mapping', text: 'Each tag must be mapped to a product, variant, received-date record, carton, or serial-level unit before stock can change.' },
   { id: 'fallback', key: 'rfid_requirement_barcode_fallback', text: 'Barcode fallback remains available for products that are not tagged or when the reader is offline.' },
 ]
 
@@ -354,7 +379,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   dateRange?: DateTimeRange
   onDateRangeChange?: (range: DateTimeRange) => void
 } = {}) {
-  const { can, t, user, notify, fmtUSD, fmtKHR, usdSymbol, exchangeRate } = useApp() as InventoryAppContext
+  const { can, t, user, notify, fmtUSD, fmtKHR, usdSymbol, exchangeRate, navigateTo } = useApp() as InventoryAppContext
   // Every stock-moving action here mutates live batch/stock state that could
   // go stale between a Review Required user's request and an admin's
   // approval, so routes/inventory.ts blocks them outright for that tier
@@ -382,6 +407,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   }, [isKhmer, t])
   const [stockStats,    setStockStats]    = useState<InventoryStats>(null)
   const [stockStatsLoaded, setStockStatsLoaded] = useState(false)
+  const [stockStatsScope, setStockStatsScope] = useState('')
   const [statsRefreshError, setStatsRefreshError] = useState('')
   const [movements,     setMovements]     = useState<InventoryMovement[]>([])
   const [movementsLoaded, setMovementsLoaded] = useState(false)
@@ -396,7 +422,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // Dashboard and Reports for the same dates.
   type InventoryStripKernel = { totals?: Record<string, number> }
   type InventoryStripReturns = { totals?: { count?: number; refund_usd?: number; compensation_usd?: number; loss_usd?: number }; by_type?: Array<{ return_type?: string; count?: number }> }
-  const [localStripRange, setLocalStripRange] = useState<DateTimeRange>(() => ({ startDate: '', endDate: '', startTime: '', endTime: '' }))
+  const [localStripRange, setLocalStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
   const stripRange = dateRange ?? localStripRange
   const handleStripRangeChange = onDateRangeChange ?? setLocalStripRange
   const [stripKernel, setStripKernel] = useState<InventoryStripKernel | null>(null)
@@ -405,8 +431,15 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [stripLoading, setStripLoading] = useState(false)
   const stripRequestRef = useRef(0)
   const loadStatsStrip = useCallback(async (): Promise<void> => {
-    if (!isActive || !stripRange.startDate || !stripRange.endDate) return
+    if (!isActive) return
     const requestId = ++stripRequestRef.current
+    if (!stripRange.startDate || !stripRange.endDate) {
+      setStripKernel(null)
+      setStripCustomerReturns(null)
+      setStripSupplierReturns(null)
+      setStripLoading(false)
+      return
+    }
     setStripLoading(true)
     const dates = { startDate: stripRange.startDate, endDate: stripRange.endDate }
     try {
@@ -423,21 +456,31 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       if (stripRequestRef.current === requestId) setStripLoading(false)
     }
   }, [isActive, stripRange.endDate, stripRange.startDate])
-  useEffect(() => { void loadStatsStrip() }, [loadStatsStrip])
-  useEffect(() => {
-    if (!isActive || !syncChannel?.channel) return
-    if (['sales', 'returns', 'inventory'].includes(syncChannel.channel)) void loadStatsStrip()
-  }, [isActive, loadStatsStrip, syncChannel?.channel, syncChannel?.ts])
+  // The two effects that actually run loadStatsStrip live further down, right
+  // after showInventoryStats is known -- see the note there.
   const [branchFilter,  setBranchFilter]  = useState('all')
+  // Products has its own request lifecycle. It must remain usable even when
+  // the independently ranged statistics loaders fail or finish out of order.
+  const [productsItems, setProductsItems] = useState<InventoryProduct[]>([])
+  const [productsPage, setProductsPage] = useState(1)
+  const [productsPageSize, setProductsPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [productsTotal, setProductsTotal] = useState(0)
+  const [productsTotalPages, setProductsTotalPages] = useState(1)
+  const [productsLoading, setProductsLoading] = useState(false)
+  const [productsError, setProductsError] = useState<string | null>(null)
+  const [productsResultScope, setProductsResultScope] = useState('')
+  const productsRequestRef = useRef(0)
   const [adjustModal,   setAdjustModal]   = useState<InventoryProduct | null>(null)
   const [manageBatchesModal, setManageBatchesModal] = useState<InventoryProduct | null>(null)
   const [adjustForm,    setAdjustForm]    = useState<AdjustForm>({
     type: 'add', quantity: DEFAULT_ADD_QUANTITY, reason: '', branch_id: '',
     pricingLocked: true,
-    selling_price_usd: '', selling_price_khr: '', special_price_usd: '', special_price_khr: '',
+    selling_price_usd: '', selling_price_khr: '', wholesale_price_usd: '', wholesale_price_khr: '',
     discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '',
     cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '', received_date: todayIsoDate(),
     supplier_id: '', supplier_name: '',
+    unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',
+    condition_tag: '',
   })
   const [transferModal, setTransferModal] = useState<InventoryProduct | null>(null)
   const [transferForm,  setTransferForm]  = useState<TransferForm>({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
@@ -472,14 +515,25 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     if (hostSection === 'all') setTab('products')
     else if (hostSection !== 'stats') setTab(hostSection)
   }, [hostSection])
+  // Declared here rather than beside the other show* flags further down
+  // because the stats-strip loaders below need it: the strip's three
+  // range-scoped requests (sales kernel + both returns reports) must not fire
+  // for a section that never draws the strip. That became reachable when the
+  // Products section gained its own range row (N10) -- before that, this
+  // component only ever had a range when the strip was on screen.
+  const showInventoryStats = inventorySection === 'all' || inventorySection === 'stats'
+  useEffect(() => { if (showInventoryStats) void loadStatsStrip() }, [loadStatsStrip, showInventoryStats])
+  useEffect(() => {
+    if (!isActive || !syncChannel?.channel || !showInventoryStats) return
+    if (['sales', 'returns', 'inventory'].includes(syncChannel.channel)) void loadStatsStrip()
+  }, [isActive, loadStatsStrip, showInventoryStats, syncChannel?.channel, syncChannel?.ts])
   const [rfidSection, setRfidSection] = useState('all')
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState<InventoryUserOption[]>([])
-  // Movements opens across all time. A pre-filled "today" range hid older
-  // history before the person had chosen to filter it.
-  const [movementStartDate, setMovementStartDate] = useState('')
-  const [movementEndDate, setMovementEndDate] = useState('')
+  // Initialize to the Cambodia business day; an explicit Clear stays all-time.
+  const [movementStartDate, setMovementStartDate] = useState(todayIsoDate)
+  const [movementEndDate, setMovementEndDate] = useState(todayIsoDate)
   // The Start → End range picker is the ONE date control on Movements now
   // (user, Aug 31: "remove [All time]; the date is default, and start date
   // and end date for customizing which is for many sections and pages
@@ -507,21 +561,14 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [loadError,     setLoadError]     = useState<string | null>(null)
   const [adjustSaving,  setAdjustSaving]  = useState(false)
   const [transferSaving, setTransferSaving] = useState(false)
+  const [pendingTransfer, setPendingTransfer] = useState<PendingInventoryTransfer | null>(null)
+  const [transferRetryError, setTransferRetryError] = useState('')
+  const [transferRetryReady, setTransferRetryReady] = useState(false)
   const [showImport, setShowImport] = useState(false)
   // F2 (Part 419): the fast per-shipment stock-in flow -- see
   // FastStockInModal.tsx; writes ride the same receive kernel as every
   // other add-stock surface.
   const [showFastStockIn, setShowFastStockIn] = useState(false)
-  useEffect(() => {
-    if (consumePendingRestore('fast_stockin')) setShowFastStockIn(true)
-    const onRestore = (event: Event) => {
-      if ((event as CustomEvent).detail?.kind !== 'fast_stockin') return
-      markRestoreHandled('fast_stockin')
-      setShowFastStockIn(true)
-    }
-    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
-    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
-  }, [])
   const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
   const [reasonManager, setReasonManager] = useState<{ open: boolean; type: InventoryReasonType }>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
@@ -542,6 +589,107 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const adjustStockInFlightRef = useRef(false)
   const transferStockInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory', enabled: historyReady, user })
+  const transferAuthorityRef = useRef({ actorId: String(user?.id ?? ''), allowed: canTransferStock })
+  transferAuthorityRef.current = { actorId: String(user?.id ?? ''), allowed: canTransferStock }
+  const transferHistoryRef = useRef(actionHistory)
+  transferHistoryRef.current = actionHistory
+  const transferDraft = transferDraftKey('inventory_transfer')
+  const [transferRestoredDirty, setTransferRestoredDirty] = useState(false)
+  const transferDraftOwnerRef = useRef({ key: transferDraft, actorId: String(user?.id ?? '') })
+  const transferDraftSnapshotRef = useRef<{ key: string; actorId: string; product: InventoryProduct; form: TransferForm } | null>(null)
+  const transferDraftGuardRef = useRef({ busy: transferSaving, pending: !!pendingTransfer })
+  transferDraftGuardRef.current = { busy: transferSaving, pending: !!pendingTransfer }
+  useEffect(() => {
+    if (!transferModal || transferDraftOwnerRef.current.actorId !== String(user?.id ?? '')) return
+    const snapshot = { ...transferDraftOwnerRef.current, product: transferModal, form: transferForm }
+    transferDraftSnapshotRef.current = snapshot
+    writeTransferDraft('inventory_transfer', snapshot.actorId, snapshot.key, { product: snapshot.product, form: snapshot.form })
+  }, [transferModal, transferForm, user?.id])
+  const parkCurrentTransfer = useCallback(() => {
+    const snapshot = transferDraftSnapshotRef.current
+    if (!snapshot) return false
+    if (!writeTransferDraft('inventory_transfer', snapshot.actorId, snapshot.key, { product: snapshot.product, form: snapshot.form })) return false
+    parkTransferDraft('inventory_transfer', snapshot.actorId, snapshot.key, `${tr('transfer', 'Transfer')} — ${snapshot.product.name || ''}`)
+    return true
+  }, [tr])
+  useEffect(() => {
+    window.addEventListener('pagehide', parkCurrentTransfer)
+    return () => { window.removeEventListener('pagehide', parkCurrentTransfer); parkCurrentTransfer() }
+  }, [parkCurrentTransfer])
+  const restoreInventoryTransfer = useCallback(async (entry?: MinimizedWorkEntry) => {
+    const actorId = String(user?.id ?? '')
+    const key = transferDraftKey('inventory_transfer')
+    if (entry && (entry.draftKey !== key || String(entry.payload?.actorId) !== actorId)) return
+    if (!canTransferStock) { if (entry) reparkDeniedRestore(entry); return }
+    const draft = readTransferDraft<{ product: InventoryProduct; form: TransferForm }>('inventory_transfer', actorId)
+    if (!draft?.product?.id) return
+    try {
+      const result = await getInventoryApi().getProductsByIds([draft.product.id], { include: 'branch_stock' })
+      if (transferAuthorityRef.current.actorId !== actorId || !transferAuthorityRef.current.allowed) {
+        if (entry) reparkDeniedRestore(entry)
+        return
+      }
+      const product = result?.items?.find((row: InventoryProduct) => String(row.id) === String(draft.product.id))
+      if (!product) throw new Error(tr('product_not_found', 'Product not found'))
+      transferDraftOwnerRef.current = { key, actorId }
+      setTransferRestoredDirty(true)
+      setTransferForm(draft.form)
+      setTransferModal(product)
+    } catch (error) { notify(error instanceof Error ? error.message : tr('failed_to_load_data', 'Failed to load data'), 'error') }
+  }, [canTransferStock, user?.id, notify, tr])
+  useEffect(() => {
+    const pending = peekPendingRestore('inventory_transfer')
+    if (pending) void restoreInventoryTransfer(pending)
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind === 'inventory_transfer' && detail.entry) void restoreInventoryTransfer(detail.entry)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, listener)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, listener)
+  }, [restoreInventoryTransfer])
+  useEffect(() => {
+    if (!isActive || !canTransferStock) { parkCurrentTransfer(); setTransferModal(null) }
+  }, [isActive, canTransferStock, parkCurrentTransfer])
+  const closeTransferDraft = () => {
+    if (transferStockInFlightRef.current || transferSaving) return
+    if (!pendingTransfer) {
+      discardTransferDraft('inventory_transfer', user?.id, transferDraftOwnerRef.current.key)
+      transferDraftSnapshotRef.current = null
+    } else parkCurrentTransfer()
+    setTransferModal(null)
+  }
+  const minimizeTransferDraft = () => {
+    if (transferStockInFlightRef.current || transferSaving || !canTransferStock) return
+    if (!parkCurrentTransfer()) { notify(tr('save_failed', 'Save failed'), 'error'); return }
+    setTransferModal(null)
+  }
+  useEffect(() => {
+    if (!transferModal) return
+    const key = transferDraftOwnerRef.current.key
+    const actorId = transferDraftOwnerRef.current.actorId
+    return registerDirtyWork({
+      key, pageId: 'branches', label: tr('transfer', 'Transfer'),
+      isDirty: () => transferDraftGuardRef.current.busy || (!transferDraftGuardRef.current.pending && !!transferDraftSnapshotRef.current),
+      discard: () => {
+        if (transferDraftGuardRef.current.busy || transferDraftGuardRef.current.pending) return
+        if (discardTransferDraft('inventory_transfer', actorId, key)) transferDraftSnapshotRef.current = null
+      },
+    })
+  }, [transferModal?.id, user?.id, tr])
+  useEffect(() => {
+    let current = true
+    setTransferRetryReady(false)
+    setPendingTransfer(null)
+    setTransferModal(null)
+    setTransferRetryError('')
+    void loadInventoryWriteTransport().then((api) => {
+      const saved = api.loadInventoryTransfer(user?.id)
+      if (current) { setPendingTransfer(saved); setTransferRetryReady(true) }
+    }).catch((error: unknown) => {
+      if (current) setTransferRetryError(error instanceof Error ? error.message : 'Transfer retry unavailable')
+    })
+    return () => { current = false }
+  }, [user?.id])
   const runInventoryMutation = useCallback((loader: InventoryLoader, label: string): Promise<any> => (
     withLoaderTimeout(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS)
   ), [])
@@ -549,17 +697,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // wrap... show only time for rows") -- the date lives once on each day's
   // divider header, so rows need only their clock time.
   const movementTimeMode = 'day'
-  const isAdmin = useMemo(() => {
-    const roleCode = String(user?.role_code || '').toLowerCase()
-    const username = String(user?.username || '').toLowerCase()
-    let permissions = user?.permissions || {}
-    try {
-      permissions = typeof permissions === 'string' ? JSON.parse(permissions || '{}') : permissions
-    } catch {
-      permissions = {}
-    }
-    return username === 'admin' || roleCode === 'admin' || !!permissions.all
-  }, [user])
+  const isAdmin = useMemo(() => effectivePermissions(user).isAdmin, [user])
   const branchesById = useMemo(() => new Map(
     (Array.isArray(branches) ? branches : []).map((branch) => [String(branch?.id), branch]),
   ), [branches])
@@ -567,15 +705,14 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     branches.find((branch) => branch.is_default) || branches[0] || null
   ), [branches])
   const defaultTransferDestinationBySourceId = useMemo(() => {
-    const branchIds = (Array.isArray(branches) ? branches : [])
-      .map((branch) => String(branch?.id || ''))
-      .filter(Boolean)
-    const firstBranchId = branchIds[0] || ''
-    const secondBranchId = branchIds[1] || ''
-    return new Map(branchIds.map((branchId) => [
-      branchId,
-      branchId !== firstBranchId ? firstBranchId : secondBranchId,
-    ]))
+    const eligibleBranches = (Array.isArray(branches) ? branches : [])
+      .filter((branch) => branchCanBeTransferSource(branch?.name))
+    return new Map(eligibleBranches.map((sourceBranch) => {
+      const destination = eligibleBranches.find((candidate) => (
+        branchCanTransferBetween(sourceBranch?.name, candidate?.name)
+      ))
+      return [String(sourceBranch?.id || ''), String(destination?.id || '')]
+    }))
   }, [branches])
   const getBranchLabel = useCallback((branchId: InventoryId | null | undefined, fallback = '') => (
     branchesById.get(String(branchId))?.name || fallback || String(branchId || '')
@@ -618,9 +755,73 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     move: inventoryReasons.filter((item) => item?.type === 'move'),
   }), [inventoryReasons])
 
-  const needsStatsData = inventorySection === 'all' || inventorySection === 'stats'
+  const needsStatsData = inventorySection === 'all' || inventorySection === 'stats' || inventorySection === 'products'
+  const needsProductsData = inventorySection === 'products' || (inventorySection === 'all' && tab === 'products')
+  // Stock state (the summary cards: products, in/low/out of stock, stock
+  // value) is a "right now" fact and stays deliberately date-free -- so does
+  // its scope key, and /api/inventory/stats takes no date params at all.
+  const inventoryStatsScope = JSON.stringify([branchFilter, deferredSearch, searchMode])
+  // The products page DOES carry the range: its Net sold / Revenue / COGS /
+  // Profit columns are scoped by it server-side, so two different windows are
+  // two different results and must not share one cached page (N10).
+  const productsScope = JSON.stringify([inventoryStatsScope, productsPage, productsPageSize, stripRange.startDate, stripRange.endDate])
   const needsMovementData = inventorySection === 'movements' || (inventorySection === 'all' && tab === 'movements')
   const needsRfidData = inventorySection === 'rfid' || (inventorySection === 'all' && tab === 'rfid')
+
+  const loadProducts = useCallback(async (): Promise<void> => {
+    if (!isActive || !needsProductsData) return
+    const requestId = beginTrackedRequest(productsRequestRef)
+    setProductsLoading(true)
+    setProductsError(null)
+    try {
+      const response = await withLoaderTimeout(
+        () => getInventoryApi().searchInventoryProducts(buildInventoryProductsSearchParams({
+          branchFilter,
+          query: deferredSearch,
+          searchMode,
+          page: productsPage,
+          pageSize: productsPageSize,
+          range: stripRange,
+        })),
+        'Inventory products',
+        INVENTORY_PRODUCTS_TIMEOUT_MS,
+      )
+      if (!isTrackedRequestCurrent(productsRequestRef, requestId)) return
+      const total = Math.max(0, Number(response?.total) || 0)
+      const pageSize = Math.max(1, Number(response?.pageSize) || productsPageSize)
+      const responsePage = Math.max(1, Number(response?.page) || productsPage)
+      const totalPages = Math.max(1, Number(response?.totalPages) || Math.ceil(total / pageSize) || 1)
+      const nextPage = clampPage(responsePage, total, pageSize)
+      if (nextPage !== responsePage) {
+        setProductsPage(nextPage)
+        return
+      }
+      setProductsItems(Array.isArray(response?.items) ? response.items : [])
+      setProductsResultScope(productsScope)
+      setProductsTotal(total)
+      setProductsTotalPages(totalPages)
+    } catch (error) {
+      if (!isTrackedRequestCurrent(productsRequestRef, requestId)) return
+      setProductsError(error instanceof Error ? error.message : tr('inventory_products_load_failed', 'Products could not be loaded.'))
+      setProductsResultScope(productsScope)
+      setProductsItems([])
+    } finally {
+      if (isTrackedRequestCurrent(productsRequestRef, requestId)) setProductsLoading(false)
+    }
+  }, [branchFilter, deferredSearch, isActive, needsProductsData, productsPage, productsPageSize, productsScope, searchMode, stripRange.endDate, stripRange.startDate, tr])
+
+  useEffect(() => {
+    setProductsPage(1)
+  }, [branchFilter, deferredSearch, searchMode, stripRange.endDate, stripRange.startDate])
+
+  useEffect(() => {
+    if (!isActive || !needsProductsData) {
+      invalidateTrackedRequest(productsRequestRef)
+      setProductsLoading(false)
+      return
+    }
+    void loadProducts()
+  }, [isActive, loadProducts, needsProductsData])
 
   const loadInventoryReasons = useCallback(async () => {
     try {
@@ -754,10 +955,16 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         }
         if (needsStatsData && statsResult?.item) {
           setStockStats(statsResult.item)
+          setStockStatsScope(inventoryStatsScope)
           setStockStatsLoaded(true)
           setStatsRefreshError('')
-        } else if (needsStatsData && loadedOnceRef.current) {
-          setStatsRefreshError(tr('inventory_stats_refresh_failed', 'Inventory stats could not refresh. Showing the last confirmed values.'))
+        } else if (needsStatsData && (needsProductsData || loadedOnceRef.current)) {
+          setStockStatsScope(inventoryStatsScope)
+          if (needsProductsData) {
+            setStockStats(null)
+            setStockStatsLoaded(false)
+          }
+          setStatsRefreshError(needsProductsData ? tr('inventory_products_load_failed', 'Products could not be loaded.') : tr('inventory_stats_refresh_failed', 'Inventory stats could not refresh. Showing the last confirmed values.'))
         }
         if (needsMovementData && Array.isArray(movs)) {
           setMovements(movs || [])
@@ -842,6 +1049,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     needsMovementData,
     needsRfidData,
     needsStatsData,
+    needsProductsData,
+    inventoryStatsScope,
     searchMode,
     tr,
   ])
@@ -980,14 +1189,43 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     { value: '', label: chooseBranchLabel },
     ...branches.map((branch) => {
       const branchQty = Number((transferModal?.branch_stock || []).find((item) => String(item.branch_id) === String(branch.id))?.quantity || 0)
-      return { value: String(branch.id), label: `${branch.name || branch.id} (${branchQty})` }
+      return {
+        value: String(branch.id),
+        label: `${branch.name || branch.id} (${branchQty})`,
+        disabled: !branchCanBeTransferSource(branch.name),
+      }
     }),
   ], [branches, chooseBranchLabel, transferModal])
-  const branchWithPlaceholderOptions = useMemo(() => [
-    { value: '', label: chooseBranchLabel },
-    ...branchSelectOptions,
-  ], [branchSelectOptions, chooseBranchLabel])
-  const adjustCurrentQuantity = adjustModal ? getStockQty(adjustModal) : 0
+  const transferDestinationBranchOptions = useMemo(() => {
+    const selectedSource = branchesById.get(String(transferForm.from_branch_id))
+    return [
+      { value: '', label: chooseBranchLabel },
+      ...branches.map((branch) => ({
+        value: String(branch.id),
+        label: branch.name || String(branch.id),
+        disabled: !branchCanTransferBetween(selectedSource?.name, branch.name),
+      })),
+    ]
+  }, [branches, branchesById, chooseBranchLabel, transferForm.from_branch_id])
+  const handleTransferSourceChange = useCallback((sourceBranchId: string) => {
+    setTransferForm((current) => ({
+      ...current,
+      from_branch_id: sourceBranchId,
+      to_branch_id: defaultTransferDestinationBySourceId.get(String(sourceBranchId)) || '',
+    }))
+  }, [defaultTransferDestinationBySourceId])
+  // The figure every adjust verdict is measured against -- receipt or removal,
+  // picker or no picker, which fields the operator is shown. It is the BRANCH
+  // the form is adjusting, not the page's branch filter: `getStockQty` answers
+  // with the product TOTAL while the list is filtered to "All branches", and
+  // routes/inventory.ts compares the requested total against the branch's own
+  // row. Handing the modal the page figure made it call a receipt a set-down
+  // (see adjustBranchQuantity's own note). One rule now, shared with
+  // StockAdjustModal.tsx and with `previousQuantity` in handleAdjust below, so
+  // what is on screen and what rides the wire cannot disagree.
+  const adjustCurrentQuantity = adjustModal
+    ? adjustBranchQuantity(adjustModal.branch_stock, adjustForm.branch_id, getStockQty(adjustModal))
+    : 0
   // Resolved against the *currently selected* adjust target (not just the
   // row the modal was opened from) so switching the "Adjust target" picker
   // (adjustTargetOptions.length > 1) updates the displayed locked price too
@@ -1006,7 +1244,12 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const handleAdjust = async () => {
     if (adjustSaving) return
     const qty = parseFloat(String(adjustForm.quantity))
-    if (!qty || qty <= 0) return notify('Invalid quantity', 'error')
+    // A set is a TARGET, not a movement: 0 is how an operator records an
+    // emptied shelf. One rule, shared with StockAdjustModal, FastStockInModal
+    // and routes/inventory.ts's own split -- and the refusal is a pack key,
+    // not hard-coded English.
+    const quantityError = stockAdjustQuantityError(adjustForm.type, adjustForm.quantity)
+    if (quantityError) return notify(tr(quantityError, STOCK_ADJUST_QUANTITY_FALLBACKS[quantityError]), 'error')
     // Mirrors the transfer form's own required-reason check just below, and
     // backs up routes/inventory.ts's /adjust hard requirement (added
     // alongside the unconditional batch-ledger routing) with a fast inline
@@ -1023,9 +1266,14 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       (selectedAdjustProduct?.branch_stock || []).map((entry) => [Number(entry?.branch_id || 0), entry]),
     )
     const selectedBranchStock = numericBranchId ? selectedBranchStockById.get(numericBranchId) : null
-    const previousQuantity = numericBranchId
-      ? Number(selectedBranchStock?.quantity || 0)
-      : Number(getStockQty(selectedAdjustProduct) || 0)
+    // Same rule, same call, as `adjustCurrentQuantity` above -- the figure the
+    // modal renders its verdicts from and the figure this submission is gated
+    // against must be one number, not two derivations that agree by habit.
+    const previousQuantity = adjustBranchQuantity(
+      selectedAdjustProduct?.branch_stock,
+      numericBranchId,
+      getStockQty(selectedAdjustProduct),
+    )
     // Pricing only ever goes on the wire when it's genuinely unlocked --
     // locked (the default) is the fast add-to-this-row path, matching
     // this endpoint's behavior before the grouping feature existed.
@@ -1039,8 +1287,47 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     // edits) without requiring one -- this validation is this form's own
     // rule, not the wire contract's.
     if (!unlockPricing && (adjustForm.type === 'add' || adjustForm.type === 'remove') && numericBranchId) {
-      if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
-      if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
+      if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
+      if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
+    }
+    const isStockIn = isStockInSubmission(adjustForm.type, qty, previousQuantity)
+    if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
+      notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error')
+      return
+    }
+    // The lot this submission actually names, derived from the one shared
+    // rule InventoryStockModals renders the picker by -- a picker that is not
+    // on screen chose nothing, so nothing stale rides the wire (N14-E).
+    // Picking an EXISTING lot blanks the supplier field on purpose: an
+    // attributed lot keeps its first supplier and the picker shows that name
+    // locked instead. This form cannot read the lot from here, so it defers
+    // the supplier half to routes/inventory.ts, which looks the lot up and
+    // refuses an unattributed one. The cost half is never deferred.
+    const batchWire = stockAdjustBatchWire({
+      type: adjustForm.type,
+      quantity: qty,
+      // `adjustCurrentQuantity` is the prop the modal renders the picker by,
+      // and it now resolves to the same branch figure `previousQuantity` and
+      // routes/inventory.ts compare against -- the two used to be different
+      // numbers, which is how the form and its wire came to disagree about
+      // what the operator was looking at.
+      currentQuantity: adjustCurrentQuantity,
+      unlockPricing,
+      branchId: numericBranchId,
+      batchId: adjustForm.batch_id,
+    })
+    // N14-D: the same rule routes/inventory.ts enforces (lib/stockReceiptGate.ts),
+    // run here so the operator is told at the form rather than by a 400.
+    const receiptGate = stockReceiptGateCode({
+      isStockIn,
+      supplierName: adjustForm.supplier_name,
+      lotAttributionDeferred: batchWire.lotAttributionDeferred,
+      unitCostUsd: adjustForm.unit_cost_usd,
+      freeGoods: adjustForm.free_goods,
+    })
+    if (receiptGate) {
+      notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
+      return
     }
     const adjustmentRequest = {
       productId: selectedAdjustProduct.id,
@@ -1052,26 +1339,43 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       userId: user?.id,
       userName: user?.name || user?.username,
       unlockPricing,
-      batchId: !unlockPricing && adjustForm.batch_id !== '' ? adjustForm.batch_id : undefined,
+      batchId: batchWire.batchId,
       // D4 (11.28): sent only when the date input was actually on screen
       // (InventoryStockModals.tsx's own visibility condition, recomputed
       // here) -- a value lingering from a hidden input must never re-date
       // some other kind of change. Group containers included since D4b.
-      receivedDate: adjustForm.type === 'add'
-          && (unlockPricing || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
+      // S4-16: a 'set' above the current figure is a receipt server-side
+      // (routes/inventory.ts converts it to an add of the difference), so it
+      // carries the same date, supplier and receipt facts an add does.
+      receivedDate: isStockIn
+          && (unlockPricing || adjustForm.type === 'set' || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
           && adjustForm.received_date
         ? String(adjustForm.received_date)
         : undefined,
       // D5a: sent only for adds, mirroring the picker's own visibility.
       // The modal already cleared these when an attributed lot was picked
       // (first attribution sticks), so what's here is what was on screen.
-      supplierId: adjustForm.type === 'add' && adjustForm.supplier_id !== '' ? Number(adjustForm.supplier_id) : undefined,
-      supplierName: adjustForm.type === 'add' && String(adjustForm.supplier_name || '').trim() !== '' ? String(adjustForm.supplier_name).trim() : undefined,
+      supplierId: isStockIn && adjustForm.supplier_id !== '' ? Number(adjustForm.supplier_id) : undefined,
+      supplierName: isStockIn && String(adjustForm.supplier_name || '').trim() !== '' ? String(adjustForm.supplier_name).trim() : undefined,
+      // P3-L6: the condition tag, sent only when the control offered it
+      // (add/remove; a 'set' has no quantity of its own to tag and the route
+      // refuses one). Absent means the ordinary untagged behaviour.
+      conditionTag: (adjustForm.type === 'add' || adjustForm.type === 'remove') && adjustForm.condition_tag
+        ? String(adjustForm.condition_tag)
+        : undefined,
+      ...stockReceiptWire(adjustForm, receiptSessionIdRef.current, isStockIn),
       pricing: unlockPricing ? {
         selling_price_usd: parseFloat(String(adjustForm.selling_price_usd)) || 0,
         selling_price_khr: parseFloat(String(adjustForm.selling_price_khr)) || 0,
-        special_price_usd: parseFloat(String(adjustForm.special_price_usd)) || 0,
-        special_price_khr: parseFloat(String(adjustForm.special_price_khr)) || 0,
+        // Was special_price_*: the 2026-09-04 ruling renamed the tier, and
+        // routes/inventory.ts's /adjust contract now names the wholesale pair
+        // too, so this is a live column again, not a dead one. It still has no
+        // input on this form -- the values ride through prefilled from the row
+        // -- but it must be sent, because unlocked pricing can land the receipt
+        // on a NEW product row, and the pair is what seeds that row's tier.
+        // FastStockInModal sends it for the same reason.
+        wholesale_price_usd: parseFloat(String(adjustForm.wholesale_price_usd)) || 0,
+        wholesale_price_khr: parseFloat(String(adjustForm.wholesale_price_khr)) || 0,
         discount_enabled: !!adjustForm.discount_enabled,
         discount_type: adjustForm.discount_type,
         discount_percent: parseFloat(String(adjustForm.discount_percent)) || 0,
@@ -1105,8 +1409,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     setAdjustSaving(true)
     try {
       const res = await runInventoryMutation(() => getInventoryApi().adjustStock(adjustmentRequest), 'Adjust inventory stock')
-      // Match the defensive pattern used elsewhere (BulkAddStockModal,
-      // BranchStockAdjuster): treat an explicit `success: false` as failure,
+      // Match the defensive pattern used elsewhere (BulkAddStockModal):
+      // treat an explicit `success: false` as failure,
       // not a missing/undefined field. A write that reaches this line
       // without throwing already succeeded server-side (the server route
       // now always sets `success: true`, but staying defensive here means a
@@ -1123,14 +1427,32 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         // (possibly 'new') batchId.
         const resolvedBatchId = (res as { batchId?: number | null } | null)?.batchId ?? null
         const inverseBatchId = resolvedBatchId != null ? resolvedBatchId : adjustmentRequest.batchId
-        actionHistory.pushAction({
+        // P3-L6. A tagged adjustment is NOT reversible by an inverse
+        // /adjust call, so no undo entry is pushed for one -- an undo that
+        // reports success while doing the wrong thing is worse than no undo.
+        //   * a tagged REMOVE moved units out of sellable stock AND created
+        //     a held row; the inverse "add" would receive brand-new stock
+        //     and leave the held row standing, so the units would exist
+        //     twice. Its real reversal is the tagged row's own "Restore to
+        //     sellable" on the Products page, which moves both ledgers.
+        //   * a tagged RESTOCK additionally recorded a supplier purchase;
+        //     un-buying it is the Stock Change ledger's revert, not this.
+        if (adjustmentRequest.conditionTag) {
+          notify(tr('stock_tagged_undo_hint', 'Saved. Use the tagged row on the product to restore or remove these units.'), 'info')
+        } else actionHistory.pushAction({
           label: `Adjust stock for ${previousSnapshot?.name || adjustModal?.name || 'product'}`,
           undo: async () => {
+            // N14-D: an undo puts the branch back to the figure it held before.
+            // It is not a new receipt -- the inverse of a remove is an add with
+            // no supplier and no cost of its own, and the inverse of a set can
+            // raise stock too -- so it declares itself a correction rather than
+            // being handed invented receipt facts.
+            const undoBase = { ...adjustmentRequest, attribution: 'correction' as const }
             const inverseRequest = adjustmentRequest.type === 'set'
-              ? { ...adjustmentRequest, type: 'set', quantity: previousQuantity, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+              ? { ...undoBase, type: 'set', quantity: previousQuantity, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
               : adjustmentRequest.type === 'remove'
-                ? { ...adjustmentRequest, type: 'add', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
-                : { ...adjustmentRequest, type: 'remove', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+                ? { ...undoBase, type: 'add', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+                : { ...undoBase, type: 'remove', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
             const undoResult = await runInventoryMutation(() => getInventoryApi().adjustStock(inverseRequest), 'Undo inventory adjustment')
             if (undoResult?.success === false) throw new Error(undoResult?.error || 'Failed to undo stock adjustment')
             await load(true)
@@ -1142,6 +1464,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
           },
         })
         notify('Stock adjusted')
+        clearWorkDraft(stockAdjustDraftKey(adjustModal?.id))
         setAdjustModal(null)
         await load(true)
       }
@@ -1162,8 +1485,42 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     setSearch(value)
   }, [])
 
+  // S4-15: minted per modal OPENING, not per component mount -- a page-wide
+  // id would fold every adjustment made all day into one Sessions row.
+  const receiptSessionIdRef = useRef(Date.now())
+  const closeAdjustAndDiscardDraft = useCallback(() => {
+    clearWorkDraft(stockAdjustDraftKey(adjustModal?.id))
+    setAdjustModal(null)
+  }, [adjustModal?.id])
+  const preserveAndMinimizeAdjust = useCallback(() => {
+    if (!adjustModal || adjustSaving) return
+    const draftKey = stockAdjustDraftKey(adjustModal.id)
+    const initialType = adjustForm.type === 'remove' || adjustForm.type === 'set' ? adjustForm.type : 'add'
+    writeWorkDraft<StockAdjustDraft>(draftKey, {
+      version: 1,
+      product: { ...adjustModal },
+      form: { ...adjustForm },
+      initialType,
+      search: '',
+      receiptSessionId: receiptSessionIdRef.current,
+      attemptId: `inventory-${receiptSessionIdRef.current}`,
+      rows: [],
+    })
+    minimizeWork({
+      key: `stock-adjust-${String(adjustModal.id)}`,
+      kind: 'stock_adjust',
+      ...STOCK_ADJUST_RESTORE_HOST,
+      label: `${tr('adjust_stock', 'Adjust stock')} — ${adjustModal.name || `#${adjustModal.id}`}`,
+      payload: { productId: adjustModal.id },
+      draftKey,
+      requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
+    })
+    notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
+    setAdjustModal(null)
+  }, [adjustForm, adjustModal, adjustSaving, notify, tr])
   const openAdjust = (p: InventoryProduct) => {
     void ensureInventoryReasonsLoaded()
+    receiptSessionIdRef.current = Date.now()
     setAdjustModal(p)
     const defaultBranchId = defaultBranch?.id?.toString() || ''
     // pricingLocked starts true (the fast "add to this row" path) --
@@ -1179,8 +1536,12 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       pricingLocked: true,
       selling_price_usd: p.selling_price_usd || 0,
       selling_price_khr: p.selling_price_khr || 0,
-      special_price_usd: p.special_price_usd || 0,
-      special_price_khr: p.special_price_khr || 0,
+      // Was the special_price_* pair, prefilled for the deleted "VIP" tier.
+      // Now prefilled from the row's real wholesale price, and sent back out
+      // with the pricing payload (see below) so an unlocked receipt that
+      // creates a new row carries the tier onto it.
+      wholesale_price_usd: p.wholesale_price_usd || 0,
+      wholesale_price_khr: p.wholesale_price_khr || 0,
       discount_enabled: !!p.discount_enabled,
       discount_type: p.discount_type || 'percent',
       discount_percent: p.discount_percent || 0,
@@ -1194,8 +1555,15 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       // stale-draft rule ReceiveBatchModal documents for its own date).
       received_date: todayIsoDate(),
       // D5a: same stale-value rule -- last adjustment's supplier must
-      // never silently attribute the next lot.
+      // never silently attribute the next lot. S4-15's receipt fields reset
+      // for the same reason: a cost or a credit due date from the previous
+      // receipt must never ride along into this one.
       supplier_id: '', supplier_name: '',
+      unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',
+      // P3-L6: the condition tag resets with every other stale receipt
+      // field -- the last removal's "broken" must never silently tag the
+      // next one.
+      condition_tag: '',
     })
   }
 
@@ -1204,12 +1572,25 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   }
 
   const openTransfer = (p: InventoryProduct) => {
+    if (!canTransferStock || !transferRetryReady || pendingTransfer || transferStockInFlightRef.current) return
+    if (readTransferDraft('inventory_transfer', user?.id)) { void restoreInventoryTransfer(); return }
+    transferDraftOwnerRef.current = { key: transferDraftKey('inventory_transfer'), actorId: String(user?.id ?? '') }
+    setTransferRestoredDirty(false)
     void ensureInventoryReasonsLoaded()
     const branchStock = Array.isArray(p?.branch_stock) ? p.branch_stock : []
     const firstStockBranch = branchStock.find((item: LegacyInventoryRecord) => Number(item?.quantity || 0) > 0)?.branch_id
-    const defaultSourceId = branchFilter !== 'all'
+    const requestedSourceId = branchFilter !== 'all'
       ? String(branchFilter)
       : String(firstStockBranch || defaultBranch?.id || '')
+    const requestedSource = branchesById.get(requestedSourceId)
+    const firstCanonicalStockBranchId = branchStock.find((item: LegacyInventoryRecord) => {
+      const branch = branchesById.get(String(item?.branch_id))
+      return Number(item?.quantity || 0) > 0 && branchCanBeTransferSource(branch?.name)
+    })?.branch_id
+    const fallbackCanonicalBranch = branches.find((branch) => branchCanBeTransferSource(branch.name))
+    const defaultSourceId = branchCanBeTransferSource(requestedSource?.name)
+      ? requestedSourceId
+      : String(firstCanonicalStockBranchId || fallbackCanonicalBranch?.id || '')
     const defaultDestinationId = String(
       defaultTransferDestinationBySourceId.get(defaultSourceId) || '',
     )
@@ -1275,7 +1656,14 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
           'Inventory product detail',
           INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS,
         )
-        const product = Array.isArray(result?.items) ? result.items[0] : null
+        // By id, not by position: a response that is not this movement's
+        // product must fall through to the movement-derived detail below
+        // rather than open a different product's card. (/api/products/search
+        // ignored `ids` until this lane fixed it and answered with the
+        // catalog's first row by name.)
+        const product = Array.isArray(result?.items)
+          ? result.items.find((row: { id?: unknown }) => Number(row?.id) === productId) || null
+          : null
         if (product) {
           setDetailProduct(product)
           return
@@ -1298,9 +1686,85 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   }, [t])
 
 
+  const transferErrorMessage = (error: unknown) => localizeBranchRuleError(
+    error instanceof Error ? error.message : tr('stock_transfer_failed', 'Stock transfer failed'), (key) => tr(key, ''),
+  ) || tr('stock_transfer_failed', 'Stock transfer failed')
+
+  const completeInventoryTransfer = async (run: PendingInventoryTransfer) => {
+    if (transferAuthorityRef.current.actorId !== run.actorId || !transferAuthorityRef.current.allowed) throw new Error(tr('access_denied', 'Access denied'))
+    const api = await loadInventoryWriteTransport()
+    if (transferAuthorityRef.current.actorId !== run.actorId || !transferAuthorityRef.current.allowed) throw new Error(tr('access_denied', 'Access denied'))
+    const actorId = run.actorId
+    const completedDraftKey = transferDraftKey('inventory_transfer')
+    const checkpoint = (next: PendingInventoryTransfer) => {
+      api.saveInventoryTransfer(actorId, next)
+      if (transferAuthorityRef.current.actorId === actorId) setPendingTransfer(next)
+    }
+    const completed = await api.executeInventoryTransfer(run, checkpoint)
+    api.saveInventoryTransfer(actorId, null)
+    completeTransferDraft(actorId, completedDraftKey)
+    if (transferAuthorityRef.current.actorId !== actorId || !transferAuthorityRef.current.allowed) return
+    const { context } = completed
+    // The Worker created the provenance-backed history in the stock transaction.
+    void transferHistoryRef.current.refreshServerItems()
+    transferDraftSnapshotRef.current = null
+    setPendingTransfer(null)
+    setTransferRetryError('')
+    setTransferModal(null)
+    notify(tr('stock_transferred_details', 'Transferred {quantity} of {product} from {from} to {to}.')
+      .replace('{quantity}', String(completed.requests[0].body.quantity))
+      .replace('{product}', context.productName)
+      .replace('{from}', branchesById.get(String(completed.requests[0].body.fromBranchId))?.name || String(completed.requests[0].body.fromBranchId))
+      .replace('{to}', branchesById.get(String(completed.requests[0].body.toBranchId))?.name || String(completed.requests[0].body.toBranchId)))
+    // A refresh failure cannot turn a confirmed movement into a retryable write.
+    await load(true).catch(() => {})
+  }
+
+  const runInventoryTransferIntent = async (
+    kind: PendingInventoryTransfer['context']['kind'], body: Record<string, unknown>,
+    context: Omit<PendingInventoryTransfer['context'], 'kind' | 'entryId'> & { entryId?: string },
+  ) => {
+    if (!transferAuthorityRef.current.allowed || !transferAuthorityRef.current.actorId) throw new Error(tr('access_denied', 'Access denied'))
+    if (!beginSingleAction(transferStockInFlightRef, { blocked: transferSaving })) throw new Error(tr('loading', 'Loading...'))
+    const actorId = transferAuthorityRef.current.actorId
+    if (String(body.userId ?? '') !== actorId) {
+      finishSingleAction(transferStockInFlightRef)
+      throw new Error(tr('access_denied', 'Access denied'))
+    }
+    setTransferSaving(true)
+    try {
+      const api = await loadInventoryWriteTransport()
+      const saved = api.loadInventoryTransfer(actorId)
+      if (saved && (saved.context.kind !== kind || (kind !== 'submit' && saved.context.entryId !== context.entryId))) {
+        throw new Error(tr('sale_bulk_pending', 'Resolve the pending operation first.'))
+      }
+      const run = saved || api.prepareInventoryTransfer(actorId, body, { ...context, kind })
+      api.saveInventoryTransfer(actorId, run)
+      setPendingTransfer(run)
+      if (transferAuthorityRef.current.actorId !== actorId || !transferAuthorityRef.current.allowed) throw new Error(tr('access_denied', 'Access denied'))
+      await completeInventoryTransfer(run)
+    } catch (error) {
+      if (transferAuthorityRef.current.actorId === actorId) setTransferRetryError(transferErrorMessage(error))
+      throw new Error(transferErrorMessage(error), { cause: error })
+    } finally {
+      finishSingleAction(transferStockInFlightRef)
+      setTransferSaving(false)
+    }
+  }
+
+  const retryInventoryTransfer = async () => {
+    if (!pendingTransfer || !canTransferStock || transferSaving) return
+    const run = pendingTransfer
+    if (!beginSingleAction(transferStockInFlightRef, { blocked: transferSaving })) return
+    setTransferSaving(true)
+    try { await completeInventoryTransfer(run) }
+    catch (error) { setTransferRetryError(transferErrorMessage(error)) }
+    finally { finishSingleAction(transferStockInFlightRef); setTransferSaving(false) }
+  }
+
   const handleTransferStock = async () => {
-    if (transferSaving || !transferModal) return
-    const quantity = Number.parseFloat(String(transferForm.quantity))
+    if (transferSaving || !transferModal || pendingTransfer || !transferRetryReady || !canTransferStock) return
+    const quantity = Number(transferForm.quantity)
     if (!transferForm.from_branch_id || !transferForm.to_branch_id) {
       notify(tr('select_transfer_branches', 'Choose both source and destination branches.'), 'error')
       return
@@ -1323,7 +1787,14 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       notify(tr('select_transfer_branches', 'Choose both source and destination branches.'), 'error')
       return
     }
-    if (!beginSingleAction(transferStockInFlightRef, { blocked: transferSaving })) return
+    if (!branchCanTransferBetween(fromBranch.name, toBranch.name)) {
+      notify(tr('transfer_canonical_pair_only', 'Transfers move stock only between Shop and Warehouse.'), 'error')
+      return
+    }
+    if (branches.filter((branch) => branchCanBeTransferSource(branch.name)).length !== 2) {
+      notify(tr('transfer_canonical_pair_only', 'Transfers move stock only between Shop and Warehouse.'), 'error')
+      return
+    }
     const confirmation = tr(
       'confirm_transfer_stock_details',
       'Transfer {quantity} of {product} from {from} to {to}? This posts a traceable stock movement.',
@@ -1333,13 +1804,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       .replace('{from}', fromBranch.name || '')
       .replace('{to}', toBranch.name || '')
     if (!window.confirm(confirmation)) {
-      finishSingleAction(transferStockInFlightRef)
       return
     }
 
-    setTransferSaving(true)
     try {
-      const result = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
+      const original = {
         productId: transferModal.id,
         fromBranchId: transferForm.from_branch_id,
         toBranchId: transferForm.to_branch_id,
@@ -1347,49 +1816,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         reason: transferForm.reason,
         userId: user?.id,
         userName: user?.name || user?.username,
-      }), 'Transfer inventory stock')
-      if (result?.success === false) throw new Error(result?.error || tr('stock_transfer_failed', 'Stock transfer failed'))
-      actionHistory.pushAction({
-        label: `${tr('transfer', 'Transfer')}: ${transferModal.name}`,
-        undo: async () => {
-          const undoResult = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
-            productId: transferModal.id,
-            fromBranchId: transferForm.to_branch_id,
-            toBranchId: transferForm.from_branch_id,
-            quantity,
-            reason: `Undo: ${transferForm.reason}`,
-            userId: user?.id,
-            userName: user?.name || user?.username,
-          }), 'Undo inventory stock transfer')
-          if (undoResult?.success === false) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed'))
-          await load(true)
-        },
-        redo: async () => {
-          const redoResult = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
-            productId: transferModal.id,
-            fromBranchId: transferForm.from_branch_id,
-            toBranchId: transferForm.to_branch_id,
-            quantity,
-            reason: `Redo: ${transferForm.reason}`,
-            userId: user?.id,
-            userName: user?.name || user?.username,
-          }), 'Redo inventory stock transfer')
-          if (redoResult?.success === false) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed'))
-          await load(true)
-        },
-      })
-      notify(tr('stock_transferred_details', 'Transferred {quantity} of {product} from {from} to {to}.')
-        .replace('{quantity}', String(quantity))
-        .replace('{product}', transferModal.name || '')
-        .replace('{from}', fromBranch.name || '')
-        .replace('{to}', toBranch.name || ''))
-      setTransferModal(null)
-      await load(true)
+      }
+      await runInventoryTransferIntent('submit', original, { original, productName: transferModal.name || '' })
     } catch (error: unknown) {
       notify(error instanceof Error ? error.message : tr('stock_transfer_failed', 'Stock transfer failed'), 'error')
-    } finally {
-      finishSingleAction(transferStockInFlightRef)
-      setTransferSaving(false)
     }
   }
 
@@ -1599,7 +2029,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // clamped-looking "page N of N" label. Self-heal it client-side instead.
   const inventoryThresholdFormulaText = tr('inventory_formula_thresholds', 'Low/Out counts are derived from stock thresholds')
   const inventoryStockValueFormulaText = tr('inventory_formula_stock_value', 'Stock value = positive quantity x effective cost for all matching stock, not just the visible page')
-  const inventoryDiscountFormulaText = tr('inventory_formula_discounts', 'Discount totals show store-funded and membership-funded reductions allocated across sold items.')
+  const inventoryDiscountFormulaText = `${tr('discounts_total', 'Total discounts')} = ${tr('rpt_item_discounts', 'Item discounts')} + ${tr('store_discounts', 'Store discounts')} + ${tr('membership_discounts', 'Membership discounts')}`
   const inventoryFeesFormulaText = tr('inventory_formula_fees', 'Fees collected combines sales tax and delivery fees captured on completed sales.')
   const statsValue = (value: ReactNode) => (stockStatsLoaded ? value : '...')
   const inventoryStatLabels = {
@@ -1640,14 +2070,18 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // returns-report scopes; see loadStatsStrip). Stock-state cards keep
   // reading stockStats -- shelf counts are "as of now", not range-scoped.
   const kernelTotals = (stripKernel?.totals || {}) as Record<string, number>
-  const stripMoney = (value: number): string => (stripLoading ? '···' : fmtUSD(value))
-  const stripCount = (value: number): string => (stripLoading ? '···' : String(value))
+  const stripDisplayTotals = normalizeDashboardGrossMetrics(kernelTotals)
+  const stripHasRange = !!stripRange.startDate && !!stripRange.endDate
+  const stripMoney = (value: number): string => (!stripHasRange ? '—' : stripLoading ? '···' : fmtUSD(value))
+  const stripCount = (value: number): string => (!stripHasRange ? '—' : stripLoading ? '···' : String(value))
   const stripRevenue = Number(kernelTotals.revenue_usd) || 0
   const stripCogs = Number(kernelTotals.cost_usd) || 0
   const stripProfit = Number(kernelTotals.profit_usd) || 0
-  const stripGross = Number(kernelTotals.gross_sales_usd) || 0
+  const stripGross = Number(stripDisplayTotals.gross_sales_usd) || 0
+  const stripItemDiscount = Number(kernelTotals.item_discount_usd) || 0
   const stripStoreDiscount = Number(kernelTotals.store_discount_usd) || 0
   const stripMemberDiscount = Number(kernelTotals.membership_discount_usd) || 0
+  const stripTotalDiscount = Number(stripDisplayTotals.total_discount_usd) || 0
   const stripTax = Number(kernelTotals.tax_usd) || 0
   const stripDeliveryFees = Number(kernelTotals.delivery_usd) || 0
   const stripDeliveryCount = Number(kernelTotals.delivery_sale_count) || 0
@@ -1737,17 +2171,16 @@ ${tr('gross_profit', 'Gross profit')} = ${String(inventoryStatLabels.revenue)} �
     {
       key: 'discounts',
       label: String(inventoryStatLabels.discounts),
-      hint: `${tr('inventory_info_discounts', 'Money given away as discounts: shop discounts plus member points redeemed.')}
-
-${inventoryDiscountFormulaText}`,
-      value: stripMoney(stripStoreDiscount + stripMemberDiscount),
-      tone: (stripStoreDiscount + stripMemberDiscount) > 0 ? 'warn' : undefined,
+      hint: inventoryDiscountFormulaText,
+      value: stripMoney(stripTotalDiscount),
+      tone: stripTotalDiscount > 0 ? 'warn' : undefined,
       details: [
+        { label: tr('rpt_item_discounts', 'Item discounts'), value: fmtUSD(stripItemDiscount) },
         { label: tr('store_discounts', 'Store discounts'), value: fmtUSD(stripStoreDiscount) },
         { label: tr('membership_discounts', 'Membership discounts'), value: fmtUSD(stripMemberDiscount) },
-        { label: tr('discounts_total', 'Total discounts'), value: fmtUSD(stripStoreDiscount + stripMemberDiscount) },
+        { label: tr('discounts_total', 'Total discounts'), value: fmtUSD(stripTotalDiscount) },
         // Discount rate = total discounts / gross -- mirrors Dashboard.
-        { label: tr('discount_rate', 'Discount rate'), value: `${stripGross > 0 ? (((stripStoreDiscount + stripMemberDiscount) / stripGross) * 100).toFixed(1) : '0.0'}%` },
+        { label: tr('discount_rate', 'Discount rate'), value: `${stripGross > 0 ? ((stripTotalDiscount / stripGross) * 100).toFixed(1) : '0.0'}%` },
       ],
     },
     {
@@ -1779,6 +2212,11 @@ ${inventoryFeesFormulaText}`,
       ],
     },
   )
+  // The sales kernel requires concrete endpoints. Mask the whole flow card,
+  // including an already-open detail, immediately when All time is selected.
+  const displayedStripCards = stripCards.map((card) => stripHasRange || ['products', 'stock-value'].includes(card.key)
+    ? card
+    : { ...card, value: '—', sub: undefined, details: undefined, tone: undefined })
   const selectedMovementGroups = useMemo(
     () => visibleMovementGroups.filter((group) => selectedMovementIds.has(group.id)),
     [selectedMovementIds, visibleMovementGroups],
@@ -1851,14 +2289,15 @@ ${inventoryFeesFormulaText}`,
   // stockStats and are labelled as current-state, not range-scoped.
   const [statsExportRange, setStatsExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
   const runRangedStatsExport = useCallback(async (range: { startDate: string; endDate: string }) => {
-    const startDate = range.startDate || stripRange.startDate || ''
-    const endDate = range.endDate || stripRange.endDate || ''
+    const startDate = range.startDate
+    const endDate = range.endDate
     const dates = { startDate, endDate }
-    const [kernel, customer, supplier] = await Promise.all([
+    const hasRange = !!startDate && !!endDate
+    const [kernel, customer, supplier] = await Promise.all(hasRange ? [
       getSalesStatsStrip(dates).catch(() => null),
       getReturnsReport({ ...dates, scope: 'customer' }).catch(() => null),
       getReturnsReport({ ...dates, scope: 'supplier' }).catch(() => null),
-    ]) as Array<Record<string, any> | null>
+    ] : [null, null, null]) as Array<Record<string, any> | null>
     const totals = (kernel?.totals || {}) as Record<string, number>
     const cust = (customer?.totals || {}) as Record<string, number>
     const supp = (supplier?.totals || {}) as Record<string, number>
@@ -1884,7 +2323,8 @@ ${inventoryFeesFormulaText}`,
       { metric: 'customer_refund_usd', value: Number(cust.refund_usd) || 0 },
       { metric: 'supplier_returns', value: Number(supp.count) || 0 },
       { metric: 'supplier_loss_usd', value: Number(supp.loss_usd) || 0 },
-    ])
+    ].map((row) => !hasRange && !row.metric.endsWith('_current') && !row.metric.startsWith('range_')
+      ? { ...row, value: '—' } : row))
   }, [inStockCount, lowStockCount, outStockCount, stripRange.endDate, stripRange.startDate, totalProducts, totalValue])
 
   const inventoryExportItems = useMemo<any[]>(() => {
@@ -1997,8 +2437,22 @@ ${inventoryFeesFormulaText}`,
       ].filter(Boolean)
     }
 
-    // The products tab is gone (the Products PAGE owns the catalog) --
-    // there is no default facet set left.
+    if (tab === 'products') {
+      return branches.length > 1 ? [{
+        id: 'branch',
+        label: t('branch') || 'Branch',
+        options: [
+          { id: 'all', label: t('all_branches') || 'All branches', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
+          ...branches.map((branch) => ({
+            id: `branch-${branch.id}`,
+            label: branch.name || String(branch.id),
+            active: branchFilter === String(branch.id),
+            onClick: () => setBranchFilter(String(branch.id)),
+          })),
+        ],
+      }] : []
+    }
+
     return []
   }, [
     branchFilter,
@@ -2029,6 +2483,8 @@ ${inventoryFeesFormulaText}`,
         movementSortDirection !== 'desc',
       ])
     }
+
+    if (tab === 'products') return countActiveFlags([branchFilter !== 'all'])
 
     return 0
   }, [branchFilter, movFilter, movementGroupMode, movementSortDirection, movementUserFilter, tab])
@@ -2061,9 +2517,10 @@ ${inventoryFeesFormulaText}`,
   }, [movementSelectMode])
   const showMovementActionGroups = movementGroupMode === 'time+action'
   const sectionStorageKey = 'business-os:inventory:section:v2'
-  const showInventoryStats = inventorySection === 'all' || inventorySection === 'stats'
+  // showInventoryStats is declared near the top, with the strip's loaders.
   const showInventorySections = inventorySection === 'all' || ['products', 'movements', 'rfid'].includes(inventorySection)
   const showInventoryTabs = inventorySection === 'all'
+  const showProductsSection = showInventorySections && tab === 'products'
   const showMovementsSection = showInventorySections && tab === 'movements'
   const showRfidSection = showInventorySections && tab === 'rfid'
   const isMovementsFirstLoad = showMovementsSection && needsMovementData && !movementsLoaded
@@ -2072,9 +2529,21 @@ ${inventoryFeesFormulaText}`,
     if (['products', 'movements', 'rfid'].includes(nextSection)) setTab(nextSection)
   }
 
+  const transferRetryPanel = pendingTransfer || transferRetryError ? (
+    <section role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:bg-amber-950/30 dark:border-amber-800">
+      <p className="font-semibold">{tr('sale_bulk_pending', 'Pending operation')}</p>
+      {pendingTransfer ? <p className="mt-1 break-words text-sm">{pendingTransfer.context.productName} · {String(pendingTransfer.requests[0].body.fromBranchId)} → {String(pendingTransfer.requests[0].body.toBranchId)} · {String(pendingTransfer.requests[0].body.quantity)} · {String(pendingTransfer.requests[0].body.reason)}</p> : null}
+      {transferRetryError ? <p className="mt-1 text-sm text-red-700 dark:text-red-300">{transferRetryError}</p> : null}
+      {pendingTransfer ? <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" className="btn-primary h-10" disabled={transferSaving || !canTransferStock} onClick={() => { void retryInventoryTransfer() }}>{transferSaving ? tr('loading', 'Loading...') : tr('retry', 'Retry')}</button>
+      </div> : null}
+    </section>
+  ) : null
+
   if (loadError && !loading && !movements.length) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
+        {transferRetryPanel}
         <div className="text-4xl">!</div>
         <p className="text-center font-medium text-red-600 dark:text-red-400">{loadError}</p>
         <button type="button" onClick={() => load(false)} className="btn-primary">
@@ -2086,6 +2555,7 @@ ${inventoryFeesFormulaText}`,
 
   return (
     <div className={embedded ? 'px-3 pt-3 pb-1 sm:px-6 sm:pt-6 sm:pb-2' : 'page-scroll p-3 sm:p-6'}>
+      {transferRetryPanel}
       {/* E1: when the Branches hub is driving (hostSection set), its chip
           row replaces this internal picker -- rendering both would be two
           competing section controls. Standalone use keeps it, including its
@@ -2106,12 +2576,12 @@ ${inventoryFeesFormulaText}`,
         loading={loading && !isMovementsFirstLoad}
         timeoutMs={8000}
         label={t('loading') || 'Loading...'}
-        details={tab === 'rfid' ? 'Checking RFID status, tag mappings, and inventory data.' : 'Loading stock stats and movement summaries.'}
-        onRetry={() => load(false)}
+        details={tab === 'rfid' ? 'Checking RFID status, tag mappings, and inventory data.' : tab === 'products' ? 'Loading branch product stock.' : 'Loading stock stats and movement summaries.'}
+        onRetry={() => { if (showProductsSection) void loadProducts(); else void load(false) }}
         className="mb-3"
       />
 
-      {statsRefreshError ? (
+      {statsRefreshError && stockStatsScope === inventoryStatsScope && !showProductsSection ? (
         <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
           {statsRefreshError}
         </div>
@@ -2150,7 +2620,7 @@ ${inventoryFeesFormulaText}`,
             )}
           />
           <StatsStrip
-            cards={stripCards}
+            cards={displayedStripCards}
             t={t}
           />
         </div>
@@ -2188,7 +2658,7 @@ ${inventoryFeesFormulaText}`,
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName={`min-w-0 ${TOOLBAR_BUTTON_WIDTH}`}
-          menuClassName="max-h-[70vh] overflow-auto"
+          menuClassName="max-h-[calc(70*var(--app-vh))] overflow-auto"
           trigger={(
             <button
               type="button"
@@ -2231,7 +2701,20 @@ ${inventoryFeesFormulaText}`,
           same box); the select-all/bulk-action card underneath only
           renders for the Products tab, same as before. */}
       {showInventorySections ? (
-      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
+        {/* N10: the Products list's Net sold / Revenue / COGS / Profit columns
+            are scoped server-side by this range, so the tab needs the same
+            Start → End row every other list pins above its search box. It is
+            skipped when the stats strip is showing, because that block already
+            draws this exact control for the same stripRange -- two pickers for
+            one clock would be the duplicate-control trap. In the Branches hub
+            the range is the hub's own, shared with Overview and Transfers.
+            No showTime: attachInventoryProductMetrics bounds these columns by
+            LOCAL DATE (localDateAtOrAfter on created_at), so advertising a
+            time filter here would be a control that does nothing. */}
+        {showProductsSection && !showInventoryStats ? (
+          <StatsRangeRow className="pt-1" range={stripRange} onRangeChange={handleStripRangeChange} t={t} />
+        ) : null}
         {/* Search row: search input + (products) AND/OR toggle + icon-only
             Filter. Filter placement is consistent across every tab,
             matching the Sales/Returns pattern. Same overflow fix as
@@ -2250,7 +2733,9 @@ ${inventoryFeesFormulaText}`,
               onChange={handleSearchChange}
               placeholder={tab === 'rfid'
                 ? tr('search_rfid_placeholder', 'Search RFID sessions, EPC / TID, reader, or product mapping')
-                : `${t('search') || 'Search'} ${t('movements') || 'Movements'}`}
+                : tab === 'products'
+                  ? `${t('search') || 'Search'} ${t('products') || 'Products'}`
+                  : `${t('search') || 'Search'} ${t('movements') || 'Movements'}`}
               className="min-w-[3.5rem] flex-1"
               inputClassName="text-sm"
             />
@@ -2278,12 +2763,35 @@ ${inventoryFeesFormulaText}`,
       </p>
       ) : null}
 
-      {/* The products LIST section is gone (user, Aug 31: "the products
-          section of inventory page can then be removed") -- the Products
-          PAGE carries the catalog now. What stays here is everything the
-          Movements section still needs: the per-product detail modal (with
-          its stock-history preview), the complete adjust/transfer/batches
-          modals it opens, and the movement exports. */}
+      {showProductsSection ? (
+        <Suspense fallback={<div className="card p-8 text-center text-sm text-slate-500">{t('loading') || 'Loading'}...</div>}>
+          <InventoryProductsSurface
+            items={productsResultScope === productsScope ? productsItems : []}
+            loading={productsLoading || productsResultScope !== productsScope}
+            error={productsResultScope === productsScope ? productsError : null}
+            serverStats={stockStatsScope === inventoryStatsScope ? stockStats : null}
+            statsLoading={stockStatsScope !== inventoryStatsScope}
+            statsError={stockStatsScope === inventoryStatsScope ? statsRefreshError : null}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+            onAdjust={canAdjustStock ? openAdjust : undefined}
+            page={productsPage}
+            pageSize={productsPageSize}
+            total={productsResultScope === productsScope ? productsTotal : 0}
+            totalPages={productsResultScope === productsScope ? productsTotalPages : 1}
+            branchFilter={branchFilter}
+            onPageChange={setProductsPage}
+            onPageSizeChange={(size: number) => { setProductsPageSize(size); setProductsPage(1) }}
+            onOpenDetail={setDetailProduct}
+            onOpenInCatalogue={(product: InventoryProduct) => {
+              try { window.sessionStorage.setItem('bos:dashboard:products-focus', JSON.stringify({ search: product.name || product.barcode || product.sku || '' })) } catch { /* navigation still works without storage */ }
+              navigateTo?.('products')
+            }}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
+
       {/* Movements */}
       {showMovementsSection ? (
         <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{tr('loading_inventory_movements', 'Loading inventory movements...', 'Loading inventory movements...')}</div>}>
@@ -2364,22 +2872,28 @@ ${inventoryFeesFormulaText}`,
             adjustTargetSelectOptions={adjustTargetSelectOptions}
             branchCount={branches.length}
             branchSelectOptions={branchSelectOptions}
-            branchWithPlaceholderOptions={branchWithPlaceholderOptions}
             defaultAddQuantity={DEFAULT_ADD_QUANTITY}
             fmtKHR={fmtKHR}
             fmtUSD={fmtUSD}
             getStockQty={getStockQty}
             onAdjust={handleAdjust}
-            onCloseAdjust={() => setAdjustModal(null)}
-            onCloseTransfer={() => setTransferModal(null)}
+            onCloseAdjust={closeAdjustAndDiscardDraft}
+            onMinimizeAdjust={adjustModal ? preserveAndMinimizeAdjust : undefined}
+            onCloseTransfer={closeTransferDraft}
+            onMinimizeTransfer={minimizeTransferDraft}
+            transferRestoredDirty={transferRestoredDirty}
+            transferPending={!!pendingTransfer}
+            transferWorkKey={transferDraftOwnerRef.current.key}
             onTransfer={handleTransferStock}
+            onTransferSourceChange={handleTransferSourceChange}
             reasonsByType={reasonsByType}
             setAdjustForm={setAdjustForm}
-            setReasonManager={setReasonManager}
-            setTransferForm={setTransferForm}
+            setReasonManager={(next: typeof reasonManager) => { if (!transferStockInFlightRef.current && !pendingTransfer) setReasonManager(next) }}
+            setTransferForm={(next: typeof transferForm) => { if (!transferStockInFlightRef.current && !pendingTransfer) setTransferForm(next) }}
             t={t}
             tr={tr}
             transferForm={transferForm}
+            transferDestinationBranchOptions={transferDestinationBranchOptions}
             transferModal={transferModal}
             transferSaving={transferSaving}
             transferSourceBranchOptions={transferSourceBranchOptions}
@@ -2446,7 +2960,19 @@ ${inventoryFeesFormulaText}`,
             exchangeRate={exchangeRate}
             onClose={() => setShowFastStockIn(false)}
             onDone={() => load(false)}
-            onMinimize={(label: string) => minimizeWork({ key: 'fast-stockin', kind: 'fast_stockin', pageId: 'branches', label })}
+            // S4-20: minimizing is silent otherwise -- the panel just
+            // vanishes, which reads as lost work. Say where it went.
+            onMinimize={(label: string) => {
+              minimizeWork({
+                key: 'fast-stockin',
+                kind: 'fast_stockin',
+                ...FAST_STOCK_IN_RESTORE_HOST,
+                label,
+                draftKey: scopedWorkDraftKey('fast_stockin'),
+                requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
+              })
+              notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
+            }}
           />
         </Suspense>
       ) : null}

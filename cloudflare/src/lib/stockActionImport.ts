@@ -3,7 +3,11 @@
 // targeted catalog/branch/stock rows needed for one bounded window.
 
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
-import { parseImportNumericValue, normalizeImportMoney } from './importNumbers'
+import { parseImportNumericValue, normalizeImportCost4, normalizeImportSellingPrice } from './importNumbers'
+// The ONE fold. Imported from the rule module both packages carry verbatim, so
+// this path cannot reach a different verdict from the create/edit guard, the
+// Conflicts sweep, the merge tool or the client's own sheet review.
+import { identityBarcodeKey, identityBarcodeClassKey, barcodeIdentityMatches } from './productDetailRule'
 import {
   resolveStockActions,
   type StockActionMode,
@@ -13,12 +17,17 @@ import {
 
 export const UNIFIED_STOCK_COLUMNS = [
   'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
-  'selling_price', 'vip_price', 'cost_price', 'batch',
+  'selling_price', 'wholesale_price', 'cost_price', 'batch',
   // Optional (blank is fine, and files with only the original ten columns
   // still import): which supplier this row's stock was bought from. The
   // same product may carry different suppliers across batches — supplier
   // is stored on the BATCH the add creates (migration 0062).
   'supplier',
+  // Optional (N14-D): the operator's explicit "these goods were free"
+  // declaration. Without it, a $0.00 cost_price on an add row is refused --
+  // the gate's free_goods_required message used to point the operator at a
+  // control this sheet had no column for.
+  'free_goods',
 ] as const
 
 export interface UnifiedStockCatalogProduct {
@@ -26,7 +35,7 @@ export interface UnifiedStockCatalogProduct {
   name: string
   barcode?: string | null
   selling_price_usd?: number | null
-  special_price_usd?: number | null
+  wholesale_price_usd?: number | null
   cost_price_usd?: number | null
   /** Active normalized lot/batch keys for the same-batch receipt exception. */
   batch_keys?: string[]
@@ -53,11 +62,23 @@ export interface UnifiedStockResolvedRow {
   date: string
   action: string
   sellingPriceUsd: number | null
-  vipPriceUsd: number | null
+  wholesalePriceUsd: number | null
   costPriceUsd: number | null
+  /**
+   * The sheet's OWN cost_price cell, with no catalog fallback (unlike
+   * costPriceUsd, which inherits an existing product's cost_price_usd so the
+   * product-price columns stay filled). The receipt gate must see what the
+   * operator actually typed on THIS row -- an existing product's catalog
+   * cost is not a cost this receipt states, and feeding it to the gate let a
+   * sheet with a supplier column but no cost_price column mint a real
+   * receipt cost the operator never typed (sibling:F13 verifier round 2).
+   */
+  sheetCostPriceUsd: number | null
   batchLabel: string | null
   /** As-entered supplier for this row's batch; '' when the column is absent/blank. */
   supplier: string
+  /** The sheet's optional free_goods column, parsed to a boolean (N14-D). */
+  freeGoods: boolean
   branchRefs: Array<{ slot: 'shop' | 'warehouse'; branchId: number; branchName: string; pending: boolean; value: number }>
   plan: StockActionPlan | null
   conflicts: string[]
@@ -72,8 +93,12 @@ function key(value: unknown): string {
   return text(value).toLowerCase().replace(/\s+/g, ' ')
 }
 
-function moneyCents(value: unknown): number {
-  return Math.round((Number(value) || 0) * 100)
+/** The sheet's free_goods cell, read the way a spreadsheet checkbox column
+ *  is actually typed -- '1'/'true'/'yes'/'y', case-insensitive; anything
+ *  else (blank included) is "not declared free". */
+function parseFreeGoodsFlag(value: unknown): boolean {
+  const normalized = text(value).toLowerCase()
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'y'
 }
 
 function optionalNumber(value: unknown, field: string): { value: number | null; error: string | null } {
@@ -86,10 +111,10 @@ function optionalNumber(value: unknown, field: string): { value: number | null; 
   }
 }
 
-function optionalMoney(value: unknown, field: string): { value: number | null; error: string | null } {
+function optionalMoney(value: unknown, field: string, selling = false): { value: number | null; error: string | null } {
   if (!text(value)) return { value: null, error: null }
   const parsed = optionalNumber(value, field)
-  return parsed.error ? parsed : { value: normalizeImportMoney(parsed.value), error: null }
+  return parsed.error ? parsed : { value: selling ? normalizeImportSellingPrice(parsed.value) : normalizeImportCost4(parsed.value), error: null }
 }
 
 export function getUnifiedStockMode(policyJson: string | null | undefined): StockActionMode {
@@ -101,40 +126,63 @@ export function getUnifiedStockMode(policyJson: string | null | undefined): Stoc
   }
 }
 
+// THE identity question, asked the way every other surface asks it (the Sep-4
+// cost ruling and N15's fold): same collapsed name + same FOLDED barcode is the
+// same product. Two things used to make this path disagree with the rest of the
+// app, and each one minted exactly the rows the merge tool then has to clean up:
+//
+//   * the barcode was compared RAW, so a sheet written in the GTIN-14 form of a
+//     code the catalog stores as EAN-13 (one extra leading zero) matched
+//     nothing and the import CREATED the leading-zero twin itself;
+//   * a different COST forked a new product. That is the pre-Sep-4 rule -- it
+//     left products.ts and stockSession.ts when the owner ruled "only a
+//     different barcode creates a new child row" -- so a restock at a new price
+//     silently became a second product row.
+//
+// Cost is still read and carried onto the row (costPriceUsd below); it simply
+// no longer decides identity.
 function matchProduct(
   name: string,
   barcode: string,
-  costPriceUsd: number | null,
   batchLabel: string,
   products: UnifiedStockCatalogProduct[],
 ): { product: UnifiedStockCatalogProduct | null; conflict: string | null } {
   const nameKey = key(name)
-  const barcodeKey = key(barcode)
-  const candidates = products.filter((product) => (
-    (!nameKey || key(product.name) === nameKey) && key(product.barcode) === barcodeKey
-  ))
-  const exactCost = candidates.filter((product) => (
-    costPriceUsd == null || moneyCents(product.cost_price_usd) === moneyCents(costPriceUsd)
-  ))
-  if (exactCost.length === 1) return { product: exactCost[0], conflict: null }
-  if (exactCost.length > 1) {
-    return { product: null, conflict: `Name/barcode/cost match ${exactCost.length} product rows; merge the exact duplicates before importing.` }
-  }
-
-  // Cost normally creates a sibling. The sole exception is an explicitly
-  // named batch already owned by exactly one compatible product: another
-  // receipt may share that option while its event cost remains on the
-  // movement/received-cost ledger, never on products.cost_price_usd.
-  const batchKey = key(batchLabel)
-  const sameBatch = batchKey
-    ? candidates.filter((product) => (product.batch_keys || []).some((value) => key(value) === batchKey))
-    : []
-  if (sameBatch.length === 1) return { product: sameBatch[0], conflict: null }
-  if (sameBatch.length > 1) return { product: null, conflict: `Batch "${batchLabel}" belongs to ${sameBatch.length} matching product rows; choose the exact row.` }
-
-  if (!nameKey && barcodeKey) {
-    const barcodeMatches = products.filter((product) => key(product.barcode) === barcodeKey)
-    if (barcodeMatches.length > 1) return { product: null, conflict: `Barcode ${barcode} matches ${barcodeMatches.length} products; add the product name and cost so the right row is chosen.` }
+  // Wildcard-aware (Sep 15 2026 ruling): a real-vs-broken barcode pair
+  // within the same name is the SAME identity. When more than one candidate
+  // still matches -- only reachable when the sheet's barcode is broken/
+  // empty and the catalog already holds two-plus real barcodes under this
+  // name -- the ambiguity is surfaced for manual review below rather than
+  // silently guessed at, same as an already-duplicated catalog today.
+  //
+  // The wildcard half of the rule is scoped to "same name" (the owner's
+  // ruling opens "for same name 100% products"); with NO name at all on the
+  // sheet there is no group to scope it to, so a nameless row only ever
+  // matches an EXACT real-barcode candidate, never wildcards onto every
+  // broken-barcode product in the whole catalog regardless of name.
+  const candidates = nameKey
+    ? products.filter((product) => key(product.name) === nameKey && barcodeIdentityMatches(product.barcode, barcode))
+    : products.filter((product) => identityBarcodeKey(product.barcode) === identityBarcodeKey(barcode) && identityBarcodeKey(barcode))
+  if (candidates.length === 1) return { product: candidates[0], conflict: null }
+  if (candidates.length > 1) {
+    // More than one row IS this identity, i.e. the catalog already holds
+    // duplicates. An explicitly named batch owned by exactly one of them still
+    // settles it (another receipt may share that lot option while its event
+    // cost stays on the movement/received-cost ledger, never on
+    // products.cost_price_usd); otherwise the row is reviewable, never
+    // actionable.
+    const batchKey = key(batchLabel)
+    const sameBatch = batchKey
+      ? candidates.filter((product) => (product.batch_keys || []).some((value) => key(value) === batchKey))
+      : []
+    if (sameBatch.length === 1) return { product: sameBatch[0], conflict: null }
+    if (sameBatch.length > 1) return { product: null, conflict: `Received date "${batchLabel}" belongs to ${sameBatch.length} matching product rows; choose the exact row.` }
+    return {
+      product: null,
+      conflict: nameKey
+        ? `Name/barcode match ${candidates.length} product rows; merge the exact duplicates before importing.`
+        : `Barcode ${barcode} matches ${candidates.length} products; add the product name so the right row is chosen.`,
+    }
   }
   return { product: null, conflict: null }
 }
@@ -161,27 +209,55 @@ export function resolveUnifiedStockImportRows(
     const rowNumber = Number(raw._rowNumber) > 0 ? Number(raw._rowNumber) : index + 2
     const name = text(raw.name)
     const barcode = text(raw.barcode)
-    const date = normalizeToIsoDate(text(raw.date)) || ''
+    // The sheet's bare `date` header names no format, so it keeps the only
+    // meaning it has ever had -- month-first -- and says so explicitly rather
+    // than leaning on a default. This is a FILE the shop already owns, not a
+    // field anyone types into the app; see unifiedStockImport.ts for the
+    // client-side mirror of the same ruling.
+    const date = normalizeToIsoDate(text(raw.date), 'month-first') || ''
     const action = text(raw.action)
     const shop = optionalNumber(raw.shop, 'shop quantity')
     const warehouse = optionalNumber(raw.warehouse, 'warehouse quantity')
-    const selling = optionalMoney(raw.selling_price, 'selling price')
-    const vip = optionalMoney(raw.vip_price, 'VIP price')
+    const selling = optionalMoney(raw.selling_price, 'selling price', true)
+    // Wholesale price -- the sheet column renamed from vip_price by migration
+    // 0111. The legacy vip_price / special_price spellings still resolve here:
+    // per the owner's ruling that column always carried wholesale numbers, so
+    // an old sheet headed "VIP price" IS a wholesale sheet and reading it as
+    // absent would silently drop the operator's real prices on every re-import
+    // of a file exported before the rename. An explicit wholesale_price wins,
+    // being the one header that unambiguously names the tier it means. Mirrors
+    // unifiedStockImport.ts's HEADER_ALIASES on the frontend side.
+    const wholesale = optionalMoney(raw.wholesale_price ?? raw.vip_price ?? raw.special_price, 'Wholesale price', true)
     const cost = optionalMoney(raw.cost_price, 'cost price')
-    const errors = [shop.error, warehouse.error, selling.error, vip.error, cost.error].filter((value): value is string => !!value)
+    const errors = [shop.error, warehouse.error, selling.error, wholesale.error, cost.error].filter((value): value is string => !!value)
     if (!name && !barcode) errors.push('Name or barcode is required.')
-    if (!date) errors.push('Date must be mm/dd/yyyy or yyyy-mm-dd.')
+    if (!date) errors.push('Date must be mm/dd/yyyy (month first, as this column has always been) or yyyy-mm-dd.')
     if (shop.value == null && warehouse.value == null) errors.push('Enter a shop or warehouse quantity.')
 
     const batchLabel = text(raw.batch)
     const effectiveBatchLabel = batchLabel || (date ? String(dateToBatchCode(date)) : '')
-    const matched = matchProduct(name, barcode, cost.value, effectiveBatchLabel, products)
+    const matched = matchProduct(name, barcode, effectiveBatchLabel, products)
     const productName = matched.product?.name || name
+    // The identity a row that must CREATE will get, and the key sibling rows in
+    // the same file group on. It is the same question matchProduct asks of the
+    // catalog: name group + folded barcode. Cost used to be part of it, so one
+    // file listing the same article at two prices minted two products, and the
+    // raw barcode used to be part of it, so '0601' and '601' in one file minted
+    // the twin pair N15 exists to remove.
+    // The class-folded key, not the raw leading-zero-only fold: a broken/
+    // short/word barcode folds to '' here, same as an empty one, so two
+    // sheet rows for one NEW same-name product that both lack a real
+    // barcode collapse to one identity ("if both is empty merge into one
+    // empty"). A real-vs-broken pair across two would-be-new rows is a
+    // narrower remaining gap (this key alone cannot express the wildcard
+    // when one row IS real and the other is not); matchProduct's wildcard
+    // already covers the common case of matching against the EXISTING
+    // catalog, which is where the barcode-omitted sheet row usually lands.
     let identityKey = matched.product
       ? `product:${matched.product.id}`
-      : `new:${key(productName)}|${key(barcode)}|cost:${moneyCents(cost.value)}`
-    if (!matched.product && key(productName) && key(barcode) && key(effectiveBatchLabel)) {
-      const batchOwnerKey = `${key(productName)}|${key(barcode)}|batch:${key(effectiveBatchLabel)}`
+      : `new:${key(productName)}|${identityBarcodeClassKey(barcode)}`
+    if (!matched.product && key(productName) && identityBarcodeKey(barcode) && key(effectiveBatchLabel)) {
+      const batchOwnerKey = `${key(productName)}|${identityBarcodeKey(barcode)}|batch:${key(effectiveBatchLabel)}`
       const earlierIdentity = newBatchIdentityByKey.get(batchOwnerKey)
       if (earlierIdentity) identityKey = earlierIdentity
       else newBatchIdentityByKey.set(batchOwnerKey, identityKey)
@@ -211,10 +287,12 @@ export function resolveUnifiedStockImportRows(
       date,
       action,
       sellingPriceUsd: selling.value ?? matched.product?.selling_price_usd ?? null,
-      vipPriceUsd: vip.value ?? matched.product?.special_price_usd ?? null,
+      wholesalePriceUsd: wholesale.value ?? matched.product?.wholesale_price_usd ?? null,
       costPriceUsd: cost.value ?? matched.product?.cost_price_usd ?? null,
+      sheetCostPriceUsd: cost.value,
       batchLabel: batchLabel || null,
       supplier: text(raw.supplier).replace(/\s{2,}/g, ' ').slice(0, 120),
+      freeGoods: parseFreeGoodsFlag(raw.free_goods),
       branchRefs,
       plan: null,
       conflicts,
@@ -227,7 +305,7 @@ export function resolveUnifiedStockImportRows(
       date,
       action,
       sellingPriceUsd: resolved.sellingPriceUsd,
-      vipPriceUsd: resolved.vipPriceUsd,
+      wholesalePriceUsd: resolved.wholesalePriceUsd,
       costPriceUsd: resolved.costPriceUsd,
       batchLabel: resolved.batchLabel,
       isNewProduct: !matched.product,

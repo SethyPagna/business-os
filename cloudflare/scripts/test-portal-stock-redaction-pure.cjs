@@ -28,7 +28,12 @@ test('the quantity-shipping attach helper is gone', () => {
 })
 
 test('both public product paths run the redacting status attach', () => {
-  const calls = src.match(/await attachPortalStockStatus\(/g) || []
+  // p6/efficiency-3: both call sites now run inside `Promise.all([...])`
+  // fanned out alongside their independent A-Z rail query, so the call is
+  // `attachPortalStockStatus(` (the `await` is on the whole array), not a
+  // standalone `await attachPortalStockStatus(`. Either shape still means
+  // the promise is awaited before the response leaves the worker.
+  const calls = src.match(/(?:await\s+)?attachPortalStockStatus\(/g) || []
   if (calls.length < 2) throw new Error(`bootstrap AND search must both attach+redact (found ${calls.length} call sites)`)
 })
 

@@ -2,8 +2,10 @@
 // and mediaQueue.ts's BullMQ+Redis workers.
 //
 // Producer side (wired in wrangler.toml as [[queues.producers]]):
-// routes/importJobs.ts does `await c.env.IMPORT_QUEUE.send({ jobId, kind })`
-// instead of `importQueue.add('analyze', payload)`. Same idea, no Redis.
+// routes/importJobs.ts does `await dispatchImportWork(c.env, { jobId, kind })`
+// instead of `importQueue.add('analyze', payload)`. Same idea, no Redis --
+// and lib/queueDispatch.ts is what turns that into IMPORT_QUEUE.send when the
+// binding exists, or an inline run when it does not.
 //
 // Consumer side (this file, exported as the `queue` handler below): Cloudflare
 // invokes it automatically with a batch of messages. No polling, no worker
@@ -16,14 +18,31 @@
 
 import type { Env } from './index'
 import { getDb } from './lib/db'
-import { runImportAnalyze, runImportApply, markJobFailed } from './lib/importEngine'
+import { runImportAnalyze, runImportApply, markJobFailed, isImportApplyAuthorizationError } from './lib/importEngine'
 import { runBulkDeleteJob } from './lib/bulkDeleteEngine'
 import { continueCloudflareBackupAssetCopy, type BackupQueueMessage } from './lib/backup'
 import { runQueuedDriveRestoreStage, runQueuedDriveSync, type DriveSyncQueueMessage } from './lib/driveSyncQueue'
 import { normalizeStoredImage } from './lib/imageAudit'
+import { registerInlineImportRunner, type ImportQueueMessage } from './lib/queueDispatch'
 
-type ImportJobMessage = { jobId: string; kind: 'analyze' | 'apply' | 'bulk-delete' }
+type ImportJobMessage = ImportQueueMessage
 type MediaJobMessage = { assetKey: string; kind: 'optimize-video' | 'optimize-image' }
+
+// The same three runners the consumer below dispatches to, exposed to
+// lib/queueDispatch.ts for the no-binding fallback. Registered rather than
+// imported because importEngine.ts/bulkDeleteEngine.ts import queueDispatch
+// themselves, so a direct import there would be a cycle. index.ts imports
+// this module on every isolate, so a real Worker always has it wired; a pure
+// test that loads importEngine alone does not, and dispatchImportWork throws
+// loudly there instead of silently dropping the work.
+registerInlineImportRunner(async (env, message) => {
+  // No queueLatencyMs: nothing sat in a queue, this IS the invocation that
+  // produced the message. Passing 0 would record a real-looking zero-latency
+  // measurement into summary_json.timings.
+  if (message.kind === 'analyze') await runImportAnalyze(env, message.jobId)
+  else if (message.kind === 'apply') await runImportApply(env, message.jobId)
+  else await runBulkDeleteJob(env, message.jobId)
+})
 
 export async function handleImportQueue(batch: MessageBatch<ImportJobMessage>, env: Env): Promise<void> {
   for (const message of batch.messages) {
@@ -36,10 +55,18 @@ export async function handleImportQueue(batch: MessageBatch<ImportJobMessage>, e
       // throughput"). Recorded into summary_json.timings alongside the
       // in-Worker phase timings so both show up in the same place.
       const queueLatencyMs = Date.now() - message.timestamp.getTime()
+      // message.attempts is 1 on first delivery and increments on every
+      // redelivery. It is the ONLY evidence a Worker ever gets that the
+      // previous attempt died -- a CPU-limit kill tears the isolate down
+      // without running any catch/finally, so the retry below never runs for
+      // that case and nothing in-process can observe it. Handing the count to
+      // the runners lets them come back with a smaller window instead of
+      // re-running the same one until the message reaches the DLQ.
+      const attempt = message.attempts
       if (kind === 'analyze') {
-        await runImportAnalyze(env, jobId, queueLatencyMs)
+        await runImportAnalyze(env, jobId, queueLatencyMs, attempt)
       } else if (kind === 'apply') {
-        await runImportApply(env, jobId, queueLatencyMs)
+        await runImportApply(env, jobId, queueLatencyMs, attempt)
       } else {
         // bulk-delete jobs share this queue rather than a dedicated one --
         // see bulk_delete_jobs migration's header for why. No
@@ -51,6 +78,15 @@ export async function handleImportQueue(batch: MessageBatch<ImportJobMessage>, e
       message.ack()
     } catch (error) {
       console.error('[import-queue] job failed', message.body, error)
+      if (isImportApplyAuthorizationError(error)) {
+        // runImportApply has already persisted the stable permission error.
+        // A role revocation is not transient infrastructure failure, so
+        // retrying the same approving actor would only repeat the denial
+        // until DLQ. A user-triggered Retry stamps a currently authorized
+        // actor and is the explicit recovery path.
+        message.ack()
+        continue
+      }
       // D1 writes inside runImportAnalyze/runImportApply already record the
       // failure onto the job row (status='failed', last_error) before
       // re-throwing -- retrying here covers transient infra errors (a D1

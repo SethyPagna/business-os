@@ -24,6 +24,7 @@ import ButtonGuidePopover from '../shared/ButtonGuidePopover'
 import { CatalogPageProvider, useCatalogPageContext } from './CatalogPageContext'
 import ImageField from './CatalogImageField'
 import { SectionShell } from './catalogUi'
+import { PRODUCT_CAUTION_SUGGESTED_TEXT, PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT } from './productDetailDefaultsText.ts'
 import type { createInitialUploadState } from '../../utils/mediaUpload.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 
@@ -38,6 +39,8 @@ type EditorSection = readonly [string, EditorSectionKey, string]
 type CatalogEditorDraft = Record<string, DraftPrimitive> & {
   business_address?: string
   business_email?: string
+  business_legal_name?: string
+  business_registration_number?: string
   business_name?: string
   business_phone?: string
   customer_portal_about_content?: string
@@ -244,6 +247,48 @@ function HintLabel({ title, hint, className = 'text-sm font-medium text-slate-70
   )
 }
 
+// A textarea whose premade wording (productDetailDefaultsText.ts) is offered
+// as the placeholder AND as a one-tap "Use suggested text" that writes it
+// into the draft. The button shows only while the field is empty: once the
+// owner has typed (or accepted) something, a tap must not overwrite it. The
+// value still reaches settings through the normal Save path only.
+function SuggestedTextField({ id, settingKey, label, suggestedText, applyLabel, value, setDraft }: {
+  id: string
+  settingKey: string
+  label: string
+  suggestedText: string
+  applyLabel: string
+  value: string
+  setDraft: (key: string, value: DraftUpdateValue) => void
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <label htmlFor={id} className="block text-sm font-medium text-slate-700">{label}</label>
+        {value.trim() ? null : (
+          <button
+            type="button"
+            className="btn-secondary inline-flex items-center gap-1 px-2 py-1 text-xs"
+            onClick={() => setDraft(settingKey, suggestedText)}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {applyLabel}
+          </button>
+        )}
+      </div>
+      <textarea
+        id={id}
+        name={settingKey}
+        className="input resize-none"
+        rows={4}
+        placeholder={suggestedText}
+        value={value}
+        onChange={(event) => setDraft(settingKey, event.target.value)}
+      />
+    </div>
+  )
+}
+
 export default function CatalogEditorSurface({ contextValue }: CatalogEditorSurfaceProps) {
   return (
     <CatalogPageProvider value={contextValue}>
@@ -314,10 +359,21 @@ function CatalogEditorSurfaceContent() {
     uploadPromoItemMedia,
   } = useCatalogPageContext<CatalogEditorSurfaceContext>()
   const [showAnnouncementStripModal, setShowAnnouncementStripModal] = useState(false)
+  // The seller-identity fields the public site's legal pages print, named
+  // in the words of their own inputs below so the owner never has to guess
+  // which of the five is empty. This summary is the ONLY place the gap is
+  // shown: the storefront renders no notice (owner, 2026-09-14).
+  const missingSellerFieldLabels = [
+    [editorDraft.business_legal_name, copy('portal_legal_editor_legal_name', 'Registered business name')],
+    [editorDraft.business_registration_number, copy('portal_legal_editor_registration', 'Business registration number')],
+    [editorDraft.business_address, copy('address', 'Address')],
+    [editorDraft.business_phone, copy('phone', 'Phone')],
+    [editorDraft.business_email, copy('email', 'Email')],
+  ].filter(([value]) => !String(value || '').trim()).map(([, label]) => label)
 
   return (
     <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-4 overflow-x-hidden pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
-      <div className="sticky top-0 z-30 -mx-4 rounded-none border-y border-slate-200 bg-white/95 px-3 py-2 shadow-md backdrop-blur dark:border-slate-700 dark:bg-slate-950/95 sm:top-2 sm:mx-0 sm:rounded-2xl sm:border">
+      <div className="sticky top-0 z-30 -mx-4 rounded-none border-y border-slate-200 bg-white px-3 py-2 shadow-md dark:border-slate-700 dark:bg-slate-950 sm:top-2 sm:mx-0 sm:rounded-2xl sm:border">
         <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 flex-1 flex-nowrap gap-1 overflow-x-auto pb-1 xl:pb-0">
             {editorSections.map(([sectionId, sectionKey, label]) => (
@@ -849,30 +905,24 @@ function CatalogEditorSurfaceContent() {
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
               <HintLabel className="text-sm font-semibold text-slate-900" title={copy('productDefaultsTitle', 'Product detail defaults')} hint={copy('productDefaultsHint', 'Shown on every product\'s detail view. A product\'s own Caution text (typed into its description) takes priority over this default; Need More Details always shows when set here.')} />
               <div className="mt-3 grid min-w-0 gap-3 lg:grid-cols-2">
-                <div>
-                <label htmlFor="portal-product-caution-default" className="block text-sm font-medium text-slate-700">{copy('productCaution', 'Caution')}</label>
-                <textarea
+                <SuggestedTextField
                   id="portal-product-caution-default"
-                  name="customer_portal_product_caution_default"
-                  className="input resize-none"
-                  rows={4}
-                  placeholder="Follow the instructions on the product packaging and use the product only as directed. Stop use if unexpected irritation, discomfort, or another adverse reaction occurs. Contact us if you need help confirming the exact variant or usage details before purchase. For external use only. Avoid contact with eyes."
+                  settingKey="customer_portal_product_caution_default"
+                  label={copy('productCaution', 'Caution')}
+                  suggestedText={PRODUCT_CAUTION_SUGGESTED_TEXT}
+                  applyLabel={copy('productDefaultsUseSuggested', 'Use suggested text')}
                   value={editorDraft.customer_portal_product_caution_default || ''}
-                  onChange={(event) => setDraft('customer_portal_product_caution_default', event.target.value)}
+                  setDraft={setDraft}
                 />
-                </div>
-                <div>
-                <label htmlFor="portal-product-need-more-details-default" className="block text-sm font-medium text-slate-700">{copy('productNeedMoreDetails', 'Need More Details')}</label>
-                <textarea
+                <SuggestedTextField
                   id="portal-product-need-more-details-default"
-                  name="customer_portal_product_need_more_details_default"
-                  className="input resize-none"
-                  rows={4}
-                  placeholder="Contact us if you need additional product details, variant confirmation, usage guidance, or help comparing suitable options. Consider how the product fits into your existing routine and what finish, function, or application style you want. For products where ingredients, shade compatibility, or personal suitability matter, check the exact packaging details before use."
+                  settingKey="customer_portal_product_need_more_details_default"
+                  label={copy('productNeedMoreDetails', 'Need More Details')}
+                  suggestedText={PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT}
+                  applyLabel={copy('productDefaultsUseSuggested', 'Use suggested text')}
                   value={editorDraft.customer_portal_product_need_more_details_default || ''}
-                  onChange={(event) => setDraft('customer_portal_product_need_more_details_default', event.target.value)}
+                  setDraft={setDraft}
                 />
-                </div>
               </div>
             </div>
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
@@ -1254,6 +1304,44 @@ function CatalogEditorSurfaceContent() {
                   value={editorDraft.customer_portal_address_link || ''}
                   onChange={(event) => setDraft('customer_portal_address_link', event.target.value)}
                 />
+              </div>
+            </div>
+
+            {/* N45: the registered identity an online seller must display
+                (Cambodia Law on Electronic Commerce 2019) and that the
+                privacy / terms / cookie templates interpolate. Same
+                business_identity permission bucket as the fields above. */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center gap-1.5">
+                <div className="text-sm font-semibold text-slate-800">{copy('portal_legal_editor_block', 'Legal & business details')}</div>
+                <InfoHint label={copy('portal_legal_editor_block', 'Legal & business details')} text={copy('portal_legal_editor_hint', 'Shown in the storefront footer and filled into the privacy, terms and cookie pages. Leave a field blank to hide that line.')} />
+              </div>
+              {missingSellerFieldLabels.length ? (
+                <p role="status" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                  {/* A hint, never a gate: nothing about the storefront is
+                      paused or switched off while these are blank (owner,
+                      2026-09-14). The copy says exactly that much. */}
+                  {copy(
+                    'portalPublicationReadinessWarning',
+                    "These seller details are shown on the storefront's legal and contact pages, so complete them when you can.",
+                  )}
+                  {' '}
+                  <span className="font-semibold">
+                    {copy('portalPublicationMissingFields', 'Missing: {fields}').replace('{fields}', missingSellerFieldLabels.join(', '))}
+                  </span>
+                </p>
+              ) : null}
+              <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="portal-business-legal-name" className="block text-sm font-medium text-slate-700">{copy('portal_legal_editor_legal_name', 'Registered business name')}</label>
+                  <input id="portal-business-legal-name" name="business_legal_name" autoComplete="organization" className="input" value={editorDraft.business_legal_name || ''} onChange={(event) => setDraft('business_legal_name', event.target.value)} />
+                  <div className="mt-1 text-[11px] text-slate-500">{copy('portal_legal_editor_legal_name_hint', 'The name the business is registered under, if it differs from the display name.')}</div>
+                </div>
+                <div>
+                  <label htmlFor="portal-business-registration" className="block text-sm font-medium text-slate-700">{copy('portal_legal_editor_registration', 'Business registration number')}</label>
+                  <input id="portal-business-registration" name="business_registration_number" autoComplete="off" className="input" value={editorDraft.business_registration_number || ''} onChange={(event) => setDraft('business_registration_number', event.target.value)} />
+                  <div className="mt-1 text-[11px] text-slate-500">{copy('portal_legal_editor_registration_hint', 'Ministry of Commerce or tax registration number, if you have one.')}</div>
+                </div>
               </div>
             </div>
 

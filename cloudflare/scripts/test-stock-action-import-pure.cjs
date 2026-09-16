@@ -19,6 +19,7 @@ function loadCompiled(file, stubs) {
   const compiled = compile(file)
   const original = Module._load
   Module._load = function(request, parent, isMain) {
+    if (request === './moneyPrecision') return original.call(this, path.join(__dirname, '../src/lib/moneyPrecision.ts'), parent, isMain)
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     return original.call(this, request, parent, isMain)
   }
@@ -31,6 +32,10 @@ function loadCompiled(file, stubs) {
   }
 }
 
+// productDetailRule carries THE fold (identityBarcodeKey). It is loaded for
+// real, not stubbed: a stub would let matchProduct 'pass' over a comparison
+// that never folds the leading zero.
+const productDetailRule = loadCompiled('productDetailRule.ts', {})
 const batchCode = loadCompiled('batchCode.ts', {})
 const importNumbers = loadCompiled('importNumbers.ts', {})
 const resolver = loadCompiled('stockActionResolver.ts', {})
@@ -38,21 +43,31 @@ const subject = loadCompiled('stockActionImport.ts', {
   './batchCode': batchCode,
   './importNumbers': importNumbers,
   './stockActionResolver': resolver,
+  './productDetailRule': productDetailRule,
 })
 
 assert.deepStrictEqual(subject.UNIFIED_STOCK_COLUMNS, [
   'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
-  'selling_price', 'vip_price', 'cost_price', 'batch',
+  'selling_price', 'wholesale_price', 'cost_price', 'batch',
   // supplier is OPTIONAL (migration 0062): blank/absent keeps the original
   // ten-column contract importable, present attributes the batch.
   'supplier',
+  // free_goods is OPTIONAL (N14-D): the operator's explicit "these goods
+  // were free" declaration for a $0.00 cost_price row.
+  'free_goods',
 ])
 assert.strictEqual(subject.getUnifiedStockMode('{"stock_action_mode":"reconcile"}'), 'reconcile')
 assert.strictEqual(subject.getUnifiedStockMode('{"stock_action_mode":"wrong"}'), 'direct')
 
-const products = [{ id: 10, name: 'Serum', barcode: 'ABC', selling_price_usd: 12, special_price_usd: 10, cost_price_usd: 5 }]
+const products = [{ id: 10, name: 'Serum', barcode: 'ABC', selling_price_usd: 12, wholesale_price_usd: 10, cost_price_usd: 5 }]
 const branches = [{ id: 1, name: 'Shop' }, { id: 2, name: 'Warehouse' }]
 const current = [{ productId: 10, branchId: 1, quantity: 8 }, { productId: 10, branchId: 2, quantity: 4 }]
+const precisionRows = subject.resolveUnifiedStockImportRows([
+  { name: 'Serum', barcode: 'ABC', shop: '1', date: '2026-08-27', action: 'add', selling_price: '1.23004', wholesale_price: '1.23004', cost_price: '1.23004' },
+], 'direct', products, branches, current)
+assert.strictEqual(precisionRows[0].sellingPriceUsd, 1.24, 'ceil original selling input, not its nearest4 truncation')
+assert.strictEqual(precisionRows[0].wholesalePriceUsd, 1.24)
+assert.strictEqual(precisionRows[0].costPriceUsd, 1.23)
 
 const direct = subject.resolveUnifiedStockImportRows([
   { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '2', warehouse: '0', date: '08/27/2026', action: 'add' },
@@ -63,6 +78,18 @@ assert.deepStrictEqual(direct[0].plan.branchActions, [{ branchId: 1, direction: 
 assert.strictEqual(direct[1].plan.kind, 'sale')
 assert.strictEqual(direct[1].plan.saleGroupKey, '2026-08-27#1')
 assert.strictEqual(direct[1].sellingPriceUsd, 12, 'blank optional prices inherit from the exact product match')
+assert.strictEqual(direct[0].freeGoods, false, 'no free_goods cell reads as not declared free')
+
+// The N14-D declaration column, read with the same truthy-string rule the
+// frontend mirror (unifiedStockImport.ts's parseFreeGoodsFlag) uses.
+const freeGoodsRows = subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '1', date: '08/27/2026', action: 'add', free_goods: 'yes' },
+  { _rowNumber: 3, name: 'Serum', barcode: 'ABC', shop: '1', date: '08/27/2026', action: 'add', free_goods: '' },
+  { _rowNumber: 4, name: 'Serum', barcode: 'ABC', shop: '1', date: '08/27/2026', action: 'add', free_goods: 'no' },
+], 'direct', products, branches, current)
+assert.strictEqual(freeGoodsRows[0].freeGoods, true)
+assert.strictEqual(freeGoodsRows[1].freeGoods, false)
+assert.strictEqual(freeGoodsRows[2].freeGoods, false)
 
 const reconcile = subject.resolveUnifiedStockImportRows([
   { name: 'Serum', barcode: 'ABC', shop: '10', warehouse: '1', date: '2026-08-27', action: '' },
@@ -80,15 +107,27 @@ const variants = [
   { ...products[0], id: 20, cost_price_usd: 5, batch_keys: ['08272026'] },
   { ...products[0], id: 21, cost_price_usd: 6, batch_keys: ['OTHER'] },
 ]
+// id 20 and id 21 differ ONLY by cost, so since the owner's Sep-4 2026 ruling
+// they are ONE identity the catalog happens to hold TWICE -- a duplicate pair,
+// which is what N15's merge tool exists to clean up. Cost used to pick between
+// them (and a third cost minted a third row), so this import path was itself a
+// source of the duplicates. It now refuses to guess and says what to do.
 const exactCost = subject.resolveUnifiedStockImportRows([
   { name: 'Serum', barcode: 'ABC', cost_price: '6', shop: '1', date: '08/28/2026', action: 'add', batch: 'NEW' },
 ], 'direct', variants, branches, [])[0]
-assert.strictEqual(exactCost.productId, 21, 'same name/barcode resolves the exact cost child')
+assert.strictEqual(exactCost.productId, null, 'a duplicate pair is reviewable, never actionable -- cost no longer picks a row')
+assert.ok(exactCost.conflicts.some((message) => /merge the exact duplicates/.test(message)))
+assert.strictEqual(exactCost.plan, null, 'and it never falls through to an apply')
 const differentCost = subject.resolveUnifiedStockImportRows([
   { name: 'Serum', barcode: 'ABC', cost_price: '7', shop: '1', date: '08/28/2026', action: 'add', batch: 'NEW' },
 ], 'direct', variants, branches, [])[0]
-assert.strictEqual(differentCost.productId, null, 'different cost creates a distinct child row')
-assert.strictEqual(differentCost.identityKey, 'new:serum|abc|cost:700')
+assert.strictEqual(differentCost.productId, null, 'a third cost does not mint a third product either')
+// 'ABC' is a word, not a real (all-digit, >=6-digit) barcode, so the Sep 15
+// 2026 wildcard rule folds it to '' in the identity key (identityBarcodeClassKey)
+// -- it carries neither a cost component (already true) nor a broken-barcode
+// component any more.
+assert.strictEqual(differentCost.identityKey, 'new:serum|', 'the identity carries no cost component, and a broken barcode folds to empty')
+assert.ok(differentCost.conflicts.some((message) => /merge the exact duplicates/.test(message)))
 const sameBatch = subject.resolveUnifiedStockImportRows([
   { name: 'Serum', barcode: 'ABC', cost_price: '7', shop: '1', date: '08/27/2026', action: 'add' },
 ], 'direct', variants, branches, [])[0]
@@ -108,17 +147,25 @@ assert.ok(invalid.errors.length >= 3)
 const ambiguous = subject.resolveUnifiedStockImportRows([
   { name: '', barcode: 'DUP', shop: '1', date: '08/27/2026', action: 'add' },
 ], 'direct', [...products, { id: 11, name: 'A', barcode: 'DUP' }, { id: 12, name: 'B', barcode: 'DUP' }], branches, current)[0]
-assert.ok(ambiguous.conflicts.some((message) => /match 2 product rows/.test(message)))
+// No name on the row, so the ONLY question left is the barcode -- and it is
+// shared by two different products. Cost used to appear in this message as a
+// second thing to supply; it cannot disambiguate anything any more.
+assert.ok(ambiguous.conflicts.some((message) => /matches 2 products/.test(message)))
+assert.ok(ambiguous.conflicts.every((message) => !/cost/i.test(message)))
 assert.strictEqual(ambiguous.plan, null, 'an ambiguous identity must never fall through to create')
 
 console.log('PASS unified stock import parses, matches, resolves branches/current stock, preserves every row, and flags ambiguity')
 
 const sqlBinding = loadCompiled('sqlBinding.ts', {})
 const searchMatch = loadCompiled('searchMatch.ts', {})
+// productIdentity for real too: it holds identityBarcodeKeySql, the ONE SQL
+// spelling of the fold this bridge narrows the catalog with.
+const productIdentity = loadCompiled('productIdentity.ts', { './db': {}, './sqlBinding': sqlBinding, './productDetailRule': productDetailRule })
 const catalog = loadCompiled('stockActionCatalog.ts', {
   './db': {},
   './sqlBinding': sqlBinding,
   './searchMatch': searchMatch,
+  './productIdentity': productIdentity,
   './stockActionImport': subject,
 })
 

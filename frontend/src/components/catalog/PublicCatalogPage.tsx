@@ -4,6 +4,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fmtTime } from '../../utils/formatters.ts'
 import { usePullToRefresh } from '../shared/usePullToRefresh.ts'
 import PullToRefreshIndicator from '../shared/PullToRefreshIndicator.tsx'
+import TruncatedText from '../shared/TruncatedText.tsx'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
@@ -37,7 +38,7 @@ import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { deriveMessengerLink, deriveTelegramLink, derivePhoneCallLink, deriveWhatsappLink, deriveInstagramLink, resolveMessengerLink } from '../../utils/socialLinks.ts'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
-import { CATALOG_DEFAULT_PAGE_SIZE } from './catalogPagination'
+import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
 import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation, resolvePortalStockStatus } from './portalCatalogDisplay.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { collapsePortalProductGroups, mergePortalCatalogProducts } from './portalProductGrouping.ts'
@@ -46,8 +47,11 @@ import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { usePortalBucket, usePortalWishlist, formatPortalBucketText, downloadPortalBucketFile } from './portalBucket.ts'
 import { usePortalAccount } from './portalAccount.ts'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
+import PortalFooter from './legal/LegalPages.tsx'
 import { getPortalLanguageText } from './portalLanguagePacks.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
+import InstallPromptBand from '../shared/InstallPromptBand.tsx'
+import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
 import {
   ALL_PUBLIC_TRANSLATE_OPTIONS,
   GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
@@ -83,6 +87,7 @@ const STOREFRONT_ICON = '/leang-cosmetics-icon-512.png'
 const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v1.png'
 const STOREFRONT_MANIFEST = '/portal-manifest.json'
 const PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
+const CONTACT_MINIMIZED_STORAGE_KEY = 'business-os-portal-contact-minimized-v1'
 const PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID = 'business-os-portal-bootstrap'
 const PUBLIC_PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
 const PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT = 80
@@ -122,6 +127,8 @@ type PortalConfig = LooseRecord & {
   aiProviderId?: string | number | null
   aiTitle?: string
   businessAddress?: string
+  businessLegalName?: string
+  businessRegistrationNumber?: string
   businessCover?: string
   businessEmail?: string
   businessFavicon?: string
@@ -199,7 +206,7 @@ type PortalConfig = LooseRecord & {
 type GalleryViewState = { open: boolean; title: string; items: string[]; index: number }
 type PortalImageViewState = { open: boolean; title: string; images: string[]; index: number }
 type FilePickerState = { open: boolean; target?: unknown; mediaType: string; title: string }
-type SubmissionDraft = { platform: string; note: string; screenshots: string[] }
+type SubmissionDraft = { platform: string; note: string; screenshots: string[]; rightsConsent: boolean; privacyConsent: boolean }
 type PortalTab = { key: string; label: string; icon: LucideIcon }
 type CatalogApi = {
   getPortalBootstrap?: () => Promise<unknown>
@@ -374,8 +381,16 @@ function normalizeFaqItems(input: unknown): Array<{ id: string | number; questio
 
 function readPortalCache(): LooseRecord | null {
   if (typeof window === 'undefined') return null
-  const stores = [window.sessionStorage, window.localStorage].filter(Boolean)
   try {
+    // Touching window.localStorage/sessionStorage THROWS (SecurityError)
+    // wherever site data is blocked -- Safari private mode, Chrome's "block
+    // all cookies" -- so the store list has to be built INSIDE this guard.
+    // Built outside it, the throw escaped a useRef initializer on the
+    // storefront's very first render, and PublicCatalogRoot.tsx has a
+    // Suspense boundary but no error boundary: the whole page rendered
+    // blank instead of simply loading without a cache. Same shape as
+    // catalogPagination.tsx's stored-page-size helpers.
+    const stores = [window.sessionStorage, window.localStorage].filter(Boolean)
     let raw = ''
     let sourceStore: Storage | null = null
     for (const store of stores) {
@@ -504,9 +519,10 @@ function formatDateTime(value: unknown): string {
   if (!value) return '-'
   const raw = String(value)
   const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-  // mm/dd/yyyy + 24-hour in Phnom Penh business time (fmtTime). This is a
-  // customer-facing surface; a bare toLocaleString() rendered whatever locale
-  // and timezone the visitor's device happened to use (dd/mm, 12-hour).
+  // dd/mm/yyyy + 24-hour in Phnom Penh business time (fmtTime, day-first
+  // since Sep 4 2026). This is a customer-facing surface; a bare
+  // toLocaleString() rendered whatever locale and timezone the visitor's
+  // device happened to use, which silently swaps day and month.
   return Number.isNaN(date.getTime()) ? String(value) : fmtTime(raw)
 }
 
@@ -585,8 +601,31 @@ export default function PublicCatalogPage() {
   const publicPortalNavRef = useRef<HTMLElement>(null)
   const skipNextProductSearchRef = useRef(false)
 
+  // The shopper's own 20/50/100 choice, read once per mount. It OUTRANKS the
+  // server's page size: the bootstrap payload is always cut at the Worker's
+  // fixed 50 (routes/portal.ts), so without this ref every response would put
+  // a shopper who picked 20 straight back onto 50.
+  const viewerPageSizeRef = useRef(readStoredCatalogPageSize())
+  // Whether the payload already in hand (server-embedded bootstrap, or the
+  // cache) IS the page this shopper's size asks for. When it is not, nothing
+  // from it may seed the grid -- not even a prefix of it. That payload is the
+  // store's first 50 product families ordered promoted, then BRAND, then name
+  // (routes/portal.ts buildPortalCatalog -> familyOrderSql), while a browse
+  // payload is rendered A-Z by NAME (portalProductGrouping.ts), so its first
+  // 20 cards are the alphabetically first 20 of the first 50 by brand -- a
+  // page the server would never serve at pageSize 20. Seeding it whole is
+  // what put 50 cards under a pager reading "1 / total-over-20" until the
+  // corrective search landed; the grid holds its loading skeletons instead.
+  const seedMatchesViewerPageSize = !cachedPortal
+    || bootstrapPageSizeMatchesViewer(cachedPortal.catalog?.pageSize, viewerPageSizeRef.current)
+
   const [config, setConfig] = useState<PortalConfig>(() => ({ ...DEFAULT_PUBLIC_CONFIG, ...(cachedPortal?.config || {}) }))
-  const [products, setProducts] = useState<CatalogProduct[]>(() => mergePortalCatalogProducts(cachedPortal?.products))
+  const [products, setProducts] = useState<CatalogProduct[]>(() => (
+    seedMatchesViewerPageSize ? mergePortalCatalogProducts(cachedPortal?.products) : []
+  ))
+  // Cleared by the first product payload cut at the viewer's size -- or by its
+  // failure, so an error is never hidden behind skeletons that never stop.
+  const [awaitingViewerSizedProducts, setAwaitingViewerSizedProducts] = useState(() => !seedMatchesViewerPageSize)
   // G1: active promotion rules ride the catalog payload (and its cache).
   const [portalPromotionRules, setPortalPromotionRules] = useState<PromotionRule[]>(() => {
     const cached = (cachedPortal?.catalog as Record<string, unknown> | undefined)?.promotion_rules
@@ -594,7 +633,9 @@ export default function PublicCatalogPage() {
   })
   const [productTotal, setProductTotal] = useState(() => Number(cachedPortal?.catalog?.total || cachedPortal?.products?.length || 0))
   const [productPage, setProductPage] = useState(() => Number(cachedPortal?.catalog?.page || 1) || 1)
-  const [productPageSize, setProductPageSize] = useState(() => Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
+  const [productPageSize, setProductPageSize] = useState(() => (
+    viewerPageSizeRef.current || Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE
+  ))
   const [productInitial, setProductInitial] = useState('all')
   const [productInitials, setProductInitials] = useState<PortalInitialOption[]>(() => normalizePortalInitialOptions(cachedPortal?.catalog?.initials))
   const [categories, setCategories] = useState<CatalogOption[]>(() => normalizeCatalogOptions(cachedPortal?.categories))
@@ -610,8 +651,9 @@ export default function PublicCatalogPage() {
   const [brandFilter, setBrandFilter] = useState<string[]>([])
   const [branchFilter, setBranchFilter] = useState<string[]>([])
   const [stockFilter, setStockFilter] = useState<string[]>([])
-  // G1b: the storefront's single promo facet -- "show only deals".
-  const [promoOnly, setPromoOnly] = useState(false)
+  // G1b: the storefront's promo facet -- '' (off), 'promoted' (the "only
+  // deals" toggle) or 'rule:<id>' (a campaign chip on the promo strip).
+  const [promoFacet, setPromoFacet] = useState('')
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [loading, setLoading] = useState(() => !(cachedPortal?.config || cachedPortal?.products?.length))
   const [refreshingProducts, setRefreshingProducts] = useState(false)
@@ -625,7 +667,7 @@ export default function PublicCatalogPage() {
   const [membershipData, setMembershipData] = useState<LooseRecord | null>(null)
   const [membershipError, setMembershipError] = useState('')
   const [membershipLoading, setMembershipLoading] = useState(false)
-  const [submissionDraft, setSubmissionDraft] = useState<SubmissionDraft>({ platform: 'Facebook', note: '', screenshots: [] })
+  const [submissionDraft, setSubmissionDraft] = useState<SubmissionDraft>({ platform: 'Facebook', note: '', screenshots: [], rightsConsent: false, privacyConsent: false })
   const [submissionSaving, setSubmissionSaving] = useState(false)
   const [assistantProfile, setAssistantProfile] = useState({ brand: '', skinType: '', shoppingFor: '', goal: '', concerns: '' })
   const [assistantQuestion, setAssistantQuestion] = useState('')
@@ -635,6 +677,8 @@ export default function PublicCatalogPage() {
   const [assistantExpandedProductId, setAssistantExpandedProductId] = useState<string | number | null>(null)
   const [aiUsageSummary, setAiUsageSummary] = useState<LooseRecord | null>(null)
   const [assistantRequestPolicy, setAssistantRequestPolicy] = useState<LooseRecord | null>(null)
+  const [assistantDisclosure, setAssistantDisclosure] = useState<LooseRecord | null>(null)
+  const [assistantDataUseConsent, setAssistantDataUseConsent] = useState(false)
   const [translateTarget, setTranslateTarget] = useState(() => readStoredTranslateTarget('en'))
   const [translateApplyState, setTranslateApplyState] = useState<'idle' | 'applied' | 'failed'>('idle')
   const [translateApplyMessage, setTranslateApplyMessage] = useState('')
@@ -659,6 +703,26 @@ export default function PublicCatalogPage() {
   // once. Keeping the drawer's shortcut on its own state removes that
   // cross-talk entirely.
   const [contactOpen, setContactOpen] = useState(false)
+  // Minimized state is remembered per viewer, not per store -- a shopper who
+  // tucks the contact button away should not see it pop back on their next
+  // page view in this browser. Read once at mount; localStorage throws in
+  // Safari private mode, so a blocked read/write just falls back to "not
+  // minimized" instead of taking the storefront down.
+  const [contactMinimized, setContactMinimizedState] = useState(() => {
+    try {
+      return window.localStorage?.getItem(CONTACT_MINIMIZED_STORAGE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const setContactMinimized = (value: boolean) => {
+    setContactMinimizedState(value)
+    try {
+      window.localStorage?.setItem(CONTACT_MINIMIZED_STORAGE_KEY, value ? '1' : '0')
+    } catch {
+      // Storage unavailable -- the choice still applies for this page view.
+    }
+  }
   const [bucketContactOpen, setBucketContactOpen] = useState(false)
   const [bucketCopyState, setBucketCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [scrollButtonsVisible, setScrollButtonsVisible] = useState(false)
@@ -668,6 +732,47 @@ export default function PublicCatalogPage() {
   // mount) -- see that effect's own `reloadToken === 0` guard.
   const [reloadToken, setReloadToken] = useState(0)
   const publicPageRootRef = useRef<HTMLDivElement | null>(null)
+
+  // The `data-public-portal` document marker, which NOTHING was setting on
+  // the live storefront.
+  //
+  // There are two storefront entries. index.tsx picks PublicCatalogRoot ->
+  // this component whenever isPublicCatalogPath() is true, which is every
+  // path on the customer host -- that is the shipped shop. App.tsx's
+  // PublicCatalogView -> `<CatalogPage publicView />` is the other one, and
+  // CatalogPage carries its own effect for this attribute. This file never
+  // renders CatalogPage (it mounts CatalogPreviewSurface directly), so on the
+  // entry customers actually load, html/body never got the marker at all.
+  //
+  // Everything keyed off it was therefore inert on the real shop: the
+  // `overflow-y: auto` + `height: auto` unlock in main.css, and in
+  // public-portal.css the Google-Translate banner suppression plus the
+  // `body { top: 0 !important; position: static !important }` that undoes the
+  // banner's downward shove of the whole document, and the
+  // `.portal-contact-value` wrapping. (The media-protection and coarse-
+  // pointer tap-target rules survived only because they carry a second
+  // `[data-public-media-protection='true']` selector, which this page's root
+  // div does set.)
+  //
+  // Previous values are captured and restored rather than blindly removed, so
+  // a StrictMode double-mount -- or any future route that renders this page
+  // under a shell that already set the marker -- cannot leave the document
+  // stripped of it.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const html = document.documentElement
+    const body = document.body
+    const previousHtmlMarker = html.getAttribute('data-public-portal')
+    const previousBodyMarker = body.getAttribute('data-public-portal')
+    html.setAttribute('data-public-portal', 'true')
+    body.setAttribute('data-public-portal', 'true')
+    return () => {
+      if (previousHtmlMarker === null) html.removeAttribute('data-public-portal')
+      else html.setAttribute('data-public-portal', previousHtmlMarker)
+      if (previousBodyMarker === null) body.removeAttribute('data-public-portal')
+      else body.setAttribute('data-public-portal', previousBodyMarker)
+    }
+  }, [])
 
   // Drives the scroll-to-top/bottom buttons in CatalogPreviewSurface. This
   // used to be hardcoded to `false` here, which silently disabled the
@@ -702,6 +807,17 @@ export default function PublicCatalogPage() {
   }, [])
 
   const copy: CopyFunction = (key, fallback = '', fallbackKm = fallback) => {
+    // This lane's assistive-technology names (portal_a11y_*) are flat keys in
+    // src/lang/en.json + km.json, not portalEditor.* ones, so they have to be
+    // looked up directly -- prefixed they resolve to nothing and the pack
+    // entries would be dead weight. `t` follows the APP's language, so an
+    // explicit Khmer choice for the storefront wins over it.
+    if (key.startsWith('portal_a11y_')) {
+      if (translateTarget === 'km' && fallbackKm) return fallbackKm
+      const packed = typeof t === 'function' ? t(key) : ''
+      if (packed && packed !== key) return packed
+      return fallback
+    }
     // Real fix: this used to only ever check the admin app's own EN/KM
     // translator (`t`) and a hardcoded Khmer fallback, so picking any of
     // the other 17 languages in the dropdown changed nothing on screen.
@@ -726,6 +842,40 @@ export default function PublicCatalogPage() {
   const externalTranslateTarget = translateWidgetEnabled && !isFirstPartyTranslateChoice(normalizedTranslateTarget)
     ? normalizedTranslateTarget
     : null
+
+  // WCAG 3.1.1: the language selector changed every string on screen but
+  // never what the DOCUMENT claimed to be written in, so a screen reader
+  // kept reading a Khmer storefront with English pronunciation (and a
+  // translation tool kept offering to translate it into the language it was
+  // already showing). 'original' means the merchant's own catalog language.
+  const portalDocumentLanguage = normalizedTranslateTarget === 'original'
+    ? configuredPortalLanguage
+    : normalizedTranslateTarget
+
+  useEffect(() => {
+    if (typeof document === 'undefined' || !portalDocumentLanguage) return undefined
+    const previous = document.documentElement.lang
+    document.documentElement.lang = portalDocumentLanguage
+    return () => { document.documentElement.lang = previous }
+  }, [portalDocumentLanguage])
+
+  // G5/B9: arm the same install-prompt capture and standalone external-link
+  // guard App.tsx arms at boot for the admin app. The storefront never mounts
+  // App.tsx (see PublicCatalogRoot.tsx), so neither installer ever ran here
+  // before -- an installed storefront PWA had no install offer of its own,
+  // AND (per standaloneNavigation.ts's own doc comment, written assuming
+  // this WAS already wired) a same-origin `target="_blank"` link on this
+  // exact page could still strand a shopper in a second chromeless window
+  // with no way back. Both installers are idempotent no-ops in an ordinary
+  // browser tab.
+  useEffect(() => {
+    const stopInstallPromptCapture = installBeforeInstallPromptCapture()
+    const stopExternalLinkGuard = installStandaloneExternalLinkGuard()
+    return () => {
+      stopInstallPromptCapture()
+      stopExternalLinkGuard()
+    }
+  }, [])
 
   // Widget isn't "ready" while an external translation is pending setup.
   useEffect(() => {
@@ -813,7 +963,7 @@ export default function PublicCatalogPage() {
 
   useEffect(() => {
     if (embeddedPortalRef.current && reloadToken === 0) {
-      skipNextProductSearchRef.current = true
+      skipNextProductSearchRef.current = bootstrapPageSizeMatchesViewer(embeddedPortalRef.current.catalog?.pageSize, viewerPageSizeRef.current)
       writePortalCache({ ...embeddedPortalRef.current, products: mergePortalCatalogProducts(embeddedPortalRef.current.products) })
       setLoading(false)
       return undefined
@@ -825,21 +975,28 @@ export default function PublicCatalogPage() {
         if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
         const next = normalizeBootstrapPayload(payload)
         const mergedProducts = mergePortalCatalogProducts(next.products)
+        // Same rule as the mount-time seed: this payload is only the grid's
+        // page when it was cut at the size the shopper actually browses at.
+        const bootstrapMatchesViewer = bootstrapPageSizeMatchesViewer(next.catalog.pageSize, viewerPageSizeRef.current)
         setConfig(next.config)
-        setProducts(mergedProducts)
+        if (bootstrapMatchesViewer) setProducts(mergedProducts)
+        // Only ever LOWERS the wait: this response and the corrective search
+        // race each other, and a slow bootstrap must not drop skeletons back
+        // over a grid the search has already filled at the viewer's size.
+        setAwaitingViewerSizedProducts((waiting) => waiting && !bootstrapMatchesViewer)
         setProductTotal(Number(next.catalog.total || next.products.length || 0))
         if (Array.isArray((next.catalog as Record<string, unknown>).promotion_rules)) {
           setPortalPromotionRules((next.catalog as Record<string, unknown>).promotion_rules as PromotionRule[])
         }
         setProductPage(Number(next.catalog.page || 1) || 1)
-        setProductPageSize(Number(next.catalog.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
+        if (!viewerPageSizeRef.current) setProductPageSize(Number(next.catalog.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
         setProductInitials(normalizePortalInitialOptions(next.catalog.initials))
         setCategories(next.categories)
         setBrands(next.brands)
         setBranches(next.branches)
         setActiveTab((current) => resolvePortalActiveTab(next.config, copy, current))
         setPortalError('')
-        skipNextProductSearchRef.current = true
+        skipNextProductSearchRef.current = bootstrapMatchesViewer
         writePortalCache({ config: next.config, categories: next.categories, brands: next.brands, branches: next.branches, products: mergedProducts, catalog: next.catalog })
       })
       .catch((error) => {
@@ -857,7 +1014,19 @@ export default function PublicCatalogPage() {
 
   useEffect(() => {
     setProductPage(1)
-  }, [brandFilter, branchFilter, categoryFilter, deferredSearch, productInitial, promoOnly, stockFilter])
+  }, [brandFilter, branchFilter, categoryFilter, deferredSearch, productInitial, promoFacet, stockFilter])
+
+  // The shopper's 20/50/100 choice from the pager. Kept in the ref as well as
+  // in state so every later bootstrap keeps deferring to it, persisted for the
+  // next visit, and back to page 1 because re-cutting the list is the one
+  // thing that can leave the current page number out of range.
+  const changeProductPageSize = (nextSize: number) => {
+    const size = normalizeCatalogPageSize(nextSize)
+    viewerPageSizeRef.current = size
+    writeStoredCatalogPageSize(size)
+    setProductPageSize(size)
+    setProductPage(1)
+  }
 
   useEffect(() => {
     if (!config.showCatalog) return undefined
@@ -879,14 +1048,17 @@ export default function PublicCatalogPage() {
       // buildPortalProductFilters), but dropping it here as well keeps a
       // stale selection from ever being sent in the first place.
       stockState: config.showStockStatus === false ? '' : stockFilter.join(','),
-      promo: promoOnly ? 'promoted' : '',
+      promo: promoFacet,
       initial: productInitial,
     }
     withLoaderTimeout(() => getCatalogApi().searchPortalCatalogProducts?.(params) || Promise.reject(new Error('Portal product search API unavailable')), 'Portal product search', PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS)
       .then((result) => {
         if (!aliveRef.current || !isTrackedRequestCurrent(productRequestRef, requestId)) return
         const data = (result || {}) as LooseRecord
-        const nextItems = mergePortalCatalogProducts(data.items)
+        // Search response: keep the server's relevance order (see
+        // portalProductGrouping.ts). The bootstrap/cache merges above stay
+        // A-Z because they are browse payloads, not answers to a query.
+        const nextItems = mergePortalCatalogProducts(data.items, Boolean(String(deferredSearch || '').trim()))
         const nextInitials = normalizePortalInitialOptions(data.initials)
         const nextTotal = Number(data.total || 0)
         const responsePage = Number(data.page || productPage) || 1
@@ -904,6 +1076,7 @@ export default function PublicCatalogPage() {
           return
         }
         setProducts(nextItems)
+        setAwaitingViewerSizedProducts(false)
         setProductTotal(nextTotal)
         if (Array.isArray((data as Record<string, unknown>).promotion_rules)) {
           setPortalPromotionRules((data as Record<string, unknown>).promotion_rules as PromotionRule[])
@@ -927,6 +1100,7 @@ export default function PublicCatalogPage() {
       })
       .catch((error) => {
         if (!aliveRef.current || !isTrackedRequestCurrent(productRequestRef, requestId)) return
+        setAwaitingViewerSizedProducts(false)
         setPortalError(getErrorMessage(error, 'Portal product search failed'))
       })
       .finally(() => {
@@ -936,7 +1110,7 @@ export default function PublicCatalogPage() {
     return () => {
       invalidateTrackedRequest(productRequestRef)
     }
-  }, [brandFilter, branchFilter, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loading, productInitial, productPage, productPageSize, products.length, promoOnly, stockFilter])
+  }, [brandFilter, branchFilter, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loading, productInitial, productPage, productPageSize, products.length, promoFacet, stockFilter])
 
   // Re-arm on mount, not just tear down: React 18 StrictMode (dev) runs
   // mount -> cleanup (simulated unmount) -> mount again on the SAME refs.
@@ -970,7 +1144,7 @@ export default function PublicCatalogPage() {
   const versionedBusinessLogo = withAssetVersion(displayConfig.businessLogo, displayConfig.businessLogo || displayConfig.businessName)
   const versionedBusinessCover = withAssetVersion(displayConfig.businessCover, displayConfig.businessCover || displayConfig.businessName)
   const selectedStockBranch = branchFilter[0] || 'all'
-  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (displayConfig.showStockStatus === false ? 0 : stockFilter.length) + (productInitial === 'all' ? 0 : 1) + (promoOnly ? 1 : 0)
+  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (displayConfig.showStockStatus === false ? 0 : stockFilter.length) + (productInitial === 'all' ? 0 : 1) + (promoFacet ? 1 : 0)
   const publicFaqItems = normalizeFaqItems(displayConfig.faqItems)
   const mapEmbedUrl = displayConfig.showGoogleMap && activeTab === 'about' ? normalizeGoogleMapsEmbed(displayConfig.googleMapsEmbed || '') : ''
   const socialLinks = [
@@ -1061,7 +1235,7 @@ export default function PublicCatalogPage() {
     setBrandFilter([])
     setBranchFilter([])
     setStockFilter([])
-    setPromoOnly(false)
+    setPromoFacet('')
     setProductInitial('all')
   }
   const openProductGallery = (product: CatalogProduct, startIndex = 0) => {
@@ -1104,16 +1278,20 @@ export default function PublicCatalogPage() {
     })
   }
   const handleSubmitShareProof = () => {
-    if (!membershipData?.customer?.membership_number && !membershipNumber.trim()) {
-      setMembershipError(copy('membershipRequired', 'Enter a membership number first.'))
+    if (!portalAccount.account) {
+      setMembershipError(copy('submissionSignInRequired', 'Sign in before sending a screenshot.', 'សូមចូលគណនីមុនពេលផ្ញើរូបថតអេក្រង់។'))
+      return
+    }
+    if (!submissionDraft.rightsConsent || !submissionDraft.privacyConsent) {
+      setMembershipError(copy('submissionConsentRequired', 'Confirm both consent statements before sending.', 'សូមបញ្ជាក់សេចក្ដីយល់ព្រមទាំងពីរមុនពេលផ្ញើ។'))
       return
     }
     setSubmissionSaving(true)
-    const payload = { membershipNumber: membershipData?.customer?.membership_number || membershipNumber.trim(), ...submissionDraft }
+    setMembershipError('')
+    const payload = { ...submissionDraft, consentLocale: String(displayConfig.language || 'en') }
     withLoaderTimeout(() => getCatalogApi().createPortalSubmission?.(payload) || Promise.reject(new Error('Submission API unavailable')), 'Share submission', PUBLIC_PORTAL_SUBMISSION_TIMEOUT_MS)
       .then(() => {
-        setSubmissionDraft({ platform: 'Facebook', note: '', screenshots: [] })
-        return handleMembershipLookup()
+        setSubmissionDraft({ platform: 'Facebook', note: '', screenshots: [], rightsConsent: false, privacyConsent: false })
       })
       .catch((error) => setMembershipError(getErrorMessage(error, 'Submission failed')))
       .finally(() => setSubmissionSaving(false))
@@ -1129,9 +1307,13 @@ export default function PublicCatalogPage() {
       setAssistantError(copy('assistantQuestionRequired', 'Ask a question first.'))
       return
     }
+    if (!assistantDataUseConsent) {
+      setAssistantError(copy('assistantConsentRequired', 'Confirm the AI data-use notice before sending your question.', 'សូមបញ្ជាក់ការជូនដំណឹងអំពីការប្រើប្រាស់ទិន្នន័យ AI មុនពេលផ្ញើសំណួរ។'))
+      return
+    }
     setAssistantLoading(true)
     setAssistantError('')
-    withLoaderTimeout(() => getCatalogApi().askPortalAi?.({ question, profile: assistantProfile }) || Promise.reject(new Error('AI assistant API unavailable')), 'AI assistant', PUBLIC_PORTAL_AI_TIMEOUT_MS)
+    withLoaderTimeout(() => getCatalogApi().askPortalAi?.({ question, profile: assistantProfile, dataUseConsent: true }) || Promise.reject(new Error('AI assistant API unavailable')), 'AI assistant', PUBLIC_PORTAL_AI_TIMEOUT_MS)
       .then((result) => setAssistantResponse((result || null) as LooseRecord | null))
       .catch((error) => setAssistantError(getErrorMessage(error, 'AI assistant failed')))
       .finally(() => setAssistantLoading(false))
@@ -1145,6 +1327,7 @@ export default function PublicCatalogPage() {
         const data = (result || {}) as LooseRecord
         setAiUsageSummary((data.usage || data.usageSummary || null) as LooseRecord | null)
         setAssistantRequestPolicy((data.policy || data.requestPolicy || null) as LooseRecord | null)
+        setAssistantDisclosure({ provider: data.provider || '', dataUseNotice: data.dataUseNotice || '' })
       })
       .catch(() => {})
   }, [activeTab, displayConfig.aiEnabled])
@@ -1225,6 +1408,30 @@ export default function PublicCatalogPage() {
     setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices })
   }
   const closeProductDetailView = () => setProductDetailView((prev) => ({ ...prev, open: false }))
+  // The announcement strip and the promotion cards link to a product by id.
+  // It is usually not on the loaded page, and there is no public by-id
+  // route on purpose (it would be a second copy of the visibility, stock
+  // and redaction rules), so it goes through the same search endpoint with
+  // productId. A product that no longer answers (deleted, hidden, out of
+  // stock with out-of-stock hidden) falls back to searching its name, so
+  // the tap always does something visible.
+  const openProductById = (productId: number, productName: string) => {
+    const loaded = products.find((product) => Number(product.id) === productId)
+    if (loaded) {
+      openProductDetail(loaded)
+      return
+    }
+    withLoaderTimeout(() => getCatalogApi().searchPortalCatalogProducts?.({ productId, pageSize: 1 }) || Promise.reject(new Error('Portal product search API unavailable')), 'Portal product lookup', PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS)
+      .then((result) => {
+        if (!aliveRef.current) return
+        const [product] = mergePortalCatalogProducts(((result || {}) as LooseRecord).items)
+        if (product) openProductDetail(product)
+        else setSearch(productName)
+      })
+      .catch(() => {
+        if (aliveRef.current) setSearch(productName)
+      })
+  }
 
   const catalogSection = displayConfig.showCatalog ? (
     <Suspense fallback={<div className="portal-empty-card">{copy('catalogLoading', 'Loading products...')}</div>}>
@@ -1237,12 +1444,12 @@ export default function PublicCatalogPage() {
         productPage={productPage}
         productPageSize={productPageSize}
         setProductPage={setProductPage}
-        setProductPageSize={setProductPageSize}
+        setProductPageSize={changeProductPageSize}
         initialOptions={productInitials}
         initialFilter={productInitial}
         setInitialFilter={setProductInitial}
         refreshingProducts={refreshingProducts}
-        loadingProducts={loading}
+        loadingProducts={loading || awaitingViewerSizedProducts}
         categories={categories}
         brands={brands}
         branches={branches}
@@ -1260,8 +1467,8 @@ export default function PublicCatalogPage() {
         branchFilter={branchFilter}
         setBranchFilter={setBranchFilter}
         stockFilter={stockFilter}
-        promoOnly={promoOnly}
-        setPromoOnly={setPromoOnly}
+        promoFacet={promoFacet}
+        setPromoFacet={setPromoFacet}
         setStockFilter={setStockFilter}
         toggleFilterValue={toggleFilterValue}
         toggleFilterValues={toggleFilterValues}
@@ -1277,6 +1484,7 @@ export default function PublicCatalogPage() {
         normalizeProductGallery={normalizeProductGallery}
         openProductGallery={openProductGallery}
         openProductDetail={openProductDetail}
+        openProductById={openProductById}
         openPortalImage={openPortalImage}
         formatPortalPrice={formatPortalPrice}
         replaceVars={(template: string, values: Record<string, string | number>) => replaceVars(template, values)}
@@ -1297,7 +1505,7 @@ export default function PublicCatalogPage() {
 
   const promotionsSection = activeTab === 'products' ? (
     <Suspense fallback={null}>
-      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} />
+      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} onOpenProduct={openProductById} />
     </Suspense>
   ) : null
 
@@ -1349,6 +1557,10 @@ export default function PublicCatalogPage() {
         assistantResponse={assistantResponse}
         assistantExpandedProductId={assistantExpandedProductId}
         setAssistantExpandedProductId={setAssistantExpandedProductId}
+        assistantDisclosure={assistantDisclosure}
+        assistantDataUseConsent={assistantDataUseConsent}
+        setAssistantDataUseConsent={setAssistantDataUseConsent}
+        accountSignedIn={!!portalAccount.account}
       />
     </Suspense>
   ) : null
@@ -1394,13 +1606,13 @@ export default function PublicCatalogPage() {
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
           <div>
             <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('bucketTitle', 'My List')}</div>
-            <div className="text-xs text-slate-400 dark:text-neutral-500">{copy('bucketHint', 'No payment here -- just a shortlist to show our team.')}</div>
+            <div className="text-xs text-slate-500 dark:text-neutral-400">{copy('bucketHint', 'No payment here -- just a shortlist to show our team.')}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {contactChannels.length > 0 ? (
               <button
                 type="button"
-                className={`rounded-full p-1.5 transition ${bucketContactOpen ? 'bg-slate-100 text-slate-700 dark:bg-neutral-800 dark:text-neutral-100' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'}`}
+                className={`rounded-full p-1.5 transition ${bucketContactOpen ? 'bg-slate-100 text-slate-700 dark:bg-neutral-800 dark:text-neutral-100' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'}`}
                 onClick={() => setBucketContactOpen((current) => !current)}
                 aria-label={copy('contactUs', 'Contact us')}
                 title={copy('contactUs', 'Contact us')}
@@ -1411,7 +1623,7 @@ export default function PublicCatalogPage() {
             ) : null}
             <button
               type="button"
-              className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
               onClick={closeBucketDrawer}
               aria-label={copy('close', 'Close')}
             >
@@ -1433,7 +1645,7 @@ export default function PublicCatalogPage() {
         */}
         {bucketContactOpen && contactChannels.length > 0 ? (
           <div className="border-b border-slate-100 bg-slate-50/60 px-5 py-3 dark:border-neutral-800 dark:bg-neutral-800/30">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-neutral-500">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">
               {copy('contactUs', 'Contact us')}
             </div>
             <div className="space-y-1">
@@ -1462,9 +1674,9 @@ export default function PublicCatalogPage() {
           <PortalNoPaymentNotice copy={copy} />
         </div>
 
-        <div className="max-h-[50vh] overflow-y-auto px-5 py-3">
+        <div className="max-h-[calc(50*var(--app-vh))] overflow-y-auto px-5 py-3">
           {bucket.items.length === 0 ? (
-            <div className="py-10 text-center text-sm text-slate-400 dark:text-neutral-500">
+            <div className="py-10 text-center text-sm text-slate-500 dark:text-neutral-400">
               {copy('bucketEmpty', 'Your list is empty. Tap "Add" on products you like.')}
             </div>
           ) : (
@@ -1472,8 +1684,8 @@ export default function PublicCatalogPage() {
               {bucket.items.map((item) => (
                 <li key={item.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-3 last:border-0 dark:border-neutral-800/60">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-slate-900 dark:text-neutral-100">{item.name}</div>
-                    {item.priceText ? <div className="text-xs text-slate-400 dark:text-neutral-500">{item.priceText}</div> : null}
+                    <TruncatedText text={item.name} className="text-sm font-medium text-slate-900 dark:text-neutral-100" />
+                    {item.priceText ? <div className="text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     <button
@@ -1529,11 +1741,11 @@ export default function PublicCatalogPage() {
               </button>
             </div>
             {bucketCopyState === 'failed' ? (
-              <div className="text-center text-xs text-rose-500">{copy('bucketCopyFailed', 'Could not copy automatically -- try Download instead.')}</div>
+              <div className="text-center text-xs text-rose-700 dark:text-rose-300">{copy('bucketCopyFailed', 'Could not copy automatically -- try Download instead.')}</div>
             ) : null}
             <button
               type="button"
-              className="w-full text-center text-xs font-medium text-slate-400 hover:text-rose-500 dark:text-neutral-500"
+              className="w-full text-center text-xs font-medium text-slate-500 hover:text-rose-700 dark:text-neutral-400 dark:hover:text-rose-300"
               onClick={bucket.clear}
             >
               {copy('clearBucket', 'Clear all')}
@@ -1564,14 +1776,14 @@ export default function PublicCatalogPage() {
           </div>
           <button
             type="button"
-            className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={() => setAccountOpen(false)}
             aria-label={copy('close', 'Close')}
           >
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+        <div className="max-h-[calc(70*var(--app-vh))] overflow-y-auto overscroll-contain px-5 py-4">
           <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">{copy('loadingPortal', 'Loading customer portal...')}</div>}>
             <CatalogAccountSection
               copy={copy}
@@ -1583,6 +1795,7 @@ export default function PublicCatalogPage() {
               signUp={portalAccount.signUp}
               signOut={portalAccount.signOut}
               clearError={portalAccount.clearError}
+              consentLocale={String(displayConfig.language || 'en')}
               cartCount={bucket.count}
               wishlistCount={wishlist.count}
             />
@@ -1611,16 +1824,16 @@ export default function PublicCatalogPage() {
           </div>
           <button
             type="button"
-            className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={() => setWishlistOpen(false)}
             aria-label={copy('close', 'Close')}
           >
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="max-h-[60vh] overflow-y-auto px-5 py-3">
+        <div className="max-h-[calc(60*var(--app-vh))] overflow-y-auto px-5 py-3">
           {wishlist.items.length === 0 ? (
-            <div className="py-10 text-center text-sm text-slate-400 dark:text-neutral-500">
+            <div className="py-10 text-center text-sm text-slate-500 dark:text-neutral-400">
               {copy('wishlistEmpty', 'Your wishlist is empty. Tap the heart on products you love.', 'បញ្ជីចង់បានរបស់អ្នកនៅទទេ។ ចុចរូបបេះដូងលើផលិតផលដែលអ្នកចូលចិត្ត។')}
             </div>
           ) : (
@@ -1630,8 +1843,8 @@ export default function PublicCatalogPage() {
                 return (
                   <li key={item.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-3 last:border-0 dark:border-neutral-800/60">
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-slate-900 dark:text-neutral-100">{item.name}</div>
-                      {item.priceText ? <div className="text-xs text-slate-400 dark:text-neutral-500">{item.priceText}</div> : null}
+                      <TruncatedText text={item.name} className="text-sm font-medium text-slate-900 dark:text-neutral-100" />
+                      {item.priceText ? <div className="text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <button
@@ -1661,7 +1874,7 @@ export default function PublicCatalogPage() {
           <div className="border-t border-slate-100 px-5 py-4 dark:border-neutral-800">
             <button
               type="button"
-              className="w-full text-center text-xs font-medium text-slate-400 transition hover:text-rose-500 dark:text-neutral-500"
+              className="w-full text-center text-xs font-medium text-slate-500 transition hover:text-rose-700 dark:text-neutral-400 dark:hover:text-rose-300"
               onClick={wishlist.clear}
             >
               {copy('clearWishlist', 'Clear all', 'សម្អាតទាំងអស់')}
@@ -1698,6 +1911,17 @@ export default function PublicCatalogPage() {
     pullToRefreshEnabled,
   )
 
+  // The one automatic system notice the public portal is allowed to show
+  // unprompted (every other banner needs a merchant-configured reason) --
+  // pinned to the TOP, clear of the bottom-right bucket/contact FABs below,
+  // and dismissible exactly like the admin app's own IosInstallHint (shared
+  // logic, see InstallPromptBand.tsx's doc comment).
+  const installBand = (
+    <div className="pointer-events-none fixed inset-x-2 top-[calc(0.75rem+env(safe-area-inset-top))] z-40 flex justify-center sm:inset-x-auto sm:right-4 sm:w-[22rem] sm:justify-end">
+      <InstallPromptBand translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} />
+    </div>
+  )
+
   // Bucket ("My List") and Contact us are two separate floating icons,
   // stacked bottom-right with the bucket on top -- the bucket stays visible
   // at all times so it's discoverable even before a shopper adds anything,
@@ -1720,17 +1944,51 @@ export default function PublicCatalogPage() {
     </button>
   )
 
+  // Minimized: a slim edge tab, same vertical slot as the full button, that
+  // restores it on tap. Full: the round button plus a small X pinned to its
+  // top-right corner that minimizes it. The X stays fully opaque on touch
+  // (there is no hover to reveal it there) and only fades in on genuine
+  // hover-capable pointers, via the `hover: hover` media feature rather than
+  // Tailwind's plain `hover:`, which also fires on a tap in most mobile
+  // browsers and would otherwise leave it stuck visible after one touch.
   const contactFab = contactChannels.length > 0 ? (
-    <button
-      type="button"
-      className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex h-12 w-12 items-center justify-center rounded-full bg-white text-slate-700 shadow-xl ring-1 ring-slate-200 transition hover:bg-slate-50 dark:bg-neutral-900 dark:text-neutral-100 dark:ring-neutral-700 dark:hover:bg-neutral-800"
-      onClick={() => setContactOpen((current) => !current)}
-      aria-label={copy('contactUs', 'Contact us')}
-      title={copy('contactUs', 'Contact us')}
-      aria-expanded={contactOpen}
-    >
-      <Headset className="h-5 w-5" />
-    </button>
+    contactMinimized ? (
+      <button
+        type="button"
+        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-0 z-50 flex h-11 w-7 items-center justify-center rounded-l-full bg-white text-slate-700 shadow-xl ring-1 ring-slate-200 transition hover:w-9 dark:bg-neutral-900 dark:text-neutral-100 dark:ring-neutral-700"
+        onClick={() => setContactMinimized(false)}
+        aria-label={copy('contactUsRestore', 'Show the contact us button')}
+        title={copy('contactUsRestore', 'Show the contact us button')}
+      >
+        <Headset className="h-4 w-4" />
+      </button>
+    ) : (
+      <div className="group fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50">
+        <button
+          type="button"
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-slate-700 shadow-xl ring-1 ring-slate-200 transition hover:bg-slate-50 dark:bg-neutral-900 dark:text-neutral-100 dark:ring-neutral-700 dark:hover:bg-neutral-800"
+          onClick={() => setContactOpen((current) => !current)}
+          aria-label={copy('contactUs', 'Contact us')}
+          title={copy('contactUs', 'Contact us')}
+          aria-expanded={contactOpen}
+        >
+          <Headset className="h-5 w-5" />
+        </button>
+        <button
+          type="button"
+          className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-white opacity-100 shadow transition [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 dark:bg-neutral-200 dark:text-neutral-900"
+          onClick={(event) => {
+            event.stopPropagation()
+            setContactOpen(false)
+            setContactMinimized(true)
+          }}
+          aria-label={copy('contactUsMinimize', 'Minimize the contact us button')}
+          title={copy('contactUsMinimize', 'Minimize the contact us button')}
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    )
   ) : null
 
   const contactPopover = contactOpen && contactChannels.length > 0 ? (
@@ -1740,12 +1998,12 @@ export default function PublicCatalogPage() {
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-2 flex items-center justify-between">
-          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-neutral-500">
+          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">
             {copy('contactUs', 'Contact us')}
           </div>
           <button
             type="button"
-            className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="rounded-full p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={() => setContactOpen(false)}
             aria-label={copy('close', 'Close')}
           >
@@ -1790,6 +2048,7 @@ export default function PublicCatalogPage() {
         if (event.button === 1 && event.target instanceof Element && event.target.closest('img, video, [data-protected-media="true"]')) event.preventDefault()
       }}
     >
+    {installBand}
     {bucketFab}
     {contactFab}
     {contactPopover}
@@ -1823,6 +2082,7 @@ export default function PublicCatalogPage() {
       catalogSection={activeTab === 'products' ? catalogSection : null}
       secondaryTabSection={secondaryTabSection}
       promotionsSection={promotionsSection}
+      footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} />}
       productDetailView={productDetailView}
       closeProductDetailView={closeProductDetailView}
       productDetailShopName={displayConfig.businessName || displayConfig.title || ''}

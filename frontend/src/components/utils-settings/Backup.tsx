@@ -1,7 +1,7 @@
 import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ButtonHTMLAttributes, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { fmtDateTime24, fmtDayFirst } from '../../utils/formatters.ts'
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Cloud from 'lucide-react/dist/esm/icons/cloud.js'
@@ -18,6 +18,7 @@ import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
 import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import { useActionHistory } from '../../utils/actionHistory.ts'
+import { isStandaloneDisplayMode } from '../../utils/standaloneDisplay.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -387,7 +388,7 @@ const MAINTENANCE_TIERS: Array<{ id: 'section' | 'data' | 'migration' | 'factory
   // to be hand-typed wrangler SQL. Sits between Data Reset and Factory Reset
   // because it mutates live stock wholesale but never deletes rows, so it is
   // less destructive than either full reset.
-  { id: 'migration', icon: Layers, labelKey: 'maintenance_tier_migration', label: 'Finalize Migration', hintKey: 'maintenance_tier_migration_hint', hint: 'Run the last old-system import steps in order: zero live stock, re-import the product files, then park the historical lots. Only right after a fresh history import.' },
+  { id: 'migration', icon: Layers, labelKey: 'maintenance_tier_migration', label: 'Finalize Migration', hintKey: 'maintenance_tier_migration_hint', hint: 'Run the last old-system import steps in order: zero live stock, re-import the product files, then park the historical received dates. Only right after a fresh history import.' },
   { id: 'factory', icon: ShieldAlert, labelKey: 'maintenance_tier_factory', label: 'Factory Reset', hintKey: 'maintenance_tier_factory_hint', hint: 'Deletes everything and returns the app to factory defaults. The most dangerous option here, and unrecoverable.' },
 ]
 
@@ -639,6 +640,18 @@ function IntegrationDoctorCard({ copy, notify, active }: IntegrationDoctorCardPr
         <DoctorStatusPill label="Cloudflare D1" check={checks.database} />
         <DoctorStatusPill label={`${String(runtime.objectStorageDriver || 'R2').toUpperCase()} storage`} check={storage} />
         <DoctorStatusPill label="Cloudflare Queues" check={checks.queue} />
+        {/* Which plan this deployment was built for (lib/planTier.ts): the
+            doctor is where someone looks when production behaves like a
+            smaller machine than expected. Env-only; never inferred here. */}
+        <DoctorStatusPill
+          label={copy('plan_tier_label', 'Plan')}
+          check={{
+            ok: true,
+            message: runtime.tier === 'free'
+              ? `${copy('plan_tier_free', 'Free')} -- ${copy('plan_tier_hint_free', 'Running on the Cloudflare free plan: smaller import batches and no automatic backups.')}`
+              : `${copy('plan_tier_paid', 'Paid')} -- ${copy('plan_tier_hint_paid', 'Running on the Cloudflare paid plan: full import batches and automatic backups.')}`,
+          }}
+        />
         <DoctorStatusPill label="Analytics" check={checks.analytics} />
         <DoctorStatusPill label="Google Drive" check={drive} />
         <DoctorStatusPill label="Google login" check={google_login} />
@@ -711,7 +724,7 @@ function formatDateTime(raw: unknown): string {
   const value = rawValue.includes('T') || rawValue.endsWith('Z') ? rawValue : `${rawValue.replace(' ', 'T')}Z`
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return rawValue
-  return date.toLocaleString('en-US', {
+  return fmtDayFirst(date, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -1034,6 +1047,28 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     return () => window.removeEventListener('message', handler)
   }, [active, copy, load, notify])
 
+  // The SAME-TAB return leg. When the consent page has no opener (an
+  // installed PWA, or any browser that blocked the popup) the Worker's
+  // callback cannot postMessage, so it redirects back here with
+  // ?drive_sync=connected|error (cloudflare/src/routes/compat.ts:989-1000).
+  // Nothing in the frontend read that parameter: the connection really was
+  // stored server-side, but the screen said nothing at all and the stale
+  // parameter stayed in the URL. Consume it once, strip it, and report.
+  useEffect(() => {
+    if (!active || typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    const outcome = String(url.searchParams.get('drive_sync') || '').trim().toLowerCase()
+    if (outcome !== 'connected' && outcome !== 'error') return
+    url.searchParams.delete('drive_sync')
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`)
+    if (outcome === 'connected') {
+      notify(copy('drive_sync_connected', 'Google Drive connected'), 'success')
+      loadRef.current?.({ force: true })
+      return
+    }
+    notify(copy('drive_sync_connect_failed', 'Google Drive connection failed'), 'error')
+  }, [active, copy, notify])
+
   const trackQueuedJob = useCallback((queued: QueuedJobResponse | undefined, reason: string, handlers: JobWatcherHandlers = {}) => {
     const jobId = queued?.job_id || queued?.item?.id
     if (!jobId) return queued
@@ -1185,6 +1220,18 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
 
   const openGoogleDriveSetup = (): void => {
     if (!pendingAuthUrl) return
+    // An installed iOS PWA has no real popup: window.open() returns a truthy
+    // proxy while Safari opens the consent page as a separate app, so the
+    // `if (popup)` branch below looked like success, the same-tab fallback
+    // never ran, and the postMessage handshake could never arrive from
+    // another app -- Drive setup sat on "setup ready" forever. Go straight to
+    // the same-tab redirect there; the Worker's callback already handles an
+    // openerless flow by redirecting back to this page with
+    // ?drive_sync=connected|error, which the effect above consumes.
+    if (isStandaloneDisplayMode()) {
+      window.location.assign(pendingAuthUrl)
+      return
+    }
     // This explicit popup keeps an opener for the completion handshake. If a
     // browser blocks it, use the same-tab path instead; the Worker then uses
     // its safe redirect fallback and no postMessage is trusted by this tab.

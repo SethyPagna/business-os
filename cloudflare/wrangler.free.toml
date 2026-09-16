@@ -1,0 +1,438 @@
+# Free-plan deployable config. HAND-MAINTAINED copy of wrangler.toml.
+#
+#   npm run deploy:free        (= deploy.cjs --config wrangler.free.toml)
+#   npm run dry-run:free       (local bundle only, no upload)
+#
+# It deploys the SAME Worker name, the SAME D1 database ids, the SAME R2
+# bucket, KV namespace, queues, Durable Objects, routes and crons as
+# wrangler.toml. It is not a second environment and not a second deployment:
+# it is the same deployment, configured for an account on the Workers Free
+# plan. Exactly one of the two files is ever deployed at a time.
+#
+# There are EXACTLY FOUR differences from wrangler.toml, each marked "DIFF n
+# of 4" at its site below:
+#   1. no [limits] block            (cpu_ms / subrequests are Paid-only)
+#   2. business-os-import consumer  max_batch_size 5 -> 1
+#   3. business-os-media consumer   max_batch_size 5 -> 1
+#   4. [vars] PLAN_TIER             "paid" -> "free"
+#
+# scripts/test-wrangler-config-drift-pure.cjs enforces that list: every
+# binding, id, queue, route, cron and var in wrangler.toml must be present
+# here with the same value, and no fifth difference may appear. When you edit
+# wrangler.toml, edit this file in the same commit -- that test is how you
+# find out you did not.
+#
+# Deliberately NOT diffed: the business-os-backup-assets consumer (already
+# max_batch_size = 1 on both plans), the DLQ consumer (one D1 UPDATE per
+# message), [observability] (Workers Logs works on Free at 200k events/day),
+# the Durable Object bindings and migrations (SQLite DOs work on Free), and
+# every queue binding (Queues work on Free).
+#
+name = "business-os"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+compatibility_flags = ["nodejs_compat"]
+account_id = "743e5b727d139e85ed11679097f6f99e"
+# Off by request (Aug 26 2026) once the custom domain was restored.
+#
+# It was turned on during that day's outage: both leangcosmetics.dpdns.org
+# and admin.* went NXDOMAIN while the Worker itself was deployed and healthy,
+# and because the routes bind to a Cloudflare ZONE there was no second way
+# in. Root cause was the delegation -- DigitalPlat still held it and pointed
+# at its own nameservers, so Cloudflare's records were never consulted.
+# (Historical record: the outage happened on the OLD domain above, before
+# leangbeauty.com existed -- do not "update" it in a rename sweep.)
+#
+# Worth remembering if the shop ever goes dark again with a healthy Worker:
+# flipping this to true and deploying restores access in about a minute,
+# independent of DNS.
+workers_dev = false
+
+# leangbeauty.com (bought Aug 2026, registered on this Cloudflare account) is
+# the primary pair, as Workers CUSTOM DOMAINS: unlike zone routes, a custom
+# domain creates its own proxied DNS record + certificate on deploy, which is
+# exactly what this zone was missing -- measured Aug 28: the apex had NO
+# A/AAAA record at all, and admin. had a stray unproxied A record pointing at
+# 36.37.242.94 (not Cloudflare), so "deployed yesterday" served nothing.
+# NOTE: if the deploy reports a conflict on admin.leangbeauty.com, that stray
+# A record must be deleted in the Cloudflare DNS dashboard first -- wrangler
+# will not silently overwrite an existing record.
+#
+# The old leangcosmetics.dpdns.org zone routes stay during the transition:
+# existing PWA installs, bookmarks and the Google OAuth redirect URIs
+# registered for the old admin host keep working until the cutover is done.
+routes = [
+  { pattern = "leangbeauty.com", custom_domain = true },
+  { pattern = "admin.leangbeauty.com", custom_domain = true },
+  { pattern = "leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
+  { pattern = "admin.leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
+]
+
+# Copied VERBATIM from wrangler.toml (not a diff site). The document-route
+# list is asset-layer routing, identical on both plans: run_worker_first is
+# what makes the Worker see a page request at all, and the admin-host
+# identity rewrite in src/lib/adminDocumentIdentity.ts has to run on Free
+# too. scripts/test-admin-host-document-rewrite-pure.cjs pins the paid file
+# against APP_DOCUMENT_ROUTES; the drift test pins this file against that.
+[assets]
+directory = "../frontend/dist"
+not_found_handling = "single-page-application"
+# The built frontend, also bound so the Worker itself can read a document it
+# has been asked to serve (src/index.ts's serveAppDocument). The binding name
+# is STATIC_ASSETS because ASSETS is already taken by the R2 bucket holding
+# uploaded files.
+binding = "STATIC_ASSETS"
+# Everything after /ws is a DOCUMENT route: the asset layer would otherwise
+# answer it from index.html without ever invoking this Worker, and G4's
+# admin-host identity rewrite has to happen before iOS reads those bytes (see
+# src/lib/adminDocumentIdentity.ts). The list mirrors that file's
+# APP_DOCUMENT_ROUTES exactly -- scripts/test-admin-host-document-rewrite-pure
+# .cjs fails if they drift, because a path listed here without a handler there
+# 404s a whole page, and a handler there without a path here never runs.
+run_worker_first = [
+  "/api/*", "/uploads/*", "/health", "/ws", "/robots.txt", "/sitemap.xml",
+  "/", "/index.html", "/admin", "/admin/*",
+  "/app", "/app/*", "/login", "/login/*",
+  "/audit", "/audit/*", "/audit-log", "/audit-log/*",
+  "/backup", "/backup/*", "/backups", "/backups/*",
+  "/branches", "/branches/*", "/catalog", "/catalog/*",
+  "/contacts", "/contacts/*", "/dashboard", "/dashboard/*",
+  "/delivery-contacts", "/delivery-contacts/*", "/fees", "/fees/*",
+  "/files", "/files/*", "/inventory", "/inventory/*",
+  "/library", "/library/*", "/loyalty", "/loyalty/*",
+  "/loyalty-points", "/loyalty-points/*", "/notes", "/notes/*",
+  "/point-of-sale", "/point-of-sale/*", "/pos", "/pos/*",
+  "/product", "/product/*", "/products", "/products/*",
+  "/promos", "/promos/*", "/promotions", "/promotions/*",
+  "/receipt-settings", "/receipt-settings/*", "/receipts", "/receipts/*",
+  "/returns", "/returns/*", "/review", "/review/*",
+  "/review-queue", "/review-queue/*", "/sales", "/sales/*",
+  "/server", "/server/*", "/settings", "/settings/*",
+  "/users", "/users/*",
+]
+
+[triggers]
+crons = ["0 */6 * * *"]
+
+# P4-4a: Smart Placement lets Cloudflare run this Worker's invocation next to
+# the D1 primary/whatever backend it talks to most, instead of always at the
+# edge location closest to the requesting browser -- this Worker's own
+# request path is D1-round-trip-bound (see the audit()/transfer/etc. fixes
+# elsewhere in this program), which is exactly the workload Smart Placement
+# is for. Free on both Workers plans (no [limits]-style Paid gate), so it
+# needs no free/paid branch the way cpu_ms above does.
+[placement]
+mode = "smart"
+
+# CPU headroom for the import queue consumer (queue.ts) and other chunked
+# D1 work (importEngine.ts's runD1BatchInChunks). This block previously had
+# to be REMOVED because custom cpu_ms is a Workers Paid-only feature and
+# made `wrangler deploy` fail on Free (error 100328), with an explicit note
+# to re-add it once the account moved to Paid -- which happened Aug 2026
+# ($5/mo). 300000ms = 5 minutes, the Paid maximum; actual usage stays far
+# below it (wall-clock waiting on D1/R2 never counts, only compute), this
+# just stops big classify/apply passes dying at the old 10ms default.
+#
+# A4 subrequest re-base (session 05, Aug 28 2026). Platform facts, from the
+# Cloudflare changelog of Feb 11 2026 + the current limits page: Workers
+# Paid now allows 10,000 subrequests per invocation BY DEFAULT (raisable
+# to 10,000,000 via this key); Free stays 50 external / 1,000 to
+# Cloudflare services. The 10,000 default is pinned EXPLICITLY here, the
+# way cpu_ms is, so a future platform-default change cannot silently
+# shrink budgets this codebase's ceilings were measured against.
+# App ceilings recorded against that 10,000 budget (each constant carries
+# its own full reasoning at its definition):
+#   backup.ts   MAX_ASSET_BYTES_PER_BACKUP  20  -> 100  (~200 subreqs/run)
+#   system.ts   MAX_IMAGE_DELETES_PER_RESET 200 -> 500  (~500 subreqs/run)
+#   importEngine ROWS_PER_IMPORT_CHUNK      150 -> 600  (CPU-bound; the
+#     constant's own comment said to raise it once cpu_ms was restored)
+#   importEngine STOCK_ACTION_MAX_UNITS     60  -> 240  (~2,880 subreqs
+#     worst case, ~29% of budget), MAX_ROWS 480 -> 1920 (units x 8 lines)
+# NOT raised, with reasons at their sites: D1's 100-bound-params-per-
+# statement (plan-independent), MAX_HISTORICAL_SALE_LINES = 100 (data
+# bound: largest real receipt is 86 lines), STOCK_ACTION_CLASSIFY_WINDOW /
+# DISPATCH_READ (M4's windowed continuation, already Paid-sized).
+# DIFF 1 of 4 vs wrangler.toml: NO [limits] BLOCK.
+#
+# wrangler.toml has:
+#   [limits]
+#   cpu_ms = 300000
+#   subrequests = 10_000
+#
+# Both keys are Workers Paid-only. Deploying a config that carries them to a
+# Free account fails outright with error 100328 -- this is the ONE key in the
+# whole file that is fatal on Free, which is why this file exists at all.
+# Without the block, Free applies its fixed budgets: 10 ms CPU per invocation
+# (including per cron trigger), 50 external subrequests, 1,000 to Cloudflare
+# services. Every in-app ceiling is re-sized for those budgets by
+# src/lib/planTier.ts, keyed off PLAN_TIER below.
+#
+# Why this is a second top-level file and not an [env.free] section: wrangler
+# 4.116 cannot DROP an inherited [limits] block from an environment, its
+# bindings are non-inheritable (every binding would have to be copied anyway),
+# and an environment name suffixes the Worker name to 'business-os-free'.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "business-os"
+database_id = "49795be9-eabe-43f1-8e16-b86faed60cb1"
+migrations_dir = "migrations"
+
+# Import-staging database (Part 572). Holds ONLY the two bulk, regenerable
+# import staging tables (import_job_rows + import_job_source_rows) -- measured
+# Aug 31 2026 at ~431 MB, ~65% of a 661 MB operational DB, all of it transient
+# per-import scratch. Splitting it out keeps the operational DB (and therefore
+# its backup time and page-cache pressure) small and stable. Co-located in
+# APAC with the DB above and the Worker.
+#
+# OPTIONAL by design on Env (index.ts, same pattern as BACKUP_QUEUE): the app
+# reaches these two tables ONLY through getDb(env).staging (lib/db.ts's
+# D1Compat.staging), which points here when this binding exists and falls back
+# to DB when it does not -- so local dev, the pure-test harnesses, and any
+# single-DB deployment keep working unchanged. Safe because a db.batch() is
+# atomic only within one D1 and D1 has no cross-database JOINs: these two
+# tables are never batched-atomically-with, nor JOINed to, operational tables
+# (the idempotency ledgers that ARE must stay on DB -- see migrations-import/).
+#
+# Migrations for THIS database live in migrations-import/ and are applied with
+# `npm run migrate:import:remote`; `migrate:remote` only touches business-os.
+[[d1_databases]]
+binding = "IMPORT_DB"
+database_name = "business-os-import"
+database_id = "5c667470-920b-4cb1-bbc9-67d0d919c965"
+migrations_dir = "migrations-import"
+
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "business-os-assets"
+
+# Analytics Engine. Free with Workers, and the only place in this stack where
+# writing an observation is genuinely cheap: it does not draw on D1's row
+# budget, KV's 1,000 writes/day, or R2 operations. That makes it the right
+# home for high-frequency signals that would be reckless to store anywhere
+# else -- see lib/analytics.ts for what is actually recorded and, more
+# importantly, what deliberately is not.
+# Cloudflare Images binding -- server-side image processing, which this Worker
+# previously had none of. That absence is why the 300-350KB backfill for
+# objects ALREADY in R2 had no server-side path and the band could only be
+# enforced on new browser uploads.
+#
+# Free plan: 5,000 unique transformations/month, and it explicitly covers
+# images stored OUTSIDE Images (i.e. ours, in R2). Repeat requests for the
+# same source+parameters within a month count once. `.info()` is NOT billed
+# at all, which is what makes the 6-hourly audit free to run. Exceeding the
+# limit returns error 9422 and is never charged -- so the worst case is
+# "transform refused", not a bill.
+[images]
+binding = "IMAGES"
+
+[[analytics_engine_datasets]]
+binding = "Business_OS_Analytics"
+dataset = "Business_OS_Analytics"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "de5f3b41c7264e4582077176fd0c1fe8"
+
+[[queues.producers]]
+binding = "IMPORT_QUEUE"
+queue = "business-os-import"
+
+[[queues.producers]]
+binding = "MEDIA_QUEUE"
+queue = "business-os-media"
+
+# Part 122: queue-driven full-asset-coverage backup copy. See
+# lib/backup.ts's createCloudflareBackup/continueCloudflareBackupAssetCopy.
+# BACKUP_QUEUE is OPTIONAL on Env (index.ts) -- if this producer binding is
+# ever removed/unavailable, createCloudflareBackup falls back to the
+# pre-existing Part 48 rotating-cursor behavior, unchanged.
+[[queues.producers]]
+binding = "BACKUP_QUEUE"
+queue = "business-os-backup-assets"
+
+[[queues.consumers]]
+queue = "business-os-import"
+# Restored to 5 (its original value) now that [limits] cpu_ms = 300000 is
+# active on the Paid plan -- exactly the condition the old comment set for
+# raising it again. History for the next reader: this was lowered to 1 on
+# the FREE plan because handleImportQueue processes a batch SEQUENTIALLY in
+# one invocation and Free's fixed 10ms CPU budget is per INVOCATION, so a
+# larger batch silently repacked several chunks' CPU into one 10ms window.
+# With a 5-minute budget, batching is a pure throughput win again.
+# DIFF 2 of 4 vs wrangler.toml (which has max_batch_size = 5).
+# handleImportQueue processes a batch SEQUENTIALLY inside ONE invocation, and
+# Free's 10 ms CPU budget is per INVOCATION -- a batch of 5 repacks five
+# chunks of real classify/write CPU into one 10 ms window. 1 gives each chunk
+# its own fresh budget and its own retry. This is the value this line held
+# while the account was on Free; the comment above records why it went back
+# to 5 on Paid.
+max_batch_size = 1
+max_batch_timeout = 5
+# Six deliveries (1 + max_retries) is what lib/queueDispatch.ts
+# chunkRowsForAttempt needs to walk 600 -> 300 -> 150 -> 75 -> 37 -> 25 rows
+# before a message is given up on; Cloudflare's default of 3 retries stopped
+# at 75, and the operator's Retry then started over at 600. Same value in
+# wrangler.toml and wrangler.free.toml on purpose (the drift test pins the
+# two files to four differences).
+max_retries = 5
+# Once a message has thrown on every one of its max_retries attempts, it's
+# moved here instead of silently dropped -- queue.ts's
+# handleImportDeadLetterQueue picks it up and marks the job definitively
+# failed with an actionable last_error (see that function's own comment for
+# the full "why", including what used to happen without this: the job could
+# sit stuck showing 'analyzing'/'applying' with no error and no further
+# progress for up to 20 minutes, until the separate stalled-job reaper in
+# routes/importJobs.ts finally caught it).
+#
+# REQUIRES a one-time manual step this account's owner has to run (this repo
+# has no live Cloudflare credentials to do it from here): the queue itself
+# has to exist before `wrangler deploy` will accept this config --
+#   wrangler queues create business-os-import-dlq
+# -- then deploy as normal. If that queue doesn't exist yet, deploy will
+# fail with a clear "queue not found" error naming it.
+dead_letter_queue = "business-os-import-dlq"
+
+[[queues.consumers]]
+queue = "business-os-import-dlq"
+# Small, generous settings on purpose: this consumer's whole job (see
+# handleImportDeadLetterQueue) is one D1 UPDATE per message, and every
+# message here has ALREADY exhausted its retries on the main import queue --
+# there's nothing time-sensitive left to protect by keeping this consumer's
+# own batch small the way business-os-import's max_batch_size=1 has to.
+max_batch_size = 10
+max_batch_timeout = 30
+# If handleImportDeadLetterQueue's own handling throws (see its comment --
+# should be rare; markJobFailed is designed not to throw), retrying a
+# message that already exhausted retries on the PRIMARY queue would just
+# loop with no further escalation path available. Cap it low rather than
+# leave Cloudflare's own default.
+max_retries = 2
+
+[[queues.consumers]]
+queue = "business-os-media"
+# DIFF 3 of 4 vs wrangler.toml (which has max_batch_size = 5).
+# Same reason as the import consumer: handleMediaQueue does real per-message
+# work (R2 get, normalize, R2 put) rather than one cheap D1 write, so batching
+# it packs CPU into a single 10 ms invocation instead of amortising latency.
+max_batch_size = 1
+max_batch_timeout = 30
+
+[[queues.consumers]]
+queue = "business-os-backup-assets"
+# handleBackupQueue processes one backup-asset continuation, Drive mirror, or
+# non-destructive Drive restore-stage job per message. Asset continuation
+# copies a bounded slice and re-enqueues itself; Drive mirror uploads one
+# finalized manifest; restore-stage streams an app-tagged Drive manifest into
+# an isolated R2 candidate and validates it. The shared max_batch_size=1 keeps
+# all three kinds isolated and gives each its own retry budget, and keeps each
+# invocation's R2 get()+put() work inside one per-invocation CPU budget rather
+# than packing several continuation steps' worth of copying into one call.
+#
+# This comment used to say "same reasoning as business-os-import's
+# max_batch_size = 1 above" -- stale since that consumer was restored to 5 on
+# Paid (see its own comment). This consumer stays at 1 on BOTH plans: its work
+# is R2 byte-copying, not a D1 write, so batching it packs real CPU rather than
+# amortising network latency. wrangler.free.toml therefore does NOT diff here.
+max_batch_size = 1
+max_batch_timeout = 5
+# No dead_letter_queue configured here (unlike business-os-import) --
+# deliberate: an exhausted infra retry leaves the small lifecycle sidecar in
+# copying state. It cannot evict either finalized backup, and the scheduled
+# stale-artifact pass removes it after 24 hours. Per-asset missing-object
+# failures are separately bounded to three attempts and end in failed state.
+#
+# REQUIRES the same one-time manual step as business-os-import-dlq above
+# (this repo has no live Cloudflare credentials to run it from here):
+#   wrangler queues create business-os-backup-assets
+# -- then deploy as normal. If that queue doesn't exist yet, deploy will
+# fail with a clear "queue not found" error naming it.
+max_retries = 3
+
+[[durable_objects.bindings]]
+name = "SYNC_UPLOADS"
+class_name = "SyncUploadSession"
+
+[[durable_objects.bindings]]
+name = "BROADCAST_HUB"
+class_name = "BroadcastHub"
+
+[[migrations]]
+tag = "v1-sync-upload-session"
+new_sqlite_classes = ["SyncUploadSession"]
+
+[[migrations]]
+tag = "v2-broadcast-hub"
+new_sqlite_classes = ["BroadcastHub"]
+
+[vars]
+# Which Workers plan this config deploys onto. Read by src/lib/planTier.ts,
+# which turns it into the limit table every plan-sensitive call site uses.
+# Pinned EXPLICITLY here rather than left to the code default so the two
+# configs state their own tier and wrangler.free.toml's only differ by value;
+# see that file's header for the complete list of diffs between them.
+# DIFF 4 of 4 vs wrangler.toml (which has PLAN_TIER = "paid").
+# This is the switch src/lib/planTier.ts reads. Everything above is what the
+# PLATFORM needs; this is what the APPLICATION needs -- import chunk sizes,
+# stock-action ceilings, backup asset caps, retention batch sizes and the
+# free-plan refusals all follow from it. Deploying this file without it would
+# produce a Worker that boots on Free and then throws Paid-sized work at it.
+PLAN_TIER = "free"
+BUSINESS_OS_PUBLIC_URL = "https://leangbeauty.com"
+BUSINESS_OS_ADMIN_URL = "https://admin.leangbeauty.com"
+# The one organization this deployment serves. The login screen pins to it
+# and offers no way to create another (routes/organizations.ts has no write
+# endpoints, and /bootstrap reports organizationCreationEnabled: false);
+# the "Switch organization" button on the login screen is the intended
+# unlock. Matched against organizations.slug OR organizations.public_id,
+# case-insensitively. If it matches nothing, the Worker falls back to the
+# first organization row rather than failing -- a stale value here can
+# never lock anyone out. Change this if the organization is ever renamed.
+# Renamed to LeangBeauty by explicit request (Aug 28 2026). SAFE ONLY
+# because coreDataInvariants' PREVIOUS_IDENTITIES list now includes
+# 'leangcosmetics' -- that is what lets the existing production row be
+# adopted and renamed IN PLACE. A slug value matching neither the current
+# nor a listed previous identity makes the invariant INSERT A SECOND, EMPTY
+# organization next to the real one. If this is ever renamed again: append
+# the then-current identity to PREVIOUS_IDENTITIES first, then change these.
+BUSINESS_OS_ORGANIZATION_SLUG = "leangbeauty"
+# Display name for that organization. Previously hardcoded to "Business OS"
+# in lib/coreDataInvariants.ts, which rewrote it on every run -- so renaming
+# the organization in the database never stuck. Setting it here is what makes
+# the rename permanent.
+BUSINESS_OS_ORGANIZATION_NAME = "LeangBeauty"
+
+# Sentry ingest DSN. A DSN is a PUBLIC key by design -- it only permits
+# writing events into this one project, never reading them -- so it belongs
+# in [vars] and not in `wrangler secret`. Absent means reporting is simply
+# skipped, so a local run behaves exactly as it did before this existed.
+SENTRY_DSN = "https://3a7ba49248bf45b90262cdc5709df9c1@o4511967341903872.ingest.us.sentry.io/4511973058543616"
+
+# Sender address for password-reset and verification email. lib/verification.ts
+# requires BOTH this and RESEND_API_KEY; with either missing, email is silently
+# skipped with only a console warning. Must be on a Resend domain whose DNS is
+# verified -- see progress.md's connected-services table.
+RESEND_FROM_EMAIL = "no-reply@leangbeauty.com"
+# Password-reset emails (lib/verification.ts) are sent via Resend. This
+# must be a verified sender/domain on the Resend account, e.g.
+# "Leang Beauty <no-reply@leangbeauty.com>". The API key is a
+
+
+GOOGLE_LOGIN_CLIENT_ID = "784691087631-2ugaidgt6umv80i9qvfo08ddu12n4a9b.apps.googleusercontent.com"
+GOOGLE_LOGIN_REDIRECT_URI = "https://admin.leangbeauty.com/api/auth/oauth/callback"
+
+# Google Drive OAuth (off-Cloudflare backup mirror) -- see
+# cloudflare/src/lib/googleDrive.ts and the /api/system/drive-sync/* routes
+# in cloudflare/src/routes/compat.ts. Separate OAuth client from the login
+# one above, matching the legacy backend's own separation of concerns.
+# CLIENT_SECRET moved out the same way as GOOGLE_LOGIN_CLIENT_SECRET above --
+# see cloudflare/.dev.vars locally, `wrangler secret put
+# GOOGLE_DRIVE_CLIENT_SECRET` for production.
+GOOGLE_DRIVE_CLIENT_ID = "784691087631-8ptg5j6vb15oi3ljg66dli7ssne88jig.apps.googleusercontent.com"
+GOOGLE_DRIVE_REDIRECT_URI = "https://admin.leangbeauty.com/api/system/drive-sync/oauth/callback"
+
+# Workers Logs (request-level method/path/status, 7-day retention). Enabled after the 2026-09-03
+# incident, when no retroactive per-invocation record existed anywhere (Sentry = exceptions only).
+[observability]
+enabled = true
+head_sampling_rate = 1

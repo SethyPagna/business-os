@@ -1,10 +1,14 @@
 import { SYNC } from '../constants.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { saleMoneyResponseFields } from '../utils/saleMoneyV1.ts'
+import type { SaleMutationHeaderQuote } from '../utils/saleMutationHeaderQuote.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
-import { apiFetch, route } from './http.ts'
+import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
-import { mirrorTable, routeMirrored } from './localMirrors.ts'
+import { mirrorReadResult, mirrorTable } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
+import { ensureClientRequestId } from './requestIds.ts'
+import { contactDisplayAddress } from '../components/contacts/contactOptionUtils.ts'
 
 type SalePayload = ExpectedUpdatedAtPayload
 type ResultRecord = Record<string, unknown>
@@ -17,6 +21,8 @@ type CustomerRecord = {
 }
 type SaleAttachCustomerResult = ResultRecord & { customer?: CustomerRecord }
 type AttemptedError = Error & { attempted?: unknown }
+export type SalesReadOptions = { signal?: AbortSignal; timeoutMs?: number }
+export const SALES_LIST_REQUEST_TIMEOUT_MS = 20_000
 
 function encodeId(id: number | string): string {
   return encodeURIComponent(String(id))
@@ -48,6 +54,35 @@ export function createSale(payload: SalePayload): Promise<unknown> {
   )
 }
 
+/** An absent receipt is not permission to rebuild an uncertain request body. */
+export function recoverSaleCreateReceipt(clientRequestId: string, options: SalesReadOptions = {}): Promise<unknown> {
+  if (!String(clientRequestId).trim()) throw new Error('Sale receipt recovery requires the original client_request_id.')
+  return apiFetch('GET', `/api/sales/create-receipt?client_request_id=${encodeURIComponent(clientRequestId)}`, undefined, options.timeoutMs ?? 8000, { signal: options.signal })
+}
+
+export type BulkSaleCancelInput = { reason: string; note?: string; fee_usd?: number; fee_khr?: number; fee_note?: string }
+export type BulkSaleStatusItem = { id: number; expected_status: string; expected_updated_at: string | null; cancel?: BulkSaleCancelInput }
+export type BulkSaleStatusResult = { actionHistoryId: number; changedCount: number; unchangedCount: number; changedIds: number[]; unchangedIds: number[] }
+export type BulkSaleStatusPayload = { client_request_id: string; items: BulkSaleStatusItem[]; target_status: string; source_status?: string; skip_stock?: boolean; cancel_reason?: string; cancel_note?: string }
+
+export function buildBulkSaleCancelInput(draft: { cancel_reason: string; cancel_note?: string; cancel_fee_usd?: string | number; cancel_fee_khr?: string | number; cancel_fee_note?: string }): BulkSaleCancelInput {
+  const feeUsd = Number(draft.cancel_fee_usd)
+  const feeKhr = Number(draft.cancel_fee_khr)
+  return {
+    reason: String(draft.cancel_reason || ''),
+    ...(String(draft.cancel_note || '').trim() ? { note: String(draft.cancel_note).trim() } : {}),
+    ...(Number.isFinite(feeUsd) && feeUsd > 0 ? { fee_usd: feeUsd } : {}),
+    ...(Number.isFinite(feeKhr) && feeKhr > 0 ? { fee_khr: feeKhr } : {}),
+    ...(String(draft.cancel_fee_note || '').trim() ? { fee_note: String(draft.cancel_fee_note).trim() } : {}),
+  }
+}
+export async function updateSalesBulkStatus(payload: BulkSaleStatusPayload): Promise<BulkSaleStatusResult> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Connect to the server to change sale status.')
+  const result = await route('sales:bulkStatus', () => apiFetch('POST', '/api/sales/bulk-status', payload), null, true) as BulkSaleStatusResult
+  // This write also creates server history; its next read must see the group.
+  cacheInvalidate('actionHistory')
+  return result
+}
 export function createSaleWithoutWriteDedupe(payload: SalePayload): Promise<unknown> {
   return apiFetch(
     'POST',
@@ -58,21 +93,79 @@ export function createSaleWithoutWriteDedupe(payload: SalePayload): Promise<unkn
   )
 }
 
-export function getSales(params: QueryParams = {}): Promise<unknown> {
+export type BulkSaleUpdatePayload = {
+  client_request_id: string
+  items: Array<{ id: number; expected_updated_at: string | null }>
+  action:
+    | { kind: 'customer_name'; name: string }
+    | { kind: 'payment_method'; source: string | null; target: string }
+    | { kind: 'delivery_contact' | 'customer'; source_id: number | null; target_id: number | null }
+}
+export type BulkSaleUpdateResult = { actionHistoryId?: number; changedCount: number; unchangedCount: number; changedIds?: number[]; unchangedIds?: number[] }
+
+export async function updateSalesBulkField(payload: BulkSaleUpdatePayload): Promise<BulkSaleUpdateResult> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Connect to the server to update sales.')
+  const result = await route('sales:bulkUpdate', () => apiFetch('POST', '/api/sales/bulk-update', payload), null, true) as BulkSaleUpdateResult
+  cacheInvalidate('actionHistory')
+  return result
+}
+
+export function getSales(params: QueryParams = {}, options: SalesReadOptions = {}): Promise<unknown> {
   const query = buildQueryString(params, { skipEmpty: false })
   const mirror = query ? undefined : mirrorTable('sales')
-  return routeMirrored(
+  return route(
     `sales:get:${query}`,
-    () => apiFetch('GET', appendQuery('/api/sales', query)),
+    async () => mirrorReadResult(
+      mirror,
+      await apiFetch(
+        'GET',
+        appendQuery('/api/sales', query),
+        undefined,
+        options.timeoutMs ?? SALES_LIST_REQUEST_TIMEOUT_MS,
+        { signal: options.signal },
+      ),
+    ),
     async () => {
       const db = await getLocalDb()
       return db.table('sales').orderBy('created_at').reverse().limit(1000).toArray()
     },
-    mirror,
+    // A timed-out list request has already consumed the page's whole read
+    // budget. Keep the ordinary retry for an immediate connection failure,
+    // but do not start another full timeout window after that budget expires.
+    {
+      // Live-server Sales data is a sensitive mirror and is purged by policy.
+      // Waiting for the server path keeps cancellation observable instead of
+      // converting an explicit abort into a background Dexie fallback race.
+      raceLocalFallback: false,
+      // The caller owns the AbortController until this promise settles. Await
+      // a stale cache refresh so returning a stale value cannot make the page
+      // abort its own still-running background request in `finally`.
+      staleWhileRevalidate: false,
+      retryTimedOutRead: false,
+      signal: options.signal,
+    },
   )
 }
 
-export async function updateSaleStatus(
+export type PreparedSaleStatusRequest = ExpectedUpdatedAtPayload & { client_request_id: string }
+
+export type SaleStatusReceipt = { committed: boolean; response?: Record<string, unknown> }
+
+/** No cache or local fallback: this read is used to converge after a receipt. */
+export function getAuthoritativeSale(id: number | string): Promise<unknown> {
+  return apiFetch('GET', `/api/sales?id=${encodeId(id)}&limit=2&_detail=${Date.now()}-${Math.random()}`, undefined, 8000)
+}
+
+/** Authoritative actor/request receipt check; does not submit another mutation. */
+export function getSaleStatusReceipt(id: number | string, payload: PreparedSaleStatusRequest): Promise<SaleStatusReceipt> {
+  return apiFetch('POST', `/api/sales/${encodeId(id)}/status-receipt`, payload, 8000, { skipWriteDedupe: true }) as Promise<SaleStatusReceipt>
+}
+
+export function getSaleLineReceipt(id: number | string, kind: 'add_items' | 'amendment', payload: Record<string, unknown>): Promise<SaleStatusReceipt> {
+  return apiFetch('POST', `/api/sales/${encodeId(id)}/line-receipt/${kind}`, payload, 8000, { skipWriteDedupe: true }) as Promise<SaleStatusReceipt>
+}
+
+export async function prepareSaleStatusRequest(
   id: number | string,
   saleStatus: unknown,
   notes?: unknown,
@@ -81,13 +174,20 @@ export async function updateSaleStatus(
   // REFUSES a transition to 'cancelled' without a reason, so callers
   // collect it (CancelSaleModal) before calling this.
   extra?: Record<string, unknown> | null,
-): Promise<unknown> {
-  const payload = await withExpectedUpdatedAt('sales', id, {
+): Promise<PreparedSaleStatusRequest> {
+  const payload = await withExpectedUpdatedAt('sales', id, ensureClientRequestId({
     ...getDevicePayload(),
     sale_status: saleStatus,
     notes,
     ...(extra || {}),
-  })
+  }, 'sale-status'))
+  return payload as PreparedSaleStatusRequest
+}
+
+export async function submitSaleStatusRequest(id: number | string, payload: PreparedSaleStatusRequest): Promise<unknown> {
+  if (!String(payload?.client_request_id || '').trim()) {
+    throw new Error('Sale status updates require a prepared client_request_id.')
+  }
   try {
     const result = await route(
       'sales:updateStatus',
@@ -97,13 +197,23 @@ export async function updateSaleStatus(
     )
     const db = await getLocalDb()
     await db.table('sales').update(id, {
-      sale_status: saleStatus,
+      ...saleMoneyResponseFields(result),
+      sale_status: payload.sale_status,
       updated_at: getResultTimestamp(result),
     }).catch(() => {})
     return result
   } catch (error) {
-    attachAttempted(error, { sale_status: saleStatus, notes })
+    attachAttempted(error, { sale_status: payload.sale_status, notes: payload.notes })
   }
+}
+
+export async function updateSaleStatus(
+  id: number | string,
+  saleStatus: unknown,
+  notes?: unknown,
+  extra?: Record<string, unknown> | null,
+): Promise<unknown> {
+  return submitSaleStatusRequest(id, await prepareSaleStatusRequest(id, saleStatus, notes, extra))
 }
 
 export async function attachSaleCustomer(
@@ -124,7 +234,11 @@ export async function attachSaleCustomer(
       customer_name: result?.customer?.name || null,
       customer_membership_number: result?.customer?.membership_number || null,
       customer_phone: result?.customer?.phone || null,
-      customer_address: result?.customer?.address || null,
+      // N21: the response carries the customer's RAW address column (the
+      // Contact Options JSON); the server stored the display address on the
+      // sale. Mirror what the server stored, or the sale detail shows the JSON
+      // again the moment this device reads its local copy offline.
+      customer_address: contactDisplayAddress(result?.customer?.address) || null,
       updated_at: getResultTimestamp(result),
     }).catch(() => {})
     return result
@@ -133,9 +247,196 @@ export async function attachSaleCustomer(
       customer_id: payload?.customer_id || null,
       customer_name: payload?.customer_name || '',
       customer_phone: payload?.customer_phone || '',
-      customer_address: payload?.customer_address || '',
+      customer_address: contactDisplayAddress(payload?.customer_address) || '',
     })
   }
+}
+
+export type SaleItemAddition = {
+  product_id: number
+  quantity: number
+  applied_price_usd?: number
+  base_price_usd?: number
+  selling_price_input_usd?: number | string
+  branch_id?: number | null
+  batch_id?: number
+  batch_label?: string
+  batch_expiry_date?: string
+  // Explicitly selects branch stock that is not represented by a received-
+  // date lot. Omitting this is a different instruction: normal server FIFO.
+  unlotted_stock?: boolean
+}
+
+/**
+ * S4-24b: add product lines to a sale that already exists (POST
+ * /api/sales/:id/items). Carries the same expected-updated-at stamp every
+ * other sale write does, so two people editing the same receipt get a write
+ * conflict rather than a silent last-write-wins.
+ *
+ * Deliberately NOT mirrored to the local db and NOT queued offline: it moves
+ * stock and changes what the customer owes against a row whose current state
+ * only the server knows. A replay from an outbox minutes later could deduct
+ * units a different sale has since taken.
+ *
+ * N18: `review.client_request_id` is CHECKED here rather than assumed. The
+ * Worker rejects a body without one, and the caller's id must be the STABLE
+ * per-user-action id (SaleDetailModal's addRequestIdRef) -- minting one here
+ * would make every retry a fresh request and re-add the same lines. So a
+ * caller that lost the id fails locally, immediately and by name, instead of
+ * spending a round trip to earn an opaque 400. (This is the guard; the actual
+ * loss was api/methods.ts's registry wrapper dropping the fourth argument.)
+ */
+export async function addSaleItems(
+  id: number | string,
+  items: SaleItemAddition[] = [],
+  notes = '',
+  review: { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string; money_precision_version?: 1; expected_header_quote?: SaleMutationHeaderQuote },
+): Promise<unknown> {
+  if (!String(review?.client_request_id || '').trim()) {
+    throw new Error("addSaleItems needs the caller's stable client_request_id; it must never be generated per request.")
+  }
+  const body = review.money_precision_version === 1 ? structuredClone({ items, notes, ...review }) : await withExpectedUpdatedAt('sales', id, {
+    ...getDevicePayload(),
+    items,
+    notes,
+    ...review,
+  })
+  try {
+    const result = await route(
+      'sales:addItems',
+      () => apiFetch('POST', `/api/sales/${encodeId(id)}/items`, body),
+      null,
+      true,
+    ) as ResultRecord
+    const db = await getLocalDb()
+    await db.table('sales').update(id, {
+      ...saleMoneyResponseFields(result),
+      updated_at: getResultTimestamp(result),
+    }).catch(() => {})
+    return result
+  } catch (error) {
+    attachAttempted(error, structuredClone(body))
+  }
+}
+
+export interface SaleAmendmentRequest {
+  expected_recorded_line_total_usd?: number
+  expected_header_quote?: SaleMutationHeaderQuote
+  pricing_quote?: { gross_usd: number; product_discount_usd: number; manual_discount_usd: number; total_usd: number; total_khr: number }
+  money_precision_version?: 1
+  selling_price_input_usd?: number | string
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_updated' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed' | 'delivery_added'
+  sale_item_id?: number
+  quantity?: number
+  applied_price_usd?: number
+  base_price_usd?: number
+  manual_discount_type?: 'percent' | 'fixed' | null
+  manual_discount_value?: number
+  manual_discount_usd?: number
+  delivery_fee_usd?: number
+  delivery_actual_cost_usd?: number | string | null
+  delivery_contact_id?: number
+  replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
+  notes?: string
+  client_request_id: string
+  expected_exchange_rate: number
+  expected_updated_at?: string
+}
+
+/**
+ * S4-30: amend a recorded sale (POST /api/sales/:id/amendments).
+ *
+ * Same discipline as addSaleItems above and for the same reasons: it carries
+ * the expected-updated-at stamp so two people correcting the same receipt get
+ * a write conflict rather than a silent last-write-wins, and it is
+ * deliberately NOT queued offline -- it moves stock in BOTH directions against
+ * a row whose current state only the server knows, and a replay from an outbox
+ * minutes later could hand back units another sale has since taken.
+ *
+ * Carries the same client_request_id guard as addSaleItems, for the same
+ * reason: POST /amendments refuses a body without one (routes/sales.ts), and
+ * the id must be the caller's stable per-action id, never a per-request mint.
+ */
+export async function amendSale(id: number | string, request: SaleAmendmentRequest): Promise<unknown> {
+  if (!String(request?.client_request_id || '').trim()) {
+    throw new Error("amendSale needs the caller's stable client_request_id; it must never be generated per request.")
+  }
+  const body = request.money_precision_version === 1 ? structuredClone(request) : await withExpectedUpdatedAt('sales', id, {
+    ...getDevicePayload(),
+    ...request,
+  })
+  try {
+    const result = await route(
+      'sales:amend',
+      () => apiFetch('POST', `/api/sales/${encodeId(id)}/amendments`, body),
+      null,
+      true,
+    ) as ResultRecord
+    const db = await getLocalDb()
+    await db.table('sales').update(id, {
+      ...saleMoneyResponseFields(result),
+      ...(result?.isDelivery !== undefined ? { is_delivery: result.isDelivery } : {}),
+      ...(result?.deliveryContactId !== undefined ? { delivery_contact_id: result.deliveryContactId } : {}),
+      ...(result?.deliveryContactName !== undefined ? { delivery_contact_name: result.deliveryContactName } : {}),
+      ...(result?.deliveryContactPhone !== undefined ? { delivery_contact_phone: result.deliveryContactPhone } : {}),
+      ...(result?.deliveryContactAddress !== undefined ? { delivery_contact_address: result.deliveryContactAddress } : {}),
+      ...(result?.deliveryFeeUsd !== undefined ? { delivery_fee_usd: result.deliveryFeeUsd } : {}),
+      ...(result?.deliveryFeeKhr !== undefined ? { delivery_fee_khr: result.deliveryFeeKhr } : {}),
+      ...(result?.deliveryFeePaidBy !== undefined ? { delivery_fee_paid_by: result.deliveryFeePaidBy } : {}),
+      delivery_actual_cost_usd: result?.deliveryActualCostUsd,
+      delivery_actual_cost_khr: result?.deliveryActualCostKhr,
+      updated_at: getResultTimestamp(result),
+    }).catch(() => {})
+    return result
+  } catch (error) {
+    attachAttempted(error, { ...request })
+  }
+}
+
+/** Sales-scoped driver picker for the atomic add-delivery correction. */
+export function getSaleDeliveryOptions(search = ''): Promise<unknown> {
+  const query = buildQueryString({ search }, { skipEmpty: true })
+  return apiFetch('GET', appendQuery('/api/sales/delivery-options', query))
+}
+
+/**
+ * The sale's amendment history (GET /api/sales/:id/amendments) -- the
+ * STAFF-facing read. The receipt never calls this: it renders net state, which
+ * is the whole point of the ledger split.
+ *
+ * No local fallback: an empty history fabricated offline would read as "this
+ * sale was never amended", which is a wrong answer rather than a missing one.
+ */
+export function getSaleAmendments(id: number | string): Promise<unknown> {
+  return route(
+    `sales:amendments:${id}`,
+    () => apiFetch('GET', `/api/sales/${encodeId(id)}/amendments`),
+    null,
+    { raceLocalFallback: false },
+  )
+}
+
+/**
+ * N41: one sale's RECORDS (GET /api/sales/:id/records) -- every change anybody
+ * ever made to it, from every writer that records itself somewhere different.
+ *
+ * NOT getSaleAmendments with a longer name. That one reads the amendment
+ * ledger and answers "how was this sale corrected"; this one unions the ledger
+ * with audit_logs, the bulk-operation receipt and the sale's own creation, so a
+ * sale cancelled inside a bulk action -- which writes nothing the ledger can
+ * see -- still says who cancelled it and when.
+ *
+ * No local fallback, for the same reason the amendment history has none: an
+ * empty list fabricated offline reads as "nobody ever touched this sale",
+ * which is a wrong answer rather than a missing one.
+ */
+export function getSaleRecords(id: number | string): Promise<unknown> {
+  return route(
+    `sales:records:${id}`,
+    () => apiFetch('GET', `/api/sales/${encodeId(id)}/records`),
+    null,
+    { raceLocalFallback: false },
+  )
 }
 
 export function getSalesExport(params: QueryParams = {}): Promise<unknown> {

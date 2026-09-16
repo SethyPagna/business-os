@@ -30,6 +30,7 @@ import type { D1Compat } from './db'
 import { buildInClause, chunkForBinding } from './sqlBinding'
 import type { StockCountPlan, StockCountPlanMovement } from './datedStockCountImport'
 import { receiveBatchStock, removeStockAcrossBatches } from './productBatches'
+import { validateCanonicalImportBranchIds, withCanonicalImportBranchWriteGuard } from './importBranchAuthority'
 
 function groupKey(productId: number, branchId: number): string {
   return `${productId}:${branchId}`
@@ -112,18 +113,30 @@ export async function applyDatedStockCountPlan(
   plan: StockCountPlan,
   actor: { userId: number | null; userName: string | null } = { userId: null, userName: null },
 ): Promise<ApplyDatedStockCountPlanResult> {
+  const branchIds = [...new Set([
+    ...plan.finalBranchStock.map((row) => row.branchId),
+    ...plan.movementsToCreate.map((row) => row.branchId),
+    ...plan.batchTopUps.map((row) => row.branchId),
+    ...plan.batchCreates.map((row) => row.branchId),
+    ...plan.batchDrains.map((row) => row.branchId),
+    ...plan.batchDeactivations.map((row) => row.branchId),
+  ])]
+  const branchAuthorityError = await validateCanonicalImportBranchIds(db, branchIds)
+  if (branchAuthorityError) throw new Error(branchAuthorityError)
+  const guardedDb = withCanonicalImportBranchWriteGuard(db, branchIds)
+
   if (plan.movementsToDelete.length) {
     // D1/SQLite has no array bind -- build the IN(...) list as its own
     // positional-safe placeholders rather than a single array param, and
     // split it so no one statement exceeds D1's 100-parameter limit.
     for (const chunk of chunkForBinding(plan.movementsToDelete)) {
       const { sql, params } = buildInClause('id', chunk)
-      await db.prepare(`DELETE FROM inventory_movements WHERE id IN (${sql})`).run(params)
+      await guardedDb.prepare(`DELETE FROM inventory_movements WHERE id IN (${sql})`).run(params)
       // No FK cascade (migration 0035's own comment) -- this importer owns
       // both tables, so it deletes a superseded movement's provenance rows
       // itself, same "delete what you own" step this DELETE already does
       // for the movement row.
-      await db.prepare(`DELETE FROM dated_stock_count_batch_actions WHERE movement_id IN (${sql})`).run(params)
+      await guardedDb.prepare(`DELETE FROM dated_stock_count_batch_actions WHERE movement_id IN (${sql})`).run(params)
     }
   }
 
@@ -154,7 +167,7 @@ export async function applyDatedStockCountPlan(
       let batchActions: { batchId: number; quantity: number }[] = []
       if (batchTracked) {
         if (movement.movementType === 'add') {
-          const received = await receiveBatchStock(db, {
+          const received = await receiveBatchStock(guardedDb, {
             productId: movement.productId,
             branchId: movement.branchId,
             quantity: movement.quantity,
@@ -162,7 +175,7 @@ export async function applyDatedStockCountPlan(
           })
           batchActions = [{ batchId: received.batchId, quantity: movement.quantity }]
         } else {
-          const drained = await removeStockAcrossBatches(db, {
+          const drained = await removeStockAcrossBatches(guardedDb, {
             productId: movement.productId,
             branchId: movement.branchId,
             quantity: movement.quantity,
@@ -175,12 +188,12 @@ export async function applyDatedStockCountPlan(
           // batch-specific to record for the shortfall portion -- it
           // never touched a batch row.
           if (drained.remainder > 0) {
-            await applyPlainStockDelta(db, movement.productId, movement.branchId, -drained.remainder)
+            await applyPlainStockDelta(guardedDb, movement.productId, movement.branchId, -drained.remainder)
           }
         }
       } else {
         const delta = movement.movementType === 'add' ? movement.quantity : -movement.quantity
-        await applyPlainStockDelta(db, movement.productId, movement.branchId, delta)
+        await applyPlainStockDelta(guardedDb, movement.productId, movement.branchId, delta)
       }
       // 0084: stamp the movement's batch_id when exactly ONE lot covered
       // its whole quantity (action quantities are signed; the movement's is
@@ -188,8 +201,8 @@ export async function applyDatedStockCountPlan(
       // NULL -- the full per-lot detail is in the actions table either way.
       const singleLotBatchId = batchActions.length === 1 && Math.abs(batchActions[0].quantity) === movement.quantity
         ? batchActions[0].batchId : null
-      const movementId = await insertMovementRow(db, movement, actor.userId, actor.userName, singleLotBatchId)
-      await insertBatchActions(db, movementId, batchActions)
+      const movementId = await insertMovementRow(guardedDb, movement, actor.userId, actor.userName, singleLotBatchId)
+      await insertBatchActions(guardedDb, movementId, batchActions)
       movementsApplied += 1
     }
   }

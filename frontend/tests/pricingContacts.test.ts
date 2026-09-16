@@ -92,10 +92,14 @@ await runTest('serializeContactOptions round-trips structured contact options', 
   assert.equal(parsed[1]?.phone, '456')
 })
 
-await runTest('customer membership generation always uses the LCMN prefix', () => {
+await runTest('the browser never mints a membership number -- LC- is the house format', () => {
   const source = readFileSync(new URL('../src/components/contacts/customerMembershipNumber.ts', import.meta.url), 'utf8')
-  assert.match(source, /const CUSTOMER_MEMBERSHIP_PREFIX = 'LCMN'/)
-  assert.match(source, /return `\$\{CUSTOMER_MEMBERSHIP_PREFIX\}-\$\{entropy\.slice\(-MEMBERSHIP_ENTROPY_LENGTH\)\.padStart\(MEMBERSHIP_ENTROPY_LENGTH, '0'\)\}`/)
+  assert.match(source, /const CUSTOMER_MEMBERSHIP_PREFIX = 'LC'/)
+  assert.match(source, /CUSTOMER_MEMBERSHIP_PLACEHOLDER = 'LC-00001'/)
+  // The LC- sequence gap-fills, so only the database knows the next free
+  // number. cloudflare/src/lib/membershipNumber.ts is the one minter.
+  assert.doesNotMatch(source, /Math\.random/)
+  assert.doesNotMatch(source, /export function generateCustomerMembershipNumber/)
 })
 
 await runTest('customers tab loads loyalty points from the main customer payload', () => {

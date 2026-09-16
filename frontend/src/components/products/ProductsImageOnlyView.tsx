@@ -1,3 +1,4 @@
+import ProductNameRail from '../shared/ProductNameRail'
 // ProductsImageOnlyView
 //
 // Part 241: the rendered surface for a user whose ONE route into the
@@ -20,7 +21,8 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Camera from 'lucide-react/dist/esm/icons/camera.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
-import { useApp } from '../../AppContext'
+import { useApp, useLowStockConfig } from '../../AppContext'
+import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import FilterMenu from '../shared/FilterMenu'
@@ -29,6 +31,7 @@ import Modal from '../shared/Modal'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fmtDateOnly } from '../../utils/formatters'
+import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 
 // Same lazyRetry pattern ProductForm.tsx already uses for this modal --
 // keeps it out of this view's own (deliberately tiny, per Part 241) bundle
@@ -49,8 +52,9 @@ interface ImageOnlyProduct {
   updated_at?: string
   selling_price_usd?: number | string | null
   selling_price_khr?: number | string | null
-  special_price_usd?: number | string | null
-  special_price_khr?: number | string | null
+  // No special_price_* here: the 2026-09-04 ruling deleted the "VIP" tier and
+  // migration 0111 moved its values into wholesale_price_*, which is now the
+  // one and only discounted tier this view can show.
   wholesale_price_usd?: number | string | null
   wholesale_price_khr?: number | string | null
   barcode?: string | null
@@ -141,6 +145,9 @@ function pickImageFile(options: { capture?: 'environment' } = {}): Promise<File 
 
 export default function ProductsImageOnlyView() {
   const { t, notify, hasPermission, fmtUSD, fmtKHR } = useImageOnlyApp()
+  // Settings > Stock Alerts -- the image grid and its details flyout are
+  // coloured by the same number as the table view of the same catalog.
+  const lowStockConfig = useLowStockConfig()
   // Which optional fields this specific role has been granted (Part 243) --
   // the server already only sends the fields it's granted (see
   // productWrites.ts's computeImageOnlyVisibleFields), so these flags just
@@ -149,7 +156,9 @@ export default function ProductsImageOnlyView() {
   // `product` anyway. Kept as plain booleans (not memoized) since
   // hasPermission() itself is already a cheap map lookup.
   const showPrice = hasPermission('products_image_only_show_price')
-  const showVip = hasPermission('products_image_only_show_vip')
+  // showVip is gone with the tier: the 2026-09-04 ruling deleted the "VIP"
+  // price outright (it was always the wholesale price under a wrong name), so
+  // `products_image_only_show_vip` no longer exists as a permission either.
   // Wholesale shows in the DETAIL panel only (not the card list), matching the
   // "wholesale only in click-to-view detail" preference and keeping the card
   // compact.
@@ -192,7 +201,7 @@ export default function ProductsImageOnlyView() {
   const [detailsProduct, setDetailsProduct] = useState<ImageOnlyProduct | null>(null)
   // K6: lots for the open detail, one flat list across the row's branches
   // ('loading' | 'error' | rows). Only ever fetched when the grant exists.
-  type DetailBatchRow = { id: number; lotCode: string | null; expiryDate: string | null; batchNumber: number | null; quantity: number; branchName: string }
+  type DetailBatchRow = { id: number; lotCode: string | null; receivedAt: string | null; expiryDate: string | null; batchNumber: number | null; quantity: number; branchName: string }
   const [detailBatches, setDetailBatches] = useState<'loading' | 'error' | DetailBatchRow[]>([])
   useEffect(() => {
     if (!detailsProduct || !showBatches) { setDetailBatches([]); return }
@@ -206,6 +215,7 @@ export default function ProductsImageOnlyView() {
       return (result?.batches || []).map((batch) => ({
         id: batch.id,
         lotCode: batch.lot_code,
+        receivedAt: batch.received_at,
         expiryDate: batch.expiry_date,
         batchNumber: batch.batch_number,
         quantity: Number(batch.quantity || 0),
@@ -309,7 +319,7 @@ export default function ProductsImageOnlyView() {
     } finally {
       if (requestIdRef.current === requestId) setLoading(false)
     }
-  }, [search, page, pageSize, t])
+  }, [search, page, pageSize, categoryFilter, brandFilter, t])
 
   useEffect(() => { load() }, [load])
 
@@ -445,7 +455,7 @@ export default function ProductsImageOnlyView() {
             const stockQty = Number(product.stock_quantity || 0)
             const stockTone = stockQty <= Number(product.out_of_stock_threshold ?? 0)
               ? 'bg-red-50 text-red-700 ring-red-100 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-900/60'
-              : stockQty <= Number(product.low_stock_threshold ?? 10)
+              : stockQty <= effectiveLowStockThreshold(lowStockConfig, product.low_stock_threshold)
                 ? 'bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900/60'
                 : 'bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-900/60'
             return (
@@ -482,7 +492,8 @@ export default function ProductsImageOnlyView() {
                   onClick={() => setDetailsProduct(product)}
                   title={t('view_details') || 'Click to view details'}
                 >
-                  <p className="break-words text-sm font-medium text-gray-800 dark:text-gray-100">{product.name}</p>
+                  {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+                  <p className="min-w-0 text-sm font-medium text-gray-800 dark:text-gray-100"><ProductNameRail name={String((product.name) ?? '')} /></p>
                   {showPrice ? (
                     // Named, not a bare figure. A number on its own next to a
                     // product could as easily be cost or a promotional price;
@@ -493,13 +504,10 @@ export default function ProductsImageOnlyView() {
                       {Number(product.selling_price_khr || 0) > 0 ? ` · ${fmtKHR(product.selling_price_khr)}` : ''}
                     </p>
                   ) : null}
-                  {showVip && (Number(product.special_price_usd || 0) > 0 || Number(product.special_price_khr || 0) > 0) ? (
-                    <p className="truncate text-xs text-emerald-600 dark:text-emerald-400">
-                      <span className="text-gray-400 dark:text-gray-500">{t('special_price') || 'VIP price'}: </span>
-                      {fmtUSD(product.special_price_usd)}
-                      {Number(product.special_price_khr || 0) > 0 ? ` · ${fmtKHR(product.special_price_khr)}` : ''}
-                    </p>
-                  ) : null}
+                  {/* The VIP price row is deleted (2026-09-04 ruling). The card
+                      list deliberately gains no wholesale row in its place --
+                      wholesale stays detail-panel-only so the card stays
+                      compact, which is the pre-existing showWholesale rule. */}
                   {showBarcode && product.barcode ? (
                     <p className="break-all font-mono text-[11px] text-gray-600 dark:text-gray-300" title={String(product.barcode)}>
                       {product.barcode}
@@ -594,7 +602,7 @@ export default function ProductsImageOnlyView() {
       ) : null}
 
       {detailsProduct ? (
-        <Modal title={detailsProduct.name} onClose={() => setDetailsProduct(null)} size="sm">
+        <Modal title={detailsProduct.name} onClose={() => setDetailsProduct(null)} size="sm" unsavedChanges="read-only">
           <div className="flex flex-col gap-4">
             <div className="flex justify-center">
               {detailsProduct.image_path ? (
@@ -622,18 +630,12 @@ export default function ProductsImageOnlyView() {
                   </dd>
                 </div>
               ) : null}
-              {showVip && (Number(detailsProduct.special_price_usd || 0) > 0 || Number(detailsProduct.special_price_khr || 0) > 0) ? (
+              {/* The VIP row that stood here is deleted (2026-09-04 ruling):
+                  wholesale, immediately below, is now the only discounted tier
+                  and already carries the values the VIP row used to show. */}
+              {showWholesale &&(Number(detailsProduct.wholesale_price_usd || 0) > 0 || Number(detailsProduct.wholesale_price_khr || 0) > 0) ? (
                 <div className="flex justify-between gap-3 py-2">
-                  <dt className="text-gray-500 dark:text-gray-400">{t('special_price') || 'VIP price'}</dt>
-                  <dd className="text-right text-emerald-700 dark:text-emerald-300">
-                    {fmtUSD(detailsProduct.special_price_usd)}
-                    {Number(detailsProduct.special_price_khr || 0) > 0 ? ` · ${fmtKHR(detailsProduct.special_price_khr)}` : ''}
-                  </dd>
-                </div>
-              ) : null}
-              {showWholesale && (Number(detailsProduct.wholesale_price_usd || 0) > 0 || Number(detailsProduct.wholesale_price_khr || 0) > 0) ? (
-                <div className="flex justify-between gap-3 py-2">
-                  <dt className="text-gray-500 dark:text-gray-400">{t('wholesale_price') || 'Wholesale'}</dt>
+                  <dt className="text-gray-500 dark:text-gray-400">{t('wholesale_price') || 'Wholesale price'}</dt>
                   <dd className="text-right text-indigo-700 dark:text-indigo-300">
                     {fmtUSD(detailsProduct.wholesale_price_usd)}
                     {Number(detailsProduct.wholesale_price_khr || 0) > 0 ? ` · ${fmtKHR(detailsProduct.wholesale_price_khr)}` : ''}
@@ -666,7 +668,7 @@ export default function ProductsImageOnlyView() {
                       const qty = Number(detailsProduct.stock_quantity || 0)
                       const tone = qty <= Number(detailsProduct.out_of_stock_threshold ?? 0)
                         ? 'bg-red-50 text-red-700 ring-red-100 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-900/60'
-                        : qty <= Number(detailsProduct.low_stock_threshold ?? 10)
+                        : qty <= effectiveLowStockThreshold(lowStockConfig, detailsProduct.low_stock_threshold)
                           ? 'bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900/60'
                           : 'bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-900/60'
                       return (
@@ -692,19 +694,23 @@ export default function ProductsImageOnlyView() {
                 stripped SERVER-side for this grant. */}
             {showBatches ? (
               <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-slate-700">
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('batches') || 'Batches'}</div>
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('batches') || 'Received dates'}</div>
                 {detailBatches === 'loading' ? (
                   <div className="py-2 text-xs text-gray-400">{t('loading') || 'Loading...'}</div>
                 ) : detailBatches === 'error' ? (
-                  <div className="py-2 text-xs text-amber-600 dark:text-amber-300">{t('batches_load_failed') || 'Could not load batches.'}</div>
+                  <div className="py-2 text-xs text-amber-600 dark:text-amber-300">{t('batches_load_failed') || 'Could not load received dates.'}</div>
                 ) : !Array.isArray(detailBatches) || detailBatches.length === 0 ? (
-                  <div className="py-2 text-xs text-gray-400">{t('no_batches_yet') || 'No batches recorded.'}</div>
+                  <div className="py-2 text-xs text-gray-400">{t('no_batches_yet') || 'No received dates recorded.'}</div>
                 ) : (
                   <div className="divide-y divide-gray-100 dark:divide-slate-700">
                     {detailBatches.map((batch) => (
                       <div key={`${batch.branchName}-${batch.id}`} className="flex items-center justify-between gap-2 py-1.5 text-xs">
                         <span className="min-w-0 truncate text-gray-700 dark:text-gray-200">
-                          {batch.lotCode || `#${batch.batchNumber ?? batch.id}`}
+                          {/* Z1a: a lot reads as its received DATE. Rendering
+                              `batch.lotCode` verbatim printed the raw MMDDYYYY
+                              code ("08242026") next to real dd/mm/yyyy dates --
+                              exactly what batchDisplayLabel exists to prevent. */}
+                          {batchDisplayLabel({ id: batch.id, lot_code: batch.lotCode, received_at: batch.receivedAt, batch_number: batch.batchNumber }, t('batch') || 'Received date')}
                           {batch.expiryDate ? <span className="ml-1 text-gray-400">exp {fmtDateOnly(batch.expiryDate)}</span> : null}
                         </span>
                         <span className="flex-shrink-0 text-gray-500 dark:text-gray-400">{batch.branchName}: {Number(batch.quantity || 0)}</span>

@@ -7,17 +7,22 @@ import {
   parseCsvNumber,
   parseCsvRows,
 } from '../../../utils/csvImport.ts'
+import { barcodeSearchKeys } from '../../../utils/searchMatch.ts'
 
 export const PRODUCT_MONEY_FIELDS = [
   'selling_price_usd',
   'selling_price_khr',
-  'special_price_usd',
-  'special_price_khr',
-  // The VIP-price header alias -- listed as a money field so a raw
-  // 'vip_price_usd' string is coerced to a number before it is copied into
-  // special_price_* during normalization (see normalizeProductImportRow).
+  'wholesale_price_usd',
+  'wholesale_price_khr',
+  // The legacy discounted-tier header aliases -- listed as money fields so a
+  // raw 'vip_price_usd' / 'special_price_usd' string is coerced to a number
+  // before it is copied into wholesale_price_* during normalization (see
+  // normalizeProductImportRow). Kept because migration 0111 renamed the tier,
+  // not the sheets operators already have on disk.
   'vip_price_usd',
   'vip_price_khr',
+  'special_price_usd',
+  'special_price_khr',
   'discount_amount_usd',
   'discount_amount_khr',
   'purchase_price_usd',
@@ -62,8 +67,12 @@ const IMAGE_FIELDS = new Set([
   'image_conflict_mode',
 ])
 
-// The DETAIL fields, matching utils/productDetailRule.ts exactly: barcode +
-// cost, and nothing else.
+// The DETAIL fields, matching utils/productDetailRule.ts exactly: the
+// barcode, and nothing else.
+//
+// Cost left this list on Sep 4 2026 (user ruling): only a different barcode
+// forks a child row now, and rows differing only in cost merge, with the
+// stored cost becoming the mean of the distinct costs.
 //
 // This list used to also contain sku, category, brand, unit, description,
 // supplier, selling price and special price -- so changing a supplier or a
@@ -76,8 +85,6 @@ const IMAGE_FIELDS = new Set([
 // nothing.
 const DETAIL_FIELDS = [
   'barcode',
-  'cost_price_usd',
-  'cost_price_khr',
 ]
 
 const TEXT_CORRUPTION_FIELDS = [
@@ -181,6 +188,32 @@ function normalizeComparableText(value: unknown): string {
   return normalizeText(value).toLocaleLowerCase()
 }
 
+const UPC_PAIR_KEY_PREFIX = /^upc[ae]:/
+
+/**
+ * Return the keys that are safe to use for barcode identity in an index.
+ *
+ * The shared search helper includes both a generic leading-zero key and, for
+ * a valid UPC-E/UPC-A pair, namespaced keys. A valid UPC-E such as 01234565
+ * must not collide with the unrelated seven-digit internal code 1234565, so
+ * paired codes use only their namespaced keys here. Short codes that the
+ * scanner helper intentionally declines still keep their exact normalized
+ * identity; existing imports commonly use values such as BC-1.
+ */
+function normalizeComparableBarcodeKeys(value: unknown): string[] {
+  const comparable = normalizeComparableText(value)
+  if (!comparable) return []
+  const keys = barcodeSearchKeys(comparable)
+  const pairKeys = keys.filter((key) => UPC_PAIR_KEY_PREFIX.test(key))
+  if (pairKeys.length) return [...new Set(pairKeys)].sort()
+  if (keys.length) return [...new Set(keys)].sort()
+  return [`exact:${comparable}`]
+}
+
+function normalizeComparableBarcodeSignature(value: unknown): string {
+  return normalizeComparableBarcodeKeys(value).join('|')
+}
+
 export const BLOCKING_PRODUCT_IMPORT_ISSUES = new Set([
   'invalid_barcode',
   'barcode_scientific_notation',
@@ -261,14 +294,24 @@ export function normalizeProductImportRow(row: ImportRow = {}, index = 0): Impor
 
   normalized.name = normalizeText(normalized.name)
   normalized.unit = normalizeText(normalized.unit || 'pcs')
-  // VIP price (stored in special_price_*; label is "VIP" now). Reads the
-  // new vip_price_* header OR the legacy special_price_* one, and defaults
-  // to 0 when neither is given -- NOT the selling price. Defaulting to
-  // selling set VIP = selling on every blank row, which the edit form then
-  // wrote back, destroying real VIP prices. Every consumer treats 0 as
-  // "no VIP price, use selling".
-  normalized.special_price_usd = normalized.special_price_usd ?? normalized.vip_price_usd ?? 0
-  normalized.special_price_khr = normalized.special_price_khr ?? normalized.vip_price_khr ?? 0
+  // Wholesale price -- the app's only discounted tier since migration 0111.
+  // The column this app used to call "VIP" (special_price_*) was never a VIP
+  // price; the owner ruled it always held the wholesale number, so 0111 moved
+  // the values into wholesale_price_* and left special_price_* dead. Reads
+  // the canonical wholesale_price_* header first, then the legacy vip_price_*
+  // and special_price_* ones -- by that same ruling an old sheet headed "VIP
+  // price" IS a wholesale sheet, so landing it here keeps the operator's real
+  // numbers instead of dropping the column on the floor. Explicit
+  // wholesale_price_* wins when a file carries both, because it is the one
+  // header that unambiguously names the tier it means. (Same precedence order
+  // as importEngine.ts's row normalizer -- the two used to disagree.)
+  //
+  // Defaults to 0 when none is given -- NOT the selling price. Defaulting to
+  // selling set the tier = selling on every blank row, which the edit form
+  // then wrote back, destroying real wholesale prices. Every consumer treats
+  // 0 as "no wholesale price, use selling".
+  normalized.wholesale_price_usd = normalized.wholesale_price_usd ?? normalized.vip_price_usd ?? normalized.special_price_usd ?? 0
+  normalized.wholesale_price_khr = normalized.wholesale_price_khr ?? normalized.vip_price_khr ?? normalized.special_price_khr ?? 0
   normalized.cost_price_usd = normalized.cost_price_usd ?? normalized.purchase_price_usd ?? 0
   normalized.cost_price_khr = normalized.cost_price_khr ?? normalized.purchase_price_khr ?? 0
   normalized.low_stock_threshold = normalized.low_stock_threshold ?? 10
@@ -306,14 +349,24 @@ function normalizeProductForSignature(product: ImportRow = {}): ImportRow {
   })
   normalized.name = normalizeText(normalized.name)
   normalized.unit = normalizeText(normalized.unit || 'pcs')
-  // VIP price (stored in special_price_*; label is "VIP" now). Reads the
-  // new vip_price_* header OR the legacy special_price_* one, and defaults
-  // to 0 when neither is given -- NOT the selling price. Defaulting to
-  // selling set VIP = selling on every blank row, which the edit form then
-  // wrote back, destroying real VIP prices. Every consumer treats 0 as
-  // "no VIP price, use selling".
-  normalized.special_price_usd = normalized.special_price_usd ?? normalized.vip_price_usd ?? 0
-  normalized.special_price_khr = normalized.special_price_khr ?? normalized.vip_price_khr ?? 0
+  // Wholesale price -- the app's only discounted tier since migration 0111.
+  // The column this app used to call "VIP" (special_price_*) was never a VIP
+  // price; the owner ruled it always held the wholesale number, so 0111 moved
+  // the values into wholesale_price_* and left special_price_* dead. Reads
+  // the canonical wholesale_price_* header first, then the legacy vip_price_*
+  // and special_price_* ones -- by that same ruling an old sheet headed "VIP
+  // price" IS a wholesale sheet, so landing it here keeps the operator's real
+  // numbers instead of dropping the column on the floor. Explicit
+  // wholesale_price_* wins when a file carries both, because it is the one
+  // header that unambiguously names the tier it means. (Same precedence order
+  // as importEngine.ts's row normalizer -- the two used to disagree.)
+  //
+  // Defaults to 0 when none is given -- NOT the selling price. Defaulting to
+  // selling set the tier = selling on every blank row, which the edit form
+  // then wrote back, destroying real wholesale prices. Every consumer treats
+  // 0 as "no wholesale price, use selling".
+  normalized.wholesale_price_usd = normalized.wholesale_price_usd ?? normalized.vip_price_usd ?? normalized.special_price_usd ?? 0
+  normalized.wholesale_price_khr = normalized.wholesale_price_khr ?? normalized.vip_price_khr ?? normalized.special_price_khr ?? 0
   normalized.cost_price_usd = normalized.cost_price_usd ?? normalized.purchase_price_usd ?? 0
   normalized.cost_price_khr = normalized.cost_price_khr ?? normalized.purchase_price_khr ?? 0
   normalized.low_stock_threshold = normalized.low_stock_threshold ?? 10
@@ -331,6 +384,7 @@ export function getProductImportDetailSignature(source: ImportRow = {}): string 
     .map((field) => {
       const value = normalized[field]
       if (typeof value === 'number') return `${field}:${Number.isFinite(value) ? value : 0}`
+      if (field === 'barcode') return `${field}:${normalizeComparableBarcodeSignature(value)}`
       return `${field}:${normalizeComparableText(value)}`
     })
     .join('|')
@@ -364,8 +418,7 @@ function buildExistingIndex(existingProducts: ImportRow[] = []) {
     }
     const sku = normalizeComparableText(product?.sku)
     if (sku) bySku.set(sku, product)
-    const barcode = normalizeComparableText(product?.barcode)
-    if (barcode) byBarcode.set(barcode, product)
+    normalizeComparableBarcodeKeys(product?.barcode).forEach((barcode) => byBarcode.set(barcode, product))
   })
   return { byName, bySku, byBarcode }
 }
@@ -381,7 +434,7 @@ function buildImportedIdentifierIndex(rows: ImportRow[] = []) {
   ;(Array.isArray(rows) ? rows : []).forEach((row, index) => {
     const rowIndex = Number(row?._import_row_index ?? index)
     add(bySku, normalizeComparableText(row?.sku), rowIndex)
-    add(byBarcode, normalizeComparableText(row?.barcode), rowIndex)
+    normalizeComparableBarcodeKeys(row?.barcode).forEach((barcode) => add(byBarcode, barcode, rowIndex))
   })
   return { bySku, byBarcode }
 }
@@ -432,8 +485,8 @@ function buildProductImportReviewGroups(rows: ImportRow[] = []): Array<Record<st
       low_stock_threshold: row?.low_stock_threshold ?? '',
       selling_price_usd: row?.selling_price_usd ?? '',
       selling_price_khr: row?.selling_price_khr ?? '',
-      special_price_usd: row?.special_price_usd ?? row?.vip_price_usd ?? '',
-      special_price_khr: row?.special_price_khr ?? row?.vip_price_khr ?? '',
+      wholesale_price_usd: row?.wholesale_price_usd ?? row?.vip_price_usd ?? row?.special_price_usd ?? '',
+      wholesale_price_khr: row?.wholesale_price_khr ?? row?.vip_price_khr ?? row?.special_price_khr ?? '',
       purchase_price_usd: row?.purchase_price_usd ?? row?.cost_price_usd ?? '',
       purchase_price_khr: row?.purchase_price_khr ?? row?.cost_price_khr ?? '',
       discount_enabled: row?.discount_enabled ?? '',
@@ -488,8 +541,8 @@ function buildProductImportReviewGroups(rows: ImportRow[] = []): Array<Record<st
             low_stock_threshold: row.low_stock_threshold ?? '',
             selling_price_usd: row.selling_price_usd ?? '',
             selling_price_khr: row.selling_price_khr ?? '',
-            special_price_usd: row.special_price_usd ?? row.vip_price_usd ?? '',
-            special_price_khr: row.special_price_khr ?? row.vip_price_khr ?? '',
+            wholesale_price_usd: row.wholesale_price_usd ?? row.vip_price_usd ?? row.special_price_usd ?? '',
+            wholesale_price_khr: row.wholesale_price_khr ?? row.vip_price_khr ?? row.special_price_khr ?? '',
             purchase_price_usd: row.purchase_price_usd ?? row.cost_price_usd ?? '',
             purchase_price_khr: row.purchase_price_khr ?? row.cost_price_khr ?? '',
             discount_enabled: row.discount_enabled ?? '',
@@ -570,12 +623,14 @@ export function analyzeProductImportRows(rows: ImportRow[] = [], existingProduct
     }
     const nameKey = normalizeImportProductName(row.name)
     const skuKey = normalizeComparableText(row.sku)
-    const barcodeKey = normalizeComparableText(row.barcode)
+    const barcodeKeys = normalizeComparableBarcodeKeys(row.barcode)
     const sameNameProducts = byName.get(nameKey) || []
     const skuMatch = skuKey ? bySku.get(skuKey) : null
-    const barcodeMatch = barcodeKey ? byBarcode.get(barcodeKey) : null
+    const barcodeMatch = barcodeKeys.map((barcode) => byBarcode.get(barcode)).find(Boolean) || null
     const sameFileSkuRows = skuKey ? (importedIdentifiers.bySku.get(skuKey) || []) : []
-    const sameFileBarcodeRows = barcodeKey ? (importedIdentifiers.byBarcode.get(barcodeKey) || []) : []
+    const sameFileBarcodeRows = Array.from(new Set(
+      barcodeKeys.flatMap((barcode) => importedIdentifiers.byBarcode.get(barcode) || []),
+    )).sort((left, right) => left - right)
     const sameFileIdentifierFields = [
       sameFileSkuRows.length > 1 ? 'sku' : '',
       sameFileBarcodeRows.length > 1 ? 'barcode' : '',

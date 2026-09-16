@@ -1,6 +1,6 @@
 import type { IndexableType, Table } from 'dexie'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
-import { businessDateTimeId } from '../utils/timestampId.ts'
+import { businessDateTimeId, isBusinessReceiptNumber } from '../utils/timestampId.ts'
 import {
   apiFetch,
   isNetErr,
@@ -116,7 +116,13 @@ async function queueOfflineSale(payload: SalePayload, reason = 'server_offline')
 
   const now = new Date().toISOString()
   const receiptNumber = buildOfflineSaleReceiptNumber()
-  salePayload.receipt_number = salePayload.receipt_number || receiptNumber
+  // A caller-supplied number is kept only when it is a real business id; a
+  // foreign shape (the old system's `NNNNNN@YYYY-MM-DD` label, say) is
+  // replaced here rather than printed on the offline receipt and then
+  // silently re-minted by the server on replay.
+  salePayload.receipt_number = isBusinessReceiptNumber(salePayload.receipt_number)
+    ? String(salePayload.receipt_number).trim()
+    : receiptNumber
   // The sale's own moment, stamped at QUEUE time like the receipt id above.
   // The replayed payload carries it to POST /api/sales, whose bounded
   // sanitizeClientCreatedAt puts the sale on the day it happened instead of

@@ -4,7 +4,7 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../shared/Modal'
 import { getInventoryReasons, saveInventoryReasons } from '../../api/methods.ts'
 // Same saved-reason catalog + "Manage reasons" component Inventory's own
-// Adjust-stock modal and BranchStockAdjuster.tsx already use -- per the
+// Adjust-stock modal already uses -- per the
 // user's own framing, delete's reason field is "basically same as
 // inventory page products adjust stock... just different page but same
 // purpose and function", so this reuses the catalog (type: 'delete'
@@ -63,7 +63,7 @@ export default function DeleteConfirmModal({
   // Delete now requires a reason, drawn from the same saved-reason catalog
   // Inventory's Adjust-stock modal uses (inventory_saved_reasons), just
   // filtered to type: 'delete' -- same chip-picker + free-text + "Manage
-  // reasons" pattern as BranchStockAdjuster.tsx, not a separate one-off UI.
+  // reasons" pattern that modal uses, not a separate one-off UI.
   const [reason, setReason] = useState('')
   const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
   const [reasonManager, setReasonManager] = useState<ReasonManagerState>({ open: false, type: 'delete' })
@@ -87,8 +87,8 @@ export default function DeleteConfirmModal({
   // Only the 'delete' slice is rendered as picker chips here, but the full
   // catalog (all types) is what gets saved back -- otherwise saving from
   // this modal would silently wipe out every Inventory-side adjust/
-  // transfer/move reason, same shared-array trap Inventory.tsx/
-  // BranchStockAdjuster.tsx's own save already guards against.
+  // transfer/move reason, same shared-array trap Inventory.tsx's own
+  // save already guards against.
   const reasonsByType = useMemo(() => ({ delete: deleteReasons }), [deleteReasons])
 
   const saveReasonCatalog = useCallback(async (nextItems: InventoryReason[]) => {
@@ -130,7 +130,7 @@ export default function DeleteConfirmModal({
   const hasImpact = summary.totalStockUnits > 0 || summary.productsWithImages > 0 || summary.productsWithBatches > 0
 
   return (
-    <Modal title={title} onClose={onClose} size="sm">
+    <Modal title={title} onClose={onClose} size="sm" unsavedChanges="read-only">
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
         <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/40 dark:bg-red-950/30">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
@@ -166,8 +166,8 @@ export default function DeleteConfirmModal({
               {summary.productsWithBatches > 0 && (
                 <li>
                   {isBulk
-                    ? T('delete_confirm_impact_batches_bulk', '{count} product(s) with active batch/lot stock').replace('{count}', String(summary.productsWithBatches))
-                    : T('delete_confirm_impact_batches_single', 'Active batch/lot stock')}
+                    ? T('delete_confirm_impact_batches_bulk', '{count} product(s) with active received-date stock').replace('{count}', String(summary.productsWithBatches))
+                    : T('delete_confirm_impact_batches_single', 'Active received-date stock')}
                 </li>
               )}
             </ul>

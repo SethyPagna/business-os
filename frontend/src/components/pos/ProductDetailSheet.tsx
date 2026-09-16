@@ -1,16 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { getProductBatches } from '../../api/batchesTransport.ts'
+import { readFreshPickerLots, startPickerLotRead } from '../../utils/pickerLotFreshness.ts'
 import { getDamagedLots, type DamagedLot } from '../../api/damagedLotsTransport.ts'
+import { stockConditionLabel } from '../../utils/stockCondition.ts'
 import type { BatchSelection, ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
-import { buildProductBranchSummaryLabel } from '../products/helpers/productDisplayHelpers.ts'
-import { buildVariantOptionLabels, computeExpiryStatus } from './posCore.ts'
+import { useApp, useLowStockConfig } from '../../AppContext'
+import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
+import { buildVariantOptionLabels, computeExpiryStatus, sortBatchesForPicker } from './posCore.ts'
+import { branchStockQuantity, deriveProductSheetState, type SheetIntent, type SheetProductLike } from './productSheetState.ts'
 import ProductImage from './ProductImage'
 
 type ProductGroupMeta = {
@@ -75,8 +81,9 @@ type ProductRecord = Record<string, unknown> & {
   selling_price_khr?: string | number
   selling_price_usd?: string | number
   sku?: string
-  special_price_khr?: string | number
-  special_price_usd?: string | number
+  // special_price_khr/usd are gone: the 2026-09-04 ruling deleted the "VIP"
+  // tier they backed, and migration 0111 moved the values into the wholesale
+  // pair below -- now the sheet's only discounted tier.
   wholesale_price_khr?: string | number
   wholesale_price_usd?: string | number
   stock_quantity?: string | number
@@ -86,7 +93,10 @@ type ProductRecord = Record<string, unknown> & {
 
 type Translate = (key: string) => string | undefined
 type CurrencyFormatter = (value: number) => string
-type PriceMode = 'selling' | 'special' | 'promotion' | string
+// 'special' dropped from the named members by the 2026-09-04 ruling -- this
+// sheet can no longer add a line at the deleted "VIP" tier. ('wholesale' has
+// always ridden in on the `| string` arm, which is why it isn't listed either.)
+type PriceMode = 'selling' | 'promotion' | string
 
 // Grouped products (same name, different branch/price/barcode/etc.) can have
 // many entries -- paginate each pill row instead of dumping them all in one
@@ -95,17 +105,19 @@ const VARIANT_CHOICES_PAGE_SIZE = 5
 const BRANCH_CHOICES_PAGE_SIZE = 6
 const BATCH_CHOICES_PAGE_SIZE = 6
 
+// One lot as the picker holds it: the transport row plus the id of the
+// product ROW it came from. Only set when several indistinguishable rows'
+// lots are merged into a single list (see `mergeRowsIntoLotList` below);
+// picking such a lot also resolves which row the sale is booked against.
+type PickerBatch = ProductBatch & { __productId?: number }
+
 // Human-readable label for one lot/batch pill -- lot code when the batch has
-// one, otherwise the shared "Batch n: mm/dd/yyyy" default (batchLabel.ts),
+// one, otherwise the shared "Batch n: dd/mm/yyyy" default (batchLabel.ts),
 // falling back further to a bare id so the pill is never blank.
-function formatBatchLabel(batch: ProductBatch, posCopy: PosCopy): string {
-  return batchDisplayLabel(batch, posCopy('Batch', 'បាច់'))
+function formatBatchLabel(batch: ProductBatch, batchWord: string): string {
+  return batchDisplayLabel(batch, batchWord)
 }
 
-interface BranchOption {
-  id: string
-  name: string
-}
 
 type PosCopy = (english: string, fallback?: string) => string
 
@@ -199,6 +211,7 @@ interface ProductDetailSheetProps {
   // product's Branch/Barcode steps can resolve to a *different* row on
   // every pick, and each row can be tracked independently of the others.
   trackedBatchProductIds?: Set<number>
+  trackedBatchLookupUnavailable?: boolean
   getDisplayStock: (product: ProductRecord | undefined, cartItem?: { branch_id?: string | number | null } | null) => number
   getPrimaryProductImage: (product: ProductRecord) => string
   getVariantChoices: (product: ProductRecord) => ProductRecord[]
@@ -218,6 +231,28 @@ interface ProductDetailSheetProps {
   // "buy >= X" deals that only engage once the cart line's quantity
   // crosses the threshold.
   promotionRules?: readonly PromotionRule[]
+  // What this sheet is opened FOR. 'sell' is POS / add-items-to-sale / a
+  // return's replacement line: the warehouse branch is shown WITH its
+  // quantity but cannot be picked, because only the shop rings a sale.
+  // 'stock' is add/remove/set/transfer/fast-stock-in, where every branch the
+  // operation permits stays selectable. See utils/branchRoles.ts.
+  intent?: SheetIntent
+  // Non-POS surfaces hand the resolved row + branch + received date back
+  // instead of adding a cart line; the price buttons become one confirm
+  // button. See components/shared/ProductOptionSheet.tsx.
+  onPick?: (product: ProductRecord, selection: { branchId: string | null; batch?: BatchSelection }) => void
+  pickLabel?: string
+  // Drop the received-date step on a host whose write cannot carry one (the
+  // sale-line REPLACEMENT: the Worker plans it with batchId null and draws by
+  // FIFO). Showing a step whose answer is discarded is worse than not showing
+  // it -- it reads as a batch-identity guarantee the write does not make. See
+  // productSheetState.ts's receivedDateStepHidden.
+  hideReceivedDates?: boolean
+  // Render through a portal above the modal that opened it. Modal.tsx tops
+  // out at z-[1070] for a nested modal and App's toasts own z-[1100], so a
+  // sheet opened from inside a modal has to sit between the two -- the
+  // sheet's own z-50 would otherwise render UNDERNEATH its opener.
+  portal?: boolean
 }
 
 export default function ProductDetailSheet({
@@ -230,6 +265,7 @@ export default function ProductDetailSheet({
   posCopy,
   activeBranchId = null,
   trackedBatchProductIds,
+  trackedBatchLookupUnavailable = false,
   getDisplayStock,
   getPrimaryProductImage,
   getVariantChoices,
@@ -238,7 +274,23 @@ export default function ProductDetailSheet({
   onClose,
   onOpenImageLightbox,
   promotionRules = [],
+  intent = 'sell',
+  onPick,
+  pickLabel,
+  hideReceivedDates = false,
+  portal = false,
 }: ProductDetailSheetProps) {
+  // Settings > Stock Alerts -- the same number the POS grid behind this sheet
+  // colours by, so the sheet and the card can never disagree about a product.
+  const lowStockConfig = useLowStockConfig()
+  const { user, authReady } = useApp() as { user: { id?: string | number } | null; authReady: boolean }
+  // A new authenticated-user snapshot includes reauthentication as well as
+  // actor/permission changes. Never reuse another session's selectable proof.
+  const actorGeneration = useRef({ user, epoch: 0 })
+  if (actorGeneration.current.user !== user) {
+    actorGeneration.current = { user, epoch: actorGeneration.current.epoch + 1 }
+  }
+  const actorScope = `${authReady}:${user?.id ?? 'anonymous'}:${actorGeneration.current.epoch}`
   const variants = getVariantChoices(product)
   const groupProduct = hasVariantChoices(product)
   const groupMeta = product.__groupMeta || null
@@ -261,75 +313,102 @@ export default function ProductDetailSheet({
   // sheet opens so a stale branch/barcode pick doesn't leak into the next.
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null)
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null)
-  // VIP price stays hidden until asked for (user, Aug 28): the button first
-  // says only "VIP"; the first tap REVEALS the amount, the second tap
-  // adds at that price. Keyed per product/variant so revealing one row's
-  // VIP does not expose another's.
-  const [vipRevealed, setVipRevealed] = useState<Record<string, boolean>>({})
+  // The `vipRevealed` tap-to-reveal state is deleted along with the tier
+  // (2026-09-04 ruling). Note the reveal gesture did NOT carry over to the
+  // wholesale buttons: those have always shown their amount outright, so
+  // nothing here needs to remember what has been revealed.
   const [branchPage, setBranchPage] = useState(0)
   const [barcodePage, setBarcodePage] = useState(0)
   // Lot/batch picker state -- see the batch-picker section further down.
   // Reset alongside the other step state whenever a different product's
   // sheet opens, same as branch/barcode above.
-  const [batches, setBatches] = useState<ProductBatch[]>([])
+  const [batches, setBatches] = useState<PickerBatch[]>([])
+  const [loadedLotScope, setLoadedLotScope] = useState('')
+  // Separate from the active-lot array: this scalar includes inactive known
+  // lots, which are never rendered as received-date choices but do reduce
+  // the date-less Shop remainder.
+  const [knownPositiveQuantityByProduct, setKnownPositiveQuantityByProduct] = useState<Record<number, number | null>>({})
   const [batchesLoading, setBatchesLoading] = useState(false)
   // Non-empty when the lot lookup FAILED, as opposed to succeeding with no
   // lots. The two must not render the same way -- see the fetch below.
   const [batchesError, setBatchesError] = useState('')
+  const [batchesReloadKey, setBatchesReloadKey] = useState(0)
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null)
+  const [selectedUnlottedProductId, setSelectedUnlottedProductId] = useState<number | null>(null)
+  const [batchChoicesOpen, setBatchChoicesOpen] = useState(false)
   // 11.9: open damaged lots for the resolved row/branch -- the Damage
   // source option shown beside the sellable lots. A failed fetch shows no
   // option (absence is safe; damaged stock is an offer, not a gate).
   const [damagedLots, setDamagedLots] = useState<DamagedLot[]>([])
   const [selectedDamagedLotId, setSelectedDamagedLotId] = useState<number | null>(null)
   const [batchPage, setBatchPage] = useState(0)
+  // Why a branch pill refused the tap, shown under the pills. A tooltip
+  // alone is unreachable on the touch screens this runs on.
+  const [branchNotice, setBranchNotice] = useState('')
   useEffect(() => {
+    setBranchNotice('')
     setSelectedBranchId(null)
     setSelectedVariantId(null)
     setBranchPage(0)
     setBarcodePage(0)
     setSelectedBatchId(null)
+    setSelectedUnlottedProductId(null)
+    setKnownPositiveQuantityByProduct({})
+    setBatchChoicesOpen(false)
     setBatchPage(0)
-  }, [product?.id])
+  }, [product?.id, actorScope])
 
-  // Step 1: which branches this group is actually carried at, gathered from
-  // every row's branch_stock. Catalogs/groups with no per-branch stock data
-  // at all simply produce no branch options, and the picker below falls
-  // back to a flat Barcode step across every row (its original behavior).
-  const branchOptionsMap = new Map<string, string>()
-  // Summed stock per branch across every row in the group, used only to
-  // grey out a branch pill when nothing in this product is carried there --
-  // see pillClass's `outOfStock` param.
-  const branchStockTotals = new Map<string, number>()
-  // `variants` is EMPTY for a flat product -- getVariantChoices only returns
-  // rows for a group (__groupChoices) or a parent with variant children. So
-  // iterating it alone meant a flat product produced no branch options at
-  // all, which left effectiveBranchId null, which left the lot picker with
-  // nothing to query. That is the reported "batch pick not working": a
-  // batch-tracked flat product showed "No lots available at this branch"
-  // and "Pick a lot first" refused the add, while the API had two lots for
-  // it. Falling back to the product's own row makes a flat product behave
-  // like a one-row group, which is what it is.
-  for (const variant of variants.length ? variants : [product]) {
-    for (const entry of Array.isArray(variant.branch_stock) ? variant.branch_stock : []) {
-      const id = entry?.branch_id
-      if (id == null) continue
-      const key = String(id)
-      if (!branchOptionsMap.has(key)) branchOptionsMap.set(key, String(entry.branch_name || key))
-      branchStockTotals.set(key, (branchStockTotals.get(key) || 0) + Number(entry?.quantity || 0))
-    }
+  // Everything this sheet derives -- which branches it offers and how many
+  // units each holds, which product ROW the steps resolve to, the ONE stock
+  // number the Add buttons enforce, and the received-date list -- comes from
+  // one pure function. It used to be ~120 lines of expressions inline right
+  // here, which is exactly why a flat product could read "Stock 0" (and
+  // refuse the sale) while its own branch_stock said 28 and every test in
+  // the repo stayed green: they were all regexes over this file's text.
+  const requireFreshLots = intent === 'sell' && !hideReceivedDates
+  const sheetInput = {
+    product,
+    variants,
+    groupProduct,
+    selectedBranchId,
+    activeBranchId,
+    selectedVariantId,
+    trackedBatchProductIds,
+    // The global index is an optimization, never evidence that this opened
+    // product has no received dates. Every sell pick verifies its own source.
+    trackedBatchLookupUnavailable: trackedBatchLookupUnavailable || requireFreshLots,
+    receivedDateStepHidden: hideReceivedDates,
+    batches,
+    knownPositiveBatchQuantityByProduct: knownPositiveQuantityByProduct,
+    selectedBatchId,
+    selectedUnlottedStock: selectedUnlottedProductId != null,
+    selectedUnlottedProductId,
+    damagedLots,
+    selectedDamagedLotId,
+    intent,
+    getDisplayStock: (row: SheetProductLike | undefined) => getDisplayStock(row as ProductRecord),
+    optionStepTitleFor: (pool: readonly SheetProductLike[]) => buildVariantOptionLabels(pool as ProductRecord[], (value) => fmtUSD(value)).stepTitle,
   }
-  const branchOptions: BranchOption[] = [...branchOptionsMap.entries()]
-    .map(([id, name]) => ({ id, name }))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-
-  const activeBranchKey = activeBranchId == null ? null : String(activeBranchId)
-  const fallbackBranchId = branchOptions.some((b) => b.id === activeBranchKey)
-    ? activeBranchKey
-    : (branchOptions[0]?.id ?? null)
-  const effectiveBranchId = selectedBranchId != null && branchOptions.some((b) => b.id === selectedBranchId)
-    ? selectedBranchId
-    : fallbackBranchId
+  const provisionalState = deriveProductSheetState(sheetInput)
+  const sourceRows = provisionalState.mergeRowsIntoLotList
+    ? provisionalState.candidatePool
+    : [groupProduct ? provisionalState.effectiveVariant : product].filter(Boolean)
+  const currentLotScope = `${actorScope}:${provisionalState.effectiveBranchId}:${sourceRows.map((row) => row?.id).join(',')}`
+  // Branch/variant changes invalidate the old result synchronously, before
+  // React runs effect cleanup. Old selected IDs must not enable a new pick.
+  const visibleBatches = loadedLotScope === currentLotScope ? batches : []
+  const sheetState = deriveProductSheetState({
+    ...sheetInput,
+    batches: visibleBatches,
+    knownPositiveBatchQuantityByProduct: loadedLotScope === currentLotScope ? knownPositiveQuantityByProduct : {},
+    selectedDamagedLotId: !requireFreshLots || loadedLotScope === currentLotScope ? selectedDamagedLotId : null,
+  })
+  const branchOptions = sheetState.branchOptions
+  const effectiveBranchId = sheetState.effectiveBranchId
+  const candidatePool = sheetState.candidatePool as ProductRecord[]
+  const effectiveVariant = sheetState.effectiveVariant as ProductRecord | null
+  const effectiveVariantStock = sheetState.effectiveVariantStock
+  const warehouseBlockedMessage = t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.'
 
   const branchPageCount = Math.max(1, Math.ceil(branchOptions.length / BRANCH_CHOICES_PAGE_SIZE))
   const clampedBranchPage = Math.min(branchPage, branchPageCount - 1)
@@ -338,26 +417,12 @@ export default function ProductDetailSheet({
     clampedBranchPage * BRANCH_CHOICES_PAGE_SIZE + BRANCH_CHOICES_PAGE_SIZE,
   )
 
-  // Step 2: narrow the group's rows down to whichever ones are actually
-  // carried at the selected branch. A row with no branch_stock entries at
-  // all is treated as branch-agnostic and stays offered under every branch.
-  const candidateVariants = branchOptions.length === 0 || effectiveBranchId == null
-    ? variants
-    : variants.filter((variant) => {
-      const branchStock = Array.isArray(variant.branch_stock) ? variant.branch_stock : []
-      if (!branchStock.length) return true
-      return branchStock.some((entry) => String(entry?.branch_id) === effectiveBranchId)
-    })
-  const candidatePool = candidateVariants.length ? candidateVariants : variants
-
-  // Shared by the barcode pills below and by effectiveVariantStock further
-  // down, so both use the exact same branch-aware stock number.
+  // Per-row stock at one branch, for the option pills. Same rule the module
+  // applies (branch_stock when the product carries any, else the
+  // cross-branch number), so the pills and the Stock row cannot disagree.
   const getVariantStockForBranch = (variant: ProductRecord | null, branchId: string | null): number => {
     if (!variant) return 0
-    if (branchOptions.length && branchId != null) {
-      return Number((Array.isArray(variant.branch_stock) ? variant.branch_stock : [])
-        .find((entry) => String(entry?.branch_id) === branchId)?.quantity || 0)
-    }
+    if (branchOptions.length && branchId != null) return branchStockQuantity(variant, branchId) ?? 0
     return getDisplayStock(variant)
   }
 
@@ -365,18 +430,30 @@ export default function ProductDetailSheet({
   // each pill's text. See posCore.ts's buildVariantOptionLabels.
   const variantOptionLabels = buildVariantOptionLabels(candidatePool, (value) => fmtUSD(value))
 
+  // THE DUPLICATE LIST. buildVariantOptionLabels reports stepTitle 'Option'
+  // in exactly one situation: neither the barcode nor the selling price
+  // differs across these rows, so it has nothing cashier-facing left to put
+  // on a pill and falls back to the row's internal id ("#7321", "#7322").
+  // Those id pills ask the SAME question the received-date list underneath
+  // asks -- "which intake of this product?" -- so the two collapse into one:
+  // every indistinguishable row's lots are fetched into a single list, and
+  // picking one also resolves the row that owns it (see the pill onClick).
+  const mergeRowsIntoLotList = sheetState.mergeRowsIntoLotList
+
+  // Step numbers are counted, not hardcoded. The option step disappears in
+  // merged mode, and a lot step still labelled "3." under a lone "1. Branch"
+  // reads as a step the cashier somehow skipped.
+  const branchStepShown = branchOptions.length > 0
+  const optionStepShown = !mergeRowsIntoLotList
+  const optionStepNumber = branchStepShown ? 2 : 1
+  const lotStepNumber = (branchStepShown ? 1 : 0) + (optionStepShown ? 1 : 0) + 1
+
   const barcodePageCount = Math.max(1, Math.ceil(candidatePool.length / VARIANT_CHOICES_PAGE_SIZE))
   const clampedBarcodePage = Math.min(barcodePage, barcodePageCount - 1)
   const pagedCandidates = candidatePool.slice(
     clampedBarcodePage * VARIANT_CHOICES_PAGE_SIZE,
     clampedBarcodePage * VARIANT_CHOICES_PAGE_SIZE + VARIANT_CHOICES_PAGE_SIZE,
   )
-
-  // Step 3: the price for whichever row Steps 1 + 2 resolved to -- defaults
-  // to the first candidate so a price shows immediately, but the cashier can
-  // override branch and/or barcode at any point and this recomputes.
-  const effectiveVariant = candidatePool.find((variant) => String(variant.id) === selectedVariantId) || candidatePool[0] || null
-  const effectiveVariantStock = getVariantStockForBranch(effectiveVariant, effectiveBranchId)
   const effectiveVariantInStock = effectiveVariant ? effectiveVariantStock > asNumber(effectiveVariant.out_of_stock_threshold) : false
   const effectiveVariantPromoBadge = promotionBadgeForProduct(effectiveVariant || undefined, promotionRules)
   const effectiveVariantPromoEvaluation = evaluatePromotionPricing(effectiveVariant || undefined, 1, promotionRules, exchangeRate)
@@ -414,18 +491,47 @@ export default function ProductDetailSheet({
   // using it here keeps the lot list and the branch shown on screen in
   // agreement instead of deriving the branch twice by different rules.
   const resolvedBranchId = effectiveBranchId
-  const isBatchTracked = resolvedProduct != null && (trackedBatchProductIds?.has(Number(resolvedProduct.id)) ?? false)
+  const isBatchTracked = sheetState.isBatchTracked
+  // Which product row(s) the lot list is drawn from. Normally just the
+  // resolved row; in merged mode (above) every indistinguishable row, so the
+  // one remaining list still reaches every lot the removed id pills used to
+  // reach. The joined key is what the fetch and the "forget the previous
+  // pick" reset below depend on, NOT resolvedProduct.id -- in merged mode
+  // choosing a lot CHANGES the resolved row, and keying on that would wipe
+  // the very selection that changed it.
+  const lotSourceProductIds = (mergeRowsIntoLotList ? candidatePool : (resolvedProduct ? [resolvedProduct] : []))
+    .map((variant) => Number(variant.id))
+    .filter((id) => Number.isFinite(id) && id > 0)
+  const lotSourceKey = lotSourceProductIds.join(',')
   useEffect(() => {
-    if (!isBatchTracked || resolvedProduct == null) { setBatches([]); return }
-    if (resolvedBranchId == null) { setBatches([]); setBatchesLoading(false); return }
-    let cancelled = false
+    if (!isBatchTracked || lotSourceProductIds.length === 0) { setBatches([]); setKnownPositiveQuantityByProduct({}); return }
+    if (resolvedBranchId == null) { setBatches([]); setKnownPositiveQuantityByProduct({}); setBatchesLoading(false); return }
+    setLoadedLotScope('')
     setBatchesLoading(true)
     setBatchesError('')
-    getProductBatches(resolvedProduct.id, resolvedBranchId).then((res) => {
-      if (cancelled) return
-      setBatches(Array.isArray(res?.batches) ? res.batches : [])
+    // Promise.all, not allSettled, on purpose: a partially-loaded lot list is
+    // indistinguishable on screen from a complete one, and a cashier picking
+    // "the oldest lot" out of a list that quietly lost half its rows sells
+    // the wrong stock. One failed row fails the whole list, which the error
+    // branch below renders as an error and which keeps the sale blocked.
+    return startPickerLotRead(lotSourceProductIds, (productId, signal) => (
+      requireFreshLots ? readFreshPickerLots(productId, resolvedBranchId, signal) : getProductBatches(productId, resolvedBranchId)
+    )
+      .then((res) => ({
+        productId,
+        batches: (Array.isArray(res?.batches) ? res.batches : [])
+          .filter((batch) => Number(batch.is_active) === 1)
+          .map((batch) => ({ ...batch, __productId: productId } as PickerBatch)),
+        knownPositiveQuantity: res?.known_positive_quantity != null && Number.isFinite(Number(res.known_positive_quantity))
+          ? Math.max(0, Number(res.known_positive_quantity))
+          : null,
+      })), (lists) => {
+      setBatches(lists.flatMap((list) => list.batches))
+      setKnownPositiveQuantityByProduct(Object.fromEntries(lists.map((list) => [list.productId, list.knownPositiveQuantity])))
       setBatchesError('')
-    }).catch((error: unknown) => {
+      setLoadedLotScope(currentLotScope)
+      setBatchesLoading(false)
+    }, (error: unknown) => {
       // A failed lot fetch is NOT "this product has no lots here". The old
       // `catch(() => setBatches([]))` rendered the two identically, so a
       // 403/500/timeout showed the definitive-sounding "No lots available
@@ -433,12 +539,13 @@ export default function ProductDetailSheet({
       // Record the error so the picker can say so and keep the sale
       // blocked -- selling batch-tracked stock without a lot is worse than
       // refusing the sale.
-      if (cancelled) return
       setBatches([])
-      setBatchesError(error instanceof Error && error.message ? error.message : 'Could not load lots')
-    }).finally(() => { if (!cancelled) setBatchesLoading(false) })
-    return () => { cancelled = true }
-  }, [isBatchTracked, resolvedProduct?.id, resolvedBranchId])
+      setKnownPositiveQuantityByProduct({})
+      setBatchesError(error instanceof Error && error.message ? error.message : 'Could not load received dates')
+      setBatchesLoading(false)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBatchTracked, lotSourceKey, resolvedBranchId, batchesReloadKey, requireFreshLots, actorScope])
   // A Branch/Barcode change can resolve to a different (or differently-
   // tracked) row, so a lot picked under the previous row must not silently
   // carry over -- same "don't leak a stale pick into the next selection"
@@ -446,50 +553,79 @@ export default function ProductDetailSheet({
   // themselves.
   useEffect(() => {
     if (resolvedProduct == null || resolvedBranchId == null) { setDamagedLots([]); return }
+    setDamagedLots([])
     let cancelled = false
     getDamagedLots(resolvedProduct.id, resolvedBranchId).then((res) => {
       if (!cancelled) setDamagedLots(Array.isArray(res?.lots) ? res.lots : [])
     }).catch(() => { if (!cancelled) setDamagedLots([]) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedProduct?.id, resolvedBranchId])
+  }, [resolvedProduct?.id, resolvedBranchId, actorScope])
+  // Keyed on the lot list's OWN identity (which rows it is drawn from, at
+  // which branch), not on the resolved row: in merged mode picking a lot is
+  // what moves the resolved row, and resetting on that would clear the pick
+  // the moment it was made. Outside merged mode `lotSourceKey` IS the
+  // resolved row's id, so this behaves exactly as before.
   useEffect(() => {
     setSelectedBatchId(null)
+    setSelectedUnlottedProductId(null)
     setSelectedDamagedLotId(null)
     setBatchPage(0)
-  }, [resolvedProduct?.id, resolvedBranchId])
+    setBatchChoicesOpen(false)
+  }, [lotSourceKey, resolvedBranchId, actorScope])
 
-  const batchPageCount = Math.max(1, Math.ceil(batches.length / BATCH_CHOICES_PAGE_SIZE))
+  // The cashier's order: available lots first, each group earliest received
+  // date to latest. See posCore.ts's sortBatchesForPicker -- the server's
+  // list is expiry-first FIFO, which interleaves empty lots among sellable
+  // ones. Ordered here at render (rather than when the fetch lands) so the
+  // list can never be shown in the raw transport order.
+  const batchWord = t('batch') || 'Received date'
+  const orderedBatches = sortBatchesForPicker(visibleBatches)
+  const batchPageCount = Math.max(1, Math.ceil(orderedBatches.length / BATCH_CHOICES_PAGE_SIZE))
   const clampedBatchPage = Math.min(batchPage, batchPageCount - 1)
-  const pagedBatches = batches.slice(clampedBatchPage * BATCH_CHOICES_PAGE_SIZE, clampedBatchPage * BATCH_CHOICES_PAGE_SIZE + BATCH_CHOICES_PAGE_SIZE)
-  const selectedBatch = batches.find((batch) => batch.id === selectedBatchId) || null
-  const batchStockTotal = batches.reduce((sum, batch) => sum + Number(batch.quantity || 0), 0)
+  const pagedBatches = orderedBatches.slice(clampedBatchPage * BATCH_CHOICES_PAGE_SIZE, clampedBatchPage * BATCH_CHOICES_PAGE_SIZE + BATCH_CHOICES_PAGE_SIZE)
+  const selectedBatch = orderedBatches.find((batch) => batch.id === selectedBatchId) || null
+  // Picking a lot in merged mode also picks the product row that owns it --
+  // that is how the removed id pills' one real job survives without the
+  // pills. Prices/VIP/wholesale below all re-render from the resolved row,
+  // so what the cashier sees is always the row the sale is booked against.
+  const chooseBatch = (batch: PickerBatch) => {
+    // Kept on one line: "picking a lot clears the damaged-lot pick and closes
+    // the list" is a contract both tests/returnOptions.test.ts and
+    // tests/productsResponsiveSurface.test.ts assert on the source text.
+    if (Number(batch.quantity || 0) <= 0) return
+    setSelectedBatchId(batch.id); setSelectedUnlottedProductId(null); setSelectedDamagedLotId(null); setBatchChoicesOpen(false)
+    if (mergeRowsIntoLotList && batch.__productId != null) setSelectedVariantId(String(batch.__productId))
+  }
   // Requires an in-stock lot to be picked before the price buttons below
   // become clickable -- a batch-tracked sale can't proceed without knowing
   // which lot it's coming from. Now applies the same way whether the
   // resolved row came from the flat flow or from the group's Branch/
   // Barcode steps.
   const selectedDamagedLot = damagedLots.find((lot) => lot.id === selectedDamagedLotId) || null
-  const batchSelectionRequired = isBatchTracked
-  // A picked damaged lot IS the line's source -- it satisfies the lot gate
-  // the same way a sellable lot does (the units come from that lot).
-  const batchReadyToSell = selectedDamagedLot != null
-    ? Number(selectedDamagedLot.quantity_remaining || 0) > 0
-    : (!batchSelectionRequired || (selectedBatch != null && Number(selectedBatch.quantity || 0) > 0))
-
-  // The ONE stock number this sheet shows. Colour and value both read it, so
-  // they can never disagree: a picked lot's own remaining quantity, else the
-  // lot total when a lot must be picked, else the resolved row's stock at the
-  // resolved branch.
-  const displayedStock = selectedDamagedLot
-    ? Number(selectedDamagedLot.quantity_remaining || 0)
-    : selectedBatch
-      ? Number(selectedBatch.quantity || 0)
-      : (batchSelectionRequired ? batchStockTotal : effectiveVariantStock)
+  // A picked damaged lot IS the line's source -- it satisfies the received-
+  // date gate the same way a sellable lot does (the units come from it).
+  const batchSelectionRequired = sheetState.batchSelectionRequired
+  const batchReadyToSell = sheetState.batchReadyToSell
+  const unlottedStockQuantity = sheetState.unlottedStockQuantity
+  const unlottedStockOptions = sheetState.unlottedStockOptions
+  const pickAllowed = sheetState.pickAllowed
+  const pickBlockedReason = sheetState.pickBlockedReason
+  // The ONE stock number this sheet shows, from productSheetState.ts:
+  // on-hand comes from branch_stock (the ledger that answers "how many are
+  // at this branch"), and the lot ledger only narrows it once a specific
+  // received date is picked. Reading the lot total as on-hand is what made
+  // the sheet print "Stock: 0" beside a branch line saying 28.
+  const displayedStock = sheetState.displayedStock
 
 
+  // P3-L6: a held lot names the condition it actually carries. Calling an
+  // 'expired' or 'opened' lot "Damage" told the cashier the wrong thing about
+  // what they are about to sell. The tag is the raw English constant in every
+  // language (owner: "the tag remains english even in khmer"); a lot with no
+  // tag -- only rows written before 0162 -- keeps the translated generic word.
   const damagedLotLabel = (lot: DamagedLot): string =>
-    `${posCopy('Damage', 'ខូចខាត')} · ${lot.return_id ? `${posCopy('return', 'ប្រគល់វិញ')} #${lot.return_id}` : `#${lot.id}`}`
+    `${lot.condition_tag ? stockConditionLabel(lot.condition_tag) : posCopy('Damage', 'ខូចខាត')} · ${lot.return_id ? `${posCopy('return', 'ប្រគល់វិញ')} #${lot.return_id}` : `#${lot.id}`}`
 
   const buildDamagedSelection = () => selectedDamagedLot
     ? { damagedLotId: selectedDamagedLot.id, quantity: Number(selectedDamagedLot.quantity_remaining || 0), label: damagedLotLabel(selectedDamagedLot) }
@@ -497,11 +633,16 @@ export default function ProductDetailSheet({
 
   const buildBatchSelection = (): BatchSelection | undefined => {
     if (selectedDamagedLot) return undefined
-    if (!batchSelectionRequired || !selectedBatch) return undefined
+    if (!batchSelectionRequired) return undefined
+    if (sheetState.selectedUnlottedProductId != null && unlottedStockQuantity > 0) return { unlottedStock: true, quantity: unlottedStockQuantity }
+    if (!selectedBatch) return undefined
     return {
       batchId: selectedBatch.id,
-      batchLabel: formatBatchLabel(selectedBatch, posCopy),
+      batchLabel: formatBatchLabel(selectedBatch, batchWord),
       batchExpiryDate: selectedBatch.expiry_date ?? null,
+      // Carried for the hosts that SHOW which intake was picked. The POS
+      // ignores it (its cart line keeps label + expiry), so this is additive.
+      batchReceivedAt: selectedBatch.received_at ?? null,
       quantity: Number(selectedBatch.quantity || 0),
     }
   }
@@ -511,8 +652,122 @@ export default function ProductDetailSheet({
     onClose()
   }
 
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+  // Non-POS surfaces confirm a choice instead of pricing a cart line. The
+  // gate is the same one the price buttons use, so a picker can never hand
+  // back a row/branch/received-date combination the POS would refuse.
+  //
+  // DISMISSED and PICKED are not the same event, and this must not collapse
+  // them: `onClose` is what a host uses to throw the whole selection away.
+  // Calling it after a successful `onPick` fired the host's discard path on
+  // top of its accept path -- in CreateProductsSessionModal that was
+  // resetExistingCandidate() nulling the product the pick had just set, so
+  // the line form it gates never opened and the pick appeared to do nothing.
+  // The host closes the sheet from inside its own onPick.
+  const confirmPick = (nextProduct: ProductRecord) => {
+    if (!pickAllowed) return
+    onPick?.(nextProduct, { branchId: effectiveBranchId, batch: buildBatchSelection() })
+  }
+  const pickButtonLabel = pickLabel || t('select') || 'Select'
+  const batchLoadFailure = (
+    <div role="alert" className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-300">
+      <span className="min-w-0 flex-1 truncate" title={batchesError}>{batchesError || posCopy('Could not load received dates', 'មិនអាចផ្ទុកថ្ងៃចូលបានទេ')}</span>
+      <button type="button" className="shrink-0 rounded px-2 py-1 font-semibold underline underline-offset-2" onClick={() => setBatchesReloadKey((key) => key + 1)}>
+        {t('retry') || posCopy('Retry', 'ព្យាយាមម្ដងទៀត')}
+      </button>
+    </div>
+  )
+
+  const chooseUnlottedStock = (productId: number): void => {
+    const option = unlottedStockOptions.find((row) => row.productId === productId)
+    if (!option || option.quantity <= 0) return
+    setSelectedBatchId(null)
+    setSelectedUnlottedProductId(productId)
+    setSelectedDamagedLotId(null)
+    setBatchChoicesOpen(false)
+    if (mergeRowsIntoLotList) setSelectedVariantId(String(productId))
+  }
+  // The gate is DERIVED (productSheetState's pickAllowed), not re-decided
+  // here. This button used to refuse anything out of stock on every host,
+  // which quietly broke the hosts whose entire job is to raise a quantity:
+  // fast stock-in, "Have already" in the create-products session and the
+  // add/set modes of the stock adjuster all open on products sitting at 0,
+  // and every one of them answered "Out of stock" with a dead button. The
+  // in-stock half of the gate belongs to a SALE; the received-date half
+  // belongs to whichever host asked the lot question.
+  const renderPickButton = (row: ProductRecord) => (
+    <button
+      type="button"
+      className="btn-primary flex-1 text-xs"
+      disabled={!pickAllowed}
+      onClick={() => confirmPick(row)}
+    >
+      {pickBlockedReason === 'out_of_stock'
+        ? (t('out_of_stock') || 'Out of stock')
+        : pickBlockedReason === 'received_date'
+          ? (t('pick_received_date_first') || 'Pick a received date first')
+          : pickButtonLabel}
+    </button>
+  )
+
+  // One branch step for BOTH shapes. It used to live inside the grouped-only
+  // block, so a standalone product -- the commonest card on the screen --
+  // got no branch row at all, and the pills that did render printed a name
+  // with no number beside the one total above them.
+  const branchStep = branchStepShown ? (
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+      <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{`1. ${t('branch') || 'Branch'}`}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {pagedBranchOptions.map((branch) => {
+          const branchOut = branch.quantity <= 0
+          const blocked = !branch.selectable
+          return (
+            <button
+              key={branch.id}
+              type="button"
+              aria-disabled={blocked}
+              className={`${pillClass(branch.id === effectiveBranchId, branchOut || blocked)}${blocked ? ' cursor-not-allowed' : ''}`}
+              onClick={() => {
+                // Greyed, NOT hidden and NOT removed: the cashier has to be
+                // able to see that the units are sitting in the warehouse,
+                // and be told what to do about it. Admins included -- this
+                // is a business rule, not a permission.
+                if (blocked) { setBranchNotice(warehouseBlockedMessage); return }
+                setBranchNotice('')
+                setSelectedBranchId(branch.id)
+                setSelectedVariantId(null)
+                setBarcodePage(0)
+              }}
+            >
+              {branch.name}
+              <span className="ml-1 text-[10px] font-normal opacity-75">· {branch.quantity}</span>
+            </button>
+          )
+        })}
+      </div>
+      {branchNotice ? <div className="mt-1.5 text-[11px] font-medium text-amber-600">{branchNotice}</div> : null}
+      <PillPager page={clampedBranchPage} pageCount={branchPageCount} onPageChange={setBranchPage} posCopy={posCopy} />
+    </div>
+  ) : null
+
+  // A portalled sheet sits ABOVE a host modal, so Escape has to close the
+  // SHEET and go no further. Without this the one key press falls through to
+  // the modal underneath and closes it too, taking the half-filled stock
+  // line with it. Captured on the way down, for the same reason every other
+  // stacked surface in this app captures it.
+  useEffect(() => {
+    if (!portal || typeof document === 'undefined') return undefined
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.stopPropagation()
+      event.preventDefault()
+      onClose()
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [portal, onClose])
+
+  const sheet = (
+    <div className={`fixed inset-0 bg-black/50 ${portal ? 'z-[1080]' : 'z-50'} flex items-end sm:items-center justify-center p-0 sm:p-4`} onClick={onClose}>
       <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-modal-80 flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-3 min-w-0">
@@ -537,19 +792,26 @@ export default function ProductDetailSheet({
           {([
             [t('label_category') || 'Category', product.category],
             [t('label_supplier') || 'Supplier', product.supplier],
-            [t('label_unit') || 'Unit', product.unit],
             [t('label_barcode') || 'Barcode', product.barcode],
             [t('label_description') || 'Description', product.description],
           ] as Array<[string, string | number | undefined]>).map(([label, val]) => val ? (
             <div key={label} className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{label}</span><span className="text-sm text-gray-800 dark:text-gray-200">{String(val)}</span></div>
           ) : null)}
-          <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Selling', 'តម្លៃលក់')}</span><div><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</div></div>
-          {/* VIP pricing is intentionally absent from the read-only detail
-              rows. It is revealed only by pressing the VIP price option
-              below, then applied on the second press. */}
-          {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
-            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Wholesale', 'បោះដុំ')}</span><div><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</div></div>
-          ) : null}
+          {/* Selling and wholesale share ONE row (owner ask, 2026-09-06):
+              two stacked rows for two numbers pushed the per-branch counts
+              and the option pills below the fold on a phone. The VIP tier
+              that used to sit beside them is deleted (2026-09-04 ruling);
+              wholesale is the one remaining discounted tier and was never a
+              tap-to-reveal price. */}
+          <div className="flex gap-3">
+            <span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('selling_price') || 'Selling'}</span>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+              <span><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</span>
+              {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
+                <span><span className="text-xs text-gray-400 mr-1">{t('wholesale_price') || 'Wholesale price'}</span><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</span>
+              ) : null}
+            </div>
+          </div>
           {promotion.active ? (
             <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span> : null}</div></div>
           ) : null}
@@ -559,18 +821,23 @@ export default function ProductDetailSheet({
               a product-level number that could be scoped to a DIFFERENT branch than
               the one on screen, which is what "display shows different data than the
               actual stock in the options" was describing. */}
-          <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock') || 'Stock'}</span><span className={`font-bold ${displayedStock <= 0 ? 'text-red-600' : displayedStock <= (asNumber(product.low_stock_threshold) || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{displayedStock} {product.unit}</span></div>
-          {/* Branch-aware zero-stock display (this session): the Stock row
-              above is the single branch-resolved number (see
-              getDisplayStock's own comment for why it's scoped to one
-              branch, not a sum), so a multi-branch product showing "0"
-              there doesn't say whether it's out everywhere or just at the
-              currently-viewed/best branch. Group products already get a
-              full per-branch picker below; for a standalone product, name
-              every tracked branch's own quantity here instead of leaving
-              the cashier to guess. */}
-          {!groupProduct && displayedStock <= 0 && Array.isArray(product.branch_stock) && product.branch_stock.length > 1 ? (
-            <div className="flex gap-3"><span className="w-24 flex-shrink-0" /><span className="text-xs text-gray-400">{buildProductBranchSummaryLabel(product)}</span></div>
+          <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock') || 'Stock'}</span><span className={`font-bold ${displayedStock <= 0 ? 'text-red-600' : displayedStock <= effectiveLowStockThreshold(lowStockConfig, product.low_stock_threshold) ? 'text-yellow-600' : 'text-green-600'}`}>{displayedStock} {product.unit}</span></div>
+          {/* "Warehouse: n · Shop: n", ALWAYS -- grouped or standalone, in
+              stock or out. The Stock row above is one branch-resolved
+              number, so on its own it never said whether the rest of the
+              units were at the other branch or nowhere. This used to render
+              only for a standalone product that was already at zero, i.e.
+              it disappeared exactly when the cashier could act on it. */}
+          {branchOptions.length ? (
+            <div className="flex gap-3"><span className="w-24 flex-shrink-0" /><span className="text-xs text-gray-400">{sheetState.branchSummary}</span></div>
+          ) : null}
+          {/* The two ledgers disagreeing, said out loud. branch_stock holds
+              units at this branch but the received-date ledger has nothing
+              to draw them from, so the sale cannot proceed -- which is very
+              different from "there are none here", and used to render as a
+              flat "Stock: 0" beside a branch line showing the units. */}
+          {sheetState.stockWithoutReceivedDate ? (
+            <div className="flex gap-3"><span className="w-24 flex-shrink-0" /><span className="text-xs font-medium text-amber-600">{t('stock_without_received_date') || 'Units are at this branch but carry no received date.'}</span></div>
           ) : null}
           {/* Flat (non-batch) expiry date -- only meaningful when this
               product isn't batch-tracked (a batch-tracked product's real
@@ -586,32 +853,10 @@ export default function ProductDetailSheet({
               </span>
             </div>
           ) : null}
+          {branchStep}
           {groupProduct ? (
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{choiceLabel}</div>
-
-              {branchOptions.length ? (
-                <div className="mb-3">
-                  <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{posCopy('1. Branch', '1. សាខា')}</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {pagedBranchOptions.map((branch) => {
-                      const branchOut = (branchStockTotals.get(branch.id) || 0) <= 0
-                      return (
-                        <button
-                          key={branch.id}
-                          type="button"
-                          className={pillClass(branch.id === effectiveBranchId, branchOut)}
-                          onClick={() => { setSelectedBranchId(branch.id); setSelectedVariantId(null); setBarcodePage(0) }}
-                        >
-                          {branch.name}
-                          {branchOut ? <span className="ml-1 text-[10px] font-normal opacity-75">({posCopy('Out', 'អស់')})</span> : null}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <PillPager page={clampedBranchPage} pageCount={branchPageCount} onPageChange={setBranchPage} posCopy={posCopy} />
-                </div>
-              ) : null}
 
               {/* The option step is labelled by whatever actually DIFFERS between
                   these rows, not hardcoded to "Barcode". Under the identity rule
@@ -619,12 +864,17 @@ export default function ProductDetailSheet({
                   barcode and differ only in cost -- which used to render as two
                   identical pills with nothing to choose between them, and picking
                   the wrong one books the sale against the wrong cost. See
-                  posCore.ts's buildVariantOptionLabels. */}
+                  posCore.ts's buildVariantOptionLabels.
+
+                  Hidden entirely in merged mode, where it degenerates into a
+                  list of internal row ids ("#7321", "#7322") duplicating the
+                  lot list below -- see mergeRowsIntoLotList. */}
+              {optionStepShown ? (
               <div className="mb-3">
                 <div className="mb-1.5 flex items-baseline justify-between gap-2">
                   <span className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">
-                    {branchOptions.length
-                      ? `2. ${posCopy(variantOptionLabels.stepTitle, variantOptionLabels.stepTitle)}`
+                    {branchStepShown
+                      ? `${optionStepNumber}. ${posCopy(variantOptionLabels.stepTitle, variantOptionLabels.stepTitle)}`
                       : posCopy(variantOptionLabels.stepTitle, variantOptionLabels.stepTitle)}
                   </span>
                   <span className="text-[10px] text-gray-400 dark:text-gray-500">
@@ -655,12 +905,13 @@ export default function ProductDetailSheet({
                 </div>
                 <PillPager page={clampedBarcodePage} pageCount={barcodePageCount} onPageChange={setBarcodePage} posCopy={posCopy} />
               </div>
+              ) : null}
 
               {effectiveVariant ? (
                 <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div {...getKhmerTextProps(effectiveVariant.name, 'min-w-0 flex-1 break-words text-sm font-semibold text-gray-900 dark:text-white')}>{effectiveVariant.name}</div>
-                    <span className={`flex-shrink-0 text-xs font-bold ${effectiveVariantStock <= 0 ? 'text-red-600' : effectiveVariantStock <= (asNumber(effectiveVariant.low_stock_threshold) || 10) ? 'text-yellow-600' : 'text-green-600'}`}>
+                    <span className={`flex-shrink-0 text-xs font-bold ${effectiveVariantStock <= 0 ? 'text-red-600' : effectiveVariantStock <= effectiveLowStockThreshold(lowStockConfig, effectiveVariant.low_stock_threshold) ? 'text-yellow-600' : 'text-green-600'}`}>
                       {effectiveVariantStock} {effectiveVariant.unit}
                     </span>
                   </div>
@@ -678,26 +929,41 @@ export default function ProductDetailSheet({
                       above for why this couldn't just reuse the flat-only gate. */}
                   {batchSelectionRequired ? (
                     <div className="mb-2 rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-900/40">
-                      <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{posCopy('3. Batch', '3. បាច់')}</div>
+                      <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{`${lotStepNumber}. ${t('batches') || 'Received dates'}`}</div>
                       {batchesLoading ? (
-                        <div className="text-xs text-gray-400">{posCopy('Loading lots…', 'កំពុងផ្ទុកបាច់…')}</div>
+                        <div className="text-xs text-gray-400">{t('loading') || 'Loading…'}</div>
                       ) : batchesError ? (
-                        <div className="text-xs font-medium text-red-500">{batchesError}</div>
-                      ) : batches.length === 0 ? (
-                        <div className="text-xs text-gray-400">{posCopy('No lots available at this branch', 'គ្មានបាច់នៅសាខានេះទេ')}</div>
+                        batchLoadFailure
+                      ) : orderedBatches.length === 0 ? (
+                        <div className="text-xs text-gray-400">{t('received_dates_none') || 'No received dates at this branch'}</div>
                       ) : (
                         <>
-                          <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs font-semibold text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                            onClick={() => setBatchChoicesOpen((open) => !open)}
+                            aria-expanded={batchChoicesOpen}
+                          >
+                            <span className="min-w-0 truncate">
+                              {selectedBatch
+                                ? `${formatBatchLabel(selectedBatch, batchWord)} · ${Number(selectedBatch.quantity || 0)}`
+                                : t('choose_received_date') || 'Choose a received date'}
+                            </span>
+                            <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${batchChoicesOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                          {batchChoicesOpen ? <><div className="mt-1.5 flex flex-wrap gap-1.5">
                             {pagedBatches.map((batch) => {
                               const batchOut = Number(batch.quantity || 0) <= 0
                               return (
                                 <button
                                   key={batch.id}
                                   type="button"
+                                  disabled={batchOut}
+                                  aria-disabled={batchOut}
                                   className={pillClass(batch.id === selectedBatchId, batchOut)}
-                                  onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null) }}
+                                  onClick={() => chooseBatch(batch)}
                                 >
-                                  <span className="font-mono">{formatBatchLabel(batch, posCopy)}</span>
+                                  <span className="font-mono">{formatBatchLabel(batch, batchWord)}</span>
                                   {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {batch.expiry_date}</span> : null}
                                   <span className="ml-1 text-[10px] font-normal opacity-75">({batch.quantity} {effectiveVariant.unit})</span>
                                 </button>
@@ -705,8 +971,17 @@ export default function ProductDetailSheet({
                             })}
                           </div>
                           <PillPager page={clampedBatchPage} pageCount={batchPageCount} onPageChange={setBatchPage} posCopy={posCopy} />
+                          </> : null}
                         </>
                       )}
+                      {unlottedStockOptions.map((option, optionIndex) => <button type="button"
+                        key={`unlotted-${option.productId}`}
+                        aria-pressed={sheetState.selectedUnlottedProductId === option.productId}
+                        className={pillClass(sheetState.selectedUnlottedProductId === option.productId, false)}
+                        onClick={() => chooseUnlottedStock(option.productId)}>
+                        <span>{posCopy('Received date not recorded', 'មិនបានកត់ត្រាកាលបរិច្ឆេទទទួល')}{unlottedStockOptions.length > 1 ? ` ${optionIndex + 1}` : ''}</span>
+                        <span className="ml-1 text-[10px] font-normal opacity-75">({option.quantity} {effectiveVariant.unit})</span>
+                      </button>)}
                     </div>
                   ) : null}
                   {damagedLots.length > 0 ? (
@@ -715,8 +990,10 @@ export default function ProductDetailSheet({
                       <div className="flex flex-wrap gap-1.5">
                         {damagedLots.map((lot) => (
                           <button key={lot.id} type="button"
+                            disabled={Number(lot.quantity_remaining || 0) <= 0}
+                            aria-disabled={Number(lot.quantity_remaining || 0) <= 0}
                             className={pillClass(lot.id === selectedDamagedLotId, Number(lot.quantity_remaining || 0) <= 0)}
-                            onClick={() => { setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id); setSelectedBatchId(null) }}>
+                            onClick={() => { if (Number(lot.quantity_remaining || 0) <= 0) return; setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id); setSelectedBatchId(null); setSelectedUnlottedProductId(null) }}>
                             <span className="font-mono">{damagedLotLabel(lot)}</span>
                             <span className="ml-1 text-[10px] font-normal opacity-75">({lot.quantity_remaining})</span>
                           </button>
@@ -725,34 +1002,23 @@ export default function ProductDetailSheet({
                     </div>
                   ) : null}
                   <div className="flex flex-wrap gap-1.5">
-                    <button className="btn-primary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
-                      {batchSelectionRequired && !selectedBatch ? posCopy('Pick a lot first', 'ជ្រើសរើសបាច់ជាមុនសិន') : `${posCopy('Selling', 'តម្លៃលក់')} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
-                    </button>
-                    {asNumber(effectiveVariant.special_price_usd) > 0 || asNumber(effectiveVariant.special_price_khr) > 0 ? (
-                      <button
-                        className="btn-secondary flex-1 text-xs"
-                        disabled={!effectiveVariantInStock || !batchReadyToSell}
-                        onClick={() => {
-                          const key = `v${effectiveVariant.id}`
-                          if (!vipRevealed[key]) { setVipRevealed((current) => ({ ...current, [key]: true })); return }
-                          closeAfterAdd(effectiveVariant, 'special')
-                        }}
-                      >
-                        {vipRevealed[`v${effectiveVariant.id}`]
-                          ? `${posCopy('VIP', 'VIP')} ${fmtUSD(asNumber(effectiveVariant.special_price_usd || effectiveVariant.selling_price_usd || 0))}`
-                          : posCopy('VIP', 'VIP')}
-                      </button>
-                    ) : null}
-                    {asNumber(effectiveVariant.wholesale_price_usd) > 0 || asNumber(effectiveVariant.wholesale_price_khr) > 0 ? (
+                    {onPick ? renderPickButton(effectiveVariant) : null}
+                    {onPick ? null : <button className="btn-primary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
+                      {batchSelectionRequired && !selectedBatch && sheetState.selectedUnlottedProductId == null ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
+                    </button>}
+                    {/* The variant's VIP add-to-cart button is deleted by the
+                        2026-09-04 ruling; the Wholesale button beside it now
+                        carries the same numbers (migration 0111 moved them). */}
+                    {!onPick && (asNumber(effectiveVariant.wholesale_price_usd) > 0 || asNumber(effectiveVariant.wholesale_price_khr) > 0) ? (
                       <button
                         className="btn-secondary flex-1 text-xs border-indigo-200 text-indigo-700 dark:border-indigo-800 dark:text-indigo-200"
                         disabled={!effectiveVariantInStock || !batchReadyToSell}
                         onClick={() => closeAfterAdd(effectiveVariant, 'wholesale')}
                       >
-                        {`${posCopy('Wholesale', 'បោះដុំ')} ${fmtUSD(asNumber(effectiveVariant.wholesale_price_usd || 0))}`}
+                        {`${t('wholesale_price') || 'Wholesale price'} ${fmtUSD(asNumber(effectiveVariant.wholesale_price_usd || 0))}`}
                       </button>
                     ) : null}
-                    {effectiveVariantPromotion.active ? (
+                    {!onPick && effectiveVariantPromotion.active ? (
                       <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'promotion')}>
                         {effectiveVariantPromoBadge.kind === 'quantity_hint'
                           ? ((effectiveVariantPromoBadge.show_title && effectiveVariantPromoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${effectiveVariantPromoBadge.min_quantity}+`)
@@ -770,27 +1036,42 @@ export default function ProductDetailSheet({
             {batchSelectionRequired ? (
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {posCopy('Pick a lot / batch', 'ជ្រើសរើសបាច់')}
+                  {t('batches') || 'Received dates'}
                 </div>
                 {batchesLoading ? (
-                  <div className="text-xs text-gray-400">{posCopy('Loading lots…', 'កំពុងផ្ទុកបាច់…')}</div>
+                  <div className="text-xs text-gray-400">{t('loading') || 'Loading…'}</div>
                 ) : batchesError ? (
-                  <div className="text-xs font-medium text-red-500">{batchesError}</div>
-                ) : batches.length === 0 ? (
-                  <div className="text-xs text-gray-400">{posCopy('No lots available at this branch', 'គ្មានបាច់នៅសាខានេះទេ')}</div>
+                  batchLoadFailure
+                ) : orderedBatches.length === 0 ? (
+                  <div className="text-xs text-gray-400">{t('received_dates_none') || 'No received dates at this branch'}</div>
                 ) : (
                   <>
-                    <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs font-semibold text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                      onClick={() => setBatchChoicesOpen((open) => !open)}
+                      aria-expanded={batchChoicesOpen}
+                    >
+                      <span className="min-w-0 truncate">
+                        {selectedBatch
+                          ? `${formatBatchLabel(selectedBatch, batchWord)} · ${Number(selectedBatch.quantity || 0)}`
+                          : t('choose_received_date') || 'Choose a received date'}
+                      </span>
+                      <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${batchChoicesOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {batchChoicesOpen ? <><div className="mt-1.5 flex flex-wrap gap-1.5">
                       {pagedBatches.map((batch) => {
                         const batchOut = Number(batch.quantity || 0) <= 0
                         return (
                           <button
                             key={batch.id}
                             type="button"
+                            disabled={batchOut}
+                            aria-disabled={batchOut}
                             className={pillClass(batch.id === selectedBatchId, batchOut)}
-                            onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null) }}
+                            onClick={() => chooseBatch(batch)}
                           >
-                            <span className="font-mono">{formatBatchLabel(batch, posCopy)}</span>
+                            <span className="font-mono">{formatBatchLabel(batch, batchWord)}</span>
                             {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {batch.expiry_date}</span> : null}
                             <span className="ml-1 text-[10px] font-normal opacity-75">({batch.quantity} {product.unit})</span>
                           </button>
@@ -798,8 +1079,17 @@ export default function ProductDetailSheet({
                       })}
                     </div>
                     <PillPager page={clampedBatchPage} pageCount={batchPageCount} onPageChange={setBatchPage} posCopy={posCopy} />
+                    </> : null}
                   </>
                 )}
+                {unlottedStockOptions.map((option) => <button type="button"
+                  key={`unlotted-${option.productId}`}
+                  aria-pressed={sheetState.selectedUnlottedProductId === option.productId}
+                  className={pillClass(sheetState.selectedUnlottedProductId === option.productId, false)}
+                  onClick={() => chooseUnlottedStock(option.productId)}>
+                  <span>{posCopy('Received date not recorded', 'មិនបានកត់ត្រាកាលបរិច្ឆេទទទួល')}</span>
+                  <span className="ml-1 text-[10px] font-normal opacity-75">({option.quantity} {product.unit})</span>
+                </button>)}
               </div>
             ) : null}
             {damagedLots.length > 0 ? (
@@ -808,8 +1098,10 @@ export default function ProductDetailSheet({
                 <div className="flex flex-wrap gap-1.5">
                   {damagedLots.map((lot) => (
                     <button key={lot.id} type="button"
+                      disabled={Number(lot.quantity_remaining || 0) <= 0}
+                      aria-disabled={Number(lot.quantity_remaining || 0) <= 0}
                       className={pillClass(lot.id === selectedDamagedLotId, Number(lot.quantity_remaining || 0) <= 0)}
-                      onClick={() => { setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id); setSelectedBatchId(null) }}>
+                      onClick={() => { if (Number(lot.quantity_remaining || 0) <= 0) return; setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id); setSelectedBatchId(null); setSelectedUnlottedProductId(null) }}>
                       <span className="font-mono">{damagedLotLabel(lot)}</span>
                       <span className="ml-1 text-[10px] font-normal opacity-75">({lot.quantity_remaining})</span>
                     </button>
@@ -818,38 +1110,26 @@ export default function ProductDetailSheet({
               </div>
             ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
-                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? posCopy('Pick a lot first', 'ជ្រើសរើសបាច់ជាមុនសិន') : `${posCopy('Selling', 'តម្លៃលក់')} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
-              </button>
-              {promotion.active ? (
+              {onPick ? renderPickButton(product) : null}
+              {onPick ? null : <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
+                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch && sheetState.selectedUnlottedProductId == null ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
+              </button>}
+              {!onPick && promotion.active ? (
                 <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>
                   {promoBadge.kind === 'quantity_hint'
                     ? ((promoBadge.show_title && promoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${promoBadge.min_quantity}+`)
                     : `${(promoBadge.show_title && promoBadge.title) || product.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${fmtUSD(promotion.applied_price_usd)}`}
                 </button>
               ) : null}
-              {asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0 ? (
-                <button
-                  className="btn-secondary flex-1"
-                  disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell}
-                  onClick={() => {
-                    const key = `p${product.id}`
-                    if (!vipRevealed[key]) { setVipRevealed((current) => ({ ...current, [key]: true })); return }
-                    closeAfterAdd(product, 'special')
-                  }}
-                >
-                  {vipRevealed[`p${product.id}`]
-                    ? `${posCopy('VIP', 'VIP')} ${fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}`
-                    : posCopy('VIP', 'VIP')}
-                </button>
-              ) : null}
-              {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
+              {/* The product's VIP add-to-cart button is deleted by the
+                  2026-09-04 ruling -- same as the variant twin above. */}
+              {!onPick && (asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0) ? (
                 <button
                   className="btn-secondary flex-1 border-indigo-200 text-indigo-700 dark:border-indigo-800 dark:text-indigo-200"
                   disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell}
                   onClick={() => closeAfterAdd(product, 'wholesale')}
                 >
-                  {`${posCopy('Wholesale', 'បោះដុំ')} ${fmtUSD(asNumber(product.wholesale_price_usd || 0))}`}
+                  {`${t('wholesale_price') || 'Wholesale price'} ${fmtUSD(asNumber(product.wholesale_price_usd || 0))}`}
                 </button>
               ) : null}
             </div>
@@ -858,4 +1138,5 @@ export default function ProductDetailSheet({
       </div>
     </div>
   )
+  return portal && typeof document !== 'undefined' ? createPortal(sheet, document.body) : sheet
 }

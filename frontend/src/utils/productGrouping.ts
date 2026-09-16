@@ -1,5 +1,6 @@
 import { compareInitialKeys, getInitialKey } from './initials.ts'
-import { productIdentitySignature, resolveMergedPricing } from './productDetailRule.ts'
+import { normalizeLeadingZeroBarcodeForCleanup, clusterRowsByBarcodeIdentity, isRealBarcode } from './productDetailRule.ts'
+import { resolveProductMergeEconomics } from './productMerge.ts'
 
 type ProductId = number
 
@@ -70,6 +71,11 @@ export interface ProductGroup {
   // Used by the "wrap" collapsed-group header (name + rows + qty + branches)
   // on Products/Inventory/Branches -- see buildProductGroupSummaryParts.
   branchNames: string[]
+  // How many child rows hideZeroStockGroupedChildRows() removed from this
+  // group. Only set when that opt-in filter actually ran and actually
+  // dropped something, so the group header can say "N hidden" instead of
+  // silently shortening the list. Absent/0 means nothing was hidden.
+  hiddenZeroStockRowCount?: number
 }
 
 export interface ProductGroupSection {
@@ -104,10 +110,6 @@ export interface ProductGroupRow extends ProductRecord {
 // quantity is exactly what is SUPPOSED to differ between the merged rows,
 // and it is combined into the merged row's branch_stock/stock_quantity
 // below rather than compared.
-function buildRowMergeSignature(item: ProductRecord): string {
-  return productIdentitySignature(item as Record<string, unknown>)
-}
-
 function mergeBranchStockEntries(items: ProductRecord[]): Array<{ branch_id: unknown; branch_name: unknown; quantity: number }> {
   const byBranch = new Map<string, { branch_id: unknown; branch_name: unknown; quantity: number }>()
   for (const item of items) {
@@ -138,45 +140,85 @@ function mergeBranchStockEntries(items: ProductRecord[]): Array<{ branch_id: unk
 // imposed here; rows come back in first-seen order within `items`.
 export function mergeSameDetailRows(items: ProductRecord[] = []): ProductGroupRow[] {
   const source = Array.isArray(items) ? items : []
-  const clusters = new Map<string, ProductRecord[]>()
-  const order: string[] = []
+  // Some callers pass one already-same-name group (buildProductGroups);
+  // others pass the whole unsorted catalog (mergePortalCatalogProducts), so
+  // this groups by exact name FIRST -- clusterRowsByBarcodeIdentity only
+  // resolves the barcode half of identity and must never see two different
+  // names in the same call, or an unrelated pair sharing a broken/empty
+  // barcode would wildcard-merge across names.
+  //
+  // Within one name group, clusterRowsByBarcodeIdentity implements the Sep
+  // 15 2026 wildcard ruling: two rows are the same product when their real
+  // barcodes fold to the same key, OR when at least one side has no real
+  // barcode (a broken/empty/word barcode is a wildcard, never a second
+  // identity on its own); two DIFFERENT real barcodes remain separate child
+  // rows. Not a plain signature map -- see productDetailRule for why (non-
+  // transitive: a broken row can only attach to ONE ranked real-barcode
+  // winner when the group holds more than one real code).
+  const byName = new Map<string, ProductRecord[]>()
   for (const item of source) {
-    const signature = buildRowMergeSignature(item)
-    if (!clusters.has(signature)) {
-      clusters.set(signature, [])
-      order.push(signature)
-    }
-    clusters.get(signature)?.push(item)
+    const key = normalizeProductGroupName(item?.name)
+    const bucket = byName.get(key)
+    if (bucket) bucket.push(item)
+    else byName.set(key, [item])
   }
+  const clusters = [...byName.values()].flatMap((nameGroup) => clusterRowsByBarcodeIdentity(
+    nameGroup as unknown as Array<{ id?: unknown; barcode?: unknown; live_stock_quantity?: unknown; stock_quantity?: unknown }>,
+  )) as unknown as ProductRecord[][]
+  // Preserve first-seen order across clusters, matching the prior signature-
+  // map's insertion-order guarantee.
+  const orderOf = new Map<ProductRecord, number>()
+  source.forEach((item, index) => orderOf.set(item, index))
+  const orderedClusters = [...clusters].sort((a, b) => {
+    const aRank = Math.min(...a.map((item) => orderOf.get(item) ?? Number.MAX_SAFE_INTEGER))
+    const bRank = Math.min(...b.map((item) => orderOf.get(item) ?? Number.MAX_SAFE_INTEGER))
+    return aRank - bRank
+  })
 
-  return order.map((signature): ProductGroupRow => {
-    const cluster = [...(clusters.get(signature) || [])].sort((a, b) => toProductId(a?.id) - toProductId(b?.id))
+  return orderedClusters.flatMap((clusterItems): ProductGroupRow[] => {
+    const cluster = [...clusterItems].sort((a, b) => toProductId(a?.id) - toProductId(b?.id))
     const lead = cluster[0] || {}
     const mergedProductIds = cluster.map((item) => toProductId(item?.id)).filter((id) => Number.isFinite(id) && id > 0)
+    const economics = resolveProductMergeEconomics(cluster as Record<string, unknown>[])
+    // The server quarantines malformed/negative money instead of merging it.
+    // Keep those raw rows visible separately so the client does not imply a
+    // merge that the authoritative write path will refuse.
+    if (economics.issues.length) {
+      return cluster.map((item) => ({ ...item, __mergedProductIds: [toProductId(item.id)], __mergedRowCount: 1 }))
+    }
     if (cluster.length <= 1) {
-      return {
+      return [{
         ...lead,
         __mergedProductIds: mergedProductIds,
         __mergedRowCount: 1,
-      }
+      }]
     }
     const branchStock = mergeBranchStockEntries(cluster)
     const stockTotal = branchStock.length
       ? branchStock.reduce((sum, entry) => sum + Number(entry.quantity || 0), 0)
       : cluster.reduce((sum, item) => sum + Number(item?.stock_quantity || 0), 0)
-    return {
+    return [{
       ...lead,
       id: lead.id,
-      // Selling and special price are not identity, so merged rows CAN
-      // disagree on them -- the highest of each wins, so the display never
-      // shows a lower price than one of the merged rows expected to charge.
-      // Same rule the server applies on import merges.
-      ...resolveMergedPricing(cluster as Record<string, unknown>[]),
+      // Retail/wholesale prices are not identity; the highest valid value of
+      // each is displayed, matching the authoritative merge kernel.
+      ...economics.merged,
+      // Cost is not identity either (Sep 4 2026): rows bought at different
+      // costs merge, and the merged row shows the mean of the DISTINCT costs
+      // rounded once to 4dp, so one article is one row no matter how many
+      // prices it was bought at. `economics` resolves all fields together.
+      //
+      // A real barcode always outranks a broken/empty wildcard row for
+      // display (Sep 15 2026 ruling), so a wildcard row with the lowest id
+      // never hides the cluster's real code behind an empty display value.
+      barcode: normalizeLeadingZeroBarcodeForCleanup(
+        (cluster.find((item) => isRealBarcode(item?.barcode)) || lead).barcode,
+      ),
       stock_quantity: stockTotal,
       branch_stock: branchStock,
       __mergedProductIds: mergedProductIds,
       __mergedRowCount: cluster.length,
-    }
+    }]
   })
 }
 
@@ -358,8 +400,38 @@ function resolveGroupKey(product: ProductRecord, { productsById = new Map() }: {
   }
 }
 
-export function buildProductGroups(products: ProductRecord[] = [], productsById: Map<unknown, ProductRecord> = new Map()): ProductGroup[] {
+// `preserveInputOrder` is the client half of the search-relevance fix (see
+// cloudflare/src/lib/productSearchQuery.ts for the server half and the
+// ordering contract). This function's default A-Z group sort is right for
+// BROWSING and wrong the moment a search term is in play: the server has
+// already ordered the response by relevance -- exact barcode, then exact/
+// prefix name, then bm25 -- and re-sorting it alphabetically here threw
+// that away completely, so the closest match reappeared wherever the
+// alphabet put it. That was the reported "shows products not really
+// matched, top to bottom" on every surface that renders through this
+// helper (POS's grid, the Branches per-branch list, TransferModal's bulk
+// picker, the storefront catalog).
+//
+// When set, groups are ordered by the position of their best-ranked member
+// in the input array, which is exactly the server's own order, and paging
+// stays consistent with it. Grouping itself is untouched either way.
+export interface ProductGroupingOptions {
+  preserveInputOrder?: boolean
+}
+
+export function buildProductGroups(
+  products: ProductRecord[] = [],
+  productsById: Map<unknown, ProductRecord> = new Map(),
+  { preserveInputOrder = false }: ProductGroupingOptions = {},
+): ProductGroup[] {
   const source = Array.isArray(products) ? products : []
+  const inputRankById = new Map<ProductId, number>()
+  if (preserveInputOrder) {
+    source.forEach((product, index) => {
+      const id = toProductId(product?.id)
+      if (!inputRankById.has(id)) inputRankById.set(id, index)
+    })
+  }
   const universe = productsById instanceof Map && productsById.size > 0
     ? [...productsById.values()]
     : source
@@ -466,10 +538,31 @@ export function buildProductGroups(products: ProductRecord[] = [], productsById:
       branchNames,
     }
   }).sort((left, right) => {
+    if (preserveInputOrder) {
+      // Rank a group by its best-placed member, so a family whose single
+      // matching variant was the server's top hit leads even when its
+      // sibling rows arrived further down the page.
+      const leftRank = bestInputRank(left, inputRankById)
+      const rightRank = bestInputRank(right, inputRankById)
+      if (leftRank !== rightRank) return leftRank - rightRank
+      // Same-rank is only reachable for groups with no member in the input
+      // (impossible by construction) -- fall through to the stable A-Z tail
+      // rather than leaving the comparator non-total.
+    }
     const nameDelta = String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' })
     if (nameDelta !== 0) return nameDelta
     return Number(left?.anchorId || 0) - Number(right?.anchorId || 0)
   })
+}
+
+// The earliest position any of a group's rows held in the server's response.
+function bestInputRank(group: { ids?: readonly ProductId[] }, inputRankById: Map<ProductId, number>): number {
+  let best = Number.MAX_SAFE_INTEGER
+  for (const id of group?.ids || []) {
+    const rank = inputRankById.get(id)
+    if (rank !== undefined && rank < best) best = rank
+  }
+  return best
 }
 
 // Category-first sectioning (per the explicit decision recorded in
@@ -486,8 +579,20 @@ export function buildProductCategorySections(products: ProductRecord[] = [], {
   productsById = new Map(),
   sortDirection = 'asc',
   uncategorizedLabel = 'Uncategorized',
-}: BuildGroupSectionsOptions & { uncategorizedLabel?: string } = {}): ProductGroupSection[] {
-  const groups = buildProductGroups(products, productsById)
+  preserveInputOrder = false,
+}: BuildGroupSectionsOptions & { uncategorizedLabel?: string; preserveInputOrder?: boolean } = {}): ProductGroupSection[] {
+  const groups = buildProductGroups(products, productsById, { preserveInputOrder })
+  // With a search term in play the server has already ranked the response
+  // by relevance, so category A-Z would bury the best match under whatever
+  // category happens to sort first -- the reported "the likely result was
+  // at bottom". Sections, and the groups inside them, are then ordered by
+  // where their best-ranked row landed in that response instead. Category
+  // headers and the grouping itself are unchanged; only the ORDER is.
+  // Browsing (no search term) keeps the decided category-A-Z layering
+  // exactly as before.
+  const sectionRank = new Map<string, number>()
+  const groupRank = new Map<string, number>()
+  if (preserveInputOrder) groups.forEach((group, index) => groupRank.set(group.key, index))
   const mode = String(sortDirection || 'asc').toLowerCase()
   const nameDirection = mode === 'name_desc' ? 'desc' : 'asc'
 
@@ -522,6 +627,11 @@ export function buildProductCategorySections(products: ProductRecord[] = [], {
   }
 
   for (const section of sections.values()) {
+    if (preserveInputOrder) {
+      section.groups.sort((left, right) => (groupRank.get(left.key) ?? Number.MAX_SAFE_INTEGER) - (groupRank.get(right.key) ?? Number.MAX_SAFE_INTEGER))
+      sectionRank.set(section.id, groupRank.get(section.groups[0]?.key ?? '') ?? Number.MAX_SAFE_INTEGER)
+      continue
+    }
     section.groups.sort((left, right) => {
       const nameDelta = String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' })
       return nameDirection === 'desc' ? -nameDelta : nameDelta
@@ -529,9 +639,68 @@ export function buildProductCategorySections(products: ProductRecord[] = [], {
   }
 
   return [...sections.values()].sort((left, right) => {
-    if (left.sortsLast !== right.sortsLast) return left.sortsLast ? 1 : -1
+    if (preserveInputOrder) {
+      // During a search the uncategorized section keeps no special standing:
+      // a product with no category can perfectly well be the exact scan hit.
+      const delta = (sectionRank.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (sectionRank.get(right.id) ?? Number.MAX_SAFE_INTEGER)
+      if (delta !== 0) return delta
+    } else if (left.sortsLast !== right.sortsLast) {
+      return left.sortsLast ? 1 : -1
+    }
     return String(left.label || '').localeCompare(String(right.label || ''), undefined, { sensitivity: 'base' })
   })
+}
+
+function isAllBranchZeroRow(row: ProductGroupRow): boolean {
+  const branchStock = Array.isArray(row?.branch_stock) ? row.branch_stock as Array<Record<string, unknown>> : []
+  // This rule is intentionally limited to a real multi-branch row. A
+  // standalone zero-stock product (or a product tracked at only one branch)
+  // remains visible; only redundant children whose recorded branch balances
+  // are all zero are removed from a same-name multi-row group.
+  return branchStock.length >= 2 && branchStock.every((entry) => Number(entry?.quantity || 0) <= 0)
+}
+
+// OPT-IN only. Products.tsx runs this exclusively when the operator turns on
+// the "Hide out-of-stock rows" option in the shared FilterMenu -- it is off by
+// default, because a row this drops is a row that cannot be found, opened,
+// edited or restocked from the Products page at all. Each surviving group
+// reports how many of its rows went away via hiddenZeroStockRowCount so the
+// header can show a "N hidden" affordance rather than a silently shorter list.
+export function hideZeroStockGroupedChildRows(sections: ProductGroupSection[] = []): ProductGroupSection[] {
+  return sections.map((section) => {
+    const groups = section.groups.flatMap((group): ProductGroup[] => {
+      if (group.rows.length <= 1) return [group]
+      const rows = group.rows.filter((row) => !isAllBranchZeroRow(row))
+      if (!rows.length) return []
+      const visibleIds = new Set(rows.flatMap((row) => row.__mergedProductIds || []).map(toProductId))
+      const items = group.items.filter((item) => visibleIds.has(toProductId(item?.id)))
+      const branchNames = [...new Set(rows.flatMap((row) => (
+        Array.isArray(row.branch_stock)
+          ? (row.branch_stock as Array<Record<string, unknown>>).map((entry) => normalizeText(entry?.branch_name)).filter(Boolean)
+          : []
+      )))].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }))
+      return [{
+        ...group,
+        rows,
+        items,
+        ids: items.map((item) => toProductId(item?.id)).filter((id) => id > 0),
+        matchedIds: group.matchedIds.filter((id) => visibleIds.has(id)),
+        sellableItems: group.sellableItems.filter((item) => visibleIds.has(toProductId(item?.id))),
+        leadProduct: rows[0],
+        anchorId: toProductId(rows[0]?.id),
+        stockTotal: rows.reduce((sum, row) => sum + Number(row?.stock_quantity || 0), 0),
+        branchNames,
+        hasMultipleItems: items.length > 1,
+        hiddenZeroStockRowCount: group.rows.length - rows.length,
+      }]
+    })
+    return {
+      ...section,
+      groups,
+      ids: groups.flatMap((group) => group.ids),
+      items: groups.flatMap((group) => group.items),
+    }
+  }).filter((section) => section.groups.length > 0)
 }
 
 export function buildProductGroupSections(products: ProductRecord[] = [], {

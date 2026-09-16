@@ -6,6 +6,7 @@
 import type { D1Compat } from './db'
 import { buildInClause, chunkForBinding } from './sqlBinding'
 import { normalizeSearchText } from './searchMatch'
+import { identityBarcodeClassKey, identityBarcodeKeySql } from './productIdentity'
 import {
   getUnifiedStockMode,
   resolveUnifiedStockImportRows,
@@ -32,7 +33,16 @@ async function readCatalogProducts(
   db: D1Compat,
   rows: Array<Record<string, unknown>>,
 ): Promise<UnifiedStockCatalogProduct[]> {
-  const barcodes = [...new Set(rows.map((row) => normalized(row.barcode)).filter(Boolean))]
+  // CLASS-FOLDED (Sep 15 2026), not raw. A candidate the SQL never selects is
+  // a candidate matchProduct can never fold in JS, so a barcode-only sheet
+  // row written in the GTIN-14 form of a code the catalog stores as EAN-13
+  // read as "no such product" and the import created the leading-zero twin
+  // itself. A broken/short barcode never drives this prefilter on its own
+  // (identityBarcodeClassKey folds it to '', filtered out below); the
+  // name_normalized prefilter just underneath already brings in every
+  // broken-barcode candidate of a matching name for matchProduct's wildcard
+  // fold to consider.
+  const barcodes = [...new Set(rows.map((row) => identityBarcodeClassKey(row.barcode)).filter(Boolean))]
   const names = [...new Set(rows.map((row) => normalizeSearchText(row.name)).filter(Boolean))]
   const found = new Map<number, UnifiedStockCatalogProduct>()
 
@@ -43,7 +53,7 @@ async function readCatalogProducts(
     for (const slice of chunkForBinding(values, 1)) {
       const { sql, params } = buildInClause('v', slice)
       const matches = await db.prepare(`
-        SELECT id, name, barcode, selling_price_usd, special_price_usd, cost_price_usd
+        SELECT id, name, barcode, selling_price_usd, wholesale_price_usd, cost_price_usd
         FROM products
         WHERE is_active = @active AND ${columnSql} IN (${sql})
       `).all<UnifiedStockCatalogProduct>({ ...params, active: 1 })
@@ -51,10 +61,16 @@ async function readCatalogProducts(
     }
   }
 
-  await readMatches(`LOWER(TRIM(COALESCE(barcode, '')))`, barcodes)
+  // identityBarcodeKeySql is the ONE SQL spelling of the fold (it lives beside
+  // the JS one in productIdentity.ts and test-stock-session-identity-guard-pure.cjs
+  // runs the two over the same fixtures), so both sides of this comparison fold
+  // the same way and this stays a bounded, indexed-enough prefilter rather than
+  // a third hand-copy of the rule.
+  await readMatches(identityBarcodeKeySql('barcode'), barcodes)
   // name_normalized is indexed/search-maintained and acts only as a bounded
-  // candidate prefilter; matchProduct still applies exact collapsed-name,
-  // barcode and cost equality in JS (never fuzzy identity).
+  // candidate prefilter; matchProduct still applies exact collapsed-name and
+  // folded-barcode equality in JS (never fuzzy identity, and never cost --
+  // cost stopped being identity on Sep 4 2026).
   await readMatches(`name_normalized`, names)
   const productIds = [...found.keys()]
   for (const slice of chunkForBinding(productIds, 0)) {

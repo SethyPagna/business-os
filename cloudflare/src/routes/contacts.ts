@@ -1,5 +1,7 @@
 import { Hono, type Context, type Next } from 'hono'
 import { getDb } from '../lib/db'
+import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, customerGenderRestorationStatus, notifyCustomerGenderRestoration, canRestoreCustomerGender, GENDER_RESTORATION_MAX_BYTES } from '../lib/customerGenderRestoration'
+import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
@@ -9,23 +11,46 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { loadSettingsMap, buildPortalConfig, summarizePoints, type SubmissionRow } from './portal'
 import {
   findContactDuplicates,
+  findContactDuplicateState,
   findDuplicateContactClusters,
   dismissDuplicateCluster,
   undismissDuplicateCluster,
   collectContactPhones,
+  contactDuplicateWriteGuardStatement,
+  buildContactDuplicateReview,
+  parseContactDuplicateCreateSeparateDecision,
+  contactDuplicateDecisionMatches,
   formatPhoneP8,
+  formatContactOptionPhones,
   type ContactDuplicateMatch,
   type ContactDuplicateTable,
+  type ContactDuplicateReview,
+  type ContactDuplicateCreateSeparateDecision,
+  type ContactDuplicateCandidateSnapshot,
 } from '../lib/contactDuplicates'
-import type { ContactOptionMode } from '../lib/contactOptions'
+import { contactDisplayAddress, type ContactOptionMode } from '../lib/contactOptions'
 import { canonicalizePhone } from '../lib/phone'
+import { normalizeMembershipNumber, withMintedMembershipNumber } from '../lib/membershipNumber'
 import { revokePortalSessionsForAccount } from '../lib/portalSession'
 import bcrypt from 'bcryptjs'
 import { buildContactMatchClause } from '../lib/contactSearch'
+import { buildSalesCustomerMatchClause } from '../lib/salesCustomerSearch'
+import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
+import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
-import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import type { Env } from '../index'
+import { actorSnapshot } from '../lib/actorSnapshot'
+import { buildContactMergePlan, contactMergeHasDistinctMemberships } from '../lib/contactMerge'
+import {
+  ANONYMOUS_CUSTOMER_ERROR_CODE,
+  ANONYMOUS_CUSTOMER_MUTATION_ERROR,
+  customerIsAnonymousSql,
+  customerIsProfileSql,
+  customerProfileMutationGuardSql,
+  isAnonymousCustomer,
+} from '../lib/anonymousCustomer'
 
 // Customers, suppliers, and delivery contacts, ported from
 // backend/src/routes/contacts.ts. This never had a real route on Cloudflare
@@ -114,6 +139,42 @@ const DELIVERY_CONTACTS: ContactConfig = {
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 const CONTACT_READ_CACHE_TTL_SECONDS = 20
 
+function anonymousCustomerMutationResponse(c: Context) {
+  return c.json({ error: ANONYMOUS_CUSTOMER_MUTATION_ERROR, code: ANONYMOUS_CUSTOMER_ERROR_CODE }, 409)
+}
+
+function anonymousCustomerGuardStatement(id: number | string, idParam = 'customerId') {
+  return { sql: customerProfileMutationGuardSql(idParam), params: { [idParam]: id } }
+}
+
+async function anonymousCustomerIds(db: ReturnType<typeof getDb>, ids: Array<number | string>): Promise<Set<number>> {
+  const normalized = [...new Set(ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+  const result = new Set<number>()
+  for (const idChunk of chunkForBinding(normalized)) {
+    const placeholders = idChunk.map(() => '?').join(',')
+    const rows = await db.prepare(`SELECT id FROM customers WHERE ${customerIsAnonymousSql()} AND id IN (${placeholders})`).all<{ id: number }>(idChunk)
+    for (const row of rows) result.add(Number(row.id))
+  }
+  return result
+}
+
+async function excludeAnonymousCustomerDuplicateState<T extends {
+  matches: ContactDuplicateMatch[]
+  review: ContactDuplicateReview
+  snapshots: ContactDuplicateCandidateSnapshot[]
+}>(db: ReturnType<typeof getDb>, config: ContactConfig, state: T): Promise<T> {
+  if (config.table !== 'customers' || state.matches.length === 0) return state
+  const excluded = await anonymousCustomerIds(db, state.matches.map((match) => match.id))
+  if (excluded.size === 0) return state
+  const matches = state.matches.filter((match) => !excluded.has(Number(match.id)))
+  return {
+    ...state,
+    matches,
+    review: buildContactDuplicateReview(matches),
+    snapshots: state.snapshots.filter((snapshot) => !excluded.has(Number(snapshot.id))),
+  }
+}
+
 async function getContactReadCacheVersion(env: Env, table: ContactTable): Promise<string> {
   // Customer rows include a computed loyalty balance derived from sales, so
   // that list must turn over on either a customer edit or a sale mutation.
@@ -159,6 +220,15 @@ for (const prefix of CONTACT_PATH_PREFIXES) {
 // after this router for anyone without the contacts permission.
 const requireContactsAccess = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, next: Next) => {
   const user = c.get('user')
+  // Only this exact, authenticated read grants POS a minimal membership view.
+  if (c.req.method === 'GET' && /^\/(?:api\/)?customers\/membership\/[^/]+$/.test(c.req.path)
+    && getPermissionTier(user, 'pos') !== 'none') return next()
+  // Sales/POS customer selection has its own bounded response shape. Grant
+  // only this exact list request; the ordinary Contacts list, customer
+  // detail and financial-history routes still require Contacts access.
+  if (c.req.method === 'GET' && /^\/(?:api\/)?customers$/.test(c.req.path)
+    && c.req.query('fields') === 'sales_picker'
+    && (getPermissionTier(user, 'pos') !== 'none' || getPermissionTier(user, 'sales') !== 'none')) return next()
   if (getPermissionTier(user, 'contacts') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
 }
@@ -211,16 +281,14 @@ function pickColumns(body: Record<string, unknown>, columns: string[]): Record<s
   return payload
 }
 
-async function generateMembershipNumber(env: Env): Promise<string> {
-  const db = getDb(env)
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const entropy = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}${attempt.toString(36)}`.toUpperCase()
-    const candidate = `LCMN-${entropy.slice(-8)}`
-    const existing = await db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(@candidate)) LIMIT 1').get({ candidate })
-    if (!existing) return candidate
-  }
-  throw new Error('Could not generate a unique membership number')
-}
+// Membership numbers are minted by lib/membershipNumber.ts -- the ONE
+// authority, shared with the import engine and the storefront signup, which
+// hands out the next gap-filling `LC-#####`. This file used to carry its own
+// random `LCMN-XXXXXXXX` generator; see that module's header for why four
+// independent minters on one column was the bug. Both mint call sites
+// (POST's runContactInsert, PUT's runContactUpdate) go straight through
+// withMintedMembershipNumber now, so there is no standalone wrapper here
+// any more.
 
 // Shared error shape for both duplicate severities the create/update
 // routes actively block on. `duplicate` carries the conflicting row so
@@ -236,49 +304,200 @@ function contactBulkDeleteEntityType(config: ContactConfig): BulkDeleteEntityTyp
   return config.table
 }
 
-function duplicateErrorResponse(entityLabel: string, match: ContactDuplicateMatch): { body: Record<string, unknown>; status: number } {
+function duplicateAllowedActions(matches: ContactDuplicateMatch[]): Array<'use_existing' | 'create_separate'> {
+  // A phone conflict is the one severity with no second option: two names
+  // cannot own one phone. Everything else is a genuine choice the caller
+  // gets to make -- including a name-only match (P3-9), which used to offer
+  // only 'use_existing' even though creating a separate record was in fact
+  // what happened when the caller ignored it.
+  return matches.some((match) => match.severity === 'phone_conflict')
+    ? ['use_existing']
+    : ['use_existing', 'create_separate']
+}
+
+function duplicateErrorResponse(
+  entityLabel: string,
+  match: ContactDuplicateMatch,
+  matches: ContactDuplicateMatch[],
+  review: ContactDuplicateReview,
+  codeOverride?: 'contact_duplicate_candidates_changed',
+): { body: Record<string, unknown>; status: number } {
+  const allowedActions = duplicateAllowedActions(matches)
+  // apiFetch keeps the legacy `duplicate` object when it turns a response
+  // into an Error. Keep the complete review contract nested there as well as
+  // at the response top level so every existing write transport can present
+  // the exact choices without changing the shared HTTP error shape.
+  const duplicate = { ...match, matches, duplicateReview: review, allowedActions }
+  if (codeOverride) {
+    return {
+      status: 409,
+      body: {
+        error: 'The possible duplicate records changed. Review the current choices before saving.',
+        code: codeOverride,
+        duplicate,
+        matches,
+        duplicateReview: review,
+        allowedActions,
+      },
+    }
+  }
   if (match.severity === 'phone_conflict') {
     return {
       status: 409,
       body: {
         error: `Phone "${match.matchedPhone}" is already registered to "${match.name}". Each phone number can only belong to one ${entityLabel}.`,
-        code: 'phone_conflict',
-        duplicate: match,
+        // A new code keeps an older cached POS from silently selecting this
+        // candidate. The current UI reads severity + allowedActions instead.
+        code: 'contact_duplicate_decision_required',
+        duplicate,
+        matches,
+        duplicateReview: review,
+        allowedActions,
+      },
+    }
+  }
+  if (match.severity === 'name_only') {
+    return {
+      status: 409,
+      body: {
+        error: `A ${entityLabel} named "${match.name}" already exists. Use that record, or confirm you are creating a separate one.`,
+        code: 'contact_duplicate_decision_required',
+        duplicate,
+        matches,
+        duplicateReview: review,
+        allowedActions,
       },
     }
   }
   return {
     status: 409,
     body: {
-      error: `A ${entityLabel} named "${match.name}" already uses this phone number. Save again to confirm this is a different contact.`,
-      code: 'possible_duplicate',
-      duplicate: match,
+      error: `A ${entityLabel} named "${match.name}" already uses this phone number. Review the existing record before creating a separate contact.`,
+      // Older cached POS builds auto-retried `possible_duplicate` with a bare
+      // boolean. This explicit-decision code makes them stop with an error
+      // instead of retrying forever while the new UI presents the choices.
+      code: 'contact_duplicate_decision_required',
+      duplicate,
+      matches,
+      duplicateReview: review,
+      allowedActions,
     },
   }
 }
 
 // Runs the duplicate check for a record about to be created/updated and
 // returns a ready-to-send error response if it should be blocked, or null
-// if it's clear to proceed. `confirmDuplicate: true` in the request body
-// (set by the frontend after the person acknowledges the flag -- see
-// ContactFormModal's duplicate banner) lets an exact_match through; a
-// phone_conflict can never be overridden this way since that would let
-// two different names claim the same phone, exactly what this feature
-// exists to prevent.
+// if it's clear to proceed. Creating a separate same-name/same-phone record
+// requires the caller to echo the exact candidate ids and identity versions
+// it reviewed. A phone_conflict can never be overridden because that would
+// let two different names claim the same phone.
+//
+// P4-2 (owner ruling, superseding P3-9's prompt below): a supplier name is a
+// company identity -- this app keeps exactly one row per company, so a
+// same-name match (`exact_match` or `name_only`; anything left once a
+// phone_conflict is ruled out) is never offered as a choice. It resolves
+// straight to the existing record via `resolvedExisting`, silently, on
+// every writer. Customers and delivery contacts are unchanged: shared names
+// are normal there (walk-ins, common Khmer given names) and stay advisory.
 async function checkContactDuplicateBlock(
   env: Env,
   config: ContactConfig,
   subject: { id?: number | string | null; name: string; phone: unknown; address: unknown },
-  confirmDuplicate: boolean,
-): Promise<{ body: Record<string, unknown>; status: number } | null> {
+  decisionInput: unknown,
+): Promise<{
+  block: { body: Record<string, unknown>; status: number } | null
+  decision: ContactDuplicateCreateSeparateDecision | null
+  matches: ContactDuplicateMatch[]
+  review: ContactDuplicateReview
+  snapshots: ContactDuplicateCandidateSnapshot[]
+  phones: string[]
+  resolvedExisting: ContactDuplicateMatch | null
+}> {
   const db = getDb(env)
   const phones = collectContactPhones({ phone: subject.phone, address: subject.address }, config.optionMode)
-  const matches = await findContactDuplicates(db, config.table, { id: subject.id, name: subject.name, phones }, config.optionMode)
+  const duplicateState = await excludeAnonymousCustomerDuplicateState(
+    db,
+    config,
+    await findContactDuplicateState(db, config.table, { id: subject.id, name: subject.name, phones }, config.optionMode),
+  )
+  const { matches, review, snapshots } = duplicateState
+  const decision = parseContactDuplicateCreateSeparateDecision(decisionInput)
+  if (decisionInput != null && !decision) {
+    return {
+      block: { status: 400, body: { error: 'The duplicate decision is invalid. Review the possible duplicates again.', code: 'invalid_duplicate_decision' } },
+      decision: null,
+      matches,
+      review,
+      snapshots,
+      phones,
+      resolvedExisting: null,
+    }
+  }
   const phoneConflict = matches.find((m) => m.severity === 'phone_conflict')
-  if (phoneConflict) return duplicateErrorResponse(config.entity, phoneConflict)
+  if (phoneConflict) return { block: duplicateErrorResponse(config.entity, phoneConflict, matches, review), decision: null, matches, review, snapshots, phones, resolvedExisting: null }
+  // P4-2: suppliers stop here -- whatever is left once a phone_conflict is
+  // ruled out shares this subject's normalized name (exact_match requires it
+  // too), so it is the same company. Resolve to it and never fall through to
+  // a create/rename. This replaces the P3-9 decision-required prompt below
+  // (kept, commented, for the customers/delivery_contacts path only) --
+  // the ten "j secrat" / six "lang" rows P3-9 was built to catch are exactly
+  // what this now auto-resolves onto instead of ever minting.
+  if (config.table === 'suppliers') {
+    const nameMatch = matches.find((match) => match.severity !== 'phone_conflict')
+    return { block: null, decision: null, matches, review, snapshots, phones, resolvedExisting: nameMatch || null }
+  }
   const exactMatch = matches.find((m) => m.severity === 'exact_match')
-  if (exactMatch && !confirmDuplicate) return duplicateErrorResponse(config.entity, exactMatch)
-  return null
+  if (exactMatch && !decision) return { block: duplicateErrorResponse(config.entity, exactMatch, matches, review), decision: null, matches, review, snapshots, phones, resolvedExisting: null }
+  // Customers and delivery contacts are deliberately NOT gated on a
+  // name_only match: people legitimately share a name, walk-ins are
+  // registered by name alone all day, and the POS creates them mid-sale
+  // where there is nobody to answer a prompt. Their name-only matches stay
+  // advisory (DuplicateFlagBanner) and land in the Conflicts tab.
+  if (decision && !contactDuplicateDecisionMatches(review, decision)) {
+    const top = exactMatch || matches[0]
+    if (top) return { block: duplicateErrorResponse(config.entity, top, matches, review, 'contact_duplicate_candidates_changed'), decision: null, matches, review, snapshots, phones, resolvedExisting: null }
+    const duplicate = { matches, duplicateReview: review, allowedActions: [] }
+    return {
+      block: { status: 409, body: { error: 'The possible duplicate records changed. Review again before saving.', code: 'contact_duplicate_candidates_changed', duplicate, matches, duplicateReview: review, allowedActions: [] } },
+      decision: null,
+      matches,
+      review,
+      snapshots,
+      phones,
+      resolvedExisting: null,
+    }
+  }
+  return {
+    block: null,
+    decision,
+    matches,
+    review,
+    snapshots,
+    phones,
+    resolvedExisting: null,
+  }
+}
+
+async function duplicateBlockAfterGuardFailure(
+  env: Env,
+  config: ContactConfig,
+  subject: { id?: number | string | null; name: string; phones: string[] },
+  decision: ContactDuplicateCreateSeparateDecision | null,
+): Promise<{ body: Record<string, unknown>; status: number } | null> {
+  const db = getDb(env)
+  const { matches, review } = await excludeAnonymousCustomerDuplicateState(
+    db,
+    config,
+    await findContactDuplicateState(db, config.table, subject, config.optionMode),
+  )
+  if (decision && !contactDuplicateDecisionMatches(review, decision)) {
+    const top = matches[0]
+    return top
+      ? duplicateErrorResponse(config.entity, top, matches, review, 'contact_duplicate_candidates_changed')
+      : { status: 409, body: { error: 'The possible duplicate records changed. Review again before saving.', code: 'contact_duplicate_candidates_changed', duplicate: { matches, duplicateReview: review, allowedActions: [] }, matches, duplicateReview: review, allowedActions: [] } }
+  }
+  const unexpected = matches.find((match) => match.severity === 'phone_conflict' || match.severity === 'exact_match')
+  return unexpected ? duplicateErrorResponse(config.entity, unexpected, matches, review) : null
 }
 
 function conflictResult(error: unknown) {
@@ -296,6 +515,55 @@ async function hasTable(db: ReturnType<typeof getDb>, name: string): Promise<boo
     .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name = @name LIMIT 1")
     .get<{ ok: number }>({ name })
   return Boolean(row)
+}
+
+// P4-2: the auto-resolve half of checkContactDuplicateBlock's supplier rule.
+// A create that resolved onto an existing supplier writes nothing (see the
+// POST handler); a create/rename/edit surface that had already loaded a
+// DIFFERENT full row (`merged`, e.g. the PUT handler's own `current`) has
+// something to reconcile instead -- fold it into the existing `keeper` via
+// the exact same writer the Conflicts tab's manual merge button uses
+// (buildContactMergePlan), so every linked table (products, product_batches,
+// returns, supplier_invoices) repoints the same way a reviewed merge does.
+// Suppliers have no membership/portal/anonymous complexity, so this needs
+// none of those merge-route guards -- just the plan, the batch, and a cache
+// bump.
+async function mergeSupplierIntoExisting(
+  env: Env,
+  config: ContactConfig,
+  user: SessionUser | undefined,
+  keeper: Record<string, unknown>,
+  merged: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const db = getDb(env)
+  const hasSupplierInvoices = await hasTable(db, 'supplier_invoices')
+  const plan = buildContactMergePlan({
+    table: config.table,
+    entity: config.entity,
+    editableColumns: config.columns,
+    keeper,
+    merged,
+    hasCustomerReceivables: false,
+    hasSupplierInvoices,
+    audit: {
+      operationId: crypto.randomUUID(),
+      userId: user?.id ?? null,
+      userName: actorSnapshot(user),
+      deviceName: null,
+      deviceTz: null,
+    },
+  })
+  await db.batch(plan.statements)
+  // p6/efficiency-3: bumpVersions() batches every namespace's D1 fallback
+  // upsert into one db.batch() round trip instead of three independent
+  // bumpVersion() calls each re-deriving its own KV/D1 plan (see
+  // lib/cache.ts's bumpVersions doc comment). It already swallows its own
+  // KV/D1 write errors per namespace the same way the old Promise.allSettled
+  // did; wrap it too so a cache-bump failure never surfaces to the caller,
+  // matching the previous allSettled behavior exactly.
+  await bumpVersions(env, ['suppliers', 'products', 'returns']).catch(() => {})
+  const keeperId = Number(keeper.id)
+  return (await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keeperId })) || plan.finalKeeper
 }
 
 // Bulk points computation for the admin side (customer list + points
@@ -341,9 +609,14 @@ async function computeCustomerPointsMap(env: Env, customerIds: number[]): Promis
         .all<{ customer_id: number; sale_status: string | null; total_usd: number; total_khr: number; membership_points_redeemed: number }>(idChunk),
       db.prepare(`SELECT customer_id, status, total_refund_usd, total_refund_khr FROM returns WHERE customer_id IN (${placeholders})`)
         .all<{ customer_id: number; status: string | null; total_refund_usd: number; total_refund_khr: number }>(idChunk),
-      db.prepare(`SELECT customer_id, status, reward_points FROM customer_share_submissions WHERE customer_id IN (${placeholders})`)
+      // `reward_points_voided_at` / `voided_at` (migration 0116): a points
+      // RESET marks these ledgers rather than deleting them, so both reads
+      // filter the voided rows out. Filtering in SQL, not after the fetch,
+      // because these are the authoritative sums -- a caller that forgot the
+      // clause would quietly resurrect a zeroed balance.
+      db.prepare(`SELECT customer_id, status, reward_points FROM customer_share_submissions WHERE customer_id IN (${placeholders}) AND reward_points_voided_at IS NULL`)
         .all<{ customer_id: number; status: string; reward_points: number }>(idChunk),
-      db.prepare(`SELECT customer_id, points FROM loyalty_point_adjustments WHERE customer_id IN (${placeholders})`)
+      db.prepare(`SELECT customer_id, points FROM loyalty_point_adjustments WHERE customer_id IN (${placeholders}) AND voided_at IS NULL`)
         .all<{ customer_id: number; points: number }>(idChunk),
     ])
     salesRows.push(...salesChunk)
@@ -388,6 +661,23 @@ async function computeCustomerPointsMap(env: Env, customerIds: number[]): Promis
   }
   return result
 }
+
+app.get('/customers/membership/:membershipNumber', async (c) => {
+  c.header('Cache-Control', 'private, no-store')
+  const number = normalizeMembershipNumber(c.req.param('membershipNumber'))
+  if (!number) return c.json({ error: 'Membership not found' }, 404)
+  const matches = await getDb(c.env).prepare(
+    `SELECT id, name, membership_number FROM customers
+      WHERE lower(trim(membership_number)) = lower(@number)
+        AND ${customerIsProfileSql()}
+      LIMIT 2`,
+  ).all<{ id: number; name: string; membership_number: string }>({ number })
+  if (!matches.length) return c.json({ error: 'Membership not found' }, 404)
+  if (matches.length !== 1) return c.json({ error: 'Membership is ambiguous' }, 409)
+  const customer = matches[0]
+  const points = (await computeCustomerPointsMap(c.env, [customer.id])).get(customer.id)
+  return c.json({ customer, points: { balance: points?.balance ?? 0, redeemableUnits: points?.redeemableUnits ?? 0 } })
+})
 
 // Which of these contacts have a storefront account (§2), keyed by contact_id.
 // Lets admin Contacts badge a contact that has signed up and show the
@@ -468,6 +758,35 @@ async function computeContactHistorySummaryMap(
   return result
 }
 
+// Deliberately separate from general contact import/update: only server-approved
+// evidence chunks may change gender, and the service owns atomic audit/replay.
+for (const operation of ['preview', 'apply'] as const) {
+  app.post(`/customers/gender-restoration/${operation}`, async (c) => {
+    try {
+      if (!canRestoreCustomerGender(c.get('user'))) return c.json({ success: false, error: 'Administrator Contacts edit permission is required.' }, 403)
+      if (Number(c.req.header('content-length') || 0) > GENDER_RESTORATION_MAX_BYTES) return c.json({ success: false, error: 'Restoration chunk is too large.' }, 413)
+      const text = await c.req.text()
+      if (new TextEncoder().encode(text).byteLength > GENDER_RESTORATION_MAX_BYTES) return c.json({ success: false, error: 'Restoration chunk is too large.' }, 413)
+      let body: unknown
+      try { body = JSON.parse(text) } catch { return c.json({ success: false, error: 'Invalid restoration JSON.' }, 400) }
+      const result = await (operation === 'apply' ? applyCustomerGenderRestoration : previewCustomerGenderRestoration)(getDb(c.env), c.get('user'), body)
+      if (operation === 'apply') c.executionCtx.waitUntil(notifyCustomerGenderRestoration(c.env))
+      return c.json(result)
+    } catch (error) {
+      const code = Number((error as { statusCode?: number }).statusCode)
+      const status = ([400, 403, 404, 409, 413, 503].includes(code) ? code : 500) as 400 | 403 | 404 | 409 | 413 | 500 | 503
+      return c.json({ success: false, error: status === 500 ? 'Restoration outcome is uncertain. Check status before retrying.' : (error as Error).message }, status)
+    }
+  })
+}
+app.get('/customers/gender-restoration/status', async (c) => {
+  try { return c.json(await customerGenderRestorationStatus(getDb(c.env), c.get('user'), c.req.query('campaign_id') || '')) }
+  catch (error) {
+    const code = Number((error as { statusCode?: number }).statusCode)
+    return c.json({ success: false, error: (error as Error).message }, ([400, 403, 404, 409].includes(code) ? code : 500) as 400 | 403 | 404 | 409 | 500)
+  }
+})
+
 function registerContactRoutes(config: ContactConfig) {
   app.get(config.path, async (c) => {
     const db = getDb(c.env)
@@ -480,9 +799,55 @@ function registerContactRoutes(config: ContactConfig) {
     if (String(query.fields || '') === 'names') {
       const version = await getContactReadCacheVersion(c.env, config.table)
       const rows = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, () =>
-        db.prepare(`SELECT id, name FROM ${config.table} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(),
+        db.prepare(`SELECT id, name FROM ${config.table} ${config.table === 'customers' ? `WHERE ${customerIsProfileSql()}` : ''} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(),
       )
       return c.json(rows)
+    }
+    // fields=picker: the bounded offline-mirror / picker shape. Only the
+    // columns a picker or a receipt needs (never notes/company/audit
+    // columns), never the loyalty aggregation, and never more than `limit`
+    // rows -- for customers the most recently active first (last sale, via
+    // idx_sales_customer_created), so a device that keeps an offline copy
+    // keeps the people who actually walk in, not the first N by name. The
+    // reply says how many rows exist, so the client can tell a full copy
+    // from a truncated one. Cache version: the table alone -- no computed
+    // balance here, so a sale must NOT turn this over the way it turns
+    // over the unpaged list (that churn is what made the unbounded read
+    // effectively uncacheable during business hours).
+    if (String(query.fields || '') === 'picker') {
+      const limit = clampInt(query.limit, CONTACT_PICKER_DEFAULT_LIMIT, 1, CONTACT_PICKER_MAX_LIMIT)
+      const version = `${config.table}:${await getVersionWithFallback(c.env, config.table)}`
+      const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
+        const [totalRow, rawItems] = await Promise.all([
+          db.prepare(`SELECT COUNT(*) AS count FROM ${config.table} ${config.table === 'customers' ? `WHERE ${customerIsProfileSql()}` : ''}`).get<{ count: number }>({}),
+          db.prepare(buildContactPickerSql(config.table)).all<Record<string, unknown>>({ limit }),
+        ])
+        const items = rawItems.slice(0, limit)
+        const total = Number(totalRow?.count || 0)
+        return { items: items || [], total, limit, truncated: total > (items || []).length }
+      })
+      return c.json(payload)
+    }
+    // Narrow Sales/POS customer search. It is deliberately customers-only
+    // and omits notes, loyalty totals, gender, contact-created date and the
+    // previous picker's last_sale_at value. Search and exact-id lookup use
+    // the same authoritative anonymous-row predicate inside the SQL read.
+    if (String(query.fields || '') === 'sales_picker') {
+      if (config.table !== 'customers') return c.json({ error: 'sales_picker is customers-only' }, 400)
+      const limit = clampInt(query.pageSize ?? query.limit, 50, 1, 100)
+      const predicates: string[] = []
+      const params: Record<string, unknown> = { limit }
+      const contactMatch = buildSalesCustomerMatchClause(query.search || query.q || '')
+      if (contactMatch) {
+        predicates.push(contactMatch.sql)
+        Object.assign(params, contactMatch.params)
+      }
+      const idFilter = parseContactIdFilter(c.req.queries('ids') ?? query.ids)
+      if (idFilter.tooMany) return c.json({ error: `ids: at most ${CONTACT_ID_FILTER_MAX} ids per request` }, 400)
+      const idClause = buildContactIdClause(idFilter)
+      if (idClause) predicates.push(idClause)
+      const items = await db.prepare(buildSalesCustomerPickerSql(predicates)).all<Record<string, unknown>>(params)
+      return c.json({ items, limit })
     }
     const hasPaging = Object.prototype.hasOwnProperty.call(query, 'page') || Object.prototype.hasOwnProperty.call(query, 'pageSize')
     const search = String(query.search || query.q || '').trim().toLowerCase()
@@ -494,6 +859,7 @@ function registerContactRoutes(config: ContactConfig) {
     // valid years and makes records on other pages unreachable.
     const baseWhere: string[] = []
     const params: Record<string, unknown> = {}
+    if (config.table === 'customers') baseWhere.push(customerIsProfileSql())
     // Was a `lower(COALESCE(col, '')) LIKE '%term%'` OR-chain across every
     // searchable column (same full-scan cost migrations/0018_products_fts.sql
     // documented for the pre-FTS5 products search, run twice per keystroke
@@ -507,6 +873,20 @@ function registerContactRoutes(config: ContactConfig) {
       baseWhere.push(contactMatch.sql)
       Object.assign(params, contactMatch.params)
     }
+
+    // ids=1,2,3 (or a repeated ids= param): batched read of specific
+    // contacts. Without it the only way to fetch known rows was to
+    // download the entire table -- for customers the heaviest read in the
+    // system, since the unpaged shape below also runs the loyalty
+    // aggregation over every row. Additive: absent -> nothing changes.
+    // Over the ceiling is an error, never a silent truncation, so a caller
+    // can never mistake a partial answer for a complete one.
+    const idFilter = parseContactIdFilter(c.req.queries('ids') ?? query.ids)
+    if (idFilter.tooMany) {
+      return c.json({ error: `ids: at most ${CONTACT_ID_FILTER_MAX} ids per request` }, 400)
+    }
+    const idClause = buildContactIdClause(idFilter)
+    if (idClause) baseWhere.push(idClause)
 
     const gender = String(query.gender || '').trim().toLowerCase()
     if (gender === 'unspecified') {
@@ -632,7 +1012,7 @@ function registerContactRoutes(config: ContactConfig) {
       live.sales = Number((await db.prepare('SELECT COUNT(*) AS n FROM sales WHERE delivery_contact_id = @id').get<{ n: number }>({ id }))?.n || 0)
     }
     return c.json({
-      kind: config.table === 'customers' ? 'customer' : config.table === 'suppliers' ? 'supplier' : 'customer',
+      kind: config.table === 'customers' ? 'customer' : config.table === 'suppliers' ? 'supplier' : 'delivery_contact',
       from: current.name,
       to,
       products_primary: 0,
@@ -657,12 +1037,19 @@ function registerContactRoutes(config: ContactConfig) {
     const db = getDb(c.env)
     const query = c.req.query()
     const name = String(query.name || '').trim()
-    const phone = String(query.phone || '').trim()
+    const rawPhones = (c.req.queries('phone') || [String(query.phone || '')])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .slice(0, 4)
     const excludeId = query.excludeId || null
-    if (!name && !phone) return c.json({ matches: [] })
-    const phones = collectContactPhones({ phone }, config.optionMode)
-    const matches = await findContactDuplicates(db, config.table, { id: excludeId, name, phones }, config.optionMode)
-    return c.json({ matches })
+    if (!name && !rawPhones.length) return c.json({ matches: [], duplicateReview: buildContactDuplicateReview([]), allowedActions: [] })
+    const phones = [...new Set(rawPhones.flatMap((phone) => collectContactPhones({ phone }, config.optionMode)))]
+    const { matches, review } = await excludeAnonymousCustomerDuplicateState(
+      db,
+      config,
+      await findContactDuplicateState(db, config.table, { id: excludeId, name, phones }, config.optionMode),
+    )
+    return c.json({ matches, duplicateReview: review, allowedActions: duplicateAllowedActions(matches) })
   })
 
   // Whole-table sweep for the admin "Possible Duplicates" review panel --
@@ -680,14 +1067,21 @@ function registerContactRoutes(config: ContactConfig) {
   const mismatchOffset = (mismatchPage - 1) * pageSize
   const missingOffset = (missingPage - 1) * pageSize
     const clusters = await findDuplicateContactClusters(db, config.table, config.optionMode, { includeDismissed })
+    const excludedIds = config.table === 'customers'
+      ? await anonymousCustomerIds(db, clusters.flatMap((cluster) => cluster.contacts.map((contact) => contact.id)))
+      : new Set<number>()
+    const visibleClusters = excludedIds.size
+      ? clusters.map((cluster) => ({ ...cluster, contacts: cluster.contacts.filter((contact) => !excludedIds.has(Number(contact.id))) }))
+        .filter((cluster) => cluster.contacts.length > 1)
+      : clusters
     // Attach each contact's "worth knowing before you act" history summary
     // (loyalty points balance for customers, past sales/returns counts for
     // any table) so the review panel can warn a reviewer before they
     // delete a record that would silently orphan that history -- merge
     // already repoints these references, delete does not.
-    const allIds = [...new Set(clusters.flatMap((cluster) => cluster.contacts.map((contact) => contact.id)))]
+    const allIds = [...new Set(visibleClusters.flatMap((cluster) => cluster.contacts.map((contact) => contact.id)))]
     const historyMap = await computeContactHistorySummaryMap(c.env, config.table, allIds)
-    const enriched = clusters.map((cluster) => ({
+    const enriched = visibleClusters.map((cluster) => ({
       ...cluster,
       contacts: cluster.contacts.map((contact) => ({ ...contact, history: historyMap.get(contact.id) || null })),
     }))
@@ -708,7 +1102,7 @@ function registerContactRoutes(config: ContactConfig) {
     const value = String(body.value || '').trim()
     if (!type || !value) return c.json({ error: 'type ("phone" or "name") and value are required' }, 400)
     const db = getDb(c.env)
-    await dismissDuplicateCluster(db, config.table, type, value, { id: user?.id ?? null, name: user?.name ?? null })
+    await dismissDuplicateCluster(db, config.table, type, value, { id: user?.id ?? null, name: actorSnapshot(user) })
     return c.json({ ok: true })
   })
 
@@ -746,6 +1140,9 @@ function registerContactRoutes(config: ContactConfig) {
     if (getActionTier(user, 'contacts', 'merge') === 'none') {
       return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }
+    if (getActionTier(user, 'contacts', 'bulk') === 'none') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
     const keepId = Number(body.keepId)
     const mergeId = Number(body.mergeId)
@@ -759,6 +1156,31 @@ function registerContactRoutes(config: ContactConfig) {
     ])
     if (!keeper) return c.json({ error: `Contact to keep (id ${keepId}) not found` }, 404)
     if (!merged) return c.json({ error: `Contact to merge (id ${mergeId}) not found` }, 404)
+    if (config.table === 'customers' && (isAnonymousCustomer(keeper) || isAnonymousCustomer(merged))) {
+      return anonymousCustomerMutationResponse(c)
+    }
+
+    // A merge endpoint is not a general hard-delete primitive. Re-prove that
+    // these two current rows still share the duplicate identity the review UI
+    // showed, then pin both complete editable snapshots in the atomic guard.
+    const duplicateMatches = await findContactDuplicates(db, config.table, {
+      id: keepId,
+      name: String(keeper.name || ''),
+      phones: collectContactPhones(keeper, config.optionMode),
+    }, config.optionMode)
+    if (!duplicateMatches.some((match) => Number(match.id) === mergeId)) {
+      return c.json({
+        error: 'These contacts no longer share a duplicate name or phone. Refresh the review before merging.',
+        code: 'contact_merge_identity_required',
+      }, 409)
+    }
+
+    if (config.table === 'customers' && contactMergeHasDistinctMemberships(keeper, merged)) {
+      return c.json({
+        error: 'Both customers have different membership IDs. Preserve their membership lineage before merging.',
+        code: 'membership_lineage_required',
+      }, 409)
+    }
     if (config.table === 'customers') {
       const portalAccounts = await db.prepare(
         `SELECT id, contact_id FROM portal_accounts WHERE contact_id IN (@keepId, @mergeId) ORDER BY id`,
@@ -772,136 +1194,100 @@ function registerContactRoutes(config: ContactConfig) {
       }
     }
 
-    // Backfill: only columns this table actually allows editing (same
-    // allowlist POST/PUT use), and only where the keeper is genuinely
-    // blank -- never overwrites a value the keeper already has.
-    const backfill: Record<string, unknown> = {}
-    for (const column of config.columns) {
-      const keeperValue = keeper[column]
-      const mergedValue = merged[column]
-      const keeperBlank = keeperValue === null || keeperValue === undefined || keeperValue === ''
-      const mergedHasValue = mergedValue !== null && mergedValue !== undefined && mergedValue !== ''
-      if (keeperBlank && mergedHasValue) backfill[column] = mergedValue
-    }
-    if (Object.keys(backfill).length) {
-      const setSql = Object.keys(backfill).map((col) => `${col} = @${col}`).join(', ')
-      await db.prepare(`UPDATE ${config.table} SET ${setSql}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ ...backfill, id: keepId })
+    const [hasCustomerReceivables, hasSupplierInvoices] = await Promise.all([
+      config.table === 'customers' ? hasTable(db, 'customer_receivables') : Promise.resolve(false),
+      config.table === 'suppliers' ? hasTable(db, 'supplier_invoices') : Promise.resolve(false),
+    ])
+    let auditDevice: { deviceName: string | null; deviceTz: string | null } = { deviceName: null, deviceTz: null }
+    if (user?.id) {
+      try {
+        const device = await db.prepare(`
+          SELECT device_name, device_tz FROM user_sessions
+          WHERE user_id = @userId AND revoked_at IS NULL
+          ORDER BY last_seen_at DESC, id DESC LIMIT 1
+        `).get<{ device_name: string | null; device_tz: string | null }>({ userId: user.id })
+        auditDevice = { deviceName: device?.device_name ?? null, deviceTz: device?.device_tz ?? null }
+      } catch (_) {
+        // Matches audit(): device attribution is best effort and never blocks
+        // the business write. The authenticated username remains authoritative.
+      }
     }
 
-    // Table-specific FK repoints -- every place elsewhere in the schema
-    // that references this contact by id (confirmed against
-    // migrations/0001_init.sql: sales/returns/customer_share_submissions
-    // for customers, returns for suppliers, sales for delivery_contacts).
-    // products.supplier is a free-text name (not an id) for suppliers --
-    // repointed by value, using the merged supplier's own name captured
-    // above before its row is deleted.
-    if (config.table === 'customers') {
-      const mergedNameLower = String(merged.name || '').trim().toLowerCase()
-      await db.batch([
-        // The id is authoritative, but these operational rows also expose a
-        // mutable display snapshot in lists, details, reports and exports.
-        // Repointing only the FK left the survivor linked to the loser name.
-        { sql: `UPDATE sales SET customer_id = @keepId, customer_name = @keeperName, customer_phone = @keeperPhone, customer_address = @keeperAddress WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name, keeperPhone: keeper.phone ?? null, keeperAddress: keeper.address ?? null } },
-        { sql: `UPDATE returns SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-        { sql: `UPDATE customer_share_submissions SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-        // Was missing until an earlier session -- loyalty_point_adjustments
-        // has no FK/CASCADE (confirmed against migrations/0028), so without
-        // this repoint, merging a customer who had ever been manually
-        // awarded points silently orphaned those adjustment rows the
-        // moment `mergeId`'s row was deleted below: computeCustomerPointsMap
-        // only ever queries adjustments for ids still in the customers
-        // table, so the merged-away customer's manually-awarded points
-        // would vanish from the survivor's balance instead of carrying
-        // over, with no error and no record of what was lost.
-        { sql: `UPDATE loyalty_point_adjustments SET customer_id = @keepId WHERE customer_id = @mergeId`, params: { keepId, mergeId } },
-        // Storefront account link (portal_accounts.contact_id, migration
-        // 0087). It has no FK/CASCADE, so a merge that deletes `mergeId`
-        // below would leave that customer's storefront account pointing at a
-        // now-deleted contacts row: the membership badge would drop off the
-        // survivor's customer row (the list joins portal_accounts on
-        // contact_id) and staff portal-reset could never find the account.
-        // Repoint it to the keeper.
-        { sql: `UPDATE portal_accounts SET contact_id = @keepId, updated_at = CURRENT_TIMESTAMP WHERE contact_id = @mergeId`, params: { keepId, mergeId } },
-      ])
-      // Customer AR ledger (migration 0094): id-attributed invoices follow
-      // the keeper, and the display name is carried over too so the
-      // name-grouped AR report (which buckets by customer_name, not id --
-      // see /customers/reports/ar-invoices) shows the merged-away customer's
-      // receivables under the survivor rather than under an orphaned name.
-      // The importer stores customer_id only when it could match a contact
-      // (import-aug31-legacy-reports.mjs: `r.customer?.id || NULL`), so the
-      // NULL-id rows named exactly like the merged contact are moved by name
-      // as well -- otherwise they would strand under a name with no contact.
-      if (await hasTable(db, 'customer_receivables')) {
-        const arStatements: Array<{ sql: string; params: Record<string, unknown> }> = [
-          { sql: `UPDATE customer_receivables SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-        ]
-        if (mergedNameLower) {
-          arStatements.push({ sql: `UPDATE customer_receivables SET customer_name = @keeperName WHERE customer_id IS NULL AND lower(trim(customer_name)) = @mergedNameLower`, params: { keeperName: keeper.name, mergedNameLower } })
-        }
-        await db.batch(arStatements)
-      }
-    } else if (config.table === 'suppliers') {
-      const mergedName = String(merged.name || '')
-      const mergedNameLower = mergedName.trim().toLowerCase()
-      const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
-        { sql: `UPDATE returns SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-        // Purchase lots (product_batches, migration 0062): id-attributed lots
-        // follow the keeper. The supplier batch/cost drilldown reads by
-        // supplier_id (contacts.ts supplier-lots query: `pb.supplier_id = @id
-        // OR (supplier_id IS NULL AND supplier_name = @name)`), so an
-        // un-repointed lot would drop off the survivor's supplier detail.
-        // The name is carried too so the id: and name: aggregation keys stay
-        // consistent (products.ts supplier-cost grouping).
-        { sql: `UPDATE product_batches SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-      ]
-      if (mergedName) {
-        statements.push({ sql: `UPDATE products SET supplier = @keeperName, updated_at = CURRENT_TIMESTAMP WHERE lower(trim(COALESCE(supplier, ''))) = @mergedNameLower`, params: { keeperName: keeper.name, mergedNameLower } })
-        // Name-only lots (supplier typed free-text, supplier_id NULL) move by
-        // name exactly the way products.supplier does above and the way
-        // renameCascade.ts already carries a supplier rename -- otherwise a
-        // merge would consolidate the id-linked lots but strand the free-text
-        // ones under the merged-away name.
-        statements.push({ sql: `UPDATE product_batches SET supplier_name = @keeperName WHERE supplier_id IS NULL AND lower(trim(supplier_name)) = @mergedNameLower`, params: { keeperName: keeper.name, mergedNameLower } })
-      }
-      await db.batch(statements)
-      // Supplier AP ledger (migration 0088): same shape as the customer AR
-      // ledger above -- id-attributed invoices follow the keeper (name
-      // carried), and the NULL-id rows the import could not attribute move by
-      // name, so the name-grouped AP report (/suppliers .../ap-invoices)
-      // consolidates onto the survivor.
-      if (mergedName && await hasTable(db, 'supplier_invoices')) {
-        await db.batch([
-          { sql: `UPDATE supplier_invoices SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-          { sql: `UPDATE supplier_invoices SET supplier_name = @keeperName WHERE supplier_id IS NULL AND lower(trim(supplier_name)) = @mergedNameLower`, params: { keeperName: keeper.name, mergedNameLower } },
+    const operationId = crypto.randomUUID()
+    const plan = buildContactMergePlan({
+      table: config.table,
+      entity: config.entity,
+      editableColumns: config.columns,
+      keeper,
+      merged,
+      hasCustomerReceivables,
+      hasSupplierInvoices,
+      audit: {
+        operationId,
+        userId: user?.id ?? null,
+        userName: actorSnapshot(user),
+        deviceName: auditDevice.deviceName,
+        deviceTz: auditDevice.deviceTz,
+      },
+    })
+
+    let committedKeeper: Record<string, unknown> = plan.finalKeeper
+    try {
+      await db.batch(plan.statements)
+    } catch (error) {
+      // A transient response can arrive after D1 committed the batch. The audit
+      // marker is in that same transaction, so it is durable proof that this
+      // exact request completed; reconcile before returning any failure.
+      try {
+        const [afterKeeper, afterMerged, receipt] = await Promise.all([
+          db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId }),
+          db.prepare(`SELECT id FROM ${config.table} WHERE id = @id`).get<{ id: number }>({ id: mergeId }),
+          db.prepare(`SELECT id FROM audit_logs
+            WHERE action = 'merge' AND entity = @entity AND entity_id = @entityId
+              AND json_valid(details) AND json_extract(details, '$.operationId') = @operationId
+            ORDER BY id DESC LIMIT 1`).get<{ id: number }>({ entity: config.entity, entityId: String(keepId), operationId }),
         ])
-      } else if (await hasTable(db, 'supplier_invoices')) {
-        await db.prepare(`UPDATE supplier_invoices SET supplier_id = @keepId WHERE supplier_id = @mergeId`).run({ keepId, mergeId })
+        if (afterKeeper && !afterMerged && receipt) {
+          committedKeeper = afterKeeper
+        } else if (/malformed JSON|contact_merge_guard/i.test(String(error))) {
+          return c.json({
+            error: 'One of these contacts changed while the merge was being saved. Refresh the review and try again.',
+            code: 'contact_merge_conflict',
+          }, 409)
+        } else {
+          throw error
+        }
+      } catch (reconcileError) {
+        if (reconcileError === error) throw error
+        return c.json({
+          error: 'The merge status could not be confirmed. Refresh before trying again.',
+          code: 'contact_merge_status_unknown',
+          operationId,
+        }, 503)
       }
-    } else if (config.table === 'delivery_contacts') {
-      await db.batch([
-        { sql: `UPDATE sales SET delivery_contact_id = @keepId, delivery_contact_name = @keeperName WHERE delivery_contact_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
-      ])
     }
 
-    await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id: mergeId })
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'merge', config.entity, keepId, { mergedId: mergeId, mergedName: merged.name, backfilled: Object.keys(backfill) })
     const mergeVersions: string[] = [config.table]
-    // A merge changes more than the contact picker: linked operational rows
-    // feed other versioned read caches. Advance those dependency namespaces
-    // at the mutation boundary so a live-refresh cannot fetch an old Cache
-    // API response under the previous version.
-    if (config.table === 'customers') {
-      mergeVersions.push('sales', 'returns')
-    } else if (config.table === 'suppliers') {
-      mergeVersions.push('products', 'returns')
-    } else if (config.table === 'delivery_contacts') {
-      mergeVersions.push('sales')
+    if (config.table === 'customers') mergeVersions.push('sales', 'returns')
+    else if (config.table === 'suppliers') mergeVersions.push('products', 'returns')
+    else mergeVersions.push('sales', 'fees')
+
+    // The merge and audit are already committed. Cache, broadcast, and the
+    // convenience refresh may fail independently but must never tell the user
+    // their data was not saved.
+    // p6/efficiency-3: same batched-bump shape as mergeSupplierIntoExisting
+    // above -- bumpVersions() folds every namespace's D1 fallback into one
+    // db.batch() instead of N independent per-namespace plans, and already
+    // swallows its own KV/D1 errors, so wrap it the same way the old
+    // Promise.allSettled did to keep a cache-bump failure from surfacing.
+    await bumpVersions(c.env, [...new Set(mergeVersions)]).catch(() => {})
+    c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: keepId, mergedId: mergeId }).catch(() => {}))
+    try {
+      committedKeeper = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId }) || committedKeeper
+    } catch (_) {
+      // Return the computed final keeper when a post-commit refresh is down.
     }
-    await Promise.all([...new Set(mergeVersions)].map((namespace) => bumpVersion(c.env, namespace)))
-    c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: keepId, mergedId: mergeId }))
-    const refreshed = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId })
-    return c.json({ contact: refreshed })
+    return c.json({ contact: committedKeeper, operationId })
   })
 
   app.post(config.path, async (c) => {
@@ -921,6 +1307,7 @@ function registerContactRoutes(config: ContactConfig) {
     // match the 10,352 migrated numbers. Matching below stays digit-based,
     // so this changes nothing about duplicate detection or linkage.
     if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = formatPhoneP8(payload.phone)
+    if (Object.prototype.hasOwnProperty.call(payload, 'address')) payload.address = formatContactOptionPhones(payload.address, config.optionMode)
     // Keep the canonical phone key in sync so the storefront signup can detect
     // this contact as an existing customer (lib/phone.ts is the authority;
     // 0087 backfilled the historical rows). Customers only — suppliers/delivery
@@ -929,29 +1316,112 @@ function registerContactRoutes(config: ContactConfig) {
       payload.phone_normalized = canonicalizePhone(payload.phone)
     }
 
-    const duplicateBlock = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.confirmDuplicate === true)
-    if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
+    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.duplicateDecision)
+    if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
+    // P4-2: a supplier name that matches an existing one resolves straight to
+    // that record -- no row is created, nothing else on it changes, and the
+    // caller (the Add Supplier form, undo/redo replay, or anything else that
+    // posts here) gets back the same shape it would from a create.
+    if (duplicateDecision.resolvedExisting) {
+      const existing = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: duplicateDecision.resolvedExisting.id })
+      if (existing) return c.json(existing)
+    }
+    const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
 
+    // Customers only. A number staff typed in wins (after a reuse check);
+    // a blank one is minted from the house LC- sequence. The mint is deferred
+    // into the INSERT below so that when two walk-ins are registered at the
+    // same instant, the writer that loses the UNIQUE index race is handed
+    // the next free number instead of an error.
+    // NOTE: kept self-contained (its own normalize + its own DB read) rather
+    // than folded into a Promise.all with the duplicate check above --
+    // scripts/test-membership-defaults-20260905.cjs extracts this exact
+    // block verbatim by anchor text and runs it standalone against only
+    // (db, payload, body, config, c, normalizeMembershipNumber), so it must
+    // not read any variable computed outside its own anchors.
+    let mintMembership = false
     if (config.table === 'customers') {
-      const raw = String(payload.membership_number || '').trim()
+      const raw = normalizeMembershipNumber(payload.membership_number)
       if (raw) {
         const existing = await db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(@raw)) LIMIT 1').get({ raw })
-        if (existing) return c.json({ error: `Membership number "${raw}" is already in use` }, 400)
-        payload.membership_number = raw
+        if (existing) {
+          // Undo/redo of a hard delete (CustomersTab.tsx) replays the
+          // customer's own original number verbatim -- gap-fill deliberately
+          // reuses a number freed by that delete (see membershipNumber.ts's
+          // header), so if a brand-new signup or manual add landed on that
+          // exact slot during the undo window, the restore must not
+          // dead-end on a 400 the user has no field to fix. Fall back to a
+          // fresh mint instead of rejecting. A normal manual add (no
+          // isUndoRestore flag) still gets the strict 400 below -- that
+          // path IS a real typo/duplicate signal staff need to see.
+          if (body.isUndoRestore === true) {
+            mintMembership = true
+          } else {
+            return c.json({ error: `Membership number "${raw}" is already in use` }, 400)
+          }
+        } else {
+          // Supplied values also restore deleted legacy contacts via undo.
+          // Compare normalized, but preserve the identity bytes on restoration.
+          payload.membership_number = String(payload.membership_number)
+        }
       } else {
-        payload.membership_number = await generateMembershipNumber(c.env)
+        mintMembership = true
       }
     }
 
-    const columns = Object.keys(payload)
-    const result = await db.prepare(`
-      INSERT INTO ${config.table} (${columns.join(', ')}, updated_at)
-      VALUES (${columns.map((col) => `@${col}`).join(', ')}, CURRENT_TIMESTAMP)
-    `).run(payload)
+    const runContactInsert = async () => {
+      const columns = Object.keys(payload)
+      const insert = {
+        sql: `INSERT INTO ${config.table} (${columns.join(', ')}, updated_at)
+          VALUES (${columns.map((col) => `@${col}`).join(', ')}, CURRENT_TIMESTAMP)`,
+        params: payload,
+      }
+      if (!duplicateGuard) return db.prepare(insert.sql).run(insert.params)
+      const results = await db.batch([duplicateGuard, insert])
+      const meta = results[1]?.meta
+      return { changes: Number(meta?.changes ?? 0), lastInsertRowid: Number(meta?.last_row_id ?? 0) }
+    }
+    let result: { changes: number; lastInsertRowid: number }
+    try {
+      result = mintMembership
+        ? await withMintedMembershipNumber(db, async (membershipNumber) => {
+          payload.membership_number = membershipNumber
+          return runContactInsert()
+        })
+        : await runContactInsert()
+    } catch (error) {
+      // P4-2: a concurrent create of the same supplier name can lose this
+      // race (the guard's atomic recheck throws) after this request already
+      // passed the check above with no match. Re-resolve rather than error --
+      // the loser of the race silently attaches to the winner too.
+      if (config.table === 'suppliers') {
+        const raceMatch = (await findContactDuplicates(db, config.table, { name, phones: duplicateDecision.phones }, config.optionMode)).find((match) => match.severity !== 'phone_conflict')
+        if (raceMatch) {
+          const existing = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: raceMatch.id })
+          if (existing) return c.json(existing)
+        }
+      }
+      const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, config, { name, phones: duplicateDecision.phones }, duplicateDecision.decision)
+      if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
+      throw error
+    }
     const id = result.lastInsertRowid
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', config.entity, id, { name })
-    await bumpVersion(c.env, config.table)
-    c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'create', id }))
+    // Perf-2: the response is the freshly-inserted row itself, which reads
+    // nothing audit()/bumpVersion() write -- defer both into the same
+    // waitUntil the broadcast already used, so the reply only waits on the
+    // one SELECT below instead of three sequential round trips.
+    c.executionCtx.waitUntil(Promise.all([
+      audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', config.entity, id, {
+        name,
+        ...(duplicateDecision.decision ? {
+          duplicate_decision: 'create_separate',
+          duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
+          duplicate_candidate_fingerprint: duplicateDecision.decision.fingerprint,
+        } : {}),
+      }),
+      bumpVersion(c.env, config.table),
+      broadcast(c.env, config.channel, { action: 'create', id }),
+    ]))
     const item = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get({ id })
     return c.json(item)
   })
@@ -969,6 +1439,9 @@ function registerContactRoutes(config: ContactConfig) {
       }
       const id = c.req.param('id')
       const db = getDb(c.env)
+      const customer = await db.prepare('SELECT id, is_anonymous FROM customers WHERE id = @id').get<Record<string, unknown>>({ id })
+      if (!customer) return c.json({ error: 'customer not found' }, 404)
+      if (isAnonymousCustomer(customer)) return anonymousCustomerMutationResponse(c)
       const account = await db.prepare('SELECT id FROM portal_accounts WHERE contact_id = @id LIMIT 1').get<{ id: number }>({ id })
       if (!account) return c.json({ error: 'This contact has no storefront account' }, 404)
       // A readable-but-random temporary password (no ambiguous chars).
@@ -976,10 +1449,14 @@ function registerContactRoutes(config: ContactConfig) {
       const bytes = new Uint8Array(10)
       crypto.getRandomValues(bytes)
       const tempPassword = [...bytes].map((b) => alphabet[b % alphabet.length]).join('')
-      await db.prepare('UPDATE portal_accounts SET password_hash = @h, updated_at = CURRENT_TIMESTAMP WHERE id = @aid')
-        .run({ h: bcrypt.hashSync(tempPassword, 10), aid: account.id })
+      const update = await db.prepare(`UPDATE portal_accounts
+        SET password_hash = @h, updated_at = CURRENT_TIMESTAMP
+        WHERE id = @aid AND contact_id = @customerId
+          AND EXISTS (SELECT 1 FROM customers WHERE id = @customerId AND ${customerIsProfileSql()})`)
+        .run({ h: bcrypt.hashSync(tempPassword, 10), aid: account.id, customerId: id })
+      if (Number(update.changes || 0) !== 1) return anonymousCustomerMutationResponse(c)
       await revokePortalSessionsForAccount(c.env, account.id)
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'portal_reset', config.entity, id, {})
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'portal_reset', config.entity, id, {})
       return c.json({ ok: true, temporaryPassword: tempPassword })
     })
   }
@@ -997,8 +1474,10 @@ function registerContactRoutes(config: ContactConfig) {
 
     const current = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id })
     if (!current) return c.json({ error: `${config.entity} not found` }, 404)
+    if (config.table === 'customers' && isAnonymousCustomer(current)) return anonymousCustomerMutationResponse(c)
+    const expectedUpdatedAt = getExpectedUpdatedAt(body)
     try {
-      assertUpdatedAtMatch(config.entity, current, getExpectedUpdatedAt(body))
+      assertUpdatedAtMatch(config.entity, current, expectedUpdatedAt)
     } catch (error) {
       const result = conflictResult(error)
       if (result) return c.json(result.body, result.status)
@@ -1009,17 +1488,29 @@ function registerContactRoutes(config: ContactConfig) {
     if (!name) return c.json({ error: 'Name is required' }, 400)
     const nameChanged = String(current.name || '').trim().toLowerCase() !== name.toLowerCase()
     const renameScope = String(body.__rename_cascade || '').trim().toLowerCase()
-    if (nameChanged && (config.table === 'customers' || config.table === 'suppliers')) {
+    // Every contact kind with live name snapshots asks the rename question
+    // (the user's rule: a rename either links everything over or keeps the
+    // past records as they were). Delivery contacts snapshot onto
+    // sales.delivery_contact_name, so they are in.
+    const renameChoiceRequired = config.table === 'customers' || config.table === 'suppliers' || config.table === 'delivery_contacts'
+    if (nameChanged && renameChoiceRequired) {
       if (renameScope !== 'carry' && renameScope !== 'record_only') {
         return c.json({ error: 'Choose whether to update linked live records or rename only this contact.', code: 'rename_choice_required' }, 409)
       }
-      const collision = await db.prepare(`SELECT id, name FROM ${config.table} WHERE id != @id AND lower(trim(name)) = lower(trim(@name)) LIMIT 1`).get<{ id: number; name: string }>({ id, name })
-      if (collision) {
-        return c.json({
-          error: `"${name}" already exists. Open Possible Duplicates and explicitly choose which record to keep, or cancel this rename.`,
-          code: 'merge_required',
-          duplicate: collision,
-        }, 409)
+      // P4-2: suppliers do not stop here on a collision -- checkContactDuplicateBlock's
+      // resolvedExisting further down folds this record into the existing
+      // same-name one automatically (mergeSupplierIntoExisting), the same
+      // "one row per company, resolved silently" rule POST now uses. Customers
+      // and delivery contacts keep asking, unchanged.
+      if (config.table !== 'suppliers') {
+        const collision = await db.prepare(`SELECT id, name FROM ${config.table} WHERE id != @id AND lower(trim(name)) = lower(trim(@name)) LIMIT 1`).get<{ id: number; name: string }>({ id, name })
+        if (collision) {
+          return c.json({
+            error: `"${name}" already exists. Open Possible Duplicates and explicitly choose which record to keep, or cancel this rename.`,
+            code: 'merge_required',
+            duplicate: collision,
+          }, 409)
+        }
       }
     }
 
@@ -1042,6 +1533,7 @@ function registerContactRoutes(config: ContactConfig) {
     // P7-c: same P8 display shape on edit as on create -- an update that
     // touches the phone must not undo the convention.
     if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = formatPhoneP8(payload.phone)
+    if (Object.prototype.hasOwnProperty.call(payload, 'address')) payload.address = formatContactOptionPhones(payload.address, config.optionMode)
     // Keep the canonical phone key in sync on edit too (see create above).
     if (config.table === 'customers' && Object.prototype.hasOwnProperty.call(payload, 'phone')) {
       payload.phone_normalized = canonicalizePhone(payload.phone)
@@ -1068,17 +1560,42 @@ function registerContactRoutes(config: ContactConfig) {
     // to check the phones already on `current`, not an empty set.
     const effectivePhone = Object.prototype.hasOwnProperty.call(payload, 'phone') ? payload.phone : current.phone
     const effectiveAddress = Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address
-    const duplicateBlock = await checkContactDuplicateBlock(c.env, config, { id, name, phone: effectivePhone, address: effectiveAddress }, body.confirmDuplicate === true)
-    if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
+    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { id, name, phone: effectivePhone, address: effectiveAddress }, body.duplicateDecision)
+    if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
+    // P4-2: this edit's resulting name (or phone) now identifies a DIFFERENT
+    // existing supplier -- most commonly a rename onto an existing name, the
+    // case the collision check above deferred here for suppliers. Fold this
+    // record into the existing one instead of saving the edit, silently and
+    // without asking, same as the create path just above.
+    if (duplicateDecision.resolvedExisting) {
+      const keeper = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: duplicateDecision.resolvedExisting.id })
+      if (keeper) {
+        const mergedResult = await mergeSupplierIntoExisting(c.env, config, user, keeper, current)
+        c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: Number(keeper.id), mergedId: Number(current.id) }).catch(() => {}))
+        return c.json(mergedResult)
+      }
+      // The matched row vanished between the check above and now (a race) --
+      // nothing left to fold into; fall through and save the edit normally.
+    }
+    const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
 
+    // Customers only, same deferred-mint shape as the POST route above: a
+    // number staff typed in wins (after a reuse check); a blank one on a
+    // customer that has never had one is minted from the house LC-
+    // sequence, deferred into the batch below so a concurrent writer
+    // winning the UNIQUE index race is handed the next free number instead
+    // of a raw 500.
+    let mintMembership = false
     if (config.table === 'customers' && Object.prototype.hasOwnProperty.call(payload, 'membership_number')) {
-      const raw = String(payload.membership_number || '').trim()
-      if (raw) {
+      const raw = normalizeMembershipNumber(payload.membership_number)
+      if (current.membership_number) {
+        payload.membership_number = current.membership_number
+      } else if (raw) {
         const existing = await db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(@raw)) AND id != @id LIMIT 1').get({ raw, id })
         if (existing) return c.json({ error: `Membership number "${raw}" is already in use` }, 400)
         payload.membership_number = raw
       } else {
-        payload.membership_number = current.membership_number || (await generateMembershipNumber(c.env))
+        mintMembership = true
       }
     }
 
@@ -1089,7 +1606,7 @@ function registerContactRoutes(config: ContactConfig) {
     // table separately, so a later failure could leave the contact and its
     // products disagreeing. D1 batch is transactional and fails loudly.
     // Immutable audit/event rows are deliberately not rewritten here.
-    const snapshotCarry = !nameChanged || renameScope === 'carry' || (config.table !== 'customers' && config.table !== 'suppliers')
+    const snapshotCarry = !nameChanged || renameScope === 'carry' || !renameChoiceRequired
     const phoneChanged = config.table === 'customers'
       && Object.prototype.hasOwnProperty.call(payload, 'phone')
       && String(current.phone || '') !== String(payload.phone || '')
@@ -1097,20 +1614,34 @@ function registerContactRoutes(config: ContactConfig) {
       && Object.prototype.hasOwnProperty.call(payload, 'address')
       && String(current.address || '') !== String(payload.address || '')
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
-    const columns = Object.keys(payload)
-    if (columns.length) {
+    if (config.table === 'customers') statements.push(anonymousCustomerGuardStatement(id))
+    if (duplicateGuard) statements.push(duplicateGuard)
+    if (expectedUpdatedAt) {
       statements.push({
+        sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM ${config.table} WHERE id = @id AND updated_at IS @expectedUpdatedAt)
+          THEN 1 ELSE json('CONTACT_STALE_WRITE_GUARD') END AS contact_stale_guard`,
+        params: { id, expectedUpdatedAt },
+      })
+    }
+    const columns = Object.keys(payload)
+    let contactUpdate: { sql: string; params: Record<string, unknown> } | null = null
+    if (columns.length) {
+      contactUpdate = {
         sql: `UPDATE ${config.table}
           SET ${columns.map((col) => `${col} = @${col}`).join(', ')}, updated_at = CURRENT_TIMESTAMP
           WHERE id = @id`,
         params: { ...payload, id },
-      })
+      }
+      statements.push(contactUpdate)
     }
 
     if ((nameChanged && snapshotCarry) || phoneChanged || addressChanged) {
       if (config.table === 'customers') {
         const customerPhone = Object.prototype.hasOwnProperty.call(payload, 'phone') ? payload.phone : current.phone
-        const customerAddress = Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address
+        // N21: sales carry the DISPLAY address, not the Contact Options JSON
+        // the customers.address column holds -- the customer row itself keeps
+        // the full options set, which is what the Customers page edits.
+        const customerAddress = contactDisplayAddress(Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address) || null
         const snapshotName = nameChanged && !snapshotCarry ? current.name : name
         statements.push(
           { sql: `UPDATE sales SET customer_name = @name, customer_phone = @phone, customer_address = @address WHERE customer_id = @id`, params: { id, name: snapshotName, phone: customerPhone ?? null, address: customerAddress ?? null } },
@@ -1140,16 +1671,52 @@ function registerContactRoutes(config: ContactConfig) {
         statements.push({ sql: `UPDATE sales SET delivery_contact_name = @name WHERE delivery_contact_id = @id`, params: { id, name } })
       }
     }
-    if (statements.length) await db.batch(statements)
+    // The contact UPDATE built above carries `payload` as its params, so a
+    // deferred mint (mintMembership) has to refresh them before the batch
+    // runs: withMintedMembershipNumber re-mints and calls back on a lost
+    // UNIQUE race, and the retry must write the NEW number, not the one it
+    // just lost. Same one retry story as the POST route above.
+    try {
+      if (mintMembership) {
+        await withMintedMembershipNumber(db, async (membershipNumber) => {
+          payload.membership_number = membershipNumber
+          if (contactUpdate) contactUpdate.params = { ...payload, id }
+          if (statements.length) await db.batch(statements)
+        })
+      } else if (statements.length) {
+        await db.batch(statements)
+      }
+    } catch (error) {
+      if (config.table === 'customers' && (await anonymousCustomerIds(db, [id])).has(Number(id))) return anonymousCustomerMutationResponse(c)
+      const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, config, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision)
+      if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
+      if (expectedUpdatedAt) {
+        const fresh = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id })
+        try {
+          assertUpdatedAtMatch(config.entity, fresh, expectedUpdatedAt)
+        } catch (conflictError) {
+          const result = conflictResult(conflictError)
+          if (result) return c.json(result.body, result.status)
+        }
+      }
+      throw error
+    }
     if (config.table === 'suppliers' && nameChanged && snapshotCarry) {
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'rename', 'supplier_cascade', id, {
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'supplier_cascade', id, {
         from: String(current.name || '').trim(),
         to: name,
         scope: 'linked_live_records',
         historical_snapshots_preserved: true,
       })
     }
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', config.entity, id, { name })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', config.entity, id, {
+      name,
+      ...(duplicateDecision.decision ? {
+        duplicate_decision: 'create_separate',
+        duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
+        duplicate_candidate_fingerprint: duplicateDecision.decision.fingerprint,
+      } : {}),
+    })
     const updateVersions: string[] = [config.table]
     if (nameChanged && snapshotCarry) {
       if (config.table === 'customers') {
@@ -1198,6 +1765,7 @@ function registerContactRoutes(config: ContactConfig) {
     const db = getDb(c.env)
     const current = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id })
     if (!current) return c.json({ error: `${config.entity} not found` }, 404)
+    if (config.table === 'customers' && isAnonymousCustomer(current)) return anonymousCustomerMutationResponse(c)
 
     let body: Record<string, unknown> = Object.fromEntries(new URL(c.req.url).searchParams)
     try {
@@ -1213,8 +1781,20 @@ function registerContactRoutes(config: ContactConfig) {
       throw error
     }
 
-    await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id })
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', config.entity, id, { name: current.name })
+    try {
+      if (config.table === 'customers') {
+        await db.batch([
+          anonymousCustomerGuardStatement(id),
+          { sql: 'DELETE FROM customers WHERE id = @customerId', params: { customerId: id } },
+        ])
+      } else {
+        await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id })
+      }
+    } catch (error) {
+      if (config.table === 'customers' && (await anonymousCustomerIds(db, [id])).has(Number(id))) return anonymousCustomerMutationResponse(c)
+      throw error
+    }
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', config.entity, id, { name: current.name })
     await bumpVersion(c.env, config.table)
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'delete', id }))
     return c.json({})
@@ -1239,6 +1819,9 @@ function registerContactRoutes(config: ContactConfig) {
     if (getActionTier(user, 'contacts', 'bulk_delete') === 'none') {
       return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }
+    if (getActionTier(user, 'contacts', 'bulk') === 'none') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
 
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
     const reason = body.reason != null ? String(body.reason).trim() || null : null
@@ -1248,9 +1831,12 @@ function registerContactRoutes(config: ContactConfig) {
     // Same generous, untuned 50,000 ceiling as products.ts's identical route.
     if (!rawIds.length) return c.json({ error: `No ${config.entity}s selected` }, 400)
     if (rawIds.length > 50000) return c.json({ error: `Select 50,000 or fewer ${config.entity}s per bulk delete` }, 400)
+    if (config.table === 'customers' && (await anonymousCustomerIds(getDb(c.env), rawIds as number[])).size > 0) {
+      return anonymousCustomerMutationResponse(c)
+    }
 
     try {
-      const { jobId, totalCount } = await createBulkDeleteJob(c.env, contactBulkDeleteEntityType(config), rawIds as number[], reason, { id: user?.id ?? null, name: user?.name ?? null })
+      const { jobId, totalCount } = await createBulkDeleteJob(c.env, contactBulkDeleteEntityType(config), rawIds as number[], reason, { id: user?.id ?? null, name: actorSnapshot(user) })
       return c.json({ success: true, jobId, totalCount }, 202)
     } catch (error) {
       return c.json({ error: error instanceof Error ? error.message : 'Failed to start bulk delete' }, 400)
@@ -1265,7 +1851,7 @@ function registerContactRoutes(config: ContactConfig) {
     if (getPermissionTier(user, 'contacts') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
     await reapStalledBulkDeleteJobs(c.env)
     const job = await getBulkDeleteJob(c.env, c.req.param('id'))
-    if (!job) return c.json({ error: 'Bulk delete job not found' }, 404)
+    if (!job || job.entity_type !== contactBulkDeleteEntityType(config)) return c.json({ error: 'Bulk delete job not found' }, 404)
     return c.json({
       success: true,
       job: {
@@ -1287,8 +1873,11 @@ function registerContactRoutes(config: ContactConfig) {
   // cancellation and products.ts's identical route.
   app.post(`${config.path}/bulk-delete-jobs/:id/cancel`, async (c) => {
     const user = c.get('user')
-    if (getPermissionTier(user, 'contacts') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
-    await getDb(c.env).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND status IN ('pending', 'processing')`).run({ id: c.req.param('id') })
+    if (getActionTier(user, 'contacts', 'bulk') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    const entityType = contactBulkDeleteEntityType(config)
+    const job = await getBulkDeleteJob(c.env, c.req.param('id'))
+    if (!job || job.entity_type !== entityType) return c.json({ error: 'Bulk delete job not found' }, 404)
+    await getDb(c.env).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND entity_type = @entityType AND status IN ('pending', 'processing')`).run({ id: c.req.param('id'), entityType })
     return c.json({ success: true })
   })
 
@@ -1328,11 +1917,35 @@ app.get('/suppliers/:id/purchases', async (c) => {
   const page = clampInt(query.page, 1, 1, 100000)
   const pageSize = clampInt(query.page_size ?? query.pageSize, 50, 1, 200)
   const offset = (page - 1) * pageSize
-  const params = { id, name: String(supplier.name || '').trim().toLowerCase() }
+  const params: Record<string, unknown> = { id, name: String(supplier.name || '').trim().toLowerCase() }
+  // A lot whose tracked receipts were all reverted or undone (received
+  // quantity 0 and no money; lib/productBatches.ts planUnreceiveBatchStock)
+  // keeps its supplier so the revert can itself be reverted, but is not a
+  // purchase -- the same rule the stock-in invoice report and the credit
+  // reminder apply. Untracked pre-0067 lots (NULL) stay.
   const supplierWhere = `(
-    pb.supplier_id = @id
-    OR (pb.supplier_id IS NULL AND pb.supplier_name IS NOT NULL AND lower(trim(pb.supplier_name)) = @name)
+    (pb.supplier_id = @id
+      OR (pb.supplier_id IS NULL AND pb.supplier_name IS NOT NULL AND lower(trim(pb.supplier_name)) = @name))
+    AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
   )`
+
+  // P3-10: the Start->End range the purchases float sends. `received_at` holds
+  // the operator's recorded receive DATE, not a UTC timestamp, so it is bounded
+  // by plain day-string comparison exactly the way the stock-in invoice report
+  // does it (stockInReportFilters below) -- localDateAtOrAfter() would shift a
+  // bare date by the business timezone and drop the edge day. A bound also
+  // requires a recorded date, so a filtered window never silently counts lots
+  // that have no receive date at all; with no range set the endpoint still
+  // reports the supplier's complete history, exactly as before.
+  const from = String(query.from || '').slice(0, 10)
+  const to = String(query.to || '').slice(0, 10)
+  const receivedDay = "substr(COALESCE(pb.received_at, ''), 1, 10)"
+  const rangeConditions: string[] = []
+  if (from) { rangeConditions.push(`${receivedDay} <> '' AND ${receivedDay} >= @from`); params.from = from }
+  if (to) { rangeConditions.push(`${receivedDay} <> '' AND ${receivedDay} <= @to`); params.to = to }
+  // The totals below stay independent of the visible PAGE, but they do honour
+  // this range, so the headline numbers always describe the filtered rows.
+  const purchasesWhere = [supplierWhere, ...rangeConditions].join(' AND ')
 
   // Totals are calculated across the COMPLETE supplier history, independently
   // of the visible page. The old endpoint capped the row array at 1,000 and
@@ -1347,7 +1960,7 @@ app.get('/suppliers/:id/purchases', async (c) => {
            SUM(CASE WHEN pb.payment_status = 'credit' THEN 1 ELSE 0 END) AS credit_batches,
            SUM(CASE WHEN pb.received_cost_usd IS NULL THEN 1 ELSE 0 END) AS batches_without_cost
     FROM product_batches pb
-    WHERE ${supplierWhere}
+    WHERE ${purchasesWhere}
   `).get<{
     batches: number; products: number; units_received: number; cost_usd: number
     credit_open_usd: number; credit_batches: number; batches_without_cost: number
@@ -1365,7 +1978,7 @@ app.get('/suppliers/:id/purchases', async (c) => {
       FROM branch_batch_stock
       GROUP BY batch_id
     ) bbs ON bbs.batch_id = pb.id
-    WHERE ${supplierWhere}
+    WHERE ${purchasesWhere}
     ORDER BY pb.received_at DESC, pb.id DESC
     LIMIT @limit OFFSET @offset
   `).all<{
@@ -1424,6 +2037,13 @@ app.get('/suppliers/:id/purchases', async (c) => {
 // must not become a giant "No supplier recorded" invoice merely because
 // the catalog was imported that day. Keep genuine no-supplier receipts;
 // exclude only the unmistakable all-null catalog placeholder shape.
+// Likewise a lot whose tracked receipts were all reverted or undone
+// (received_quantity 0 and no money; lib/productBatches.ts
+// planUnreceiveBatchStock, lib/stockSession.ts's undo target): it keeps its
+// supplier so the revert can itself be reverted, but nothing was bought, so
+// there is no invoice line -- under the supplier or under "no supplier".
+// Untracked pre-0067 lots (NULL) stay. The reverts themselves stay visible
+// in the stock ledger.
 const STOCK_IN_REPORT_SOURCE = `
   SELECT pb.id, pb.variant_product_id, pb.batch_number, pb.lot_code, pb.received_at,
          pb.received_quantity, pb.unit_cost_usd, pb.received_cost_usd, pb.payment_status, pb.credit_due_date,
@@ -1447,6 +2067,7 @@ const STOCK_IN_REPORT_SOURCE = `
     AND pb.unit_cost_usd IS NULL
     AND pb.received_branch_id IS NULL
   )
+  AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
 `
 
 // Builds the WHERE clause + params both endpoints share. A date bound also
@@ -1665,8 +2286,8 @@ app.get('/suppliers/reports/ap-invoices', async (c) => {
   else if (status === 'paid') conditions.push('si.outstanding_balance_usd <= 0')
   const from = String(query.from || '').slice(0, 10)
   const to = String(query.to || '').slice(0, 10)
-  if (from) { conditions.push("date(si.invoice_date, '+7 hours') >= @from"); params.from = from }
-  if (to) { conditions.push("date(si.invoice_date, '+7 hours') <= @to"); params.to = to }
+  if (from) { conditions.push(localDateAtOrAfter('si.invoice_date', '@from')); params.from = from }
+  if (to) { conditions.push(localDateAtOrBefore('si.invoice_date', '@to')); params.to = to }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
   type ApRow = {
@@ -1737,6 +2358,9 @@ app.get('/suppliers/reports/ap-invoices', async (c) => {
 // Resilient to the ledger not being applied yet -- returns an empty payload
 // rather than erroring, so the section renders "no receivables" until then.
 app.get('/customers/reports/ar-invoices', async (c) => {
+  if (getActionTier(c.get('user'), 'contacts', 'financial_history') !== 'full') {
+    return c.json({ error: 'You do not have permission to view customer financial history' }, 403)
+  }
   const db = getDb(c.env)
   const query = c.req.query()
   const page = clampInt(query.page, 1, 1, 100000)
@@ -1766,8 +2390,8 @@ app.get('/customers/reports/ar-invoices', async (c) => {
   else if (status === 'settled') conditions.push('cr.outstanding_balance_usd = 0')
   const from = String(query.from || '').slice(0, 10)
   const to = String(query.to || '').slice(0, 10)
-  if (from) { conditions.push("date(cr.invoice_date, '+7 hours') >= @from"); params.from = from }
-  if (to) { conditions.push("date(cr.invoice_date, '+7 hours') <= @to"); params.to = to }
+  if (from) { conditions.push(localDateAtOrAfter('cr.invoice_date', '@from')); params.from = from }
+  if (to) { conditions.push(localDateAtOrBefore('cr.invoice_date', '@to')); params.to = to }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
   type ArRow = {
@@ -1986,6 +2610,7 @@ app.post('/customers/link-conflicts/relink', async (c) => {
   const user = c.get('user')
   const denied = denyUnlessFullContactAction(c, 'resolve_conflicts')
   if (denied) return denied
+  if (getActionTier(user, 'sales', 'customer') !== 'full' || getActionTier(user, 'sales', 'customer_reassign') !== 'full') return c.json({ error: 'No permission to reassign sale customers.' }, 403)
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const currentId = Number(body.customer_id)
   const phoneKey = String(body.phone_key || '').trim()
@@ -1994,14 +2619,32 @@ app.post('/customers/link-conflicts/relink', async (c) => {
     return c.json({ error: 'customer_id, phone_key and a different target_customer_id are required' }, 400)
   }
   const db = getDb(c.env)
-  const target = await db.prepare('SELECT id, name FROM customers WHERE id = ?').get<{ id: number; name: string | null }>([targetId])
+  const target = await db.prepare('SELECT id, name, is_anonymous FROM customers WHERE id = ?').get<{ id: number; name: string | null; is_anonymous: number }>([targetId])
   if (!target) return c.json({ error: 'Target customer not found.' }, 404)
-  const result = await db.prepare(`
-    UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
-    WHERE customer_id = @currentId AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey
-  `).run({ targetId, currentId, phoneKey })
+  if (isAnonymousCustomer(target)) return anonymousCustomerMutationResponse(c)
+  const loyaltyPredicate = `EXISTS(SELECT 1 FROM sales s WHERE s.customer_id=@currentId AND ${PHONE_KEY_SQL('s.customer_phone')}=@phoneKey AND ${loyaltyAffectingSaleSql()})`
+  const loyaltyParams = { currentId, phoneKey }
+  const loyaltyBlocked = () => db.prepare(`SELECT 1 WHERE ${loyaltyPredicate}`).get(loyaltyParams)
+  if (await loyaltyBlocked()) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
+  let result
+  try {
+    const results = await db.batch([
+      anonymousCustomerGuardStatement(targetId, 'targetId'),
+      { sql: `SELECT CASE WHEN NOT (${loyaltyPredicate}) THEN 1 ELSE json_extract('${LOYALTY_REASSIGNMENT_CODE}','$') END`, params: loyaltyParams },
+      {
+        sql: `UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
+          WHERE customer_id = @currentId AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey`,
+        params: { targetId, currentId, phoneKey },
+      },
+    ])
+    result = results[2]
+  } catch (error) {
+    if (await loyaltyBlocked()) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
+    if ((await anonymousCustomerIds(db, [targetId])).has(targetId)) return anonymousCustomerMutationResponse(c)
+    throw error
+  }
   const changed = Number((result as { meta?: { changes?: number } })?.meta?.changes ?? (result as { changes?: number })?.changes ?? 0)
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'relink_sales', 'customer', targetId, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'relink_sales', 'customer', targetId, {
     fromCustomerId: currentId, phoneKey, salesRelinked: changed,
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'relink', id: targetId }))
@@ -2015,6 +2658,7 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
   const user = c.get('user')
   const denied = denyUnlessFullContactAction(c, 'resolve_conflicts')
   if (denied) return denied
+  if (getActionTier(user, 'sales', 'customer') !== 'full' || getActionTier(user, 'sales', 'customer_reassign') !== 'full') return c.json({ error: 'No permission to reassign sale customers.' }, 403)
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const name = String(body.name || '').trim()
   const phone = String(body.phone || '').trim()
@@ -2023,30 +2667,69 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
   if (!name && !phone) return c.json({ error: 'The group’s name or phone is required' }, 400)
   const db = getDb(c.env)
 
+  // Check before creating any directory row, and again atomically with relink.
+  const loyaltyPredicate = `EXISTS(SELECT 1 FROM sales s WHERE s.customer_id IS NULL
+    AND lower(trim(COALESCE(s.customer_name,'')))=lower(@name)
+    AND ${PHONE_KEY_SQL('s.customer_phone')}=@phoneKey AND ${loyaltyAffectingSaleSql()})`
+  const loyaltyParams = { name, phoneKey }
+  const loyaltyBlocked = () => db.prepare(`SELECT 1 WHERE ${loyaltyPredicate}`).get(loyaltyParams)
+  if (await loyaltyBlocked()) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
+
   let targetId: number
   let created = false
   if (Number.isFinite(requestedTarget) && requestedTarget > 0) {
-    const target = await db.prepare('SELECT id FROM customers WHERE id = ?').get<{ id: number }>([requestedTarget])
+    const target = await db.prepare('SELECT id, is_anonymous FROM customers WHERE id = ?').get<{ id: number; is_anonymous: number }>([requestedTarget])
     if (!target) return c.json({ error: 'Target customer not found.' }, 404)
+    if (isAnonymousCustomer(target)) return anonymousCustomerMutationResponse(c)
     targetId = target.id
   } else {
-    const membership = await generateMembershipNumber(c.env)
-    const inserted = await db.prepare(`
-      INSERT INTO customers (name, phone, phone_normalized, membership_number, created_at, updated_at)
-      VALUES (@name, @phone, @phoneNormalized, @membership, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `).run({ name: name || phone, phone: phone || null, phoneNormalized: canonicalizePhone(phone), membership })
+    const storedPhone = formatPhoneP8(phone)
+    const duplicateDecision = await checkContactDuplicateBlock(c.env, CUSTOMERS, { name: name || storedPhone, phone: storedPhone, address: null }, null)
+    if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
+    const duplicateGuard = contactDuplicateWriteGuardStatement('customers', { name: name || storedPhone, phones: duplicateDecision.phones })
+    let inserted: { changes: number; lastInsertRowid: number }
+    try {
+      inserted = await withMintedMembershipNumber(db, async (membership) => {
+        const insert = {
+          sql: `INSERT INTO customers (name, phone, phone_normalized, membership_number, created_at, updated_at)
+            VALUES (@name, @phone, @phoneNormalized, @membership, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          params: { name: name || storedPhone, phone: storedPhone || null, phoneNormalized: canonicalizePhone(storedPhone), membership },
+        }
+        if (!duplicateGuard) return db.prepare(insert.sql).run(insert.params)
+        const results = await db.batch([duplicateGuard, insert])
+        const meta = results[1]?.meta
+        return { changes: Number(meta?.changes ?? 0), lastInsertRowid: Number(meta?.last_row_id ?? 0) }
+      })
+    } catch (error) {
+      const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, CUSTOMERS, { name: name || storedPhone, phones: duplicateDecision.phones }, null)
+      if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
+      throw error
+    }
     targetId = Number((inserted as { lastInsertRowid?: number | bigint }).lastInsertRowid ?? (inserted as { meta?: { last_row_id?: number } })?.meta?.last_row_id)
     created = true
   }
 
-  const result = await db.prepare(`
-    UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
-    WHERE customer_id IS NULL
-      AND lower(trim(COALESCE(customer_name,''))) = lower(@name)
-      AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey
-  `).run({ targetId, name, phoneKey })
+  let result
+  try {
+    const results = await db.batch([
+      anonymousCustomerGuardStatement(targetId, 'targetId'),
+      { sql: `SELECT CASE WHEN NOT (${loyaltyPredicate}) THEN 1 ELSE json_extract('${LOYALTY_REASSIGNMENT_CODE}','$') END`, params: loyaltyParams },
+      {
+        sql: `UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
+          WHERE customer_id IS NULL
+            AND lower(trim(COALESCE(customer_name,''))) = lower(@name)
+            AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey`,
+        params: { targetId, name, phoneKey },
+      },
+    ])
+    result = results[2]
+  } catch (error) {
+    if (await loyaltyBlocked()) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
+    if ((await anonymousCustomerIds(db, [targetId])).has(targetId)) return anonymousCustomerMutationResponse(c)
+    throw error
+  }
   const changed = Number((result as { meta?: { changes?: number } })?.meta?.changes ?? (result as { changes?: number })?.changes ?? 0)
-  await audit(c.env, user?.id ?? null, user?.name ?? null, created ? 'create_and_link_sales' : 'link_sales', 'customer', targetId, {
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), created ? 'create_and_link_sales' : 'link_sales', 'customer', targetId, {
     name, phone, salesLinked: changed, createdContact: created,
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: created ? 'create' : 'update', id: targetId }))
@@ -2070,7 +2753,7 @@ app.post('/customers/link-conflicts/dismiss', async (c) => {
     VALUES ('customers', @kind, @value, @byId, @byName, CURRENT_TIMESTAMP)
     ON CONFLICT(contact_table, cluster_type, cluster_value) DO UPDATE SET
       dismissed_by_id = @byId, dismissed_by_name = @byName, dismissed_at = CURRENT_TIMESTAMP
-  `).run({ kind, value, byId: user?.id ?? null, byName: user?.name ?? null })
+  `).run({ kind, value, byId: user?.id ?? null, byName: actorSnapshot(user) })
   return c.json({ ok: true })
 })
 
@@ -2108,15 +2791,31 @@ app.post('/customers/:id/points', async (c) => {
     return c.json({ error: 'Points must be a positive number no greater than 1,000,000.' }, 400)
   }
   const db = getDb(c.env)
-  const customer = await db.prepare('SELECT id, name, membership_number FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null }>([customerId])
+  const customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number }>([customerId])
   if (!customer) return c.json({ error: 'Customer not found.' }, 404)
+  if (isAnonymousCustomer(customer)) return anonymousCustomerMutationResponse(c)
   const note = String(body.note || '').trim().slice(0, 500) || null
-  const result = await db.prepare(`
-    INSERT INTO loyalty_point_adjustments (customer_id, points, note, created_by_id, created_by_name)
-    VALUES (@customerId, @points, @note, @actorId, @actorName)
-  `).run({ customerId, points: Number(points.toFixed(2)), note, actorId: actor.id, actorName: actor.name })
-  await audit(c.env, actor.id, actor.name, 'award_points', 'customer', customerId, {
-    adjustmentId: result.lastInsertRowid,
+  // created_by_name is a USER_NAME_SNAPSHOTS column (userIdentity.ts), so the
+  // rename cascade rewrites it to the account USERNAME. Stamping the full name
+  // here would make this row change shape the first time anyone is renamed.
+  let result
+  try {
+    const results = await db.batch([
+      anonymousCustomerGuardStatement(customerId),
+      {
+        sql: `INSERT INTO loyalty_point_adjustments (customer_id, points, note, created_by_id, created_by_name)
+          VALUES (@customerId, @points, @note, @actorId, @actorName)`,
+        params: { customerId, points: Number(points.toFixed(2)), note, actorId: actor.id, actorName: actorSnapshot(actor) },
+      },
+    ])
+    result = results[1]
+  } catch (error) {
+    if ((await anonymousCustomerIds(db, [customerId])).has(customerId)) return anonymousCustomerMutationResponse(c)
+    throw error
+  }
+  const adjustmentId = Number(result.meta?.last_row_id ?? 0)
+  await audit(c.env, actor.id, actorSnapshot(actor), 'award_points', 'customer', customerId, {
+    adjustmentId,
     customerName: customer.name,
     membershipNumber: customer.membership_number,
     points: Number(points.toFixed(2)),
@@ -2124,7 +2823,7 @@ app.post('/customers/:id/points', async (c) => {
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'award_points', id: customerId }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'customers'))
-  return c.json({ success: true, id: result.lastInsertRowid, customer_id: customerId, points: Number(points.toFixed(2)) }, 201)
+  return c.json({ success: true, id: adjustmentId, customer_id: customerId, points: Number(points.toFixed(2)) }, 201)
 })
 
 // GET /api/customers/points-summary -- was a hardcoded `[]` stub. Exported
@@ -2136,6 +2835,14 @@ app.post('/customers/:id/points', async (c) => {
 // rather than leaving the stub, since a wrong-shaped `[]` is worse than
 // an unused-but-correct endpoint: silent, and indistinguishable from "no
 // customers have points yet" if something starts calling it later.
+//
+// It IS called now: LoyaltyPointsPage.tsx's "Top customer points" board
+// used to download the whole customers table (every column, plus the
+// loyalty aggregation for all ~5k rows) just to sort ten membership
+// holders by balance client-side. `membership_only` + `sort=points` +
+// `top` move that to the server, where the scan is already happening, and
+// return ten rows instead of megabytes. All three are additive: without
+// them this endpoint answers exactly as before.
 app.get('/customers/points-summary', async (c) => {
   const db = getDb(c.env)
   const query = c.req.query()
@@ -2143,6 +2850,7 @@ app.get('/customers/points-summary', async (c) => {
 
   const where: string[] = []
   const params: Record<string, unknown> = {}
+  where.push(customerIsProfileSql())
   // Same FTS5 swap as registerContactRoutes above -- see lib/contactSearch.ts.
   // This endpoint is currently unreachable from the frontend (see the
   // comment above this handler), but kept correct rather than left on the
@@ -2152,6 +2860,10 @@ app.get('/customers/points-summary', async (c) => {
     where.push(contactMatch.sql)
     Object.assign(params, contactMatch.params)
   }
+  // membership_only=1: only contacts that actually carry a membership
+  // number, i.e. the only ones a loyalty board can name.
+  const membershipOnly = ['1', 'true', 'yes'].includes(String(query.membership_only || '').trim().toLowerCase())
+  if (membershipOnly) where.push(`trim(COALESCE(membership_number, '')) <> ''`)
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
   const limit = clampInt(query.limit, 500, 1, 2000)
 
@@ -2178,7 +2890,16 @@ app.get('/customers/points-summary', async (c) => {
     }
   })
 
-  return c.json(payload)
+  // sort=points: highest balance first (ties keep the name order the SQL
+  // already applied, since Array#sort is stable). Balances are computed
+  // above rather than stored, which is why this cannot be an ORDER BY --
+  // same reason the paged list route documents for points_balance.
+  if (String(query.sort || '').trim().toLowerCase() === 'points') {
+    payload.sort((left, right) => Number(right.points_balance || 0) - Number(left.points_balance || 0))
+  }
+  // top=N: return only the first N of the (optionally sorted) result.
+  const top = clampInt(query.top, 0, 0, 2000)
+  return c.json(top > 0 ? payload.slice(0, top) : payload)
 })
 
 export default app

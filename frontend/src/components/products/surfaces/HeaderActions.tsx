@@ -113,11 +113,11 @@ export default function ProductsHeaderActions({
   const importHint = tr('import_button_hint', 'Bring products in from a CSV or Excel file')
   const exportLabel = tr('export', 'Export')
   const exportHint = tr('export_button_hint', 'Download products as a customizable XLSX file')
-  const productLabel = tr('product', 'Product')
-  const productHint = tr('add_product_button_hint', 'Create a new product from scratch')
+  const productLabel = tr('add_products', 'Add products')
+  const productHint = tr('add_products_button_hint', 'Add new products or receive stock for products you already have')
   const addStockLabel = tr('add_stock', 'Add Stock')
   const addStockHint = tr('add_stock_menu_hint', 'Receive stock — set the shipment info once, then add one product or many, line by line')
-  const addNewProductLabel = tr('add_new_product', 'Add New Product')
+  const addNewProductLabel = tr('add_new_product', 'Create Products')
   const mergeDuplicatesLabel = tr('merge_duplicate_products', 'Merge duplicate products')
   const mergeDuplicatesHint = tr('merge_duplicates_button_hint', 'Combine branch-only duplicate rows of the same item into one')
   const wireImagesLabel = tr('wire_images_title', 'Wire images to products')
@@ -222,7 +222,7 @@ export default function ProductsHeaderActions({
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName={buttonSizing}
-          menuClassName="max-h-[70vh] overflow-auto"
+          menuClassName="max-h-[calc(70*var(--app-vh))] overflow-auto"
           trigger={(
             <button
               type="button"

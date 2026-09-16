@@ -2,6 +2,27 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Shared compact navigation geometry. Labels may grow vertically so Khmer
+   clusters and text zoom wrap instead of clipping or widening the page. */
+.hub-section-grid,
+.hub-section-pills,
+.section-switcher {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.hub-section-tile,
+.hub-section-pill,
+.section-switcher button {
+  overflow-wrap: anywhere;
+}
+
+.hub-section-label,
+.hub-section-description {
+  max-width: 100%;
+  white-space: normal;
+}
+
 @layer base {
   * { box-sizing: border-box; }
   html {
@@ -10,6 +31,13 @@
     max-width: 100%;
     overflow-x: hidden;
     touch-action: pan-x pan-y;
+    /* iOS/Android WebKit flash a translucent grey box over any tapped element
+       with a click handler, including whole table rows and cards. The app
+       already gives every tappable surface its own `active:` state, so the
+       default highlight only ever arrives as a second, differently-shaped and
+       differently-timed flash on top of it. Inherited, so one declaration on
+       <html> covers the whole app and both portals. */
+    -webkit-tap-highlight-color: transparent;
   }
   body {
     margin: 0;
@@ -37,15 +65,22 @@
     font: inherit;
     font-family: inherit;
   }
-html[data-public-portal='true'],
-body[data-public-portal='true'] {
+html[data-public-portal='true'] {
   height: auto;
   min-height: 100%;
   overflow-y: auto !important;
   overflow-x: hidden;
   overscroll-behavior-y: auto;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y pinch-zoom;
+  touch-action: pan-y;
+}
+
+body[data-public-portal='true'] {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+  overscroll-behavior-y: auto;
+  touch-action: pan-y;
 }
 
 /* Khmer line-heights (user, Aug 31: "khmer versions are not compact enough...
@@ -54,7 +89,32 @@ body[data-public-portal='true'] {
    the km line-heights toward the Latin baseline while leaving the font-SIZES and
    the earlier legibility floors (Z7/Aug-29) untouched -- line-height is what drives
    row height, so this compacts rows without shrinking or lightening the glyphs.
-   Values stay above Latin (~1.33) so stacked coeng subscripts never clip. */
+   Values stay above Latin (~1.33) so stacked coeng subscripts never clip.
+
+   S4-22 (user, Sep 4: "Khmer glyphs are clipped. Ascenders and descenders are cut
+   across the app"). The sentence above -- "so stacked coeng subscripts never clip"
+   -- was wrong, and here is the measurement that shows it. Rendering every Khmer
+   cluster in km.json (628 distinct clusters) in headless Chrome and reading the
+   INK back out of the screenshot gives, as a multiple of font-size:
+
+     Noto Sans Khmer  1.532-1.546em    Battambang       1.576-1.606em
+     Khmer UI         1.262-1.321em    Leelawadee UI    1.162-1.214em
+
+   The first two are the fonts this stack asks for by name; the last two are what
+   Windows substitutes. So the compaction pass to 1.38-1.52 put the line box BELOW
+   the ink for every device that has the font we actually request, and .truncate
+   (overflow:hidden) shears whatever leaves the box. --km-line-height is that
+   measured floor, applied to every Khmer-scoped line-height below.
+
+   The floor alone is not the whole fix, because Noto's ink is not centred in its
+   own line box: measured against the box, the ink sits ~0.18em LOW, so the coeng
+   subscripts run out of the bottom while the top has room to spare. Half-leading is
+   symmetric, so clearing a one-sided 0.18em offset by line-height alone would cost
+   0.36em on top of the ink -- 1.91 on .text-xs, measured, a 32% taller row
+   everywhere, which would undo the Aug-31 ask above. The asymmetric half is handled
+   by overflow-clip-margin further down instead, which costs no layout at all. */
+:root { --km-line-height: 1.6; }
+
 body.lang-km,
 body.lang-km button,
 body.lang-km input,
@@ -65,7 +125,7 @@ body.lang-km th,
 body.lang-km td {
   font-family: "Noto Sans Khmer", "Khmer OS Siemreap", "Battambang", "Khmer OS", sans-serif;
   font-weight: 400;
-  line-height: 1.5;
+  line-height: var(--km-line-height, 1.6);
   letter-spacing: 0;
   text-rendering: optimizeLegibility;
   font-feature-settings: "kern" 1, "liga" 1;
@@ -79,7 +139,7 @@ body.lang-km td {
   text-rendering: optimizeLegibility;
   font-feature-settings: "kern" 1, "liga" 1;
   font-kerning: normal;
-  line-height: 1.5;
+  line-height: var(--km-line-height, 1.6);
   font-synthesis: none;
 }
 
@@ -90,7 +150,7 @@ body:not(.lang-km) .khmer-text {
 body:not(.lang-km) .khmer-text.text-xs,
 body:not(.lang-km) .khmer-text.text-\[10px\],
 body:not(.lang-km) .khmer-text.text-\[11px\] {
-  line-height: 1.45;
+  line-height: var(--km-line-height, 1.6);
 }
 
 body.lang-km:not([data-public-portal='true']) button,
@@ -119,33 +179,27 @@ body.lang-km:not([data-public-portal='true']) nav.safe-area-inset-bottom button 
 body.lang-km:not([data-public-portal='true']) .fixed.bottom-16 button,
 body.lang-km:not([data-public-portal='true']) .fixed.bottom-16 button span {
   font-weight: 600 !important;
-  line-height: 1.4;
-}
-
-body.lang-km:not([data-public-portal='true']) .app-topbar .font-medium,
-body.lang-km:not([data-public-portal='true']) .app-topbar .font-semibold,
-body.lang-km:not([data-public-portal='true']) .app-topbar .font-bold {
-  font-weight: 600 !important;
+  line-height: var(--km-line-height, 1.6);
 }
 
 body.lang-km .text-xs {
   font-size: calc(0.79rem * var(--ui-text-scale, 1)) !important;
-  line-height: 1.45 !important;
+  line-height: var(--km-line-height, 1.6) !important;
 }
 
 body.lang-km .text-sm {
   font-size: calc(0.92rem * var(--ui-text-scale, 1)) !important;
-  line-height: 1.48 !important;
+  line-height: var(--km-line-height, 1.6) !important;
 }
 
 body.lang-km .text-base {
   font-size: calc(1.02rem * var(--ui-text-scale, 1)) !important;
-  line-height: 1.52 !important;
+  line-height: var(--km-line-height, 1.6) !important;
 }
 
 body.lang-km .text-lg {
   font-size: calc(1.16rem * var(--ui-text-scale, 1)) !important;
-  line-height: 1.48 !important;
+  line-height: var(--km-line-height, 1.6) !important;
 }
 
 body.lang-km h1,
@@ -156,14 +210,22 @@ body.lang-km h5,
 body.lang-km h6,
 body.lang-km .page-title,
 body.lang-km .section-title {
-  line-height: 1.38;
+  line-height: var(--km-line-height, 1.6);
+}
+
+/* `.page-scroll > h1` further down sets 1.1 for the 28px page title -- display
+   leading that works for Latin and cuts Khmer in half. Same specificity as
+   `body.lang-km h1` and it wins on source order, so the km floor has to be
+   restated here at a specificity that beats it. */
+body.lang-km .page-scroll > h1 {
+  line-height: var(--km-line-height, 1.6);
 }
 
 body.lang-km input,
 body.lang-km textarea,
 body.lang-km select,
 body.lang-km .input {
-  line-height: 1.45;
+  line-height: var(--km-line-height, 1.6);
 }
 
 /* Z7 (user, Aug 29): Khmer glyphs have thinner strokes than Latin, so the
@@ -432,15 +494,10 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
    a login screen, not a data surface) but shrank it and moved it onto the
    same neutral base as everything else, so it reads as "dark UI with a
    brand accent" rather than "dark blue app". */
-.app-topbar {
-  border-color: #d9e2ec;
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(16px);
-}
-.dark .app-topbar {
-  border-color: var(--dm-border-strong);
-  background: rgba(20, 20, 20, 0.92);
-}
+/* P4-4b: `.app-topbar` itself (light+dark) removed -- zero elements in
+   frontend/src carry this class (grep confirmed), so the rule above this
+   comment plus the Khmer-font-weight override that targeted it were both
+   unreachable. The history comment stays; the dead declarations do not. */
 .auth-shell {
   background:
     linear-gradient(135deg, #f9f8f6 0%, #f3efe6 46%, #f8f6f2 100%);
@@ -530,6 +587,36 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
     transition: border-color 0.15s, box-shadow 0.15s;
     min-height: 2.5rem;
   }
+
+  /* The shared typed-date field (components/shared/DateEntryInput.tsx).
+     13px on desktop, where dates sit in dense grids beside 13px labels, and
+     16px under 768px because iOS Safari zooms the whole page when a focused
+     field is smaller than 16px.
+
+     The selector is 'input.date-entry-input', not the bare class, ON PURPOSE:
+     call sites pass their own text-sm/text-xs utilities, and this file's own
+     .text-sm/.text-xs rules (see the --ui-text-scale block far below) are
+     themselves !important. Two !important declarations of equal specificity
+     are resolved by source order, and those rules come later -- so the bare
+     .date-entry-input rule LOST, and every adopted field rendered at 14px on
+     a phone (verified live at 375px, Sep 3), i.e. under the iOS floor it was
+     written to guarantee. The element-qualified selector outranks them.
+     --ui-text-scale is multiplied in rather than ignored so the field still
+     follows the app-wide text scale like every field beside it; max() keeps
+     the phone floor even when the scale is below 1. */
+  input.date-entry-input {
+    font-size: max(16px, calc(13px * var(--ui-text-scale, 1))) !important;
+    font-variant-numeric: tabular-nums;
+  }
+  @media (min-width: 768px) {
+    input.date-entry-input { font-size: calc(13px * var(--ui-text-scale, 1)) !important; }
+  }
+  .date-entry-input--invalid {
+    border-color: #dc2626 !important;
+    color: #b91c1c;
+  }
+  .dark .date-entry-input--invalid { border-color: #ef4444 !important; color: #fca5a5; }
+
   .card { @apply bg-white dark:bg-zinc-800 rounded-xl shadow-sm border border-gray-200 dark:border-zinc-700; }
 
   .table-row {
@@ -574,8 +661,17 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
     height: 100%;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-y: contain;
-    touch-action: pan-y;
+    /* Permit opt-in horizontal scrollers such as the date-preset rail to
+       negotiate pan-x. The page itself remains overflow-x-hidden. */
+    touch-action: pan-x pan-y;
     padding-bottom: 1.5rem;
+  }
+
+  .stats-date-presets {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+    touch-action: pan-x;
   }
   @media (max-width: 767px) {
     .page-scroll {
@@ -617,16 +713,32 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 
   /* Portalled dialogs must fit the actually visible iOS viewport and stay
      clear of notches/home indicators. This also keeps footer buttons from
-     sitting underneath the app's fixed bottom navigation. */
+     sitting underneath the app's fixed bottom navigation.
+
+     --kb-inset is the on-screen keyboard's height, published by
+     utils/useVisualViewportInset.ts (installed once from shared/Modal.tsx).
+     It is 0px -- and the property is not even set -- whenever no keyboard is
+     up, so everything below is byte-identical to the old rules on desktop.
+     It has to be subtracted SEPARATELY from dvh: iOS never shrinks the layout
+     viewport for the keyboard, so 100dvh on an iPhone still spans the area
+     the keyboard is painted over and a dialog's sticky Save/Cancel footer
+     ends up underneath it the moment a field is focused.
+     The padding-bottom below moves the centring box up by the same amount, so
+     a panel that still fits is re-centred in the visible strip instead of
+     being centred in the full viewport with its lower half covered. */
   .modal-viewport-safe {
     padding-top: calc(.75rem + env(safe-area-inset-top, 0px));
     padding-right: calc(.75rem + env(safe-area-inset-right, 0px));
-    padding-bottom: calc(.75rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(.75rem + env(safe-area-inset-bottom, 0px) + var(--kb-inset, 0px));
     padding-left: calc(.75rem + env(safe-area-inset-left, 0px));
   }
   .modal-panel-safe {
-    max-height: calc(100vh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-    max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    /* One declaration through --app-vh (defined below with an @supports
+       guard), not the vh-then-dvh pair: a declaration that contains env() or
+       var() is only checked at computed-value time, so on an engine without
+       dvh it becomes invalid THERE and max-height falls to none -- the earlier
+       vh line is not resurrected. The helper carries the fallback instead. */
+    max-height: calc(100 * var(--app-vh) - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px));
     max-width: calc(100vw - 1.5rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   }
   .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -704,6 +816,26 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .h-screen { height: 100vh; height: 100dvh; }
 .min-h-screen { min-height: 100vh; min-height: 100dvh; }
 
+/* ONE definition of "1% of the viewport height a phone can actually show",
+   for the ~30 places that cannot use the two overrides above because they are
+   arbitrary Tailwind values (`max-h-[70vh]`), compound (`min(28rem,70vh)`) or
+   inline styles. Every one of them measured against plain `vh`, i.e. against
+   the LARGER "as if the browser chrome were hidden" viewport, so a dropdown
+   or sheet capped at 70vh rendered taller than the visible area on iOS and
+   its last rows sat under Safari's toolbar or the app's bottom nav.
+
+   This deliberately does NOT use the `a: 100vh; a: 100dvh` double-declaration
+   pattern the rules above use, and it cannot: custom property values are
+   stored as unparsed token streams, so an engine with no `dvh` support would
+   still ACCEPT `--app-vh: 1dvh` and keep it, and every consumer would then
+   compute to nothing. @supports is the only guard that actually tests the
+   unit. iOS Safari has had dvh since 15.4; the 1vh value is the fallback for
+   anything older. */
+:root { --app-vh: 1vh; }
+@supports (height: 1dvh) {
+  :root { --app-vh: 1dvh; }
+}
+
 /* iOS standalone mode can change the visual viewport when browser chrome or
    the keyboard moves. Keep the app shell pinned to that visible viewport and
    prevent flex descendants from manufacturing a wider page. */
@@ -732,12 +864,22 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
    visible fold, in the same area the fixed bottom nav bar occupies, which
    is what read as "the nav bar shows through the modal". Same 92vh-then-
    92dvh fallback pattern as `.h-screen` above, just as reusable classes
-   since an arbitrary-value utility can't carry two declarations itself. */
-.max-h-modal-90 { max-height: 90vh; max-height: 90dvh; }
-.max-h-modal-92 { max-height: 92vh; max-height: 92dvh; }
-.max-h-modal-80 { max-height: 80vh; max-height: 80dvh; }
-.max-h-modal-85 { max-height: 85vh; max-height: 85dvh; }
-.max-h-modal-88 { max-height: 88vh; max-height: 88dvh; }
+   since an arbitrary-value utility can't carry two declarations itself.
+
+   Every one of these also subtracts --kb-inset (see .modal-panel-safe above):
+   a phone dialog capped at 88% of the viewport is still 88% of an area the
+   iOS keyboard covers the bottom third of. The property is unset whenever no
+   keyboard is open, so `var(--kb-inset, 0px)` is 0 and desktop is unchanged.
+
+   Measured through --app-vh, one declaration each, for the reason given at
+   .modal-panel-safe: a `90vh; calc(90dvh - var(..))` pair loses BOTH values
+   on an engine without dvh, because the var() makes the second declaration
+   invalid at computed-value time instead of at parse time. */
+.max-h-modal-90 { max-height: calc(90 * var(--app-vh) - var(--kb-inset, 0px)); }
+.max-h-modal-92 { max-height: calc(92 * var(--app-vh) - var(--kb-inset, 0px)); }
+.max-h-modal-80 { max-height: calc(80 * var(--app-vh) - var(--kb-inset, 0px)); }
+.max-h-modal-85 { max-height: calc(85 * var(--app-vh) - var(--kb-inset, 0px)); }
+.max-h-modal-88 { max-height: calc(88 * var(--app-vh) - var(--kb-inset, 0px)); }
 
 /* POS product grid. Denser on phones (user, Aug 31: "pos products section is
    showing one whole product display for small screens ... should be minimized
@@ -763,6 +905,24 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   body * { visibility: hidden; }
   #receipt-print, #receipt-print * { visibility: visible; }
   #receipt-print { position: absolute; left:0; top:0; width:80mm; }
+}
+
+/* Receipt text contrast: Normal | Maximum black (Section 4, 2026-09-02 RC).
+   Receipt.tsx sets data-receipt-contrast="maximum" on the receipt shell
+   root(s) -- the on-screen preview, the interactive receipt view, and (via
+   printReceipt.ts baking computed styles into its export clones) print/PDF/
+   image. ONE switch, ONE override rule: every descendant's foreground goes
+   pure black at full opacity and every border/divider colour flattens to
+   black too. Font size and weight are untouched -- this rule never sets
+   them. The admin app's dark mode must never leak into the receipt, so this
+   is not gated by a `dark:` variant; the receipt shell itself is always
+   rendered on a white background regardless of theme. */
+[data-receipt-contrast="maximum"],
+[data-receipt-contrast="maximum"] * {
+  color: #000000 !important;
+  opacity: 1 !important;
+  border-color: #000000 !important;
+  text-decoration-color: #000000 !important;
 }
 
 /* Animations */
@@ -831,8 +991,98 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .compact-analytics-legend::-webkit-scrollbar { display: none; }
 body.lang-km .compact-analytics-legend {
   font-size: .625rem;
-  line-height: 1.25;
+  line-height: var(--km-line-height, 1.6);
 }
+
+/* Product rows: one-line price strip, horizontally scrolling names ----------
+   Owner, Sep 6 2026: "the qty unit is being pushed to next row if selling
+   price, wholesale price, cost price is fully there ... keep it visible
+   compact one line", and "for product names, make it horizontal scroll
+   instead of pushing rows ... clean no need show the scroll bar".
+
+   .scroll-x-clean is ONE class for every product-name cell (Products desktop
+   table row, Products mobile card, both group titles in ProductsListSurface,
+   Inventory / Branches > Products desktop + mobile rows, ProductsImageOnly).
+   Deliberately NO `touch-action: pan-x` -- unlike .compact-action-row above,
+   a name cell sits inside a vertically scrolling LIST, and pinning the axis
+   would make a vertical swipe that happens to start on a product name do
+   nothing at all. Default `touch-action` lets the browser pick the axis from
+   the gesture, which is what "smooth ios pwa and android pwa" means here.
+   overscroll-behavior-inline stops a horizontal fling chaining out to the
+   page/PWA back-swipe. */
+.scroll-x-clean {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scroll-x-clean::-webkit-scrollbar { width: 0; height: 0; display: none; }
+/* A Khmer cluster carries ~1.6em of ink and `overflow-y: hidden` cannot be
+   given an overflow-clip-margin, so without this floor every coeng subscript
+   in a scrolling name would be sheared off -- the same defect the dense-table
+   block below restates this floor for. */
+body.lang-km .scroll-x-clean,
+.scroll-x-clean.khmer-text { line-height: var(--km-line-height, 1.6); }
+
+/* .price-strip -- selling | wholesale | cost | qty+unit on ONE line.
+   Arithmetic for the reported wrap, at 375px on the Products mobile card:
+   page px-3 + card px-3 + the w-16 thumbnail and its gap-3 leave 375 - 24 -
+   24 - 64 - 12 = 251px of text column. Three "$123.45" figures at .75rem are
+   ~131px, a 4-digit qty ~27px, a coloured unit chip ~37px and three "|"
+   ~10px = 206px of ink -- but the old row also spent six `gap-x-1.5` gaps,
+   36px. That clears 251px only when nothing else is on the line, and loses as
+   soon as select mode adds its checkbox (-28px -> 223px) or the viewport is a
+   360px Android (-15px -> 236px). Hence the wrap.
+   Four levers, and all four are spent: .1875rem per gap instead of .375rem
+   (-18.0px), the digits one notch down to .7rem (-11.3px), tightened tracking
+   (-3.2px) and the negative margin either side of "|" (-6.0px).
+   Model (tests/productRowPriceStrip.test.ts is the AUTHORITY over this
+   comment; these two figures are asserted against it): OLD 242.1px,
+   NEW 203.7px. That clears all four cases -- 251, 236, 223 and the tightest,
+   208px on a 360px Android in select mode.
+   The model excludes a promotion label and a long Khmer unit, and the
+   tightest Latin case has only ~4px of headroom, so the browser is still the
+   authority over the model. Nothing is hidden and nothing wraps: flex-wrap is
+   nowrap, and any residual overflow scrolls cleanly instead of pushing the
+   qty to a second row. */
+.price-strip {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0 .1875rem;
+  font-size: .7rem;
+  line-height: 1rem;
+  letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+.price-strip::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.price-strip > * { flex: 0 0 auto; white-space: nowrap; }
+/* The blank either side of "|" is the cheapest width on the row, so it is
+   spent first -- the digits stay legible and the divider stays visible. */
+.price-strip .price-strip-divider { margin: 0 -.0625rem; }
+/* The qty cell's unit chip: renderUnitChip's uncoloured variant is text-xs,
+   which after the step-down would render LARGER than the prices beside it.
+   Class+type beats Tailwind's single class, so both variants sit at the 10px
+   the coloured chip already uses. */
+.price-strip-qty > span { font-size: .625rem; }
+body.lang-km .price-strip { line-height: var(--km-line-height, 1.6); }
 
 .dense-data-shell {
   overflow:hidden;
@@ -862,6 +1112,13 @@ body.lang-km .compact-analytics-legend {
   white-space:nowrap;
 }
 .dark .dense-data-table th { border-color:#52525b; background:#202024; color:#a1a1aa; }
+/* Khmer runs about twice as wide as English for the same label, so a header
+   that fits in English can overrun a fixed column. "Before -> After" is 90px
+   in English and 131px as "ស្តុកពីមុន → ស្តុកចុងក្រោយ", against 104px of usable
+   width in its 7.5rem column -- and th is nowrap with no overflow, so it ran
+   into the Branch header instead of clipping. This lets that one header wrap
+   to two lines; English still fits on one, so nothing moves in English. */
+.dense-data-table th.dense-th-wrap { white-space:normal; line-height:.9rem; }
 .dense-data-table th[data-tone='blue'] { color:#1d4ed8; background:#eff6ff; }
 .dense-data-table th[data-tone='emerald'] { color:#047857; background:#ecfdf5; }
 .dense-data-table th[data-tone='amber'] { color:#b45309; background:#fffbeb; }
@@ -896,8 +1153,102 @@ body.lang-km .compact-analytics-legend {
   text-transform:uppercase;
 }
 .dark .dense-data-table .dense-day-row td { background:#202024; color:#a1a1aa; }
-.dense-cell-truncate { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* -webkit-touch-callout: press-and-hold on a clipped one of these opens the
+   reveal panel (textAffordances.ts's touchstart gate), and iOS would
+   otherwise raise its own selection callout on top of it. The controller
+   already suppresses the Android/desktop context menu from JS; this is the
+   half only CSS can do. */
+.dense-cell-truncate { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; -webkit-touch-callout:none; }
 .dense-id { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:.68rem; letter-spacing:-.025em; }
+
+/* Text affordances -- the ONE float shared by the copy gesture and the
+   tap-to-reveal (src/components/shared/textAffordances.ts). It is created
+   in plain DOM on document.body by the delegated controller, not rendered
+   by React, precisely so it can open over a `.dense-cell-truncate` cell on
+   a surface that imports nothing from that module. That is why its styling
+   lives here as real classes instead of Tailwind utilities on a component.
+   z-1200 matches InfoHint's topmost explanatory layer: these values are
+   frequently opened from inside z-[1050] modals, and z-1000 put the panel
+   behind the surface that contained the ellipsis. */
+[data-copy-value] { cursor:copy; -webkit-touch-callout:none; }
+.text-affordance-float {
+  position:fixed;
+  z-index:1200;
+  display:flex;
+  flex-direction:column;
+  gap:.375rem;
+  overflow-y:auto;
+  border-radius:.5rem;
+  border:1px solid #e2e8f0;
+  background:#fff;
+  padding:.625rem;
+  text-align:left;
+  font-size:.75rem;
+  font-weight:400;
+  line-height:1.55;
+  color:#475569;
+  box-shadow:0 10px 25px -5px rgb(0 0 0 / .18), 0 8px 10px -6px rgb(0 0 0 / .12);
+}
+/* Tailwind's preflight `[hidden]{display:none}` and this rule's `display:flex`
+   have equal specificity, so state the closed case explicitly rather than
+   depending on stylesheet order. */
+.text-affordance-float[hidden] { display:none; }
+.dark .text-affordance-float { border-color:#475569; background:#1e293b; color:#cbd5e1; }
+.text-affordance-value { white-space:pre-line; overflow-wrap:anywhere; user-select:text; }
+.text-affordance-copy {
+  align-self:flex-start;
+  border-radius:.375rem;
+  border:1px solid #e2e8f0;
+  padding:.125rem .5rem;
+  font-size:.6875rem;
+  font-weight:600;
+  color:#334155;
+}
+.text-affordance-copy:hover { background:#f1f5f9; }
+.text-affordance-copy[data-copied='true'] { border-color:#10b981; background:#ecfdf5; color:#047857; }
+.dark .text-affordance-copy { border-color:#475569; color:#e2e8f0; }
+.dark .text-affordance-copy:hover { background:#334155; }
+.dark .text-affordance-copy[data-copied='true'] { border-color:#059669; background:rgb(6 78 59 / .35); color:#6ee7b7; }
+
+/* S4-22. The dense table's line boxes are absolute (1rem on a .75rem cell = 1.33em,
+   .9rem on a .68rem header = 1.32em), which is below the 1.55-1.61em of ink a Khmer
+   cluster carries. Restate the km floor here, at a specificity that beats
+   `.dense-data-table th.dense-th-wrap`. The `height` on th/td is a minimum in table
+   layout, and 1.6em still fits inside it, so single-line rows do NOT grow -- only the
+   deliberately two-line `.dense-th-wrap` header gets taller, in Khmer only. */
+body.lang-km .dense-data-table th,
+body.lang-km .dense-data-table th.dense-th-wrap,
+body.lang-km .dense-data-table td { line-height: var(--km-line-height, 1.6); }
+
+/* S4-22, the half a line-height floor cannot reach. Noto Sans Khmer -- the family this
+   app names first and the one Android supplies -- declares a descent about 0.23em
+   shallower than its own coeng subscripts, so its ink sits low in the line box rather
+   than centred in it. `.truncate` is `overflow:hidden`, and overflow cannot be clipped
+   on one axis alone, so that overhang is sheared off every truncated row. Buying the
+   room with line-height costs double (1.91 on .text-xs, measured) because half-leading
+   is symmetric; `overflow-clip-margin` buys exactly the overhang and costs no layout.
+   Verified in Chrome: `text-overflow: ellipsis` still ellipsizes under `overflow: clip`,
+   the horizontal cut lands on the same pixel as `hidden`, and `scrollWidth` still
+   exceeds `clientWidth`, which is what `TruncatedText.tsx` reads to decide whether to
+   offer the full string. Guarded by @supports, so a browser without it keeps today's
+   behaviour rather than losing the clip. Deliberately NOT applied to line-clamp, even
+   though Chrome was measured to clamp identically under `clip` (same box height, same
+   scrollHeight): -webkit-line-clamp is a prefixed -webkit-box behaviour and there is no
+   way to check WebKit from here, and if it stopped clamping a catalog description would
+   grow without bound -- a far worse defect than the ~1.5px of last-line coeng that the
+   1.6 floor leaves on a clamped Khmer paragraph.
+   The one behavioural difference is that `clip` does not establish a block formatting
+   context and `hidden` does, so a truncating box wrapping a block child could reflow.
+   Checked: of the 363 `truncate` elements in src/, none has a block-level child. */
+@supports (overflow-clip-margin: 0.3em) {
+  body.lang-km .truncate,
+  body.lang-km .dense-cell-truncate,
+  .khmer-text.truncate,
+  [lang='km'].truncate {
+    overflow: clip;
+    overflow-clip-margin: 0.3em;
+  }
+}
 
 @media (min-width:768px) {
   .desktop-dense-only { display:block; }
@@ -1029,4 +1380,42 @@ body[data-density='spacious'] th, body[data-density='spacious'] td { padding-top
   width: 100%;
   min-width: 0;
   max-width: 100%;
+}
+
+/* ---------------------------------------------------------------------------
+   iOS focus-zoom floor. Must stay at the END of this file -- see the
+   specificity note below.
+
+   iOS Safari zooms the whole page in when a focused text field's COMPUTED
+   font-size is under 16px, and it never zooms back out: the layout is left
+   scaled up with the action row pushed outside the viewport, which is the
+   "everything jumps when I tap a field and I can't reach the buttons" report.
+
+   This rule is the PRIMARY mechanism. `maximum-scale=1, user-scalable=no` on
+   index.html's viewport meta is belt and braces only: Safari has ignored
+   user-scalable on the open web since iOS 10 (an accessibility decision) and
+   honours it only in an installed home-screen PWA, so a build that relies on
+   the meta tag alone still zooms for anyone using the site in a browser tab.
+
+   `.input` already carried `font-size: max(16px, ...)` (see the .input rule
+   far above) but WITHOUT !important, while `.text-xs`/`.text-sm` in this file
+   ARE !important -- so `<input className="input text-sm">`, of which there
+   were 74 single-line occurrences, resolved to 14px and zoomed. That is the
+   same trap `input.date-entry-input` documents: a class rule (0-1-0) beats a
+   bare type rule (0-0-1) when both are !important, so the selectors here are
+   deliberately element-plus-pseudo-class (0-1-1 and up) AND placed last.
+
+   Scoped to the types that actually raise a keyboard. Checkbox/radio/range/
+   color/file are excluded because their intrinsic box can be font-size
+   derived, and resizing them would change layout for no iOS benefit.
+   `.date-entry-input` is excluded by name so the dedicated rule above (which
+   guarantees the same 16px floor on phones and additionally pins 13px from
+   768px up) keeps winning instead of tying with this one on source order. */
+@media (max-width: 767px) {
+  input:is([type='text'], [type='search'], [type='email'], [type='url'], [type='tel'], [type='number'], [type='password'], :not([type])):not(.date-entry-input),
+  select:not([multiple]),
+  textarea:not([hidden]),
+  [contenteditable='true']:not([hidden]) {
+    font-size: max(16px, 1em) !important;
+  }
 }

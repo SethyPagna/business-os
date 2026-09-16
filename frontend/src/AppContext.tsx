@@ -1,7 +1,10 @@
+import { getHubPageFromLocation, navigationHash, needsNavigationGuard } from './components/shared/hubNavigation.ts'
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react'
 import type { ReactNode } from 'react'
 import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
+import { ACTOR_SESSION_RETRY_EVENT, acknowledgeActorCookieUser, actorSessionReconciliationMarker, completeActorSessionReconciliation, isActorCookieMutationPending, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
+import { readActorSessionRecoveryBootstrap } from './api/http.ts'
 import {
   normalizeRuntimeDescriptor,
   readStoredRuntimeDescriptor,
@@ -10,29 +13,38 @@ import {
   shouldResetForRuntimeChange,
   writeStoredRuntimeDescriptor,
 } from './platform/runtime/clientRuntime.ts'
-import { isWSConnected, resumeWS } from './api/websocket.ts'
+import { requestPersistentAppStorage } from './api/syncRuntime.ts'
+import { disconnectWS, isWSConnected, resumeWS } from './api/websocket.ts'
 import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWork.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
-import { parsePermissionMap, getPermissionTierFromMap, type PermissionTier } from './utils/permissions.ts'
-import { actionAllowed, isActionOverriddenOff } from './utils/permissionActions.ts'
+import { effectivePermissions, type PermissionTier } from './utils/permissions.ts'
 import { normalizePriceValue } from './utils/pricing.ts'
+import { fmtDayFirst } from './utils/formatters.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
+import { presentWriteError, type WriteErrorDetail } from './utils/writeErrorPresentation.ts'
 import type { SettingsWriteOptions } from './types/settingsContracts.ts'
+import {
+  beginPermissionRefresh,
+  createPermissionRefreshAccumulator,
+  finishPermissionRefresh,
+  notePermissionRefreshIntent,
+} from './utils/permissionRefreshAccumulator.ts'
 import {
   AppContext,
   SyncContext,
   isBrokenLocalizedString,
   useApp,
+  useLowStockConfig,
   useSync,
   useT,
   type AppContextCoreValue,
 } from './app/AppContextCore.tsx'
 
-export { isBrokenLocalizedString, useApp, useSync, useT }
+export { isBrokenLocalizedString, useApp, useLowStockConfig, useSync, useT }
 
 /**
  * Global application context.
@@ -64,6 +76,12 @@ type AppSettings = AppRecord & {
   exchange_rate?: string | number
   language?: string
   login_session_duration?: string
+  // The owner's low-stock alert switch/amount/scope (utils/lowStockSettings.ts).
+  // Riding on this map is what puts them in the offline snapshot too, so the
+  // till colours its grid the same way with no connection.
+  low_stock_alert_enabled?: string
+  low_stock_threshold_default?: string | number
+  low_stock_threshold_mode?: string
   theme?: string
   ui_accent_color?: string
   ui_border_radius?: string
@@ -197,6 +215,9 @@ type AppContextValue = {
   saveSettings: (newSettings: AppSettings, options?: SettingsWriteOptions) => Promise<WriteConflictDetail | { success: boolean; error?: unknown }>
   setPage: (page: string) => void
   settings: AppSettings
+  /** C5: navigator.storage.persist()'s answer for this device, null until asked.
+   *  false means the browser may evict IndexedDB -- including unsynced sales. */
+  storagePersisted: boolean | null
   syncChannel: SyncChannelUpdate | null
   syncConnected: boolean
   syncServerUnreachable: boolean
@@ -269,7 +290,7 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   cogs: 'COGS',
   cogs_header: 'COGS',
   cost: 'Cost',
-  cost_in_purchase: 'Cost In (Purchase)',
+  cost_in_purchase: 'Cost price',
   current_stock: 'Current Stock',
   custom: 'Custom',
   customer_portal: 'Customer Portal',
@@ -319,7 +340,7 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   save: 'Save',
   search: 'Search',
   select_all: 'Select all',
-  selling_price_label: 'Selling Price',
+  selling_price_label: 'Selling price',
   server_back_online: 'Server is back online. You can keep working.',
   server_reconnecting: 'Server reconnecting',
   server_tunnel_reconnecting: 'Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.',
@@ -571,13 +592,16 @@ const PAGE_PERMISSIONS: Record<string, string | null> = {
 
 function getInitialAdminPage(publicMode: boolean): string {
   if (publicMode || typeof window === 'undefined') return 'dashboard'
+  if (window.location.pathname === '/' && window.location.hash.startsWith('#hub:')) {
+    return getHubPageFromLocation(window.location.pathname, window.location.hash) || 'dashboard'
+  }
   return getAdminPageFromPath(window.location.pathname) || 'dashboard'
 }
 
 function LoadingScreen() {
   // Used during the very first bootstrap before settings/user state are ready.
   return (
-    <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#1e3a8a', fontFamily:'sans-serif' }}>
+    <div style={{ minHeight:'calc(100 * var(--app-vh, 1vh))', display:'flex', alignItems:'center', justifyContent:'center', background:'#1e3a8a', fontFamily:'sans-serif' }}>
       <div style={{ textAlign:'center', color:'white' }}>
         <div style={{ fontSize:56, marginBottom:16 }}>🏪</div>
         <h2 style={{ margin:'0 0 8px', fontWeight:700, fontSize:22 }}>Business OS</h2>
@@ -597,6 +621,19 @@ function AccessDenied({ t }: { t: (key: string) => string }) {
       <p className="text-gray-500 dark:text-gray-400 max-w-sm">{t('access_denied_desc')}</p>
     </div>
   )
+}
+
+// Module-scope so its component type never changes across AppProvider
+// renders. The old inline `AccessDenied: () => <AccessDenied t={t} />` in
+// appValue minted a brand-new arrow function (a new component type) on
+// EVERY render; App.tsx renders it as JSX (`<AccessDenied/>`), so each
+// render of the provider was forcing React to unmount and remount whatever
+// was using it. Reading `t` from context here (rather than closing over the
+// provider's local `t`) keeps this component reference stable while still
+// re-rendering when the language/translations actually change.
+function AccessDeniedConnected() {
+  const { t } = useApp() as { t: (key: string) => string }
+  return <AccessDenied t={t} />
 }
 
 export function AppProvider({ children, publicMode = false }: { children: ReactNode; publicMode?: boolean }) {
@@ -627,6 +664,13 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const [notification,        setNotification]        = useState<AppNotification | null>(null)
   const [writeConflict,       setWriteConflict]       = useState<WriteConflictDetail | null>(null)
   const [langRevision,        setLangRevision]        = useState(0)
+  // C5: navigator.storage.persist()'s answer for THIS device. `null` means
+  // nobody has asked yet (no signed-in user, or the request is still in
+  // flight) and must never be read as "granted". A browser with no Storage
+  // Manager at all resolves false here on purpose: it cannot promise
+  // persistence either, so the same warning applies to it.
+  const [storagePersisted,    setStoragePersisted]    = useState<boolean | null>(null)
+  const persistentStorageAskedForRef = useRef<number | null>(null)
   const settingsRef = useRef<AppSettings>({})
   const authRecoveryRef = useRef(false)
   const authEstablishedAtRef = useRef(0)
@@ -780,6 +824,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     preserveOfflineWork?: boolean
     preserveUiDrafts?: boolean
   } = {}) => {
+    if (isActorSessionQuarantined()) return
+    resetActorReadSession()
     await resetClientRuntimeState({
   // Authentication helpers.
       preserveDeviceSettings: true,
@@ -796,6 +842,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [])
 
   const handleUnauthorizedSession = useCallback(async (message = 'Please sign in again to continue.'): Promise<void> => {
+    if (isActorSessionQuarantined()) return
+    disconnectWS()
     await clearLocalBusinessState({
       clearAuth: true,
       preserveSyncServer: true,
@@ -804,6 +852,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       preserveOfflineWork: true,
       preserveUiDrafts: true,
     })
+    if (isActorSessionQuarantined()) return
     setUser(null)
     setPage('dashboard')
     setAuthReady(true)
@@ -815,7 +864,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   const applyBootstrapPayload = useCallback(async (
     payload: BootstrapPayload | null,
-    options: { fallbackUser?: AppUser | null } = {},
+    options: { fallbackUser?: AppUser | null; actorReconciliation?: boolean } = {},
   ): Promise<{
     group: OrganizationPayload | null
     organization: OrganizationPayload | null
@@ -823,6 +872,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     system: BootstrapSystemPayload | null
     user: AppUser | null
   }> => {
+    if (isActorSessionQuarantined() && !options.actorReconciliation) throw new Error('Session reconciliation is required.')
     const safePayload = payload || {}
     const fallbackUser = options.fallbackUser || null
     const nextUser = safePayload?.user || fallbackUser || null
@@ -834,6 +884,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         preserveSyncServer: true,
         preserveSessionDuration: true,
       })
+      if (isActorSessionQuarantined()) throw new Error('Session reconciliation is required.')
     }
     writeStoredRuntimeDescriptor(runtimeDescriptor)
 
@@ -877,8 +928,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       persistAuthState({ user: nextUser, expiryTime, sessionDuration })
       setUser(nextUser)
       getAppApi().ensureSessionRecoveryListeners?.()
-      resumeWS()
-      startHealthCheck()
+      if (!options?.actorReconciliation) {
+        resumeWS()
+        startHealthCheck()
+      }
     }
 
     const organization = safePayload?.organization
@@ -913,11 +966,80 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     }
   }, [clearLocalBusinessState])
 
+  const reconciledActorRef = useRef<{ marker: string | null; user: AppUser } | null>(null)
+  useEffect(() => {
+    const reconciled = reconciledActorRef.current
+    if (!reconciled || reconciled.user !== user) return
+    reconciledActorRef.current = null
+    if (completeActorSessionReconciliation(reconciled.marker)) {
+      setAuthReady(true)
+      resumeWS()
+      startHealthCheck()
+    }
+  }, [user])
+
+  useEffect(() => {
+    if (publicMode) return
+    let disposed = false
+    let running = 0
+    let requestedMarker: string | null | undefined
+    const reconcile = async (force = false) => {
+      if (!isActorSessionQuarantined()) return
+      const marker = actorSessionReconciliationMarker()
+      if (!force && requestedMarker === marker) return
+      requestedMarker = marker
+      const request = ++running
+      // Save registered work locally, never submit/replay it. Old components
+      // remain mounted and hidden by App's independent quarantine surface.
+      flushPendingWorkDrafts()
+      if (marker !== actorSessionReconciliationMarker()) return
+      disconnectWS()
+      setAuthReady(false)
+      if (isActorCookieMutationPending()) {
+        setActorSessionQuarantineStatus('authentication-pending')
+        return
+      }
+      setActorSessionQuarantineStatus('checking')
+      try {
+        const payload = await readActorSessionRecoveryBootstrap() as BootstrapPayload
+        if (disposed || request !== running || marker !== actorSessionReconciliationMarker()) return
+        const nextUser = payload?.user
+        const sameActor = !!user?.id && String(nextUser?.id) === String(user.id)
+          && String(nextUser?.organization_id || nextUser?.organization_slug || '') === String(user.organization_id || user.organization_slug || '')
+        if (!sameActor) { setActorSessionQuarantineStatus('different-account'); return }
+        if (shouldResetForRuntimeChange(readStoredRuntimeDescriptor(), buildRuntimeDescriptorFromBootstrap(payload))) {
+          setActorSessionQuarantineStatus('reload-required'); return
+        }
+        // Same actor only. React must commit the refreshed permission snapshot
+        // before the effect above removes the overlay or re-enables dispatch.
+        reconciledActorRef.current = { marker, user: nextUser! }
+        await applyBootstrapPayload(payload, { actorReconciliation: true })
+        if (marker !== actorSessionReconciliationMarker()) reconciledActorRef.current = null
+      } catch {
+        if (!disposed && request === running && marker === actorSessionReconciliationMarker()) {
+          setActorSessionQuarantineStatus('unavailable')
+        }
+      }
+    }
+    const unsubscribe = subscribeActorSessionQuarantine(() => { void reconcile() })
+    const retry = () => { void reconcile(true) }
+    window.addEventListener(ACTOR_SESSION_RETRY_EVENT, retry)
+    void reconcile()
+    return () => { disposed = true; running++; unsubscribe(); window.removeEventListener(ACTOR_SESSION_RETRY_EVENT, retry) }
+  }, [applyBootstrapPayload, publicMode, user])
+
   // Sync event listeners (loadSettings is defined above).
   const debounceRef = useRef<Record<string, number>>({})
+  const permissionRefreshRef = useRef(createPermissionRefreshAccumulator())
+  const permissionRefreshTimerRef = useRef<number | null>(null)
+  const schedulePermissionRefreshRef = useRef<() => void>(() => {})
   useEffect(() => {
-    if (publicMode) return undefined
+    if (publicMode) {
+      permissionRefreshRef.current = createPermissionRefreshAccumulator()
+      return undefined
+    }
     const hasRecoverableSession = !!(user?.id || getStoredUserPayload())
+    if (!hasRecoverableSession) permissionRefreshRef.current = createPermissionRefreshAccumulator()
     if (!hasRecoverableSession) {
       setSyncConnected(false)
       setSyncServerUnreachable(false)
@@ -925,56 +1047,61 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     }
     ensureSyncUpdateCacheListener()
 
+    let disposed = false
+    const refreshPermissions = async () => {
+      permissionRefreshTimerRef.current = null
+      const accumulator = permissionRefreshRef.current
+      if (!beginPermissionRefresh(accumulator)) return
+      try {
+        await clearLocalBusinessState({
+          clearAuth: false,
+          preserveSyncServer: true,
+          preserveSessionDuration: true,
+          preserveOfflineWork: true,
+          preserveUiDrafts: true,
+        })
+        if (disposed) return
+        const bootstrap = await readAppBootstrap('Runtime bootstrap')
+        if (disposed) return
+        if (bootstrap?.user) {
+          await applyBootstrapPayload(bootstrap, { fallbackUser: user || null })
+        } else if (bootstrap?.unauthorized) {
+          await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
+        } else if (!getStoredUserPayload()) {
+          await loadSettings().catch(() => {})
+        }
+      } finally {
+        const needsAnotherRefresh = finishPermissionRefresh(accumulator)
+        if (permissionRefreshRef.current === accumulator && needsAnotherRefresh) {
+          schedulePermissionRefreshRef.current()
+        }
+      }
+    }
+    const schedulePermissionRefresh = () => {
+      if (disposed) return
+      if (permissionRefreshTimerRef.current != null) {
+        window.clearTimeout(permissionRefreshTimerRef.current)
+      }
+      permissionRefreshTimerRef.current = window.setTimeout(() => {
+        void refreshPermissions().catch(() => {})
+      }, SYNC.EVENT_DEBOUNCE_MS)
+    }
+    schedulePermissionRefreshRef.current = schedulePermissionRefresh
+    if (permissionRefreshRef.current.pending) schedulePermissionRefresh()
+
     const onUpdate = (e: Event) => {
       const detail = eventDetail<{ channel?: string; reason?: string | null; source?: string | null; payload?: { action?: string; id?: string | number } | null }>(e)
       const channel = String(detail.channel || '')
       if (!channel) return
+      const roleId = (user as { role_id?: string | number | null } | null)?.role_id
+      if (notePermissionRefreshIntent(permissionRefreshRef.current, detail, { userId: user?.id, roleId })) {
+        schedulePermissionRefresh()
+      }
       if (debounceRef.current[channel]) clearTimeout(debounceRef.current[channel])
       debounceRef.current[channel] = window.setTimeout(async () => {
         delete debounceRef.current[channel]
         // Settings changes from other devices apply immediately; no reload needed.
         if (channel === 'settings') loadSettings().catch(() => {})
-        // Live permission propagation. Was: a 'users'/'roles' broadcast
-        // (fired by every PATCH /api/users/:id and PATCH /api/roles/:id --
-        // see cloudflare/src/routes/users.ts) only ever invalidated that
-        // page's own list cache here. It never touched the CURRENT
-        // session's own `user.permissions`/`user.role_permissions` --
-        // those only get re-read from the server on the 'runtime' branch
-        // below, or a fresh login. So an already-logged-in employee whose
-        // permissions (or whose role's permissions) an admin edited on
-        // another device kept running on their stale, cached permission
-        // set until they logged out and back in -- exactly "permission
-        // changes don't take effect for employees" and the follow-on
-        // "POS stops showing products", since hasPermission()/
-        // canAccessPage() read straight off that stale `user` object.
-        // Fixed by re-fetching the session (same bootstrap path 'runtime'
-        // already uses) whenever the broadcast's own id says it actually
-        // affects THIS session -- the edited user's id for 'users', or
-        // this user's own role_id for 'roles' -- rather than for every
-        // unrelated user/role edit anyone makes.
-        const payloadId = detail.payload?.id
-        const currentUserId = user?.id != null ? String(user.id) : null
-        const currentRoleId = (user as { role_id?: string | number | null } | null)?.role_id
-        const affectsThisSession =
-          (channel === 'users' && payloadId != null && currentUserId != null && String(payloadId) === currentUserId) ||
-          (channel === 'roles' && payloadId != null && currentRoleId != null && String(payloadId) === String(currentRoleId))
-        if (channel === 'runtime' || affectsThisSession) {
-          await clearLocalBusinessState({
-            clearAuth: false,
-            preserveSyncServer: true,
-            preserveSessionDuration: true,
-            preserveOfflineWork: true,
-            preserveUiDrafts: true,
-          })
-          const bootstrap = await readAppBootstrap('Runtime bootstrap')
-          if (bootstrap?.user) {
-            await applyBootstrapPayload(bootstrap, { fallbackUser: user || null })
-          } else if (bootstrap?.unauthorized) {
-            await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
-          } else if (!getStoredUserPayload()) {
-            await loadSettings().catch(() => {})
-          }
-        }
         setSyncChannel({
           channel,
           ts: Date.now(),
@@ -1048,12 +1175,21 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       const detail = eventDetail<{ backend?: { frontend?: { hash?: string } }; message?: string }>(e)
       const message = detail.message
         || 'Business OS server update is required. Restart the server, then refresh this page.'
+      const runtimeHash = String(detail.backend?.frontend?.hash || '').trim()
       setSyncServerUnreachable(true)
       // iOS may ignore beforeunload prompts. Keep the current build running
       // when an editor is dirty and persist any debounced draft immediately;
       // the next clean recovery event can safely reload the new runtime.
       if (hasDirtyWork()) {
         flushPendingWorkDrafts()
+        window.dispatchEvent(new CustomEvent('sync:app-update-available', {
+          detail: {
+            reason: 'runtime_mismatch',
+            message: 'New version ready',
+            version: runtimeHash,
+            ts: Date.now(),
+          },
+        }))
         setNotification({
           message: 'An app update is ready. Save or discard unfinished work before reloading.',
           type: 'warning',
@@ -1062,7 +1198,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         return
       }
       try {
-        const runtimeHash = String(detail.backend?.frontend?.hash || '').trim()
         const recoveryKey = `${FRONTEND_BUILD_INFO.hash || 'dev'}:${runtimeHash || 'unknown'}`
         const previous = window.sessionStorage.getItem(RUNTIME_RECOVERY_SESSION_KEY)
         if (previous !== recoveryKey) {
@@ -1204,8 +1339,16 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     window.addEventListener('sync:conflict', onConflict)
     window.addEventListener('auth:unauthorized', onUnauthorized)
     return () => {
+      disposed = true
       clearTimeout(quickCheck)
       if (pollTimer != null) clearInterval(pollTimer)
+      if (permissionRefreshTimerRef.current != null) {
+        window.clearTimeout(permissionRefreshTimerRef.current)
+        permissionRefreshTimerRef.current = null
+      }
+      if (schedulePermissionRefreshRef.current === schedulePermissionRefresh) {
+        schedulePermissionRefreshRef.current = () => {}
+      }
       window.removeEventListener('sync:update', onUpdate)
       window.removeEventListener('sync:status', onStatus)
       window.removeEventListener('sync:error',  onError)
@@ -1221,6 +1364,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // OTP login event listener.
   useEffect(() => {
     const handleOtpLogin = async (e: Event) => {
+      if (isActorSessionQuarantined()) return
       const otpUser = eventDetail<AppUser & { sessionDuration?: string; sessionExpiresAt?: string; password?: unknown; otp_secret?: unknown }>(e)
       if (!otpUser) return
       const retiredTokenKey = `auth${'Token'}`
@@ -1267,6 +1411,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   useEffect(() => {
     const handleUserUpdated = (e: Event) => {
+      if (isActorSessionQuarantined()) return
       const nextUser = eventDetail<AppUser>(e)
       if (!nextUser) return
       setUser((prev: AppUser | null) => {
@@ -1598,6 +1743,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   // Authentication helpers.
   const persistAuthenticatedUser = useCallback(async (nextUser: AppUser, sessionDuration = 'session', sessionExpiresAt = ''): Promise<void> => {
+    if (isActorSessionQuarantined() && !acknowledgeActorCookieUser(nextUser)) throw new Error('Resolve the changed session before signing in here.')
+    resetActorReadSession()
     const expiryTime = computeSessionExpiryMs(sessionDuration, sessionExpiresAt)
 
     try {
@@ -1681,10 +1828,14 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [persistAuthenticatedUser])
 
   const logout = useCallback(async () => {
+    if (isActorSessionQuarantined()) return
+    resetActorReadSession()
+    disconnectWS()
     try {
       const api = getAppApi()
       await withLoaderTimeout(() => api.logout?.(), 'Logout', APP_LOGOUT_TIMEOUT_MS)
     } catch (_) {}
+    if (isActorSessionQuarantined()) return
     await clearLocalBusinessState({
       clearAuth: true,
       preserveSyncServer: true,
@@ -1692,6 +1843,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       preserveRuntimeMeta: true,
       preserveOfflineWork: true,
     })
+    if (isActorSessionQuarantined()) return
     setUser(null)
     setAuthReady(true)
     setPage('dashboard')
@@ -1721,6 +1873,47 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const dismissNotification = useCallback(() => {
     setNotification(null)
   }, [])
+
+  // C5: ask the browser to make this origin's storage persistent, once per
+  // authenticated session, from the BOOT path.
+  //
+  // Before this, requestPersistentAppStorage() had exactly one caller --
+  // api/saleWriteTransport.ts, at the moment a sale was already being queued
+  // offline. That is far too late on the device this matters on: a
+  // non-installed iOS Safari origin is subject to ITP's 7-day cap, so the
+  // whole IndexedDB store (including sales queued but never synced) can be
+  // evicted before the first offline sale is ever written. Asking at boot
+  // gives the browser its chance to grant persistence while there is still
+  // nothing to lose.
+  //
+  // Keyed on the signed-in actor, never on mount: `persist()` is a
+  // permission-shaped prompt on some browsers and must not be triggered on
+  // the login screen or the public storefront (neither has an offline vault
+  // to protect). The ref makes it once per session, and syncRuntime.ts
+  // memoises the promise besides, so the sale path's later call is the same
+  // single real request rather than a second one.
+  //
+  // Shop devices are shared by several staff accounts, so the answer is
+  // recomputed per authenticated session and CLEARED on sign-out: a stale
+  // `false` left behind by the previous cashier would otherwise put a
+  // warning in front of the next one before their own session was measured.
+  useEffect(() => {
+    const actorId = user?.id == null ? null : Number(user.id)
+    if (actorId == null || !Number.isFinite(actorId)) {
+      persistentStorageAskedForRef.current = null
+      setStoragePersisted(null)
+      return undefined
+    }
+    if (persistentStorageAskedForRef.current === actorId) return undefined
+    setStoragePersisted(null)
+    persistentStorageAskedForRef.current = actorId
+    let cancelled = false
+    void requestPersistentAppStorage().then((persisted) => {
+      if (cancelled) return
+      setStoragePersisted(persisted)
+    })
+    return () => { cancelled = true }
+  }, [user?.id])
 
   const dismissWriteConflict = useCallback(() => {
     setWriteConflict(null)
@@ -1953,7 +2146,9 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         }
       }
       if (!normalizedOptions.silentToast) {
-        notify(getErrorMessage(error, 'Failed to save settings'), 'error')
+        const writeError = error && typeof error === 'object' ? error as WriteErrorDetail : {}
+        const presentation = presentWriteError(writeError, t)
+        notify(`${presentation.title}: ${presentation.detail}`, 'error')
       }
       return { success: false, error }
     }
@@ -1980,29 +2175,18 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // "I only see Dashboard and Notes after logging in": those two are the
   // only nav items with permission: null (see navigationConfig.ts), so
   // they're the only ones that don't depend on this merge.
-  const getMergedPermissionsRaw = useCallback((): Record<string, unknown> => {
-    if (!user) return {}
-    try {
-      const rolePermissions = parsePermissionMap((user as { role_permissions?: unknown }).role_permissions)
-      const userPermissions = parsePermissionMap(user.permissions)
-      return { ...rolePermissions, ...userPermissions }
-    } catch {
-      return {}
-    }
-  }, [user])
+  const authority = useMemo(() => effectivePermissions(user), [user])
 
   const getPermissions = useCallback((): Record<string, boolean> => {
-    const merged = getMergedPermissionsRaw()
+    const merged = authority.merged
     return Object.fromEntries(
       Object.entries(merged).map(([key, value]) => [key, value === true]),
     )
-  }, [getMergedPermissionsRaw])
+  }, [authority])
 
   const hasPermission = useCallback((key: string) => {
-    if (!user) return false
-    const p = getPermissions()
-    return !!(p.all || p[key])
-  }, [user, getPermissions])
+    return authority.hasPermission(key)
+  }, [authority])
 
   // Tier-aware read for REVIEW_TIER_KEYS sections (see utils/permissions.ts)
   // -- 'full' behaves exactly like hasPermission()===true, 'none' exactly
@@ -2016,9 +2200,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // from 'none' by design (see permissions.ts's own comment on why that's
   // deliberate on the backend too).
   const getPermissionTier = useCallback((key: string): PermissionTier => {
-    const merged = getMergedPermissionsRaw()
-    return getPermissionTierFromMap(merged, key, merged.all === true)
-  }, [getMergedPermissionsRaw])
+    return authority.getPermissionTier(key)
+  }, [authority])
 
   // Per-ACTION gate: "may this role press this specific button?"
   //
@@ -2039,15 +2222,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // cloudflare/src/lib/permissions.ts's getActionTier, so a control hidden
   // here is genuinely refused by the API rather than merely hidden.
   const can = useCallback((permissionKey: string, actionKey: string): boolean => {
-    if (!user) return false
-    return actionAllowed(
-      permissionKey,
-      actionKey,
-      getPermissionTier(permissionKey),
-      hasPermission,
-      (section, action) => isActionOverriddenOff(getPermissions(), section, action),
-    )
-  }, [user, getPermissionTier, hasPermission, getPermissions])
+    return authority.can(permissionKey, actionKey)
+  }, [authority])
 
   const canAccessPage = useCallback((pageId: string) => {
     if (!user) return false
@@ -2057,6 +2233,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // top-of-file comment for the backend-side half of this rule; the
     // page's own upload/download/rename/delete controls still self-gate
     // on real Full Access to `library` (FilesPage.tsx's `canManageLibrary`).
+    if (!Object.hasOwn(PAGE_PERMISSIONS, pageId)) return false
     const required = PAGE_PERMISSIONS[pageId]
     if (required == null) return true
     // Tier-aware, not hasPermission(): a Review Required user for a
@@ -2065,12 +2242,12 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // page. hasPermission() is strict-boolean by design and would 403 a
     // 'review'-tier user out of the page entirely, same class of bug the
     // backend's own permissions.ts comment warns callers about.
-    if (getPermissionTier(required) !== 'none') return true
+    if (can(required, 'view')) return true
     // Part 557 slice 8: the storefront editor (catalog page) is split into
     // per-area write grants. Any of posts/FAQ/About opens the page -- the
     // config grant is already covered by the `customer_portal` check above --
     // and CatalogPage then self-gates each section to what the role can save.
-    if (pageId === 'catalog' && (hasPermission('portal_posts') || hasPermission('portal_faq') || hasPermission('portal_about'))) return true
+    if (pageId === 'catalog' && ['portal_posts', 'portal_faq', 'portal_about'].some((key) => can(key, 'view'))) return true
     // 'products_image_only' (Part 241): a restricted role with no real
     // `products` tier of its own still needs into the Products page --
     // it just gets the lightweight image-only view once there (see
@@ -2078,31 +2255,31 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // shape (cloudflare/src/routes/products.ts): only relevant when the
     // real tier is 'none', since anyone with actual products access
     // already passed the check above.
-    if (pageId === 'products' && hasPermission('products_image_only')) return true
+    if (pageId === 'products' && getPermissionTier('products') === 'none' && can('products_image_only', 'view')) return true
     // G2: Loyalty Points lives INSIDE the Promotions page now. A user
     // whose only grant is customer_portal (the old Loyalty page's gate)
     // must still reach the page for its Loyalty section -- the promo
     // sections inside self-gate on the real 'promotions' tier, so this
     // widens the door, not the controls.
-    if (pageId === 'promotions' && getPermissionTier('customer_portal') !== 'none') return true
+    if (pageId === 'promotions' && (can('customer_portal', 'view') || can('products', 'view'))) return true
     // E3/E4 (Part 403): audit_log, users and backup retired as standalone
     // pages -- their components are sections of Review & Logs / Settings
     // now. A grant on any absorbed section opens its host page; each
     // section still self-gates on its own key inside, so this widens the
     // door, never the controls.
-    if (pageId === 'review' && getPermissionTier('audit_log') !== 'none') return true
+    if (pageId === 'review' && can('audit_log', 'view')) return true
     // Users is admin-only now (Part 557 slice 3) -- it carries no per-role
     // `users` grant, so only the backup section can open Settings for a
     // non-admin here; admins reach it via the tier-aware check above.
-    if (pageId === 'settings' && getPermissionTier('backup') !== 'none') return true
+    if (pageId === 'settings' && can('backup', 'view')) return true
     // E2: returns and fees retired as standalone pages into the Sales hub,
     // same contract as above -- a returns- or fees-only grant still opens
     // the Sales page, whose sections self-gate on their own keys inside.
-    if (pageId === 'sales' && (getPermissionTier('returns') !== 'none' || getPermissionTier('fees') !== 'none')) return true
+    if (pageId === 'sales' && (can('returns', 'view') || can('fees', 'view'))) return true
     // E1: inventory retired as a standalone page into the Branches hub --
     // an inventory-only grant still opens the Branches page, whose chips
     // self-gate ('branches' for the branch list, 'inventory' for the rest).
-    if (pageId === 'branches' && getPermissionTier('inventory') !== 'none') return true
+    if (pageId === 'branches' && can('inventory', 'view')) return true
     // 'settings'/'receipt_settings' page (this session, alongside
     // routes/settings.ts's new per-field business_identity/sales_policy
     // gating): a user granted only one of the narrower settings
@@ -2116,29 +2293,51 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // still applies once inside -- this only controls whether the page
     // itself opens, same as the tier-aware check just above.
     if ((pageId === 'settings' || pageId === 'receipt_settings') &&
-      (hasPermission('business_identity') || hasPermission('sales_policy') || hasPermission('drive_credentials'))) {
+      ['business_identity', 'sales_policy', 'drive_credentials'].some((key) => can(key, 'view'))) {
       return true
     }
     return false
-  }, [user, getPermissionTier, hasPermission])
+  }, [user, getPermissionTier, can])
 
+  const committedLocationRef = useRef(typeof window === 'undefined' ? null : {
+    href: window.location.href,
+    state: window.history.state,
+  })
+  const pendingTraversalRef = useRef<null | { targetHref: string; delta: number; restored: boolean; approved: boolean; resumed: boolean }>(null)
+  const resumeHistoryNavigation = useCallback(() => {
+    const pending = pendingTraversalRef.current
+    if (!pending || !pending.restored || !pending.approved || pending.resumed) return
+    pending.resumed = true
+    window.history.go(pending.delta)
+  }, [])
+  useEffect(() => {
+    const remember = () => {
+      const state = window.history.state || {}
+      if (!Number.isInteger(state.bosNavigationIndex)) {
+        window.history.replaceState({ ...state, bosNavigationIndex: 0 }, '', window.location.href)
+      }
+      committedLocationRef.current = { href: window.location.href, state: window.history.state }
+    }
+    remember()
+    window.addEventListener(APP_NAVIGATION_EVENT, remember)
+    return () => window.removeEventListener(APP_NAVIGATION_EVENT, remember)
+  }, [])
   const navigateNow = useCallback((pageId: string, anchor?: string) => {
     if (!canAccessPage(pageId)) return
     if (typeof window !== 'undefined') {
       const nextPath = getAdminPathForPage(pageId)
       const currentUrl = new URL(window.location.href)
-      // An explicit anchor (e.g. a notification pointing at a specific tab
-      // on the target page) overrides whatever hash happens to be in the
-      // URL already; otherwise leave the current hash alone.
-      const nextHash = anchor ? `#${anchor}` : currentUrl.hash
+      const nextHash = navigationHash(getHubPageFromLocation(currentUrl.pathname, currentUrl.hash) || resolveAdminLandingPage(settingsRef.current.default_landing_page), pageId, currentUrl.hash, anchor)
       if (nextPath && (currentUrl.pathname !== nextPath || nextHash !== currentUrl.hash)) {
-        window.history.pushState(window.history.state, '', `${nextPath}${currentUrl.search}${nextHash}`)
+        const index = Number(committedLocationRef.current?.state?.bosNavigationIndex || 0)
+        window.history.pushState({ bosNavigationIndex: index + 1 }, '', `${nextPath}${currentUrl.search}${nextHash}`)
       }
+      committedLocationRef.current = { href: window.location.href, state: window.history.state }
       window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, {
         detail: {
           page: pageId,
           path: nextPath,
-          anchor: anchor || null,
+          anchor: nextHash.slice(1) || null,
         },
       }))
     }
@@ -2150,14 +2349,16 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // N2: the navigation guard. Page switches consult the dirty-work
   // registry (utils/dirtyWork.ts) first -- unsaved work opens the
   // three-option modal (App.tsx renders it off this state) instead of
-  // being silently stranded. Same-page navigation (tab/anchor moves inside
-  // the page) passes through: the work stays mounted either way.
+  // being silently stranded. Hub section switches also consult this guard because switching bodies
+  // unmounts the previous section; ordinary anchors keep their existing behavior.
   const [navGuard, setNavGuard] = useState<null | { pageId: string; anchor?: string; entries: DirtyWorkEntry[] }>(null)
   const pageRef = useRef(page)
   pageRef.current = page
   const navigateTo = useCallback((pageId: string, anchor?: string) => {
     if (!canAccessPage(pageId)) return
-    if (pageId !== pageRef.current) {
+    pendingTraversalRef.current = null
+    const currentHash = typeof window === 'undefined' ? '' : window.location.hash
+    if (needsNavigationGuard(pageRef.current, pageId, currentHash, navigationHash(pageRef.current, pageId, currentHash, anchor))) {
       const dirty = getDirtyWork()
       if (dirty.length > 0) {
         setNavGuard({ pageId, anchor, entries: dirty })
@@ -2169,30 +2370,39 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   const resolveNavGuard = useCallback(async (action: 'save' | 'discard' | 'stay') => {
     const guard = navGuard
+    const traversal = pendingTraversalRef.current
     setNavGuard(null)
-    if (!guard || action === 'stay') return
+    if (!guard || action === 'stay') { pendingTraversalRef.current = null; return }
     if (action === 'save') {
       for (const entry of guard.entries) {
         if (!entry.isDirty()) continue
         if (!entry.save) continue
         try {
           const saved = await entry.save()
-          if (!saved) return // save refused (validation etc.) -- stay put
+          if (!saved) { pendingTraversalRef.current = null; return }
         } catch {
+          pendingTraversalRef.current = null
           return
         }
       }
       // Anything dirty WITHOUT a save hook must not be silently lost by a
       // "save" choice -- staying is the safe reading (the modal only offers
       // Save & Leave when every dirty entry can save; this is the backstop).
-      if (getDirtyWork().length > 0) return
+      if (getDirtyWork().length > 0) { pendingTraversalRef.current = null; return }
     } else {
       for (const entry of guard.entries) {
         try { entry.discard?.() } catch { /* leaving anyway */ }
       }
     }
-    navigateNow(guard.pageId, guard.anchor)
-  }, [navGuard, navigateNow])
+    if (traversal) {
+      if (pendingTraversalRef.current !== traversal) return
+      traversal.approved = true
+      // history.go is asynchronous: approval may arrive before rollback finishes.
+      resumeHistoryNavigation()
+    } else {
+      navigateNow(guard.pageId, guard.anchor)
+    }
+  }, [navGuard, navigateNow, resumeHistoryNavigation])
 
   // Browser close/reload guard -- the native confirm is all a page gets.
   useEffect(() => {
@@ -2216,22 +2426,49 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   useEffect(() => {
     if (typeof window === 'undefined') return
     const onPopState = () => {
-      const target = getAdminPageFromPath(window.location.pathname) || 'dashboard'
-      if (target === pageRef.current || !canAccessPage(target)) return
-      const dirty = getDirtyWork()
-      if (dirty.length > 0) {
-        const currentPath = getAdminPathForPage(pageRef.current)
-        if (currentPath) {
-          window.history.pushState(window.history.state, '', `${currentPath}${window.location.search}${window.location.hash}`)
+      const targetUrl = new URL(window.location.href)
+      const target = getHubPageFromLocation(targetUrl.pathname, targetUrl.hash) || resolveAdminLandingPage(settingsRef.current.default_landing_page)
+      const previous = committedLocationRef.current
+      // Fold/modal history uses the same URL. It must never change the host section.
+      const pending = pendingTraversalRef.current
+      if (previous?.href === targetUrl.href) {
+        if (pending && !pending.resumed) {
+          pending.restored = true
+          resumeHistoryNavigation()
         }
-        setNavGuard({ pageId: target, entries: dirty })
         return
       }
+      const approvedTraversal = pending?.resumed && pending.targetHref === targetUrl.href
+      if (approvedTraversal) pendingTraversalRef.current = null
+      const previousHash = previous ? new URL(previous.href).hash : ''
+      const dirty = !approvedTraversal && needsNavigationGuard(pageRef.current, target, previousHash, targetUrl.hash) ? getDirtyWork() : []
+      if (!canAccessPage(target) || dirty.length > 0) {
+        if (previous) {
+          const from = previous.state?.bosNavigationIndex
+          const to = window.history.state?.bosNavigationIndex
+          const indexed = Number.isInteger(from) && Number.isInteger(to) && from !== to
+          if (dirty.length > 0 && canAccessPage(target)) {
+            pendingTraversalRef.current = { targetHref: targetUrl.href, delta: indexed ? to - from : -1, restored: !indexed, approved: false, resumed: false }
+            setNavGuard({ pageId: target, anchor: targetUrl.hash.slice(1), entries: dirty })
+          }
+          if (indexed) {
+            // Return to the committed entry without destroying Forward on Stay.
+            window.history.go(from - to)
+          } else {
+            window.history.pushState(previous.state, '', previous.href)
+          }
+        }
+        return
+      }
+      committedLocationRef.current = { href: targetUrl.href, state: window.history.state }
+      window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, {
+        detail: { page: target, path: targetUrl.pathname, anchor: targetUrl.hash.slice(1) || null },
+      }))
       startTransition(() => setPage(target))
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
-  }, [canAccessPage])
+  }, [canAccessPage, resumeHistoryNavigation])
 
   // Currency helpers.
   const exchangeRate    = parseFloat(String(settings.exchange_rate || '4100'))
@@ -2262,7 +2499,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const formatDateTime = useCallback((value: unknown, options: Intl.DateTimeFormatOptions = {}): string => {
     const date = normalizeDateInput(value)
     if (!date) return '--'
-    return date.toLocaleString('en-US', {
+    const resolved: Intl.DateTimeFormatOptions = {
       hour12: false,
       year: 'numeric',
       month: '2-digit',
@@ -2272,12 +2509,19 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       second: '2-digit',
       timeZone: displayTimezone,
       ...options,
-    })
+    }
+    return fmtDayFirst(date, resolved)
   }, [displayTimezone])
 
-  const canWriteToServer = !!syncUrl && !syncServerUnreachable
+  const canWriteToServer = !!syncUrl && !syncServerUnreachable && !isActorSessionQuarantined()
 
-  const appValue: AppContextValue = {
+  // Memoized on the actual fields so every consumer of useApp()/AppContext
+  // (91 call sites) gets the SAME object reference across renders that
+  // didn't change any of these values, instead of a brand-new object every
+  // render forcing every context consumer to re-render. Every field below
+  // is already stable (useCallback/useState setter/primitive) except
+  // `settings`, which is its own useState value.
+  const appValue: AppContextValue = useMemo(() => ({
     user, login, logout, persistAuthenticatedUser,
     authReady,
     page, setPage, navigateTo,
@@ -2298,14 +2542,36 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     syncChannel,
     syncServerUnreachable,
     canWriteToServer,
-    AccessDenied: () => <AccessDenied t={t} />,
-  }
-
-  const syncValue: SyncContextValue = {
+    storagePersisted,
+    AccessDenied: AccessDeniedConnected,
+  }), [
+    user, login, logout, persistAuthenticatedUser,
+    authReady,
+    page, setPage, navigateTo,
+    navGuard, resolveNavGuard,
+    settings, loadSettings, saveSettings,
+    language, theme, t,
+    toggleTheme, toggleLanguage,
+    notify, notification,
+    writeConflict, dismissWriteConflict, reloadWriteConflict, dismissNotification,
+    hasPermission, canAccessPage, getPermissions, getPermissionTier, can,
+    formatPrice, fmtUSD, fmtKHR,
+    usdSymbol, khrSymbol, displayCurrency, exchangeRate,
+    usdToKhr, khrToUsd,
+    displayTimezone, deviceTimezone, formatDateTime,
+    syncUrl, updateSyncUrl,
     syncConnected,
     syncChannel,
     syncServerUnreachable,
-  }
+    canWriteToServer,
+    storagePersisted,
+  ])
+
+  const syncValue: SyncContextValue = useMemo(() => ({
+    syncConnected,
+    syncChannel,
+    syncServerUnreachable,
+  }), [syncConnected, syncChannel, syncServerUnreachable])
 
   return (
     <AppContext.Provider value={appValue as AppContextCoreValue}>

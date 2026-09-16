@@ -1,6 +1,17 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import { useVisualViewportInset } from '../../utils/useVisualViewportInset.ts'
+import type { DraftPreservingMinimize, UnsavedChangesDeclaration } from '../../utils/closeGuard.ts'
+import { ModalCloseContext } from './modalCloseContext.ts'
+import UnsavedChangesPrompt from './UnsavedChangesPrompt.tsx'
+
+// Same cast UnsavedChangesPrompt.tsx uses next to this file -- Modal is
+// rendered from every admin surface, all of which sit under the one
+// AppProvider, so useApp() is always safe here.
+const useApp = useAppHook as unknown as () => { t: (key: string) => string }
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl'
 
@@ -12,6 +23,20 @@ type ModalProps = {
   // (e.g. a flow's − minimize button). Interactive children are already
   // drag-exempt via handlePointerDown's closest('button...') guard.
   headerExtra?: ReactNode
+  // Capability, not decoration: supply only when this callback synchronously
+  // preserves the current draft and parks a restorable flow. Its presence is
+  // what allows the unsaved prompt to show a minimize control; dirty/workKey
+  // declarations alone never imply that navigation can preserve a draft.
+  onMinimize?: DraftPreservingMinimize
+  /**
+   * Omit the header Close control only when the surrounding workflow is
+   * intentionally mandatory and offers no dismissal at all. Ordinary modals
+   * keep the accessible Close button by default; use closeDisabled when a
+   * temporary in-flight operation, rather than the workflow itself, blocks it.
+   */
+  closeAffordance?: 'visible' | 'omitted'
+  /** Blocks every dismissal affordance while a child operation must finish. */
+  closeDisabled?: boolean
   wide?: boolean
   size?: ModalSize
   // Lets the operator drag the modal window around by its header -- added
@@ -21,9 +46,38 @@ type ModalProps = {
   // before this component ever implemented it (a real typecheck break,
   // not just an unused prop) -- see CHANGES-VERIFIED.md.
   draggable?: boolean
+  // Nested tools such as the barcode camera are opened from inside another
+  // modal. Give them an explicit higher layer so their controls and scan
+  // result cannot fall behind or interact with the parent workflow.
+  layer?: 'default' | 'nested'
+  // S4-21: REQUIRED, and required on purpose. Every modal must say whether
+  // closing it can lose work; a new modal that says nothing does not
+  // compile, which is the only version of "every modal and float in the
+  // app, not a one-off" that survives the next twenty modals.
+  //   'read-only'   nothing here can be edited and lost
+  //   { workKey }   the utils/dirtyWork.ts key this modal registered
+  //   { dirty }     a direct answer, for work that cannot outlive the modal
+  // Scoped to THIS modal: a nested tool (the barcode camera opened from
+  // inside a product form) declares its own 'read-only' and closes
+  // straight through -- the parent form's key is never consulted by the
+  // child's ✕.
+  unsavedChanges: UnsavedChangesDeclaration
 }
 
-export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra }: ModalProps) {
+export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, onMinimize, closeAffordance = 'visible', closeDisabled = false, layer = 'default', unsavedChanges }: ModalProps) {
+  const { t } = useApp()
+  const tr = (key: string, fallback: string): string => {
+    const value = t(key)
+    return value && value !== key ? value : fallback
+  }
+  // Every admin dialog in the app renders through this component, so this is
+  // the one place that has to keep `--kb-inset` current: .modal-viewport-safe
+  // and .modal-panel-safe (styles/main.css) subtract it so a sticky Save/
+  // Cancel footer stays above the iOS on-screen keyboard, which does not
+  // shrink the layout viewport and therefore is invisible to `dvh`.
+  useVisualViewportInset()
+  const closeGuard = useCloseGuard(unsavedChanges, onClose, onMinimize)
+  const requestClose = closeDisabled ? () => {} : closeGuard.requestClose
   const widthClass =
     size === 'sm' ? 'max-w-lg' :
     size === 'lg' ? 'max-w-3xl' :
@@ -117,7 +171,11 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
     // both, but deliberately still below App.tsx's toast layer (z-[1100])
     // -- a toast confirming an action taken while a modal is open should
     // stay visible on top of it, not get hidden behind the backdrop.
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-[1050] overflow-y-auto sm:p-4">
+    <div
+      className={`modal-viewport-safe pointer-events-auto fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center ${layer === 'nested' ? 'z-[1070]' : 'z-[1050]'} overflow-y-auto sm:p-4`}
+      role="dialog"
+      aria-modal="true"
+    >
       <div
         ref={panelRef}
         className={`modal-panel-safe bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${widthClass} flex flex-col fade-in my-auto`}
@@ -132,19 +190,28 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
           <h2 className="detail-scroll-text min-w-0 flex-1 text-base font-bold text-gray-900 dark:text-white sm:text-lg" title={typeof title === 'string' ? title : undefined}>{title}</h2>
           <div className="flex shrink-0 items-center gap-1">
           {headerExtra}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            /* Z5: the ✕ was text-gray-400 (~2.5:1 on white, fails WCAG AA);
-               gray-600/gray-300 gives a legible close affordance in both
-               themes. */
-            className="text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
-          ><X className="h-4 w-4" /></button>
+          {closeAffordance === 'visible' ? (
+            <button
+              type="button"
+              onClick={requestClose}
+              disabled={closeDisabled}
+              aria-label={tr('close', 'Close')}
+              /* Z5: the ✕ was text-gray-400 (~2.5:1 on white, fails WCAG AA);
+                 gray-600/gray-300 gives a legible close affordance in both
+                 themes. */
+              className="text-gray-600 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:text-white w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+            ><X className="h-4 w-4" /></button>
+          ) : null}
           </div>
         </div>
-        <div className="modal-scroll p-3 sm:p-4">{children}</div>
+        {/* The guarded close is published to the content so a Cancel button
+            inside the modal goes through the SAME check as the ✕ -- see
+            modalCloseContext.ts. */}
+        <ModalCloseContext.Provider value={requestClose}>
+          <div className="modal-scroll p-3 sm:p-4">{children}</div>
+        </ModalCloseContext.Provider>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>
   )
 

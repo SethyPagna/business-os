@@ -252,7 +252,7 @@ export function usePortalWishlist() {
 export function formatPortalBucketText(items: PortalBucketItem[], businessName = ''): string {
   const lines: string[] = []
   if (businessName) lines.push(businessName)
-  // Customer-facing share text: pin mm/dd/yyyy 24-hour Phnom Penh like every
+  // Customer-facing share text: pin dd/mm/yyyy 24-hour Phnom Penh like every
   // other surface instead of the device's own locale/timezone.
   lines.push(fmtDateTime24(new Date()))
   lines.push('')

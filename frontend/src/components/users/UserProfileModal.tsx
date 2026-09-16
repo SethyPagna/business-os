@@ -7,6 +7,7 @@ import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import Modal from '../shared/Modal'
+import { useFormDirty } from '../../utils/formDirty.ts'
 import type { OtpModalProps } from '../utils-settings/OtpModal'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import InfoHint from '../shared/InfoHint.tsx'
@@ -15,6 +16,7 @@ import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAp
 import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isTrackedRequestCurrent, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
+import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
@@ -28,7 +30,7 @@ const PROFILE_OAUTH_DISCONNECT_TIMEOUT_MS = 20000
 const PROFILE_AVATAR_UPLOAD_TIMEOUT_MS = 30000
 
 type EntityId = string | number
-type ProfileSection = 'personal' | 'login_methods' | 'security' | 'organization'
+type ProfileSection = 'personal' | 'login_methods' | 'security' | 'organization' | 'shifts'
 type OtpMode = 'setup' | 'disable' | null
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, tone?: string) => void
@@ -390,8 +392,11 @@ function AvatarEditorModal({
 }: AvatarEditorModalProps) {
   if (!open || !src) return null
 
+  // S4-21: the crop/zoom the operator set but has not uploaded is real
+  // unsaved work, so a dismissal asks before throwing it away. The
+  // defaults (100 / 50 / 50) are the untouched state.
   return (
-    <Modal title={tr('avatar_editor', 'Edit avatar image')} onClose={onClose}>
+    <Modal title={tr('avatar_editor', 'Edit avatar image')} onClose={onClose} unsavedChanges={{ dirty: zoom !== 100 || positionX !== 50 || positionY !== 50 }}>
       <div className="space-y-4">
         <div className="flex items-center justify-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-300">
           <span>{tr('adjust_image', 'Adjust image')}</span>
@@ -452,7 +457,7 @@ function AvatarViewerModal({
   if (!open) return null
 
   return (
-    <Modal title={tr('avatar_image', 'Profile photo')} onClose={onClose} size="sm">
+    <Modal title={tr('avatar_image', 'Profile photo')} onClose={onClose} size="sm" unsavedChanges="read-only">
       <div className="flex max-h-[72dvh] min-h-0 flex-col">
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-2xl bg-gray-100 p-2 dark:bg-zinc-900/70">
           {avatarPath ? (
@@ -532,6 +537,12 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
   const [avatarZoom, setAvatarZoom] = useState(100)
   const [avatarPositionX, setAvatarPositionX] = useState(50)
   const [avatarPositionY, setAvatarPositionY] = useState(50)
+  // S4-21: the account form holds typed profile fields that a dismissal
+  // would lose. `profile` is null while loading, which useFormDirty
+  // deliberately does not baseline -- otherwise the form would read as
+  // dirty the instant its data arrived. (The avatar editor declares its
+  // own dirtiness from its props, in AvatarEditorModal above.)
+  const { dirty: profileDirty } = useFormDirty(profile)
   const avatarFileInputRef = useRef<HTMLInputElement | null>(null)
   const avatarObjectUrlRef = useRef('')
   const loadProfileRequestRef = useRef(0)
@@ -973,7 +984,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
 
   return (
     <>
-      <Modal title={title} onClose={onClose} wide>
+      <Modal title={title} onClose={onClose} wide unsavedChanges={{ dirty: profileDirty }}>
         {loading || !profile ? (
           <div className="py-10 text-center text-sm text-gray-400">{tr('loading_account', 'Loading account...')}</div>
         ) : (
@@ -1029,6 +1040,9 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                 </ProfileSectionButton>
                 <ProfileSectionButton active={activeSection === 'organization'} onClick={() => setActiveSection('organization')}>
                   {tr('organization', 'Organization')}
+                </ProfileSectionButton>
+                <ProfileSectionButton active={activeSection === 'shifts'} onClick={() => setActiveSection('shifts')}>
+                  {tr('shift_summary_title', 'Shifts')}
                 </ProfileSectionButton>
               </div>
               {/* align="right" so the history menu + its hover preview open
@@ -1177,6 +1191,17 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
 
               </div>
             </section>
+            ) : null}
+
+            {activeSection === 'shifts' ? (
+              <section className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
+                <ShiftHistoryPanel
+                  userId={currentUserId}
+                  compact
+                  layer="nested"
+                  notify={notify}
+                />
+              </section>
             ) : null}
 
             {activeSection === 'security' ? (

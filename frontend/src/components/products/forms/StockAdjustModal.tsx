@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import Modal from '../../shared/Modal'
 import SearchInput from '../../shared/SearchInput'
 import ScanSearchButton from '../../shared/ScanSearchButton'
+import ProductOptionSheet from '../../shared/ProductOptionSheet.tsx'
+import { buildProductGroups } from '../../../utils/productGrouping.ts'
 import InventoryStockModals from '../../inventory/InventoryStockModals'
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog'
@@ -14,14 +16,30 @@ import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
+import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
+import {
+  applyRowOutcome,
+  browserStockStorage,
+  classifyStockAdjustFailure,
+  createRow,
+  dropFailedStockAttempt,
+  emitFailedAttemptsChanged,
+  hasUnsavedFailures,
+  recordFailedStockAttempt,
+  submitButtonState,
+  type StockAdjustRow,
+} from '../../../utils/stockAdjustOutcome.ts'
+import { clearWorkDraft, writeWorkDraft } from '../../../utils/workDrafts.ts'
+import { readStockAdjustDraft, stockAdjustDraftKey, type StockAdjustDraft } from '../../../utils/stockAdjustDraft.ts'
+import { buildStockAdjustQuantityReview } from '../../../utils/stockAdjustReview.ts'
+import { useRestoredStockAdjustDirty } from '../../../utils/useRestoredStockAdjustDirty.ts'
 
 // Full-featured "Adjust stock" flow for the Products page "Stock Changes"
 // ledger. It REUSES Inventory's own presentational adjust modal
-// (InventoryStockModals) verbatim rather than reimplementing it (and
-// deliberately NOT the leaner BranchStockAdjuster), so this entry point
-// looks and behaves exactly like the Inventory page's adjust modal -- same
-// batch picker, same pricing lock, same supplier attribution, same saved-
-// reason catalog. Two steps: pick a product, then adjust it.
+// (InventoryStockModals) verbatim rather than reimplementing it, so this
+// entry point looks and behaves exactly like the Inventory page's adjust
+// modal -- same batch picker, same pricing lock, same supplier attribution,
+// same saved-reason catalog. Two steps: pick a product, then adjust it.
 
 type InventoryId = number | string
 type InventoryFormValue = string | number
@@ -39,8 +57,10 @@ type AdjustForm = {
   pricingLocked: boolean
   selling_price_usd: InventoryFormValue
   selling_price_khr: InventoryFormValue
-  special_price_usd: InventoryFormValue
-  special_price_khr: InventoryFormValue
+  // Renamed from special_price_* with the tier itself (2026-09-04 ruling), in
+  // lockstep with InventoryStockModals.tsx as the type comment above requires.
+  wholesale_price_usd: InventoryFormValue
+  wholesale_price_khr: InventoryFormValue
   discount_enabled: boolean
   discount_type: string
   discount_percent: InventoryFormValue
@@ -52,12 +72,22 @@ type AdjustForm = {
   received_date: string
   supplier_id: number | ''
   supplier_name: string
+  // S4-15/S4-16: mirrors InventoryStockModals.tsx's matching receipt fields --
+  // what this stock-in cost per unit and how it was paid. Offered for an 'add'
+  // and for a 'set' that raises the figure (utils/stockReceiptFields.ts).
+  unit_cost_usd: InventoryFormValue
+  // N14-D: the explicit free-goods declaration, mirrored from the shared form.
+  free_goods: boolean
+  payment_status: string
+  credit_due_date: string
+  // P3-L6: mirrors InventoryStockModals.tsx's field of the same name --
+  // '' = untagged, otherwise the English condition constant the units are
+  // kept (or received) under. See frontend/src/utils/stockCondition.ts.
+  condition_tag: string
 }
 
-// 4-union reason type -- matches BranchStockAdjuster.tsx and
-// InventoryReasonManagerModal.tsx (which renders a 'delete' tab). The
-// saved-reason catalog handling below is cribbed verbatim in shape from
-// BranchStockAdjuster.tsx. The narrower Stock* aliases beneath exist only
+// 4-union reason type -- matches InventoryReasonManagerModal.tsx (which
+// renders a 'delete' tab). The narrower Stock* aliases beneath exist only
 // for the two casts at the InventoryStockModals boundary, whose own reason
 // union has three members and no 'delete'.
 type InventoryReasonType = 'adjust' | 'transfer' | 'move' | 'delete'
@@ -85,8 +115,10 @@ type PickedProduct = Record<string, any> & {
   barcode?: string
   selling_price_usd?: number
   selling_price_khr?: number
-  special_price_usd?: number
-  special_price_khr?: number
+  // Was special_price_*: the 2026-09-04 ruling deleted the "VIP" tier those
+  // columns backed, and migration 0111 moved the values into this pair.
+  wholesale_price_usd?: number
+  wholesale_price_khr?: number
   discount_enabled?: number | boolean | null
   discount_type?: string
   discount_percent?: number
@@ -108,8 +140,23 @@ type Branch = {
 type StockAdjustModalProps = {
   initialType?: 'add' | 'remove' | 'set'
   initialProduct?: Record<string, any> | null
+  // Reopening an UNSAVED failed attempt from the Stock Change section: the
+  // row carries exactly the values that failed, so the operator lands back on
+  // the same form instead of retyping it. `resumeAttemptId` is the persisted
+  // record this modal clears once the retry commits.
+  resumeRow?: {
+    type?: string
+    quantity?: number
+    reason?: string
+    branchId?: number | null
+    batchId?: number | string | null
+    receivedDate?: string
+  } | null
+  resumeAttemptId?: string | null
   onClose: () => void
   onDone: () => void
+  onMinimize?: (label: string, detail: { draftKey: string; productId: InventoryId }) => void
+  restoreDraftKey?: string | null
   t: (key: string) => string
 }
 
@@ -124,6 +171,11 @@ type AppContextSlice = {
   notify: (message: unknown, type?: string, duration?: number) => void
 }
 
+type PendingStockAdjust = {
+  request: NonNullable<Parameters<typeof adjustStock>[0]>
+  beforeQuantity: number
+}
+
 // All received-date defaults use the fixed Cambodia business calendar day.
 function todayIsoDate(): string {
   return todayStr()
@@ -136,7 +188,7 @@ function stockQtyOf(product?: Record<string, any> | null): number {
   return Number(product.stock_quantity || 0)
 }
 
-export default function StockAdjustModal({ initialType = 'add', initialProduct = null, onClose, onDone, t }: StockAdjustModalProps) {
+export default function StockAdjustModal({ initialType = 'add', initialProduct = null, resumeRow = null, resumeAttemptId = null, onClose, onDone, onMinimize, restoreDraftKey = null, t }: StockAdjustModalProps) {
   const { fmtUSD, fmtKHR, usdSymbol, user, notify } = useApp() as AppContextSlice
 
   const isKhmer = /[ក-៿]/.test(t('cancel') || '')
@@ -147,12 +199,33 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   }, [t, isKhmer])
 
   // --- product picker (step 1) ---
-  const initialPickedProduct = initialProduct?.id != null ? initialProduct as PickedProduct : null
+  const restoredDraftRef = useRef<StockAdjustDraft | null>(readStockAdjustDraft(restoreDraftKey))
+  const restoredDraft = restoredDraftRef.current
+  const adjustRestoredDirty = useRestoredStockAdjustDirty(Boolean(restoredDraft))
+  const openingProduct = (restoredDraft?.product || initialProduct) as PickedProduct | null
+  const openingType = restoredDraft?.initialType || initialType
+  const initialPickedProduct = openingProduct?.id != null ? openingProduct : null
   const [selectedProduct, setSelectedProduct] = useState<PickedProduct | null>(initialPickedProduct)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(restoredDraft?.search || '')
   const debouncedSearch = useDebouncedValue(search, 200)
   const [results, setResults] = useState<PickedProduct[]>([])
   const [searching, setSearching] = useState(false)
+  // Same-name rows collapse to ONE title row. Tapping it (or a standalone
+  // product's row) opens the shared option sheet, which is where branch,
+  // option and received date get chosen -- this list used to commit on the
+  // first tap and show one branch-summed number with no way to see which
+  // branch held it.
+  const [picking, setPicking] = useState<PickedProduct | null>(null)
+
+  // Camera results belong to this picker only. A named handler (rather than
+  // passing a generic setSearch reference) makes that boundary explicit and
+  // clears stale rows while the exact barcode query is loading.
+  const handleProductScan = useCallback((value: string) => {
+    const barcode = String(value || '').trim()
+    if (!barcode) return
+    setResults([])
+    setSearch(barcode)
+  }, [])
 
   useEffect(() => {
     if (selectedProduct) return
@@ -161,7 +234,14 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     // include branch_stock so per-branch quantity + remove-availability
     // checks below are accurate; the search endpoint supports `include`
     // (same param getProductsByIds passes).
-    searchProducts({ search: debouncedSearch, pageSize: 20, include: 'branch_stock' })
+    // `query` is the catalog search endpoint's free-text parameter. This
+    // used to say `search:`, which the server does not read: it answered
+    // 200 with the entire unfiltered catalog, so typing or scanning a
+    // barcode here listed unrelated products (reported live: scanning
+    // 3348901770569 still showed "Abercrombie Authantic 10ml"). The
+    // transport now canonicalizes the key for every caller
+    // (api/productReadTransport.ts) -- this spells it correctly regardless.
+    searchProducts({ query: debouncedSearch, pageSize: 20, include: 'branch_stock', surface: 'inventory' })
       .then((raw) => {
         if (cancelled) return
         const rows = Array.isArray(raw)
@@ -190,7 +270,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     [branches],
   )
 
-  // --- saved-reason catalog (cribbed verbatim in shape from BranchStockAdjuster.tsx) ---
+  // --- saved-reason catalog (same shape as Inventory.tsx's own) ---
   const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
   const [reasonManager, setReasonManager] = useState<ReasonManagerState>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
@@ -246,16 +326,16 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   }, [inventoryReasons, saveReasonCatalog, tr])
 
   // --- adjust form (step 2) ---
-  const [adjustForm, setAdjustForm] = useState<AdjustForm>(() => ({
-    type: initialType,
+  const [adjustForm, setAdjustForm] = useState<AdjustForm>(() => restoredDraft ? restoredDraft.form as unknown as AdjustForm : ({
+    type: openingType,
     quantity: 1,
     reason: '',
     branch_id: '',
     pricingLocked: true,
     selling_price_usd: 0,
     selling_price_khr: 0,
-    special_price_usd: 0,
-    special_price_khr: 0,
+    wholesale_price_usd: 0,
+    wholesale_price_khr: 0,
     discount_enabled: false,
     discount_type: 'percent',
     discount_percent: 0,
@@ -267,30 +347,70 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     received_date: todayIsoDate(),
     supplier_id: '',
     supplier_name: '',
+    unit_cost_usd: '',
+    free_goods: false,
+    payment_status: 'paid',
+    credit_due_date: '',
+    condition_tag: '',
   }))
+  // S4-15: one id for everything typed in this modal opening, so several
+  // lines land in the Sessions list as ONE receipt rather than one row per
+  // second. Same shape FastStockInModal mints: routes/inventory.ts stores it
+  // as the movement's reference_id, which is the key stockInSessionsQuery
+  // groups on in preference to the created_at/user/branch/supplier fallback.
+  const receiptSessionIdRef = useRef(Date.now())
+  if (restoredDraft) receiptSessionIdRef.current = restoredDraft.receiptSessionId
   const [adjustSaving, setAdjustSaving] = useState(false)
   const submitRef = useRef(false)
   // Part 563: the built, validated adjustment request awaiting the operator's
   // explicit confirm. onAdjust validates + builds the request and parks it
   // here (opening the review dialog); commitAdjust does the actual write once
   // the dialog is confirmed. null = no confirm pending.
-  const [pendingAdjust, setPendingAdjust] = useState<Parameters<typeof adjustStock>[0] | null>(null)
+  const [pendingAdjust, setPendingAdjust] = useState<PendingStockAdjust | null>(null)
+  // Failure resilience (user, Sep 3: a failed adjustment "should not close the
+  // action ... so user can edit the failed to correct"). `rows` is the
+  // row-outcome list from utils/stockAdjustOutcome.ts -- one row here, since
+  // POST /api/inventory/adjust commits exactly one product per call, but the
+  // same reducer the bulk surface uses so the rule is one rule. A row that
+  // reached 'done' is never resubmitted; a failed row keeps its request
+  // verbatim and carries the server's reason for inline display.
+  const [rows, setRows] = useState<StockAdjustRow<Parameters<typeof adjustStock>[0]>[]>(() => restoredDraft?.rows as StockAdjustRow<Parameters<typeof adjustStock>[0]>[] || [])
+  const attemptIdRef = useRef<string>(restoredDraft?.attemptId || resumeAttemptId || `attempt-${Date.now().toString(36)}`)
+  const resumeRef = useRef(resumeRow)
+  const storage = useMemo(() => browserStockStorage(), [])
+  const userKey = user?.id ?? user?.username ?? null
+  const failedRow = rows.find((row) => row.status === 'failed') || null
+  const submitState = submitButtonState(rows)
+  const currentDraftKey = restoreDraftKey || stockAdjustDraftKey(selectedProduct?.id || openingProduct?.id)
 
   // Initialize adjustForm exactly like Inventory.openAdjust once a product
   // is picked (pricingLocked true, prices from the product, branch = default).
-  const selectProduct = useCallback((product: PickedProduct) => {
+  const selectProduct = useCallback((product: PickedProduct, picked?: { branchId?: string | null; batchId?: number | null }) => {
+    const restore = restoredDraftRef.current
+    if (restore && String(restore.product.id) === String(product.id)) {
+      restoredDraftRef.current = null
+      setSelectedProduct(product)
+      setAdjustForm({ ...(restore.form as unknown as AdjustForm), product_id: product.id })
+      return
+    }
     setSelectedProduct(product)
     setAdjustForm({
       product_id: product.id,
-      type: initialType,
+      type: openingType,
       quantity: 1,
       reason: '',
-      branch_id: defaultBranch?.id != null ? String(defaultBranch.id) : '',
+      // The branch the option sheet resolved wins over the default branch:
+      // it is the one whose quantity the operator was just reading.
+      branch_id: picked?.branchId != null ? String(picked.branchId) : (defaultBranch?.id != null ? String(defaultBranch.id) : ''),
       pricingLocked: true,
       selling_price_usd: product.selling_price_usd || 0,
       selling_price_khr: product.selling_price_khr || 0,
-      special_price_usd: product.special_price_usd || 0,
-      special_price_khr: product.special_price_khr || 0,
+      // Was the special_price_* pair for the deleted "VIP" tier; prefilled from
+      // the row's real wholesale price now, and sent back out with the pricing
+      // payload below so an unlocked receipt that creates a new row carries
+      // the tier onto it.
+      wholesale_price_usd: product.wholesale_price_usd || 0,
+      wholesale_price_khr: product.wholesale_price_khr || 0,
       discount_enabled: !!product.discount_enabled,
       discount_type: product.discount_type || 'percent',
       discount_percent: product.discount_percent || 0,
@@ -298,23 +418,44 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       cost_usd: product.cost_price_usd || product.purchase_price_usd || 0,
       cost_khr: product.cost_price_khr || product.purchase_price_khr || 0,
       barcode: product.barcode || '',
-      batch_id: '',
+      batch_id: picked?.batchId != null ? String(picked.batchId) : '',
       received_date: todayIsoDate(),
       supplier_id: '',
       supplier_name: '',
+      unit_cost_usd: '',
+      free_goods: false,
+      payment_status: 'paid',
+      credit_due_date: '',
+      condition_tag: '',
     })
-  }, [defaultBranch, initialType])
+    // Resuming an unsaved failed attempt: put back exactly what the operator
+    // had typed (type, quantity, reason, branch, lot, date) on top of the
+    // freshly seeded form, once.
+    const resume = resumeRef.current
+    if (resume) {
+      resumeRef.current = null
+      setAdjustForm((prev) => ({
+        ...prev,
+        type: resume.type || prev.type,
+        quantity: resume.quantity != null ? resume.quantity : prev.quantity,
+        reason: resume.reason || prev.reason,
+        branch_id: resume.branchId != null ? String(resume.branchId) : prev.branch_id,
+        batch_id: resume.batchId != null ? resume.batchId : prev.batch_id,
+        received_date: resume.receivedDate || prev.received_date,
+      }))
+    }
+  }, [defaultBranch, openingType])
 
   // When opened from a product detail card, skip the product-picker step and
   // refresh that exact row with branch_stock/images/batches before adjustment.
   // This makes the floating Adjust Stock action authoritative even if the
   // detail card itself came from a lighter paged product row.
   useEffect(() => {
-    const initial = initialProduct
+    const initial = openingProduct
     const id = initial?.id
     if (!initial || id == null) return
     let cancelled = false
-    getProductsByIds([id])
+    getProductsByIds([id], { surface: 'inventory' })
       .then((raw) => {
         if (cancelled) return
         const rows = Array.isArray(raw)
@@ -322,11 +463,22 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
           : Array.isArray((raw as { items?: unknown })?.items)
             ? (raw as { items: PickedProduct[] }).items
             : []
-        selectProduct((rows[0] as PickedProduct | undefined) || initial as PickedProduct)
+        // Key the refreshed row by the id that was asked for. Taking
+        // items[0] meant that any response that was not exactly this
+        // product -- and until the fix in this lane the endpoint ignored
+        // `ids` and answered with the head of the whole catalog -- silently
+        // rebound the form to a different product: reported live on an
+        // iPhone, picking "Dior Backstage Highlighter New 002" and getting
+        // "Abercrombie Authantic 10ml" (the catalog's first row by name) in
+        // the adjustment below. The picked product's identity now comes
+        // from its id, and an unmatched response falls back to the row the
+        // operator actually clicked rather than to a stranger.
+        const refreshed = (rows as PickedProduct[]).find((row) => Number(row?.id) === Number(id))
+        selectProduct(refreshed || initial as PickedProduct)
       })
       .catch(() => { if (!cancelled) selectProduct(initial as PickedProduct) })
     return () => { cancelled = true }
-  }, [initialProduct?.id, selectProduct])
+  }, [openingProduct?.id, selectProduct])
 
   // onAdjust: replicates Inventory.handleAdjust's validation + payload build
   // EXACTLY, minus the undo/redo action-history pinning (omitted here).
@@ -335,7 +487,10 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     if (!product) { notify('Select a product first', 'error'); return }
     if (adjustSaving) return
     const qty = parseFloat(String(adjustForm.quantity))
-    if (!qty || qty <= 0) { notify('Invalid quantity', 'error'); return }
+    // Same rule, same helper, as Inventory.handleAdjust and FastStockInModal:
+    // a set may target 0 (an emptied branch), an add or a remove may not move 0.
+    const quantityError = stockAdjustQuantityError(adjustForm.type, adjustForm.quantity)
+    if (quantityError) { notify(tr(quantityError, STOCK_ADJUST_QUANTITY_FALLBACKS[quantityError]), 'error'); return }
     if (!String(adjustForm.reason || '').trim()) {
       notify(tr('adjust_reason_required', 'A reason is required for this stock adjustment.'), 'error')
       return
@@ -347,8 +502,47 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     const selectedBranchStock = numericBranchId ? branchStockById.get(numericBranchId) : null
     const unlockPricing = adjustForm.type === 'add' && !adjustForm.pricingLocked
     if (!unlockPricing && (adjustForm.type === 'add' || adjustForm.type === 'remove') && numericBranchId) {
-      if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
-      if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
+      if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
+      if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
+    }
+    // Same figure InventoryStockModals shows as "Current" and gates its own
+    // receipt fields on -- the one shared branch rule, not a second derivation
+    // that happens to agree. (It did not: for a branch with no branch_stock
+    // row this answered 0 while the prop below answered the product total.)
+    const currentQuantity = adjustBranchQuantity(product.branch_stock, numericBranchId, stockQtyOf(product))
+    const isStockIn = isStockInSubmission(adjustForm.type, qty, currentQuantity)
+    if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
+      notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error')
+      return
+    }
+    // The lot this submission actually names, from the one shared rule
+    // InventoryStockModals renders the picker by -- a picker that is not on
+    // screen chose nothing, so nothing stale rides the wire (N14-E). Picking
+    // an EXISTING lot blanks the supplier field on purpose: an attributed lot
+    // keeps its first supplier and the picker shows that name locked instead.
+    // This form cannot read the lot from here, so it defers the supplier half
+    // to routes/inventory.ts, which looks the lot up and refuses an
+    // unattributed one. The cost half is never deferred.
+    const batchWire = stockAdjustBatchWire({
+      type: adjustForm.type,
+      quantity: qty,
+      currentQuantity,
+      unlockPricing,
+      branchId: numericBranchId,
+      batchId: adjustForm.batch_id,
+    })
+    // N14-D: the same rule routes/inventory.ts enforces (lib/stockReceiptGate.ts).
+    // The sibling surface on this same shared form runs it identically.
+    const receiptGate = stockReceiptGateCode({
+      isStockIn,
+      supplierName: adjustForm.supplier_name,
+      lotAttributionDeferred: batchWire.lotAttributionDeferred,
+      unitCostUsd: adjustForm.unit_cost_usd,
+      freeGoods: adjustForm.free_goods,
+    })
+    if (receiptGate) {
+      notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
+      return
     }
     const adjustmentRequest = {
       productId: product.id,
@@ -360,19 +554,35 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       userId: user?.id,
       userName: user?.name || user?.username,
       unlockPricing,
-      batchId: !unlockPricing && adjustForm.batch_id !== '' ? adjustForm.batch_id : undefined,
-      receivedDate: adjustForm.type === 'add'
-          && (unlockPricing || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
+      batchId: batchWire.batchId,
+      // S4-16: a 'set' above the current figure has no batch picker but
+      // always creates or date-matches a lot server-side, so it carries the
+      // date, supplier and receipt fields exactly as an explicit add does.
+      receivedDate: isStockIn
+          && (unlockPricing || adjustForm.type === 'set' || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
           && adjustForm.received_date
         ? String(adjustForm.received_date)
         : undefined,
-      supplierId: adjustForm.type === 'add' && adjustForm.supplier_id !== '' ? Number(adjustForm.supplier_id) : undefined,
-      supplierName: adjustForm.type === 'add' && String(adjustForm.supplier_name || '').trim() !== '' ? String(adjustForm.supplier_name).trim() : undefined,
+      supplierId: isStockIn && adjustForm.supplier_id !== '' ? Number(adjustForm.supplier_id) : undefined,
+      supplierName: isStockIn && String(adjustForm.supplier_name || '').trim() !== '' ? String(adjustForm.supplier_name).trim() : undefined,
+      // P3-L6: the condition tag, sent only when the control offered it
+      // (add/remove; a 'set' has no quantity of its own to tag and the route
+      // refuses one). Absent means the ordinary untagged behaviour.
+      conditionTag: (adjustForm.type === 'add' || adjustForm.type === 'remove') && adjustForm.condition_tag
+        ? String(adjustForm.condition_tag)
+        : undefined,
+      ...stockReceiptWire(adjustForm, receiptSessionIdRef.current, isStockIn),
       pricing: unlockPricing ? {
         selling_price_usd: parseFloat(String(adjustForm.selling_price_usd)) || 0,
         selling_price_khr: parseFloat(String(adjustForm.selling_price_khr)) || 0,
-        special_price_usd: parseFloat(String(adjustForm.special_price_usd)) || 0,
-        special_price_khr: parseFloat(String(adjustForm.special_price_khr)) || 0,
+        // Was special_price_*, renamed with the tier by the 2026-09-04 ruling.
+        // /adjust names the wholesale pair now, so this is a live column. No
+        // input renders for it -- the values ride through prefilled from the
+        // row -- but unlocked pricing can land the receipt on a NEW product
+        // row, and this pair is what seeds that row's tier. Kept identical to
+        // Inventory.tsx's copy of this payload.
+        wholesale_price_usd: parseFloat(String(adjustForm.wholesale_price_usd)) || 0,
+        wholesale_price_khr: parseFloat(String(adjustForm.wholesale_price_khr)) || 0,
         discount_enabled: !!adjustForm.discount_enabled,
         discount_type: adjustForm.discount_type,
         discount_percent: parseFloat(String(adjustForm.discount_percent)) || 0,
@@ -395,39 +605,136 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     }
     // Part 563: don't write yet -- park the validated request and open the
     // review dialog. commitAdjust runs the actual write once confirmed.
-    setPendingAdjust(adjustmentRequest)
+    setPendingAdjust({ request: adjustmentRequest, beforeQuantity: currentQuantity })
+    // Keep the row's identity across a retry: an edited-and-resubmitted failed
+    // row stays the SAME rowId, so the outcome list never grows a phantom
+    // duplicate and a committed row can never be re-entered.
+    setRows((prev) => {
+      const retryTarget = prev.find((row) => row.status === 'failed') || prev.find((row) => row.status === 'pending')
+      if (retryTarget) {
+        return prev.map((row) => (row.rowId === retryTarget.rowId
+          ? { ...row, status: 'pending' as const, request: adjustmentRequest, failure: null }
+          : row))
+      }
+      return [...prev.filter((row) => row.status === 'done'), createRow(adjustmentRequest)]
+    })
   }, [selectedProduct, adjustSaving, adjustForm, user, notify, tr])
 
+  // Persist the failed attempt so the Stock Change section can list it (and
+  // reopen it prefilled) even if the operator navigates away. There is no
+  // server-side 'failed' status to write to -- inventory_movements only ever
+  // records movements that committed -- so this is client-side, per user, and
+  // marked UNSAVED in the ledger until it is fixed or discarded.
+  const persistFailedAttempt = useCallback((
+    request: Parameters<typeof adjustStock>[0],
+    rowId: string,
+    failure: ReturnType<typeof classifyStockAdjustFailure>,
+  ) => {
+    const req = (request || {}) as Record<string, any>
+    const branchId = req.branchId != null ? Number(req.branchId) : null
+    recordFailedStockAttempt(storage, userKey, {
+      id: attemptIdRef.current,
+      createdAt: new Date().toISOString(),
+      source: 'adjust',
+      rows: [{
+        rowId,
+        productId: req.productId ?? null,
+        productName: String(req.productName || selectedProduct?.name || ''),
+        type: String(req.type || ''),
+        quantity: Number(req.quantity || 0),
+        branchId,
+        branchName: branchId ? String(branches.find((b) => Number(b.id) === branchId)?.name || branchId) : '',
+        batchId: req.batchId ?? null,
+        receivedDate: String(req.receivedDate || ''),
+        reason: String(req.reason || ''),
+        note: '',
+        failure,
+      }],
+    })
+    emitFailedAttemptsChanged()
+  }, [storage, userKey, selectedProduct, branches])
+
   const commitAdjust = useCallback(async () => {
-    const adjustmentRequest = pendingAdjust
+    const adjustmentRequest = pendingAdjust?.request
     if (!adjustmentRequest) return
+    // The row this confirm is committing -- never a row already 'done'.
+    const target = rows.find((row) => row.status === 'pending') || rows.find((row) => row.status === 'failed')
+    if (!target) return
     // Single-flight guard: a double-submit must never issue two writes.
     if (!beginSingleAction(submitRef, { blocked: adjustSaving })) return
     setAdjustSaving(true)
+    setRows((prev) => applyRowOutcome(prev, target.rowId, { status: 'saving' }))
     try {
       const res = await adjustStock(adjustmentRequest) as { success?: boolean; error?: string } | undefined
       if (res?.success !== false) {
+        setRows((prev) => applyRowOutcome(prev, target.rowId, { status: 'done' }))
+        dropFailedStockAttempt(storage, userKey, attemptIdRef.current)
+        emitFailedAttemptsChanged()
         notify(tr('stock_updated', 'Stock updated'))
         setPendingAdjust(null)
+        clearWorkDraft(currentDraftKey)
         onDone()
         onClose()
-      } else {
-        // Keep the review dialog open on a rejected write so the operator can
-        // fix the reason/quantity and retry rather than losing the request.
-        notify(res?.error || 'Adjustment failed', 'error')
+        return
       }
+      // A `{success:false}` body is a rejected write, same as a thrown one.
+      throw Object.assign(new Error(res?.error || 'Adjustment failed'), { status: 400 })
     } catch (error: unknown) {
-      notify(error instanceof Error ? error.message : 'Error', 'error')
+      // THE RULE: a failure never closes this modal and never resets a field.
+      // The row keeps the exact request the operator built, the server's own
+      // reason is pinned to it for inline display, and the attempt is
+      // persisted so the Stock Change section lists it as unsaved.
+      const failure = classifyStockAdjustFailure(error)
+      setRows((prev) => applyRowOutcome(prev, target.rowId, { status: 'failed', failure }))
+      persistFailedAttempt(adjustmentRequest, target.rowId, failure)
+      notify(failure.message, 'error')
     } finally {
       finishSingleAction(submitRef)
       setAdjustSaving(false)
     }
-  }, [pendingAdjust, adjustSaving, notify, tr, onDone, onClose])
+  }, [pendingAdjust, rows, adjustSaving, notify, tr, currentDraftKey, onDone, onClose, storage, userKey, persistFailedAttempt])
+
+  // S4-21: closing with an unresolved failure still asks first, but the
+  // ASKING is no longer this file's job. InventoryStockModals (the shared
+  // adjust chrome this page renders) now routes its ✕, backdrop and Cancel
+  // through the one close guard, so the private "Discard the unsaved
+  // adjustment?" ConfirmDialog that used to live here has been retired --
+  // it was a second implementation of the same question. What was specific
+  // to this surface is kept and handed down: the failed attempt's values
+  // (adjustDiscardItems) still appear in the prompt, and Discard still runs
+  // this cleanup rather than a generic close.
+  const discardFailedAndClose = useCallback(() => {
+    clearWorkDraft(currentDraftKey)
+    if (hasUnsavedFailures(rows)) {
+      dropFailedStockAttempt(storage, userKey, attemptIdRef.current)
+      emitFailedAttemptsChanged()
+    }
+    onClose()
+  }, [currentDraftKey, rows, storage, userKey, onClose])
+
+  const preserveAndMinimize = useCallback(() => {
+    if (!onMinimize || adjustSaving || !selectedProduct) return
+    writeWorkDraft<StockAdjustDraft>(currentDraftKey, {
+      version: 1,
+      product: { ...selectedProduct },
+      form: { ...adjustForm },
+      initialType: adjustForm.type === 'remove' || adjustForm.type === 'set' ? adjustForm.type : 'add',
+      search,
+      receiptSessionId: receiptSessionIdRef.current,
+      attemptId: attemptIdRef.current,
+      rows,
+    })
+    onMinimize(`${tr('adjust_stock', 'Adjust stock')} — ${String(selectedProduct.name || `#${selectedProduct.id}`)}`, {
+      draftKey: currentDraftKey,
+      productId: selectedProduct.id,
+    })
+    onClose()
+  }, [adjustForm, adjustSaving, currentDraftKey, onClose, onMinimize, rows, search, selectedProduct, tr])
 
   // Step 1: product picker.
   if (!selectedProduct) {
     return (
-      <Modal title={tr('adjust_pick_product', 'Choose a product to adjust')} onClose={onClose} size="sm">
+      <Modal title={tr('adjust_pick_product', 'Choose a product to adjust')} onClose={onClose} size="sm" unsavedChanges="read-only">
         <div className="space-y-3">
           <div className="flex gap-2">
             <div className="min-w-0 flex-1">
@@ -439,7 +746,11 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
                 autoFocus
               />
             </div>
-            <ScanSearchButton onDetected={setSearch} t={t} />
+            <ScanSearchButton
+              onDetected={handleProductScan}
+              t={t}
+              title={tr('scan_product_for_adjustment', 'Scan product for this stock adjustment')}
+            />
           </div>
           {searching && !results.length ? (
             <div className="py-6 text-center text-sm text-gray-400">{t('loading')}</div>
@@ -447,23 +758,49 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
             <div className="py-6 text-center text-sm text-gray-400">{t('no_data_found')}</div>
           ) : (
             <div className="max-h-96 space-y-1 overflow-y-auto">
-              {results.map((product) => (
-                <button
-                  key={String(product.id)}
-                  type="button"
-                  onClick={() => selectProduct(product)}
-                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-gray-200 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:border-gray-700 dark:hover:border-blue-600 dark:hover:bg-blue-900/20"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-gray-900 dark:text-white">{product.name || String(product.id)}</span>
-                    <span className="block truncate text-xs text-gray-400">
-                      {product.barcode ? `${product.barcode} · ` : ''}{stockQtyOf(product)} {product.unit || ''}
+              {buildProductGroups(results as never[], new Map(), { preserveInputOrder: true }).map((group) => {
+                const rows = (group.items || []) as unknown as PickedProduct[]
+                const lead = (group.leadProduct || rows[0]) as unknown as PickedProduct
+                return (
+                  <button
+                    key={group.key}
+                    type="button"
+                    onClick={() => setPicking({ ...lead, __groupChoices: rows } as PickedProduct)}
+                    className="flex w-full items-center justify-between gap-2 rounded-xl border border-gray-200 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:border-gray-700 dark:hover:border-blue-600 dark:hover:bg-blue-900/20"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-gray-900 dark:text-white">{group.name || String(lead?.id)}</span>
+                      <span className="block truncate text-xs text-gray-400">
+                        {rows.length > 1
+                          ? `${rows.length} ${tr('options', 'options')} · ${group.stockTotal}`
+                          : `${lead?.barcode ? `${lead.barcode} · ` : ''}${stockQtyOf(lead)} ${lead?.unit || ''}`}
+                      </span>
                     </span>
-                  </span>
-                </button>
-              ))}
+                  </button>
+                )
+              })}
             </div>
           )}
+          {picking ? (
+            <ProductOptionSheet
+              product={picking as never}
+              t={t}
+              fmtUSD={(value: number) => fmtUSD(value)}
+              fmtKHR={(value: number) => fmtKHR(value)}
+              // A stock adjustment may target either canonical branch --
+              // the warehouse holds stock, it just never sells.
+              intent="stock"
+              pickLabel={tr('select', 'Select')}
+              onClose={() => setPicking(null)}
+              onPick={(product, selection) => {
+                setPicking(null)
+                selectProduct(product as unknown as PickedProduct, {
+                  branchId: selection.branchId,
+                  batchId: selection.batch?.batchId ?? null,
+                })
+              }}
+            />
+          ) : null}
         </div>
       </Modal>
     )
@@ -471,10 +808,9 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
 
   // Step 2: reuse Inventory's own adjust modal, fully wired.
   const product = selectedProduct
-  const numericBranchId = adjustForm.branch_id ? Number(adjustForm.branch_id) : null
-  const branchRows = Array.isArray(product.branch_stock) ? product.branch_stock : []
-  const branchEntry = numericBranchId ? branchRows.find((entry) => Number(entry?.branch_id) === numericBranchId) : null
-  const adjustCurrentQuantity = branchEntry ? Number(branchEntry.quantity || 0) : stockQtyOf(product)
+  // The figure the modal renders every verdict from, resolved by the same
+  // shared rule `onAdjust` gates the submission with above.
+  const adjustCurrentQuantity = adjustBranchQuantity(product.branch_stock, adjustForm.branch_id, stockQtyOf(product))
   const adjustCurrentPricing = {
     selling_price_usd: Number(product.selling_price_usd) || 0,
     selling_price_khr: Number(product.selling_price_khr) || 0,
@@ -487,15 +823,18 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   // Compact review rows for the confirm dialog, read from the parked request
   // (so they match exactly what will be written, not the live form).
   const buildAdjustReviewItems = (): ConfirmReviewItem[] => {
-    const req = pendingAdjust
+    const req = pendingAdjust?.request
     if (!req) return []
-    const reqType = String(req.type || '')
-    const typeLabel = reqType === 'remove' ? tr('remove', 'Remove') : reqType === 'set' ? tr('set', 'Set') : tr('add', 'Add')
     const reqBranchId = req.branchId != null ? Number(req.branchId) : null
     const branchName = reqBranchId ? (branches.find((b) => Number(b.id) === reqBranchId)?.name || String(reqBranchId)) : '--'
     const items: ConfirmReviewItem[] = [
-      { label: tr('type', 'Type'), value: typeLabel },
-      { label: tr('quantity', 'Quantity'), value: `${Number(req.quantity || 0)}${product.unit ? ` ${product.unit}` : ''}` },
+      ...buildStockAdjustQuantityReview({
+        type: req.type,
+        quantity: req.quantity,
+        beforeQuantity: pendingAdjust?.beforeQuantity,
+        unit: product.unit,
+        tr,
+      }),
       { label: tr('branch', 'Branch'), value: branchName },
     ]
     const reqReason = String(req.reason || '').trim()
@@ -504,6 +843,29 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     if (reqSupplier) items.push({ label: tr('supplier', 'Supplier'), value: reqSupplier })
     return items
   }
+
+  // The failed row's reason, shown INLINE next to the values that produced it
+  // (not only as a toast, which disappears). 409/400 insufficient stock adds
+  // the available quantity; an offline failure says the write never left the
+  // device and the row is being kept.
+  const failureNotice = failedRow?.failure ? (
+    <div
+      data-stock-adjust-failure="true"
+      className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300"
+    >
+      <div className="font-semibold">
+        {failedRow.failure.offline
+          ? tr('stock_adjust_failed_offline', 'Not saved — offline. Your entry is kept.', 'មិនបានរក្សាទុក — គ្មានអ៊ីនធឺណិត។ ធាតុរបស់អ្នកត្រូវបានរក្សាទុក។')
+          : tr('stock_adjust_failed_row', 'Not saved — fix and retry', 'មិនបានរក្សាទុក — សូមកែ ហើយព្យាយាមម្ដងទៀត')}
+      </div>
+      <div className="mt-0.5 break-words">{failedRow.failure.message}</div>
+      {failedRow.failure.available != null ? (
+        <div className="mt-0.5 tabular-nums">
+          {tr('available', 'Available')}: <b>{failedRow.failure.available}</b>
+        </div>
+      ) : null}
+    </div>
+  ) : null
 
   return (
     <>
@@ -514,7 +876,14 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         setAdjustForm={setAdjustForm}
         adjustSaving={adjustSaving}
         onAdjust={onAdjust}
-        onCloseAdjust={onClose}
+        onCloseAdjust={discardFailedAndClose}
+        onMinimizeAdjust={onMinimize ? preserveAndMinimize : undefined}
+        adjustRestoredDirty={adjustRestoredDirty}
+        adjustDiscardItems={buildAdjustReviewItems()}
+        adjustNotice={failureNotice}
+        adjustSubmitLabel={submitState.mode === 'retry'
+          ? `${tr('retry', 'Retry')} (${submitState.failedCount})`
+          : undefined}
         adjustTargetOptions={[product]}
         adjustTargetSelectOptions={[]}
         adjustBranchSelectOptions={branchSelectOptions}
@@ -560,14 +929,21 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         <ConfirmDialog
           t={t}
           title={tr('adjust_stock', 'Adjust stock')}
-          message={String(pendingAdjust.productName || product.name || '')}
+          message={String(pendingAdjust?.request.productName || product.name || '')}
           items={buildAdjustReviewItems()}
-          confirmLabel={tr('confirm', 'Confirm')}
+          // Once anything has failed the primary action is a RETRY of exactly
+          // that row, never a fresh submit -- committed rows are excluded by
+          // rowsToSubmit(), so a retry can never double-apply.
+          confirmLabel={submitState.mode === 'retry'
+            ? `${tr('retry_failed', 'Retry failed')} (${submitState.failedCount})`
+            : tr('confirm', 'Confirm')}
           working={adjustSaving}
           workingLabel={tr('saving', 'Saving...')}
           onConfirm={commitAdjust}
           onClose={() => { if (!adjustSaving) setPendingAdjust(null) }}
-        />
+        >
+          {failureNotice}
+        </ConfirmDialog>
       ) : null}
     </>
   )

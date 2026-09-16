@@ -30,7 +30,11 @@ await runTest('formatters accept database timestamp shapes', () => {
 
 await runTest('receipt date formatting accepts every supported timestamp representation', () => {
   const instant = Date.parse('2026-09-02T01:59:00.000Z')
-  const expected = '09/02/2026 08:59'
+  // 2026-09-02 is the 2nd day of the 9th month: day-first renders 02/09.
+  // (User, Sep 4 2026: 'change the whole app to dd-mm-yyy'.) What this test
+  // really pins is that ALL five timestamp representations agree -- that
+  // contract is unchanged; only the order inside the string moved.
+  const expected = '02/09/2026 08:59'
   assert.equal(fmtDateTime24(instant), expected)
   assert.equal(fmtDateTime24(new Date(instant)), expected)
   assert.equal(fmtDateTime24('2026-09-02T01:59:00.000Z'), expected)
@@ -82,7 +86,12 @@ await runTest('timezone labels say Phnom Penh, never Bangkok (user, Aug 30 2026)
   const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
   assert.match(auditLog, /fmtTimezoneLabel\(log\?\.device_tz\)/)
   const saleDetail = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
-  assert.match(saleDetail, /fmtTimezoneLabel\(sale\.device_tz\)/)
+  // S4-24 (user, Sep 4 2026): the sale detail stopped showing a Timezone row
+  // at all -- it reads like a receipt now, and no receipt prints one. The rule
+  // this case exists for is unchanged and gets stricter here: the surface must
+  // not print a captured zone RAW either, which is the only way Bangkok could
+  // still reach a reader from this file.
+  assert.doesNotMatch(saleDetail, /{s*sale.device_tzs*}/, 'the sale detail must never print a raw captured timezone')
   const serverPage = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
   assert.match(serverPage, /fmtTimezoneLabel\(settings\?\.display_timezone \|\| displayTimezone\)/)
   assert.match(serverPage, /fmtTimezoneLabel\(deviceTimezone\)/)

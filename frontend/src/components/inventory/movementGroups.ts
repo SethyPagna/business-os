@@ -1,3 +1,5 @@
+import { lotCodeAsDate } from '../../utils/batchLabel.ts'
+
 type MovementRecord = Record<string, unknown>
 
 type MovementGroup = {
@@ -30,6 +32,8 @@ type MovementGroup = {
   branchSummary?: string
   userSummary?: string
   reasonSummary?: string
+  reasonPrimary?: string
+  reasonExtraCount?: number
 }
 
 type MovementGroupPageOptions = {
@@ -148,6 +152,13 @@ export function translateMovementType(type: unknown, t?: (key: string) => string
     replacement_out: ['movement_type_replacement_out', 'Replacement'],
     'in': ['stock_in', 'Stock In'],
     out: ['stock_out', 'Stock Out'],
+    // N14: rows the unified stock-in session wrote before it was corrected to
+    // the ledger's canonical 'add' (cloudflare/src/lib/stockSession.ts). They
+    // ARE receipts, so they must read as "Add Stock" like every other receipt
+    // rather than title-case through the unknown-type fallback as if they were
+    // a second kind of movement. Migration 0128 rewrites the rows themselves;
+    // this keeps the ledger honest for anything not yet normalised.
+    stock_in: ['add_stock', 'Add Stock'],
   }
   const mapped = canonicalKey[key]
   if (mapped) return T(mapped[0], mapped[1])
@@ -316,7 +327,10 @@ export function buildMovementGroups(movements: unknown[] = []): MovementGroup[] 
         const displayName = normalizeText(item.product_name)
         if (displayName) return displayName
         const lotCode = normalizeText(item.lot_code)
-        if (lotCode) return `Lot ${lotCode}`
+        // Z1a: an 8-digit MMDDYYYY lot code is the received date wearing a
+        // code's clothes -- printing it verbatim gave "Lot 08242026" next to
+        // real dd/mm/yyyy dates. A genuine custom code still renders as a code.
+        if (lotCode) return `Received date ${lotCodeAsDate(lotCode) || lotCode}`
         const productId = Number(item.product_id || 0)
         if (Number.isFinite(productId) && productId > 0) return `product #${productId}`
         return 'Inventory movement'
@@ -345,7 +359,19 @@ export function buildMovementGroups(movements: unknown[] = []): MovementGroup[] 
         productSummary: uniqueProducts.length <= 2 ? uniqueProducts.join(', ') : `${uniqueProducts.slice(0, 2).join(', ')} +${uniqueProducts.length - 2}`,
         branchSummary: uniqueBranches.length <= 1 ? (uniqueBranches[0] || '') : `${uniqueBranches[0]} +${uniqueBranches.length - 1}`,
         userSummary: uniqueUsers.length <= 1 ? (uniqueUsers[0] || '') : `${uniqueUsers[0]} +${uniqueUsers.length - 1}`,
-        reasonSummary: allReasons[0] || '',
+        // Same +N convention as the branch and user summaries above. Printing
+        // only the first reason hid every other one in the group, which is
+        // exactly the case per-line reasons create: one stock-in session can
+        // now carry a different reason on every line.
+        //
+        // Given in PARTS as well as pre-joined. The row has to truncate the
+        // reason text on a narrow screen but must never truncate the "+2"
+        // that says there are more, and a single string cannot express that
+        // -- CSS clips the end of it first. The joined form stays for the
+        // CSV export, which has no width to run out of.
+        reasonPrimary: allReasons[0] || '',
+        reasonExtraCount: Math.max(0, allReasons.length - 1),
+        reasonSummary: allReasons.length <= 1 ? (allReasons[0] || '') : `${allReasons[0]} +${allReasons.length - 1}`,
       }
     })
     .sort((a, b) => {

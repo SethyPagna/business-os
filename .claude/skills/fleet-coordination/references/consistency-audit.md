@@ -90,10 +90,27 @@ they are not stylistic preferences to be re-litigated per surface.
   scroll, never nested sub-tabs; mini-sections go below the top section row.
 
 **Data and logic**
-- Dates render `mm/dd/yyyy` + 24-hour everywhere; batch codes are numeric `MMDDYYYY`; sale receipt
-  ids are bare `YYYYMMDD-HHMMSS` (returns keep `RET-`/`SRET-`); all bucketing is the fixed UTC+7
-  business day via `cloudflare/src/lib/businessDateWindow.ts`. Leads: raw `toLocaleDateString(` /
-  `toLocaleString(` in the frontend, hand-rolled `date(created_at)` in SQL.
+- **Dates render `dd/mm/yyyy` + 24-hour everywhere — DAY first, slashes** (user, Sep 4 2026:
+  "change the whole app to dd-mm-yyy, just receipt id stays yyyy-mm-dd"; slashes because the app
+  already used them, so only the order moved). Leads: raw `toLocaleDateString(` /
+  `toLocaleString(` in the frontend, hand-rolled `date(created_at)` in SQL. Prefer the shared
+  formatters (`utils/formatters.ts`) over a local one; a locale is never trusted to pick the
+  order, because a wrong locale swaps day and month **without failing**.
+- **Identifiers that merely LOOK like dates do NOT follow that convention and must never be
+  "fixed" to match it.** Each is sorted, matched or stored, so reformatting one corrupts data or
+  breaks ordering: batch/lot codes are numeric **`MMDDYYYY`** (`lib/batchCode.ts`'s
+  `dateToBatchCode` — stored as `lot_code`/`batch_key` and recomputed to match existing lots);
+  sale receipt ids are bare **`YYYYMMDD-HHMMSS`** (returns keep `RET-`/`SRET-`, migration 0107);
+  stock session ids are **`S-YYYYMMDD-HHMM`** (`utils/timestampId.ts`); migration 0108 wrote
+  literal **`ADJMM/DD/YYYY`** lot codes that render verbatim. Storage and transport stay ISO:
+  D1 columns, API payloads, query parameters, and anything used as a sort key, dedupe key,
+  filename or URL parameter.
+- **A date cell's reading order comes from its column header, not from the display convention.**
+  `batch(dd/mm/yyyy)` is day-first, `batch(mm/dd/yyyy)` is month-first *forever* (every sheet the
+  shop already has keeps its present meaning), and the bare `batch`/`date`/`received_date`
+  fallbacks name no format so they stay month-first. ISO is accepted under every header and is
+  what the downloaded template ships. Lead: `lib/batchCode.ts`'s `readBatchDateCell`.
+- All bucketing is the fixed UTC+7 business day via `cloudflare/src/lib/businessDateWindow.ts`.
 - One canonical revenue definition (net sales: tax and delivery excluded, refunds subtracted,
   unpaid credit shown as Pending) on **every** surface that shows revenue — Dashboard, Sales
   `/stats`, the Reports kernel, exports. A new surface joins the shared kernel; it never re-derives.

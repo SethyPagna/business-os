@@ -1,4 +1,16 @@
 import assert from 'node:assert/strict'
+// These transport tests model a browser with readable coordination storage.
+function createReadableStorage(): Storage {
+  const values = new Map<string, string>()
+  return {
+    get length() { return values.size },
+    clear: () => { values.clear() },
+    key: (index: number) => [...values.keys()][index] ?? null,
+    getItem: (key: string) => values.get(String(key)) ?? null,
+    setItem: (key: string, value: string) => { values.set(String(key), String(value)) },
+    removeItem: (key: string) => { values.delete(String(key)) },
+  }
+}
 import fs from 'node:fs'
 import {
   __resetApiHealthForTests,
@@ -6,6 +18,7 @@ import {
   apiFetch,
   buildApiRequestDedupeKey,
   cacheGet,
+  cacheClearAll,
   cacheInvalidate,
   cacheInvalidateWithDerived,
   cacheSet,
@@ -42,6 +55,7 @@ import { mirrorReadResult } from '../src/api/localMirrors.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from '../src/api/portalHttp.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
 import { buildQueryCacheStorageKey } from '../src/api/queryCache.ts'
+import { resetActorReadSession } from '../src/api/actorReadScope.ts'
 import { createClientRequestId, ensureClientRequestId } from '../src/api/requestIds.ts'
 import { dispatchSyncUpdates, emitSyncQueueChanged } from '../src/api/syncRuntime.ts'
 import { PENDING_SYNC_PREVIEW_LIMIT, serializePendingSyncPreview } from '../src/api/syncPreview.ts'
@@ -322,6 +336,8 @@ await runTest('a bare non-JSON 401 (edge interference, e.g. Cloudflare Access) d
     } as unknown as typeof CustomEvent
   }
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     setTimeout,
     clearTimeout,
     dispatchEvent: (event: Event) => events.push(event),
@@ -369,6 +385,8 @@ await runTest('a real invalid_session 401 (proper app JSON error) still forces a
     } as unknown as typeof CustomEvent
   }
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     setTimeout,
     clearTimeout,
     dispatchEvent: (event: Event) => events.push(event),
@@ -415,6 +433,8 @@ await runTest('read routes return fallback on transient gateway errors without s
     } as unknown as typeof CustomEvent
   }
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     setTimeout,
     clearTimeout,
     dispatchEvent: (event: Event) => events.push(event),
@@ -665,6 +685,8 @@ await runTest('portal HTTP helper prefers browser origin and keeps fetch abort s
   const originalFetch = globalThis.fetch
   const calls: FetchCall[] = []
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     location: { origin: 'https://browser.example.test/' },
   } as unknown as Window & typeof globalThis
   globalThis.fetch = ((...args: FetchCall) => {
@@ -731,6 +753,8 @@ await runTest('import job transport emits explicit activity events for lazy trac
   const events: Array<{ type: string; detail: Record<string, unknown> }> = []
   const listeners = new Map<string, Set<(event: Event) => void>>()
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     dispatchEvent: (event: Event) => {
       events.push({
         type: event.type,
@@ -838,6 +862,8 @@ await runTest('sync runtime helpers emit compact window events with timestamps',
     } as unknown as typeof CustomEvent
   }
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     dispatchEvent: (event: Event) => events.push(event),
   } as unknown as Window & typeof globalThis
 
@@ -900,7 +926,12 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const systemRuntimeSource = fs.readFileSync(new URL('../src/api/systemRuntime.ts', import.meta.url), 'utf8')
   const driveSyncSource = fs.readFileSync(new URL('../src/api/driveSync.ts', import.meta.url), 'utf8')
   const notificationSummarySource = fs.readFileSync(new URL('../src/api/notificationSummary.ts', import.meta.url), 'utf8')
-  assert.equal(buildQueryCacheStorageKey(' products:search:x '), 'read_cache:products:search:x')
+  const scopedKey = buildQueryCacheStorageKey(' products:search:x ')
+  assert.match(scopedKey, /^read_cache:v2:/)
+  assert.ok(scopedKey.endsWith(':products:search:x'))
+  assert.equal(scopedKey, buildQueryCacheStorageKey('products:search:x'), 'same runtime authority reuses the same key')
+  resetActorReadSession()
+  assert.notEqual(scopedKey, buildQueryCacheStorageKey('products:search:x'), 'new authenticated session cannot reuse prior persisted data')
   assert.doesNotMatch(source, /from '\.\/actorQuery\.ts'/)
   assert.doesNotMatch(source, /from '\.\/lookupTransport\.ts'/)
   assert.match(source, /function loadLookupTransport\(\) \{[\s\S]*import\('\.\/lookupTransport\.ts'\)/)
@@ -990,12 +1021,22 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(productReadTransportSource, /readCachedQueryResult\(cacheKey\)/)
   assert.match(productReadTransportSource, /requireLiveServerWrite\('products:lookup:replace'\)/)
   assert.doesNotMatch(productReadTransportSource, /requireLiveServerWrite\([^)]*,\s*apiFetch/)
-  assert.match(productWriteTransportSource, /export async function createProduct/)
-  assert.match(productWriteTransportSource, /ensureSupplierExists\(body\.supplier\)/)
-  assert.match(productWriteTransportSource, /withExpectedUpdatedAt\('products', id/)
+  assert.match(
+    productWriteTransportSource,
+    /export async function createProduct\(payload: ProductPayload = \{\}\)[\s\S]*const body = ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'product'\)[\s\S]*apiFetch\('POST', '\/api\/products', body\)/,
+    'product create sends the caller payload directly to the product route',
+  )
+  assert.match(
+    productWriteTransportSource,
+    /export async function updateProduct\(id: string \| number, payload: ProductPayload = \{\}\)[\s\S]*const body = await withExpectedUpdatedAt\('products', id, \{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}\)[\s\S]*apiFetch\('PUT', `\/api\/products\/\$\{encodeId\(id\)\}`, body\)/,
+    'product update preserves the caller payload and concurrency metadata on the product route',
+  )
+  assert.doesNotMatch(productWriteTransportSource, /ensureSupplierExists|apiFetch\('POST', '\/api\/suppliers'/,
+    'product writes never create a hidden supplier contact')
   assert.match(productWriteTransportSource, /apiFetch\('POST', '\/api\/products\/variant'/)
   assert.match(productWriteTransportSource, /apiFetch\('POST', '\/api\/products\/bulk-import'/)
-  assert.match(productWriteTransportSource, /cacheInvalidate\('suppliers'\)/)
+  assert.doesNotMatch(productWriteTransportSource, /cacheInvalidate\('suppliers'\)/,
+    'product writes do not pretend that a supplier contact was created')
   assert.match(
     actorQuerySource,
     /export function appendActorQuery\(path: string, extra: ActorQueryParams = \{\}\): string[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
@@ -1035,7 +1076,9 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /export const otpSetup = async \(payload\) => \{[\s\S]*loadAuthTransport\(\)[\s\S]*otpSetupRequest\(payload\)/, 'legacy OTP setup should lazy-load auth transport')
   assert.match(importTransportSource, /export async function apiFormPost\([\s\S]*requireLiveServerWrite\(channel,[\s\S]*credentials: 'include'[\s\S]*body: form/)
   assert.match(importJobsTransportSource, /export function listImportJobs/)
-  assert.match(importJobsTransportSource, /lastImportJobsByQuery\.set\(query, result\)/)
+  assert.match(importJobsTransportSource, /assertActorReadScope\(scope\)\s+lastImportJobsByQuery\.set\(query, \{ data: result, scope \}\)/)
+  assert.match(importJobsTransportSource, /cached && isActorReadScopeCurrent\(cached\.scope\) \? cached\.data/)
+  assert.match(importJobsTransportSource, /if \(permissionFailure\) throw permissionFailure/)
   assert.match(importJobsTransportSource, /export function deleteImportJob/)
   assert.match(importJobsTransportSource, /apiFetch\('DELETE', `\/api\/import-jobs\/\$\{encodedId\}\$\{force\}`/)
   assert.match(importJobsTransportSource, /apiFetch\('POST', `\/api\/import-jobs\/\$\{encodedId\}\/delete`/)
@@ -1101,7 +1144,8 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(auditLogTransportSource, /export function deleteAuditLogsRetention/)
   assert.match(auditLogTransportSource, /encodeURIComponent\(String\(olderThanDays\)\)/)
   assert.match(dashboardTransportSource, /export function getDashboard/)
-  assert.match(dashboardTransportSource, /apiFetch\('GET', '\/api\/dashboard'\)/)
+  assert.match(dashboardTransportSource, /`dashboard:get:\$\{query\}`/)
+  assert.match(dashboardTransportSource, /appendQuery\('\/api\/dashboard', query\)/)
   assert.match(dashboardTransportSource, /export function getAnalytics/)
   assert.match(dashboardTransportSource, /buildQueryString\(params, \{ skipEmpty: false \}\)/)
   assert.match(dashboardTransportSource, /`analytics:get:\$\{query\}`/)
@@ -1116,7 +1160,10 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(salesTransportSource, /skipWriteDedupe: true/)
   assert.match(salesTransportSource, /export function getSales/)
   assert.match(salesTransportSource, /buildQueryString\(params, \{ skipEmpty: false \}\)/)
-  assert.match(salesTransportSource, /routeMirrored\(/)
+  assert.match(salesTransportSource, /mirrorReadResult\(/)
+  assert.match(salesTransportSource, /raceLocalFallback: false/)
+  assert.match(salesTransportSource, /staleWhileRevalidate: false/)
+  assert.match(salesTransportSource, /retryTimedOutRead: false/)
   assert.match(salesTransportSource, /appendQuery\('\/api\/sales', query\)/)
   assert.match(salesTransportSource, /const db = await getLocalDb\(\)[\s\S]*db\.table\('sales'\)\.orderBy\('created_at'\)\.reverse\(\)\.limit\(1000\)\.toArray\(\)/)
   assert.match(salesTransportSource, /export async function updateSaleStatus\(/)
@@ -1489,6 +1536,382 @@ await runTest('Y18: derived dashboard/analytics caches die with their entity gro
   assert.match(httpSource, /cacheInvalidateWithDerived\(channel\.split\(':'\)\[0\]\)/)
   assert.match(httpSource, /cacheInvalidateWithDerived\(refreshChannel\)/)
 })
+
+function deferredRead<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail })
+  return { promise, resolve, reject }
+}
+
+const flushReadCallbacks = () => new Promise<void>(resolve => setImmediate(resolve))
+
+for (const oldFirst of [true, false]) {
+  await runTest(`invalidated read starts fresh and preserves newer dedupe (oldFirst=${oldFirst})`, async () => {
+    resetApiState()
+    cacheClearAll()
+    setSyncServerUrl('https://sync.example.test')
+    const old = deferredRead<number>()
+    const fresh = deferredRead<number>()
+    let freshCalls = 0
+    let duplicateCalls = 0
+    const first = route('products:race', () => old.promise)
+    cacheInvalidate('products')
+    const next = route('products:race', () => { freshCalls++; return fresh.promise })
+    try {
+      if (oldFirst) {
+        old.resolve(1)
+        await first
+        assert.equal(cacheGet('products:race'), null, 'invalidated result must not refill cache')
+        const duplicate = route('products:race', () => { duplicateCalls++; return 3 })
+        fresh.resolve(2)
+        assert.equal(await duplicate, 2, 'older completion must not delete newer dedupe entry')
+      } else {
+        fresh.resolve(2)
+        // Settle old even on the broken implementation, which reuses it.
+        await flushReadCallbacks()
+        old.resolve(1)
+      }
+      assert.equal(await first, 1, 'already-started caller keeps its result')
+      assert.equal(await next, 2)
+      assert.equal(freshCalls, 1)
+      assert.equal(duplicateCalls, 0)
+      assert.equal(cacheGet('products:race'), 2)
+    } finally {
+      old.resolve(1); fresh.resolve(2)
+      await Promise.allSettled([first, next])
+      cacheClearAll(); resetApiState()
+    }
+  })
+}
+
+for (const invalidate of [cacheClearAll, () => cacheInvalidateWithDerived('sales')]) {
+  await runTest(`outstanding dashboard read respects ${invalidate === cacheClearAll ? 'clear-all' : 'derived sales invalidation'}`, async () => {
+    resetApiState(); cacheClearAll(); setSyncServerUrl('https://sync.example.test')
+    const old = deferredRead<number>()
+    const pending = route('dashboard:race', () => old.promise)
+    invalidate()
+    old.resolve(1)
+    await pending
+    assert.equal(cacheGet('dashboard:race'), null)
+    assert.equal(await route('dashboard:race', () => 2), 2)
+    cacheClearAll(); resetApiState()
+  })
+}
+
+await runTest('unrelated channel invalidation preserves pending read dedupe', async () => {
+  resetApiState(); cacheClearAll(); setSyncServerUrl('https://sync.example.test')
+  const old = deferredRead<number>()
+  const first = route('settings:race', () => old.promise)
+  cacheInvalidateWithDerived('sales')
+  let duplicateCalls = 0
+  const next = route('settings:race', () => { duplicateCalls++; return 2 })
+  old.resolve(1)
+  assert.deepEqual(await Promise.all([first, next]), [1, 1])
+  assert.equal(duplicateCalls, 0)
+  assert.equal(cacheGet('settings:race'), 1)
+  cacheClearAll(); resetApiState()
+})
+
+await runTest('invalidated SWR completion cannot replace a newer foreground value or emit refresh', async () => {
+  resetApiState(); cacheClearAll(); setSyncServerUrl('https://sync.example.test')
+  const originalNow = Date.now
+  const originalWindow = globalThis.window
+  const events: string[] = []
+  globalThis.window = { localStorage: createReadableStorage(), sessionStorage: createReadableStorage(), dispatchEvent: (event: Event) => { events.push(event.type); return true } } as unknown as Window & typeof globalThis
+  const old = deferredRead<number>()
+  try {
+    cacheSet('products:swr-race', 0)
+    const now = originalNow()
+    Date.now = () => now + 21_000
+    assert.equal(await route('products:swr-race', () => old.promise), 0)
+    cacheInvalidate('products')
+    assert.equal(await route('products:swr-race', () => 2), 2)
+    old.resolve(1)
+    await flushReadCallbacks()
+    assert.equal(cacheGet('products:swr-race'), 2)
+    assert.deepEqual(events, [])
+  } finally {
+    old.resolve(1); await flushReadCallbacks()
+    Date.now = originalNow; globalThis.window = originalWindow
+    cacheClearAll(); resetApiState()
+  }
+})
+
+for (const localOnly of [true, false]) {
+  await runTest(`invalidated pending local ${localOnly ? 'only' : 'error fallback'} cannot refill cache`, async () => {
+    resetApiState(); cacheClearAll()
+    if (!localOnly) setSyncServerUrl('https://sync.example.test')
+    const local = deferredRead<number>()
+    const started = deferredRead<void>()
+    const pending = route('products:local-race', () => { throw new Error('read refused') }, () => {
+      started.resolve(); return local.promise
+    }, { raceLocalFallback: false })
+    await started.promise
+    cacheInvalidate('products')
+    local.resolve(1)
+    assert.equal(await pending, 1)
+    assert.equal(cacheGet('products:local-race'), null)
+    cacheClearAll(); resetApiState()
+  })
+}
+
+await runTest('local race winner cannot let late invalidated server overwrite fresh cache or emit refresh', async () => {
+  resetApiState(); cacheClearAll(); setSyncServerUrl('https://sync.example.test')
+  const originalWindow = globalThis.window
+  const events: string[] = []
+  globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
+    setTimeout: (fn: () => void) => setTimeout(fn, 0),
+    clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
+    dispatchEvent: (event: Event) => { events.push(event.type); return true },
+  } as unknown as Window & typeof globalThis
+  const server = deferredRead<number>()
+  try {
+    assert.equal(await route('products:local-winner', () => server.promise, () => 1), 1)
+    cacheInvalidate('products')
+    const fresh = route('products:local-winner', () => 3)
+    await flushReadCallbacks()
+    server.resolve(2)
+    assert.equal(await fresh, 3)
+    await flushReadCallbacks()
+    assert.equal(cacheGet('products:local-winner'), 3)
+    assert.deepEqual(events, [])
+  } finally {
+    server.resolve(2); await flushReadCallbacks()
+    globalThis.window = originalWindow; cacheClearAll(); resetApiState()
+  }
+})
+
+await runTest('older rejection cannot remove newer pending dedupe', async () => {
+  resetApiState(); cacheClearAll(); setSyncServerUrl('https://sync.example.test')
+  const old = deferredRead<number>()
+  const fresh = deferredRead<number>()
+  const first = route('products:rejection-race', () => old.promise)
+  const rejected = assert.rejects(first, /read refused/)
+  cacheInvalidate('products')
+  const next = route('products:rejection-race', () => fresh.promise)
+  old.reject(new Error('read refused'))
+  await rejected
+  let duplicateCalls = 0
+  const duplicate = route('products:rejection-race', () => { duplicateCalls++; return 3 })
+  fresh.resolve(2)
+  assert.deepEqual(await Promise.all([next, duplicate]), [2, 2])
+  assert.equal(duplicateCalls, 0)
+  cacheClearAll(); resetApiState()
+})
+
+await runTest('pending local loser remains invalidatable after the server wins', async () => {
+  resetApiState(); cacheClearAll(); setSyncServerUrl('https://sync.example.test')
+  const originalWindow = globalThis.window
+  globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
+    setTimeout: (fn: () => void) => setTimeout(fn, 0),
+    clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
+  } as unknown as Window & typeof globalThis
+  const server = deferredRead<number>()
+  const local = deferredRead<number>()
+  const started = deferredRead<void>()
+  const pending = route('products:local-loser', () => server.promise, () => {
+    started.resolve(); return local.promise
+  })
+  try {
+    await started.promise
+    server.resolve(2)
+    assert.equal(await pending, 2)
+    cacheClearAll()
+    local.resolve(1)
+    await flushReadCallbacks()
+    assert.equal(cacheGet('products:local-loser'), null)
+  } finally {
+    server.resolve(2); local.resolve(1); await pending; await flushReadCallbacks()
+    globalThis.window = originalWindow; cacheClearAll(); resetApiState()
+  }
+})
+
+await runTest('non-invalidated SWR still caches and emits its refresh', async () => {
+  resetApiState(); cacheClearAll(); setSyncServerUrl('https://sync.example.test')
+  const originalNow = Date.now
+  const originalWindow = globalThis.window
+  const events: string[] = []
+  globalThis.window = { localStorage: createReadableStorage(), sessionStorage: createReadableStorage(), dispatchEvent: (event: Event) => { events.push(event.type); return true } } as unknown as Window & typeof globalThis
+  const refresh = deferredRead<number>()
+  try {
+    cacheSet('products:swr-control', 0)
+    const now = originalNow()
+    Date.now = () => now + 21_000
+    assert.equal(await route('products:swr-control', () => refresh.promise), 0)
+    refresh.resolve(1)
+    await flushReadCallbacks()
+    assert.equal(cacheGet('products:swr-control'), 1)
+    assert.deepEqual(events, ['cache:updated', 'sync:update'])
+  } finally {
+    refresh.resolve(1); await flushReadCallbacks()
+    Date.now = originalNow; globalThis.window = originalWindow
+    cacheClearAll(); resetApiState()
+  }
+})
+
+async function withImmediateFallbackTimers(work: () => Promise<void>) {
+  resetApiState(); cacheClearAll(); setSyncServerUrl('https://sync.example.test')
+  const originalWindow = globalThis.window
+  globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
+    setTimeout: (fn: () => void) => setTimeout(fn, 0),
+    clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
+    dispatchEvent: () => true,
+  } as unknown as Window & typeof globalThis
+  try {
+    await work()
+  } finally {
+    await flushReadCallbacks()
+    globalThis.window = originalWindow; cacheClearAll(); resetApiState()
+  }
+}
+
+for (const deduped of [false, true]) {
+  for (const serverFirst of [true, false]) {
+    await runTest(`F54 server retains precedence (serverFirst=${serverFirst}, deduped=${deduped})`, () => withImmediateFallbackTimers(async () => {
+      const server = deferredRead<number>()
+      const locals = [deferredRead<number>(), deferredRead<number>()]
+      const started = [deferredRead<void>(), deferredRead<void>()]
+      const reads: Array<Promise<number | null>> = []
+      let serverCalls = 0
+      for (let index = 0; index < (deduped ? 2 : 1); index++) {
+        reads.push(route('products:f54-orders', () => { serverCalls++; return server.promise }, () => {
+          started[index].resolve(); return locals[index].promise
+        }))
+      }
+      try {
+        await Promise.all(started.slice(0, reads.length).map(item => item.promise))
+        if (serverFirst) {
+          server.resolve(2)
+          assert.deepEqual(await Promise.all(reads), reads.map(() => 2))
+          assert.equal(cacheGet('products:f54-orders'), 2)
+          locals.forEach(local => local.resolve(1))
+        } else {
+          // A deduped caller's local data may still be pending when the first
+          // caller returns local and the shared server later upgrades it.
+          locals[0].resolve(1)
+          assert.equal(await reads[0], 1)
+          assert.equal(cacheGet('products:f54-orders'), 1)
+          server.resolve(2)
+          if (deduped) assert.equal(await reads[1], 2)
+          await flushReadCallbacks()
+          locals[1].resolve(1)
+        }
+        await flushReadCallbacks()
+        assert.equal(serverCalls, 1)
+        assert.equal(cacheGet('products:f54-orders'), 2, 'late local results must not replace authoritative server data')
+      } finally {
+        server.resolve(2); locals.forEach(local => local.resolve(1))
+        await Promise.allSettled(reads); await flushReadCallbacks()
+      }
+    }))
+  }
+}
+
+for (const failure of ['server-error', 'local-error', 'invalid-session', 'abort'] as const) {
+  await runTest(`F54 fallback rejection handling: ${failure}`, () => withImmediateFallbackTimers(async () => {
+    const server = deferredRead<number>()
+    const local = deferredRead<number>()
+    const started = deferredRead<void>()
+    const pending = route('products:f54-rejection', () => server.promise, () => {
+      started.resolve(); return local.promise
+    })
+    // Observe rejection immediately; late race losers must also be consumed.
+    const settled = pending.then(value => ({ value, error: null }), error => ({ value: null, error }))
+    try {
+      await started.promise
+      if (failure === 'local-error') {
+        local.reject(new Error('local read failed'))
+        server.resolve(2)
+        assert.deepEqual(await settled, { value: 2, error: null })
+        assert.equal(cacheGet('products:f54-rejection'), 2)
+      } else if (failure === 'server-error') {
+        server.reject(new Error('server read refused'))
+        local.resolve(1)
+        assert.deepEqual(await settled, { value: 1, error: null })
+        assert.equal(cacheGet('products:f54-rejection'), 1)
+      } else {
+        const error = failure === 'invalid-session'
+          ? Object.assign(new Error('sign in'), { code: 'invalid_session', status: 401 })
+          : Object.assign(new Error('canceled'), { name: 'AbortError' })
+        server.reject(error)
+        assert.equal((await settled).error, error)
+        local.resolve(1)
+        await flushReadCallbacks()
+        assert.equal(cacheGet('products:f54-rejection'), null, 'rejected auth/canceled race cannot cache its late local result')
+      }
+    } finally {
+      server.resolve(2); local.resolve(1)
+      await settled; await flushReadCallbacks()
+    }
+  }))
+}
+
+await runTest('F54 caller abort after server success consumes a late local rejection', () => withImmediateFallbackTimers(async () => {
+  const signal = new AbortController()
+  const server = deferredRead<number>()
+  const local = deferredRead<number>()
+  const started = deferredRead<void>()
+  const pending = route('products:f54-late-abort', () => server.promise, () => {
+    started.resolve(); return local.promise
+  }, { signal: signal.signal })
+  await started.promise
+  server.resolve(2)
+  assert.equal(await pending, 2)
+  signal.abort()
+  local.resolve(1)
+  await flushReadCallbacks()
+  assert.equal(cacheGet('products:f54-late-abort'), 2)
+}))
+
+await runTest('F54 local winner remains usable when its background server later rejects', () => withImmediateFallbackTimers(async () => {
+  const server = deferredRead<number>()
+  assert.equal(await route('products:f54-late-server-error', () => server.promise, () => 1), 1)
+  server.reject(new Error('server read refused'))
+  await flushReadCallbacks()
+  assert.equal(cacheGet('products:f54-late-server-error'), 1)
+}))
+
+for (const deduped of [false, true]) {
+  await runTest(`F54 near-simultaneous settlement never exposes local after server cache (deduped=${deduped})`, () => withImmediateFallbackTimers(async () => {
+    const server = deferredRead<number>()
+    const locals = [deferredRead<number>(), deferredRead<number>()]
+    const started = [deferredRead<void>(), deferredRead<void>()]
+    const reads: Array<Promise<number | null>> = []
+    for (let index = 0; index < (deduped ? 2 : 1); index++) {
+      reads.push(route('products:f54-microtasks', () => server.promise, () => {
+        started[index].resolve(); return locals[index].promise
+      }))
+    }
+    try {
+      await Promise.all(started.slice(0, reads.length).map(item => item.promise))
+      locals.forEach(local => local.resolve(1))
+      queueMicrotask(() => server.resolve(2))
+      let sawServer = false
+      const exposedReads: Array<Promise<number | null>> = []
+      for (let tick = 0; tick < 30; tick++) {
+        await Promise.resolve()
+        const cached = cacheGet('products:f54-microtasks')
+        if (cached === 2) sawServer = true
+        if (sawServer && cached === 1) {
+          exposedReads.push(route('products:f54-microtasks', () => 3))
+        }
+      }
+      assert.equal(sawServer, true)
+      assert.deepEqual(await Promise.all(exposedReads), [], 'a new caller must never observe local data after the server value was cached')
+      assert.equal(cacheGet('products:f54-microtasks'), 2)
+    } finally {
+      server.resolve(2); locals.forEach(local => local.resolve(1))
+      await Promise.allSettled(reads); await flushReadCallbacks()
+    }
+  }))
+}
 
 if (failed > 0) {
   process.exitCode = 1

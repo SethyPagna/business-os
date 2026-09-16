@@ -2,12 +2,63 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Keep the app at the device width on iOS. The image lightbox has its
+         own explicit zoom controls; browser pinch-zoom otherwise scales the
+         whole UI and pushes action rows outside the viewport.
+
+         maximum-scale/user-scalable are belt and braces, NOT the primary
+         defence against focus-zoom: Safari has ignored user-scalable on the
+         open web since iOS 10 and honours it only in an installed home-screen
+         PWA. The mechanism that actually stops a tapped field from zooming
+         the page is the 16px font-size floor at the end of
+         src/styles/main.css -- keep that rule, not this attribute, in mind
+         when a field starts zooming again. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#1e3a8a" />
-    <meta name="description" content="Leang Beauty online store" />
+    <meta name="description" content="Leang Beauty — product catalog, prices and store contact" />
+    <!-- Canonical URL and link previews (Open Graph / Twitter card) for the
+         storefront. All three absolute values name the PRIMARY host, for two
+         reasons: crawlers do not resolve relative URLs, and the alias host
+         leangcosmetics.dpdns.org serves this very same document -- an absolute
+         canonical is what folds the alias into leangbeauty.com without any
+         per-host work at all.
+
+         The storefront's indexable URLs are the home page and the three
+         query-addressed legal readers (?legal=privacy|terms|cookies, which the
+         sitemap lists). Those readers are VIEWS of this one document -- the
+         raw HTML a crawler receives is byte-identical -- so they share its
+         canonical. If a policy ever becomes its own document, the canonical
+         has to become per-URL, and that means a Worker rewrite.
+
+         On admin hosts the Worker replaces canonical and og:* along with the
+         title and icons (cloudflare/src/lib/adminDocumentIdentity.ts). It
+         replaces them with RELATIVE values on purpose: nothing should ever
+         preview or index the admin app, and the point there is only that it is
+         not Leang Beauty. The inline bootstrap below leaves all of these
+         alone. -->
+    <link rel="canonical" href="https://leangbeauty.com/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Leang Beauty" />
+    <meta property="og:title" content="Leang Beauty" />
+    <meta property="og:description" content="Leang Beauty — product catalog, prices and store contact" />
+    <meta property="og:url" content="https://leangbeauty.com/" />
+    <meta property="og:image" content="https://leangbeauty.com/leang-cosmetics-icon-512.png" />
+    <meta name="twitter:card" content="summary" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- `default`, not `black-translucent`. black-translucent paints the iOS
+         status bar text WHITE and lets the page run underneath it, which only
+         works over dark top chrome. Both hosts are near-white in the
+         light-first default this app ships: the storefront ground is #ffffff
+         (src/components/catalog/portalContrast.ts:46 PORTAL_LIGHT_SURFACE) and
+         the admin's mobile top bar is the ivory --nav-surface #fffdf8
+         (src/components/navigation/nav-chrome.css:48 and .bos-nav-topbar at
+         :104) -- NOT the #1e3a8a the theme-color meta above advertises. So on
+         an iPhone the clock and battery were white on white on both. This is
+         deliberately one static value rather than a per-host swap in the
+         script below: both hosts want the same answer, and a branch that sets
+         the same string twice is dead code. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Leang Beauty" />
     <meta name="format-detection" content="telephone=no" />
     <!-- Public-first metadata is intentional. iOS may snapshot the raw HTML
@@ -95,7 +146,7 @@
         if (publicRoute) {
           document.title = 'Leang Beauty'
           var description = document.querySelector('meta[name="description"]')
-          if (description) description.setAttribute('content', 'Leang Beauty online store')
+          if (description) description.setAttribute('content', 'Leang Beauty — product catalog, prices and store contact')
           var appTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]')
           if (appTitle) appTitle.setAttribute('content', 'Leang Beauty')
           var manifest = document.querySelector('link[rel="manifest"]')
@@ -133,10 +184,64 @@
           if (adminAppleIcon) adminAppleIcon.setAttribute('href', '/apple-touch-icon.png')
         }
       }())
+
+      // Decide the theme BEFORE the loading-shell stylesheet below is applied.
+      //
+      // The shell used to paint itself from `prefers-color-scheme: dark`,
+      // while public/theme-bootstrap.js -- which only loads at the bottom of
+      // <body> -- forces light unless the device stored 'dark'. On a dark-mode
+      // iPhone that is a guaranteed dark flash on every cold start, and it
+      // contradicts the owner's light-first rule ("the storefront and admin
+      // default to LIGHT on first load and never auto-honour OS dark").
+      //
+      // Same three storage keys, same precedence, same 'light' default as
+      // src/public-runtime/theme-bootstrap.ts (generated into
+      // public/theme-bootstrap.js) and AppContext, so a device that stored a
+      // theme under the OLD key still gets exactly the theme it had:
+      //   1. businessos_device_settings  JSON, .theme        (current)
+      //   2. businessos_theme            raw string          (older)
+      //   3. businessos_settings         JSON, .theme        (legacy)
+      // Only the literal 'dark' means dark; anything else, including a missing
+      // value and the OS preference, means light. tests/iosLayoutGuards.test.ts
+      // locks these key names and this order against theme-bootstrap.ts.
+      ;(function setInitialBusinessOsTheme() {
+        function isDark(value) {
+          return String(value == null ? '' : value).trim().toLowerCase() === 'dark'
+        }
+        function storedObjectTheme(key) {
+          try {
+            var parsed = JSON.parse(localStorage.getItem(key) || '')
+            return parsed && typeof parsed === 'object' ? parsed.theme : ''
+          } catch (parseError) { return '' }
+        }
+        var dark = false
+        try {
+          dark = isDark(storedObjectTheme('businessos_device_settings'))
+            || isDark(localStorage.getItem('businessos_theme'))
+            || isDark(storedObjectTheme('businessos_settings'))
+        } catch (storageError) { /* private mode / blocked storage: stay light */ }
+        // The same two effects theme-bootstrap.js applies, just early enough
+        // to beat first paint. theme-bootstrap.js re-applies them verbatim, so
+        // it stays the single authority and this can only ever agree with it.
+        // Wrapped like the redirect above: nothing in a pre-paint script may
+        // throw, and the DOM doubles the startup tests run this file in
+        // (tests/brandIcons.test.ts) have no classList on documentElement.
+        try {
+          var root = document.documentElement
+          if (root.classList) {
+            if (dark) root.classList.add('dark')
+            else root.classList.remove('dark')
+          }
+          if (root.style) root.style.colorScheme = dark ? 'dark' : 'light'
+        } catch (themeApplyError) { /* fall through to the light shell */ }
+      }())
     </script>
     <style data-business-os-initial-shell>
       :root {
-        color-scheme: light dark;
+        /* light, not `light dark`: the app is light-first and never auto-
+           honours the OS preference. The script above adds `dark` to <html>
+           when -- and only when -- the device actually stored that choice. */
+        color-scheme: light;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background: #f5f7fb;
         color: #0f172a;
@@ -200,15 +305,22 @@
         font-size: 11px;
         line-height: 1.3;
       }
-      @media (prefers-color-scheme: dark) {
-        :root,
-        body {
-          background: #101827;
-          color: #e5edf7;
-        }
-        .business-os-initial-copy {
-          color: #a7b4c6;
-        }
+      /* Keyed on the stored choice the script above applied, NOT on
+         `prefers-color-scheme: dark`. The old media query painted this shell
+         dark for every dark-mode iPhone and then theme-bootstrap.js forced
+         light a moment later -- a dark flash on every cold start of an app
+         that is light-first by decision. `.dark` (0-1-0) is declared after
+         `:root`/`body` (0-1-0 / 0-0-1), so it wins on source order. */
+      .dark {
+        color-scheme: dark;
+      }
+      .dark,
+      .dark body {
+        background: #101827;
+        color: #e5edf7;
+      }
+      .dark .business-os-initial-copy {
+        color: #a7b4c6;
       }
     </style>
   </head>

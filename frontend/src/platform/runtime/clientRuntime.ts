@@ -226,6 +226,10 @@ function clearStorage(storage: Storage | null, preserveKeys: Set<string>): void 
     for (let index = 0; index < storage.length; index += 1) {
       const key = storage.key(index)
       if (!key || preserveKeys.has(key)) continue
+      // These exact frozen financial attempts outlive logout/runtime refresh.
+      // Do not parse, snapshot or restore them: malformed evidence and a newer
+      // cross-tab value must survive asynchronous cleanup byte-for-byte.
+      if (key.startsWith('businessos_pending_sale-add-items_v2:') || key.startsWith('businessos_pending_sale-amendment_v2:') || key.startsWith('businessos_pending_return_create_v1:')) continue
       if (isBusinessOsStorageKey(key)) toDelete.push(key)
     }
     toDelete.forEach((key) => storage.removeItem(key))
@@ -265,6 +269,15 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   // has to be re-approved on the very next login. See utils/deviceInfo.ts's
   // own comment on this key for the full reasoning.
   localPreserveKeys.add(STORAGE_KEYS.DEVICE_ID)
+  // Nonsecret shared-cookie session fence: another tab must still observe the
+  // logout/login boundary after this storage reset finishes.
+  localPreserveKeys.add('businessos_read_session')
+  // Device-scoped by design (utils/standaloneNavigation.ts): the iOS "install
+  // this app" hint was dismissed for this phone, not for one cashier, so the
+  // next sign-in on a shared till must not re-ask. Spelled out here rather
+  // than imported to keep this runtime module free of UI-utility imports.
+  localPreserveKeys.add(`${STORAGE_KEYS.DEVICE_SETTINGS}:ios-install-hint-dismissed-at-v1`)
+  localPreserveKeys.add('businessos_auth_cookie_pending')
   if (preserveAuth) {
     localPreserveKeys.add(STORAGE_KEYS.USER)
     localPreserveKeys.add(STORAGE_KEYS.USER_EXPIRY)
@@ -273,7 +286,9 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   }
 
   const keptLocal = canUseBrowserStorage() ? [
-    ...snapshotStorage(window.localStorage, localPreserveKeys),
+    // Live coordination keys are never removed, and must never be restored
+    // from a snapshot after asynchronous cleanup: their owner may have changed.
+    ...snapshotStorage(window.localStorage, localPreserveKeys).filter(([key]) => key !== 'businessos_read_session' && key !== 'businessos_auth_cookie_pending'),
     ...(options.preserveUiDrafts === true ? snapshotStoragePrefixes(window.localStorage, ['businessos_draft_']) : []),
   ] : []
   const keptSession = canUseBrowserStorage() ? snapshotStorage(window.sessionStorage, sessionPreserveKeys) : []

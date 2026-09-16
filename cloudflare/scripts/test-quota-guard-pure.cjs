@@ -36,6 +36,12 @@ function freshEnv() {
   return {
     env: {
       DB: db,
+      // This whole file asserts the FREE ceilings (1,000 KV writes/day is the
+      // Workers Free number). Until the tier split those numbers were applied
+      // unconditionally, including on the paid account that has been live --
+      // see the tier check at the bottom of this file, which is what stops
+      // that regression coming back by way of a 'harmless' default.
+      PLAN_TIER: 'free',
       CACHE: {
         get: async (key) => (kv.has(key) ? kv.get(key) : null),
         put: async (key, value) => { kvWrites += 1; kv.set(key, value) },
@@ -241,6 +247,9 @@ function loadModule(name) {
     // test env has -- stubbed so this never depends on the real dataset.
     if (request === './analytics') return { recordAnalytics: () => {} }
     if (request === './quotaGuard') return loadModule('quotaGuard.ts')
+    // Real: quotaGuard's ceilings are per-plan now, and this file's numbers
+    // ARE the free column -- a stub would make limitsFor() read undefined.
+    if (request === './planTier') return loadModule('planTier.ts')
     if (request === '../index') return {}
     return require(request)
   }
@@ -251,9 +260,118 @@ function loadModule(name) {
   return moduleObj.exports
 }
 
+check('the ceilings are per plan, and an unset PLAN_TIER means paid', async () => {
+  const { QUOTA_LIMITS_BY_TIER, consumeQuota } = await loadQuotaGuard()
+  const { __resetPlanTierCacheForTests } = loadModule('planTier.ts')
+  // The bug this split fixes: the table above used to be the FREE column
+  // unconditionally, so a paid deployment started degrading bumpVersion at
+  // 700 KV writes/day against a ceiling it does not have.
+  assert.equal(QUOTA_LIMITS_BY_TIER.free.kv_write.limit, 1000)
+  assert.ok(QUOTA_LIMITS_BY_TIER.paid.kv_write.limit > QUOTA_LIMITS_BY_TIER.free.kv_write.limit * 100,
+    'paid KV writes are billed per operation, not capped at the free daily ceiling')
+  // The image/CDN budgets belong to their own products' plans and must NOT
+  // move with the Workers plan -- a positive control in the other direction.
+  for (const resource of ['r2_class_a', 'cf_images_transform', 'cloudinary_transform']) {
+    assert.deepEqual(QUOTA_LIMITS_BY_TIER.free[resource], QUOTA_LIMITS_BY_TIER.paid[resource], resource + ' is not scoped to the Workers plan')
+  }
+  // And the default: an env with no PLAN_TIER is paid, so a config that
+  // forgets the var cannot silently shrink production's ceilings.
+  const { env } = freshEnv()
+  delete env.PLAN_TIER
+  __resetPlanTierCacheForTests()
+  const status = await consumeQuota(env, 'kv_write', 1)
+  assert.equal(status.limit, QUOTA_LIMITS_BY_TIER.paid.kv_write.limit)
+})
+
+// ---------------------------------------------------------------------------
+// P4-4a: consumeQuota's D1 round trips are tier-conditional now. Paid-tier
+// kv_write skips D1 entirely (its 1,000,000/day ceiling protects nothing
+// this shop's volume can reach); every other case still writes, but the
+// write+read-back are folded into a single INSERT ... RETURNING instead of
+// a separate INSERT then SELECT.
+// ---------------------------------------------------------------------------
+
+// Counts each get/all/run as one D1 round trip -- same shape the other
+// P4-4a round-trip tests in this program use.
+function countingDb(rawDb) {
+  let statements = 0
+  return {
+    stats: () => statements,
+    db: {
+      prepare(sql) {
+        const stmt = rawDb.prepare(sql)
+        return {
+          get: (params) => { statements += 1; return stmt.get(params) },
+          all: (params) => { statements += 1; return stmt.all(params) ?? [] },
+          run: (params) => { statements += 1; return stmt.run(params) },
+        }
+      },
+    },
+  }
+}
+
+function freshCountingEnv(planTier) {
+  const rawDb = openDb(MIGRATION_SQLS)
+  const counter = countingDb(rawDb)
+  const kv = new Map()
+  return {
+    env: {
+      DB: counter.db,
+      PLAN_TIER: planTier,
+      CACHE: {
+        get: async (key) => (kv.has(key) ? kv.get(key) : null),
+        put: async (key, value) => { kv.set(key, value) },
+        delete: async (key) => { kv.delete(key) },
+      },
+    },
+    roundTrips: () => counter.stats(),
+  }
+}
+
+check('paid tier: kv_write costs ZERO D1 round trips and is always ok/allowed', async () => {
+  const { consumeQuota } = await loadQuotaGuard()
+  const { env, roundTrips } = freshCountingEnv('paid')
+  const status = await consumeQuota(env, 'kv_write', 1)
+  assert.equal(roundTrips(), 0, 'paid-tier kv_write must not touch D1 at all')
+  assert.equal(status.zone, 'ok')
+  assert.equal(status.reservedZone, 'ok')
+  assert.equal(status.allowed, true)
+  assert.equal(status.limit, 1_000_000)
+  // Calling it 5000 more times still costs nothing and stays 'ok' -- there is
+  // no counter to escalate, by design (nothing on this plan needs it to).
+  for (let i = 0; i < 5; i++) await consumeQuota(env, 'kv_write', 1)
+  assert.equal(roundTrips(), 0)
+})
+
+check('paid tier: every OTHER resource (shared ceiling across tiers) still tracks in D1', async () => {
+  const { consumeQuota } = await loadQuotaGuard()
+  const { env, roundTrips } = freshCountingEnv('paid')
+  for (const resource of ['r2_class_a', 'cf_images_transform', 'cloudinary_transform']) {
+    const before = roundTrips()
+    const status = await consumeQuota(env, resource, 1)
+    assert.ok(roundTrips() > before, `${resource} must still cost a D1 round trip on paid tier -- its ceiling is the SAME on both plans`)
+    assert.equal(status.used, 1)
+  }
+})
+
+check('free tier: consumeQuota costs exactly ONE D1 round trip (RETURNING folds write+read)', async () => {
+  const { consumeQuota } = await loadQuotaGuard()
+  const { env, roundTrips } = freshCountingEnv('free')
+  const first = await consumeQuota(env, 'kv_write', 1)
+  assert.equal(roundTrips(), 1, 'the old code cost 2 (INSERT...ON CONFLICT, then a separate SELECT) -- RETURNING must fold them into 1')
+  assert.equal(first.used, 1)
+  const second = await consumeQuota(env, 'kv_write', 4)
+  assert.equal(roundTrips(), 2, 'each call still costs exactly one round trip, accumulating correctly')
+  assert.equal(second.used, 5)
+})
+
 async function main() {
+  const { __resetPlanTierCacheForTests } = loadModule('planTier.ts')
   for (const { name, fn } of tests) {
     try {
+      // resolvePlanTier caches per isolate; this process exercises both
+      // tiers, so the cache is cleared between cases.
+      __resetPlanTierCacheForTests()
       await fn()
       console.log('PASS', name)
       passed++

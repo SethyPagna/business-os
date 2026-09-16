@@ -28,6 +28,23 @@ assert.deepEqual(
   ['settings', 'sales', 'pos', 'dashboard'],
 )
 
+// The low-stock alert re-colours a badge, a count and a filter on five open
+// pages at once, so turning it off must reach every one of them without a
+// reload -- not just the Settings page that wrote it.
+assert.deepEqual(
+  getSettingsRefreshChannels({
+    low_stock_alert_enabled: 'false',
+  }),
+  ['settings', 'products', 'inventory', 'branches', 'pos', 'dashboard', 'notifications'],
+)
+assert.deepEqual(
+  getSettingsRefreshChannels({
+    low_stock_threshold_default: '4',
+    low_stock_threshold_mode: 'global',
+  }),
+  ['settings', 'products', 'inventory', 'branches', 'pos', 'dashboard', 'notifications'],
+)
+
 assert.deepEqual(
   getSettingsRefreshChannels({
     pos_payment_methods: '["Cash"]',

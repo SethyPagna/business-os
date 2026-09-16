@@ -5,7 +5,36 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 export const normalizeLegacyText = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
-export const barcodeKey = (value) => String(value ?? '').replace(/\D/g, '').replace(/^0+(?=\d)/, '')
+/**
+ * The ONE barcode-key rule every legacy migration script shares.
+ *
+ * A source code is a BARCODE ONLY WHEN IT IS ENTIRELY DIGITS.  Anything else --
+ * a SKU-style code, a spreadsheet header cell, a "Created By:..." banner row --
+ * returns '' so the caller falls through to its name path instead of chasing a
+ * barcode.  '' is deliberate: it is neither an error nor a throw, because every
+ * caller already reads an empty key as "this row carries no barcode".
+ *
+ * This helper used to strip non-digits, and stripping does NOT produce an empty
+ * key -- it produces a SHORT WRONG one.  "Libre10ml" became "10" and
+ * "CompletelyClean45g" became "45", and 44 live products carry the literal
+ * barcode "10" (the 10ml-perfume placeholder), 3 of them active.  The only
+ * reason this produced dropped lines rather than silent mis-booking into the
+ * wrong product is that the duplicate-barcode quarantine stood in front of it.
+ * Relax that quarantine and this becomes silent mis-booking against those 44
+ * products.  The Sep-1 transfer path is the sharpest edge: it calls
+ * resolveUniqueBarcode with no name fallback at all, so a short wrong key that
+ * hit exactly one active product would book stock against an unrelated product
+ * and look correct forever.
+ *
+ * A digits-only code keeps its leading-zero normalisation ("0012345" ->
+ * "12345") so an Excel-widened barcode still equals its stored form, and "0"
+ * stays "0" for the callers that reject it as a placeholder.
+ */
+export const barcodeKey = (value) => {
+  const code = String(value ?? '').trim()
+  if (!/^[0-9]+$/.test(code)) return ''
+  return code.replace(/^0+(?=\d)/, '')
+}
 // Keep this identical to cloudflare/src/lib/phone.ts::canonicalizePhone.
 // Unlike a barcode comparison key, a stored customer phone must retain its
 // national leading zero so portal/customer equality lookups keep working.
@@ -72,7 +101,15 @@ export function resolveLegacyCashier(rawName, users = []) {
   return { status: distinct.length ? 'ambiguous' : 'unmatched', rawName: String(rawName), canonical, user: null, candidates: distinct.map((user) => user.id) }
 }
 
-/** Never let a cost/name fallback silently choose among duplicate barcodes. */
+/**
+ * Never let a cost/name fallback silently choose among duplicate barcodes.
+ *
+ * Some callers (the Sep-1 stock-transfer path) have NO name fallback behind
+ * this, so `missing_barcode` there means the line is reported and skipped, not
+ * resolved by another route.  That is why the key must come from barcodeKey's
+ * entirely-digits rule and never from digit extraction: a short wrong key here
+ * has nothing standing behind it but the duplicate quarantine.
+ */
 export function resolveUniqueBarcode(barcode, candidates = []) {
   const key = barcodeKey(barcode)
   if (!key || key === '0') return { status: 'missing_barcode', key, product: null }
@@ -100,8 +137,13 @@ export function resolveReviewedSep1ItemOverride({ invoice, barcode, sourceName, 
   if (!override) return { status: 'no_reviewed_override', product: null }
   const product = candidates.find((candidate) => Number(candidate.id) === override.productId && String(candidate.name) === override.productName)
   if (!product) return { status: 'override_live_product_mismatch', product: null, override }
+  // Match on the OLD-SYSTEM label, which after migration 0107 lives in
+  // sales.legacy_receipt_number -- receipt_number now holds the business
+  // YYYYMMDD-HHMMSS id. Both are accepted so this keeps working against a
+  // pre-0107 snapshot as well as against repaired production.
+  const legacyLabel = `${override.invoice}@2026-09-01`
   const existing = existingSaleItems.filter((item) =>
-    String(item.receipt_number) === `${override.invoice}@2026-09-01`
+    (String(item.legacy_receipt_number ?? '') === legacyLabel || String(item.receipt_number) === legacyLabel)
     && Number(item.product_id) === override.productId
     && String(item.product_name) === override.productName
     && Math.abs(Number(item.cost_price_usd) - override.sourceCostUsd) < 0.00001,
@@ -204,5 +246,37 @@ export function buildSep1CorrectionManifest({ receipts = [], transfers = [], sou
         'negative-stock trigger and pre/post stock totals must pass before any apply',
       ],
     },
+  }
+}
+
+/**
+ * Refuse to re-apply an old-system importer after migration 0107.
+ *
+ * These importers key every sale they wrote by the OLD SYSTEM's invoice label
+ * `NNNNNN@YYYY-MM-DD`, both to mint sales.receipt_number and -- crucially --
+ * to recognise the rows they already imported so a rerun is a no-op.
+ * Migration 0107 moved that label to sales.legacy_receipt_number and put
+ * receipt_number back into the project's own YYYYMMDD-HHMMSS format (the user
+ * rule of Sep 2 2026, after a reconciliation pack overwrote 15,004 receipts).
+ *
+ * Post-0107 a rerun would therefore do two harmful things at once: match none
+ * of its own rows and duplicate every sale, and write the `@` label back onto
+ * live receipts. Neither is recoverable from inside the script, so it stops
+ * here instead. A genuine re-import goes through the sales importer, which
+ * routes a foreign source label to legacy_receipt_number and mints a real
+ * business receipt id from the sale's own moment
+ * (cloudflare/src/lib/salesImportCommit.ts).
+ *
+ * @param queryRows a function running one SQL command and returning its rows
+ */
+export function assertLegacyReceiptEraStillCurrent(queryRows) {
+  const rows = queryRows("SELECT COUNT(*) AS n FROM pragma_table_info('sales') WHERE name = 'legacy_receipt_number'")
+  if (Number(rows?.[0]?.n || 0) > 0) {
+    throw new Error(
+      'Refusing to apply: migration 0107 has already moved the old-system `NNNNNN@YYYY-MM-DD` labels to '
+      + 'sales.legacy_receipt_number and rewritten sales.receipt_number to the business YYYYMMDD-HHMMSS format. '
+      + 'This importer keys its sales by the old label, so a rerun would duplicate every row it already '
+      + 'imported and put the `@` shape back on live receipts. Re-import through the sales importer instead.',
+    )
   }
 }

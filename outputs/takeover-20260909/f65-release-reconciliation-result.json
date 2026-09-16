@@ -1,0 +1,186 @@
+{
+  "schema_version": 1,
+  "task_id": "f65-release-reconciliation-20260909",
+  "agent": {
+    "provider": "codex",
+    "role": "reconciler",
+    "session_id": "/root/expense_version_guard"
+  },
+  "status": "completed",
+  "summary": "Reconciled the complete F65 reviewed N-group merge and independent product-removal feature onto live base 2767fbf, preserved the existing live fixes, repaired lifecycle backup/reset coverage and legacy test harnesses, and verified the clean source candidate a5702d49 through focused, package, native D1, browser, and independent review evidence.",
+  "base_sha": "2767fbf43559771b94ba00246c3381cd8c509196",
+  "head_sha": "a5702d494fadae62b207d0a28f3a289aea0636b8",
+  "changes": [
+    "Added paged, durable global conflict reviews for up to 1600 canonical actions, with explicit N-member keeper and field choices, frozen original-group economics, bounded continuation, and exact concurrency guards.",
+    "Added independent direct-removal receipts with permission tiers, approval, same-ID Undo/Redo, graph fingerprints, append-only evidence, and truthful replay/status partitions.",
+    "Added the accessible English/Khmer review UI and v2 transport while retaining the legacy exact-pair merge path and hiding removal controls without products.delete authority.",
+    "Added migration 0138 lifecycle tables to full backup/restore and product/full/factory reset ordering.",
+    "Adapted eleven legacy backend harnesses to the new route dependencies and verified that those commits contain test changes only.",
+    "Preserved the live F46 native query/finalizer, F57, F71, and customer-edit behavior while replaying the F65 chain instead of overwriting products.ts wholesale."
+  ],
+  "commits": [
+    "cb9e65eb005b7d89140c0655429d02a3061c763b",
+    "0b87b9a373684fcffa87f2ede144fca3fa190190",
+    "46be990f097a1c05aaaa8675c7699e31e9688946",
+    "9a303a49aa841b0c73f4e19fb150b29dfe0d1951",
+    "ea04ee69279fd3e27bae8268178a4b497e920354",
+    "0ecb577128f0c04bab89712395b2660c7bd2ca03",
+    "116736c7703eb06dbd04d20b37bd8de2a996153d",
+    "074c657f9e650e1f9f24f126b1f1612e13c5a5ad",
+    "6a89f8794c85db9ed7ac96c70617dcfca13555c5",
+    "ee1089ca3d746b5e3e2ffa0d01002fe527d39256",
+    "f63eaad58d92030ab0d5d643059007a392ede1bc",
+    "a5a67fb1a54a1b7500363b4da3963898d4a68782",
+    "d071015dd62ca3a6352f1bbd91fe6d222879d7ef",
+    "183035340d6180b2b250cb06340ac36fb0e3a8ad",
+    "f5048ad52fde13d966ef2f479380ca865e0900b3",
+    "d7ed372818fd986b3a5c276af564a74c1ee9b2f7",
+    "b0ca98a4e99b67280d47715dadf3825a4a40ac41",
+    "aa9d44e490d84a5b7830c90540e5f34a9abc5216",
+    "5708253162246ba9320e5fda6626ebadb45a9623",
+    "71b317342a77ca0600cbb1a7c07f897d6ac146c8",
+    "25fad5a6ff44378f82d4b1f775eaeef9148c74bc",
+    "d9ae3490f61170c94dd266d44ae3188f04c736b1",
+    "a515adce0184ee26c94685d678a4e8204521a2b0",
+    "5c061dbe271928ded9cffeba554e103f37f66127",
+    "d7b3367a03d404a3f82604dbe6494fdff9a63aec",
+    "646c2367be697b742d59442e55aeecf2725aadd0",
+    "22e7c96e89aebc76eacc5eded730984a61c0faf4",
+    "bb3e3cf6981e3db682bcfab98716330b209a1586",
+    "2326721e4c78c13410920ee75f0392b5faecf954",
+    "a8f26f982ef7f74f5c95a5c8f21cad6b0237de5f",
+    "1f1c3ef473e2a0c413b81f1bdd75c71d1f2165a3",
+    "95c3c11ae5681d83cd2f89db85f4d3fe0347e889",
+    "daf24bbe89643f0aed55084a9f707eb7b7465fb7",
+    "939c1037b4dbc1948e56665000aa12c84781de51",
+    "c6a99443b0bde357f4aaa01c454adb07c286d0a5",
+    "81b7809bd3f3c2156350ff18eed213cd607a680b",
+    "344e9701b05f126618162a6aa5d55610d4885359",
+    "0318fbae293ccf3fd70a623ec03608aae3f97bb7",
+    "6c08416467e79bbfe35c7f976e6e0489ad6fd7aa",
+    "ea9c109f0bc264675c83756cc983f8fa763c9938",
+    "ab08474fad497ebc8dfe11b79351808f90fc864c",
+    "fc876e2a0bbf9e2cac9c029f6922df0a556f9bab",
+    "bff59a583f976a92a1930df90070917c6b2b3c3a",
+    "a5702d494fadae62b207d0a28f3a289aea0636b8"
+  ],
+  "evidence": [
+    {
+      "claim": "The clean release candidate contains the intended F65 chain on the requested live base.",
+      "source": "git",
+      "locator": "C:/Users/mrkl6/Downloads/bos-f65-release-20260909",
+      "observed": "HEAD a5702d494fadae62b207d0a28f3a289aea0636b8 on codex/f65-release-20260909; git status and git diff --check were clean before writing this result envelope."
+    },
+    {
+      "claim": "The real reconciled browser/backend flow supports mixed N-group merge and independent removal with bounded continuation.",
+      "source": "headed Chrome plus local Wrangler/Miniflare disposable D1",
+      "locator": "C:/Users/mrkl6/AppData/Local/Temp/f65-final-gates-ab08474f/browser-final-snapshot.log",
+      "observed": "390x844 flow completed 14 actions (13 groups plus one independent removal) in three apply requests after one confirmation; N=3 used distinct nonzero cost mean $9 and max retail/wholesale $20/$18; supplier/date lots remained visible and retained."
+    },
+    {
+      "claim": "Approval, replay, Undo/Redo, and concurrency states are authoritative.",
+      "source": "local Worker API and disposable D1 browser fixture",
+      "locator": "C:/Users/mrkl6/AppData/Local/Temp/f65-browser-7UeArd",
+      "observed": "Review-tier removal reached approval_pending; identical lost-response replay returned the same pending receipt without duplication; approval followed by Undo generation 0 and Redo generation 1 succeeded; a post-finalize branch-stock mutation produced merge_state_conflict with zero history/audit and preserved the concurrent quantity."
+    },
+    {
+      "claim": "Native D1 limits and removal/group behavior pass on the exact source head.",
+      "source": "isolated native Worker/D1 regression scripts",
+      "locator": "C:/Users/mrkl6/AppData/Local/Temp/f65-final-gates-a5702d49/product-conflict-action-remove-native-rerun.log",
+      "observed": "Removal preview/finalize/apply/undo used 16/16/31/20 statements, max 13 bindings, one compound term, and max batch 21; exit 0."
+    },
+    {
+      "claim": "Native group review passes the large bounded fixture and refusal control.",
+      "source": "isolated native Worker/D1 regression script",
+      "locator": "C:/Users/mrkl6/AppData/Local/Temp/f65-final-gates-a5702d49/product-conflict-action-groups-native-rerun.log",
+      "observed": "Twelve groups and 36 members plus oversized-lot refusal passed with 31 statements, max 36 bindings, and one compound term; exit 0."
+    },
+    {
+      "claim": "All 309 backend scripts have passing evidence on the exact source head.",
+      "source": "two exhaustive sweeps plus fresh isolated native reruns",
+      "locator": "C:/Users/mrkl6/AppData/Local/Temp/f65-final-gates-a5702d49/cloudflare-test-sweep-attempt2.log",
+      "observed": "The first sweep passed 308/309 and the second passed every non-native script; accumulated Windows runs terminated native workerd processes with exit -1073740791 and no assertion output. Both affected native scripts pass immediately in fresh isolated processes, distinguishing host-process exhaustion from functional assertion failure."
+    },
+    {
+      "claim": "An independent verifier found no release blocker at the exact clean source head.",
+      "source": "offline_plan_correction",
+      "locator": "C:/Users/mrkl6/Downloads/business-os-v1/outputs/takeover-20260908/f65-release-rereview.json",
+      "observed": "PASS at exact a5702d494fadae62b207d0a28f3a289aea0636b8, including the post-6c AppSelect/pager/UI/test-only delta, frontend typecheck/i18n, changed-backend compatibility scripts, and clean diff."
+    }
+  ],
+  "verification": [
+    {
+      "command": "npm run test:utils",
+      "scope": "frontend exact a5702d49",
+      "exit_code": 0,
+      "expected": "All utility/component regression tests pass.",
+      "observed": "330/330 passed; log C:/Users/mrkl6/AppData/Local/Temp/f65-final-gates-a5702d49/frontend-test-utils.log."
+    },
+    {
+      "command": "npm run typecheck && npm run verify:i18n && npm run build",
+      "scope": "frontend exact a5702d49",
+      "exit_code": 0,
+      "expected": "Frontend types, localization parity, and production build pass.",
+      "observed": "Typecheck passed; i18n passed with 5551 keys across 574 source files; build passed with 1111 modules."
+    },
+    {
+      "command": "npm run typecheck",
+      "scope": "cloudflare exact a5702d49",
+      "exit_code": 0,
+      "expected": "Worker TypeScript passes.",
+      "observed": "Passed; log C:/Users/mrkl6/AppData/Local/Temp/f65-final-gates-a5702d49/cloudflare-typecheck.log."
+    },
+    {
+      "command": "full cloudflare/scripts/test-*.cjs sweep, attempt 1",
+      "scope": "309 backend scripts exact a5702d49",
+      "exit_code": 1,
+      "expected": "Every script either passes in the sweep or is rerun freshly when the Windows native host terminates without assertion output.",
+      "observed": "308 passed; product-conflict-action-remove-native exited -1073740791 without output. The same script then passed isolated with measured native D1 bounds."
+    },
+    {
+      "command": "full cloudflare/scripts/test-*.cjs sweep, attempt 2",
+      "scope": "309 backend scripts exact a5702d49, without parallel frontend workload",
+      "exit_code": 1,
+      "expected": "Confirm all ordinary scripts and identify any process-only native failures.",
+      "observed": "307 passed; the two F65 native workerd processes exited -1073740791 without assertion output. Both pass in fresh isolated processes; log C:/Users/mrkl6/AppData/Local/Temp/f65-final-gates-a5702d49/cloudflare-test-sweep-attempt2.log."
+    },
+    {
+      "command": "$env:F65_NATIVE_D1='1'; node scripts/test-product-conflict-action-groups-native.cjs",
+      "scope": "exact-head native group review",
+      "exit_code": 0,
+      "expected": "Real native D1 group bounds and oversize refusal pass.",
+      "observed": "12 groups/36 members plus oversized-lot refusal passed; 31 statements, 36 bindings, one compound term."
+    },
+    {
+      "command": "$env:F65_NATIVE_D1='1'; node scripts/test-product-conflict-action-remove-native.cjs",
+      "scope": "exact-head native direct removal",
+      "exit_code": 0,
+      "expected": "Real native D1 preview/finalize/apply/Undo passes inside statement, binding, compound, and batch limits.",
+      "observed": "Passed with preview16/finalize16/apply31/undo20 statements, max13 bindings, compound1, max batch21."
+    },
+    {
+      "command": "git status --short --branch; git diff --check",
+      "scope": "source candidate exact a5702d49",
+      "exit_code": 0,
+      "expected": "Clean worktree and no whitespace errors.",
+      "observed": "Clean before this result-envelope file was created; build-generated public files were normalized back to their committed byte content."
+    }
+  ],
+  "risks": [
+    "A single long Windows process that launches the entire backend suite can terminate native workerd with status -1073740791 after extensive prior tests. The native scripts pass in fresh isolated processes and emit no failed assertion in the accumulated run.",
+    "Deployment and remote migration provenance remain the release owner's responsibility; this task did not inspect or change production state."
+  ],
+  "blockers": [],
+  "not_done": [
+    "No production deployment was performed.",
+    "No remote D1 migration was applied.",
+    "No remote secret or production data was changed."
+  ],
+  "handoff": "Release source candidate is exact a5702d494fadae62b207d0a28f3a289aea0636b8. Use the independent PASS artifact and exact-head logs above for the checkpoint decision. Migration 0138 is present but was not applied remotely.",
+  "workspace": {
+    "branch": "codex/f65-release-20260909",
+    "worktree": "C:/Users/mrkl6/Downloads/bos-f65-release-20260909",
+    "dirty_before": [],
+    "dirty_after": []
+  }
+}

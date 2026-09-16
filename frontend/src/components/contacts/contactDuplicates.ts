@@ -1,4 +1,5 @@
 import { apiFetch, route } from '../../api/http.ts'
+import { dispatchResolvedSyncError, type SyncProblemReference } from '../../utils/syncProblemLifecycle.ts'
 
 // Frontend transport for the live/whole-table duplicate-detection endpoints
 // added to routes/contacts.ts (see cloudflare/src/lib/contactDuplicates.ts
@@ -21,7 +22,26 @@ export type ContactDuplicateMatch = {
   membershipNumber: string | null
   matchedPhone: string | null
   severity: ContactDuplicateSeverity
+  version: string
+  syncProblem?: SyncProblemReference
 }
+
+export type ContactDuplicateCandidateVersion = { id: number; version: string }
+
+export type ContactDuplicateReview = {
+  candidateIds: number[]
+  candidateVersions: ContactDuplicateCandidateVersion[]
+  fingerprint: string
+}
+
+export type ContactDuplicateCheck = {
+  matches: ContactDuplicateMatch[]
+  duplicateReview: ContactDuplicateReview
+  allowedActions: Array<'use_existing' | 'create_separate'>
+  syncProblem?: SyncProblemReference
+}
+
+export type ContactDuplicateDecision = ContactDuplicateReview & { action: 'create_separate' }
 
 // Per-contact "worth knowing before you act" history the /duplicates
 // endpoint attaches to every cluster member (routes/contacts.ts's
@@ -53,10 +73,12 @@ const TABLE_ENDPOINT: Record<ContactTableKind, string> = {
   delivery_contacts: '/api/delivery-contacts',
 }
 
-function appendQuery(path: string, params: Record<string, string>): string {
+function appendQuery(path: string, params: Record<string, string | string[]>): string {
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
-    if (value) query.set(key, value)
+    if (Array.isArray(value)) {
+      for (const item of value) if (item) query.append(key, item)
+    } else if (value) query.set(key, value)
   }
   const qs = query.toString()
   return qs ? `${path}?${qs}` : path
@@ -68,20 +90,82 @@ function appendQuery(path: string, params: Record<string, string>): string {
 // routes/contacts.ts's checkContactDuplicateBlock).
 export async function checkContactDuplicate(
   table: ContactTableKind,
-  subject: { name: string; phone: string; excludeId?: number | string | null },
-): Promise<ContactDuplicateMatch[]> {
-  if (!subject.name.trim() && !subject.phone.trim()) return []
+  subject: { name: string; phones: string[]; excludeId?: number | string | null },
+): Promise<ContactDuplicateCheck> {
+  const empty = (): ContactDuplicateCheck => ({
+    matches: [],
+    duplicateReview: { candidateIds: [], candidateVersions: [], fingerprint: 'v1|' },
+    allowedActions: [],
+  })
+  const phones = [...new Set(subject.phones.map((phone) => phone.trim()).filter(Boolean))].slice(0, 4)
+  if (!subject.name.trim() && !phones.length) return empty()
   try {
     const path = appendQuery(`${TABLE_ENDPOINT[table]}/check-duplicate`, {
       name: subject.name,
-      phone: subject.phone,
+      phone: phones,
       excludeId: subject.excludeId != null ? String(subject.excludeId) : '',
     })
     const result = await apiFetch('GET', path)
-    return Array.isArray(result?.matches) ? result.matches : []
+    return normalizeContactDuplicateCheck(result) || empty()
   } catch {
-    return []
+    return empty()
   }
+}
+
+export function normalizeContactDuplicateCheck(value: unknown): ContactDuplicateCheck | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const input = value as Record<string, unknown>
+  const reviewInput = input.duplicateReview
+  if (!Array.isArray(input.matches) || !reviewInput || typeof reviewInput !== 'object' || Array.isArray(reviewInput)) return null
+  const review = reviewInput as Record<string, unknown>
+  if (!Array.isArray(review.candidateIds) || !Array.isArray(review.candidateVersions) || typeof review.fingerprint !== 'string') return null
+  const candidateIds = review.candidateIds.map(Number)
+  const candidateVersions = review.candidateVersions.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+    const row = entry as Record<string, unknown>
+    return { id: Number(row.id), version: String(row.version || '') }
+  })
+  if (candidateIds.some((id) => !Number.isSafeInteger(id) || id <= 0)
+    || candidateVersions.some((entry) => !entry || !Number.isSafeInteger(entry.id) || entry.id <= 0 || !entry.version)) return null
+  const allowedActions = Array.isArray(input.allowedActions)
+    ? input.allowedActions.filter((action): action is 'use_existing' | 'create_separate' => action === 'use_existing' || action === 'create_separate')
+    : []
+  return {
+    matches: input.matches as ContactDuplicateMatch[],
+    duplicateReview: { candidateIds, candidateVersions: candidateVersions as ContactDuplicateCandidateVersion[], fingerprint: review.fingerprint },
+    allowedActions,
+  }
+}
+
+export function readContactDuplicateDecisionError(error: unknown): ContactDuplicateCheck | null {
+  const input = error as Record<string, unknown> | null
+  const code = input?.code
+  if (code !== 'contact_duplicate_decision_required'
+    && code !== 'possible_duplicate'
+    && code !== 'phone_conflict'
+    && code !== 'contact_duplicate_candidates_changed') return null
+  const check = normalizeContactDuplicateCheck(input)
+    || normalizeContactDuplicateCheck(input?.duplicate)
+  if (!check) return null
+  const syncProblem = typeof input?.syncErrorId === 'string'
+    ? {
+        errorId: input.syncErrorId,
+        channel: typeof input.syncErrorChannel === 'string' ? input.syncErrorChannel : null,
+        code: typeof input.code === 'string' ? input.code : null,
+      }
+    : null
+  return syncProblem
+    ? { ...check, syncProblem, matches: check.matches.map((match) => ({ ...match, syncProblem })) }
+    : check
+}
+
+export function resolveContactDuplicateSyncError(value: ContactDuplicateCheck | ContactDuplicateMatch | null | undefined): boolean {
+  return dispatchResolvedSyncError(value?.syncProblem)
+}
+
+export function createSeparateContactDecision(check: ContactDuplicateCheck): ContactDuplicateDecision | null {
+  if (!check.allowedActions.includes('create_separate')) return null
+  return { action: 'create_separate', ...check.duplicateReview }
 }
 
 // Whole-table sweep for an admin "Possible Duplicates" review panel. Pass
@@ -156,6 +240,59 @@ export async function mergeContacts(
     null,
     true,
   )
+}
+
+// ---- Bulk merge planning (pure) ----------------------------------------
+// P3-9. The Conflicts tab's Bulk Merge used to run only on clusters of
+// EXACTLY two records and silently skip everything bigger, on the reasoning
+// that a 3+-way cluster needs a human to pick the survivor. That reasoning
+// did not survive contact with the data the hidden `ensureSupplierExists()`
+// writer left behind: production carries a "j secrat" cluster of ten rows and
+// a "lang" cluster of six, all created by the same accident, all identical
+// apart from their ids. Those are exactly the clusters Bulk Merge exists for,
+// and they were the only ones it refused.
+//
+// So the plan is computed for a cluster of ANY size, by a rule that is stated
+// rather than guessed at, and it is pure so it can be tested without a server.
+
+export type BulkContactMergePlan = {
+  cluster: ContactDuplicateCluster
+  keeperId: number
+  /** Merged into the keeper in this order, one mergeContacts() call each. */
+  loserIds: number[]
+}
+
+/**
+ * Which record of a cluster survives, in priority order:
+ *
+ *   1. The one member that carries a phone number, when exactly one does. A
+ *      duplicate minted by a hidden writer has no phone (nothing typed one),
+ *      so the row that has one is the contact somebody actually created.
+ *   2. Otherwise the lowest id -- created first, so the most history already
+ *      points at it and the merge moves the least.
+ *
+ * Returns null for a cluster with nothing to merge.
+ */
+export function chooseBulkMergeKeeper(contacts: ContactDuplicateClusterEntry[]): ContactDuplicateClusterEntry | null {
+  if (!Array.isArray(contacts) || contacts.length < 2) return null
+  const byId = [...contacts].sort((a, b) => a.id - b.id)
+  const withPhone = byId.filter((contact) => String(contact.phone || '').trim() !== '')
+  return withPhone.length === 1 ? withPhone[0] : byId[0]
+}
+
+/** One plan per mergeable cluster; clusters with nothing to merge are dropped. */
+export function planBulkContactMerges(clusters: ContactDuplicateCluster[]): BulkContactMergePlan[] {
+  const plans: BulkContactMergePlan[] = []
+  for (const cluster of clusters || []) {
+    const keeper = chooseBulkMergeKeeper(cluster?.contacts || [])
+    if (!keeper) continue
+    plans.push({
+      cluster,
+      keeperId: keeper.id,
+      loserIds: [...cluster.contacts].sort((a, b) => a.id - b.id).filter((contact) => contact.id !== keeper.id).map((contact) => contact.id),
+    })
+  }
+  return plans
 }
 
 // ---- Sale-link conflicts (the Conflicts tab's fourth section) ----------

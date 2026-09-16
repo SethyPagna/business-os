@@ -3,6 +3,7 @@ import { downloadXLSX } from '../../utils/xlsxExport.ts'
 import { buildStandaloneReportHtml } from '../../utils/exportReports.tsx'
 import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage.ts'
 import { formatPriceNumber } from '../../utils/pricing.ts'
+import { effectiveLowStockThreshold, type LowStockConfig } from '../../utils/lowStockSettings.ts'
 
 type MetricMap = Record<string, number | undefined>
 type Row = Record<string, unknown>
@@ -74,6 +75,11 @@ export interface DashboardExportContext {
   fmtUSD: (value: unknown) => string
   grossSalesLabel: string
   lowStockCount: number
+  // Settings > Stock Alerts, so an exported "Threshold" column is the number
+  // the row was actually judged by -- under 'All products' the per-product
+  // column is not that number, and printing it would explain the colour with
+  // a figure that did not decide it.
+  lowStock: LowStockConfig
   netRevenueLabel: string
   outOfStockCount: number
   periodKpis: SummaryCard[]
@@ -203,7 +209,7 @@ function buildDashboardTopProductRows(products: DashboardExportProduct[] = []): 
 function buildDashboardTopCustomerRows(ctx: DashboardExportContext): Row[] {
   return (ctx.analytics?.topCustomers || []).map((c, i) => ({
     Rank: i + 1,
-    Customer: c.customer_name || '',
+    Customer: c.customer_name || ctx.translateOr('walk_in', 'General'),
     Sales: c.sale_count || 0,
     Gross: priceCsv(c.gross_revenue_usd),
     Store_Discounts: priceCsv(c.store_discount_usd),
@@ -233,7 +239,7 @@ function buildDashboardLowStockRows(ctx: DashboardExportContext): Row[] {
   return (ctx.summary?.low_stock || []).map((p) => ({
     Product: p.name || '',
     Stock: p.stock_quantity || 0,
-    Threshold: p.low_stock_threshold || 0,
+    Threshold: effectiveLowStockThreshold(ctx.lowStock, p.low_stock_threshold),
   }))
 }
 
@@ -250,7 +256,7 @@ function buildDashboardRecentRows(ctx: DashboardExportContext): Row[] {
     Receipt: sale.receipt_number || '',
     Created_At: sale.created_at || '',
     Branch: sale.branch_name || '',
-    Customer: sale.customer_name || '',
+    Customer: sale.customer_name || ctx.translateOr('walk_in', 'General'),
     Total_USD: priceCsv(sale.total_usd || sale.total),
     Total_KHR: priceCsv(sale.total_khr),
   }))

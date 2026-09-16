@@ -11,9 +11,11 @@ import { sanitizeMediaList } from '../lib/media'
 import { ensureCoreDataInvariants, dropAllCustomTables, FACTORY_RESET_TABLES, PRODUCTS_RESET_TABLES } from '../lib/coreDataInvariants'
 import { createCloudflareBackup, createSectionBackup } from '../lib/backup'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion } from '../lib/cache'
+import { bumpVersion, bumpVersions } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { actorSnapshot } from '../lib/actorSnapshot'
+import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
 
 // Each R2 delete is its own subrequest, and a Worker invocation has a
 // hard ceiling on how many it may make. A catalog of ~6,700 products with
@@ -35,7 +37,64 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 // catalog": a 20k-object sweep belongs to a continuation design, not one
 // interactive request, and the leftover-reporting path already handles
 // the remainder honestly.
-const MAX_IMAGE_DELETES_PER_RESET = 500
+//
+// The number itself now lives in lib/planTier.ts (maxImageDeletesPerReset)
+// because it is plan-sensitive: Free allows 50 external subrequests per
+// invocation, so 500 is not a cap there, it is a guaranteed mid-loop
+// failure. It is read per request at the call site below rather than kept
+// as a second copy here that could drift from the table.
+
+const SALE_RECORD_RESET_GUARD_KEY = 'sale_record_events_reset_guard'
+const SALE_INCIDENT_RECOVERY_RESET_GUARD_KEY = 'sale_incident_recovery_reset_guard'
+const SALE_NOT_PAID_STOCK_RECOVERY_RESET_GUARD_KEY = 'sale_not_paid_stock_recovery_reset_guard'
+
+type ResetStatement = { sql: string; params?: Record<string, unknown> }
+
+// sale_record_events is immutable outside restore/reset. Keep its short-lived
+// reset authority inside the same D1 transaction as every destructive delete:
+// no request can observe the flag and a failure rolls the flag and deletes back.
+function guardSaleRecordReset(statements: ResetStatement[]): ResetStatement[] {
+  const token = crypto.randomUUID()
+  return [
+    {
+      sql: `INSERT INTO system_flags(key,value,updated_at)
+            VALUES(@key,json_object('mode','reset','token',@token),CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`,
+      params: { key: SALE_RECORD_RESET_GUARD_KEY, token },
+    },
+    {
+      sql: `INSERT INTO system_flags(key,value,updated_at)
+            VALUES(@key,json_object('mode','reset','token',@token),CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`,
+      params: { key: SALE_INCIDENT_RECOVERY_RESET_GUARD_KEY, token },
+    },
+    {
+      sql: `INSERT INTO system_flags(key,value,updated_at)
+            VALUES(@key,json_object('mode','reset','token',@token),CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`,
+      params: { key: SALE_NOT_PAID_STOCK_RECOVERY_RESET_GUARD_KEY, token },
+    },
+    ...statements,
+    {
+      sql: `DELETE FROM system_flags
+            WHERE key=@key AND json_extract(value,'$.mode')='reset'
+              AND json_extract(value,'$.token')=@token`,
+      params: { key: SALE_NOT_PAID_STOCK_RECOVERY_RESET_GUARD_KEY, token },
+    },
+    {
+      sql: `DELETE FROM system_flags
+            WHERE key=@key AND json_extract(value,'$.mode')='reset'
+              AND json_extract(value,'$.token')=@token`,
+      params: { key: SALE_INCIDENT_RECOVERY_RESET_GUARD_KEY, token },
+    },
+    {
+      sql: `DELETE FROM system_flags
+            WHERE key=@key AND json_extract(value,'$.mode')='reset'
+              AND json_extract(value,'$.token')=@token`,
+      params: { key: SALE_RECORD_RESET_GUARD_KEY, token },
+    },
+  ]
+}
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
@@ -88,6 +147,22 @@ app.post('/client-error', async (c) => {
 function denyUnlessRestorePermission(c: any) {
   const user = c.get('user')
   if (!hasPermission(user, 'backup_restore')) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  return null
+}
+
+// This one-time identity repair is driven only from the signed-in Admin UI.
+// The session cookie is SameSite=Lax, but an explicit exact-origin check keeps
+// the unsafe request boundary self-contained if cookie or browser behaviour
+// changes later. Browser fetches always send Origin for POST; rejecting a
+// missing value also prevents a copied command from bypassing the reviewed UI
+// preview/confirmation flow.
+function denyCrossOriginMaintenanceRequest(c: any, requireOrigin: boolean) {
+  const origin = c.req.header('Origin')
+  let requestOrigin = ''
+  try { requestOrigin = new URL(c.req.url).origin } catch { /* denied below */ }
+  if ((requireOrigin && !origin) || (origin && origin !== requestOrigin) || c.req.header('Sec-Fetch-Site') === 'cross-site') {
+    return c.json({ success: false, error: 'This maintenance action must be submitted from the same origin.' }, 403)
+  }
   return null
 }
 
@@ -168,6 +243,19 @@ app.post('/reset-data', async (c) => {
   const includeMovements = mode === 'products' && body.includeMovements === true
   const includeSales = mode === 'products' && body.includeSales === true
   const includeImages = mode === 'products' && body.includeImages === true
+  // Refuse rather than half-delete. Each image delete is one external
+  // subrequest and Free allows 50 per invocation, so a reset asking to
+  // delete more than maxImageDeletesPerReset files would leave the rest
+  // orphaned in R2 with no second pass to collect them -- the request that
+  // knows about them is the one that just ended. Paid keeps the existing
+  // "deleted N, left M" behaviour because 500 fits its budget.
+  if (includeImages && resolvePlanTier(c.env) === 'free') {
+    return c.json({
+      success: false,
+      error: 'Deleting the image files as part of a products reset is not available on the Cloudflare free plan: one request cannot delete enough of them to finish the job, and a partial delete would leave orphaned files behind. Reset without the image option, then remove the files from the Library.',
+      code: 'reset_images_unavailable_free',
+    }, 400)
+  }
   const db = getDb(c.env)
   const user = c.get('user')
 
@@ -196,6 +284,9 @@ app.post('/reset-data', async (c) => {
     // whether or not this toggle is used. Allocation tables are listed
     // first since they reference sale_items/return_items.
     if (includeSales) {
+      tablesToClear.unshift('sale_record_events')
+      tablesToClear.splice(1, 0, 'return_mutation_receipts')
+      tablesToClear.splice(2, 0, 'return_create_receipts', 'return_create_guards')
       tablesToClear.push(
         'return_item_batch_allocations',
         'sale_item_batch_allocations',
@@ -256,7 +347,8 @@ app.post('/reset-data', async (c) => {
         imageKeysToDelete = sanitizeMediaList(rawPaths).map((p) => p.replace(/^\/+/, ''))
       }
 
-      await db.batch(tablesToClear.map((table) => ({ sql: `DELETE FROM "${table}"` })))
+      const deletes = tablesToClear.map((table) => ({ sql: `DELETE FROM "${table}"` }))
+      await db.batch(guardSaleRecordReset(deletes))
       // Deliberately NOT touched by either toggle: customers, suppliers,
       // delivery_contacts, custom_fields, import job history, and every
       // settings/user/branch/category/unit table.
@@ -277,9 +369,14 @@ app.post('/reset-data', async (c) => {
       // that already succeeded, it's just reported back to the caller.
       const imageDeleteErrors: string[] = []
       let imagesDeleted = 0
-      const imagesOverCap = Math.max(0, imageKeysToDelete.length - MAX_IMAGE_DELETES_PER_RESET)
+      // Tier-aware shadow: the module-level constant keeps its Paid 500,
+      // while a Free deployment gets the number that actually fits Free's
+      // 50-external-subrequest ceiling (each delete is one subrequest).
+      // See lib/planTier.ts's maxImageDeletesPerReset.
+      const imageDeleteCap = getPlanLimits(c.env).maxImageDeletesPerReset
+      const imagesOverCap = Math.max(0, imageKeysToDelete.length - imageDeleteCap)
       if (includeImages && imageKeysToDelete.length) {
-        for (const key of imageKeysToDelete.slice(0, MAX_IMAGE_DELETES_PER_RESET)) {
+        for (const key of imageKeysToDelete.slice(0, imageDeleteCap)) {
           try {
             await deleteObject(c.env.ASSETS, key)
             imagesDeleted += 1
@@ -294,7 +391,7 @@ app.post('/reset-data', async (c) => {
       if (includeSales) productResetLabelParts.push('sales and returns deleted')
       if (includeImages) productResetLabelParts.push(`${imagesDeleted} image file(s) deleted`)
 
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'reset_data', 'system', null, {
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reset_data', 'system', null, {
         label: `Products reset - ${productResetLabelParts.join('; ')}`,
         mode,
         includeMovements,
@@ -322,7 +419,7 @@ app.post('/reset-data', async (c) => {
 
       return c.json({
         success: true,
-        message: `Products reset complete - products, batches, and their branch stock deleted${includeMovements ? ', movement/audit history deleted' : ''}${includeSales ? ', sales and returns deleted' : ''}${includeImages ? `, ${imagesDeleted} image file(s) deleted` : ''}. ${keptSuffix} A fresh backup was taken first.${imagesOverCap ? ` Note: ${imagesOverCap} more image file(s) were left in storage -- a single request cannot delete more than ${MAX_IMAGE_DELETES_PER_RESET}. They are no longer referenced by any product and can be removed from the Library.` : ''}${imageDeleteErrors.length ? ` Note: ${imageDeleteErrors.length} image file(s) failed to delete from storage (the database was still updated correctly).` : ''}`,
+        message: `Products reset complete - products, their received dates, and their branch stock deleted${includeMovements ? ', movement/audit history deleted' : ''}${includeSales ? ', sales and returns deleted' : ''}${includeImages ? `, ${imagesDeleted} image file(s) deleted` : ''}. ${keptSuffix} A fresh backup was taken first.${imagesOverCap ? ` Note: ${imagesOverCap} more image file(s) were left in storage -- a single request cannot delete more than ${imageDeleteCap}. They are no longer referenced by any product and can be removed from the Library.` : ''}${imageDeleteErrors.length ? ` Note: ${imageDeleteErrors.length} image file(s) failed to delete from storage (the database was still updated correctly).` : ''}`,
       })
     } catch (error) {
       return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)
@@ -349,6 +446,16 @@ app.post('/reset-data', async (c) => {
 
   try {
     const statements: Array<{ sql: string }> = [
+      { sql: 'DELETE FROM transfer_operation_members' },
+      { sql: 'DELETE FROM transfer_operation_receipts' },
+      { sql: 'DELETE FROM sale_record_events' },
+      { sql: 'DELETE FROM sale_not_paid_stock_recovery_members' },
+      { sql: 'DELETE FROM sale_not_paid_stock_recovery_receipts' },
+      { sql: 'DELETE FROM sale_incident_recovery_members' },
+      { sql: 'DELETE FROM sale_incident_recovery_receipts' },
+      { sql: 'DELETE FROM return_mutation_receipts' },
+      { sql: 'DELETE FROM return_create_receipts' },
+      { sql: 'DELETE FROM return_create_guards' },
       { sql: 'DELETE FROM return_item_batch_allocations' },
       { sql: 'DELETE FROM sale_item_batch_allocations' },
       { sql: 'DELETE FROM return_items' },
@@ -364,6 +471,17 @@ app.post('/reset-data', async (c) => {
 
     if (mode === 'all') {
       statements.push(
+        // Reviewed group/removal actions bind product identity, graph
+        // snapshots and action-history rows. Clear all receipt children
+        // before their parents and before products/history.
+        { sql: 'DELETE FROM product_conflict_action_group_members' },
+        { sql: 'DELETE FROM product_remove_operations' },
+        { sql: 'DELETE FROM product_conflict_action_groups' },
+        { sql: 'DELETE FROM product_conflict_action_reviews' },
+        // Durable selected-conflict receipts refer to products and history.
+        // Clear case children before parent runs and before either target.
+        { sql: 'DELETE FROM product_conflict_merge_run_cases' },
+        { sql: 'DELETE FROM product_conflict_merge_runs' },
         { sql: 'DELETE FROM product_batches' },
         { sql: 'DELETE FROM products' },
         { sql: 'DELETE FROM branch_stock' },
@@ -408,7 +526,7 @@ app.post('/reset-data', async (c) => {
       )
     }
 
-    await db.batch(statements)
+    await db.batch(guardSaleRecordReset(statements))
 
     // mode 'all' wipes the import tables in `statements` above; the two BULK
     // members (import_job_rows, import_job_source_rows) live on the separate
@@ -472,7 +590,7 @@ app.post('/reset-data', async (c) => {
     const label = mode === 'all'
       ? 'Full data reset - sales, returns, products, and contacts cleared'
       : 'Sales reset - sales, returns, and stock cleared'
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'reset_data', 'system', null, { label, mode, r2Errors: resetSweepErrors.length || undefined })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reset_data', 'system', null, { label, mode, r2Errors: resetSweepErrors.length || undefined })
 
     // Notify every connected page/device (Dashboard, Products, Inventory,
     // Sales, POS, Branches, Returns) that their data just changed out from
@@ -578,7 +696,7 @@ app.post('/reset-section', async (c) => {
   try {
     await db.batch(config.tables.map((table) => ({ sql: `DELETE FROM "${table}"` })))
 
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'reset_data', 'system', null, {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reset_data', 'system', null, {
       label: `${config.label} reset - ${config.tables.join(', ')} cleared`,
       mode: `section:${section}`,
     })
@@ -621,22 +739,481 @@ app.post('/reset-section', async (c) => {
 //                         import` opening lots are deliberately untouched, so
 //                         migration 0081's lot-ledger reconcile (Step 4f)
 //                         still works and re-running this is a no-op.
+//   step='repair_sep23_subtotals' -> One allowlisted, manifest-bound repair
+//                         for sale ids 16842-16863. The helper owns every
+//                         guard and statement; this route accepts no SQL.
 //
-// Both are idempotent (the `<> 0` guards mean a second run reports 0
+// The stock actions are idempotent (the `<> 0` guards mean a second run reports 0
 // affected), take a fresh scoped backup first exactly like every reset
 // above, and only zero quantities -- no row is ever deleted here.
 // ---------------------------------------------------------------------------
-const MIGRATION_FINALIZE_STEPS = ['zero_stock', 'park_lots'] as const
+const LEGACY_SUBTOTAL_REPAIR_STEP = 'repair_sep23_subtotals'
+const GENERAL_CUSTOMER_REPAIR_STEP = 'mark_shared_general_24969'
+const MIGRATION_FINALIZE_STEPS = ['zero_stock', 'park_lots', LEGACY_SUBTOTAL_REPAIR_STEP, GENERAL_CUSTOMER_REPAIR_STEP] as const
 type MigrationFinalizeStep = typeof MIGRATION_FINALIZE_STEPS[number]
+
+app.get('/shared-general-customer-repair/preview', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'general_customer_repair_preview', 10, 600)) {
+    return c.json({ success: false, error: 'Too many previews. Wait a few minutes and try again.' }, 429)
+  }
+
+  const repair = await import('../lib/generalCustomerRepair')
+  const user = c.get('user')
+  try {
+    return c.json(await repair.previewGeneralCustomerRepair(getDb(c.env), {
+      id: user?.id,
+      name: actorSnapshot(user),
+    }))
+  } catch (error) {
+    if (error instanceof repair.GeneralCustomerRepairValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof repair.GeneralCustomerRepairConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not preview the General customer repair. No data was changed.' }, 500)
+  }
+})
+
+// The marker repair above is immutable and intentionally preserves the old
+// profile row. This follow-up clears only the confirmed legacy membership from
+// that already-anonymous shared identity, with its own manifest and receipt.
+app.get('/shared-general-customer-membership-repair/preview', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'general_customer_membership_repair_preview', 10, 600)) {
+    return c.json({ success: false, error: 'Too many previews. Wait a few minutes and try again.' }, 429)
+  }
+  const repair = await import('../lib/generalCustomerMembershipRepair')
+  const user = c.get('user')
+  try {
+    return c.json(await repair.previewGeneralCustomerMembershipRepair(getDb(c.env), { id: user?.id, name: actorSnapshot(user) }))
+  } catch (error) {
+    if (error instanceof repair.GeneralCustomerMembershipRepairValidationError) return c.json({ success: false, error: error.message }, 400)
+    if (error instanceof repair.GeneralCustomerMembershipRepairConflictError) return c.json({ success: false, error: error.message }, 409)
+    return c.json({ success: false, error: 'Could not preview the shared General membership repair. No data was changed.' }, 500)
+  }
+})
+
+app.post('/shared-general-customer-membership-repair/apply', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  const crossOrigin = denyCrossOriginMaintenanceRequest(c, true)
+  if (crossOrigin) return crossOrigin
+  if (await rateLimited(c, 'general_customer_membership_repair_apply', 5, 600)) {
+    return c.json({ success: false, error: 'Too many repair attempts. Wait a few minutes and try again.' }, 429)
+  }
+  const rawBody = await c.req.text()
+  if (new TextEncoder().encode(rawBody).byteLength > 4096) return c.json({ success: false, error: 'Repair request body is too large.' }, 413)
+  let body: unknown
+  try { body = JSON.parse(rawBody) } catch { return c.json({ success: false, error: 'Repair request must be valid JSON.' }, 400) }
+  const repair = await import('../lib/generalCustomerMembershipRepair')
+  const db = getDb(c.env)
+  const user = c.get('user')
+  let plan
+  try {
+    plan = await repair.prepareGeneralCustomerMembershipRepair(db, body, { id: user?.id, name: actorSnapshot(user) })
+  } catch (error) {
+    if (error instanceof repair.GeneralCustomerMembershipRepairValidationError) return c.json({ success: false, error: error.message }, 400)
+    if (error instanceof repair.GeneralCustomerMembershipRepairConflictError) return c.json({ success: false, error: error.message }, 409)
+    return c.json({ success: false, error: 'Could not validate the shared General membership repair. No data was changed.' }, 500)
+  }
+  if (plan.outcome === 'apply') {
+    try { await createSectionBackup(c.env, ['customers', 'action_history', 'audit_logs'], 'manual') }
+    catch { return c.json({ success: false, error: 'Aborted: could not create the customer repair backup first. No data was changed.' }, 500) }
+  }
+  const beforeToken = await repair.readGeneralCustomerMembershipRepairCacheToken(c.env)
+  try {
+    const result = await repair.applyGeneralCustomerMembershipRepair(db, plan)
+    const refresh = await repair.refreshGeneralCustomerMembershipRepair(c.env, beforeToken)
+    return c.json({
+      success: true,
+      outcome: result.outcome,
+      affected: { customers: result.changedCustomers },
+      verification_pending: result.verification_pending,
+      ...refresh,
+      message: result.outcome === 'applied'
+        ? 'Cleared the legacy membership from the shared General customer. Sales and links were preserved.'
+        : 'This exact shared General membership repair was already applied. No customer, history or audit row changed.',
+    })
+  } catch (error) {
+    if (error instanceof repair.GeneralCustomerMembershipRepairConflictError) return c.json({ success: false, error: error.message }, 409)
+    return c.json({ success: false, error: 'Shared General membership repair failed. The atomic batch changed no data.' }, 500)
+  }
+})
+
+app.get('/sale-incident-recovery-20260909/preview', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'sale_incident_recovery_preview', 10, 600)) {
+    return c.json({ success: false, error: 'Too many previews. Wait a few minutes and try again.' }, 429)
+  }
+  const recovery = await import('../lib/saleIncidentRecovery')
+  const user = c.get('user')
+  try {
+    return c.json(await recovery.previewSaleIncidentRecovery(getDb(c.env), {
+      id: user?.id,
+      name: actorSnapshot(user),
+    }))
+  } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof recovery.SaleIncidentRecoveryConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not preview the fixed sale recovery. No data was changed.' }, 500)
+  }
+})
+
+app.post('/sale-incident-recovery-20260909/apply', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  const crossOrigin = denyCrossOriginMaintenanceRequest(c, true)
+  if (crossOrigin) return crossOrigin
+  const advertisedBytes = Number(c.req.header('Content-Length') || 0)
+  if (Number.isFinite(advertisedBytes) && advertisedBytes > 4096) {
+    return c.json({ success: false, error: 'Recovery request body is too large.' }, 413)
+  }
+  if (await rateLimited(c, 'sale_incident_recovery_apply', 5, 600)) {
+    return c.json({ success: false, error: 'Too many recovery attempts. Wait a few minutes and try again.' }, 429)
+  }
+  const rawBody = await c.req.text()
+  if (new TextEncoder().encode(rawBody).byteLength > 4096) {
+    return c.json({ success: false, error: 'Recovery request body is too large.' }, 413)
+  }
+  let body: unknown
+  try { body = JSON.parse(rawBody) } catch { return c.json({ success: false, error: 'Recovery request must be valid JSON.' }, 400) }
+
+  const recovery = await import('../lib/saleIncidentRecovery')
+  const db = getDb(c.env)
+  const user = c.get('user')
+  let plan
+  try {
+    plan = await recovery.prepareSaleIncidentRecovery(db, body, {
+      id: user?.id,
+      name: actorSnapshot(user),
+    })
+  } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof recovery.SaleIncidentRecoveryConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not validate the fixed sale recovery. No data was changed.' }, 500)
+  }
+
+  if (plan.outcome === 'apply') {
+    try {
+      await createSectionBackup(c.env, recovery.SALE_INCIDENT_RECOVERY_BACKUP_TABLES, 'manual')
+    } catch {
+      return c.json({ success: false, error: 'Aborted: could not create the recovery backup first. No data was changed.' }, 500)
+    }
+  }
+
+  try {
+    const result = await recovery.applySaleIncidentRecovery(db, plan)
+    const refreshes = await Promise.allSettled([
+      bumpVersion(c.env, 'sales'),
+      bumpVersion(c.env, 'products'),
+      broadcast(c.env, 'sales', { action: 'update', recovery: recovery.SALE_INCIDENT_RECOVERY_TARGET }),
+      broadcast(c.env, 'products', { action: 'update', recovery: recovery.SALE_INCIDENT_RECOVERY_TARGET }),
+    ])
+    const cacheInvalidated = refreshes[0].status === 'fulfilled' && refreshes[1].status === 'fulfilled'
+    const refreshPending = refreshes.some((entry) => entry.status === 'rejected')
+    return c.json({
+      ...result,
+      verification_pending: Boolean(result.verification_pending),
+      cache_invalidated: cacheInvalidated,
+      refresh_pending: refreshPending,
+      broadcast_requested: true,
+      message: result.outcome === 'applied'
+        ? 'Recovered the three proven itemless sales in one guarded transaction. Sale 16954 remains blocked pending sale-time cost evidence.'
+        : 'This exact three-sale recovery was already applied. No sale, stock, audit, history or backup row changed; cache refresh was retried.',
+    })
+  } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryUncertainError) {
+      return c.json({
+        success: false,
+        outcome: 'uncertain',
+        operation_id: error.operationId,
+        manifest_sha256: error.manifestSha256,
+        verification_pending: true,
+        cache_invalidated: false,
+        refresh_pending: true,
+        broadcast_requested: false,
+        message: error.message,
+      }, 202)
+    }
+    if (error instanceof recovery.SaleIncidentRecoveryConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Sale recovery failed. The atomic D1 batch changed no data.' }, 500)
+  }
+})
+
+app.get('/sale-incident-recovery-20260909-v2/preview', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'sale_incident_recovery_v2_preview', 10, 600)) {
+    return c.json({ success: false, error: 'Too many sale 16954 recovery previews. Wait a few minutes and try again.' }, 429)
+  }
+  const recovery = await import('../lib/saleIncidentRecoveryV2')
+  const user = c.get('user')
+  try {
+    return c.json(await recovery.previewSaleIncidentRecoveryV2(getDb(c.env), {
+      id: user?.id,
+      name: actorSnapshot(user),
+    }))
+  } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryV2ValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof recovery.SaleIncidentRecoveryV2ConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not preview the fixed sale 16954 recovery. No data was changed.' }, 500)
+  }
+})
+
+app.post('/sale-incident-recovery-20260909-v2/apply', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  const crossOrigin = denyCrossOriginMaintenanceRequest(c, true)
+  if (crossOrigin) return crossOrigin
+  const advertisedBytes = Number(c.req.header('Content-Length') || 0)
+  if (Number.isFinite(advertisedBytes) && advertisedBytes > 4096) {
+    return c.json({ success: false, error: 'Sale 16954 recovery request body is too large.' }, 413)
+  }
+  if (await rateLimited(c, 'sale_incident_recovery_v2_apply', 5, 600)) {
+    return c.json({ success: false, error: 'Too many sale 16954 recovery attempts. Wait a few minutes and try again.' }, 429)
+  }
+  const rawBody = await c.req.text()
+  if (new TextEncoder().encode(rawBody).byteLength > 4096) {
+    return c.json({ success: false, error: 'Sale 16954 recovery request body is too large.' }, 413)
+  }
+  let body: unknown
+  try { body = JSON.parse(rawBody) } catch { return c.json({ success: false, error: 'Sale 16954 recovery request must be valid JSON.' }, 400) }
+
+  const recovery = await import('../lib/saleIncidentRecoveryV2')
+  const db = getDb(c.env)
+  const user = c.get('user')
+  let plan
+  try {
+    plan = await recovery.prepareSaleIncidentRecoveryV2(db, body, {
+      id: user?.id,
+      name: actorSnapshot(user),
+    })
+  } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryV2ValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof recovery.SaleIncidentRecoveryV2ConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not validate the fixed sale 16954 recovery. No data was changed.' }, 500)
+  }
+
+  if (plan.outcome === 'apply') {
+    try {
+      await createSectionBackup(c.env, recovery.SALE_INCIDENT_RECOVERY_V2_BACKUP_TABLES, 'manual')
+    } catch {
+      return c.json({ success: false, error: 'Aborted: could not create the sale 16954 recovery backup first. No data was changed.' }, 500)
+    }
+  }
+
+  try {
+    const result = await recovery.applySaleIncidentRecoveryV2(db, plan)
+    const refreshes = await Promise.allSettled([
+      bumpVersion(c.env, 'sales'),
+      bumpVersion(c.env, 'products'),
+      broadcast(c.env, 'sales', { action: 'update', recovery: recovery.SALE_INCIDENT_RECOVERY_V2_TARGET }),
+      broadcast(c.env, 'products', { action: 'update', recovery: recovery.SALE_INCIDENT_RECOVERY_V2_TARGET }),
+    ])
+    const cacheInvalidated = refreshes[0].status === 'fulfilled' && refreshes[1].status === 'fulfilled'
+    const refreshPending = refreshes.some((entry) => entry.status === 'rejected')
+    return c.json({
+      ...result,
+      verification_pending: Boolean(result.verification_pending),
+      cache_invalidated: cacheInvalidated,
+      refresh_pending: refreshPending,
+      broadcast_requested: true,
+      message: result.outcome === 'applied'
+        ? 'Recovered the proven persisted line for sale 16954 in one guarded transaction.'
+        : 'This exact sale 16954 recovery was already applied. No sale, stock, audit, history or backup row changed; cache refresh was retried.',
+    })
+  } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryV2UncertainError) {
+      return c.json({
+        success: false,
+        outcome: 'uncertain',
+        operation_id: error.operationId,
+        manifest_sha256: error.manifestSha256,
+        verification_pending: true,
+        cache_invalidated: false,
+        refresh_pending: true,
+        broadcast_requested: false,
+        message: error.message,
+      }, 202)
+    }
+    if (error instanceof recovery.SaleIncidentRecoveryV2ConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Sale 16954 recovery failed. The atomic D1 batch changed no data.' }, 500)
+  }
+})
+
+app.get('/sale-not-paid-stock-recovery-20260909/preview', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'sale_not_paid_stock_recovery_preview', 10, 600)) {
+    return c.json({ success: false, error: 'Too many Not Paid stock correction previews. Wait a few minutes and try again.' }, 429)
+  }
+  const recovery = await import('../lib/saleNotPaidStockRecovery')
+  const user = c.get('user')
+  try {
+    return c.json(await recovery.previewSaleNotPaidStockRecovery(getDb(c.env), {
+      id: user?.id,
+      name: actorSnapshot(user),
+    }))
+  } catch (error) {
+    if (error instanceof recovery.SaleNotPaidStockRecoveryValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof recovery.SaleNotPaidStockRecoveryConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not preview the fixed Not Paid stock correction. No data was changed.' }, 500)
+  }
+})
+
+app.post('/sale-not-paid-stock-recovery-20260909/apply', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  const crossOrigin = denyCrossOriginMaintenanceRequest(c, true)
+  if (crossOrigin) return crossOrigin
+  const advertisedBytes = Number(c.req.header('Content-Length') || 0)
+  if (Number.isFinite(advertisedBytes) && advertisedBytes > 4096) {
+    return c.json({ success: false, error: 'Not Paid stock correction request body is too large.' }, 413)
+  }
+  if (await rateLimited(c, 'sale_not_paid_stock_recovery_apply', 5, 600)) {
+    return c.json({ success: false, error: 'Too many Not Paid stock correction attempts. Wait a few minutes and try again.' }, 429)
+  }
+  const rawBody = await c.req.text()
+  if (new TextEncoder().encode(rawBody).byteLength > 4096) {
+    return c.json({ success: false, error: 'Not Paid stock correction request body is too large.' }, 413)
+  }
+  let body: unknown
+  try { body = JSON.parse(rawBody) } catch { return c.json({ success: false, error: 'Not Paid stock correction request must be valid JSON.' }, 400) }
+
+  const recovery = await import('../lib/saleNotPaidStockRecovery')
+  const db = getDb(c.env)
+  const user = c.get('user')
+  let plan
+  try {
+    plan = await recovery.prepareSaleNotPaidStockRecovery(db, body, {
+      id: user?.id,
+      name: actorSnapshot(user),
+    })
+  } catch (error) {
+    if (error instanceof recovery.SaleNotPaidStockRecoveryValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof recovery.SaleNotPaidStockRecoveryConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not validate the fixed Not Paid stock correction. No data was changed.' }, 500)
+  }
+
+  if (plan.outcome === 'apply') {
+    try {
+      await createSectionBackup(c.env, recovery.SALE_NOT_PAID_STOCK_RECOVERY_BACKUP_TABLES, 'manual')
+    } catch {
+      return c.json({ success: false, error: 'Aborted: could not create the Not Paid stock correction backup first. No data was changed.' }, 500)
+    }
+  }
+
+  try {
+    const result = await recovery.applySaleNotPaidStockRecovery(db, plan)
+    const refreshes = await Promise.allSettled([
+      bumpVersions(c.env, ['sales', 'products', 'audit_log']),
+      broadcast(c.env, 'sales', { action: 'update', recovery: recovery.SALE_NOT_PAID_STOCK_RECOVERY_TARGET }),
+      broadcast(c.env, 'products', { action: 'update', recovery: recovery.SALE_NOT_PAID_STOCK_RECOVERY_TARGET }),
+    ])
+    const cacheInvalidated = refreshes.slice(0, 1).every((entry) => entry.status === 'fulfilled')
+    const refreshPending = refreshes.some((entry) => entry.status === 'rejected')
+    return c.json({
+      ...result,
+      verification_pending: Boolean(result.verification_pending),
+      cache_invalidated: cacheInvalidated,
+      refresh_pending: refreshPending,
+      broadcast_requested: true,
+      message: result.outcome === 'applied'
+        ? 'Corrected the three Not Paid sales to hold their four recovered items in one guarded transaction.'
+        : 'This exact Not Paid stock correction was already applied. No sale, allocation, stock, movement, audit, history or backup row changed; cache refresh was retried.',
+    })
+  } catch (error) {
+    if (error instanceof recovery.SaleNotPaidStockRecoveryUncertainError) {
+      return c.json({
+        success: false,
+        outcome: 'uncertain',
+        operation_id: error.operationId,
+        manifest_sha256: error.manifestSha256,
+        verification_pending: true,
+        cache_invalidated: false,
+        refresh_pending: true,
+        broadcast_requested: false,
+        message: error.message,
+      }, 202)
+    }
+    if (error instanceof recovery.SaleNotPaidStockRecoveryConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Not Paid stock correction failed before a durable receipt was recorded. No correction was applied.' }, 500)
+  }
+})
+
+app.get('/legacy-subtotal-repair/preview', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'subtotal_repair_preview', 10, 600)) {
+    return c.json({ success: false, error: 'Too many previews. Wait a few minutes and try again.' }, 429)
+  }
+  const repair = await import('../lib/legacySubtotalRepair')
+  const user = c.get('user')
+  try {
+    return c.json(await repair.previewLegacySubtotalRepair(getDb(c.env), { id: user?.id, name: actorSnapshot(user) }))
+  } catch (error) {
+    if (error instanceof repair.LegacySubtotalRepairValidationError || error instanceof repair.LegacySubtotalRepairConflictError) {
+      return c.json({ success: false, error: 'The fixed 22-sale cohort is not in the expected unrepaired state. No data was changed; inspect the recorded repair and current sale data.' }, 409)
+    }
+    return c.json({ success: false, error: 'Could not preview the subtotal repair. No data was changed.' }, 500)
+  }
+})
 
 app.post('/finalize-migration', async (c) => {
   const denied = denyUnlessRestorePermission(c)
   if (denied) return denied
+  const crossOrigin = denyCrossOriginMaintenanceRequest(c, false)
+  if (crossOrigin) return crossOrigin
   if (await rateLimited(c, 'finalize_migration', 10, 600)) {
     return c.json({ error: 'Too many attempts. Wait a few minutes and try again.' }, 429)
   }
 
-  const body = await c.req.json<{ step?: string }>().catch(() => ({}) as { step?: string })
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const step = body.step as MigrationFinalizeStep
   if (!MIGRATION_FINALIZE_STEPS.includes(step)) {
     return c.json({ error: `Unknown step. Must be one of: ${MIGRATION_FINALIZE_STEPS.join(', ')}` }, 400)
@@ -644,6 +1221,114 @@ app.post('/finalize-migration', async (c) => {
 
   const db = getDb(c.env)
   const user = c.get('user')
+
+  if (step === GENERAL_CUSTOMER_REPAIR_STEP) {
+    const missingOrigin = denyCrossOriginMaintenanceRequest(c, true)
+    if (missingOrigin) return missingOrigin
+    const repair = await import('../lib/generalCustomerRepair')
+    let plan
+    try {
+      plan = await repair.prepareGeneralCustomerRepair(db, body, {
+        id: user?.id,
+        name: actorSnapshot(user),
+      })
+    } catch (error) {
+      if (error instanceof repair.GeneralCustomerRepairValidationError) {
+        return c.json({ success: false, error: error.message }, 400)
+      }
+      if (error instanceof repair.GeneralCustomerRepairConflictError) {
+        return c.json({ success: false, error: error.message }, 409)
+      }
+      return c.json({ success: false, error: 'Could not validate the General customer repair request. No data was changed.' }, 500)
+    }
+
+    // Exact replay contains no customer mutation and therefore needs no new
+    // backup. A prepared apply cannot reach its atomic D1 batch until this
+    // customers-only snapshot succeeds.
+    if (plan.outcome === 'apply') {
+      try {
+        await createSectionBackup(c.env, repair.GENERAL_CUSTOMER_REPAIR_BACKUP_TABLES, 'manual')
+      } catch (error) {
+        return c.json({
+          success: false,
+          error: 'Aborted: could not create the customers backup first. No data was changed.',
+        }, 500)
+      }
+    }
+
+    try {
+      const result = await repair.applyGeneralCustomerRepair(db, plan)
+      // Capture the comparison token only after D1 has resolved to applied or
+      // exact replay. An unrelated pre-commit version advance must never be
+      // mistaken for this repair's successful invalidation.
+      const beforeToken = await repair.readGeneralCustomerRepairCacheToken(c.env)
+      const refresh = await repair.refreshGeneralCustomerRepair(c.env, beforeToken)
+      return c.json({
+        success: true,
+        outcome: result.outcome,
+        affected: { customers: result.changedCustomers },
+        verification_pending: result.verification_pending,
+        ...refresh,
+        message: result.outcome === 'applied'
+          ? 'Marked customer 24969 as the shared General checkout identity. Its profile and linked history were preserved, and a fresh customers backup was taken first.'
+          : 'This exact General customer repair was already applied. No customer row or backup changed; the cache refresh was retried.',
+      })
+    } catch (error) {
+      if (error instanceof repair.GeneralCustomerRepairConflictError) {
+        return c.json({ success: false, error: error.message }, 409)
+      }
+      return c.json({ success: false, error: 'General customer repair failed. The atomic batch changed no data.' }, 500)
+    }
+  }
+
+  if (step === LEGACY_SUBTOTAL_REPAIR_STEP) {
+    // Loaded only for this one-off path so the long-lived finalize actions and
+    // their small pure harness do not acquire an unrelated runtime dependency.
+    const repair = await import('../lib/legacySubtotalRepair')
+    let plan
+    try {
+      plan = await repair.prepareLegacySubtotalRepair(body, { id: user?.id, name: actorSnapshot(user) })
+    } catch (error) {
+      if (error instanceof repair.LegacySubtotalRepairValidationError) {
+        return c.json({ success: false, error: error.message }, 400)
+      }
+      return c.json({ success: false, error: 'Could not validate the subtotal repair request. No data was changed.' }, 500)
+    }
+
+    try {
+      await createSectionBackup(c.env, repair.LEGACY_SUBTOTAL_REPAIR_BACKUP_TABLES, 'manual')
+    } catch (error) {
+      return c.json({
+        success: false,
+        error: `Aborted: could not create a backup first (${(error as Error).message || 'unknown error'}). No data was changed.`,
+      }, 500)
+    }
+
+    try {
+      const result = await repair.applyLegacySubtotalRepair(db, plan)
+      // A verified replay also heals a lost post-commit refresh. This repair
+      // changes sales only; do not invalidate inventory or announce stock work.
+      c.executionCtx.waitUntil(Promise.all([
+        bumpVersion(c.env, 'sales'),
+        broadcast(c.env, 'sales', { action: 'update', repair: LEGACY_SUBTOTAL_REPAIR_STEP }),
+      ]))
+      return c.json({
+        success: true,
+        outcome: result.outcome,
+        affected: { sales: result.changedSales },
+        plan_id: plan.planId,
+        manifest_sha256: plan.manifestSha256,
+        message: result.outcome === 'applied'
+          ? 'Repaired the guarded 22-sale legacy subtotal cohort. A fresh backup was taken first.'
+          : 'This exact guarded subtotal repair was already applied; no sale changed. A fresh backup was taken before verification.',
+      })
+    } catch (error) {
+      if (error instanceof repair.LegacySubtotalRepairConflictError) {
+        return c.json({ success: false, error: error.message }, 409)
+      }
+      return c.json({ success: false, error: 'Subtotal repair failed. The atomic batch changed no data.' }, 500)
+    }
+  }
 
   // Same hard prerequisite as every reset: a fresh, scoped backup must
   // succeed before any write runs, so the operation is always undoable.
@@ -669,7 +1354,7 @@ app.post('/finalize-migration', async (c) => {
       ])
       const affected = { branch_stock: branchRows?.n ?? 0, products: productRows?.n ?? 0 }
 
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'finalize_migration', 'system', null, {
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'finalize_migration', 'system', null, {
         label: `Migration finalize: zeroed live stock (${affected.branch_stock} branch-stock rows, ${affected.products} products)`,
         step,
       })
@@ -694,7 +1379,7 @@ app.post('/finalize-migration', async (c) => {
     ).run()
     const affected = { branch_batch_stock: parkable?.n ?? 0 }
 
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'finalize_migration', 'system', null, {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'finalize_migration', 'system', null, {
       label: `Migration finalize: parked ${affected.branch_batch_stock} historical lot rows`,
       step,
     })
@@ -706,7 +1391,7 @@ app.post('/finalize-migration', async (c) => {
     return c.json({
       success: true,
       affected,
-      message: `Parked ${affected.branch_batch_stock} historical lot row(s) — the POS lot picker will now skip un-allocatable "Unified stock import" lots. A fresh backup was taken first.`,
+      message: `Parked ${affected.branch_batch_stock} historical row(s) — the POS picker will now skip un-allocatable "Unified stock import" received dates. A fresh backup was taken first.`,
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Finalize migration failed' }, 500)
@@ -739,7 +1424,7 @@ app.post('/factory-reset', async (c) => {
   try {
     const droppedCustomTables = await dropAllCustomTables(c.env)
 
-    await db.batch(FACTORY_RESET_TABLES.map((table) => ({ sql: `DELETE FROM "${table}"` })))
+    await db.batch(guardSaleRecordReset(FACTORY_RESET_TABLES.map((table) => ({ sql: `DELETE FROM "${table}"` }))))
     // The two bulk import-staging tables live on the separate import-staging DB
     // (see lib/db.ts); FACTORY_RESET_TABLES' DELETE of import_job_rows hits only
     // the main DB's empty shell, so clear the real staging on its own DB. No-op
@@ -772,7 +1457,7 @@ app.post('/factory-reset', async (c) => {
       }
     }
 
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'factory_reset', 'system', null, {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'factory_reset', 'system', null, {
       label: 'Factory reset completed',
       droppedCustomTables: droppedCustomTables.length,
       deletedObjectCount,
@@ -816,7 +1501,7 @@ app.post('/import-retention/orphans', async (c) => {
   const apply = body?.dry_run === false && body?.force === true
   const report = await cleanOrphanImportStaging(c.env, { apply })
   if (apply) {
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'import_orphan_staging_clean', 'system', null, {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'import_orphan_staging_clean', 'system', null, {
       tables: report.tables,
       r2Keys: report.r2Keys,
       r2Deleted: report.r2Deleted,
@@ -855,7 +1540,7 @@ app.post('/repair-integrity', async (c) => {
   try {
     const result = await runDataIntegrityCheck(c.env, true)
     if (result.repairs > 0) {
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'repair', 'data-integrity', null, {
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'repair', 'data-integrity', null, {
         repairs: result.repairs,
         errors: result.errors.length,
       })

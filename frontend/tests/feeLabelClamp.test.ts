@@ -18,7 +18,7 @@ const serverSource = fs.readFileSync(path.join(here, '..', '..', 'cloudflare', '
 const feesPageSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'fees', 'FeesPage.tsx'), 'utf8').replace(/\r\n/g, '\n')
 const feesTransportSource = fs.readFileSync(path.join(here, '..', 'src', 'api', 'feesTransport.ts'), 'utf8').replace(/\r\n/g, '\n')
 const expenseLabelManagerSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'fees', 'ExpenseLabelManagerModal.tsx'), 'utf8').replace(/\r\n/g, '\n')
-const expenseReportSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'sales', 'FeesReportSection.tsx'), 'utf8').replace(/\r\n/g, '\n')
+const expenseReportSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'sales', 'reports', 'ExpensesReport.tsx'), 'utf8').replace(/\r\n/g, '\n')
 
 function extractFunction(source: string, name: string): string {
   const re = new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`)
@@ -123,7 +123,13 @@ check('Expenses keeps reliable filtered paging and responsive dense rows', () =>
   assert.match(feesPageSource, /\.\.\.\(branchFilter \? \{ branchId: branchFilter \} : \{\}\)/, 'report totals must follow the branch filter')
   assert.match(feesPageSource, /className="dense-data-table min-w-\[720px\]"/, 'desktop must use the shared dense table')
   assert.match(feesPageSource, /dense-data-shell hidden overflow-x-auto md:block/, 'the table must start at the safe desktop breakpoint')
-  assert.match(feesPageSource, /space-y-2 md:hidden/, 'mobile must retain dedicated cards')
+  assert.match(feesPageSource, /space-y-3 md:hidden/, 'mobile must retain dedicated cards')
+  const primary = feesPageSource.slice(feesPageSource.indexOf('data-expense-line="primary"'), feesPageSource.indexOf('data-expense-line="secondary"'))
+  assert.ok(primary.indexOf('fmtClock24(fee.created_at)') < primary.indexOf('feeTypeLabel(fee.fee_type)') && primary.indexOf('feeTypeLabel(fee.fee_type)') < primary.indexOf("fee.label || ''"), 'compact primary metadata is time, category, then label')
+  const secondary = feesPageSource.slice(feesPageSource.indexOf('data-expense-line="secondary"'), feesPageSource.indexOf('</button>', feesPageSource.indexOf('data-expense-line="secondary"')))
+  assert.match(secondary, /fee\.created_by_name[\s\S]*fee\.branch_name/, 'compact metadata keeps normal cashier then branch text')
+  assert.doesNotMatch(secondary, /fee\.delivery_contact_name/, 'delivery detail no longer crowds the compact list row')
+  assert.match(feesPageSource, /data-expense-detail-actions=""[\s\S]*\{canEditFee \? \([\s\S]*\{canDeleteFee \? \(/, 'Edit/Delete live in the permission-gated detail action row')
   assert.match(feesPageSource, /data-tone="violet"[\s\S]*data-tone="blue"[\s\S]*data-tone="emerald"/, 'type, category and amount headers must use semantic tones')
 })
 

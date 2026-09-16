@@ -47,9 +47,21 @@ function loadModule(relPath, requireShim) {
 
 const batchCode = loadModule('lib/batchCode.ts', require)
 const sqlBinding = loadModule('lib/sqlBinding.ts', require)
+const moneyPrecision = loadModule('lib/moneyPrecision.ts', require)
 const productBatches = loadModule('lib/productBatches.ts', (id) => {
   if (id === './batchCode') return batchCode
   if (id === './sqlBinding') return sqlBinding
+  if (id === './moneyPrecision') return moneyPrecision
+  return require(id)
+})
+const roles = loadModule('lib/branchRoles.ts', require)
+const identity = loadModule('lib/canonicalBranchIdentity.ts', (id) => {
+  if (id === './db') return { toDbBool: (value, fallback = 0) => {
+    if (value == null || value === '') return fallback
+    if (typeof value === 'boolean') return value ? 1 : 0
+    return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase()) ? 1 : 0
+  } }
+  if (id === './branchRoles') return roles
   return require(id)
 })
 const { readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } = productBatches
@@ -68,15 +80,16 @@ function wrapDb(sqlite) {
     },
     batch(statements) {
       const tx = sqlite.transaction((stmts) => {
+        const results = []
         for (const s of stmts) {
           const st = sqlite.prepare(s.sql)
-          if (s.params == null) st.run()
-          else st.run(s.params)
+          const result = s.params == null ? st.run() : st.run(s.params)
+          results.push({ meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid || 0) } })
         }
+        return results
       })
       try {
-        tx(statements)
-        return Promise.resolve()
+        return Promise.resolve(tx(statements))
       } catch (error) {
         return Promise.reject(error)
       }
@@ -89,8 +102,11 @@ function freshDb() {
   db.exec(`
     CREATE TABLE product_batches (
       id INTEGER PRIMARY KEY, variant_product_id INTEGER NOT NULL,
-      lot_code TEXT, expiry_date TEXT, received_at TEXT, batch_number INTEGER,
+      batch_key TEXT, lot_code TEXT, expiry_date TEXT, received_at TEXT, batch_number INTEGER,
       is_active INTEGER DEFAULT 1, notes TEXT
+    );
+    CREATE TABLE branches (
+      id INTEGER PRIMARY KEY, name TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE branch_batch_stock (
       id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL, branch_id INTEGER NOT NULL,
@@ -103,6 +119,7 @@ function freshDb() {
       UNIQUE (product_id, branch_id)
     );
   `)
+  db.prepare("INSERT INTO branches(id,name,is_active) VALUES (1,'Shop',1),(2,'Warehouse',1)").run()
   // Product 1 at branch 1: lot A (older, 6 units), lot B (newer, 4 units),
   // branch_stock 12 -- 2 units of legacy stock the lot ledger never tracked.
   db.prepare(`INSERT INTO product_batches (id, variant_product_id, lot_code, received_at, batch_number) VALUES (101, 1, 'A', '2026-08-01', 1)`).run()
@@ -130,6 +147,7 @@ async function composeBranchTransferStatements(db, quantity) {
   const lots = await readFifoLotAvailability(wrapDb(db), 1, 1)
   const { takes, uncovered } = allocateAcrossLots(lots, quantity)
   const statements = [
+    identity.canonicalTransferAuthorityGuardStatement(1, 2),
     { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = 1 AND branch_id = 1', params: { quantity } },
     {
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 2, @quantity)
@@ -142,6 +160,20 @@ async function composeBranchTransferStatements(db, quantity) {
     ]),
   ]
   return { statements, takes, uncovered }
+}
+
+function composeExplicitLotTransferStatements(quantity) {
+  return [
+    identity.canonicalTransferAuthorityGuardStatement(1, 2),
+    { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = 1 AND branch_id = 1', params: { quantity } },
+    {
+      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 2, @quantity)
+            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
+      params: { quantity },
+    },
+    decrementBatchStockStrictStatement(101, 1, quantity),
+    incrementBatchStockStatement(101, 2, quantity),
+  ]
 }
 
 let passed = 0
@@ -217,30 +249,52 @@ await check('strict decrement makes a concurrent lot drain abort-and-rollback, n
   assert.strictEqual(lotQty(db, 101, 2) + lotQty(db, 102, 2), 0, 'no phantom destination lot minted')
 })
 
-await check('source lock: BOTH /transfer and /transfer-bulk auto-allocate FIFO for the no-batchId path (strict decrement, materializing the destination lot)', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'branches.ts'), 'utf8')
-
-  const single = routeBody(src, "app.post('/transfer',")
-  assert.ok(/readFifoLotAvailability\(db, productId, fromBranchId\)/.test(single), '/transfer must read source-lot availability for the no-batch path')
-  assert.ok(/allocateAcrossLots\(sourceLots, quantity\)/.test(single), '/transfer must allocate FIFO across the source lots')
-  assert.ok(/incrementBatchStockStatement\(destLotId, toBranchId, take\.quantity\)/.test(single), '/transfer must materialize the destination lot per take')
-
-  const bulk = routeBody(src, "app.post('/transfer-bulk',")
-  assert.ok(/readFifoLotAvailability\(db, item\.productId, fromBranchId\)/.test(bulk), '/transfer-bulk must read source-lot availability per no-batch item')
-  assert.ok(/allocateAcrossLots\(sourceLots, item\.quantity\)/.test(bulk), '/transfer-bulk must allocate FIFO across the source lots')
-  assert.ok(/incrementBatchStockStatement\(destLotId, toBranchId, take\.quantity\)/.test(bulk), '/transfer-bulk must materialize the destination lot per take')
-
-  // The FIFO legs use the STRICT decrement (their availability read is outside
-  // the atomic batch, so a concurrent drain must abort-and-retry, not clamp
-  // into per-lot drift). Guards against a future edit swapping the clamped form
-  // back in and silently re-opening the race.
-  assert.ok(/decrementBatchStockStrictStatement\(take\.batchId, fromBranchId, take\.quantity\)/.test(single), '/transfer no-batch decrement must be the STRICT statement')
-  assert.ok(/decrementBatchStockStrictStatement\(take\.batchId, fromBranchId, take\.quantity\)/.test(bulk), '/transfer-bulk no-batch decrement must be the STRICT statement')
-  // ...while each route's EXPLICIT-batch leg (a user-picked lot whose quantity
-  // may legitimately trail the branch total) stays CLAMPED.
-  assert.ok(/decrementBatchStockStatement\(sourceBatch\.id, fromBranchId, quantity\)/.test(single), '/transfer explicit-batch leg stays clamped')
-  assert.ok(/decrementBatchStockStatement\(sourceBatchForItem\.id, fromBranchId, item\.quantity\)/.test(bulk), '/transfer-bulk explicit-batch leg stays clamped')
+await check('an explicit-lot concurrent drain rolls back aggregate and lot effects instead of clamping', async () => {
+  const db = freshDb()
+  const statements = composeExplicitLotTransferStatements(5)
+  // The route pre-read saw 6 units in lot A. A concurrent sale then consumes
+  // 4 from that lot and 4 from the aggregate before this transfer batch.
+  db.prepare('UPDATE branch_batch_stock SET quantity = 2 WHERE batch_id = 101 AND branch_id = 1').run()
+  db.prepare('UPDATE branch_stock SET quantity = 8 WHERE product_id = 1 AND branch_id = 1').run()
+  await assert.rejects(wrapDb(db).batch(statements), /CHECK|constraint/i)
+  assert.strictEqual(stockQty(db, 1), 8, 'aggregate source update rolls back')
+  assert.strictEqual(stockQty(db, 2), 0, 'aggregate destination receives nothing')
+  assert.strictEqual(lotQty(db, 101, 1), 2, 'concurrent source-lot value is preserved')
+  assert.strictEqual(lotQty(db, 101, 2), 0, 'destination lot is not minted')
 })
+
+await check('a destination-lot clone is guarded against a concurrent ambiguous branch identity', async () => {
+  const db = freshDb()
+  const compat = wrapDb(db)
+  const source = { lot_code: 'C', expiry_date: '2027-01-01', received_at: '2026-08-01', notes: 'guarded clone' }
+  const guard = identity.canonicalTransferAuthorityGuardStatement(1, 2)
+
+  db.prepare("INSERT INTO branches(id,name,is_active) VALUES (3,' shop ',1)").run()
+  await assert.rejects(
+    productBatches.resolveDestinationBatch(compat, source, 2, { writeGuard: guard }),
+    /NOT NULL/,
+  )
+  assert.equal(db.prepare("SELECT COUNT(*) AS total FROM product_batches WHERE variant_product_id=2").get().total, 0)
+
+  db.prepare('UPDATE branches SET is_active=0 WHERE id=3').run()
+  const insertedId = await productBatches.resolveDestinationBatch(compat, source, 2, { writeGuard: guard })
+  assert.ok(insertedId > 0)
+  assert.deepStrictEqual(
+    db.prepare('SELECT variant_product_id,lot_code,expiry_date,received_at,notes FROM product_batches WHERE id=?').get(insertedId),
+    { variant_product_id: 2, lot_code: 'C', expiry_date: '2027-01-01', received_at: '2026-08-01', notes: 'guarded clone' },
+  )
+})
+
+await check('both transfer routes use the shared read-only provenance planner and one atomic batch', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src/routes/branches.ts'), 'utf8')
+  for (const marker of ["app.post('/transfer',", "app.post('/transfer-bulk',"]) {
+    const body = routeBody(src, marker)
+    assert.match(body, /await planTransferOperation\(db,/)
+    assert.match(body, /await db.batch\(statements\)/)
+    assert.doesNotMatch(body, /await resolveDestinationBatch\(/)
+  }
+})
+
 
 }
 

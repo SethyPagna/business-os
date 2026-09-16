@@ -6,8 +6,20 @@
 // Target fields this import can use, in the order shown on the mapping
 // screen. Mirrors lib/datedStockCountResolve.ts's own RawDatedCountRow
 // shape exactly -- these are the only fields the backend understands.
+//
+// The Count date hint names an ORDER because this column has one and the app
+// around it has the opposite. Everything a person TYPES in Business OS is
+// day-first (dd/mm/yyyy) since Sep 4 2026, but this screen maps a file the
+// shop already owns, and lib/datedStockCountResolve.ts reads that column
+// month-first -- deliberately, because re-reading old snapshots under a new
+// order would rewrite historical stock counts with nothing on screen to show
+// it. "Any common date format" hid that split: for any day <= 12 the two
+// readings are both real dates, so a column of 03/09/2026 imported as 9 March
+// while the operator who mapped it had just typed the same digits somewhere
+// else in the app and meant 3 September. The order is stated instead, with
+// yyyy-mm-dd offered as the escape hatch that cannot be misread either way.
 export const TARGET_FIELDS: { key: string; label: string; required: boolean; hint: string }[] = [
-  { key: 'date', label: 'Count date', required: true, hint: 'The date this snapshot was taken (any common date format).' },
+  { key: 'date', label: 'Count date', required: true, hint: 'The date this snapshot was taken. This column is read MONTH first, mm/dd/yyyy (03/09/2026 = 9 March), so sheets you already have keep their meaning; yyyy-mm-dd also works and can never be misread.' },
   { key: 'branchName', label: 'Branch', required: true, hint: 'Branch name -- an unrecognized one is created automatically.' },
   { key: 'count', label: 'Counted quantity', required: true, hint: 'The stock quantity counted on that date.' },
   { key: 'productName', label: 'Product name', required: false, hint: 'At least one of Product name / SKU / Barcode is required.' },

@@ -59,9 +59,19 @@ test('full automation blocks remote work behind local regression verification', 
 test('full automation migrates both production D1 databases before deploy', () => {
   const mainMigrationIndex = indexOrFail(full, 'npm run migrate:remote')
   const importMigrationIndex = indexOrFail(full, 'npm run migrate:import:remote')
-  const deployIndex = indexOrFail(full, 'npm run deploy')
+  // The deploy STEP, not the first mention of the script name. The file's
+  // header now documents -Plan free|paid by naming `npm run deploy` and
+  // `npm run deploy:free`, and that comment sits above the migration steps --
+  // a bare indexOf('npm run deploy') finds it and reads the pipeline as
+  // "deploy runs before the migrations". Anchor on the Invoke-Step line, then
+  // pin the plan switch inside it so NEITHER branch can drift ahead of a
+  // migration: a free release must migrate both databases too.
+  const deployIndex = indexOrFail(full, 'Invoke-Step "wrangler deploy')
+  const planSwitchIndex = indexOrFail(full, "if ($Plan -eq 'free') { npm run deploy:free } else { npm run deploy }")
   assert(mainMigrationIndex < importMigrationIndex, 'operational DB migration should run before import staging migration')
   assert(importMigrationIndex < deployIndex, 'both D1 migrations must finish before Worker deployment')
+  assert(deployIndex < planSwitchIndex, 'the plan switch must live inside the deploy step')
+  assert(importMigrationIndex < planSwitchIndex, 'a free-plan deploy must migrate both databases first as well')
 })
 
 test('local verifier can run TypeScript tests on Node 22 and newer', () => {

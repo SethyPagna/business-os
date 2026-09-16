@@ -1,26 +1,37 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { getStockInSessionLines, getStockInSessions } from '../../api/productReadTransport.ts'
 import { revertStockMovement } from '../../api/inventoryWriteTransport.ts'
 import { updateBatch } from '../../api/batchesTransport.ts'
-import { fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
+import { fmtClock24, fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
+import { groupByBusinessDay } from '../../utils/businessDayGroups.ts'
+import { stockSessionId } from '../../utils/timestampId.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { FAST_STOCK_IN_RESTORE_HOST, minimizeWork } from '../../utils/minimizedWork.ts'
+import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import Modal from '../shared/Modal.tsx'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
+import InfoHint from '../shared/InfoHint.tsx'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives.tsx'
+import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 
 const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal.tsx'), 'stock-session-fast-stock-in')
 
 type T = (key: string) => string
 type Branch = { id?: string | number; name?: string }
 type Row = {
-  id: number; product_id: number; product_name: string; barcode?: string | null; quantity: number
+  // N29: null for a line the Add-products session CREATED at quantity 0 --
+  // there is no movement behind it, so nothing to revert. Such a line is
+  // identified by session_line_id instead.
+  id: number | null; session_line_id?: string | null
+  product_id: number; product_name: string; barcode?: string | null; quantity: number
   sku?: string | null; image_path?: string | null
   branch_id?: number | null; branch_name?: string | null; user_name?: string | null; created_at: string
   reference_id?: number | string | null; batch_id?: number | null; batch_lot_code?: string | null; batch_received_at?: string | null
@@ -34,10 +45,15 @@ type Row = {
   batch_payment_status?: string | null; batch_credit_due_date?: string | null
   batch_expiry_date?: string | null; batch_updated_at?: string | null
   batch_receipt_session_count?: number | null
+  // N14: 1 when this line CREATED the product, 0 when it received into one
+  // that already existed, null when the receipt did not come through the
+  // stock-in session endpoint and therefore never recorded the answer.
+  created_product?: number | null
+  session_command_kind?: string | null
 }
 type Session = {
   key: string; rows: Row[]; supplier: SupplierChoice; receivedDate: string; branchId: string
-  branchName: string; userName: string; createdAt: string; quantity: number
+  branchName: string; userName: string; createdAt: string; quantity: number; lineCount: number
   costUsd: number | null; linesWithoutCost: number; paymentStatus: 'paid' | 'credit' | 'mixed' | ''
   creditDueDate: string; hasSharedBatch: boolean; hasMixedHeader: boolean
 }
@@ -48,8 +64,11 @@ function sessionCost(rows: Row[]): { costUsd: number | null; linesWithoutCost: n
   let missing = 0
   const fallbackBatches = new Set<number>()
   for (const row of rows) {
+    // A product created at 0 cost nothing to receive: a KNOWN $0, not a
+    // missing receipt-level cost.
+    if (Math.abs(Number(row.quantity) || 0) === 0) { known = true; continue }
     const movementTotal = row.total_cost_usd == null ? null : Number(row.total_cost_usd)
-    if (movementTotal != null && Number.isFinite(movementTotal) && movementTotal > 0) {
+    if (movementTotal != null && Number.isFinite(movementTotal) && movementTotal >= 0) {
       total += movementTotal; known = true; continue
     }
     const batchId = Number(row.batch_id) || 0
@@ -64,9 +83,27 @@ function sessionCost(rows: Row[]): { costUsd: number | null; linesWithoutCost: n
   return { costUsd: known ? Math.round(total * 100) / 100 : null, linesWithoutCost: missing }
 }
 
+// N14: the New/Existing pill. Deliberately three-valued -- a receipt taken
+// through a path that leaves no stock_session_members row (fast stock-in's
+// inline create, POST /batches, a legacy import) knows nothing about whether
+// the product was new, and saying "Existing" for it would be a guess. Those
+// rows get no pill and the column header's InfoHint says why.
+function productOriginTag(row: Row, tr: (key: string, fallback: string) => string): { label: string; className: string } | null {
+  if (row.created_product == null) return null
+  return Number(row.created_product) === 1
+    ? { label: tr('stock_session_new_product', 'New'), className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' }
+    : { label: tr('stock_session_existing_product', 'Existing'), className: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-300' }
+}
+
 function paymentState(rows: Row[]): Session['paymentStatus'] {
   const values = [...new Set(rows.map((row) => String(row.batch_payment_status || '')).filter((value) => value === 'paid' || value === 'credit'))]
   return values.length > 1 ? 'mixed' : (values[0] as 'paid' | 'credit' | undefined) || ''
+}
+
+// React key + selection identity for a receipt line: the movement id when
+// there is one, the session line id for a zero-quantity create.
+function lineKey(row: Row): string {
+  return row.id != null ? `movement:${row.id}` : `line:${row.session_line_id || row.product_id}`
 }
 
 function formatUsd(value: unknown): string {
@@ -109,12 +146,14 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         return
       }
       const mapped = payload.sessions.map((row, index): Session => ({
-        key: String(row.session_key || `session-row-${page}-${index + 1}`), rows: [], quantity: Number(row.quantity) || 0,
+        key: String(row.session_key || `session-row-${page}-${index + 1}`), rows: [], quantity: Number(row.quantity) || 0, lineCount: Number(row.line_count) || 0,
         supplier: { supplierId: Number(row.supplier_id) || null, supplierName: Number(row.supplier_state_count) > 1 ? tr('mixed_suppliers', 'Multiple suppliers') : String(row.supplier_name || '') },
         receivedDate: String(row.received_at || ''), branchId: row.branch_id ? String(row.branch_id) : '',
         branchName: Number(row.branch_state_count) > 1 ? tr('multiple_branches', 'Multiple branches') : String(row.branch_name || ''),
         userName: Number(row.user_state_count) > 1 ? tr('multiple_users', 'Multiple users') : String(row.user_name || ''), createdAt: String(row.created_at || ''),
-        costUsd: Number(row.movement_cost_usd) > 0 ? Number(row.movement_cost_usd) : null,
+        // $0 is a real total when every line has a known cost (an all-zero
+        // create session); '—' stays for lines whose cost was never recorded.
+        costUsd: Number(row.movement_cost_usd) > 0 ? Number(row.movement_cost_usd) : (Number(row.lines_without_movement_cost) || 0) === 0 ? 0 : null,
         linesWithoutCost: Number(row.lines_without_movement_cost) || 0,
         paymentStatus: Number(row.payment_state_count) > 1 ? 'mixed' : (row.payment_status === 'paid' || row.payment_status === 'credit' ? row.payment_status : ''),
         creditDueDate: String(row.credit_due_date || ''), hasSharedBatch: false,
@@ -132,6 +171,14 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     const timer = window.setTimeout(() => { void load() }, 200)
     return () => window.clearTimeout(timer)
   }, [load])
+
+  // N14: one date per business DAY on a divider row, and each session row then
+  // carries only its wall clock -- the same treatment the Stock Changes ledger
+  // has shipped since Aug 30 2026. The shared helper (utils/businessDayGroups)
+  // keys on Asia/Phnom_Penh, not the device calendar, so a 23:30 Phnom Penh
+  // receipt does not slide onto the neighbouring day for a device abroad.
+  // Rows already arrive created_at DESC from GET /products/stock-in-sessions.
+  const dayGroups = useMemo(() => groupByBusinessDay(sessions, (session) => session.createdAt), [sessions])
 
   const open = async (summary: Session) => {
     if (opening) return
@@ -159,16 +206,16 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const saveHeader = async () => {
     if (!selected || busy) return
     if (selected.hasSharedBatch || selected.hasMixedHeader) {
-      notify(tr('shared_batch_session_edit_blocked', 'This session shares a lot with another receipt. Review both receipts before editing the lot; changing it here could rewrite another session.'), 'error')
+      notify(tr('shared_batch_session_edit_blocked', 'This session shares a received date with another receipt. Review both receipts before editing it; changing it here could rewrite another session.'), 'error')
       return
     }
     if (editPayment === 'credit' && !editCreditDueDate.trim()) {
-      notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
+      notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error')
       return
     }
     if (!window.confirm(tr(
       'confirm_update_stock_session',
-      'Update the receipt details for this {count}-line stock-in session? The selected lot records will be updated.',
+      'Update the receipt details for this {count}-line stock-in session? The selected received-date records will be updated.',
     ).replace('{count}', String(selected.rows.length)))) return
     setBusy(true)
     try {
@@ -188,17 +235,22 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     finally { setBusy(false) }
   }
   const removeRow = async (row: Row) => {
+    if (row.id == null) return
     if (busy || !window.confirm(tr('confirm_remove_stock_line', `Remove ${row.product_name} from this session? This posts a reversing stock movement.`))) return
     setBusy(true)
     try { await revertStockMovement(row.id); notify(tr('movement_reverted', 'Stock line removed')); setSelected(null); await load(); onChanged() }
     catch (error) { notify(error instanceof Error ? error.message : tr('update_failed', 'Update failed'), 'error') }
     finally { setBusy(false) }
   }
+  // Only lines with a movement can be reversed; a product created at 0 left
+  // no stock to take back and stays as history.
+  const revertibleRows = selected ? selected.rows.filter((row) => row.id != null) : []
+  const editableLots = selected ? selected.rows.some((row) => Number(row.batch_id) > 0) : false
   const removeSession = async () => {
-    if (!selected || busy || !window.confirm(tr('confirm_remove_stock_session', `Remove this ${selected.rows.length}-line stock-in session? Each line will be reversed; history is preserved.`))) return
+    if (!selected || busy || !revertibleRows.length || !window.confirm(tr('confirm_remove_stock_session', `Remove this ${revertibleRows.length}-line stock-in session? Each line will be reversed; history is preserved.`))) return
     setBusy(true)
     try {
-      for (const row of selected.rows) await revertStockMovement(row.id)
+      for (const row of revertibleRows) if (row.id != null) await revertStockMovement(row.id)
       notify(tr('stock_session_removed', 'Stock-in session removed'))
       setSelected(null); await load(); onChanged()
     } catch (error) { notify(error instanceof Error ? error.message : tr('update_failed', 'Update failed'), 'error') }
@@ -206,7 +258,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   }
 
   return <div className="space-y-3">
-    <div className="sticky top-0 z-20 flex gap-2 bg-gray-50/95 py-1 backdrop-blur dark:bg-gray-900/95">
+    <div className="sticky top-0 z-20 flex gap-2 bg-gray-50 py-1 dark:bg-gray-900">
       <div className="min-w-0 flex-1"><SearchInput id="stock-in-session-search" value={search} onChange={(value) => { setSearch(value); setPage(1) }} placeholder={tr('search_stock_sessions', 'Search products, suppliers, users…')} /></div>
       <ScanSearchButton onDetected={(value) => { setSearch(value); setPage(1) }} t={t} />
     </div>
@@ -214,80 +266,97 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
       <div className="desktop-dense-only dense-data-shell">
         <div className="scroll-x">
           <table className="dense-data-table min-w-[900px]" aria-label={tr('stock_in_sessions', 'Stock-in Sessions')}>
-            <colgroup><col className="w-[8rem]" /><col className="w-[18%]" /><col className="w-[15%]" /><col className="w-[14%]" /><col className="w-[12%]" /><col className="w-[8rem]" /><col className="w-[7rem]" /><col /></colgroup>
-            <thead><tr><th>{tr('receipt', 'Receipt')}</th><th data-tone="blue">{tr('supplier', 'Supplier')}</th><th>{tr('branch', 'Branch')}</th><th>{tr('cashier_user', 'User')}</th><th data-tone="violet">{tr('payment', 'Payment')}</th><th data-tone="emerald" className="text-right">{tr('quantity', 'Quantity')}</th><th data-tone="amber" className="text-right">{tr('total_cost', 'Total cost')}</th><th>{tr('recorded', 'Recorded')}</th></tr></thead>
-            <tbody>{sessions.map((session) => <tr key={session.key} data-clickable="true" tabIndex={0} onClick={() => void open(session)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void open(session) } }} aria-label={`${session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}, ${session.quantity}`}>
-              <td><span className="dense-cell-truncate dense-id font-semibold text-blue-700 dark:text-blue-300" title={session.key}>{session.key}</span></td>
+            <colgroup><col className="w-[8rem]" /><col className="w-[18%]" /><col className="w-[15%]" /><col className="w-[14%]" /><col className="w-[12%]" /><col className="w-[4.5rem]" /><col className="w-[7rem]" /><col className="w-[7rem]" /><col /></colgroup>
+            <thead><tr><th>{tr('session_id', 'Session ID')}</th><th data-tone="blue">{tr('supplier', 'Supplier')}</th><th>{tr('branch', 'Branch')}</th><th>{tr('cashier_user', 'User')}</th><th data-tone="violet">{tr('payment', 'Payment')}</th><th className="text-right">{tr('items', 'Items')}</th><th data-tone="emerald" className="text-right">{tr('quantity', 'Quantity')}</th><th data-tone="amber" className="text-right">{tr('total_cost', 'Total cost')}</th><th>{tr('time', 'Time')}</th></tr></thead>
+            <tbody>{dayGroups.flatMap((group) => [
+              <tr key={`day-${group.key}`} className="dense-day-row"><td colSpan={9}>{group.key} · {group.rows.length}</td></tr>,
+              ...group.rows.map((session) => <tr key={session.key} data-clickable="true" tabIndex={0} onClick={() => void open(session)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void open(session) } }} aria-label={`${session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}, ${session.quantity}`}>
+              <td><span className="dense-cell-truncate dense-id font-semibold text-blue-700 dark:text-blue-300" title={session.key}>{stockSessionId(session.createdAt) || session.key}</span></td>
               <td><span className="dense-cell-truncate font-semibold" title={session.supplier.supplierName}>{session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}</span></td>
               <td><span className="dense-cell-truncate" title={session.branchName}>{session.branchName || '—'}</span></td>
               <td><span className="dense-cell-truncate" title={session.userName}>{session.userName || tr('unknown_user', 'Unknown user')}</span></td>
-              <td><span className={`inline-flex rounded px-1.5 py-0.5 font-semibold ${session.paymentStatus === 'credit' ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300' : session.paymentStatus === 'paid' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-800'}`}>{session.paymentStatus === 'credit' ? tr('on_credit', 'On credit') : session.paymentStatus === 'paid' ? tr('paid', 'Paid') : tr('not_recorded', 'Not recorded')}</span></td>
+              <td><span className={`inline-flex rounded px-1.5 py-0.5 font-semibold ${session.paymentStatus === 'credit' ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300' : session.paymentStatus === 'paid' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-800'}`}>{session.paymentStatus === 'credit' ? tr('on_credit', 'Not Yet Paid') : session.paymentStatus === 'paid' ? tr('paid', 'Paid') : tr('not_recorded', 'Not recorded')}</span></td>
+              <td className="text-right tabular-nums text-gray-500">{session.lineCount}</td>
               <td className="text-right font-bold tabular-nums text-emerald-600">+{session.quantity}</td>
               <td className="text-right font-semibold tabular-nums">{session.costUsd == null ? '—' : `$${session.costUsd.toFixed(2)}`}</td>
-              <td><span className="dense-cell-truncate tabular-nums" title={fmtDateTime24(session.createdAt)}>{fmtDateTime24(session.createdAt)}</span></td>
-            </tr>)}</tbody>
+              {/* Time only -- the day divider above carries the date, and the
+                  full stamp stays revealable on hover (truncated-text rule). */}
+              <td><span className="dense-cell-truncate tabular-nums" title={fmtDateTime24(session.createdAt)}>{fmtClock24(session.createdAt)}</span></td>
+            </tr>),
+            ])}</tbody>
           </table>
         </div>
       </div>
-      <div className="mobile-cards-only space-y-1.5">{sessions.map((session) => <button key={session.key} type="button" disabled={opening} onClick={() => void open(session)} className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left shadow-sm hover:border-blue-300 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900">
-        <span className="min-w-0"><span className="block truncate text-sm font-semibold text-gray-900 dark:text-white">{session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}</span><span className="block truncate dense-id text-gray-400">{session.key} · {fmtDateTime24(session.createdAt)}</span><span className="block truncate text-[11px] text-gray-400">{session.branchName || '—'} · {session.userName || tr('unknown_user', 'Unknown user')}</span></span>
-        <span className="shrink-0 text-right"><span className="block text-sm font-bold text-emerald-600">+{session.quantity}</span><span className="block text-[11px] font-semibold text-gray-500">{session.costUsd == null ? '—' : `$${session.costUsd.toFixed(2)}`}</span></span>
-      </button>)}</div>
+      <div className="mobile-cards-only space-y-1.5">{dayGroups.flatMap((group) => [
+        <div key={`day-${group.key}`} className="px-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{group.key} · {group.rows.length}</div>,
+        ...group.rows.map((session) => <button key={session.key} type="button" disabled={opening} onClick={() => void open(session)} className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left shadow-sm hover:border-blue-300 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900">
+          <span className="min-w-0"><span className="block truncate text-sm font-semibold text-gray-900 dark:text-white">{session.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}</span><span className="block truncate dense-id text-gray-400" title={fmtDateTime24(session.createdAt)}>{stockSessionId(session.createdAt) || session.key} · {fmtClock24(session.createdAt)}</span><span className="block truncate text-[11px] text-gray-400">{session.branchName || '—'} · {session.userName || tr('unknown_user', 'Unknown user')} · {session.lineCount} {tr('items', 'Items').toLowerCase()}</span></span>
+          <span className="shrink-0 text-right"><span className="block text-sm font-bold text-emerald-600">+{session.quantity}</span><span className="block text-[11px] font-semibold text-gray-500">{session.costUsd == null ? '—' : `$${session.costUsd.toFixed(2)}`}</span></span>
+        </button>),
+      ])}</div>
     </>)}
     <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalSessions} label={tr('stock_in_sessions', 'stock-in sessions')} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></div>
 
-    {selected ? <Modal title={tr('stock_in_session', 'Stock-in session')} onClose={() => setSelected(null)} size="lg">
+    {/* S4-14: the id the list row shows is repeated in the title, so the row
+        an operator clicked and the receipt they read back are the same thing. */}
+    {selected ? <Modal title={`${tr('stock_in_session', 'Stock-in session')}${stockSessionId(selected.createdAt) ? ` · ${stockSessionId(selected.createdAt)}` : ''}`} onClose={() => setSelected(null)} size="lg" unsavedChanges={{ dirty: editing }}>
       <div className="space-y-3">
         {editing ? <div className="grid grid-cols-2 gap-2 rounded-lg bg-gray-50 p-2.5 dark:bg-gray-800/60">
-          <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><input type="date" className="input h-9 text-sm" value={String(editDate || '').slice(0, 10)} onChange={(event) => setEditDate(event.target.value)} /></label>
+          <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 text-sm" t={t} ariaLabel={tr('received_date', 'Received date')} value={String(editDate || '').slice(0, 10)} onChange={(iso) => setEditDate(iso)} /></label>
           <SupplierPickerField value={editSupplier} onChange={setEditSupplier} tr={(key, fallback = key) => tr(key, fallback)} idPrefix="stock-session-edit" />
-          <label><span className="mb-1 block text-[11px] text-gray-500">{tr('payment', 'Payment')}</span><AppSelect ariaLabel={tr('payment', 'Payment')} value={editPayment} onChange={(value) => setEditPayment(value as 'paid' | 'credit')} buttonClassName="h-9 w-full text-sm" optionClassName="text-sm" options={[{ value: 'paid', label: tr('paid', 'Paid') }, { value: 'credit', label: tr('on_credit', 'On credit') }]} /></label>
-          {editPayment === 'credit' ? <label><span className="mb-1 block text-[11px] text-gray-500">{tr('due_date', 'Due date')}</span><input type="date" className="input h-9 text-sm" value={String(editCreditDueDate || '').slice(0, 10)} onChange={(event) => setEditCreditDueDate(event.target.value)} /></label> : <div />}
-          {selected.hasSharedBatch || selected.hasMixedHeader ? <div className="col-span-2 text-[11px] text-amber-700 dark:text-amber-300">{tr('shared_batch_session_edit_blocked', 'This session contains shared lots or mixed linked headers. Review its receipts before editing; changing them together could rewrite another session.')}</div> : null}
+          <label><span className="mb-1 block text-[11px] text-gray-500">{tr('payment', 'Payment')}</span><AppSelect ariaLabel={tr('payment', 'Payment')} value={editPayment} onChange={(value) => setEditPayment(value as 'paid' | 'credit')} buttonClassName="h-9 w-full text-sm" optionClassName="text-sm" options={[{ value: 'paid', label: tr('paid', 'Paid') }, { value: 'credit', label: tr('on_credit', 'Not Yet Paid') }]} /></label>
+          {editPayment === 'credit' ? <label><span className="mb-1 block text-[11px] text-gray-500">{tr('due_date', 'Due date')}</span><DateEntryInput className="h-9 text-sm" t={t} ariaLabel={tr('due_date', 'Due date')} value={String(editCreditDueDate || '').slice(0, 10)} onChange={(iso) => setEditCreditDueDate(iso)} /></label> : <div />}
+          {selected.hasSharedBatch || selected.hasMixedHeader ? <div className="col-span-2 text-[11px] text-amber-700 dark:text-amber-300">{tr('shared_batch_session_edit_blocked', 'This session contains shared received dates or mixed linked headers. Review its receipts before editing; changing them together could rewrite another session.')}</div> : null}
         </div> : <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg bg-gray-50 p-2.5 text-xs dark:bg-gray-800/60 sm:grid-cols-4">
           <div className="col-span-2 min-w-0 sm:col-span-1"><div className="truncate font-semibold text-gray-900 dark:text-white">{selected.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}</div><div className="truncate text-gray-400">{selected.branchName || '—'}</div></div>
           <div><div className="text-gray-400">{tr('received_date', 'Received date')}</div><div className="text-gray-700 dark:text-gray-200">{fmtDate(selected.receivedDate || selected.createdAt)}</div></div>
           <div><div className="text-gray-400">{tr('recorded', 'Recorded')}</div><div className="text-gray-700 dark:text-gray-200">{fmtDateTime24(selected.createdAt)}</div></div>
           <div><div className="text-gray-400">{tr('cashier_user', 'User')}</div><div className="truncate text-gray-700 dark:text-gray-200">{selected.userName || tr('unknown_user', 'Unknown user')}</div></div>
           <div><div className="text-gray-400">{tr('total_cost', 'Total cost')}</div><div className="font-semibold text-gray-700 dark:text-gray-200">{selected.costUsd == null ? '—' : `$${selected.costUsd.toFixed(2)}`}</div></div>
-          <div><div className="text-gray-400">{tr('payment', 'Payment')}</div><div className="text-gray-700 dark:text-gray-200">{selected.paymentStatus === 'credit' ? `${tr('on_credit', 'On credit')}${selected.creditDueDate ? ` · ${fmtDate(selected.creditDueDate)}` : ''}` : selected.paymentStatus === 'paid' ? tr('paid', 'Paid') : tr('not_recorded', 'Not recorded')}</div></div>
-          <div><div className="text-gray-400">{tr('quantity', 'Quantity')}</div><div className="font-semibold text-emerald-600">+{selected.quantity}</div></div>
-          {selected.linesWithoutCost ? <div className="col-span-2 text-[11px] text-amber-700 dark:text-amber-300 sm:col-span-4">{selected.linesWithoutCost} {tr('stock_lines_without_cost', 'line(s) have no receipt-level cost. Shared-lot totals are not guessed.')}</div> : null}
+          <div><div className="text-gray-400">{tr('payment', 'Payment')}</div><div className="text-gray-700 dark:text-gray-200">{selected.paymentStatus === 'credit' ? `${tr('on_credit', 'Not Yet Paid')}${selected.creditDueDate ? ` · ${fmtDate(selected.creditDueDate)}` : ''}` : selected.paymentStatus === 'paid' ? tr('paid', 'Paid') : tr('not_recorded', 'Not recorded')}</div></div>
+          <div><div className="text-gray-400">{tr('quantity', 'Quantity')}</div><div className="font-semibold text-emerald-600">+{selected.quantity} <span className="font-normal text-gray-400">· {selected.rows.length} {tr('items', 'Items').toLowerCase()}</span></div></div>
+          {selected.linesWithoutCost ? <div className="col-span-2 text-[11px] text-amber-700 dark:text-amber-300 sm:col-span-4">{selected.linesWithoutCost} {tr('stock_lines_without_cost', 'line(s) have no receipt-level cost. Shared received-date totals are not guessed.')}</div> : null}
         </div>}
         {selectedLine ? <div className="relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-3 rounded-xl border border-blue-100 bg-blue-50/55 p-3 text-xs dark:border-blue-900/60 dark:bg-blue-950/20 sm:grid-cols-[4.5rem_minmax(0,1fr)]">
           {selectedLine.image_path ? <ProductImg src={selectedLine.image_path} alt={selectedLine.product_name} className="h-14 w-14 rounded-lg object-cover sm:h-[4.5rem] sm:w-[4.5rem]" /> : <ProductImagePlaceholder compact className="h-14 w-14 rounded-lg sm:h-[4.5rem] sm:w-[4.5rem]" />}
           <div className="min-w-0 pr-7"><div className="break-words font-semibold text-gray-900 dark:text-white">{selectedLine.product_name}</div><div className="mt-0.5 break-all dense-id text-gray-500">{selectedLine.barcode || tr('barcode_not_recorded', 'Barcode not recorded')}{selectedLine.sku ? ` · ${selectedLine.sku}` : ''}</div>
-            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4"><div><span className="block text-gray-400">{tr('quantity', 'Quantity')}</span><b className="text-emerald-600">+{Math.abs(Number(selectedLine.quantity) || 0)} {selectedLine.unit || ''}</b></div><div><span className="block text-gray-400">{tr('receipt_cost', 'Receipt cost')}</span><b>{formatUsd(selectedLine.unit_cost_usd ?? selectedLine.batch_unit_cost_usd)}</b></div><div><span className="block text-gray-400">{tr('selling_price', 'Selling price')}</span><b>{formatUsd(selectedLine.selling_price_usd)}</b></div><div><span className="block text-gray-400">{tr('purchase_price', 'Purchase price')}</span><b>{formatUsd(selectedLine.purchase_price_usd ?? selectedLine.cost_price_usd)}</b></div><div><span className="block text-gray-400">{tr('brand', 'Brand')}</span><b className="break-words">{selectedLine.brand || '—'}</b></div><div><span className="block text-gray-400">{tr('category', 'Category')}</span><b className="break-words">{selectedLine.category || '—'}</b></div><div><span className="block text-gray-400">{tr('batch', 'Batch')}</span><b className="dense-id">{selectedLine.batch_lot_code || `#${selectedLine.batch_id || '—'}`}</b></div><div><span className="block text-gray-400">{tr('expiry_date', 'Expiry')}</span><b>{selectedLine.batch_expiry_date ? fmtDate(selectedLine.batch_expiry_date) : '—'}</b></div><div><span className="block text-gray-400">{tr('supplier', 'Supplier')}</span><b className="truncate">{selectedLine.batch_supplier_name || '—'}</b></div><div><span className="block text-gray-400">{tr('payment', 'Payment')}</span><b>{selectedLine.batch_payment_status === 'credit' ? tr('on_credit', 'On credit') : selectedLine.batch_payment_status === 'paid' ? tr('paid', 'Paid') : '—'}</b></div></div>
+            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4"><div><span className="block text-gray-400">{tr('quantity', 'Quantity')}</span><b className="text-emerald-600">+{Math.abs(Number(selectedLine.quantity) || 0)} {selectedLine.unit || ''}</b></div><div><span className="block text-gray-400">{tr('cost_price', 'Cost price')}</span><b>{formatUsd(selectedLine.unit_cost_usd ?? selectedLine.batch_unit_cost_usd ?? selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</b></div><div><span className="block text-gray-400">{tr('selling_price', 'Selling price')}</span><b>{formatUsd(selectedLine.selling_price_usd)}</b></div><div><span className="block text-gray-400">{tr('catalog_cost_price', 'Catalog cost price')}</span><b>{formatUsd(selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</b></div><div><span className="block text-gray-400">{tr('brand', 'Brand')}</span><b className="break-words">{selectedLine.brand || '—'}</b></div><div><span className="block text-gray-400">{tr('category', 'Category')}</span><b className="break-words">{selectedLine.category || '—'}</b></div><div><span className="block text-gray-400">{tr('received_date', 'Received date')}</span><b className="dense-id">{selectedLine.batch_id ? batchDisplayLabel({ id: selectedLine.batch_id, lot_code: selectedLine.batch_lot_code, received_at: selectedLine.batch_received_at }, tr('batch', 'Received date')) : '—'}</b></div><div><span className="block text-gray-400">{tr('expiry_date', 'Expiry')}</span><b>{selectedLine.batch_expiry_date ? fmtDate(selectedLine.batch_expiry_date) : '—'}</b></div><div><span className="block text-gray-400">{tr('supplier', 'Supplier')}</span><b className="truncate">{selectedLine.batch_supplier_name || '—'}</b></div><div><span className="block text-gray-400">{tr('payment', 'Payment')}</span><b>{selectedLine.batch_payment_status === 'credit' ? tr('on_credit', 'Not Yet Paid') : selectedLine.batch_payment_status === 'paid' ? tr('paid', 'Paid') : '—'}</b></div>{/* P3-L2: the reason, revealed on click -- the row shows it truncated. */}<div className="col-span-2 sm:col-span-4"><span className="block text-gray-400">{tr('reason', 'Reason')}</span><b className="break-words">{selectedLine.reason || '—'}</b></div></div>
           </div><button type="button" className="absolute right-2 top-2 rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-white dark:hover:bg-gray-800" onClick={() => setSelectedLine(null)}>{tr('close', 'Close')}</button>
         </div> : null}
         <div className="desktop-dense-only dense-data-shell">
+          {/* N26: the Product column takes every pixel the fixed columns do
+              not need, and the name WRAPS inside it -- "did not show the
+              products full name, got cut by elipses". The barcode sits under
+              the name instead of competing with it for width. */}
           <div className="scroll-x"><table className="dense-data-table min-w-[720px]">
-            <thead><tr><th data-tone="blue">{tr('product', 'Product')}</th><th>{tr('barcode', 'Barcode')}</th><th>{tr('batch', 'Batch')}</th><th>{tr('reason', 'Reason')}</th><th data-tone="emerald" className="text-right">{tr('quantity', 'Quantity')}</th><th data-tone="amber" className="text-right">{tr('unit_cost', 'Unit cost')}</th><th className="w-10" aria-label={tr('actions', 'Actions')} /></tr></thead>
+            <colgroup><col /><col className="w-[7rem]" /><col className="w-[22%]" /><col className="w-[6rem]" /><col className="w-[7rem]" /><col className="w-10" /></colgroup>
+            <thead><tr><th data-tone="blue"><span className="inline-flex items-center gap-1">{tr('product', 'Product')}<InfoHint label={tr('product', 'Product')} text={tr('stock_session_origin_hint', 'New means this session created the product; Existing means it received into a product already in the catalogue. Receipts recorded outside an Add-products session carry no marker.')} /></span></th><th>{tr('batch', 'Received date')}</th><th>{tr('reason', 'Reason')}</th><th data-tone="emerald" className="text-right">{tr('quantity', 'Quantity')}</th><th data-tone="amber" className="text-right">{tr('cost_price', 'Cost price')}</th><th aria-label={tr('actions', 'Actions')} /></tr></thead>
             <tbody>{selected.rows.map((row) => {
-              const unitCost = row.total_cost_usd != null && Number(row.total_cost_usd) > 0 ? Number(row.total_cost_usd) / Math.max(1, Math.abs(Number(row.quantity) || 0)) : row.unit_cost_usd
-              return <tr key={row.id} className={selectedLine?.id === row.id ? 'bg-blue-50/70 dark:bg-blue-950/20' : ''}>
-                <td><button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] items-center gap-2 text-left hover:text-blue-700 dark:hover:text-blue-300"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-8 w-8 rounded object-cover" /> : <ProductImagePlaceholder compact className="h-8 w-8 rounded" />}</span><span className="min-w-0"><span className="block dense-cell-truncate font-semibold" title={row.product_name}>{row.product_name}</span><span className="block dense-cell-truncate text-[10px] text-gray-400">{[row.unit, row.tag_label].filter(Boolean).join(' · ')}</span></span></button></td>
-                <td><span className="dense-cell-truncate dense-id" title={row.barcode || ''}>{row.barcode || '—'}</span></td>
+              const unitCost = row.total_cost_usd != null && Number(row.total_cost_usd) >= 0 ? Number(row.total_cost_usd) / Math.max(1, Math.abs(Number(row.quantity) || 0)) : row.unit_cost_usd
+              const originTag = productOriginTag(row, tr)
+              return <tr key={lineKey(row)} className={selectedLine === row ? 'bg-blue-50/70 dark:bg-blue-950/20' : ''}>
+                <td><button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] items-start gap-2 text-left hover:text-blue-700 dark:hover:text-blue-300"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-8 w-8 rounded object-cover" /> : <ProductImagePlaceholder compact className="h-8 w-8 rounded" />}</span><span className="min-w-0 whitespace-normal"><span className="flex min-w-0 flex-wrap items-center gap-1"><span className="break-words font-semibold">{row.product_name}</span>{originTag ? <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-semibold ${originTag.className}`}>{originTag.label}</span> : null}</span><span className="block break-all dense-id text-gray-400">{row.barcode || tr('barcode_not_recorded', 'Barcode not recorded')}</span>{[row.unit, row.tag_label].filter(Boolean).length ? <span className="block break-words text-[10px] text-gray-400">{[row.unit, row.tag_label].filter(Boolean).join(' · ')}</span> : null}</span></button></td>
                 <td><span className="dense-cell-truncate dense-id">{row.batch_id || '—'}</span></td>
                 <td><span className="dense-cell-truncate text-gray-500" title={row.reason || ''}>{row.reason || '—'}</span></td>
                 <td className="text-right font-bold tabular-nums text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</td>
-                <td className="text-right tabular-nums">{unitCost == null || Number(unitCost) <= 0 ? '—' : `$${Number(unitCost).toFixed(2)}`}</td>
-                <td><button type="button" disabled={busy} onClick={() => void removeRow(row)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-3.5 w-3.5" /></button></td>
+                <td className="text-right tabular-nums">{unitCost == null ? '—' : `$${Number(unitCost).toFixed(2)}`}</td>
+                <td>{row.id == null ? <InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /> : <button type="button" disabled={busy} onClick={() => void removeRow(row)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-3.5 w-3.5" /></button>}</td>
               </tr>
             })}</tbody>
           </table></div>
         </div>
         <div className="mobile-cards-only space-y-1">{selected.rows.map((row) => {
-          const unitCost = row.total_cost_usd != null && Number(row.total_cost_usd) > 0 ? Number(row.total_cost_usd) / Math.max(1, Math.abs(Number(row.quantity) || 0)) : row.unit_cost_usd
-          return <div key={row.id} className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border px-2.5 py-1.5 ${selectedLine?.id === row.id ? 'border-blue-300 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/20' : 'border-gray-100 dark:border-gray-700'}`}>
-            <button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-2 text-left"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-10 w-10 rounded-lg object-cover" /> : <ProductImagePlaceholder compact className="h-10 w-10 rounded-lg" />}</span><span className="min-w-0"><span className="block break-words text-[13px] font-medium leading-4 text-gray-800 dark:text-gray-100">{row.product_name}</span><span className="block break-all text-[11px] text-gray-400">{[row.barcode, row.unit, row.tag_label].filter(Boolean).join(' · ') || tr('details_not_recorded', 'Details not recorded')}</span>{row.reason ? <span className="block truncate text-[11px] text-gray-400">{row.reason}</span> : null}</span></button>
-            <span className="shrink-0 text-right"><b className="block text-sm text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</b><span className="block text-[11px] text-gray-400">{unitCost == null || Number(unitCost) <= 0 ? '—' : `$${Number(unitCost).toFixed(2)} / ${row.unit || tr('unit', 'unit')}`}</span></span>
-            <button type="button" disabled={busy} onClick={() => void removeRow(row)} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-4 w-4" /></button>
+          const unitCost = row.total_cost_usd != null && Number(row.total_cost_usd) >= 0 ? Number(row.total_cost_usd) / Math.max(1, Math.abs(Number(row.quantity) || 0)) : row.unit_cost_usd
+          const originTag = productOriginTag(row, tr)
+          return <div key={lineKey(row)} className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border px-2.5 py-1.5 ${selectedLine === row ? 'border-blue-300 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/20' : 'border-gray-100 dark:border-gray-700'}`}>
+            <button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-2 text-left"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-10 w-10 rounded-lg object-cover" /> : <ProductImagePlaceholder compact className="h-10 w-10 rounded-lg" />}</span><span className="min-w-0"><span className="block break-words text-[13px] font-medium leading-4 text-gray-800 dark:text-gray-100">{row.product_name}{originTag ? <span className={`ml-1 inline-block rounded px-1 py-0.5 align-middle text-[10px] font-semibold ${originTag.className}`}>{originTag.label}</span> : null}</span><span className="block break-all text-[11px] text-gray-400">{[row.barcode, row.unit, row.tag_label].filter(Boolean).join(' · ') || tr('details_not_recorded', 'Details not recorded')}</span>{row.reason ? <span className="block truncate text-[11px] text-gray-400">{row.reason}</span> : null}</span></button>
+            <span className="shrink-0 text-right"><b className="block text-sm text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</b><span className="block text-[11px] text-gray-400">{unitCost == null ? '—' : `$${Number(unitCost).toFixed(2)} / ${row.unit || tr('unit', 'unit')}`}</span></span>
+            {row.id == null ? <span className="p-2"><InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /></span> : <button type="button" disabled={busy} onClick={() => void removeRow(row)} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-4 w-4" /></button>}
           </div>
         })}</div>
-        <div className="compact-action-row border-t border-gray-100 pt-3 dark:border-gray-700">{editing ? <><button type="button" disabled={busy} className="btn-primary h-8 px-2.5 text-xs" onClick={() => void saveHeader()}>{tr('save', 'Save')}</button><button type="button" disabled={busy} className="btn-secondary h-8 px-2.5 text-xs" onClick={() => setEditing(false)}>{tr('cancel', 'Cancel')}</button></> : <><button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={() => setEditing(true)}><Pencil className="h-3.5 w-3.5" />{tr('edit', 'Edit')}</button><button type="button" className="btn-primary inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={() => { setAddMore(selected); setSelected(null) }}><Plus className="h-3.5 w-3.5" />{tr('add_more', 'Add more')}</button><button type="button" disabled={busy} className="btn-danger ml-auto inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={() => void removeSession()}><Trash2 className="h-3.5 w-3.5" />{tr('remove_session', 'Remove')}</button></>}</div>
+        <div className="compact-action-row border-t border-gray-100 pt-3 dark:border-gray-700">{editing ? <><button type="button" disabled={busy} className="btn-primary h-8 px-2.5 text-xs" onClick={() => void saveHeader()}>{tr('save', 'Save')}</button><button type="button" disabled={busy} className="btn-secondary h-8 px-2.5 text-xs" onClick={() => setEditing(false)}>{tr('cancel', 'Cancel')}</button></> : <>{editableLots ? <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={() => setEditing(true)}><Pencil className="h-3.5 w-3.5" />{tr('edit', 'Edit')}</button> : null}<button type="button" className="btn-primary inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={() => { setAddMore(selected); setSelected(null) }}><Plus className="h-3.5 w-3.5" />{tr('add_more', 'Add more')}</button>{revertibleRows.length ? <button type="button" disabled={busy} className="btn-danger ml-auto inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={() => void removeSession()}><Trash2 className="h-3.5 w-3.5" />{tr('remove_session', 'Remove')}</button> : <span className="ml-auto self-center text-[11px] text-gray-400">{tr('stock_session_no_lot_to_edit', 'Every line was created at 0 — no received date to edit or reverse.')}</span>}</>}</div>
       </div>
     </Modal> : null}
-    {addMore ? <Suspense fallback={null}><FastStockInModal branchOptions={branches.map((branch) => ({ value: String(branch.id || ''), label: String(branch.name || branch.id || '') }))} defaultBranchId={addMore.branchId || null} initialHeader={{ branchId: addMore.branchId, receivedDate: addMore.receivedDate, supplier: addMore.supplier, paymentStatus: addMore.paymentStatus === 'credit' ? 'credit' : 'paid', creditDueDate: addMore.creditDueDate }} tr={(key, fallback = key) => tr(key, fallback)} notify={notify} onClose={() => setAddMore(null)} onDone={() => { void load(); onChanged() }} /></Suspense> : null}
+    {addMore ? <Suspense fallback={null}><FastStockInModal branchOptions={branches.map((branch) => ({ value: String(branch.id || ''), label: String(branch.name || branch.id || '') }))} defaultBranchId={addMore.branchId || null} initialHeader={{ branchId: addMore.branchId, receivedDate: addMore.receivedDate, supplier: addMore.supplier, paymentStatus: addMore.paymentStatus === 'credit' ? 'credit' : 'paid', creditDueDate: addMore.creditDueDate }} tr={(key, fallback = key) => tr(key, fallback)} notify={notify} onClose={() => setAddMore(null)} onDone={() => { void load(); onChanged() }} onMinimize={(label: string) => { minimizeWork({ key: 'fast-stockin', kind: 'fast_stockin', ...FAST_STOCK_IN_RESTORE_HOST, label, draftKey: scopedWorkDraftKey('fast_stockin'), requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' } }); notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.'), 'info') }} /></Suspense> : null}
   </div>
 }

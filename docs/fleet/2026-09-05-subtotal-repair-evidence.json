@@ -1,0 +1,113 @@
+{
+  "checkpoint": "a127e37aded0ec7c88a3d0fa06d92bc3b5bda822",
+  "worker_version": "ac5c708d-2ac6-4e76-b801-4497b38ab4d8",
+  "deployment": "6ed0346f-32a4-4f45-b4e7-a0ce87a09533",
+  "plan_id": "sep23-subtotal-46e9e6ed-fade-45e8-9ba8-8396c761e17c",
+  "manifest_sha256": "d3a2f99631df1f347820430f2417629a67e2f4a619170a1c6a02e7006caaceb4",
+  "backup_key": "backups/cloudflare/business-os-cloudflare-20260905-145420Z.json",
+  "backup_bytes": 52002774,
+  "applied_at": "2026-09-05 14:54:47",
+  "history_id": 245,
+  "audit_id": 3799,
+  "protected_scope": {
+    "products": "all IDs/stock_quantity/cost_price_usd/cost_price_khr/purchase_price_usd/purchase_price_khr",
+    "sales": "all columns for 16842-16863 excluding only subtotal_usd",
+    "sale_items": "all columns for sales16842-16863",
+    "fees": "all columns for4268-4273",
+    "other_tables": "all columns/all rows ordered by rowid"
+  },
+  "before": {
+    "checked_at": "2026-09-05T14:50:31.834Z",
+    "protected": {
+      "products": {
+        "count": 10273,
+        "hash": "8f071e63a0f77990c67797722908aa5298f8bfdde3270224240357496f80efa6"
+      },
+      "branch_stock": {
+        "count": 20438,
+        "hash": "7e43bf7bedd8b5ef5f9dffadc8f1849b470451b44303a93b5c1f76ec9d5efc4c"
+      },
+      "branch_batch_stock": {
+        "count": 47129,
+        "hash": "1e2229d4449d48fb91b91f210ad87869b4bc8dca5ece03610dc1d2112bc5aaca"
+      },
+      "product_batches": {
+        "count": 35969,
+        "hash": "d797907f088e7cf21ec7bf183b8e0aba87bdf4cd1ecb4360f2981521e0fd07a1"
+      },
+      "inventory_movements": {
+        "count": 23191,
+        "hash": "ad8cd3831a8267a6c1b8122bac7914828b5e9ba8280a3a0c92c0134856ce9cc8"
+      },
+      "sale_item_batch_allocations": {
+        "count": 105,
+        "hash": "f973b40ed6d36e1079b4cf137303ad82fddf5599ff64034e1b3c4775cbfaec4d"
+      },
+      "sale_items": {
+        "count": 56,
+        "hash": "444e0b9f9f38fb2c2a6ed4543868300d89a3e62c46113f519f889b3ff977c5bd"
+      },
+      "sales": {
+        "count": 22,
+        "hash": "4888b5fc46ca308cd50bcb1bcc30c16bfd80e34de3f7bdc06453ce65412ce422"
+      },
+      "receivables": {
+        "count": 13304,
+        "hash": "34b9cdea5814dc74042fcc16acf17ff212571d5fc0fbeaa67351a4287c729cd5"
+      },
+      "fees": {
+        "count": 6,
+        "hash": "f9240e500e7deaba5a4a89e6519f2b89c6a7c84e82e241fadd052476d6bc016d"
+      }
+    },
+    "subtotal": 0,
+    "total": 3462
+  },
+  "after": {
+    "checked_at": "2026-09-05T14:55:09.045Z",
+    "protected": {
+      "products": {
+        "count": 10273,
+        "hash": "8f071e63a0f77990c67797722908aa5298f8bfdde3270224240357496f80efa6"
+      },
+      "branch_stock": {
+        "count": 20438,
+        "hash": "7e43bf7bedd8b5ef5f9dffadc8f1849b470451b44303a93b5c1f76ec9d5efc4c"
+      },
+      "branch_batch_stock": {
+        "count": 47129,
+        "hash": "1e2229d4449d48fb91b91f210ad87869b4bc8dca5ece03610dc1d2112bc5aaca"
+      },
+      "product_batches": {
+        "count": 35969,
+        "hash": "d797907f088e7cf21ec7bf183b8e0aba87bdf4cd1ecb4360f2981521e0fd07a1"
+      },
+      "inventory_movements": {
+        "count": 23191,
+        "hash": "ad8cd3831a8267a6c1b8122bac7914828b5e9ba8280a3a0c92c0134856ce9cc8"
+      },
+      "sale_item_batch_allocations": {
+        "count": 105,
+        "hash": "f973b40ed6d36e1079b4cf137303ad82fddf5599ff64034e1b3c4775cbfaec4d"
+      },
+      "sale_items": {
+        "count": 56,
+        "hash": "444e0b9f9f38fb2c2a6ed4543868300d89a3e62c46113f519f889b3ff977c5bd"
+      },
+      "sales": {
+        "count": 22,
+        "hash": "4888b5fc46ca308cd50bcb1bcc30c16bfd80e34de3f7bdc06453ce65412ce422"
+      },
+      "receivables": {
+        "count": 13304,
+        "hash": "34b9cdea5814dc74042fcc16acf17ff212571d5fc0fbeaa67351a4287c729cd5"
+      },
+      "fees": {
+        "count": 6,
+        "hash": "f9240e500e7deaba5a4a89e6519f2b89c6a7c84e82e241fadd052476d6bc016d"
+      }
+    },
+    "subtotal": 3462,
+    "total": 3462
+  }
+}

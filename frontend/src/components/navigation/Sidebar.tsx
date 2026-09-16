@@ -1,6 +1,14 @@
-import { Suspense, type ComponentType, type CSSProperties, type ReactNode, useMemo, useState, useSyncExternalStore } from 'react'
-import { getRegisteredWork, hasDirtyWork, subscribeDirtyWork } from '../../utils/dirtyWork.ts'
-import { flushPendingWorkDrafts } from '../../utils/workDrafts.ts'
+import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
+import { getHubDestinations, hubAnchor, mobileGroupAction, resolveChromeSection } from '../shared/hubNavigation.ts'
+import { buildMobileHomeLayout, mobileHomeSectionsPanelId } from '../../utils/mobileHomeTiles.ts'
+import { mobileChromeViewportOffset, navLayerToggle } from '../../utils/mobileNavChrome.ts'
+import './nav-chrome.css'
+import { useMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
+import { useIsCompactViewport } from '../../utils/useViewport.ts'
+import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
+import { Suspense, type ComponentType, type CSSProperties, type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { getRegisteredWork, subscribeDirtyWork } from '../../utils/dirtyWork.ts'
+import { restartIntoLatestApp } from '../../utils/appUpdate.ts'
 import type { LucideIcon } from 'lucide-react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import BookUser from 'lucide-react/dist/esm/icons/book-user.js'
@@ -25,10 +33,11 @@ import Users from 'lucide-react/dist/esm/icons/users.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
 import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem, type NavigationPermission } from '../shared/navigationConfig'
+import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem } from '../shared/navigationConfig'
 import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import MinimizedWorkTray from '../shared/MinimizedWorkTray.tsx'
+import { getMobileSectionIcon } from './mobileSectionIcons.ts'
 
 const QuickPreferenceToggles = lazyRetry(() => import('../shared/QuickPreferenceToggles'), 'quick-preference-toggles')
 
@@ -40,8 +49,8 @@ const QuickPreferenceToggles = lazyRetry(() => import('../shared/QuickPreference
 function QuickPreferenceTogglesFallback() {
   return (
     <div className="flex items-center gap-2" aria-hidden="true">
-      <div className="h-10 w-10 rounded-xl border border-gray-200 bg-white/85 dark:border-slate-700 dark:bg-slate-900/70" />
-      <div className="h-10 w-10 rounded-xl border border-gray-200 bg-white/85 dark:border-slate-700 dark:bg-slate-900/70" />
+      <div className="h-10 w-10 rounded-full bg-transparent" />
+      <div className="h-10 w-10 rounded-full bg-transparent" />
     </div>
   )
 }
@@ -56,6 +65,7 @@ interface SidebarUser {
 }
 
 interface SidebarSettings {
+  ui_mobile_section_nav?: unknown
   ui_nav_order?: unknown
   ui_mobile_pinned?: unknown
   language?: string | null
@@ -67,12 +77,17 @@ interface SidebarSettings {
 
 interface SidebarAppContext {
   page: string
-  navigateTo: (pageId: string) => void
+  navigateTo: (pageId: string, anchor?: string) => void
   user?: SidebarUser | null
   logout: () => void
   t: TranslateFn
   settings?: SidebarSettings | null
-  hasPermission: (permission: NavigationPermission) => boolean
+  hasPermission: (permission: string) => boolean
+  getPermissionTier: (key: string) => string
+  // Per-action grant: a page's action-gated sections (Products' Stock-in
+  // Sessions / Duplicates) are only offered in the sheet when the same
+  // action that renders them on the page is actually granted.
+  can: (permissionKey: string, actionKey: string) => boolean
   canAccessPage: (pageId: string) => boolean
   syncUrl?: string | null
   syncConnected?: boolean
@@ -99,6 +114,7 @@ type SidebarProps = {
   // so any caller that doesn't pass this (e.g. a future test render) still
   // gets a bar that's actually on screen.
   mobileHeaderVisible?: boolean
+  appUpdateVisible?: boolean
 }
 
 const useApp = useAppHook as () => SidebarAppContext
@@ -185,7 +201,7 @@ function isNavigationItemWithIcon(item: NavigationItemWithIcon | undefined): ite
   return !!item
 }
 
-export default function Sidebar({ notificationSlot = null, desktopNotificationSlot = null, showQuickPreferences = false, mobileHeaderVisible = true }: SidebarProps = {}) {
+export default function Sidebar({ notificationSlot = null, desktopNotificationSlot = null, showQuickPreferences = false, mobileHeaderVisible = true, appUpdateVisible = false }: SidebarProps = {}) {
   const {
     page,
     navigateTo,
@@ -194,12 +210,58 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     t,
     settings,
     hasPermission,
+    getPermissionTier,
+    can,
     canAccessPage,
     syncUrl,
     syncConnected,
   } = useApp()
 
   const [moreOpen, setMoreOpen] = useState(false)
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
+  const mode = useMobileSectionNavMode(settings?.ui_mobile_section_nav)
+  const compact = useIsCompactViewport()
+  const inline = compact && mode === 'pages'
+  const [location, setLocation] = useState(() => ({ pathname: window.location.pathname, hash: window.location.hash }))
+  useEffect(() => {
+    const committed = () => {
+      setLocation({ pathname: window.location.pathname, hash: window.location.hash })
+      setMoreOpen(false)
+      setAccountOpen(false)
+    }
+    window.addEventListener(APP_NAVIGATION_EVENT, committed)
+    return () => window.removeEventListener(APP_NAVIGATION_EVENT, committed)
+  }, [])
+  useEffect(() => { setMoreOpen(false); setExpandedGroup(null) }, [inline])
+  const destinations = (id: string) => canAccessPage(id) ? getHubDestinations(id, { getPermissionTier, hasPermission, can }) : []
+  const currentSections = destinations(page)
+  // Chrome follows the COMMITTED route, and shows page level when the route
+  // names no section. It must not fall back to `bos:hub:<page>:active` (the
+  // last section visited): only Sales and Contacts seed their bodies from
+  // that key, so on Products/Promotions/Review/Branches the guess titled the
+  // bar with the sub page just left while the body rendered the page's own
+  // default. See resolveChromeSection in shared/hubNavigation.ts.
+  const currentSectionId = resolveChromeSection(page, location.pathname, location.hash, currentSections.map((section) => section.id))
+  const currentSection = currentSections.find((section) => section.id === currentSectionId)
+  const sectionLabel = (section: { key: string; label: string }) => {
+    const label = t(section.key)
+    return label && label !== section.key ? label : section.label
+  }
+  const openMobileGroup = (id: string) => {
+    const action = mobileGroupAction(expandedGroup, id, destinations(id), inline)
+    setExpandedGroup(action.expanded)
+    if (action.navigate) navigateTo(id)
+    else { setAccountOpen(false); setMoreOpen(true) }
+  }
+  // The top bar's Back control. A toggle, not an opener: the pages layer now
+  // covers the page it was opened from (that is what removes the band the
+  // old bottom sheet left under the bar), so the scrim that used to serve as
+  // "tap outside to dismiss" is gone with it. One control, both directions.
+  const openSectionMenu = () => {
+    const next = navLayerToggle({ open: moreOpen, expanded: expandedGroup }, page, currentSections.length > 0)
+    setExpandedGroup(next.expanded)
+    setMoreOpen(next.open)
+  }
   const [profileOpen, setProfileOpen] = useState(false)
   // The footer account row is a full-width toggle that expands into an account
   // panel -- Profile / Settings / Receipt Settings / Update / Exit -- so those
@@ -207,46 +269,10 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   // (user request). The same panel opens as a dropdown from the mobile header
   // avatar.
   const [accountOpen, setAccountOpen] = useState(false)
-  const runAppUpdate = async () => {
-    // iOS does not reliably show beforeunload prompts. Refuse an explicit
-    // update while an editor has unsaved work, and activate the WAITING worker
-    // (posting to controller targets the old active worker and does nothing).
-    if (hasDirtyWork()) {
-      flushPendingWorkDrafts()
-      window.alert(t('save_or_discard_before_update') || 'Save or discard your unfinished work before updating the app.')
-      return
-    }
-    flushPendingWorkDrafts()
-    try {
-      const registration = await navigator.serviceWorker?.getRegistration?.('/')
-      await registration?.update?.().catch(() => {})
-      let waiting = registration?.waiting || null
-      if (!waiting && registration?.installing) {
-        const installing = registration.installing
-        await new Promise<void>((resolve) => {
-          if (installing.state === 'installed') return resolve()
-          const timer = window.setTimeout(resolve, 5000)
-          installing.addEventListener('statechange', () => {
-            if (installing.state !== 'installed') return
-            window.clearTimeout(timer)
-            resolve()
-          }, { once: true })
-        })
-        waiting = registration.waiting
-      }
-      if (waiting) {
-        const changed = new Promise<void>((resolve) => {
-          const timer = window.setTimeout(resolve, 1500)
-          navigator.serviceWorker.addEventListener('controllerchange', () => {
-            window.clearTimeout(timer)
-            resolve()
-          }, { once: true })
-        })
-        waiting.postMessage({ type: 'BUSINESS_OS_SKIP_WAITING' })
-        await changed
-      }
-    } catch (_) {}
-    window.location.reload()
+  const runAppUpdate = () => {
+    void restartIntoLatestApp({
+      unsavedWorkMessage: t('save_or_discard_before_update') || 'Save or discard your unfinished work before updating the app.',
+    })
   }
 
   // N2: which pages currently hold registered unsaved work -- drives the
@@ -300,8 +326,22 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   }, [visibleItems, mobilePinnedIds])
 
   const drawerItems = visibleItems.filter((item) => !mobilePinnedIds.includes(item.id))
+  const inlineItems = [
+    ...visibleItems,
+    ...NAV_CONFIG_ITEMS.filter((item) => item.id === 'settings' && canAccessPage(item.id)).map((item) => ({ ...item, icon: getIconForItem(item.id) })),
+  ]
 
   const language = settings?.language || 'en'
+  // What the bar names is what is ON SCREEN. With the pages layer open the
+  // screen is the page (its tile unfolded over the sub page), so the bar says
+  // the page; closed, it says the section the route names. Back is a pure
+  // toggle and must stay one -- navigating away would discard the sub page's
+  // state -- so this is the half of "it still shows the page i back from"
+  // that the section-state fix could not reach: the route legitimately still
+  // names the sub page, and the title was reading it unconditionally.
+  const mobileTitle = (moreOpen && inline) || !currentSection
+    ? getNavLabel(NAV_CONFIG_ITEMS.find((item) => item.id === page) || { id: page, key: page, permission: null }, t, language)
+    : sectionLabel(currentSection)
   const brandLogo = settings?.customer_portal_logo_image || ''
   const brandName = settings?.business_name || 'Business OS'
   const sidebarBg = settings?.ui_sidebar_color || ''
@@ -333,6 +373,12 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     sidebarTextColor ? { backgroundColor: withAlpha(sidebarTextColor, isDark ? '24' : '18') || undefined } : undefined,
   )
 
+  // Where the fixed top chrome ends, from the top of the viewport. The pages
+  // layer below anchors to exactly this, in all four (update bar x auto-hidden
+  // header) states, so there is never a band between the bar and the layer --
+  // and never a strip of the page underneath showing through one.
+  const navLayerTop = mobileChromeViewportOffset({ headerVisible: mobileHeaderVisible, appUpdateVisible })
+
   // Account panel actions -- rendered inside the desktop footer expander and
   // the mobile header dropdown. Settings / Receipt Settings are gated the same
   // way their old nav rows were; Profile / Update / Exit are always available
@@ -340,7 +386,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   type AccountAction = { id: string; label: string; icon: LucideIcon; onClick: () => void; tone?: 'blue' | 'red' }
   const accountActions: AccountAction[] = [
     { id: 'profile', label: t('profile') || 'Profile', icon: User, onClick: () => setProfileOpen(true) },
-    ...(canAccessPage('settings') ? [{ id: 'settings', label: t('settings') || 'Settings', icon: Settings, onClick: () => navigateTo('settings') } as AccountAction] : []),
+    ...(canAccessPage('settings') ? [{ id: 'settings', label: t('settings') || 'Settings', icon: Settings, onClick: () => inline ? openMobileGroup('settings') : navigateTo('settings') } as AccountAction] : []),
     ...(canAccessPage('receipt_settings') ? [{ id: 'receipt_settings', label: t('receipt_settings') || 'Receipt Settings', icon: Receipt, onClick: () => navigateTo('receipt_settings') } as AccountAction] : []),
     { id: 'update', label: t('refresh_app') || 'Update', icon: RefreshCw, onClick: runAppUpdate, tone: 'blue' },
     { id: 'logout', label: t('logout') || 'Exit', icon: LogOut, onClick: logout, tone: 'red' },
@@ -359,7 +405,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
         key={item.id}
         type="button"
         onClick={() => { setAccountOpen(false); item.onClick() }}
-        className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors ${accountActionToneClass(item.tone)}`}
+        className={`flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors md:min-h-0 ${accountActionToneClass(item.tone)}`}
       >
         <Icon className="h-4 w-4 shrink-0" />
         <span className="truncate">{item.label}</span>
@@ -495,8 +541,26 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
           background still extends fully behind the notch; App.tsx's <main>
           padding-top is matched to this same total height. */}
       <header
-        className={`fixed left-0 right-0 top-0 z-40 flex h-[calc(4rem+env(safe-area-inset-top))] items-center justify-between border-b border-gray-200 bg-white pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))] pt-[env(safe-area-inset-top)] transition-transform duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-900 md:hidden ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'}`}
+        data-bos-mobile-header={inline ? 'inline' : 'sections'}
+        className={`bos-nav-chrome bos-nav-topbar fixed left-0 right-0 z-40 flex items-center justify-between transition-[transform,top] duration-300 ease-in-out md:hidden ${inline ? 'pl-[calc(0.25rem+env(safe-area-inset-left))] pr-[calc(0.25rem+env(safe-area-inset-right))]' : 'pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))]'} ${appUpdateVisible ? 'top-[calc(3rem+env(safe-area-inset-top))] h-16 pt-0' : 'top-0 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]'} ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'}`}
       >
+        {inline ? (
+          <div className="flex min-w-0 flex-1 items-center gap-1">
+            <button
+              type="button"
+              onClick={openSectionMenu}
+              aria-expanded={moreOpen}
+              aria-controls="mobile-nav-layer"
+              aria-label={moreOpen ? (t('close') || 'Close') : (t('back') || 'Back')}
+              className="bos-nav-back flex h-11 w-11 shrink-0 items-center justify-center rounded-lg transition-colors"
+            >
+              <ChevronLeft className={`h-5 w-5 transition-transform ${moreOpen ? 'rotate-90' : ''}`} />
+            </button>
+            <div className="bos-nav-title min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-sm font-semibold [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" title={mobileTitle} tabIndex={0}>
+              {mobileTitle}
+            </div>
+          </div>
+        ) : (
         <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200/80 bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80">
             {brandLogo ? (
@@ -508,10 +572,14 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             )}
           </div>
         </div>
-        <div className="mx-2 min-w-0 flex-1">
-          <MinimizedWorkTray variant="mobile" />
-        </div>
-        <div className="flex flex-shrink-0 items-center gap-2">
+        )}
+        {inline ? null : (
+          <div className="mx-2 min-w-0 flex-1 [&_button]:min-h-11 [&_button]:min-w-11">
+            <MinimizedWorkTray variant="mobile" />
+          </div>
+        )}
+        <div className="flex shrink-0 items-center gap-1 [&_button]:min-h-11 [&_button]:min-w-11">
+          <div id="section-export-action-host" className="flex shrink-0 items-center empty:hidden" />
           {notificationSlot}
           {showQuickPreferences ? (
             <Suspense fallback={<QuickPreferenceTogglesFallback />}>
@@ -519,12 +587,12 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             </Suspense>
           ) : null}
           <div className="relative z-50 flex-shrink-0">
-            <button type="button" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen} aria-label={t('account') || 'Account'} className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50/90 p-0.5 dark:bg-blue-900/30">
-              <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
+            <button type="button" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen} aria-label={t('account') || 'Account'} className="bos-nav-avatar flex h-11 w-11 items-center justify-center rounded-full p-0.5">
+              <div className="bos-nav-avatar-face flex h-10 w-10 items-center justify-center overflow-hidden rounded-full">
                 {user?.avatar_path ? (
                   <img src={user.avatar_path} alt={user?.name || 'User'} className="h-10 w-10 object-cover" loading="lazy" decoding="async" />
                 ) : (
-                  <span className="text-base font-bold text-blue-600 dark:text-blue-400">
+                  <span className="text-base font-bold">
                     {user?.name?.[0]?.toUpperCase()}
                   </span>
                 )}
@@ -535,11 +603,11 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                 <div className="fixed inset-0 z-40" onClick={() => setAccountOpen(false)} />
                 <div className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white p-1 shadow-xl dark:border-gray-700 dark:bg-gray-800">
                   <div className="mb-1 flex items-center gap-2.5 border-b border-gray-100 px-2.5 py-2 dark:border-gray-700">
-                    <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
+                    <div className="bos-nav-avatar-face flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full">
                       {user?.avatar_path ? (
                         <img src={user.avatar_path} alt={user?.name || 'User'} className="h-8 w-8 object-cover" loading="lazy" decoding="async" />
                       ) : (
-                        <span className="text-sm font-bold text-blue-600 dark:text-blue-400">{user?.name?.[0]?.toUpperCase()}</span>
+                        <span className="text-sm font-bold">{user?.name?.[0]?.toUpperCase()}</span>
                       )}
                     </div>
                     <div className="min-w-0">
@@ -547,6 +615,13 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                       <div className="truncate text-xs text-gray-400">{user?.role_name || t('no_role') || 'No role'}</div>
                     </div>
                   </div>
+                  {inline ? (
+                    <div className="mb-1 max-w-full border-b border-gray-100 px-1 pb-1 dark:border-gray-700 [&>div]:flex-wrap [&>div]:overflow-visible">
+                      <div className="max-w-full [&_button]:min-h-11 [&_button]:min-w-11">
+                        <MinimizedWorkTray variant="mobile" />
+                      </div>
+                    </div>
+                  ) : null}
                   {accountActions.map(renderAccountAction)}
                 </div>
               </>
@@ -555,6 +630,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
         </div>
       </header>
 
+      {!inline ? (
       <nav className="safe-area-inset-bottom fixed bottom-0 left-0 right-0 z-40 flex h-14 items-stretch border-t border-gray-200 bg-white dark:border-slate-800 dark:bg-slate-900 md:hidden">
         {pinnedItems.map((item) => {
           const Icon = item.icon
@@ -566,7 +642,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               aria-label={label}
               data-bos-nav-id={item.id}
               onFocus={() => announcePageIntent(item.id, 'focus')}
-              onClick={() => { navigateTo(item.id); setMoreOpen(false) }}
+              onClick={() => openMobileGroup(item.id)}
               onPointerEnter={() => announcePageIntent(item.id, 'pointer')}
               onTouchStart={() => announcePageIntent(item.id, 'touch')}
               className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${!sidebarTextColor ? (isActiveItem ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400') : ''}`}
@@ -582,7 +658,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
         <button
           aria-label={t('more') || 'More'}
           data-bos-nav-id="more"
-          onClick={() => setMoreOpen((open) => !open)}
+          onClick={() => { setExpandedGroup(null); setMoreOpen((open) => !open) }}
           className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${!sidebarTextColor ? (moreOpen ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400') : ''}`}
           style={moreOpen ? mobileActiveStyle : mobileInactiveStyle}
         >
@@ -590,19 +666,85 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
           <span className="block max-w-[68px] truncate whitespace-nowrap text-center text-[9.5px] font-medium leading-3">{t('more') || 'More'}</span>
         </button>
       </nav>
+      ) : null}
 
       {moreOpen ? (
         <>
-          <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setMoreOpen(false)} />
-          {/* bottom-[...] matches the bottom nav's actual height (3.55rem +
-              safe-area-inset-bottom, see .safe-area-inset-bottom in main.css)
-              instead of a flat bottom-16, so this drawer doesn't slide in
-              underneath -- and get hidden behind -- the taller nav bar that
+          {/* The pages layer is opaque and reaches the bottom bar, so nothing
+              behind it is visible or tappable: a scrim would only be a second
+              dismissal affordance for the Back toggle that already opened it.
+              The legacy bottom sheet still floats over its page and keeps
+              its own. */}
+          {inline ? null : <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setMoreOpen(false)} />}
+          {/* Pages mode: `top` is the bottom edge of the fixed chrome
+              (mobileChromeViewportOffset), so the layer is FLUSH with the top
+              bar -- one merged surface, no band, and no strip of the page it
+              was opened from showing above it. It used to be bottom-anchored
+              with `max-h-[70vh]`, which put its top edge wherever its content
+              happened to end.
+              Sections mode: bottom-[...] matches the bottom nav's actual
+              height (3.55rem + safe-area-inset-bottom, see
+              .safe-area-inset-bottom in main.css) instead of a flat
+              bottom-16, so this drawer doesn't slide in underneath -- and get
+              hidden behind -- the taller nav bar that
               env(safe-area-inset-bottom) produces on notched iPhones. */}
-          <div className="fixed bottom-[calc(3.55rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 max-h-[70vh] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900 md:hidden">
+          <div
+            id="mobile-nav-layer"
+            data-bos-nav-layer={inline ? 'pages' : 'sheet'}
+            style={inline ? { top: navLayerTop } : undefined}
+            className={`fixed left-0 right-0 z-40 overflow-y-auto md:hidden ${inline ? 'bos-nav-chrome bos-nav-layer' : 'max-h-[calc(70*var(--app-vh))] rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900'} ${inline ? 'bottom-0 pb-[env(safe-area-inset-bottom)]' : 'bottom-[calc(3.55rem+env(safe-area-inset-bottom))]'}`}
+          >
+            {inline ? null : (
             <div className="sticky top-0 bg-white px-3 pb-1 pt-3 dark:bg-gray-900">
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" />
             </div>
+            )}
+            {inline ? (
+              /* Home tiles: a 2-column grid whose tapped tile unfolds its own
+                 sections as a full-width 2-column sub-grid under that tile's
+                 ROW (reference images #1/#2, layout only). The order and the
+                 sub-grid's insertion point are buildMobileHomeLayout's --
+                 see utils/mobileHomeTiles.ts for why placing it "after the
+                 tile" is the wrong-looking-right implementation. */
+              <div className="grid grid-cols-2 gap-2 px-3 pb-4 pt-3">
+                {buildMobileHomeLayout(inlineItems, expandedGroup, destinations).map((entry) => {
+                  if (entry.kind === 'sections') return (
+                    <div key={entry.key} id={mobileHomeSectionsPanelId(entry.ownerId)} className="bos-nav-sections col-span-2 grid min-w-0 grid-cols-2 gap-1 rounded-xl p-2">
+                      {entry.sections.map((section) => {
+                        // Active = the section the committed route names, not
+                        // the last one tapped. It reads as open (gold ground,
+                        // gold ink, semibold, leading rule), which nothing in
+                        // this list used to do at all.
+                        const isOpenSection = page === entry.ownerId && currentSectionId === section.id
+                        const SectionIcon = getMobileSectionIcon(entry.ownerId, section.id)
+                        return (
+                        <button key={section.id} type="button" data-bos-section={`${entry.ownerId}:${section.id}`}
+                          aria-current={isOpenSection ? 'page' : undefined}
+                          onClick={() => navigateTo(entry.ownerId, hubAnchor(entry.ownerId, section.id))}
+                          className={`bos-nav-section flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 break-words rounded-lg px-2 py-2.5 text-center text-[13px] leading-snug transition-colors ${isOpenSection ? 'is-active' : ''}`}>
+                          {SectionIcon ? <SectionIcon className="h-5 w-5 shrink-0" aria-hidden="true" /> : null}
+                          <span className="min-w-0 max-w-full break-words text-center leading-tight">{sectionLabel(section)}</span>
+                        </button>
+                        )
+                      })}
+                    </div>
+                  )
+                  const { item, expanded, hasSections } = entry
+                  const Icon = item.icon
+                  return (
+                    <button key={entry.key} type="button" data-bos-nav-id={item.id} aria-expanded={hasSections ? expanded : undefined}
+                      aria-controls={hasSections ? mobileHomeSectionsPanelId(item.id) : undefined}
+                      onClick={() => openMobileGroup(item.id)}
+                      className={`bos-nav-tile relative flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-xl px-2 py-3 text-[13px] font-medium transition-colors ${expanded ? 'is-open' : ''}`}>
+                      <Icon className="h-5 w-5 shrink-0" />
+                      <span className="min-w-0 break-words text-center leading-tight">{getNavLabel(item, t, language)}</span>
+                      {dirtyPageIds.has(item.id) ? <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-amber-400" /> : null}
+                      {hasSections ? <ChevronUp className={`absolute bottom-1.5 right-1.5 h-3.5 w-3.5 opacity-70 ${expanded ? '' : 'rotate-180'}`} /> : null}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
             <div className="grid grid-cols-4 gap-2 px-3 pb-4">
               {drawerItems.map((item) => {
                 const Icon = item.icon
@@ -614,7 +756,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                     aria-label={label}
                     data-bos-nav-id={item.id}
                     onFocus={() => announcePageIntent(item.id, 'focus')}
-                    onClick={() => { navigateTo(item.id); setMoreOpen(false) }}
+                    onClick={() => openMobileGroup(item.id)}
                     onPointerEnter={() => announcePageIntent(item.id, 'pointer')}
                     onTouchStart={() => announcePageIntent(item.id, 'touch')}
                     className={`relative flex flex-col items-center gap-1.5 rounded-xl p-3 text-xs font-medium transition-colors ${!sidebarTextColor ? (isActiveItem ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-gray-50 text-gray-600 dark:bg-gray-800 dark:text-gray-400') : (isActiveItem ? 'bg-white/70 dark:bg-slate-800/70' : 'bg-gray-50 dark:bg-gray-800')}`}
@@ -629,6 +771,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                 )
               })}
             </div>
+            )}
           </div>
         </>
       ) : null}

@@ -1,33 +1,52 @@
+import ProductNameRail from '../shared/ProductNameRail'
 import type { ComponentProps, ReactNode } from 'react'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { consumeLongPressClick, createLongPressHandlers, createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
+import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
+// N13: Transfer History is a history surface, so its branch pair, actor and
+// note go through the one shared row model -- the card said "N/A", the table
+// said '-' and the detail said an em dash about the same transfer.
+import { historyActor, historyExportField, historyField } from '../../utils/historyRowModel.ts'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
-import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
+import { useApp as useAppHook, useLowStockConfig, useSync as useSyncHook } from '../../AppContext.tsx'
+import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import type { QueryParams } from '../../api/query.ts'
 import Modal from '../shared/Modal'
 import InfoHint from '../shared/InfoHint.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import FilterMenu from '../shared/FilterMenu'
-import type { DateTimeRange } from '../shared/DateTimeRangePicker'
+import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
+import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
-import BranchForm from './BranchForm'
+import BranchForm, { branchFormDraftBaseKey, branchFormWorkKey } from './BranchForm'
 import { useActionHistory } from '../../utils/actionHistory.ts'
-import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
+import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
+import { branchRoleFromName } from '../../utils/branchRoles.ts'
+import {
+  RESTORE_WORK_EVENT,
+  consumePendingRestore,
+  markRestoreHandled,
+  minimizeWork,
+  reparkDeniedRestore,
+  type MinimizedWorkEntry,
+  transferDraftKey,
+  peekPendingRestore,
+} from '../../utils/minimizedWork.ts'
+import { flushPendingWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -37,11 +56,10 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import {
-  createBranch as createBranchRequest,
-  deleteBranch as deleteBranchRequest,
   getBranches as getBranchesRequest,
   getBranchStock as getBranchStockRequest,
   getTransfers as getTransfersRequest,
+  getBranchSummary,
   updateBranch as updateBranchRequest,
 } from '../../api/branchTransport.ts'
 
@@ -95,6 +113,7 @@ interface BranchRecord {
   notes?: string | null
   is_default?: BranchFlag | null
   is_active?: BranchFlag | null
+  updated_at?: string | null
 }
 
 interface BranchFormPayload {
@@ -189,8 +208,6 @@ interface BranchApi {
   getTransfers: (params: QueryParams) => Promise<unknown>
   getBranchStock: (branchId: string | number, options: { page: number; pageSize: number; stockState: string; query?: string }) => Promise<BranchStockState>
   updateBranch: (id: string | number, payload: BranchTransportPayload) => Promise<BranchMutationResult>
-  createBranch: (payload: BranchTransportPayload) => Promise<BranchMutationResult>
-  deleteBranch: (id: string | number, userId?: string | number, userName?: string) => Promise<BranchMutationResult>
 }
 
 interface BranchStatTileProps {
@@ -206,11 +223,6 @@ interface StatDetail {
   title: ReactNode
   value: ReactNode
   detail: ReactNode
-}
-
-interface RestoredBranchEntry {
-  originalId: string | number
-  restoredId: number
 }
 
 type ActionHistoryProp = ComponentProps<typeof ActionHistoryBar>['history']
@@ -230,8 +242,6 @@ function getBranchApi(): BranchApi {
     getTransfers: (params) => getTransfersRequest(params),
     getBranchStock: (branchId, options) => getBranchStockRequest(branchId, options) as Promise<BranchStockState>,
     updateBranch: (id, payload) => updateBranchRequest(id, payload) as Promise<BranchMutationResult>,
-    createBranch: (payload) => createBranchRequest(payload) as Promise<BranchMutationResult>,
-    deleteBranch: (id, userId, userName) => deleteBranchRequest(id, userId ?? null, userName ?? null) as Promise<BranchMutationResult>,
   }
 }
 
@@ -280,14 +290,18 @@ function formatTransferDate(rawValue: string | null | undefined): string {
     : `${rawValue.replace(' ', 'T')}Z`
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return 'N/A'
-  return date.toLocaleString('en-US', {
+  // dd/mm/yyyy HH:mm, day-first (Sep 4 2026) -- see utils/formatters.ts for
+  // why the order is assembled here rather than left to a locale.
+  const parts = new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
-  })
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
+  return `${get('day')}/${get('month')}/${get('year')}, ${get('hour')}:${get('minute')}`
 }
 
 /**
@@ -314,12 +328,19 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   showDateRange?: boolean
 } = {}) {
   const { can, t, user, notify, fmtUSD } = useApp()
+  // Settings > Stock Alerts -- the per-branch product cards use the same
+  // number the Branches stats above them are counted by.
+  const lowStockConfig = useLowStockConfig()
   // Transferring stock moves real quantities against live state, so
   // routes/branches.ts blocks it outright for the Review Required tier
   // (POST /transfer and /transfer-bulk) instead of queueing it -- see
-  // utils/permissionActions.ts. Add/edit/delete DO queue for that tier, so
-  // they stay available; only transfer is withheld.
+  // utils/permissionActions.ts. Canonical branch identity is fixed; only
+  // metadata edits remain available here.
   const canTransferStock = can('branches', 'transfer')
+  const canEditBranch = can('branches', 'edit')
+  const canExportBranch = can('branches', 'export')
+  const branchExportAuthorityRef = useRef({ actorId: String(user?.id ?? ''), allowed: canExportBranch })
+  branchExportAuthorityRef.current = { actorId: String(user?.id ?? ''), allowed: canExportBranch }
   // Same grant Inventory's own adjust/receive affordances check, because
   // POST /api/batches sits behind 'inventory' server-side -- a button the
   // server would 403 is worse than no button.
@@ -338,6 +359,22 @@ export default function Branches({ embedded = false, view, showSectionNavigation
    * 2.2 UI selection/expansion state.
    */
   const [branches, setBranches] = useState<BranchRecord[]>([])
+  const [statsOpen, setStatsOpen] = useState(false)
+  const [branchSummary, setBranchSummary] = useState<Record<string, number> | null>(null)
+  const [statsLoading, setStatsLoading] = useState(false)
+  const [statsError, setStatsError] = useState('')
+  const [statsRefresh, setStatsRefresh] = useState(0)
+  useEffect(() => {
+    if (!statsOpen || !isActive) return
+    let current = true
+    setStatsLoading(true)
+    setStatsError('')
+    void withLoaderTimeout(() => getBranchSummary(), 'Branch summary', BRANCHES_LIST_TIMEOUT_MS)
+      .then((summary) => { if (current) setBranchSummary(summary as Record<string, number>) })
+      .catch((error) => { if (current) { setBranchSummary(null); setStatsError(getErrorMessage(error, tr('failed_to_load_data', 'Failed to load data'))) } })
+      .finally(() => { if (current) setStatsLoading(false) })
+    return () => { current = false }
+  }, [statsOpen, isActive, statsRefresh, syncChannel?.ts, tr])
   const [internalTab, setInternalTab] = useState<BranchTab>('branches')
   const tab = view ?? internalTab
   const setTab = useCallback((nextTab: BranchTab) => {
@@ -363,6 +400,109 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   // D4b receive entry point: which product card's "receive" was clicked,
   // and into which branch (preselected in the shared modal).
   const [receiveTarget, setReceiveTarget] = useState<{ product: BranchStockProduct; branchId: string } | null>(null)
+  const restoreBranchForm = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
+    const branchId = entry.payload?.branchId
+    const isEdit = (typeof branchId === 'number' || typeof branchId === 'string') && String(branchId).trim() !== ''
+    if (!isEdit || !canEditBranch) {
+      reparkDeniedRestore(entry)
+      notify(tr('access_denied', 'Access denied'), 'warning')
+      return false
+    }
+
+    let currentBranch: BranchRecord | null = null
+    if (isEdit) {
+      try {
+        const result = await branchApi.getBranches()
+        currentBranch = Array.isArray(result)
+          ? result.filter(isBranchRecord).find((branch) => String(branch.id) === String(branchId)) || null
+          : null
+      } catch {
+        reparkDeniedRestore(entry)
+        notify(tr('failed_to_load_data', 'Failed to load data'), 'warning')
+        return false
+      }
+      if (!currentBranch) {
+        reparkDeniedRestore(entry)
+        notify(tr('branch_not_found', 'Branch not found'), 'warning')
+        return false
+      }
+      if (branchRoleFromName(currentBranch.name) === 'other' || !currentBranch.is_active) {
+        reparkDeniedRestore(entry)
+        notify(tr('access_denied', 'Access denied'), 'warning')
+        return false
+      }
+    }
+
+    setSelected(currentBranch)
+    setModal('form')
+    return true
+  }, [branchApi, canEditBranch, notify, tr])
+
+  useEffect(() => {
+    const pending = consumePendingRestore('branch_form')
+    if (pending) {
+      void restoreBranchForm(pending).then((restored) => {
+        if (restored) markRestoreHandled('branch_form')
+      })
+    }
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'branch_form') return
+      const entry = detail.entry as MinimizedWorkEntry | undefined
+      if (!entry) return
+      void restoreBranchForm(entry).then((restored) => {
+        if (restored) markRestoreHandled('branch_form')
+      })
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [restoreBranchForm])
+  const restoreReceiveBatch = useCallback((entry: MinimizedWorkEntry): boolean => {
+    if (!canReceiveStock) return false
+    const payload = entry.payload || {}
+    const productId = payload.productId
+    const branchId = String(payload.branchId || '')
+    if ((typeof productId !== 'number' && typeof productId !== 'string') || !String(productId).trim() || !branchId) return false
+    setReceiveTarget({
+      product: {
+        id: productId,
+        name: String(payload.productName || ''),
+        unit: String(payload.productUnit || ''),
+      },
+      branchId,
+    })
+    return true
+  }, [canReceiveStock])
+  useEffect(() => {
+    const pending = consumePendingRestore('receive_batch')
+    if (pending) {
+      if (canReceiveStock) restoreReceiveBatch(pending)
+      else reparkDeniedRestore(pending)
+    }
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'receive_batch') return
+      const entry = detail.entry as MinimizedWorkEntry | undefined
+      if (!canReceiveStock) {
+        if (entry) reparkDeniedRestore(entry)
+        return
+      }
+      // New dispatches carry the complete entry. Keep the payload-only fallback
+      // for a chip created by an older same-version tab.
+      const candidate = entry || {
+        key: `receive-batch-${String(detail.payload?.productId || '')}`,
+        kind: 'receive_batch',
+        pageId: 'branches',
+        label: '',
+        payload: detail.payload || {},
+        minimizedAt: Date.now(),
+      }
+      if (!restoreReceiveBatch(candidate)) return
+      markRestoreHandled('receive_batch')
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [canReceiveStock, restoreReceiveBatch])
   // A Set (not a single value) so more than one branch card can be open at
   // once -- was accordion-style (opening one silently closed any other),
   // reported as "can only open one branch at a time, should allow checking
@@ -383,25 +523,18 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       return next
     })
   }, [])
-  const [selectedIds, setSelectedIds] = useState<Set<string | number>>(new Set())
   const [branchStatusFilter, setBranchStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [transferFromFilter, setTransferFromFilter] = useState<string>('all')
   const [transferToFilter, setTransferToFilter] = useState<string>('all')
   // One page-level date scope. Current-stock branch cards are intentionally
   // snapshots, while every dated branch surface (transfer history and its
   // export) reads this same range.
-  const [localBranchDateRange, setLocalBranchDateRange] = useState<DateTimeRange>(() => ({
-    startDate: '',
-    endDate: '',
-    startTime: '',
-    endTime: '',
-  }))
+  const [localBranchDateRange, setLocalBranchDateRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const branchDateRange = dateRange ?? localBranchDateRange
   const handleBranchDateRangeChange = onDateRangeChange ?? setLocalBranchDateRange
   const [statDetail, setStatDetail] = useState<StatDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false)
   const [historyReady, setHistoryReady] = useState(false)
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
@@ -409,9 +542,25 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const loadPromiseRef = useRef<Promise<unknown> | null>(null)
   const loadPromiseModeRef = useRef('')
   const saveInFlightRef = useRef(false)
-  const deleteInFlightRef = useRef(false)
-  const bulkDeleteInFlightRef = useRef(false)
-  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user })
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user, scope: 'branches' })
+  useEffect(() => {
+    const restore = (entry: MinimizedWorkEntry) => {
+      if (!canTransferStock || entry.draftKey !== transferDraftKey('branch_transfer') || String(entry.payload?.actorId) !== String(user?.id)) {
+        reparkDeniedRestore(entry)
+        return
+      }
+      setModal('transfer')
+    }
+    const pending = peekPendingRestore('branch_transfer')
+    if (pending) restore(pending)
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind === 'branch_transfer' && detail.entry) restore(detail.entry)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, listener)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, listener)
+  }, [canTransferStock, user?.id])
+  useEffect(() => { if (!isActive || !canTransferStock) setModal((current) => current === 'transfer' ? null : current) }, [isActive, canTransferStock])
 
   /**
    * 3. Data Loading
@@ -541,7 +690,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
     const channel = syncChannel.channel
-    if (channel === 'branches' || channel === 'products' || channel === 'inventory' || channel === 'users') void load(true)
+    if (channel === 'branches' || channel === 'products' || channel === 'inventory' || channel === 'users' || channel === 'settings') void load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
 
   useEffect(() => () => {
@@ -630,17 +779,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     setTransferToFilter('all')
     setTransferPage(1)
   }, [])
-  const selectedCount = selectedIds.size
-  useEffect(() => {
-    // Drop any selected id that the current status filter has hidden, so a
-    // selection made under one filter (or via select-all) can never reach
-    // bulk-delete for a branch the user isn't currently looking at.
-    const validIds = new Set(visibleBranches.map((branch) => branch.id))
-    setSelectedIds((current) => {
-      const next = new Set([...current].filter((id) => validIds.has(id)))
-      return next.size === current.size ? current : next
-    })
-  }, [visibleBranches])
   const openStatDetail = useCallback((title: ReactNode, value: ReactNode, detail: ReactNode) => {
     setStatDetail({ title, value, detail })
   }, [])
@@ -775,12 +913,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   }
 
   /**
-   * 6. CRUD Actions
+   * 6. Canonical branch metadata edits
    */
   const handleSaveBranch = async (form: BranchFormPayload) => {
+    if (!selected) return
     if (!beginSingleAction(saveInFlightRef)) return
     try {
-      const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
+      const existingSnapshot = cloneHistorySnapshot(selected)
       const payload: BranchTransportPayload = {
         ...form,
         is_default: form.is_default ? 1 : 0,
@@ -788,69 +927,35 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         userId: user?.id,
         userName: user?.name,
       }
-      const res = selected
-        ? await runBranchMutation(() => branchApi.updateBranch(selected.id, payload), 'Update branch')
-        : await runBranchMutation(() => branchApi.createBranch(payload), 'Create branch')
+      const res = await runBranchMutation(() => branchApi.updateBranch(selected.id, payload), 'Update branch')
       if (res?.success === false) {
         notify(res.error || 'Failed to save branch', 'error')
         return
       }
-      let createdBranchId = extractHistoryResultId(res)
-      if (selected && existingSnapshot) {
-        const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
-        actionHistory.pushAction({
-          label: `Edit branch ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
-          // Declarative payloads (K1): the server's 'branch.update' applier can
-          // replay a branch edit by itself, so undo/redo survive a page reload
-          // where these closures are gone. undo restores the pre-edit fields,
-          // redo the post-edit fields. When the server applies it (response
-          // applied:true) the hook calls `refresh` instead of the closure, so
-          // there is no redundant/conflicting second write; when it does not
-          // (older server), the closures below run exactly as before.
-          undo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(existingSnapshot) },
-          redo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(nextSnapshot) },
-          refresh: async () => { await load() },
-          undo: async () => {
-            const result = await runBranchMutation(
-              () => branchApi.updateBranch(existingSnapshot.id, buildBranchPayload(existingSnapshot)),
-              'Undo branch edit',
-            )
-            if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
-            await load()
-          },
-          redo: async () => {
-            const result = await runBranchMutation(
-              () => branchApi.updateBranch(nextSnapshot.id, buildBranchPayload(nextSnapshot)),
-              'Redo branch edit',
-            )
-            if (result?.success === false) throw new Error(result.error || 'Failed to reapply branch changes')
-            await load()
-          },
-        })
-      } else if (createdBranchId > 0) {
-        const createdSnapshot = cloneHistorySnapshot({ ...payload, id: createdBranchId })
-        actionHistory.pushAction({
-          label: `Add branch ${createdSnapshot.name || ''}`.trim(),
-          undo: async () => {
-            const result = await runBranchMutation(
-              () => branchApi.deleteBranch(createdBranchId, user?.id, user?.name),
-              'Undo branch create',
-            )
-            if (result?.success === false) throw new Error(result?.error || 'Failed to undo branch creation')
-            await load()
-          },
-          redo: async () => {
-            const result = await runBranchMutation(
-              () => branchApi.createBranch(buildBranchPayload(createdSnapshot)),
-              'Redo branch create',
-            )
-            if (result?.success === false) throw new Error(result.error || 'Failed to recreate branch')
-            createdBranchId = extractHistoryResultId(result)
-            await load()
-          },
-        })
-      }
-      notify(selected ? tr('branch_updated', 'Branch updated') : tr('branch_created', 'Branch created'))
+      const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
+      actionHistory.pushAction({
+        label: `Edit branch ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
+        undo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(existingSnapshot) },
+        redo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(nextSnapshot) },
+        refresh: async () => { await load() },
+        undo: async () => {
+          const result = await runBranchMutation(
+            () => branchApi.updateBranch(existingSnapshot.id, buildBranchPayload(existingSnapshot)),
+            'Undo branch edit',
+          )
+          if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
+          await load()
+        },
+        redo: async () => {
+          const result = await runBranchMutation(
+            () => branchApi.updateBranch(nextSnapshot.id, buildBranchPayload(nextSnapshot)),
+            'Redo branch edit',
+          )
+          if (result?.success === false) throw new Error(result.error || 'Failed to reapply branch changes')
+          await load()
+        },
+      })
+      notify(tr('branch_updated', 'Branch updated'))
       setModal(null)
       setSelected(null)
       await load()
@@ -861,151 +966,21 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     }
   }
 
-  const handleDelete = async (branch: BranchRecord) => {
-    if (!beginSingleAction(deleteInFlightRef)) return
-    if (!window.confirm(`Delete branch "${branch.name}"? This cannot be undone.`)) {
-      finishSingleAction(deleteInFlightRef)
-      return
-    }
-    try {
-      const snapshot = cloneHistorySnapshot(branch)
-      const res = await runBranchMutation(
-        () => branchApi.deleteBranch(branch.id, user?.id, user?.name),
-        'Delete branch',
-      )
-      // deleteBranch's direct (non-review) success returns {} with no `success`
-      // flag; a real failure is thrown. Gating on `!res?.success` showed "Cannot
-      // delete branch" on a delete that actually succeeded. Only an explicit
-      // success:false is a failure here.
-      if (res?.success === false) {
-        notify(res?.error || 'Cannot delete branch', 'error')
-        return
-      }
-      let restoredBranchId = 0
-      actionHistory.pushAction({
-        label: `Delete branch ${snapshot.name || ''}`.trim(),
-        undo: async () => {
-          const result = await runBranchMutation(
-            () => branchApi.createBranch(buildBranchPayload(snapshot)),
-            'Undo branch delete',
-          )
-          if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
-          restoredBranchId = extractHistoryResultId(result)
-          await load()
-        },
-        redo: async () => {
-          const targetId = restoredBranchId || Number(snapshot.id || 0)
-          if (!targetId) return
-          const result = await runBranchMutation(
-            () => branchApi.deleteBranch(targetId, user?.id, user?.name),
-            'Redo branch delete',
-          )
-          if (result?.success === false) throw new Error(result?.error || 'Failed to delete branch again')
-          await load()
-        },
-      })
-      notify(tr('branch_deleted', 'Branch deleted'))
-      await load()
-    } catch (error) {
-      notify(getErrorMessage(error, 'Failed to delete branch'), 'error')
-    } finally {
-      finishSingleAction(deleteInFlightRef)
-    }
-  }
-
-  const handleBulkDelete = async () => {
-    if (!selectedCount) return
-    if (!beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkDeleteBusy })) return
-    const toDelete = branches.filter((branch) => selectedIds.has(branch.id) && !branch.is_default)
-    if (!toDelete.length) {
-      finishSingleAction(bulkDeleteInFlightRef)
-      notify(tr('cannot_delete_default_branch', 'Cannot delete default branch'), 'error')
-      return
-    }
-    if (!window.confirm(`Delete ${toDelete.length} branch(es)? This cannot be undone.`)) {
-      finishSingleAction(bulkDeleteInFlightRef)
-      return
-    }
-
-    setBulkDeleteBusy(true)
-    try {
-      const deletedSnapshots = toDelete.map((branch) => ({ ...branch }))
-      const deleteRun = await runConcurrentTasks<BranchRecord, number>(toDelete, async (branch: BranchRecord) => {
-        const result = await runBranchMutation(
-          () => branchApi.deleteBranch(branch.id, user?.id, user?.name),
-          'Bulk delete branches',
-        )
-        if (result?.success === false) throw new Error(result?.error || 'Failed to delete branch')
-        return Number(branch.id || 0)
-      })
-      const failedIds = deleteRun.failures
-        .map((entry) => Number(entry.item?.id || 0))
-        .filter((id) => Number.isFinite(id) && id > 0)
-      const failed = failedIds.length
-      setSelectedIds(new Set(failedIds))
-      await load()
-      const restoredSnapshots = deletedSnapshots.filter((branch) => !failedIds.includes(Number(branch?.id || 0)))
-      if (restoredSnapshots.length) {
-        let restoredEntries: RestoredBranchEntry[] = []
-        actionHistory.pushAction({
-          label: `Delete ${restoredSnapshots.length} branch${restoredSnapshots.length === 1 ? '' : 'es'}`,
-          undo: async () => {
-            const restoreRun = await runConcurrentTasks<BranchRecord, RestoredBranchEntry>(restoredSnapshots, async (snapshot: BranchRecord) => {
-              const result = await runBranchMutation(() => branchApi.createBranch({
-                name: snapshot.name || '',
-                location: snapshot.location || '',
-                phone: snapshot.phone || '',
-                manager: snapshot.manager || '',
-                notes: snapshot.notes || '',
-                is_default: snapshot.is_default ? 1 : 0,
-                is_active: snapshot.is_active ?? 1,
-                userId: user?.id,
-                userName: user?.name,
-              }), 'Restore deleted branches')
-              if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
-              return { originalId: snapshot.id, restoredId: Number(result?.id || result?.data?.id || 0) }
-            })
-            if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore branch'))
-            restoredEntries = restoreRun.successes.map((entry) => entry.value)
-            await load()
-          },
-          redo: async () => {
-            const idsToDelete = restoredEntries.length
-              ? restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
-              : restoredSnapshots.map((snapshot) => Number(snapshot.id || 0)).filter((id) => id > 0)
-            const redoRun = await runConcurrentTasks<number, void>(idsToDelete, async (branchId: number) => {
-              const result = await runBranchMutation(
-                () => branchApi.deleteBranch(branchId, user?.id, user?.name),
-                'Redo bulk branch delete',
-              )
-              if (result?.success === false) throw new Error(result?.error || 'Failed to re-delete branch')
-            })
-            if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete branch'))
-            await load()
-          },
-        })
-      }
-      if (failed > 0) {
-        notify(tr('bulk_delete_partial_fail', '{n} branch(es) could not be deleted.').replace('{n}', String(failed)), 'error')
-        return
-      }
-      notify(tr('bulk_deleted_count', '{n} branch(es) deleted').replace('{n}', String(toDelete.length)))
-    } finally {
-      finishSingleAction(bulkDeleteInFlightRef)
-      setBulkDeleteBusy(false)
-    }
-  }
-
-  /**
-   * 7. Selection Utilities
-   */
-  const toggleSelect = (id: string | number) => {
-    setSelectedIds((prev) => {
-      const next = new Set<string | number>(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
+  const branchDraftKey = scopedWorkDraftKey(branchFormDraftBaseKey(selected?.id))
+  const canMinimizeBranchForm = selected != null && canEditBranch
+  const preserveBranchForm = () => {
+    flushPendingWorkDraft(branchDraftKey)
+    minimizeWork({
+      key: branchFormWorkKey(selected?.id),
+      kind: 'branch_form',
+      pageId: 'branches',
+      label: `${tr('edit_branch', 'Edit Branch')} — ${selected?.name || selected?.id}`,
+      payload: { branchId: selected?.id },
+      draftKey: branchDraftKey,
+      requiredPermission: { permissionKey: 'branches', actionKey: 'edit' },
     })
+    setModal(null)
+    setSelected(null)
   }
 
   // H1+X5 (Part 403): per-branch stock export -- the unpaged
@@ -1013,10 +988,15 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   // its quantity for that branch in one response, so no page loop; one
   // fetch per active branch, flattened into Branch-per-row records for the
   // shared options dialog.
-  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
+  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string; actorId: string } | null>(null)
   const [branchExportLoading, setBranchExportLoading] = useState(false)
+  const branchExportInFlightRef = useRef(false)
+  useEffect(() => { setExportDialog(null) }, [canExportBranch, user?.id])
   const openBranchExport = useCallback(async () => {
-    if (branchExportLoading) return
+    if (!branchExportAuthorityRef.current.allowed || branchExportInFlightRef.current) return
+    const actorId = branchExportAuthorityRef.current.actorId
+    const isExportCurrent = () => branchExportAuthorityRef.current.allowed && branchExportAuthorityRef.current.actorId === actorId
+    branchExportInFlightRef.current = true
     setBranchExportLoading(true)
     try {
       if (tab === 'transfers') {
@@ -1026,6 +1006,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         let totalPages = 1
 
         do {
+          if (!isExportCurrent()) return
           const response = await branchApi.getTransfers({
             startDate: branchDateRange.startDate || undefined,
             endDate: branchDateRange.endDate || undefined,
@@ -1042,11 +1023,11 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           exportRows.push(...pageRows.map((transfer) => ({
             Date: formatTransferDate(transfer.created_at),
             Product: transfer.product_name || '',
-            From: transfer.from_name || '',
-            To: transfer.to_name || '',
+            From: historyExportField(transfer.from_name),
+            To: historyExportField(transfer.to_name),
             Quantity: Number(transfer.quantity || 0),
-            Note: transfer.note || '',
-            User: transfer.user_name || '',
+            Note: historyExportField(transfer.note),
+            User: historyExportField(transfer.user_name),
           })))
           totalPages = Array.isArray(response)
             ? 1
@@ -1058,7 +1039,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           notify(tr('no_data_to_export', 'No data to export'), 'error')
           return
         }
-        setExportDialog({ rows: exportRows, baseName: 'branch-transfers' })
+        if (!isExportCurrent()) return
+        setExportDialog({ rows: exportRows, baseName: 'branch-transfers', actorId })
         return
       }
 
@@ -1067,9 +1049,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       // unbounded burst when an account has many branches.
       const stockLoad = await runConcurrentTasks<BranchRecord, Array<Record<string, unknown>> | null>(
         branches,
-        async (branch: BranchRecord) => getBranchStockRequest(branch.id, {}) as Promise<Array<Record<string, unknown>> | null>,
+        async (branch: BranchRecord) => {
+          if (!isExportCurrent()) return null
+          return getBranchStockRequest(branch.id, {}) as Promise<Array<Record<string, unknown>> | null>
+        },
         { concurrency: 4 },
       )
+      if (!isExportCurrent()) return
       if (stockLoad.failures.length) throw stockLoad.failures[0]?.error
       for (const { item: branch, value: stock } of stockLoad.successes) {
         for (const product of Array.isArray(stock) ? stock : []) {
@@ -1091,62 +1077,32 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         notify(tr('no_data_to_export', 'No data to export'), 'error')
         return
       }
-      setExportDialog({ rows, baseName: 'branch-stock' })
+      if (isExportCurrent()) setExportDialog({ rows, baseName: 'branch-stock', actorId })
     } catch (error) {
-      notify(error instanceof Error && error.message ? error.message : tr('export_failed', 'Export failed.'), 'error')
+      if (isExportCurrent()) notify(error instanceof Error && error.message ? error.message : tr('export_failed', 'Export failed.'), 'error')
     } finally {
+      branchExportInFlightRef.current = false
       setBranchExportLoading(false)
     }
   }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, branchExportLoading, branches, notify, tab, transferFromFilter, transferToFilter, tr])
 
-  // 11.1/11.2 (B6): same selection model as the table pages -- checkboxes
-  // only exist while something is selected, entered by long-pressing a
-  // branch card. Branches is a card list with no column header, so the
-  // select-all checkbox lives on the list-top row that only renders in
-  // select mode (the card list's equivalent of the table header).
-  const selectionModeActive = selectedIds.size > 0
-  const branchLongPressStateByIdRef = useRef<Map<string | number, LongPressState>>(new Map())
-  const getBranchLongPressState = (branchId: string | number): LongPressState => {
-    const existing = branchLongPressStateByIdRef.current.get(branchId)
-    if (existing) return existing
-    const created = createLongPressState()
-    branchLongPressStateByIdRef.current.set(branchId, created)
-    return created
-  }
-
-  const toggleSelectAll = () => {
-    // Scope select-all to the currently *visible* (filtered) branches, not the
-    // full unfiltered list — otherwise selecting-all under an active status
-    // filter silently selects branches the user can't see on screen, and a
-    // subsequent bulk delete removes rows the filter had hidden from view.
-    if (selectedCount === visibleBranches.length && visibleBranches.length > 0) {
-      setSelectedIds(new Set<string | number>())
-      return
-    }
-    setSelectedIds(new Set<string | number>(visibleBranches.map((branch) => branch.id)))
-  }
-
-  const branchExportButton = (
+  const branchExportButton = canExportBranch ? (
     <button
       type="button"
-      className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700 disabled:cursor-wait disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-emerald-500 dark:hover:bg-slate-700/80 dark:hover:text-emerald-300"
+      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-700 transition-colors hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60 dark:text-slate-200 dark:hover:bg-slate-700"
       onClick={() => { void openBranchExport() }}
-      disabled={branchExportLoading}
+      disabled={branchExportLoading || !canExportBranch}
       title={tab === 'transfers' ? tr('export_transfer_history', 'Export transfer history') : tr('export_branch_stock', 'Export per-branch stock')}
       aria-label={tab === 'transfers' ? tr('export_transfer_history', 'Export transfer history') : tr('export_branch_stock', 'Export per-branch stock')}
     >
       <Download className="h-4 w-4 shrink-0" />
-      <span className="truncate">{branchExportLoading ? tr('exporting', 'Exporting…') : tr('export', 'Export')}</span>
+      <span className="sr-only">{branchExportLoading ? tr('exporting', 'Exporting…') : tr('export', 'Export')}</span>
     </button>
-  )
+  ) : null
 
   return (
     <div className={`flex min-h-0 flex-col ${embedded ? 'flex-1 px-3 pb-3 pt-1 sm:px-6 sm:pb-6 sm:pt-2' : 'page-scroll p-3 sm:p-6'}`}>
-      {/* The aggregate Branches / Items / Value stat cards that used to sit
-          here (above the Branches / Transfer History tabs) were removed
-          (user, Aug 29: "remove the stats above the branches/transfers
-          section"). The per-branch stat tiles inside each expanded branch
-          below are kept, and the Inventory-moved "Stats" hub section is kept. */}
+      {/* Current stock totals stay independent of the transfer-history range. */}
 
       {loadError && !loading && !branches.length && !transfers.length ? (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
@@ -1180,7 +1136,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           `visibleBranches.length`), the 'transfers' tab has no equivalent,
           and pulling a tab-conditional row up into this always-rendered
           wrapper would change its behavior, not just its position. */}
-      <div className="sticky top-2 z-30 -mx-1 mb-3 space-y-2 bg-gray-50/95 pb-1.5 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 mb-3 space-y-2 bg-gray-50 pb-1.5 dark:bg-gray-900 sm:mx-0">
         {/* Merged toolbar row. On phones (user-reported "buttons on each
             other"): four equal flex-1 buttons gave History only ~1/4 of a
             narrow row, and its nowrap "History" label overflowed its box into
@@ -1193,12 +1149,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             rather than a fixed toolbar control. */}
         {!showDateRange ? <div className="flex min-w-0 items-stretch gap-1 overflow-x-auto pt-1">
           <ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} className="w-auto shrink-0" showLabel dense />
-          {selectedCount > 0 ? (
-            <button className="btn-danger flex-shrink-0 text-sm" onClick={handleBulkDelete} disabled={bulkDeleteBusy}>
-              <Trash2 className="h-4 w-4" />
-              <span>{tr('delete', 'Delete')} ({selectedCount})</span>
-            </button>
-          ) : null}
           {branchExportButton}
         </div> : null}
         {showDateRange ? (
@@ -1209,11 +1159,18 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               setTransferPage(1)
             }}
             t={t}
+            leading={tab === 'branches' ? (
+              <button type="button" aria-expanded={statsOpen} aria-controls="branch-overview-stats" onClick={() => setStatsOpen((open) => !open)}
+                className={`inline-flex h-10 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold ${statsOpen ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}>
+                <BarChart3 className="h-4 w-4" />{tr('stats', 'Stats')}
+              </button>
+            ) : undefined}
+            actions={branchExportButton}
             className="min-w-0"
-            actions={<><ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} className="w-auto shrink-0" showLabel dense />{branchExportButton}</>}
           />
         ) : null}
         <div className="flex min-w-0 items-center gap-1 overflow-x-auto border-b border-gray-200 pt-0.5 dark:border-gray-700">
+          {showDateRange ? <ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} className="w-auto shrink-0" showLabel dense /> : null}
           {showSectionNavigation ? <div className="flex gap-1 overflow-x-auto">
             {[
               { id: 'branches' as BranchTab, label: tr('branches', 'Branches') },
@@ -1234,7 +1191,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           </div> : null}
           {canTransferStock ? (
             <button
-              className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300"
               onClick={() => setModal('transfer')}
               title={tr('transfer', 'Transfer')}
               aria-label={tr('transfer', 'Transfer')}
@@ -1243,15 +1200,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               <span>{tr('transfer', 'Transfer')}</span>
             </button>
           ) : null}
-          {tab === 'branches' ? <button
-            className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:border-blue-800 hover:bg-blue-700"
-            onClick={() => { setSelected(null); setModal('form') }}
-            title={tr('add_branch', 'Add Branch')}
-            aria-label={tr('add_branch', 'Add Branch')}
-          >
-            <Plus className="h-4 w-4 shrink-0" />
-            <span>{tr('branches', 'Branch')}</span>
-          </button> : null}
           <div className="mb-1 ml-auto shrink-0">
             <FilterMenu
               label={tr('filters', 'Filters')}
@@ -1263,6 +1211,21 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           </div>
         </div>
       </div>
+
+      {tab === 'branches' && statsOpen ? (
+        <section id="branch-overview-stats" className="mb-3 space-y-2" aria-label={tr('current_stock', 'Current Stock')}>
+          <p className="text-xs text-slate-500">{tr('current_stock', 'Current Stock')}</p>
+          {statsLoading ? <p role="status">{tr('loading', 'Loading')}…</p> : statsError ? (
+            <div role="status"><p>{statsError}</p><button type="button" className="btn-secondary h-10" onClick={() => setStatsRefresh((value) => value + 1)}>{tr('retry', 'Retry')}</button></div>
+          ) : branchSummary ? (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <BranchStatTile label={tr('branches', 'Branches')} value={branchSummary.branch_count ?? 0} />
+              <BranchStatTile label={tr('products', 'Products')} value={branchSummary.total_products ?? 0} />
+              <BranchStatTile label={tr('stock_value', 'Stock Value')} value={fmtUSD(branchSummary.stock_value_usd ?? 0)} />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {tab === 'branches' ? (
         <div className="space-y-3">
@@ -1280,30 +1243,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                   </div>
                 </div>
               ))}
-            </div>
-          ) : null}
-
-          {/* 11.2 (B6): no standing "Select all (N)" control -- this row only
-              exists in select mode, where its checkbox is the select-all. */}
-          {!loading && visibleBranches.length > 0 && selectionModeActive ? (
-            <div className="flex items-center gap-3 px-2">
-              <input
-                id="branches-select-all"
-                name="branches_select_all"
-                aria-label="Select all branches"
-                type="checkbox"
-                className="h-4 w-4 rounded"
-                checked={selectedCount === visibleBranches.length && visibleBranches.length > 0}
-                ref={(element) => {
-                  if (element) {
-                    element.indeterminate = selectedCount > 0 && selectedCount < visibleBranches.length
-                  }
-                }}
-                onChange={toggleSelectAll}
-              />
-              <span className="text-xs text-gray-500 dark:text-gray-400">
-                {`${selectedCount} selected`}
-              </span>
             </div>
           ) : null}
 
@@ -1336,44 +1275,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             const outStockCount = Number(stockSummary.out_of_stock_products ?? 0)
             const totalValue = Number(stockSummary.positive_value_usd ?? stockSummary.total_value_usd ?? 0)
 
-            const cardLongPressState = getBranchLongPressState(branch.id)
-            const cardLongPress = createLongPressHandlers(cardLongPressState, {
-              disabled: selectionModeActive,
-              onLongPress: () => {
-                if (!selectedIds.has(branch.id)) toggleSelect(branch.id)
-              },
-              // No onClick: a plain tap on the card keeps hitting whatever
-              // inner control it landed on (expand, manage, transfer).
-            })
             return (
               <div
                 key={branch.id}
-                className={`card select-none overflow-hidden transition-all ${selectedIds.has(branch.id) ? 'ring-2 ring-blue-400 dark:ring-blue-500' : ''}`}
-                {...(selectionModeActive ? {} : cardLongPress)}
-                // The ghost click that follows a fired long-press would land
-                // on an inner control (e.g. the expand button) -- swallow it
-                // in the capture phase so entering select mode doesn't also
-                // toggle whatever sat under the finger.
-                onClickCapture={(event) => {
-                  if (consumeLongPressClick(cardLongPressState)) {
-                    event.preventDefault()
-                    event.stopPropagation()
-                  }
-                }}
+                className="card overflow-hidden transition-all"
               >
                 <div className="p-3 sm:p-4">
                   <div className="flex items-start gap-2">
-                    {selectionModeActive ? (
-                    <input
-                      id={`branch-select-${branch.id}`}
-                      name={`branch_select_${branch.id}`}
-                      aria-label={`Select branch ${branch.name}`}
-                      type="checkbox"
-                      className="mt-1 h-4 w-4 flex-shrink-0 rounded"
-                      checked={selectedIds.has(branch.id)}
-                      onChange={() => toggleSelect(branch.id)}
-                    />
-                    ) : null}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-3">
                         {/* The whole name/details block is now the click
@@ -1423,24 +1331,14 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                           >
                             <Warehouse className="h-3.5 w-3.5" />
                           </button>
-                          <button
+                          {canEditBranch && branchRoleFromName(branch.name) !== 'other' && !!branch.is_active ? <button
                             onClick={() => { setSelected(branch); setModal('form') }}
                             className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                             title={tr('edit', 'Edit')}
                             aria-label={tr('edit', 'Edit')}
                           >
                             <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          {!branch.is_default ? (
-                            <button
-                              onClick={() => handleDelete(branch)}
-                              className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-red-200 text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-900/20"
-                              title={tr('delete', 'Delete')}
-                              aria-label={tr('delete', 'Delete')}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          ) : null}
+                          </button> : null}
                         </div>
                       </div>
 
@@ -1513,7 +1411,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                   (name left, qty right) needs the width; 4-5 skinny columns
                                   truncated every real product name. */}
                               <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-                                {buildProductGroups(inStock).flatMap((group) => {
+                                {/* preserveInputOrder while a term is in the box: this list is
+                                    the server response from runBranchStockSearch, already ranked
+                                    by relevance (exact barcode, then exact/prefix name, then
+                                    bm25 -- cloudflare/src/lib/productSearchQuery.ts). Grouping
+                                    used to re-sort it A-Z and bury the scanned product. With an
+                                    empty box this is a plain browse list and stays A-Z. */}
+                                {buildProductGroups(inStock, undefined, { preserveInputOrder: Boolean(getBranchStockQuery(branch.id)) }).flatMap((group) => {
                                   const cards = group.rows.map((row) => {
                                     const product = row as unknown as BranchStockProduct
                                     // Neutral surface + a thin colored left edge and colored qty,
@@ -1525,7 +1429,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                     const cardQty = Number(product.branch_quantity || 0)
                                     const stockTone = cardQty <= Number(product.out_of_stock_threshold || 0)
                                       ? 'out'
-                                      : cardQty <= Number(product.low_stock_threshold || 10) ? 'low' : 'ok'
+                                      : cardQty <= effectiveLowStockThreshold(lowStockConfig, product.low_stock_threshold) ? 'low' : 'ok'
                                     return (
                                     <div
                                       key={product.id}
@@ -1541,9 +1445,15 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                           spaces between the name and stock quantity") -- the
                                           name block no longer stretches (no flex-1), only the
                                           receive button floats to the card edge (ml-auto). */}
+                                      {/* No SKU sub-line (N10): SKU was an
+                                          app-wide outlier and left the Products
+                                          tab's table; the same field in the same
+                                          branch-stock context goes with it, and
+                                          stays on the product's own detail
+                                          surfaces. */}
                                       <div className="min-w-0">
-                                        <div className="whitespace-normal break-words font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
-                                        {product.sku ? <div className="break-all font-mono text-[10px] leading-tight text-gray-400">{product.sku}</div> : null}
+                                        {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+                                        <div className="min-w-0 font-medium text-gray-800 dark:text-gray-200"><ProductNameRail name={String((product.name) ?? '')} /></div>
                                       </div>
                                       <span
                                         className={`shrink-0 whitespace-nowrap text-sm font-bold tabular-nums ${
@@ -1559,8 +1469,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                         <button
                                           type="button"
                                           className="ml-auto flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-600 dark:hover:bg-blue-900/40 dark:hover:text-blue-300"
-                                          title={tr('receive_batch', 'Receive Batch')}
-                                          aria-label={`${tr('receive_batch', 'Receive Batch')} — ${product.name || ''}`}
+                                          title={tr('receive_batch', 'Receive Stock')}
+                                          aria-label={`${tr('receive_batch', 'Receive Stock')} — ${product.name || ''}`}
                                           onClick={() => setReceiveTarget({ product, branchId: String(branch.id) })}
                                         >
                                           <Plus className="h-3.5 w-3.5" />
@@ -1592,7 +1502,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                       className="col-span-full flex min-w-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-left text-xs transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/60 dark:hover:bg-slate-800"
                                     >
                                       {groupCollapsed ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" /> : <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />}
-                                      <span className="min-w-0 whitespace-normal break-words font-semibold text-slate-700 dark:text-slate-200">{group.name}</span>
+                                      {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+                                      <span className="min-w-0 font-semibold text-slate-700 dark:text-slate-200"><ProductNameRail name={String((group.name) ?? '')} /></span>
                                       <span className="flex-shrink-0 rounded-full bg-slate-200 px-1.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
                                         {group.rows.length}
                                       </span>
@@ -1637,13 +1548,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               <button type="button" key={transfer.id} onClick={() => setTransferDetail(transfer)} className="card w-full p-2.5 text-left transition hover:border-violet-300 hover:bg-violet-50/30 dark:hover:border-violet-800 dark:hover:bg-violet-950/10">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="mb-0.5 flex min-w-0 items-center gap-1.5">
-                      <span className="truncate font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-300" title={`Transfer #${transfer.id}`}>
-                        {formatTransferReference(transfer.id)}
-                      </span>
-                      <span className="shrink-0 rounded bg-violet-50 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-600 dark:bg-violet-950/40 dark:text-violet-300">
-                        {tr('transfer', 'Transfer')}
-                      </span>
+                    <div className="mb-0.5 truncate font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-300" title={`Transfer #${transfer.id}`}>
+                      {formatTransferReference(transfer.id)}
                     </div>
                     <div className="whitespace-normal break-words text-sm font-semibold text-gray-900 dark:text-white">{transfer.product_name}</div>
                     <div className="mt-0.5 text-[11px] text-gray-400">{formatTransferDate(transfer.created_at)}</div>
@@ -1654,13 +1560,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                   </div>
                 </div>
                 <div className="mt-2 flex min-w-0 items-center gap-1 text-[11px]">
-                  <span className="min-w-0 truncate rounded bg-rose-50 px-1.5 py-0.5 font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{transfer.from_name || 'N/A'}</span>
-                  <ArrowRightLeft className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
-                  <span className="min-w-0 truncate rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">{transfer.to_name || 'N/A'}</span>
+                  <span className="min-w-0 truncate rounded bg-rose-50 px-1.5 py-0.5 font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{historyField(transfer.from_name)}</span>
+                  <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
+                  <span className="min-w-0 truncate rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">{historyField(transfer.to_name)}</span>
                 </div>
                 <div className="mt-2 flex min-w-0 items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                  <div className="min-w-0 truncate" title={transfer.note || undefined}>{transfer.note || '-'}</div>
-                  <div className="shrink-0 truncate">{transfer.user_name || 'N/A'}</div>
+                  <div className="min-w-0 truncate" title={transfer.note || undefined}>{historyField(transfer.note)}</div>
+                  <div className="shrink-0 truncate">{historyActor(transfer.user_name)}</div>
                 </div>
               </button>
             ))}
@@ -1691,20 +1597,19 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                   <tr key={transfer.id} className="table-row cursor-pointer hover:bg-violet-50/50 dark:hover:bg-violet-950/10" onClick={() => setTransferDetail(transfer)}>
                     <td className="whitespace-nowrap px-2.5 py-1.5">
                       <div className="font-mono text-[11px] font-semibold text-violet-700 dark:text-violet-300" title={`Transfer #${transfer.id}`}>{formatTransferReference(transfer.id)}</div>
-                      <div className="text-[9px] font-bold uppercase tracking-wide text-violet-500 dark:text-violet-400">{tr('transfer', 'Transfer')}</div>
                     </td>
                     <td className="whitespace-nowrap px-2.5 py-1.5 text-[11px] text-gray-400">{formatTransferDate(transfer.created_at)}</td>
                     <td className="max-w-[16rem] whitespace-normal break-words px-2.5 py-1.5 font-medium text-gray-800 dark:text-gray-200">{transfer.product_name}</td>
                     <td className="px-2.5 py-1.5">
                       <div className="flex min-w-0 items-center gap-1">
-                        <span className="max-w-[8rem] truncate rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" title={transfer.from_name || undefined}>{transfer.from_name || 'N/A'}</span>
-                        <ArrowRightLeft className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
-                        <span className="max-w-[8rem] truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" title={transfer.to_name || undefined}>{transfer.to_name || 'N/A'}</span>
+                        <span className="max-w-[8rem] truncate rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" title={transfer.from_name || undefined}>{historyField(transfer.from_name)}</span>
+                        <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
+                        <span className="max-w-[8rem] truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" title={transfer.to_name || undefined}>{historyField(transfer.to_name)}</span>
                       </div>
                     </td>
                     <td className="bg-blue-50/30 px-2.5 py-1.5 text-right font-bold text-blue-700 dark:bg-blue-950/10 dark:text-blue-300">{transfer.quantity}</td>
-                    <td className="max-w-[14rem] px-2.5 py-1.5 text-gray-500"><div className="truncate" title={transfer.note || undefined}>{transfer.note || '-'}</div></td>
-                    <td className="max-w-[10rem] px-2.5 py-1.5 text-gray-500"><div className="truncate" title={transfer.user_name || undefined}>{transfer.user_name || '-'}</div></td>
+                    <td className="max-w-[14rem] px-2.5 py-1.5 text-gray-500"><div className="truncate" title={transfer.note || undefined}>{historyField(transfer.note)}</div></td>
+                    <td className="max-w-[10rem] px-2.5 py-1.5 text-gray-500"><div className="truncate" title={transfer.user_name || undefined}>{historyActor(transfer.user_name)}</div></td>
                   </tr>
                 ))}
               </tbody>
@@ -1732,13 +1637,19 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         </>
       ) : null}
 
-      {modal === 'form' ? (
-        <Modal title={selected ? `${tr('edit_branch', 'Edit Branch')}: ${selected.name}` : `+ ${tr('add_branch', 'Add Branch')}`} onClose={() => setModal(null)}>
+      {modal === 'form' && selected ? (
+        <Modal
+          title={`${tr('edit_branch', 'Edit Branch')}: ${selected.name}`}
+          onClose={() => setModal(null)}
+          onMinimize={canMinimizeBranchForm ? preserveBranchForm : undefined}
+          headerExtra={canMinimizeBranchForm ? <MinimizeButton tr={(key, fallback) => tr(key, fallback)} onMinimize={preserveBranchForm} /> : null}
+          unsavedChanges={{ workKey: branchFormWorkKey(selected?.id) }}
+        >
           <BranchForm branch={selected} onSave={handleSaveBranch} onClose={() => setModal(null)} />
         </Modal>
       ) : null}
 
-      {exportDialog ? (
+      {exportDialog && canExportBranch && exportDialog.actorId === String(user?.id ?? '') ? (
         <Suspense fallback={null}>
           <ExportOptionsDialog
             title={t('export_options_title') || 'Export options'}
@@ -1746,6 +1657,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             columns={columnsFromRows(exportDialog.rows)}
             rows={exportDialog.rows}
             rememberKey="branches"
+            canExport={() => branchExportAuthorityRef.current.allowed && branchExportAuthorityRef.current.actorId === exportDialog.actorId}
             t={t}
             notify={notify}
             onClose={() => setExportDialog(null)}
@@ -1755,12 +1667,15 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       {modal === 'transfer' ? (
         <Suspense fallback={null}>
           <LazyTransferModal
+            key={`transfer-${user?.id}`}
             branches={transferBranchOptions}
             onClose={() => setModal(null)}
             onDone={() => {
               setModal(null)
               load()
               setBranchStocks({})
+              setStatsRefresh((value) => value + 1)
+              actionHistory.refreshServerItems()
             }}
             user={user || undefined}
             notify={notify}
@@ -1768,16 +1683,16 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         </Suspense>
       ) : null}
       {transferDetail ? (
-        <Modal title={`${tr('transfer_history', 'Transfer History')} · ${formatTransferReference(transferDetail.id)}`} onClose={() => setTransferDetail(null)}>
+        <Modal title={`${tr('transfer_history', 'Transfer History')} · ${formatTransferReference(transferDetail.id)}`} onClose={() => setTransferDetail(null)} unsavedChanges="read-only">
           <div className="space-y-3 text-sm">
             <dl className="divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
               {[
                 [tr('product_name', 'Product'), transferDetail.product_name || '—'],
-                [tr('route', 'Route'), `${transferDetail.from_name || '—'} → ${transferDetail.to_name || '—'}`],
+                [tr('route', 'Route'), `${historyField(transferDetail.from_name)} → ${historyField(transferDetail.to_name)}`],
                 [tr('quantity', 'Quantity'), String(transferDetail.quantity ?? '—')],
                 [tr('date', 'Date'), formatTransferDate(transferDetail.created_at)],
-                [tr('user', 'User'), transferDetail.user_name || '—'],
-                [tr('transfer_note', 'Note'), transferDetail.note || '—'],
+                [tr('user', 'User'), historyActor(transferDetail.user_name)],
+                [tr('transfer_note', 'Note'), historyField(transferDetail.note)],
               ].map(([label, value]) => (
                 <div key={label} className="flex items-start justify-between gap-3 px-3 py-2">
                   <dt className="text-xs text-slate-500 dark:text-slate-400">{label}</dt>
@@ -1801,6 +1716,17 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             defaultBranchId={receiveTarget.branchId}
             notify={notify}
             onClose={() => setReceiveTarget(null)}
+            onMinimize={({ branchId, draftKey, label, productId, productName, productUnit }) => {
+              minimizeWork({
+                key: `receive-batch-${String(productId)}`,
+                kind: 'receive_batch',
+                pageId: 'branches',
+                label,
+                payload: { branchId, productId, productName, productUnit },
+                draftKey,
+                requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
+              })
+            }}
             onReceived={() => {
               const branchId = receiveTarget.branchId
               setReceiveTarget(null)
@@ -1813,7 +1739,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       ) : null}
 
       {statDetail ? (
-        <Modal title={statDetail.title} onClose={() => setStatDetail(null)}>
+        <Modal title={statDetail.title} onClose={() => setStatDetail(null)} unsavedChanges="read-only">
           <div className="space-y-3">
             <div className="rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/70">
               <div className="text-xs font-semibold uppercase text-slate-400">{statDetail.title}</div>

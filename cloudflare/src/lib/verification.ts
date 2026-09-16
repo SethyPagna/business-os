@@ -1,4 +1,5 @@
 import { getDb } from './db'
+import { sqliteUtcTimestamp } from './rateLimit'
 import type { Env } from '../index'
 
 // Real password-reset send/verify -- auth priority item 1 from
@@ -47,28 +48,16 @@ export function normalizeEmail(input: string | null | undefined): string {
   return String(input || '').trim().toLowerCase()
 }
 
-// Callers should treat "rate limited" as "silently skip sending" rather
-// than surfacing it distinctly -- the public response must stay identical
-// to the "no such account" case to avoid enumeration.
-async function isRateLimited(env: Env, userId: number, purpose: string, requesterIp: string | null): Promise<boolean> {
-  const db = getDb(env)
-  const windowStart = new Date(Date.now() - REQUEST_WINDOW_MS).toISOString()
-
-  const userCount = await db.prepare(`
-    SELECT COUNT(*) AS n FROM verification_codes
-    WHERE user_id = @user_id AND purpose = @purpose AND created_at > @since
-  `).get<{ n: number }>({ user_id: userId, purpose, since: windowStart })
-  if ((userCount?.n || 0) >= REQUEST_LIMIT_PER_USER) return true
-
-  if (requesterIp) {
-    const ipCount = await db.prepare(`
-      SELECT COUNT(*) AS n FROM verification_codes
-      WHERE requester_ip = @ip AND created_at > @since
-    `).get<{ n: number }>({ ip: requesterIp, since: windowStart })
-    if ((ipCount?.n || 0) >= REQUEST_LIMIT_PER_IP) return true
-  }
-
-  return false
+// SQLite timestamps without a zone are UTC, not the host's local timezone.
+// Reject malformed dates (including JS-normalized dates such as February 30)
+// rather than allowing NaN to bypass the expiry comparison.
+function expiryMilliseconds(value: string): number {
+  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})?$/.exec(value)
+  if (!match) return NaN
+  const base = `${match[1]}T${match[2]}${match[3] || ''}`
+  const utc = Date.parse(`${base}Z`)
+  if (!Number.isFinite(utc) || new Date(utc).toISOString().slice(0, 19) !== base.slice(0, 19)) return NaN
+  return Date.parse(`${base}${match[4] || 'Z'}`)
 }
 
 // Sends the recovery link by email via Resend (https://resend.com) -- a
@@ -77,7 +66,7 @@ async function isRateLimited(env: Env, userId: number, purpose: string, requeste
 // `RESEND_FROM_EMAIL` (wrangler var, must be a verified sender/domain on
 // the Resend account) to actually send. Without them, this logs and
 // returns `sent: false` -- callers must NOT let that change the response
-// shown to the requester (see isRateLimited's comment on enumeration).
+// shown to the requester, to avoid account enumeration.
 async function sendRecoveryEmail(env: Env, toEmail: string, link: string): Promise<{ sent: boolean }> {
   if (!env.RESEND_API_KEY || !env.RESEND_FROM_EMAIL) {
     console.warn('[verification] RESEND_API_KEY/RESEND_FROM_EMAIL not configured -- recovery link not emailed. Set both with `wrangler secret put RESEND_API_KEY` and a RESEND_FROM_EMAIL var before relying on this in production.')
@@ -146,27 +135,50 @@ export async function issuePasswordResetLink(
   redirectTo: string,
   requesterIp: string | null,
 ): Promise<{ issued: boolean; sent: boolean }> {
-  if (await isRateLimited(env, userId, PASSWORD_RESET_LINK_PURPOSE, requesterIp)) {
-    return { issued: false, sent: false }
-  }
-
   const db = getDb(env)
   const token = generateLinkToken()
   const tokenHash = await hashToken(token)
-  const expiresAt = new Date(Date.now() + LINK_TTL_MS).toISOString()
+  const now = Date.now()
+  const createdAt = sqliteUtcTimestamp(now)
+  const expiresAt = sqliteUtcTimestamp(now + LINK_TTL_MS)
+  const params = {
+    user_id: userId, purpose: PASSWORD_RESET_LINK_PURPOSE, code_hash: tokenHash,
+    target: email, expires_at: expiresAt, requester_ip: requesterIp,
+    created_at: createdAt, since: sqliteUtcTimestamp(now - REQUEST_WINDOW_MS),
+    user_max: REQUEST_LIMIT_PER_USER, ip_max: REQUEST_LIMIT_PER_IP,
+  }
 
-  await db.batch([
+  // Both quotas and admission are one conditional write. Invalidate older
+  // links only if this batch admitted a replacement; a denied request must
+  // neither send mail nor revoke the user's still-valid link. The id bound
+  // prevents an adapter retry from invalidating a newer admitted request.
+  const results = await db.batch([
+    {
+      sql: `INSERT INTO verification_codes (user_id, purpose, code_hash, target, max_attempts, expires_at, requester_ip, created_at)
+            SELECT @user_id, @purpose, @code_hash, @target, 1, @expires_at, @requester_ip, @created_at
+            WHERE (SELECT COUNT(*) FROM (
+              SELECT 1 FROM verification_codes
+              WHERE user_id = @user_id AND purpose = @purpose AND created_at > @since
+              LIMIT @user_max
+            )) < @user_max
+            AND (@requester_ip IS NULL OR @requester_ip = '' OR (SELECT COUNT(*) FROM (
+              SELECT 1 FROM verification_codes
+              WHERE requester_ip = @requester_ip AND created_at > @since
+              LIMIT @ip_max
+            )) < @ip_max)
+            AND NOT EXISTS (SELECT 1 FROM verification_codes
+                            WHERE user_id = @user_id AND purpose = @purpose AND code_hash = @code_hash)`,
+      params,
+    },
     {
       sql: `UPDATE verification_codes SET consumed_at = CURRENT_TIMESTAMP
-            WHERE user_id = @user_id AND purpose = @purpose AND consumed_at IS NULL`,
-      params: { user_id: userId, purpose: PASSWORD_RESET_LINK_PURPOSE },
-    },
-    {
-      sql: `INSERT INTO verification_codes (user_id, purpose, code_hash, target, max_attempts, expires_at, requester_ip)
-            VALUES (@user_id, @purpose, @code_hash, @target, 1, @expires_at, @requester_ip)`,
-      params: { user_id: userId, purpose: PASSWORD_RESET_LINK_PURPOSE, code_hash: tokenHash, target: email, expires_at: expiresAt, requester_ip: requesterIp },
+            WHERE user_id = @user_id AND purpose = @purpose AND consumed_at IS NULL
+              AND id < (SELECT id FROM verification_codes
+                        WHERE user_id = @user_id AND purpose = @purpose AND code_hash = @code_hash)`,
+      params,
     },
   ])
+  if (results[0]?.meta?.changes !== 1) return { issued: false, sent: false }
 
   // Matches the URL shape Login.tsx already parses: hash fragment
   // access_token + type=recovery, appended to the page the client sent as
@@ -197,13 +209,18 @@ export async function consumePasswordResetLink(env: Env, token: string): Promise
   `).get<{ id: number; user_id: number; expires_at: string }>({ code_hash: tokenHash, purpose: PASSWORD_RESET_LINK_PURPOSE })
 
   if (!row) return { ok: false, reason: 'invalid' }
-  if (new Date(row.expires_at).getTime() < Date.now()) {
+  const expiresAt = expiryMilliseconds(row.expires_at)
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
     await db.prepare('UPDATE verification_codes SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?').run([row.id])
     return { ok: false, reason: 'expired' }
   }
 
-  await db.prepare('UPDATE verification_codes SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?').run([row.id])
-  return { ok: true, userId: row.user_id }
+  const consumed = await db.prepare(`
+    UPDATE verification_codes SET consumed_at = CURRENT_TIMESTAMP
+    WHERE id = @id AND consumed_at IS NULL AND expires_at = @expires_at
+      AND julianday(expires_at) > julianday(@now)
+  `).run({ id: row.id, expires_at: row.expires_at, now: sqliteUtcTimestamp(Date.now()) })
+  return consumed.changes === 1 ? { ok: true, userId: row.user_id } : { ok: false, reason: 'invalid' }
 }
 
 export function isEmailConfigured(env: Env): boolean {

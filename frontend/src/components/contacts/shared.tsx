@@ -67,6 +67,9 @@ interface DetailModalProps {
   // Optional extra buttons in the footer row, before Edit -- e.g. the
   // supplier detail's "Purchases" drill (Part 384 D5).
   extraButtons?: Array<{ label: string; onClick: () => void }>
+  // Supplier contact options can contain long unbroken emails/names. This is
+  // opt-in so other contact detail surfaces retain their current wrapping.
+  wrapValuesAnywhere?: boolean
 }
 
 interface ContactTableProps<T extends ContactRow> {
@@ -82,6 +85,10 @@ interface ContactTableProps<T extends ContactRow> {
   selectionModeActive?: boolean
   renderRow?: (row: T) => ReactNode
   renderCard?: (row: T) => ReactNode
+  // Supplier directory opts into cards at every width. Keep the default
+  // responsive table/card split for Customers and Delivery.
+  cardsAtAllWidths?: boolean
+  cardGridClassName?: string
   totalCount?: number
   page?: number
   pageSize?: number
@@ -245,24 +252,24 @@ export function ThreeDotMenu({ onDetails, onEdit, onDelete }: ThreeDotMenuProps)
   )
 }
 
-export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t, extraButtons = [] }: DetailModalProps) {
+export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t, extraButtons = [], wrapValuesAnywhere = false }: DetailModalProps) {
   const title = item?.name || (typeof t === 'function' ? (t('details') || 'Details') : 'Details')
 
   return (
-    <Modal title={title} onClose={onClose}>
+    <Modal title={title} onClose={onClose} unsavedChanges="read-only">
       <div className="space-y-2.5">
         {/* Compact detail rows (user, Part 567: "the details when click to
             view needs to be made more compact") -- narrower label column and
             tighter vertical padding than the old 140px / py-2 layout, so more
             fields fit without scrolling. */}
-        <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-gray-200 dark:border-zinc-700">
+        <div className="max-h-[calc(60*var(--app-vh))] overflow-y-auto rounded-xl border border-gray-200 dark:border-zinc-700">
           {fields.map(([label, value], index) => (
             <div
               key={`${String(label)}-${index}`}
               className="grid grid-cols-[112px,1fr] gap-2 border-b border-gray-100 px-3 py-1.5 text-[13px] last:border-b-0 dark:border-zinc-800"
             >
               <div className="font-medium text-gray-500 dark:text-gray-400">{label || '-'}</div>
-              <div className="whitespace-pre-line break-words text-gray-800 dark:text-gray-200">{value || '-'}</div>
+              <div className={`whitespace-pre-line break-words text-gray-800 dark:text-gray-200 ${wrapValuesAnywhere ? 'min-w-0 [overflow-wrap:anywhere]' : ''}`}>{value || '-'}</div>
             </div>
           ))}
         </div>
@@ -289,6 +296,8 @@ export function ContactTable<T extends ContactRow>({
   selectionModeActive = false,
   renderRow,
   renderCard,
+  cardsAtAllWidths = false,
+  cardGridClassName = '',
   totalCount,
   page: controlledPage,
   pageSize: controlledPageSize,
@@ -332,7 +341,7 @@ export function ContactTable<T extends ContactRow>({
           details={loadingDetails}
           onRetry={onRetry}
         />
-        <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-zinc-700 md:block">
+        <div className={cardsAtAllWidths ? 'hidden' : 'hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-zinc-700 md:block'}>
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500 dark:bg-zinc-800 dark:text-gray-400">
               <tr>
@@ -365,7 +374,7 @@ export function ContactTable<T extends ContactRow>({
             </tbody>
           </table>
         </div>
-        <div className="space-y-3 md:hidden">
+        <div className={cardsAtAllWidths ? `grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3 ${cardGridClassName}` : 'space-y-3 md:hidden'}>
           {skeletonRows.slice(0, 6).map((row) => (
             <div key={`contact-mobile-skeleton-${row}`} className="card animate-pulse p-3">
               <div className="mb-3 flex items-start justify-between gap-3">
@@ -409,7 +418,7 @@ export function ContactTable<T extends ContactRow>({
           Refreshing...
         </div>
       ) : null}
-      <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-zinc-700 md:block">
+      <div className={cardsAtAllWidths ? 'hidden' : 'hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-zinc-700 md:block'}>
         <table className="w-full border-collapse text-xs">
           <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 dark:bg-zinc-800 dark:text-slate-400">
             <tr>
@@ -421,7 +430,7 @@ export function ContactTable<T extends ContactRow>({
                       ref={selectAllRef}
                       id="contacts-select-all"
                       name="contacts_select_all"
-                      aria-label="Select all contacts"
+                      aria-label={t?.('select_all') || 'Select all contacts'}
                       type="checkbox"
                       className="h-4 w-4 rounded"
                       checked={!!selectAll?.checked}
@@ -441,7 +450,7 @@ export function ContactTable<T extends ContactRow>({
           </tbody>
         </table>
       </div>
-      <div className="space-y-2 md:hidden">
+      <div className={cardsAtAllWidths ? `grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3 ${cardGridClassName}` : 'space-y-2 md:hidden'}>
         {pagedRows.map((row) => renderCard?.(row))}
       </div>
       <div className="mt-3 flex justify-center">

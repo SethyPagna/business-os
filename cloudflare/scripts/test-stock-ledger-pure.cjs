@@ -24,14 +24,25 @@ function ok(cond, label) {
   console.log(`PASS ${label}`)
 }
 
-// ---- compile the real kernel (only local import: businessDateWindow) -------
+// ---- compile the real kernel (local imports: businessDateWindow, ----------
+// ---- stockInSessionsQuery's receipt-type vocabulary) ----------------------
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-ledger-'))
 fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'stockLedgerQuery.ts'), path.join(tmpDir, 'stockLedgerQuery.ts'))
-// stockLedgerQuery.ts imports ./businessDateWindow (the UTC+7 helpers); copy that
-// pure dependency in so the isolated compile resolves and emits it.
+// stockLedgerQuery.ts imports ./businessDateWindow (the UTC+7 helpers) and
+// ./stockInSessionsQuery (STOCK_RECEIPT_MOVEMENT_TYPES, so the shared-lot
+// receipt count and the Stock-in Sessions list agree on what a receipt is);
+// copy those pure dependencies in so the isolated compile resolves and emits.
 fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts'), path.join(tmpDir, 'businessDateWindow.ts'))
+// N13: and ./movementBranchName, which resolves a movement row's branch
+// through branch_id when the row carries no branch_name snapshot.
+fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'movementBranchName.ts'), path.join(tmpDir, 'movementBranchName.ts'))
+// N13: and the actor / receipt resolutions the same SELECT list now carries;
+// stockInSessionsQuery came with the session lane's receipt-type list.
+fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'movementActorName.ts'), path.join(tmpDir, 'movementActorName.ts'))
+fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'movementReference.ts'), path.join(tmpDir, 'movementReference.ts'))
+fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'stockInSessionsQuery.ts'), path.join(tmpDir, 'stockInSessionsQuery.ts'))
 execSync(
-  `npx tsc "${path.join(tmpDir, 'stockLedgerQuery.ts')}" "${path.join(tmpDir, 'businessDateWindow.ts')}" --outDir "${tmpDir}" --module commonjs --target es2022 --strict --skipLibCheck${ignoreConfigFlag}`,
+  `npx tsc "${path.join(tmpDir, 'stockLedgerQuery.ts')}" "${path.join(tmpDir, 'businessDateWindow.ts')}" "${path.join(tmpDir, 'movementBranchName.ts')}" "${path.join(tmpDir, 'movementActorName.ts')}" "${path.join(tmpDir, 'movementReference.ts')}" "${path.join(tmpDir, 'stockInSessionsQuery.ts')}" --outDir "${tmpDir}" --module commonjs --target es2022 --strict --skipLibCheck${ignoreConfigFlag}`,
   { cwd: cloudflareRoot, stdio: 'pipe' },
 )
 const kernel = require(path.join(tmpDir, 'stockLedgerQuery.js'))
@@ -213,7 +224,12 @@ ok(true, 'supplier filter matches a name-only attributed lot (D1b identity rule)
 {
   const migrationsDir = path.join(cloudflareRoot, 'migrations')
   const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
-  const pre = files.filter((f) => !f.startsWith('0084'))
+  // Build the schema exactly as it existed immediately before 0084. The old
+  // exclusion-only filter also loaded 0085+, so migration 0153 referenced
+  // inventory_movements.batch_id before 0084 had added that column.
+  const pre = files.filter((f) => Number.parseInt(f.slice(0, 4), 10) < 84)
+  const migration0084 = files.find((f) => f.startsWith('0084'))
+  assert.ok(migration0084, '0084 migration fixture located')
   const db2 = openDb(pre.map((f) => fs.readFileSync(path.join(migrationsDir, f), 'utf8')))
   db2.prepare(`INSERT INTO products (id, name, unit, stock_quantity, is_active) VALUES (9101, 'Backfill Test', 'pcs', 0, 1)`).run({})
   const mv = (id, qty) => db2.prepare(`INSERT INTO inventory_movements
@@ -226,7 +242,7 @@ ok(true, 'supplier filter matches a name-only attributed lot (D1b identity rule)
   act(101, 601, -5)              // one lot, full coverage -> backfilled
   act(102, 601, -4); act(102, 602, -2) // two lots -> NULL
   act(103, 601, -3)              // one lot, PARTIAL coverage (shortfall) -> NULL
-  db2.exec(fs.readFileSync(path.join(migrationsDir, files.find((f) => f.startsWith('0084'))), 'utf8'))
+  db2.exec(fs.readFileSync(path.join(migrationsDir, migration0084), 'utf8'))
   const got = Object.fromEntries(
     db2.prepare('SELECT id, batch_id FROM inventory_movements WHERE id IN (101, 102, 103)').all({}).map((r) => [r.id, r.batch_id]),
   )

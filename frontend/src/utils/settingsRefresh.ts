@@ -24,6 +24,13 @@ const SETTINGS_CHANNEL_RULES: SettingsChannelRule[] = [
     channels: ['settings', 'sales', 'pos', 'dashboard'],
   },
   {
+    // Without a 'pos' channel here, turning the wholesale automation on would
+    // not reach an already-open till until it was reloaded -- the cashier
+    // would tick the box and watch nothing happen.
+    keys: ['pos_wholesale_auto_enabled', 'pos_wholesale_auto_min_qty'],
+    channels: ['settings', 'pos'],
+  },
+  {
     keys: [
       'business_name',
       'business_phone',
@@ -52,6 +59,15 @@ const SETTINGS_CHANNEL_RULES: SettingsChannelRule[] = [
       'notifications_realert_minutes',
     ],
     channels: ['settings', 'dashboard', 'users'],
+  },
+  {
+    // The low-stock switch/amount/scope re-colour a badge, a count and a
+    // filter on five open pages at once -- the till included, same reasoning
+    // as the wholesale rule above. Without these channels an owner would turn
+    // the alert off in Settings and watch the Dashboard card, the Products
+    // list and the POS grid keep showing amber until each was reloaded.
+    keys: ['low_stock_alert_enabled', 'low_stock_threshold_mode', 'low_stock_threshold_default'],
+    channels: ['settings', 'products', 'inventory', 'branches', 'pos', 'dashboard', 'notifications'],
   },
   {
     keys: ['login_session_duration'],

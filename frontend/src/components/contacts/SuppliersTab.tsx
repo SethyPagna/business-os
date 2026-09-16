@@ -18,7 +18,9 @@ import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.t
 import type { QueryParams } from '../../api/query.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
 import Modal from '../shared/Modal'
+import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
@@ -29,6 +31,7 @@ import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countA
 import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
+import { readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateCheck, type ContactDuplicateMatch } from './contactDuplicates'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -119,7 +122,6 @@ interface SupplierPayload {
   gender?: string | null
   userId?: string | number | null
   userName?: string | null
-  confirmDuplicate?: boolean
   __rename_cascade?: 'carry' | 'record_only'
 }
 
@@ -151,6 +153,18 @@ interface SupplierApi {
 }
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
+
+function buildLocalizedSupplierContactOptionSummary(options: ContactOption[], tr: (key: string, fallbackEn: string, fallbackKm?: string) => string): string {
+  if (!options.length) return '-'
+  return options.map((option, index) => {
+    const rawLabel = String(option.label || '').trim()
+    // "Default" is canonical application copy stored by older forms. Keep
+    // user-entered labels verbatim; only localize the canonical label.
+    const label = rawLabel.toLowerCase() === 'default' ? tr('default', 'Default') : rawLabel
+    const parts = [option.name, option.phone, option.email, option.address].filter(Boolean)
+    return `#${index + 1} ${label ? `(${label}) ` : ''}${parts.join(' | ') || '-'}`
+  }).join('\n')
+}
 
 const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
@@ -196,18 +210,44 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
+// P4-4b item 6 (parity): handleSave's edit path used to call
+// load({ silent: true }) after every update -- a full re-search of the
+// current filtered/sorted/paginated Suppliers page just to reflect one row
+// changing. updateSupplier's PUT response already IS that one row (see
+// routes/contacts.ts's PUT handler: `SELECT * FROM suppliers WHERE
+// id = @id`), so this patches it into place instead -- same pattern
+// CustomersTab.tsx's patchCustomerRow uses (see that file's own comment
+// for why the response is spread OVER the existing row rather than
+// replacing it, even though SupplierRow carries no computed-only fields
+// analogous to customers' points_balance/portal_account today; keeping the
+// merge direction identical guards against that changing later). Returns
+// null (asking the caller to fall back to a full load) when the id isn't
+// present on the currently-loaded page.
+function patchSupplierRow(rows: SupplierRow[], id: number | string, patch: Record<string, unknown>): SupplierRow[] | null {
+  let matched = false
+  const next = rows.map((row) => {
+    if (Number(row.id) !== Number(id)) return row
+    matched = true
+    return { ...row, ...patch }
+  })
+  return matched ? next : null
+}
+
 interface SupplierFormProps {
   supplier?: SupplierRow | null
   onSave: (payload: SupplierPayload) => Promise<unknown> | unknown
+  onUseExisting: (match: ContactDuplicateMatch) => void | Promise<void>
   onClose: () => void
   t: TranslateFn
 }
 
-function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
+function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierFormProps) {
   const init: SupplierPayload = supplier
     ? { ...supplier }
     : { name: '', phone: '', email: '', company: '', contact_person: '', address: '', notes: '', gender: '' }
   const [form, setForm] = useState<SupplierPayload>(init)
+  // S4-21: dismissing this modal with edits raises the discard prompt.
+  const { dirty: formDirty } = useFormDirty(form, String(supplier?.id ?? 'new'))
   const [options, setOptions] = useState<ContactOption[]>(() => {
     const parsed = parseStoredContactOptions(init.address, { legacyField: 'address' })
     if (parsed.length) return parsed
@@ -221,19 +261,32 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // P4-2: a same-name supplier is no longer a choice the operator makes --
+  // the server (routes/contacts.ts checkContactDuplicateBlock) resolves it
+  // straight to the existing record, silently, so there is nothing left to
+  // echo back on save. `serverDuplicateCheck` stays only for the one case
+  // that IS still a real conflict server-side: a stale client missed a
+  // phone_conflict (a different name already owns this phone), and the 409
+  // refreshes the banner below with the current match.
+  const [serverDuplicateCheck, setServerDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
   const primaryOptionPhone = getPrimaryContactOption(options).phone || form.phone || ''
-  const duplicateMatches = useContactDuplicateFlag('suppliers', form.name || '', primaryOptionPhone, supplier?.id)
-  const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
-  const set = (key: keyof SupplierPayload, value: string) => setForm((current) => ({ ...current, [key]: value }))
-  const addOption = () => setOptions((current) => {
-    if (current.length >= CONTACT_OPTION_LIMIT) return current
-    return [...current, createContactOption()]
-  })
-  const updateOption = (index: number, nextOption: ContactOption) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option)))
-  const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
+  const duplicateCheck = useContactDuplicateFlag('suppliers', form.name || '', [form.phone || '', ...options.map((option) => option.phone)], supplier?.id)
+  const activeDuplicateCheck = serverDuplicateCheck || duplicateCheck
+  const duplicateMatches = activeDuplicateCheck.matches
+  // The worst non-phone-conflict match currently known -- purely informational
+  // now (see above): saving resolves to this record instead of creating or
+  // renaming onto a second row, and the confirm dialog says so below.
+  const existingNameMatch = duplicateMatches.find((match) => match.severity !== 'phone_conflict')
+  const clearServerDuplicateCheck = () => setServerDuplicateCheck(null)
+  const set = (key: keyof SupplierPayload, value: string) => { clearServerDuplicateCheck(); setForm((current) => ({ ...current, [key]: value })) }
+  const addOption = () => {
+    clearServerDuplicateCheck()
+    setOptions((current) => current.length >= CONTACT_OPTION_LIMIT ? current : [...current, createContactOption()])
+  }
+  const updateOption = (index: number, nextOption: ContactOption) => { clearServerDuplicateCheck(); setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option))) }
+  const removeOption = (index: number) => { clearServerDuplicateCheck(); setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index)) }
   // Part 563: validate, then open the review dialog; commitSupplier saves on
-  // confirm. The exact-duplicate window.confirm() is folded into the dialog
-  // (danger note) instead of a separate native popup.
+  // confirm.
   const handleSubmit = () => {
     if (saving) return
     const phoneConflict = duplicateMatches.find((match) => match.severity === 'phone_conflict')
@@ -262,22 +315,26 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
     setSaving(true)
     try {
       const primaryOption = getPrimaryContactOption(options)
-      await Promise.resolve(onSave({
+      const result = await Promise.resolve(onSave({
         ...form,
         phone: primaryOption.phone || form.phone || '',
         email: primaryOption.email || form.email || '',
         address: serializeContactOptions(options) || '',
         contact_person: primaryOption.name || form.contact_person || '',
         gender: form.gender || '',
-        confirmDuplicate: !!exactMatch,
       }))
+      const nextCheck = (result as { duplicateDecisionRequired?: ContactDuplicateCheck } | null)?.duplicateDecisionRequired
+      if (nextCheck) {
+        setServerDuplicateCheck(nextCheck)
+        setLocalError(t('contact_duplicate_review_changed') || 'Review the current possible duplicate records before saving.')
+      }
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <Modal title={supplier ? (t('edit_supplier') || 'Edit Supplier') : (t('add_supplier') || 'Add Supplier')} onClose={onClose}>
+    <Modal title={supplier ? (t('edit_supplier') || 'Edit Supplier') : (t('add_supplier') || 'Add Supplier')} onClose={onClose} unsavedChanges={{ dirty: formDirty }}>
       <div className="space-y-3">
         <div>
           <label htmlFor="supplier-form-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('name')} *</label>
@@ -294,9 +351,15 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
             id="supplier-form-phone"
             name="supplier_phone"
             autoComplete="tel"
+            inputMode="tel"
             className="input sm:w-1/2"
             value={options[0]?.phone || ''}
-            onChange={(event) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === 0 ? { ...option, phone: event.target.value } : option)))}
+            onChange={(event) => {
+              const phone = formatPhoneInputElement(event.currentTarget)
+              setOptions((current) => current.map((option, itemIndex) => (itemIndex === 0 ? { ...option, phone } : option)))
+            }}
+            onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === 0 ? { ...option, phone } : option))))}
+            onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (phone) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === 0 ? { ...option, phone } : option))))}
           />
         </div>
         <div>
@@ -318,26 +381,26 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
                     <>
                 <div className="flex items-center gap-2">
                   <span className="w-5 flex-shrink-0 text-xs font-bold text-gray-400">#{index + 1}</span>
-                  <input id={fieldId('label')} name={fieldId('label')} className="input flex-1 text-xs py-1" autoComplete="off" placeholder="Option label" value={option.label || ''} onChange={(event) => updateOption(index, { ...option, label: event.target.value })} />
-                  {options.length > 1 ? <button type="button" onClick={() => removeOption(index)} className="rounded px-1.5 py-1 text-xs text-red-500 hover:text-red-700">Remove</button> : null}
+                  <input id={fieldId('label')} name={fieldId('label')} className="input flex-1 text-xs py-1" autoComplete="off" placeholder={t('contact_option_label') || 'Option label'} value={option.label || ''} onChange={(event) => updateOption(index, { ...option, label: event.target.value })} />
+                  {options.length > 1 ? <button type="button" onClick={() => removeOption(index)} className="rounded px-1.5 py-1 text-xs text-red-500 hover:text-red-700">{t('remove') || 'Remove'}</button> : null}
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
-                    <label htmlFor={fieldId('name')} className="mb-0.5 block text-xs text-gray-400">Name</label>
-                    <input id={fieldId('name')} name={fieldId('name')} className="input text-xs py-1" autoComplete="name" placeholder="Contact name" value={option.name || ''} onChange={(event) => updateOption(index, { ...option, name: event.target.value })} />
+                    <label htmlFor={fieldId('name')} className="mb-0.5 block text-xs text-gray-400">{t('name') || 'Name'}</label>
+                    <input id={fieldId('name')} name={fieldId('name')} className="input text-xs py-1" autoComplete="name" placeholder={t('contact_option_name') || 'Contact name'} value={option.name || ''} onChange={(event) => updateOption(index, { ...option, name: event.target.value })} />
                   </div>
                   <div>
-                    <label htmlFor={fieldId('phone')} className="mb-0.5 block text-xs text-gray-400">Phone</label>
-                    <input id={fieldId('phone')} name={fieldId('phone')} className="input text-xs py-1" autoComplete="tel" placeholder="Phone number" value={option.phone || ''} onChange={(event) => updateOption(index, { ...option, phone: event.target.value })} />
+                    <label htmlFor={fieldId('phone')} className="mb-0.5 block text-xs text-gray-400">{t('phone') || 'Phone'}</label>
+                    <input id={fieldId('phone')} name={fieldId('phone')} className="input text-xs py-1" autoComplete="tel" inputMode="tel" placeholder={t('phone_number') || 'Phone number'} value={option.phone || ''} onChange={(event) => updateOption(index, { ...option, phone: formatPhoneInputElement(event.currentTarget) })} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => updateOption(index, { ...option, phone }))} onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (phone) => updateOption(index, { ...option, phone }))} />
                   </div>
                 </div>
                 <div>
-                  <label htmlFor={fieldId('email')} className="mb-0.5 block text-xs text-gray-400">Email</label>
-                  <input id={fieldId('email')} name={fieldId('email')} className="input text-xs py-1" autoComplete="email" type="email" placeholder="Email address" value={option.email || ''} onChange={(event) => updateOption(index, { ...option, email: event.target.value })} />
+                  <label htmlFor={fieldId('email')} className="mb-0.5 block text-xs text-gray-400">{t('email') || 'Email'}</label>
+                  <input id={fieldId('email')} name={fieldId('email')} className="input text-xs py-1" autoComplete="email" type="email" placeholder={t('contact_option_email') || 'Email address'} value={option.email || ''} onChange={(event) => updateOption(index, { ...option, email: event.target.value })} />
                 </div>
                 <div>
-                  <label htmlFor={fieldId('address')} className="mb-0.5 block text-xs text-gray-400">Address</label>
-                  <input id={fieldId('address')} name={fieldId('address')} className="input text-xs py-1" autoComplete="street-address" placeholder="Office or pickup address" value={option.address || ''} onChange={(event) => updateOption(index, { ...option, address: event.target.value })} />
+                  <label htmlFor={fieldId('address')} className="mb-0.5 block text-xs text-gray-400">{t('address') || 'Address'}</label>
+                  <input id={fieldId('address')} name={fieldId('address')} className="input text-xs py-1" autoComplete="street-address" placeholder={t('supplier_option_address') || 'Office or pickup address'} value={option.address || ''} onChange={(event) => updateOption(index, { ...option, address: event.target.value })} />
                 </div>
                     </>
                   )
@@ -376,7 +439,7 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
           </div>
         ) : null}
 
-        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="supplier" />
+        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="supplier" autoResolves onUseExisting={onUseExisting} t={t} />
 
         {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx/
             CustomerFormModal.tsx's own fix. */}
@@ -391,8 +454,12 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
           title={supplier ? (t('edit_supplier') || 'Edit Supplier') : (t('add_supplier') || 'Add Supplier')}
           message={String(form.name || '').trim()}
           items={buildSupplierReviewItems()}
-          note={exactMatch ? `"${exactMatch.name}" already has this exact name and phone number. Create a separate supplier record anyway?` : undefined}
-          danger={!!exactMatch}
+          // P4-2: a same-name match is never a choice for suppliers any more
+          // (the server resolves it silently) -- this note is purely
+          // informational, naming the record the save will actually land on.
+          note={existingNameMatch
+            ? (t('contact_duplicate_will_use_existing') || `This name matches an existing supplier. Saving will use "${existingNameMatch.name}" instead of creating a new one.`)
+            : undefined}
           confirmLabel={supplier ? (t('save') || 'Save') : (t('add_supplier') || 'Add Supplier')}
           cancelLabel={t('cancel') || 'Cancel'}
           working={saving}
@@ -416,6 +483,12 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   // 'block'.
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
+  const canBulkContacts = can('contacts', 'bulk')
+  const canBulkContactsRef = useRef(canBulkContacts)
+  canBulkContactsRef.current = canBulkContacts
+  const canImportContacts = canBulkContacts && can('contacts', 'import')
+  const canImportContactsRef = useRef(canImportContacts)
+  canImportContactsRef.current = canImportContacts
   // Export is assembled client-side from already-loaded rows; gating it
   // enforces the stated policy (review-tier cannot export) and matches the
   // modeled 'contacts:export' action + the Products/Customers/Delivery tabs.
@@ -556,7 +629,26 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     [collapsedSections, filteredSections],
   )
 
-  const { selectedIds, setSelectedIds, toggleOne, selectAllProp, selectionModeActive, getRowLongPressState } = useContactSelection(visibleSuppliers)
+  const contactSelection = useContactSelection(visibleSuppliers)
+  const { setSelectedIds, getRowLongPressState } = contactSelection
+  const selectedIds = canBulkContacts ? contactSelection.selectedIds : new Set<number>()
+  const selectionModeActive = canBulkContacts && contactSelection.selectionModeActive
+  const toggleOne = (id: unknown) => {
+    if (!canBulkContactsRef.current) return
+    contactSelection.toggleOne(id)
+  }
+  const selectAllProp = {
+    ...contactSelection.selectAllProp,
+    onChange: (checked: boolean) => {
+      if (!canBulkContactsRef.current) return
+      contactSelection.selectAllProp.onChange(checked)
+    },
+  }
+  useEffect(() => {
+    if (canImportContacts) return
+    setSelectedIds((current) => current.size ? new Set<number>() : current)
+    setModal((current) => current === 'import' ? null : current)
+  }, [canImportContacts, setSelectedIds])
   // H1+X5 (Part 402): exports go through the shared options dialog.
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
@@ -590,7 +682,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     },
     {
       id: 'group',
-      label: tr('group_by', 'Group by'),
+      label: tr('sort_by', 'Sort by'),
       options: [
         { id: 'group-time', label: tr('date', 'Date'), active: groupMode === 'time', onClick: () => setGroupMode('time') },
         { id: 'group-alphabet', label: 'A-Z / ខ្មែរ', active: groupMode === 'alphabet', onClick: () => setGroupMode('alphabet') },
@@ -619,6 +711,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   const isSectionFullySelected = (ids: Array<number | string> = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
   const isSectionPartiallySelected = (ids: Array<number | string> = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
   const toggleSectionSelection = (ids: Array<number | string>, checked: boolean) => {
+    if (!canBulkContactsRef.current) return
     ids.forEach((id) => {
       const numericId = Number(id)
       const isSelected = selectedIds.has(numericId)
@@ -838,11 +931,49 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       }
       setModal(null)
       setSelected(null)
-      await load({ silent: true, label: 'Suppliers after save' })
+      // P4-4b item 6 (parity): patch the edited row in place instead of the
+      // full load() -- same "patch only when the target position is
+      // already known" rule CustomersTab.tsx's handleSave uses. `useUpdate`
+      // (not just `selected`) gates this: a rename-copy keeps `selected`
+      // truthy but the write created a DIFFERENT new row than the one
+      // selected, so that path (like every create) still needs the full
+      // load() to find where the new row landed on the server-sorted/
+      // paginated list.
+      if (useUpdate && result && typeof result === 'object') {
+        const patched = patchSupplierRow(suppliers, (selected as { id: number | string }).id, result as Record<string, unknown>)
+        if (patched) {
+          setSuppliers(patched)
+        } else {
+          await load({ silent: true, label: 'Suppliers after save' })
+        }
+      } else {
+        await load({ silent: true, label: 'Suppliers after save' })
+      }
+      return { success: true }
     } catch (error: unknown) {
+      const duplicateCheck = readContactDuplicateDecisionError(error)
+      if (duplicateCheck) return { duplicateDecisionRequired: duplicateCheck }
       notify(getErrorMessage(error, 'Failed'), 'error')
+      return { success: false }
     } finally {
       finishSingleAction(saveInFlightRef)
+    }
+  }
+
+  const handleUseExisting = async (match: ContactDuplicateMatch) => {
+    try {
+      const data = await withLoaderTimeout(
+        () => getSupplierApi().getSuppliers({ ids: [String(match.id)] }),
+        'Load existing supplier',
+        12000,
+      )
+      const existing = normalizeSupplierRows(data).find((supplier) => Number(supplier.id) === Number(match.id))
+      if (!existing) throw new Error('The existing supplier could not be loaded')
+      setSelected(existing)
+      setModal('detail')
+      resolveContactDuplicateSyncError(match)
+    } catch (error) {
+      notify(getErrorMessage(error, t('contact_duplicate_existing_load_failed') || 'Could not load the existing record. Try again.'), 'error')
     }
   }
 
@@ -886,7 +1017,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
+    if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
     if (!confirm(`Delete ${selectedIds.size} supplier(s)?`)) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
@@ -911,6 +1042,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
         actionHistory.pushAction({
           label: `Delete ${deletedCount} supplier${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
+            if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot: SupplierRow) => {
               const result = await runSupplierMutation(() => getSupplierApi().createSupplier({
                 name: snapshot.name || '',
@@ -930,6 +1062,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             await load({ silent: true, label: 'Suppliers restore deleted' })
           },
           redo: async () => {
+            if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
             const redoRun = await runConcurrentTasks(idsToDelete, async (id: number) => (
               runSupplierMutation(() => getSupplierApi().deleteSupplier(id), 'Redo bulk supplier delete')
@@ -996,6 +1129,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           History before Manage per the ordering used on those tabs. */}
       <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel dense />
+        {(canImportContacts || canExportContacts) ? (
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName="min-w-0 flex-1"
@@ -1012,7 +1146,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             </button>
           )}
           items={([
-            { label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => setModal('import'), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+            ...(canImportContacts ? [{ label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => { if (!canImportContactsRef.current) return; setModal('import') }, color: 'blue' as const, icon: <Download className="h-4 w-4 shrink-0" /> }] : []),
             ...(canExportContacts ? [{
               label: tr('export', 'Export', 'នាំចេញ'),
               color: 'green',
@@ -1050,6 +1184,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             }] : []),
           ] as PortalMenuItem[])}
         />
+        ) : null}
         <button
           className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
           onClick={() => { setSelected(null); setModal('form') }}
@@ -1070,7 +1205,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           separate select-all row here: ContactTable renders its own
           selectAll control inside the table header via the `selectAll`
           prop below. */}
-      <div className="sticky top-2 z-30 -mx-1 flex min-w-0 items-center gap-2 bg-gray-50/95 pb-2 pt-1 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 flex min-w-0 items-center gap-2 bg-gray-50 pb-2 pt-1 dark:bg-gray-900 sm:mx-0">
         <div className="flex flex-1 min-w-0 items-center gap-2">
           <SearchInput
             id="supplier-search"
@@ -1091,7 +1226,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               {tr('retry', 'Retry')}
             </button>
           ) : null}
-          {selectedIds.size > 0 && canBulkDeleteContacts ? (
+          {canBulkContacts && selectedIds.size > 0 && canBulkDeleteContacts ? (
             <button
               className="btn-secondary whitespace-nowrap text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:cursor-not-allowed disabled:opacity-60"
               onClick={handleBulkDelete}
@@ -1125,7 +1260,12 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
 
       <ContactTable
         loading={loading}
-        rows={displayRows}
+        // One compact card per persisted supplier. Time/alphabet sections
+        // still determine ordering, but their synthetic header rows are not
+        // rendered as extra entries in the supplier directory.
+        rows={visibleSuppliers}
+        cardsAtAllWidths
+        cardGridClassName="items-stretch"
         emptyLabel={refreshing ? (t('searching') || 'Searching...') : (t('no_suppliers') || 'No suppliers')}
         columns={supplierColumns}
         selectAll={selectAllProp}
@@ -1185,7 +1325,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           })
           const rowLongPressState = getRowLongPressState(Number(supplier.id))
           const rowLongPress = createLongPressHandlers(rowLongPressState, {
-            disabled: selectionModeActive,
+            disabled: !canBulkContacts || selectionModeActive,
             onLongPress: () => {
               if (!selectedIds.has(Number(supplier.id))) toggleOne(supplier.id)
             },
@@ -1195,7 +1335,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           <tr
             key={supplier.id}
             className={`table-row cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
-            {...(selectionModeActive ? {} : rowLongPress)}
+            {...(canBulkContacts && !selectionModeActive ? rowLongPress : {})}
             onClickCapture={(event) => {
               // Swallow the ghost click that follows a fired long-press.
               if (consumeLongPressClick(rowLongPressState)) {
@@ -1267,7 +1407,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           })
           const cardLongPressState = getRowLongPressState(Number(supplier.id))
           const cardLongPress = createLongPressHandlers(cardLongPressState, {
-            disabled: selectionModeActive,
+            disabled: !canBulkContacts || selectionModeActive,
             onLongPress: () => {
               if (!selectedIds.has(Number(supplier.id))) toggleOne(supplier.id)
             },
@@ -1279,16 +1419,21 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           const contactCount = options.length || ((supplier.phone || supplier.email) ? 1 : 0)
           const cardPhone = primaryOption.phone || supplier.phone || ''
           const cardEmail = primaryOption.email || supplier.email || ''
-          const cardContactPerson = primaryOption.name || supplier.contact_person || ''
-          const cardCompany = supplier.company || ''
           const cardMetaPrimary = [cardPhone, cardEmail].filter(Boolean).join(' · ')
-          const cardMetaSecondary = [cardContactPerson, cardCompany].filter(Boolean).join(' · ')
           return (
           <div
             key={supplier.id}
-            className={`card flex cursor-pointer select-none items-center gap-3 p-3 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}
+            role="button"
+            tabIndex={0}
+            aria-label={`${tr('details', 'Details')}: ${supplier.name || ''}`}
+            className={`card flex min-h-11 cursor-pointer select-none items-center gap-3 p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}
             onClick={() => handleContactCellClick(supplier)}
-            {...(selectionModeActive ? {} : cardLongPress)}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+              event.preventDefault()
+              handleContactCellClick(supplier)
+            }}
+            {...(canBulkContacts && !selectionModeActive ? cardLongPress : {})}
             onClickCapture={(event) => {
               if (consumeLongPressClick(cardLongPressState)) {
                 event.preventDefault()
@@ -1315,7 +1460,6 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
                 ) : null}
               </div>
               {cardMetaPrimary ? <div className="mt-0.5 truncate text-[11px] text-gray-500">{cardMetaPrimary}</div> : null}
-              {cardMetaSecondary ? <div className="truncate text-[11px] text-gray-400">{cardMetaSecondary}</div> : null}
             </div>
           </div>
           )
@@ -1324,8 +1468,8 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       </>
       )}
 
-      {modal === 'form' ? <SupplierForm supplier={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
-      {modal === 'import' ? (
+      {modal === 'form' ? <SupplierForm supplier={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
+      {canImportContacts && modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="supplier" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Suppliers after import' })} />
         </Suspense>
@@ -1350,7 +1494,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               [t('contact_person') || 'Contact', primaryOption.name || selected.contact_person],
               [t('gender') || 'Gender', selected.gender ? (tr(selected.gender, selected.gender)) : (tr('unspecified', 'Unspecified'))],
               [t('address'), primaryOption.address],
-              ['Contact Options', buildContactOptionSummary(options)],
+              [tr('contact_options', 'Contact options'), buildLocalizedSupplierContactOptionSummary(options, tr)],
               [t('notes'), selected.notes],
               [t('col_added') || t('added_on') || 'Added', fmtDateTime24(selected.created_at)],
             ]
@@ -1359,6 +1503,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           onDelete={canDeleteContact ? () => handleDelete(selected) : undefined}
           onClose={() => { setModal(null); setSelected(null) }}
           t={t}
+          wrapValuesAnywhere
           extraButtons={[{ label: tr('supplier_purchases', 'Purchases'), onClick: () => setModal('purchases') }]}
         />
       ) : null}

@@ -43,7 +43,7 @@ export default function ExportChoiceDialog({ title, groups, onClose }: {
   }
 
   return (
-    <Modal title={title} onClose={onClose} size="sm">
+    <Modal title={title} onClose={onClose} size="sm" unsavedChanges="read-only">
       <div className="space-y-3">
         {groups.map((group) => (
           <div key={group.id}>

@@ -13,6 +13,10 @@ import { useApp as useAppFromContext } from '../../AppContext.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { refreshAppData } from '../../utils/appRefresh'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
+import LegacySubtotalRepair from './LegacySubtotalRepair.tsx'
+import GeneralCustomerRepair from './GeneralCustomerRepair.tsx'
+import GeneralCustomerMembershipRepair from './GeneralCustomerMembershipRepair.tsx'
+import SaleNotPaidStockRecovery from './SaleNotPaidStockRecovery.tsx'
 
 type ResetMode = 'sales' | 'products' | 'all'
 type ResetColor = 'red' | 'danger'
@@ -255,6 +259,19 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error || 'unknown error')
 }
 
+// A refusal the Worker has coded (api/http.ts copies the body's `code` onto
+// the thrown error, e.g. reset_images_unavailable_free) has a key of the same
+// name in both language packs; anything else keeps its message. t() returns
+// the key itself for an unknown key, which is how an uncoded error is told
+// apart from a translated one.
+function describeError(error: unknown, T: (key: string, fallback: string) => string): string {
+  const message = getErrorMessage(error)
+  const code = (error as { code?: unknown } | null)?.code
+  if (typeof code !== 'string' || !code) return message
+  const localized = T(code, message)
+  return localized === code ? message : localized
+}
+
 // The three optional "also clear" toggles that only a PRODUCTS reset has.
 // Extracted so the products reset can live in the page-reset grid below
 // (where it belongs -- it clears one page's data, exactly like the contact
@@ -368,7 +385,7 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
         notify(`${T('error', 'Error')}: ${result?.error || 'unknown'}`, 'error')
       }
     } catch (error: unknown) {
-      notify(`${T('error', 'Error')}: ${getErrorMessage(error)}`, 'error')
+      notify(`${T('error', 'Error')}: ${describeError(error, T)}`, 'error')
     } finally {
       finishSingleAction(resetInFlightRef)
       setWorking(false)
@@ -377,6 +394,8 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
 
   return (
     <div className="space-y-4">
+      <LegacySubtotalRepair />
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {MODES.map((entry) => {
           const Icon = entry.icon
@@ -481,8 +500,8 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
       id: 'products',
       kind: 'data',
       label: T('reset_products_label', 'Products Only Reset'),
-      desc: T('reset_products_desc', 'Deletes all products, their batches, branch stock, and image links. Stored image files are kept by default; choose below only if you also want to permanently delete them. Sales, returns, movements, customers, and suppliers are kept by default. Takes a fresh backup first.'),
-      deleted: T('reset_products_deleted', 'All products, product batches, branch/batch stock, product image links'),
+      desc: T('reset_products_desc', 'Deletes all products, their received dates, branch stock, and image links. Stored image files are kept by default; choose below only if you also want to permanently delete them. Sales, returns, movements, customers, and suppliers are kept by default. Takes a fresh backup first.'),
+      deleted: T('reset_products_deleted', 'All products, received dates, branch stock, product image links'),
       kept: T('reset_products_kept', 'Sales, returns, inventory movements, customers, suppliers, contacts, settings, users, branches'),
       word: 'RESET PRODUCTS',
       icon: PackageX,
@@ -576,7 +595,7 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
         notify(`${T('error', 'Error')}: ${result?.error || 'unknown'}`, 'error')
       }
     } catch (error: unknown) {
-      notify(`${T('error', 'Error')}: ${getErrorMessage(error)}`, 'error')
+      notify(`${T('error', 'Error')}: ${describeError(error, T)}`, 'error')
     } finally {
       finishSingleAction(sectionResetInFlightRef)
       setWorking(false)
@@ -585,6 +604,9 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
 
   return (
     <div className="space-y-4">
+      <SaleNotPaidStockRecovery />
+      <GeneralCustomerRepair />
+      <GeneralCustomerMembershipRepair />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {SECTIONS.map((entry) => (
           <button
@@ -664,7 +686,7 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
         setTyped('')
       }
     } catch (error: unknown) {
-      notify(`${T('factory_reset_label', 'Factory Reset')} ${T('failed', 'failed')}: ${getErrorMessage(error)}`, 'error')
+      notify(`${T('factory_reset_label', 'Factory Reset')} ${T('failed', 'failed')}: ${describeError(error, T)}`, 'error')
       setStep(0)
       setTyped('')
     } finally {
@@ -752,7 +774,7 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
 //      operator does in Products -> Import; this panel can only instruct and
 //      gate on an explicit acknowledgement, it cannot upload their local CSVs
 //      for them.
-//   3. Park historical lots (4e)     -> POST /finalize-migration park_lots
+//   3. Park historical received dates (4e)     -> POST /finalize-migration park_lots
 //
 // Step 4f (the lot-ledger reconcile) is migration 0081 and applies itself on
 // deploy, so it needs no button here. Both server calls take a fresh scoped
@@ -785,7 +807,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
     try {
       const result = await withLoaderTimeout(
         () => getFinalizeApi().finalizeMigration?.(step) || Promise.resolve({ success: false, error: 'Migration finalize API is unavailable' }),
-        step === 'zero_stock' ? 'Zero live stock' : 'Park historical lots',
+        step === 'zero_stock' ? 'Zero live stock' : 'Park historical received dates',
         RESET_DATA_TIMEOUT_MS,
       )
       if (result?.success) {
@@ -802,7 +824,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
         notify(`${T('error', 'Error')}: ${result?.error || 'unknown'}`, 'error')
       }
     } catch (error: unknown) {
-      notify(`${T('error', 'Error')}: ${getErrorMessage(error)}`, 'error')
+      notify(`${T('error', 'Error')}: ${describeError(error, T)}`, 'error')
     } finally {
       finishSingleAction(inFlightRef)
       setWorking(false)
@@ -813,7 +835,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
   const steps: Array<{ id: FinalizeStage; label: string; icon: LucideIcon }> = [
     { id: 'zero', label: T('finalize_step_zero', 'Zero stock'), icon: RotateCcw },
     { id: 'reimport', label: T('finalize_step_reimport', 'Re-import'), icon: Upload },
-    { id: 'park', label: T('finalize_step_park', 'Park lots'), icon: Archive },
+    { id: 'park', label: T('finalize_step_park', 'Park received dates'), icon: Archive },
   ]
   const stageOrder: FinalizeStage[] = ['zero', 'reimport', 'park', 'done']
   const currentIndex = stageOrder.indexOf(stage)
@@ -828,7 +850,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
           <div className="min-w-0">
             <h2 className="mb-1 text-base font-semibold text-gray-800 dark:text-gray-200">{T('finalize_title', 'Finalize migration')}</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              {T('finalize_desc', 'The last two old-system import steps, run in order: zero the live stock, re-import the product files, then park the historical lots. Each takes a fresh backup first. Only run this right after the history import — never on a running store.')}
+              {T('finalize_desc', 'The last two old-system import steps, run in order: zero the live stock, re-import the product files, then park the historical received dates. Each takes a fresh backup first. Only run this right after the history import — never on a running store.')}
             </p>
           </div>
         </div>
@@ -865,7 +887,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
           description={T('finalize_zero_desc', 'Sets every branch stock count and product stock quantity to zero, so the next re-import of the product files lands exactly on the template totals instead of stacking on top of the stock-history import. Reversible by the re-import you do next; a fresh backup is taken first.')}
           whatHeader={T('finalize_zero_header', 'This will set to zero:')}
           whatDeleted={T('finalize_zero_what', 'All branch_stock quantities and all products.stock_quantity values')}
-          whatKept={T('finalize_zero_kept', 'Products, batches, suppliers, sales, and lot costs — only the live counts are zeroed')}
+          whatKept={T('finalize_zero_kept', 'Products, received dates, suppliers, sales, and received-date costs — only the live counts are zeroed')}
           confirmWord="ZERO STOCK"
           onConfirm={() => runStep('zero_stock', () => { setReimportAck(false); setStage('reimport') })}
           working={working}
@@ -891,7 +913,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
           </div>
           <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
             <input type="checkbox" className="mt-0.5" checked={reimportAck} onChange={(event) => setReimportAck(event.target.checked)} />
-            <span>{T('finalize_reimport_ack', "I've re-imported both product files (Add / Update). Continue to parking the historical lots.")}</span>
+            <span>{T('finalize_reimport_ack', "I've re-imported both product files (Add / Update). Continue to parking the historical received dates.")}</span>
           </label>
           <div className="mt-4 flex gap-3">
             <button
@@ -910,16 +932,16 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
 
       {stage === 'park' ? (
         <ConfirmReset
-          title={T('finalize_park_title', 'Step 3 — Park historical lots')}
-          description={T('finalize_park_desc', "Zeros the remaining quantity on the historical 'Unified stock import' lots so the POS lot picker skips them — the old system never tied sales to lots, so their remaining counts aren't allocatable. The opening lots from the product import are left alone, so migration 0081's lot-ledger reconcile still works and re-running this is a no-op. A fresh backup is taken first.")}
+          title={T('finalize_park_title', 'Step 3 — Park historical received dates')}
+          description={T('finalize_park_desc', "Zeros the remaining quantity on the historical 'Unified stock import' received dates so the POS received-date picker skips them — the old system never tied sales to a received date, so their remaining counts aren't allocatable. The opening received dates from the product import are left alone, so migration 0081's received-date ledger reconcile still works and re-running this is a no-op. A fresh backup is taken first.")}
           whatHeader={T('finalize_park_header', 'This will set to zero:')}
-          whatDeleted={T('finalize_park_what', "The remaining quantity on every 'Unified stock import' historical lot")}
-          whatKept={T('finalize_park_kept', 'The lots themselves and their received/cost data (the supplier Purchases view still reads them); the product-import opening lots are untouched')}
+          whatDeleted={T('finalize_park_what', "The remaining quantity on every 'Unified stock import' historical received date")}
+          whatKept={T('finalize_park_kept', 'The received dates themselves and their received/cost data (the supplier Purchases view still reads them); the product-import opening received dates are untouched')}
           confirmWord="PARK LOTS"
           onConfirm={() => runStep('park_lots', () => setStage('done'))}
           working={working}
           elapsedSeconds={elapsedSeconds}
-          buttonLabel={T('finalize_park_button', 'Park historical lots')}
+          buttonLabel={T('finalize_park_button', 'Park historical received dates')}
           icon={Archive}
           t={t}
         />
@@ -934,7 +956,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
             <div>
               <h2 className="mb-1 text-base font-semibold text-emerald-700 dark:text-emerald-400">{T('finalize_done_title', 'Migration finalized')}</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                {T('finalize_done_desc', 'Live stock is zeroed and re-imported to the template totals, and the historical lots are parked. The lot-ledger reconcile (Step 4f) runs automatically as migration 0081 on the next deploy — nothing more to do here.')}
+                {T('finalize_done_desc', 'Live stock is zeroed and re-imported to the template totals, and the historical received dates are parked. The received-date ledger reconcile (Step 4f) runs automatically as migration 0081 on the next deploy — nothing more to do here.')}
               </p>
             </div>
           </div>

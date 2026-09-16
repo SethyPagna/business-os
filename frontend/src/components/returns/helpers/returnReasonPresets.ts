@@ -26,7 +26,7 @@ export function buildDefaultReturnReasonPresets(t: (key: string) => string | und
       tr('reason_quality', 'Quality issue'),
     ],
     supplier: [
-      tr('reason_defective_batch', 'Defective batch'),
+      tr('reason_defective_batch', 'Defective received stock'),
       tr('reason_expired_stock', 'Expired stock'),
       tr('reason_wrong_shipment', 'Wrong shipment'),
       tr('reason_excess_stock', 'Excess stock'),

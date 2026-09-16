@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import settingsRoute from './routes/settings'
 import productsRoute from './routes/products'
 import portalRoute from './routes/portal'
@@ -11,6 +11,7 @@ import backupsRoute from './routes/backups'
 import lookupsRoute from './routes/lookups'
 import contactsRoute from './routes/contacts'
 import inventoryRoute from './routes/inventory'
+import stockInCommitRoute from './routes/stockInCommit'
 import compatRoute from './routes/compat'
 import aiRoute from './routes/ai'
 import importJobsRoute from './routes/importJobs'
@@ -24,11 +25,16 @@ import usersRoute from './routes/users'
 import devicesRoute from './routes/devices'
 import notesRoute from './routes/notes'
 import batchesRoute from './routes/batches'
+import shiftsRoute from './routes/shifts'
 import feesRoute from './routes/fees'
+import reportsRoute from './routes/reports'
 import telegramRoute from './routes/telegram'
 import reviewQueueRoute from './routes/reviewQueue'
+import posRoute from './routes/pos'
 import { createSyncRoute } from './routes/sync'
 import { getSessionUser } from './lib/auth'
+import { hasPermission, isAdminControlUser } from './lib/permissions'
+import { admitRequestBody, SMALL_BODY_BYTES, MIGRATION_FINALIZE_BODY_BYTES, smallBodyAccess } from './lib/requestBodyGuard'
 import { ensureCoreDataInvariantsOnce } from './lib/coreDataInvariants'
 import { getMaintenance, isMaintenanceGatedRequest } from './lib/maintenance'
 import { reportError } from './lib/errorReporting'
@@ -42,6 +48,9 @@ import { maybeRunScheduledImportRetention, cleanOrphanImportStaging } from './li
 import { maybeRunScheduledImageAudit } from './lib/imageAudit'
 import { maybeRunScheduledEphemeralRetention } from './lib/ephemeralRetention'
 import { reapStalledImportJobs } from './routes/importJobs'
+import { ReportMoneyPrecisionError, reportMoneyHttpError } from './lib/reportMoneyPrecision'
+import { ADMIN_DOCUMENT_REWRITES, APP_DOCUMENT_ROUTES, shouldRewriteAdminDocument } from './lib/adminDocumentIdentity'
+import { robotsTxt, sitemapXml } from './lib/publicSeo'
 
 export type Env = {
   DB: D1Database
@@ -54,6 +63,12 @@ export type Env = {
   // optional-binding-with-fallback pattern as BACKUP_QUEUE below.
   IMPORT_DB?: D1Database
   ASSETS: R2Bucket
+  // The Workers static-asset binding (wrangler.toml [assets]) -- the built
+  // frontend. Distinct from ASSETS above, which is the R2 bucket holding
+  // UPLOADED files. Optional so a deployment or test harness without the
+  // binding degrades to an explicit 503 on document routes instead of
+  // failing to type-check the whole Worker.
+  STATIC_ASSETS?: Fetcher
   CACHE: KVNamespace
   // Sentry DSN. Optional: absent means reporting is simply skipped, so a
   // local or misconfigured environment behaves exactly as before rather
@@ -75,8 +90,13 @@ export type Env = {
   // and nothing publicly writable is created on the Cloudinary side.
   CLOUDINARY_API_KEY?: string
   CLOUDINARY_API_SECRET?: string
-  IMPORT_QUEUE: Queue
-  MEDIA_QUEUE: Queue
+  // Optional so the type tells the truth: a deployment whose config lost its
+  // [[queues.producers]] block still runs, it just has no binding here. The
+  // producers no longer touch these directly -- import work goes through
+  // lib/queueDispatch.ts (queued when bound, inline when not) and image
+  // normalization through lib/imageAudit.ts, which already checked.
+  IMPORT_QUEUE?: Queue
+  MEDIA_QUEUE?: Queue
   // Optional (wrangler.toml [[queues.producers]] binding) -- see
   // lib/backup.ts's createCloudflareBackup/continueCloudflareBackupAssetCopy
   // for the queue-driven full-asset-coverage backup path (Part 122).
@@ -91,6 +111,13 @@ export type Env = {
   BROADCAST_HUB: DurableObjectNamespace
   BUSINESS_OS_PUBLIC_URL: string
   BUSINESS_OS_ADMIN_URL: string
+  // Which Workers plan this deployment runs on: 'paid' (wrangler.toml) or
+  // 'free' (wrangler.free.toml). Read ONLY by lib/planTier.ts, which turns
+  // it into the limit table every plan-sensitive call site reads. Optional
+  // and defaulting to 'paid' on purpose -- see that module's header for why
+  // an unset value must never be treated as 'free', and why the tier is
+  // never inferred from which bindings happen to be present.
+  PLAN_TIER?: 'free' | 'paid'
   // Slug (or public_id) of the one organization this deployment serves --
   // see routes/organizations.ts's getDefaultOrganization for why this is a
   // preference with a fallback rather than a hard requirement. Optional:
@@ -149,6 +176,14 @@ const app = new Hono<{ Bindings: Env }>()
 // the frontend can actually parse and show a sane message for, instead of
 // a bare string.
 app.onError((error, c) => {
+  if (error instanceof ReportMoneyPrecisionError) {
+    const mapped = reportMoneyHttpError(error)
+    return c.json({
+      success: false,
+      error: mapped.message,
+      code: error.code,
+    }, mapped.status)
+  }
   console.error('[worker] unhandled error', c.req.method, c.req.path, error)
   // Reported through waitUntil, never awaited: the response must not wait on
   // a third-party POST, and on the free plan's 10ms CPU budget it must not
@@ -172,39 +207,6 @@ app.onError((error, c) => {
     success: false,
     error: 'Something went wrong processing that request. Please try again.',
   }, 500)
-})
-
-// Fresh D1 database (migrations applied, never factory-reset) starts with
-// zero branches/roles/admin user -- nothing to log in with and nowhere for
-// a product to be assigned. This makes sure a default org/branch/roles/
-// admin always exist before any request is handled, so "empty app" behaves
-// the same as "just factory-reset" instead of being a dead end. Memoized
-// per-isolate inside ensureCoreDataInvariantsOnce(), so this is a no-op
-// DB-wise after the isolate's first request.
-app.use('*', async (c, next) => {
-  await ensureCoreDataInvariantsOnce(c.env)
-  return next()
-})
-
-// Restore maintenance gate (Part-77 slice C, lib/maintenance.ts): while a
-// backup restore streams its DELETE-then-reinsert, every state-changing
-// /api request except auth and the restore flow itself is refused with 503
-// -- a write that interleaves with a half-restored database corrupts it
-// (and would itself be clobbered or orphaned). Reads stay open: browsing a
-// mid-restore snapshot is harmless and the admin needs the UI alive. Costs
-// one D1 point-read per WRITE request only (GETs skip it); a missing
-// system_flags table (pre-0089 local DB) fails open inside getMaintenance.
-app.use('/api/*', async (c, next) => {
-  if (isMaintenanceGatedRequest(c.req.method, c.req.path)) {
-    const maintenance = await getMaintenance(c.env)
-    if (maintenance) {
-      return c.json({
-        error: 'A backup restore is in progress. The system is read-only until it finishes.',
-        maintenance: { mode: maintenance.mode, phase: maintenance.phase, startedAt: maintenance.startedAt },
-      }, 503)
-    }
-  }
-  return next()
 })
 
 // Baseline security headers on every response. Previously none of these
@@ -241,6 +243,157 @@ app.use('*', async (c, next) => {
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   c.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=(self), payment=(), usb=()')
   c.header('Strict-Transport-Security', 'max-age=15552000; includeSubDomains')
+})
+
+// G4: the app document itself, for the SPA routes wrangler.toml's
+// run_worker_first sends here.
+//
+// One built index.html serves both hosts with a storefront-first <head> and
+// an inline script that swaps in the admin identity before first paint. On
+// iOS that script is not always early enough: Add to Home Screen can read the
+// raw HTML, so installing the ADMIN app could produce a home-screen icon
+// called Leang Beauty pointing at the storefront manifest. Rewriting the tags
+// here means the bytes iOS reads are already correct, on every SPA route
+// someone can be sitting on when they install, without touching index.html or
+// the storefront host.
+//
+// Registered ABOVE the body-guard/seeding middleware on purpose: a static
+// document must not carry a D1 bootstrap, and Hono runs matched handlers in
+// registration order, so this terminal handler keeps the security headers set
+// above and skips everything below. Anything it cannot rewrite -- a 304, a
+// non-HTML response, the storefront host -- is passed through untouched.
+const APP_DOCUMENT_CACHE_CONTROL = 'public, max-age=0, must-revalidate'
+
+async function serveAppDocument(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const assets = c.env.STATIC_ASSETS
+  // Only reachable if run_worker_first routes a document here on a deployment
+  // whose [assets] block has no binding; say so instead of serving a 404 page.
+  if (!assets) return c.text('Static assets are not bound to this Worker deployment.', 503)
+
+  const response = await assets.fetch(c.req.raw)
+  const shouldRewrite = shouldRewriteAdminDocument({
+    hostname: new URL(c.req.url).hostname,
+    method: c.req.method,
+    accept: c.req.header('accept'),
+    contentType: response.headers.get('content-type'),
+    ok: response.ok,
+  })
+  // The storefront, a HEAD probe, a 304, an error page: returned exactly as
+  // the asset layer produced it, with no body handling at all.
+  if (!shouldRewrite) return response
+
+  // Everything from here on is best-effort identity polish. The document
+  // itself must never depend on it: before this handler existed the asset
+  // layer answered these routes on its own, and a throw here would turn the
+  // storefront's front page into Hono's JSON 500. So any failure in the
+  // rewrite set-up hands back the asset response exactly as produced.
+  try {
+    return rewriteAdminDocument(response)
+  } catch {
+    return response
+  }
+}
+
+function rewriteAdminDocument(response: Response): Response {
+  const headers = new Headers(response.headers)
+  // The rewritten body has a different length, and the asset layer already
+  // set one for the original.
+  headers.delete('content-length')
+  // Mirrors frontend/public/_headers for '/' and '/index.html'. Set here
+  // explicitly because this response is produced by the Worker rather than by
+  // the asset layer that applies that file; the pure test fails if the two
+  // ever disagree. It matters at deploy time: a client still running the old
+  // build revalidates its navigation instead of replaying a cached shell, and
+  // so picks up this rewritten document.
+  headers.set('Cache-Control', APP_DOCUMENT_CACHE_CONTROL)
+
+  // STREAMED, never buffered: on the free plan this handler has 10 ms of CPU,
+  // and HTMLRewriter parses the document as it passes through instead of
+  // materialising it. It also cannot touch the inline bootstrap script, which
+  // names the same URLs inside quoted selectors -- those are text, not tags.
+  let rewriter = new HTMLRewriter()
+  for (const rule of ADMIN_DOCUMENT_REWRITES) rewriter = rewriter.on(rule.selector, { element: rule.element })
+  return rewriter.transform(new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  }))
+}
+
+// GET and HEAD: run_worker_first hands this Worker every method on these
+// paths, and a HEAD that fell through to Hono's 404 would report the app's
+// own pages as missing.
+for (const route of APP_DOCUMENT_ROUTES) app.on(['GET', 'HEAD'], route, serveAppDocument)
+
+// P3-L3 (E): robots.txt and sitemap.xml, split by host (lib/publicSeo.ts).
+// The storefront is indexable and points at a minimal sitemap; the admin
+// host answers "Disallow: /" and has no sitemap. Registered here, above the
+// D1 middleware, for the same reason as the document handler: a crawler's
+// probe must never cost a database round trip. Both paths are in
+// run_worker_first (wrangler.toml and wrangler.free.toml) or the asset
+// layer would answer them with the SPA document instead.
+const PUBLIC_SEO_CACHE_CONTROL = 'public, max-age=3600'
+app.on(['GET', 'HEAD'], '/robots.txt', (c) => {
+  const url = new URL(c.req.url)
+  return c.text(robotsTxt(url.hostname, url.origin), 200, { 'Cache-Control': PUBLIC_SEO_CACHE_CONTROL })
+})
+app.on(['GET', 'HEAD'], '/sitemap.xml', (c) => {
+  const url = new URL(c.req.url)
+  const body = sitemapXml(url.hostname, url.origin)
+  if (body === null) return c.notFound()
+  return c.body(body, 200, { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': PUBLIC_SEO_CACHE_CONTROL })
+})
+
+// Security headers must wrap every early response. Public small envelopes are
+// admitted before even bootstrap/maintenance DB work. Other body classes are
+// deliberately untouched; AI and screenshots are admitted inside portal gates.
+app.use('*', async (c, next) => {
+  if (smallBodyAccess(c.req.method, c.req.path) === 'public') {
+    const rejection = await admitRequestBody(c, SMALL_BODY_BYTES)
+    if (rejection) return rejection
+  }
+  return next()
+})
+
+// Fresh D1 databases need a default org/branch/roles/admin. Memoized per isolate;
+// run after public body admission so rejected bodies cannot trigger seeding.
+app.use('*', async (c, next) => {
+  await ensureCoreDataInvariantsOnce(c.env)
+  return next()
+})
+
+// Refuse writes during DELETE/reinsert restore. Auth/restore and reads retain
+// their existing exemptions; a missing system_flags table still fails open.
+app.use('/api/*', async (c, next) => {
+  if (isMaintenanceGatedRequest(c.req.method, c.req.path)) {
+    const maintenance = await getMaintenance(c.env)
+    if (maintenance) {
+      return c.json({
+        error: 'A backup restore is in progress. The system is read-only until it finishes.',
+        maintenance: { mode: maintenance.mode, phase: maintenance.phase, startedAt: maintenance.startedAt },
+      }, 503)
+    }
+  }
+  return next()
+})
+
+// Preserve the existing unauthenticated/backup-permission responses without
+// consuming their bodies. These are control envelopes, never backup contents.
+// Body-dependent permission checks still run in the original handlers.
+app.use('/api/*', async (c, next) => {
+  if (smallBodyAccess(c.req.method, c.req.path) !== 'staff') return next()
+  const user = await getSessionUser(c)
+  if (!user) return next()
+  if (c.req.path === '/api/auth/devices/sessions/revoke-user' && !isAdminControlUser(user)) return next()
+  if (c.req.path.startsWith('/api/backups')) {
+    if (!hasPermission(user, 'backup')) return next()
+    if (c.req.path === '/api/backups/maintenance/clear' && !hasPermission(user, 'backup_restore')) return next()
+  }
+  const finalize = c.req.path === '/api/system/finalize-migration'
+  if (finalize && !hasPermission(user, 'backup_restore')) return next()
+  const rejection = await admitRequestBody(c, finalize ? MIGRATION_FINALIZE_BODY_BYTES : SMALL_BODY_BYTES)
+  if (rejection) return rejection
+  return next()
 })
 
 app.get('/health', (c) => c.json({ status: 'ok', version: 'cloudflare-portal-bootstrap-20260728', time: new Date().toISOString() }))
@@ -285,7 +438,7 @@ app.get('/ws', async (c) => {
 // (files.ts requires auth), not at read time.
 app.get('/uploads/*', async (c) => {
   const key = `uploads/${c.req.path.replace(/^\/uploads\//, '')}`
-  return serveObject(c.env.ASSETS, key, c.req.raw)
+  return serveObject(c.env.ASSETS, key, c.req.raw, c.executionCtx)
 })
 
 app.route('/api/settings', settingsRoute)
@@ -301,6 +454,7 @@ app.route('/api/backups', backupsRoute)
 app.route('/api', lookupsRoute)
 app.route('/api', contactsRoute)
 app.route('/api/inventory', inventoryRoute)
+app.route('/api/inventory/fast-stock-in', stockInCommitRoute)
 app.route('/api/ai', aiRoute)
 app.route('/api/import-jobs', importJobsRoute)
 app.route('/api/returns', returnsRoute)
@@ -311,9 +465,12 @@ app.route('/api/action-history', actionHistoryRoute)
 app.route('/api/runtime', runtimeRoute)
 app.route('/api/notes', notesRoute)
 app.route('/api/batches', batchesRoute)
+app.route('/api/shifts', shiftsRoute)
 app.route('/api/fees', feesRoute)
+app.route('/api/reports', reportsRoute)
 app.route('/api/telegram', telegramRoute)
 app.route('/api/review', reviewQueueRoute)
+app.route('/api/pos', posRoute)
 app.route('/api', usersRoute)
 app.route('/api', compatRoute)
 app.route('/api/sync', createSyncRoute(app))

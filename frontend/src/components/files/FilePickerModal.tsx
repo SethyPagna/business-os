@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, ComponentType, ReactNode } from 'react'
-import ModalBase from '../shared/Modal'
+import type { ChangeEvent, ReactNode } from 'react'
+import Modal from '../shared/Modal'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import {
   beginTrackedRequest,
@@ -9,6 +9,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
+import { canonicalizePersistedMediaPath } from '../../utils/mediaUpload.ts'
 import {
   deleteFileAsset as deletePickerFileAsset,
   getFiles as fetchPickerFiles,
@@ -47,6 +48,7 @@ type FilePickerModalProps = {
   title?: ReactNode
   multiple?: boolean
   initialSelected?: string[]
+  layer?: 'default' | 'nested'
 }
 
 type AppContextValue = {
@@ -55,7 +57,6 @@ type AppContextValue = {
   t?: TranslateFunction
 }
 
-const Modal = ModalBase as ComponentType<{ title: ReactNode; onClose: () => void; wide?: boolean; children: ReactNode }>
 const useApp = useAppHook as () => AppContextValue
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -63,7 +64,10 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 function normalizeFileAssets(value: unknown): FileAsset[] {
-  return Array.isArray(value) ? value.filter((asset): asset is FileAsset => !!asset && typeof asset === 'object') : []
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((asset): asset is FileAsset => !!asset && typeof asset === 'object')
+    .map((asset) => ({ ...asset, public_path: canonicalizePersistedMediaPath(asset.public_path) }))
 }
 
 async function uploadFileAssetRequest(payload: { file: File; userId?: string | number; userName?: string }): Promise<FileAsset> {
@@ -106,6 +110,7 @@ export default function FilePickerModal({
   title = 'Choose file',
   multiple = false,
   initialSelected = EMPTY_INITIAL_SELECTED,
+  layer = 'default',
 }: FilePickerModalProps) {
   const { notify, user, t } = useApp()
   const normalizedInitialSelectedKey = Array.isArray(initialSelected) ? initialSelected.filter(Boolean).join('\u0000') : ''
@@ -191,7 +196,7 @@ export default function FilePickerModal({
   }, [mediaType])
 
   function toggleSelectedPath(asset: FileAsset): void {
-    const publicPath = String(asset?.public_path || '').trim()
+    const publicPath = canonicalizePersistedMediaPath(asset?.public_path)
     if (!publicPath) return
     setSelectedPaths((current) => (
       current.includes(publicPath)
@@ -215,7 +220,9 @@ export default function FilePickerModal({
           'Upload picker file asset',
           FILE_PICKER_UPLOAD_TIMEOUT_MS,
         )
-        if (asset?.public_path) uploadedAssets.push(asset)
+        const publicPath = canonicalizePersistedMediaPath(asset?.public_path)
+        if (!publicPath) throw new Error('Upload completed without a stored file path.')
+        uploadedAssets.push({ ...asset, public_path: publicPath })
       }
       notify(tr('upload_complete', 'Upload complete'), 'success')
       await loadFiles()
@@ -287,7 +294,10 @@ export default function FilePickerModal({
   const selectedAssets = files.filter((asset) => selectedPathSet.has(asset.public_path || ''))
 
   return (
-    <Modal title={title} onClose={onClose} wide>
+    // Library uploads/deletes commit immediately; selectedPaths is only the
+    // picker choice that Cancel intentionally discards. Closing cannot lose
+    // an uncommitted library write, so this modal is explicitly read-only.
+    <Modal title={title} onClose={onClose} wide layer={layer} unsavedChanges="read-only">
       <div className="space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row">
           <input className="input flex-1" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr('search_files', 'Search files')} />

@@ -30,10 +30,14 @@
 
 import type { Env } from '../index'
 import { getDb, type D1Compat } from './db'
+import { getPlanLimits } from './planTier'
+import { dispatchImportWork } from './queueDispatch'
 import { chunkForBinding, selectInChunks } from './sqlBinding'
 import { runD1BatchInChunks } from './importEngine'
 import { bumpVersion } from './cache'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
+import { actorSnapshot } from './actorSnapshot'
+import { customerIsAnonymousSql } from './anonymousCustomer'
 
 export type BulkDeleteEntityType = 'products' | 'customers' | 'suppliers' | 'delivery_contacts'
 
@@ -58,15 +62,35 @@ interface EntityConfig {
   // Extra statements for this chunk of ids beyond the core delete --
   // e.g. products' per-branch inventory_movements rows. Reads (SELECT)
   // needed to build those extra statements happen here too, scoped to
-  // just this chunk's ids, not the whole job's id list.
-  buildExtraStatements: (db: D1Compat, ids: number[], reason: string, user: { id: number | null; name: string | null }) => Promise<D1Statement[]>
+  // just this chunk's ids, not the whole job's id list. `jobId` lets the
+  // products config stamp one shared reference_id per job (see
+  // bulkDeleteWriteOffReferenceId) -- removalLosses.ts p5/losses.
+  buildExtraStatements: (db: D1Compat, ids: number[], reason: string, user: { id: number | null; name: string | null }, jobId: string) => Promise<D1Statement[]>
+}
+
+/**
+ * The reference_id every 'delete' movement row from ONE bulk-delete job
+ * carries. Same shared-string-per-event shape productDelete.ts's
+ * productRemoveWriteOffReferenceId uses for its write_off rows, generalized
+ * to a plain job id since a bulk-delete job has no apply/redo generation
+ * concept -- a job runs exactly once. removalLosses.ts's revert guard
+ * (removalLossMovementWhere) excludes a 'delete' row when an 'add' row
+ * exists stamped `revert:` + this string, the same way it excludes a
+ * write_off. There is no undo action for a bulk-delete job today, so no
+ * writer ever produces that 'revert:' row -- this stamp exists so a future
+ * undo lands on a guard that is already wired, not one that has to be
+ * invented at the same time as the undo itself.
+ */
+export function bulkDeleteWriteOffReferenceId(jobId: string): string {
+  return `bulk_delete:${jobId}`
 }
 
 // Exported (alongside ENTITY_CONFIGS below) purely so
 // test-bulk-delete-engine-pure.cjs can exercise the real logic without a
 // live D1 -- both are pure/data, no Env or D1Compat needed to call them.
 // Returns one statement per D1-sized slice of `chunk`, not one statement
-// for the whole chunk: BULK_DELETE_CHUNK_SIZE is a CPU-budget number (500),
+// for the whole chunk: the bulk-delete chunk size is a CPU-budget number
+// (paid 500, free 125 -- lib/planTier.ts's bulkDeleteChunkSize),
 // while D1 refuses any single statement carrying more than 100 bound
 // parameters, so a 500-id `IN (...)` threw `too many SQL variables` and
 // runBulkDeleteJob's catch recorded all 500 ids as *failed deletes* --
@@ -76,13 +100,52 @@ export function buildCoreDeleteStatements(config: EntityConfig, chunk: number[])
   return chunkForBinding(chunk).map((slice) => {
     const placeholders = slice.map(() => '?').join(',')
     if (config.deleteMode === 'hard') {
-      return { sql: `DELETE FROM ${config.table} WHERE ${config.idColumn} IN (${placeholders})`, params: slice as unknown as Record<string, unknown> }
+      const profileOnly = config.table === 'customers' ? ` AND NOT (${customerIsAnonymousSql()})` : ''
+      return { sql: `DELETE FROM ${config.table} WHERE ${config.idColumn} IN (${placeholders})${profileOnly}`, params: slice as unknown as Record<string, unknown> }
     }
     return { sql: `UPDATE ${config.table} SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE ${config.idColumn} IN (${placeholders})`, params: slice as unknown as Record<string, unknown> }
   })
 }
 
+export function buildAnonymousCustomerBulkDeleteGuard(ids: number[]): D1Statement {
+  return {
+    sql: `SELECT CASE WHEN NOT EXISTS (
+      SELECT 1 FROM customers
+      WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(@customerIds))
+        AND ${customerIsAnonymousSql()}
+    ) THEN 1 ELSE json_extract('anonymous_customer_immutable', '$') END AS anonymous_customer_guard`,
+    params: { customerIds: JSON.stringify(ids) },
+  }
+}
+
+async function loadAnonymousCustomerIds(db: D1Compat, ids: number[]): Promise<Set<number>> {
+  const found = new Set<number>()
+  for (const slice of chunkForBinding(ids)) {
+    const placeholders = slice.map(() => '?').join(',')
+    const rows = await db.prepare(`SELECT id FROM customers WHERE id IN (${placeholders}) AND ${customerIsAnonymousSql()}`)
+      .all<{ id: number }>(slice)
+    for (const row of rows) found.add(Number(row.id))
+  }
+  return found
+}
+
 const NO_EXTRA_STATEMENTS = async () => []
+
+export function bulkDeleteWriteOffCosts(input: { quantity: number; unitCostUsd: number | null; unitCostKhr: number | null }) {
+  const quantity = Number(input.quantity)
+  const unitCostUsd = input.unitCostUsd == null ? null : Number(input.unitCostUsd)
+  const unitCostKhr = input.unitCostKhr == null ? null : Number(input.unitCostKhr)
+  const totalCostUsd = unitCostUsd == null ? null : unitCostUsd * quantity
+  const totalCostKhr = unitCostKhr == null ? null : unitCostKhr * quantity
+  if (!Number.isFinite(quantity)
+    || (unitCostUsd !== null && !Number.isFinite(unitCostUsd))
+    || (unitCostKhr !== null && !Number.isFinite(unitCostKhr))
+    || (totalCostUsd !== null && !Number.isFinite(totalCostUsd))
+    || (totalCostKhr !== null && !Number.isFinite(totalCostKhr))) {
+    throw new Error('Bulk-delete write-off cost is outside the supported numeric range.')
+  }
+  return { unitCostUsd, unitCostKhr, totalCostUsd, totalCostKhr }
+}
 
 export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
   products: {
@@ -91,7 +154,7 @@ export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
     auditEntity: 'product',
     cacheKey: 'products',
     deleteMode: 'soft',
-    buildExtraStatements: async (db, ids, reason, user) => {
+    buildExtraStatements: async (db, ids, reason, user, jobId) => {
       // Same movement-logging rule as the single-delete route: one
       // inventory_movements row per branch that still had stock, so the
       // movement history isn't silently missing what a bulk delete removed.
@@ -100,21 +163,41 @@ export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
         const placeholders = slice.map(() => '?').join(',')
         return db.prepare(`
           SELECT bs.product_id AS productId, bs.branch_id AS branchId, bs.quantity AS quantity,
-                 p.name AS productName, b.name AS branchName
+                 p.name AS productName,
+                 COALESCE(p.cost_price_usd, (
+                   SELECT CASE
+                     WHEN SUM(bbs.quantity) = bs.quantity
+                      AND SUM(CASE WHEN pb.unit_cost_usd IS NULL THEN 1 ELSE 0 END) = 0
+                     THEN SUM(bbs.quantity * pb.unit_cost_usd) / NULLIF(SUM(bbs.quantity), 0)
+                     ELSE NULL
+                   END
+                   FROM branch_batch_stock bbs
+                   JOIN product_batches pb ON pb.id = bbs.batch_id
+                   WHERE pb.variant_product_id = bs.product_id AND bbs.branch_id = bs.branch_id
+                     AND bbs.quantity > 0 AND pb.unit_cost_usd IS NOT NULL
+                 )) AS unitCostUsd,
+                 p.cost_price_khr AS unitCostKhr,
+                 b.name AS branchName
           FROM branch_stock bs
           LEFT JOIN products p ON p.id = bs.product_id
           LEFT JOIN branches b ON b.id = bs.branch_id
           WHERE bs.product_id IN (${placeholders}) AND bs.quantity > 0
-        `).all<{ productId: number; branchId: number; quantity: number; productName: string | null; branchName: string | null }>(slice)
+        `).all<{ productId: number; branchId: number; quantity: number; productName: string | null; branchName: string | null; unitCostUsd: number | null; unitCostKhr: number | null }>(slice)
       })
-      return stockRows.map((row) => ({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-              VALUES (@productId, @productName, @branchId, @branchName, 'delete', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-        params: {
-          productId: row.productId, productName: row.productName, branchId: row.branchId, branchName: row.branchName,
-          quantity: row.quantity, reason, userId: user.id, userName: user.name,
-        },
-      }))
+      const referenceId = bulkDeleteWriteOffReferenceId(jobId)
+      return stockRows.map((row) => {
+        const costs = bulkDeleteWriteOffCosts(row)
+        return {
+          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at)
+                VALUES (@productId, @productName, @branchId, @branchName, 'delete', @quantity, @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr, @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP)`,
+          params: {
+            productId: row.productId, productName: row.productName, branchId: row.branchId, branchName: row.branchName,
+            quantity: row.quantity,
+            ...costs,
+            reason, referenceId, userId: user.id, userName: actorSnapshot(user),
+          },
+        }
+      })
     },
   },
   // Customers/suppliers/delivery_contacts (this session): hard-delete,
@@ -141,7 +224,8 @@ export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
 // for most products), so this errs a little larger than import's; the
 // adaptive halve-and-retry inside runD1BatchInChunks covers it either way
 // if a particular chunk (e.g. unusually stock-heavy) blows the budget.
-const BULK_DELETE_CHUNK_SIZE = 500
+// The number itself is plan-sensitive and lives in lib/planTier.ts
+// (bulkDeleteChunkSize: paid 500, free 125), read per job below.
 
 interface JobRow {
   id: string
@@ -175,9 +259,9 @@ export async function createBulkDeleteJob(
     VALUES (@id, @entityType, 'pending', @reason, @idsJson, @totalCount, @userId, @userName)
   `).run({
     id: jobId, entityType, reason, idsJson: JSON.stringify(uniqueIds), totalCount: uniqueIds.length,
-    userId: user.id, userName: user.name,
+    userId: user.id, userName: actorSnapshot(user),
   })
-  await env.IMPORT_QUEUE.send({ jobId, kind: 'bulk-delete' })
+  await dispatchImportWork(env, { jobId, kind: 'bulk-delete' })
   return { jobId, totalCount: uniqueIds.length }
 }
 
@@ -198,6 +282,11 @@ async function markFailed(db: D1Compat, jobId: string, message: string): Promise
 
 export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
   const db = getDb(env)
+  // Ids per chunk, tier-aware -- see lib/planTier.ts. Free gets 125 instead
+  // of 500 for the same reason the import chunk shrinks: one chunk has to
+  // fit one invocation's CPU budget. runD1BatchInChunks' adaptive
+  // halve-and-retry still covers a chunk that overshoots on either plan.
+  const bulkDeleteChunkSize = getPlanLimits(env).bulkDeleteChunkSize
   const job = await getBulkDeleteJob(env, jobId)
   if (!job) return // job row vanished (shouldn't happen outside manual DB edits) -- nothing to do
   if (job.status === 'completed' || job.status === 'cancelled' || job.status === 'failed') return // already terminal, e.g. a redelivered queue message
@@ -230,15 +319,31 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
       return
     }
 
-    const chunk = allIds.slice(cursor, cursor + BULK_DELETE_CHUNK_SIZE)
+    const chunk = allIds.slice(cursor, cursor + bulkDeleteChunkSize)
+    let deleteChunk = chunk
+    if (job.entity_type === 'customers') {
+      const protectedIds = await loadAnonymousCustomerIds(db, chunk)
+      if (protectedIds.size) {
+        for (const id of protectedIds) if (!failedIds.includes(id)) failedIds.push(id)
+        deleteChunk = chunk.filter((id) => !protectedIds.has(id))
+      }
+    }
     try {
       // One statement deletes the whole chunk, instead of one DELETE/UPDATE
       // per id -- this is the core of why this is fast at 10k+ scale.
       // Soft (products) vs hard (customers/suppliers/delivery_contacts)
       // decided by config.deleteMode -- see buildCoreDeleteStatement.
-      const deleteStatements = buildCoreDeleteStatements(config, chunk)
-      const extraStatements = await config.buildExtraStatements(db, chunk, job.reason, user)
-      await runD1BatchInChunks(db, [...deleteStatements, ...extraStatements])
+      const deleteStatements = buildCoreDeleteStatements(config, deleteChunk)
+      const extraStatements = await config.buildExtraStatements(db, deleteChunk, job.reason, user, jobId)
+      if (job.entity_type === 'customers' && deleteChunk.length) {
+        // The advisory read above lets unrelated profile ids continue when a
+        // queued job contains a marker. This in-transaction assertion closes
+        // the race where a profile is marked after that read but before the
+        // hard delete. Guard and deletes are six statements at most.
+        await db.batch([buildAnonymousCustomerBulkDeleteGuard(deleteChunk), ...deleteStatements, ...extraStatements])
+      } else {
+        await runD1BatchInChunks(db, [...deleteStatements, ...extraStatements])
+      }
 
       // One audit_logs row per deleted id, batched together with everything
       // above rather than going through audit()'s per-call session lookup --
@@ -247,22 +352,24 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
       // this module exists to avoid; a bulk-delete audit entry is
       // identifiable as a batch via the shared `reason` text and tight
       // created_at clustering even without a device column.
-      const auditStatements: D1Statement[] = chunk.map((id) => ({
+      const auditStatements: D1Statement[] = deleteChunk.map((id) => ({
         sql: `INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, new_value)
               VALUES (@userId, @userName, 'delete', @entity, @entityId, @details, @entity, @entityId, NULL)`,
-        params: { userId: user.id, userName: user.name, entity: config.auditEntity, entityId: id, details: JSON.stringify({ reason: job.reason, bulkJobId: jobId }) },
+        params: { userId: user.id, userName: actorSnapshot(user), entity: config.auditEntity, entityId: id, details: JSON.stringify({ reason: job.reason, bulkJobId: jobId }) },
       }))
       await runD1BatchInChunks(db, auditStatements)
 
       cursor += chunk.length
-      await db.prepare(`UPDATE bulk_delete_jobs SET processed_count = @cursor, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId, cursor })
+      await db.prepare(`UPDATE bulk_delete_jobs
+        SET processed_count = @cursor, failed_count = @failedCount, failed_ids_json = @failedIds, updated_at = CURRENT_TIMESTAMP
+        WHERE id = @id`).run({ id: jobId, cursor, failedCount: failedIds.length, failedIds: JSON.stringify(failedIds) })
     } catch (error) {
       // A whole chunk failing (after runD1BatchInChunks' own per-statement
       // adaptive retry already gave up) is treated as those specific ids
       // failing, not the whole job -- record them and move on to the next
       // chunk rather than abandoning everything already-processed.
       console.error('[bulk-delete] chunk failed', jobId, { cursor, chunkSize: chunk.length }, error)
-      failedIds.push(...chunk)
+      for (const id of deleteChunk) if (!failedIds.includes(id)) failedIds.push(id)
       cursor += chunk.length
       await db.prepare(`
         UPDATE bulk_delete_jobs SET processed_count = @cursor, failed_count = @failedCount, failed_ids_json = @failedIds, last_error = @error, updated_at = CURRENT_TIMESTAMP WHERE id = @id

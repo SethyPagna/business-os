@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { checkContactDuplicate } from './contactDuplicates'
-import type { ContactDuplicateMatch, ContactTableKind } from './contactDuplicates'
+import type { ContactDuplicateCheck, ContactTableKind } from './contactDuplicates'
 
 const DEBOUNCE_MS = 500
 
@@ -15,28 +15,33 @@ const DEBOUNCE_MS = 500
 export function useContactDuplicateFlag(
   table: ContactTableKind,
   name: string,
-  phone: string,
+  phones: string[],
   excludeId?: number | string | null,
-): ContactDuplicateMatch[] {
-  const [matches, setMatches] = useState<ContactDuplicateMatch[]>([])
+): ContactDuplicateCheck {
+  const [result, setResult] = useState<ContactDuplicateCheck>({
+    matches: [],
+    duplicateReview: { candidateIds: [], candidateVersions: [], fingerprint: 'v1|' },
+    allowedActions: [],
+  })
   const requestIdRef = useRef(0)
+  const phoneKey = phones.map((phone) => phone.trim()).filter(Boolean).join('\u0000')
 
   useEffect(() => {
     const trimmedName = name.trim()
-    const trimmedPhone = phone.trim()
-    if (!trimmedName && !trimmedPhone) {
-      setMatches([])
+    const trimmedPhones = phones.map((phone) => phone.trim()).filter(Boolean)
+    if (!trimmedName && !trimmedPhones.length) {
+      setResult({ matches: [], duplicateReview: { candidateIds: [], candidateVersions: [], fingerprint: 'v1|' }, allowedActions: [] })
       return undefined
     }
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
     const timer = window.setTimeout(() => {
-      void checkContactDuplicate(table, { name: trimmedName, phone: trimmedPhone, excludeId }).then((result) => {
-        if (requestIdRef.current === requestId) setMatches(result)
+      void checkContactDuplicate(table, { name: trimmedName, phones: trimmedPhones, excludeId }).then((nextResult) => {
+        if (requestIdRef.current === requestId) setResult(nextResult)
       })
     }, DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
-  }, [table, name, phone, excludeId])
+  }, [table, name, phoneKey, excludeId])
 
-  return matches
+  return result
 }

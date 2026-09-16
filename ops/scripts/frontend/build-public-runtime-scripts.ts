@@ -19,6 +19,12 @@ const BANNER = '/*\n' +
   ' * Run: npm.cmd --prefix frontend run build:public-runtime\n' +
   ' */\n'
 
+// Line endings are not content. Exported so the regression test can drive the
+// same function this check uses, rather than a copy of it.
+function normalizeEol(text) {
+  return String(text).replace(/\r\n/g, '\n')
+}
+
 // Source file -> output file in frontend/public. service-worker.ts emits sw.js
 // so it registers at the site root as /sw.js (required for full-origin scope).
 const FILES = [
@@ -80,7 +86,15 @@ function main() {
     const expected = BANNER + outputText
     if (checkOnly) {
       const current = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : ''
-      if (current !== expected) {
+      // Compare CONTENT, not bytes. Git stores these files with LF; this
+      // checkout is core.autocrlf=true, so they arrive on disk with CRLF while
+      // this generator always emits LF. A raw byte comparison therefore called
+      // a pristine checkout stale forever -- and since this is step 2 of the
+      // `test:utils` chain, and that chain stops at the first red, it could
+      // stop a lane before a single one of its 170 test files ever ran. A
+      // staleness check answers "is the generated code out of date", and a
+      // line ending is not the generated code.
+      if (normalizeEol(current) !== normalizeEol(expected)) {
         throw new Error(`Generated runtime is stale: ${path.relative(root, outputPath)}. Run npm.cmd --prefix frontend run build:public-runtime.`)
       }
       console.log(`Verified ${path.relative(root, outputPath)}`)
@@ -91,9 +105,15 @@ function main() {
   }
 }
 
-try {
-  main()
-} catch (error) {
-  console.error(`build:public-runtime failed: ${error && error.message ? error.message : error}`)
-  process.exit(1)
+// Exported so the regression test drives the real comparison rather than a
+// copy of it; the main() guard keeps requiring this file side-effect free.
+module.exports = { normalizeEol }
+
+if (require.main === module) {
+  try {
+    main()
+  } catch (error) {
+    console.error(`build:public-runtime failed: ${error && error.message ? error.message : error}`)
+    process.exit(1)
+  }
 }

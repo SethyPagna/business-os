@@ -10,23 +10,30 @@
 //     branch_stock. POS's damage option (11.9) draws quantity_remaining
 //     down later; a lot that has been drawn from blocks un-doing the
 //     return edit that created it.
-//   - Replace hands the customer product from the SAME-NAME stock of a
-//     returned item (the name group IS product identity in this app --
-//     see routes/products.ts's identity rule). A different product is a
-//     refund plus a new sale, not a replacement.
-//   - The value gap settles as 'even_exchange' (no money moves; only legal
-//     when the gap is zero) or 'price_difference' (full access only).
+//   - Replace may hand out any catalog product. routes/returns.ts records the
+//     hand-out as a linked sale/receipt as well as this stock movement.
+//   - A return is ONLY a return: the customer gets back exactly what the
+//     original sale line charged. A replacement is ONLY a sale: priced,
+//     tendered and recorded like any other. Neither nets against the other,
+//     so there is no exchange arithmetic, no price-difference settlement
+//     and no permission gate on a value gap. (Returns rows written before
+//     this carry settlement_mode/settlement_diff_* from migration 0074;
+//     those columns are read-only history now -- ReturnDetailModal still
+//     renders them for old rows, nothing writes them again.)
 //
 // The pre-existing sellable-restock path (receiveBatchStock/plain bump)
 // stays in routes/returns.ts unchanged; this file owns only what 0074
 // added, so scripts/test-returns-replace-damaged-pure.cjs can drive the
 // real logic against a real sqlite database.
 import type { D1Compat } from './db'
-import { removeStockFromBatch } from './productBatches'
-import { selectInChunks } from './sqlBinding'
+import { InsufficientBatchStockError, planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
+import {
+  DEFAULT_STOCK_CONDITION_TAG, parseStockConditionTag,
+  TAGGED_DISPOSAL_MOVEMENT_TYPE, taggedReasonText,
+  type StockConditionSource, type StockConditionTag,
+} from './stockCondition'
 
 export type ReturnStockAction = 'none' | 'restock' | 'damaged'
-export type SettlementMode = 'even_exchange' | 'price_difference'
 
 // Movement-ledger types for the product's information trail (11.13's "adds
 // a damage entry in the product's information" is exactly these rows).
@@ -43,55 +50,159 @@ export function normalizeStockAction(input: { stock_action?: unknown; return_to_
   return input.return_to_stock !== false ? 'restock' : 'none'
 }
 
-export function computeSettlement(input: {
-  mode?: unknown
-  returnedTotalUsd: number
-  returnedTotalKhr: number
-  replacementTotalUsd: number
-  replacementTotalKhr: number
-}): { mode: SettlementMode; diffUsd: number; diffKhr: number; needsFullAccess: boolean; evenExchangeBlocked: boolean } {
-  const mode: SettlementMode = String(input.mode ?? '').trim().toLowerCase() === 'price_difference' ? 'price_difference' : 'even_exchange'
-  // Positive = the replacement is worth MORE than what came back -- the
-  // customer owes the difference; negative = the shop refunds it.
-  const diffUsd = Number((input.replacementTotalUsd - input.returnedTotalUsd).toFixed(2))
-  const diffKhr = Math.round(input.replacementTotalKhr - input.returnedTotalKhr)
-  return {
-    mode,
-    diffUsd,
-    diffKhr,
-    needsFullAccess: mode === 'price_difference',
-    evenExchangeBlocked: mode === 'even_exchange' && (Math.abs(diffUsd) >= 0.005 || Math.abs(diffKhr) >= 1),
-  }
+// P4-3. Owner: "if restock as damaged etc... Don't we have the remove tag
+// rule for returns. that should be consistent." A returned line marked
+// 'damaged' now carries the SAME two-way choice the remove-stock flow's
+// StockConditionTagRow offers: keep the units as a tagged, held row (the
+// existing/default behavior -- untouched for old clients that never send
+// either field below) or destroy them immediately as a booked loss. 'none'
+// (no restock at all) is UNCHANGED by this -- the owner's ruling names the
+// 'damaged' branch only.
+export type DamagedDisposition = 'keep' | 'remove'
+
+// Absent/blank means 'keep' -- the ONLY behavior a return's 'damaged' items
+// have ever had, so an old client or test payload that never sends this
+// field gets back exactly what it always got: a held, tagged row.
+export function parseDamagedDisposition(value: unknown): { ok: true; disposition: DamagedDisposition } | { ok: false; error: string } {
+  if (value == null || String(value).trim() === '') return { ok: true, disposition: 'keep' }
+  const raw = String(value).trim().toLowerCase()
+  if (raw === 'keep' || raw === 'remove') return { ok: true, disposition: raw }
+  return { ok: false, error: `Unknown damaged disposition "${String(value)}". Use "keep" or "remove".` }
 }
 
-export class ReplacementNameMismatchError extends Error {
-  constructor(productName: string) {
-    super(`"${productName}" is not the same-name stock of any returned item -- a replacement must be the same product (any of its rows). For a different product, refund this return and make a new sale instead.`)
-    this.name = 'ReplacementNameMismatchError'
-  }
+// The one place a return item's condition tag + disposition are decided,
+// shared by POST / (create) and PATCH /:id (edit) so the two writers cannot
+// drift on what counts as a valid tag or a valid disposition.
+export function resolveDamagedReturnChoice(item: { condition_tag?: unknown; damaged_disposition?: unknown }):
+  | { ok: true; tag: StockConditionTag; disposition: DamagedDisposition }
+  | { ok: false; error: string } {
+  const tagResult = parseStockConditionTag(item.condition_tag)
+  if (!tagResult.ok) return { ok: false, error: tagResult.error }
+  const dispositionResult = parseDamagedDisposition(item.damaged_disposition)
+  if (!dispositionResult.ok) return { ok: false, error: dispositionResult.error }
+  return { ok: true, tag: tagResult.tag ?? DEFAULT_STOCK_CONDITION_TAG, disposition: dispositionResult.disposition }
 }
 
-// Replace's identity gate: every replacement product's name_key must match
-// a returned item's product name_key. name_key is trigger-maintained
-// (migration 0010) so this is the SAME grouping every other surface uses.
-export async function assertReplacementsSameName(
-  db: D1Compat,
-  returnedProductIds: number[],
-  replacementProductIds: number[],
-): Promise<void> {
-  const replacementIds = [...new Set(replacementProductIds.filter((id) => Number.isFinite(id) && id > 0))]
-  if (!replacementIds.length) return
-  const returnedIds = [...new Set(returnedProductIds.filter((id) => Number.isFinite(id) && id > 0))]
-  const fetchKeys = async (ids: number[]) => ids.length
-    ? await selectInChunks(ids, 0, (chunk) => db
-        .prepare(`SELECT id, name, name_key FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
-        .all<{ id: number; name: string | null; name_key: string | null }>(chunk))
-    : []
-  const returnedKeys = new Set((await fetchKeys(returnedIds)).map((row) => String(row.name_key || '')))
-  for (const row of await fetchKeys(replacementIds)) {
-    if (!returnedKeys.has(String(row.name_key || ''))) {
-      throw new ReplacementNameMismatchError(String(row.name || `product #${row.id}`))
+// What one returned line refunds. The ONLY authority is the price the
+// ORIGINAL sale line charged -- not the product's current selling price, and
+// not whatever the client posted. A manual return (no sale line on file) has
+// no such authority and falls back to the posted price, which is the only
+// number that exists for it.
+export function resolveRefundUnitPrice(input: {
+  saleLine?: { applied_price_usd?: number | null; applied_price_khr?: number | null } | null
+  postedUsd: number
+  postedKhr: number
+}): { unitUsd: number; unitKhr: number; fromSaleLine: boolean } {
+  const line = input.saleLine
+  if (line && (line.applied_price_usd != null || line.applied_price_khr != null)) {
+    return {
+      unitUsd: Number(line.applied_price_usd) || 0,
+      unitKhr: Number(line.applied_price_khr) || 0,
+      fromSaleLine: true,
     }
+  }
+  return { unitUsd: Number(input.postedUsd) || 0, unitKhr: Number(input.postedKhr) || 0, fromSaleLine: false }
+}
+
+export type ReturnLotSplit = { batchId: number; quantity: number }
+
+export class ReturnLotRequiredError extends Error {
+  code = 'return_lot_required'
+  constructor(productName: string, quantity: number) {
+    super(`Pick the lot ${quantity} unit(s) of "${productName}" go back into. This product's stock is tracked by lot, and the original sale line does not say which one -- a return never lands on unspecified stock.`)
+    this.name = 'ReturnLotRequiredError'
+  }
+}
+
+// Which lot(s) a returned line restocks into, decided BEFORE any write.
+//
+// An explicit operator pick is authoritative for the WHOLE line -- the person
+// looked at the shelf and said "these units belong in that lot", and letting
+// it merge with a derived split would put units somewhere nobody chose. With
+// no pick, the sale itself answers: the lots the line actually drew from
+// (last drawn first, mirroring the cancel path), or the single lot recorded
+// on the line.
+//
+// A lot-tracked product with neither a pick nor a sale-side answer is
+// REFUSED, never silently bumped onto the unspecified branch_stock
+// aggregate. A product that has never used lot tracking (`lotTracked` false)
+// keeps the plain aggregate bump, which for it is the only truthful
+// destination.
+export function planReturnLot(input: {
+  allocations: Array<{ batch_id: number; outstanding: number }>
+  saleLineBatchId: number | null
+  operatorBatchId: number | null
+  quantity: number
+  lotTracked: boolean
+}): { splits: ReturnLotSplit[]; plainQuantity: number; requiresLotPick: boolean } {
+  const quantity = Math.max(0, Number(input.quantity) || 0)
+  if (input.operatorBatchId != null) {
+    return { splits: [{ batchId: Number(input.operatorBatchId), quantity }], plainQuantity: 0, requiresLotPick: false }
+  }
+  const splits: ReturnLotSplit[] = []
+  let remaining = quantity
+  for (let index = input.allocations.length - 1; index >= 0 && remaining > 0; index -= 1) {
+    const alloc = input.allocations[index]
+    const give = Math.min(Math.max(0, Number(alloc.outstanding) || 0), remaining)
+    if (give <= 0) continue
+    splits.push({ batchId: Number(alloc.batch_id), quantity: give })
+    remaining -= give
+  }
+  if (remaining > 0 && input.saleLineBatchId != null) {
+    splits.push({ batchId: Number(input.saleLineBatchId), quantity: remaining })
+    remaining = 0
+  }
+  return {
+    splits,
+    plainQuantity: input.lotTracked ? 0 : remaining,
+    requiresLotPick: remaining > 0 && input.lotTracked,
+  }
+}
+
+export function createDamagedLotStatement(input: {
+  productId: number
+  productName: string | null
+  branchId: number | null
+  batchId: number | null
+  returnIdSql: string
+  quantity: number
+  reason: string | null
+  userId: number | string | null
+  userName: string | null
+  // P3-L6 (migration 0162). ONE insert shape for every writer of this table.
+  // The returns callers below omit all three and keep the identity their rows
+  // always had implicitly -- the same values 0162 backfilled history with --
+  // so nothing about the returns flow changes. The stock-side writers
+  // (lib/damagedLotActions.ts) always pass them explicitly.
+  conditionTag?: StockConditionTag | null
+  source?: StockConditionSource | null
+  unitCostUsd?: number | null
+}): StockWriteStatement {
+  const quantity = Number(input.quantity)
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Damaged quantity must be positive')
+  return {
+    sql: `INSERT INTO damaged_stock_lots (
+      product_id, product_name, branch_id, batch_id, return_id, quantity,
+      quantity_remaining, reason, created_by_user_id, created_by_user_name,
+      condition_tag, source, unit_cost_usd
+    ) VALUES (
+      @product_id,@product_name,@branch_id,@batch_id,${input.returnIdSql},@quantity,
+      @quantity,@reason,@user_id,@user_name,
+      @condition_tag,@source,@unit_cost_usd
+    )`,
+    params: {
+      product_id: input.productId,
+      product_name: input.productName,
+      branch_id: input.branchId,
+      batch_id: input.batchId,
+      quantity,
+      reason: input.reason,
+      user_id: input.userId,
+      user_name: input.userName,
+      condition_tag: input.conditionTag ?? DEFAULT_STOCK_CONDITION_TAG,
+      source: input.source ?? 'return',
+      unit_cost_usd: input.unitCostUsd ?? null,
+    },
   }
 }
 
@@ -106,20 +217,8 @@ export async function createDamagedLot(db: D1Compat, input: {
   userId: number | string | null
   userName: string | null
 }): Promise<void> {
-  await db.prepare(`
-    INSERT INTO damaged_stock_lots (product_id, product_name, branch_id, batch_id, return_id, quantity, quantity_remaining, reason, created_by_user_id, created_by_user_name)
-    VALUES (@product_id, @product_name, @branch_id, @batch_id, @return_id, @quantity, @quantity, @reason, @user_id, @user_name)
-  `).run({
-    product_id: input.productId,
-    product_name: input.productName,
-    branch_id: input.branchId,
-    batch_id: input.batchId,
-    return_id: input.returnId,
-    quantity: input.quantity,
-    reason: input.reason,
-    user_id: input.userId,
-    user_name: input.userName,
-  })
+  const statement = createDamagedLotStatement({ ...input, returnIdSql: '@return_id' })
+  await db.prepare(statement.sql).run({ ...(statement.params as Record<string, unknown>), return_id: input.returnId })
 }
 
 export class ConsumedDamagedStockError extends Error {
@@ -127,6 +226,112 @@ export class ConsumedDamagedStockError extends Error {
     super(`${consumed} unit(s) of "${productName}" from this return's damaged stock ${consumed === 1 ? 'has' : 'have'} already been drawn (sold or written off) -- the return can no longer be edited. Record a separate adjustment instead.`)
     this.name = 'ConsumedDamagedStockError'
   }
+}
+
+// P4-3. ONE writer for a return line marked 'damaged', called by BOTH POST /
+// (create) and PATCH /:id (edit) so the lot's condition_tag/source/
+// unit_cost_usd are stamped identically everywhere instead of the edit path
+// hand-rolling its own INSERT (which is what left those three columns NULL
+// on every return-created lot before this).
+//
+// 'keep' (the default, and the ONLY behavior before this lane): a damage_in
+// movement records the physical return, and createDamagedLotStatement opens
+// a held row -- exactly damagedLotActions.ts's HOLD, minus the sellable-stock
+// leg, because a return's damaged units never entered sellable stock to
+// begin with (they came from the customer, not off the shelf). From here on
+// the row is indistinguishable from a remove-stock-created tagged row: the
+// SAME planDisposeTagged/planRestoreTagged and the SAME product-page Tagged
+// Stock Rows surface own it (readTaggedLotGroups/readOpenTaggedLots read
+// damaged_stock_lots without caring about `source`).
+//
+// 'remove' (new): the units are destroyed immediately -- damage_in still
+// records the return, then the SAME row is opened and drained to zero in one
+// batch, with a write_off booking the loss (removalLosses.ts counts
+// 'write_off' at cost). Opening the row rather than skipping it is
+// deliberate: reverseDamagedLots (return edit/cancel) finds it exactly like
+// an already-disposed remove-stock row -- quantity_remaining(0) <
+// quantity(original) -- and refuses the edit with the SAME
+// ConsumedDamagedStockError a sold-from lot gets, rather than silently
+// leaving an unreversed loss with nothing in `damaged_stock_lots` to key off.
+// This mirrors DISPOSE's own "no undo path" rule (removalLosses.ts): once
+// destroyed, a separate adjustment is the only way to correct it.
+export function planDamagedReturnLine(input: {
+  productId: number
+  productName: string | null
+  branchId: number
+  batchId: number | null
+  /** SQL expression (with its own params bound by the caller) identifying
+   *  the return row -- returnCreateIdSql()'s subquery for POST /, '@return_id'
+   *  for PATCH /:id. */
+  returnIdSql: string
+  quantity: number
+  reason: string | null
+  userId: number | string | null
+  userName: string | null
+  tag: StockConditionTag
+  disposition: DamagedDisposition
+  unitCostUsd: number | null
+  unitCostKhr: number | null
+}): StockWriteStatement[] {
+  const quantity = Number(input.quantity)
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Damaged quantity must be positive')
+  const statements: StockWriteStatement[] = [
+    createDamagedLotStatement({
+      productId: input.productId,
+      productName: input.productName,
+      branchId: input.branchId,
+      batchId: input.batchId,
+      returnIdSql: input.returnIdSql,
+      quantity,
+      reason: input.reason,
+      userId: input.userId,
+      userName: input.userName,
+      conditionTag: input.tag,
+      source: 'return',
+      unitCostUsd: input.unitCostUsd,
+    }),
+    {
+      sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+            VALUES(@dmg_product_id,@dmg_product_name,@dmg_branch_id,'${DAMAGE_IN_MOVEMENT}',@dmg_quantity,@dmg_unit_cost_usd,@dmg_unit_cost_khr,@dmg_reason,${input.returnIdSql},@dmg_user_id,@dmg_user_name,@dmg_batch_id)`,
+      params: {
+        dmg_product_id: input.productId, dmg_product_name: input.productName, dmg_branch_id: input.branchId,
+        dmg_quantity: quantity, dmg_unit_cost_usd: input.unitCostUsd, dmg_unit_cost_khr: input.unitCostKhr,
+        dmg_reason: input.reason, dmg_user_id: input.userId, dmg_user_name: input.userName, dmg_batch_id: input.batchId,
+      },
+    },
+  ]
+  if (input.disposition === 'remove') {
+    // The row this SAME call just opened, keyed the same way the create
+    // path's own fallback-batch subquery pattern keys a just-inserted row:
+    // by business identity within THIS batch/transaction, not a returned id.
+    const lotRefSql = `(SELECT id FROM damaged_stock_lots WHERE return_id=${input.returnIdSql} AND product_id=@dsp_product_id AND branch_id=@dsp_branch_id ORDER BY id DESC LIMIT 1)`
+    statements.push(
+      {
+        sql: `UPDATE damaged_stock_lots SET quantity_remaining = quantity_remaining - @dsp_quantity, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ${lotRefSql} AND quantity_remaining >= @dsp_quantity`,
+        params: { dsp_product_id: input.productId, dsp_branch_id: input.branchId, dsp_quantity: quantity },
+      },
+      {
+        // reference_id = the return (SAME as damage_in above), not a
+        // damaged_lot: marker: routes/returns.ts's create-path postcondition
+        // counts every return-tied movement by reference_id=<this return>,
+        // and movementReference.ts never resolves a write_off's reference_id
+        // to a receipt label regardless of its shape, so there is nothing to
+        // gain from the marker here -- unlike damagedLotActions.ts's DISPOSE,
+        // this write_off is not reachable from the generic Stock Change
+        // ledger revert in the first place ('write_off' is not on
+        // stockRevert.ts's REVERTIBLE_MOVEMENT_TYPES allowlist at all).
+        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+              VALUES(@wo_product_id,@wo_product_name,@wo_branch_id,'${TAGGED_DISPOSAL_MOVEMENT_TYPE}',@wo_quantity,@wo_unit_cost_usd,@wo_unit_cost_khr,@wo_reason,${input.returnIdSql},@wo_user_id,@wo_user_name,@wo_batch_id)`,
+        params: {
+          wo_product_id: input.productId, wo_product_name: input.productName, wo_branch_id: input.branchId,
+          wo_quantity: quantity, wo_unit_cost_usd: input.unitCostUsd, wo_unit_cost_khr: input.unitCostKhr,
+          wo_reason: taggedReasonText(input.tag, input.reason), wo_user_id: input.userId, wo_user_name: input.userName, wo_batch_id: input.batchId,
+        },
+      },
+    )
+  }
+  return statements
 }
 
 // Editing a return re-applies its stock from scratch (see PATCH /:id in
@@ -163,6 +368,61 @@ export class InsufficientReplacementStockError extends Error {
   }
 }
 
+export function planReplacementStock(input: {
+  productId: number
+  productName: string
+  branchId: number
+  batchId: number | null
+  quantity: number
+  unitCostUsd: number
+  unitCostKhr: number
+  returnIdSql: string
+  returnNumber: string | null
+  userId: number | string | null
+  userName: string | null
+}): { statements: StockWriteStatement[]; usedBatch: boolean } {
+  const quantity = Number(input.quantity)
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Replacement quantity must be positive')
+  const shared = {
+    product_id: input.productId,
+    product_name: input.productName,
+    branch_id: input.branchId,
+    quantity,
+    unit_cost_usd: input.unitCostUsd,
+    unit_cost_khr: input.unitCostKhr,
+    reason: `Replacement for return ${input.returnNumber ? `#${input.returnNumber}` : 'being recorded'}`,
+    user_id: input.userId,
+    user_name: input.userName,
+    batch_id: input.batchId,
+  }
+  const statements: StockWriteStatement[] = input.batchId != null
+    ? [...planRemoveStockFromBatch({ batchId: input.batchId, productId: input.productId, branchId: input.branchId, quantity }).statements]
+    : [
+        {
+          sql: `UPDATE branch_stock SET quantity=quantity-@quantity
+                WHERE product_id=@product_id AND branch_id=@branch_id`,
+          params: shared,
+        },
+        {
+          sql: `UPDATE products SET stock_quantity=(
+                  SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@product_id
+                ), updated_at=CURRENT_TIMESTAMP WHERE id=@product_id`,
+          params: shared,
+        },
+      ]
+  statements.push({
+    sql: `INSERT INTO inventory_movements (
+      product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,
+      unit_cost_khr,reason,reference_id,user_id,user_name,batch_id
+    ) VALUES (
+      @product_id,@product_name,@branch_id,'${REPLACEMENT_OUT_MOVEMENT}',-@quantity,
+      @unit_cost_usd,@unit_cost_khr,@reason,${input.returnIdSql},@user_id,@user_name,@batch_id
+    )`,
+    params: shared,
+  })
+  return { statements, usedBatch: input.batchId != null }
+}
+
 // Drain the stock a replacement line hands to the customer -- the POS way:
 // an explicit batch drains that exact lot (validated by
 // removeStockFromBatch, which also keeps branch_stock/stock_quantity in
@@ -182,18 +442,16 @@ export async function applyReplacementStock(db: D1Compat, input: {
   userId: number | string | null
   userName: string | null
 }): Promise<{ usedBatch: boolean }> {
-  let usedBatch = false
   if (input.batchId != null) {
-    // Throws InsufficientBatchStockError/Error before writing anything if
-    // the lot can't cover it -- deliberately NOT caught here: the person
-    // picked this exact lot, so a shortfall is an answer, not a fallback.
-    await removeStockFromBatch(db, {
-      batchId: input.batchId,
-      productId: input.productId,
-      branchId: input.branchId,
-      quantity: input.quantity,
+    const batch = await db.prepare(`SELECT COALESCE(bbs.quantity,0) AS available
+      FROM product_batches pb
+      LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
+      WHERE pb.id=@batchId AND pb.variant_product_id=@productId`).get<{ available: number }>({
+      batchId: input.batchId, productId: input.productId, branchId: input.branchId,
     })
-    usedBatch = true
+    if (!batch) throw new Error('Selected received date does not belong to this product')
+    const available = Number(batch.available) || 0
+    if (input.quantity > available) throw new InsufficientBatchStockError(available)
   } else {
     const stockRow = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @product_id AND branch_id = @branch_id')
       .get<{ quantity: number }>({ product_id: input.productId, branch_id: input.branchId })
@@ -201,36 +459,13 @@ export async function applyReplacementStock(db: D1Compat, input: {
     if (input.quantity > available) {
       throw new InsufficientReplacementStockError(input.productName, input.quantity, available)
     }
-    // Strict (unclamped) subtraction (Part-77, oversell-clamp audit): the
-    // check above already validated availability, so the only way this goes
-    // negative is a concurrent consumer winning the read-write race -- then
-    // 0058's CHECK(quantity >= 0) rejects the write (the movement below
-    // never runs) instead of the old MAX(0, ...) clamp handing the customer
-    // units the branch no longer had.
-    await db.prepare(`
-      INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
-      ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity
-    `).run({ product_id: input.productId, branch_id: input.branchId, quantity: input.quantity })
   }
-  await db.prepare(`
-    INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-    VALUES (@product_id, @product_name, @branch_id, '${REPLACEMENT_OUT_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)
-  `).run({
-    product_id: input.productId,
-    product_name: input.productName,
-    branch_id: input.branchId,
-    quantity: -input.quantity,
-    unit_cost_usd: input.unitCostUsd,
-    unit_cost_khr: input.unitCostKhr,
-    reason: `Replacement for return ${input.returnNumber ? `#${input.returnNumber}` : `id ${input.returnId}`}`,
-    reference_id: input.returnId,
-    user_id: input.userId,
-    user_name: input.userName,
-    // 0084: an explicit lot pick drained exactly that lot; the plain path
-    // touched no specific lot.
-    batch_id: input.batchId ?? null,
-  })
-  return { usedBatch }
+  const plan = planReplacementStock({ ...input, returnIdSql: '@return_id' })
+  await db.batch(plan.statements.map((statement) => ({
+    ...statement,
+    params: { ...(statement.params as Record<string, unknown>), return_id: input.returnId },
+  })))
+  return { usedBatch: plan.usedBatch }
 }
 
 export const DAMAGE_OUT_MOVEMENT = 'damage_out'
@@ -267,7 +502,7 @@ export async function consumeDamagedLot(db: D1Compat, input: {
     FROM damaged_stock_lots WHERE id = @id
   `).get<{ id: number; product_id: number; product_name: string | null; branch_id: number | null; return_id: number | null; quantity_remaining: number }>({ id: input.lotId })
   if (!lot || Number(lot.product_id) !== Number(input.productId)) {
-    throw new Error('Selected damaged lot does not belong to this product')
+    throw new Error('Selected damaged stock does not belong to this product')
   }
   const result = await db.prepare(`
     UPDATE damaged_stock_lots
@@ -301,10 +536,15 @@ export async function restoreDamagedLot(db: D1Compat, input: {
 export async function listOpenDamagedLots(db: D1Compat, input: {
   productId: number
   branchId?: number | null
-}): Promise<Array<{ id: number; branch_id: number | null; batch_id: number | null; return_id: number | null; quantity_remaining: number; reason: string | null; created_at: string | null }>> {
+}): Promise<Array<{ id: number; branch_id: number | null; batch_id: number | null; return_id: number | null; quantity_remaining: number; reason: string | null; created_at: string | null; condition_tag: string | null }>> {
   const branchClause = input.branchId != null ? 'AND branch_id = @branch_id' : ''
+  // P3-L6: condition_tag rides along so the POS damage picker can name the
+  // condition it is offering ("expired", "opened") instead of calling every
+  // held lot "damaged". unit_cost_usd (0162) deliberately does NOT: this
+  // reader is behind the POS-readable gate, which must not hand a cashier
+  // cost figures -- see routes/batches.ts GET /damaged-lots.
   return await db.prepare(`
-    SELECT id, branch_id, batch_id, return_id, quantity_remaining, reason, created_at
+    SELECT id, branch_id, batch_id, return_id, quantity_remaining, reason, created_at, condition_tag
     FROM damaged_stock_lots
     WHERE product_id = @product_id AND quantity_remaining > 0 ${branchClause}
     ORDER BY created_at ASC, id ASC

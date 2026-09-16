@@ -3,6 +3,8 @@
 // stripping) plus backend/src/money.ts's normalizePriceValue. Exact
 // behavioral port -- no native/Node dependencies in the original either.
 
+import { roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
+
 const KHMER_ZERO = 0x17e0
 const ARABIC_INDIC_ZERO = 0x0660
 const EXTENDED_ARABIC_INDIC_ZERO = 0x06f0
@@ -83,14 +85,18 @@ export function parseImportNumericValue(
   return parsed
 }
 
-function roundUpToDecimals(value: number, decimals = 2): number {
-  const factor = 10 ** decimals
-  const scaled = value * factor
-  const epsilon = 1e-9
-  if (value >= 0) return Math.ceil(scaled - epsilon) / factor
-  return Math.floor(scaled + epsilon) / factor
+export function normalizeImportMoney(value: unknown, fallbackValue = 0): number {
+  // Legacy sale imports retain their existing policy until versioned sale
+  // settlement is activated. Cost writers opt into the explicit helper below.
+  const parsed = parseImportNumericValue(value, fallbackValue)
+  return parsed >= 0 ? Math.ceil(parsed * 100 - 1e-9) / 100 : Math.floor(parsed * 100 + 1e-9) / 100
 }
 
-export function normalizeImportMoney(value: unknown, fallbackValue = 0): number {
-  return roundUpToDecimals(parseImportNumericValue(value, fallbackValue), 2)
+export function normalizeImportCost4(value: unknown, fallbackValue = 0): number {
+  return roundMoney4(parseImportNumericValue(value, fallbackValue))
+}
+
+/** Catalog selling/wholesale defaults only; round original input directly. */
+export function normalizeImportSellingPrice(value: unknown, fallbackValue = 0): number {
+  return sellingPriceCeilCent(parseImportNumericValue(value, fallbackValue))
 }

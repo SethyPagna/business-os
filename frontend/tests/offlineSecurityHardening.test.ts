@@ -21,11 +21,14 @@ const localDbSource = fs.readFileSync(new URL('../src/api/localDb.ts', import.me
 const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const swSource = fs.readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
 const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const appUpdateSource = fs.readFileSync(new URL('../src/utils/appUpdate.ts', import.meta.url), 'utf8')
+const sidebarSource = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
 const serverPageSource = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
 const packageSource = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
 const swRuntimeSource = fs.readFileSync(new URL('../src/public-runtime/service-worker.ts', import.meta.url), 'utf8')
 const websocketSource = fs.readFileSync(new URL('../src/api/websocket.ts', import.meta.url), 'utf8')
 const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
+const offlineSnapshotSource = fs.readFileSync(new URL('../src/api/offlineSnapshotTransport.ts', import.meta.url), 'utf8')
 
 await runTest('frontend uses cookie credentials and does not persist auth tokens for offline sync', () => {
   assert.match(httpSource, /credentials:\s*'include'/)
@@ -106,6 +109,14 @@ await runTest('UX exposes vault, conflicts, storage, security, and update states
   assert.match(appSource, /Conflicts need review/)
   assert.match(appSource, /New version ready/)
   assert.match(appSource, /sync:app-update-available/)
+  assert.match(appSource, /function AppUpdateBanner/)
+  assert.match(appSource, /fixed inset-x-0 top-0/)
+  assert.match(appSource, /Restart now/)
+  assert.match(appSource, /App updates are independent of authentication[\s\S]*window\.addEventListener\('sync:app-update-available',[\s\S]*\}, \[\]\)/)
+  assert.match(appSource, /announcedHash === FRONTEND_BUILD_HASH/)
+  assert.match(appUpdateSource, /if \(hasDirtyWork\(\)\)[\s\S]*flushPendingWorkDrafts\(\)[\s\S]*return 'blocked'/)
+  assert.match(appUpdateSource, /BUSINESS_OS_SKIP_WAITING/)
+  assert.match(sidebarSource, /restartIntoLatestApp/)
   assert.match(serverPageSource, /Sync Center/)
   assert.match(serverPageSource, /Storage/)
   assert.match(serverPageSource, /Security/)
@@ -113,7 +124,15 @@ await runTest('UX exposes vault, conflicts, storage, security, and update states
 })
 
 await runTest('offline security hardening test is part of the utility suite', () => {
-  assert.match(packageSource, /offlineSecurityHardening\.test\.ts/)
+  // Since 0a5e836e test:utils runs every tests/*.test.ts through the discovery
+  // runner, so this file is in the suite by existing; pin the runner instead.
+  assert.match(packageSource, /"test:utils": "node tests\/runTestChain\.ts"/)
+})
+
+await runTest('offline customer snapshots use the bounded picker shape and replace the prior mirror', () => {
+  assert.match(offlineSnapshotSource, /\/api\/customers\?fields=picker&limit=\$\{OFFLINE_CUSTOMER_MIRROR_LIMIT\}/)
+  assert.match(offlineSnapshotSource, /await mirrorTable\('customers'\)\(items\)/)
+  assert.doesNotMatch(offlineSnapshotSource, /apiFetch\('GET', '\/api\/customers'\)/)
 })
 
 if (failed > 0) {

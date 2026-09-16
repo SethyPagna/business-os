@@ -7,9 +7,10 @@
 // /stats endpoint -- all kept computing total_products/in_stock/low_stock/
 // out_of_stock as a plain `COUNT(*) FROM products`, counting every variant
 // row separately (and even counting group-header placeholder rows, which
-// aren't sellable products at all -- see businessMetrics.ts's
-// sellableProductWhere for the same exclusion, applied there but never to
-// these three live endpoints). Net effect: any catalog with grouped/variant
+// aren't sellable products at all -- the same exclusion the dead
+// lib/businessMetrics.ts applied in its own sellableProductWhere, and never
+// to these three live endpoints; that file is gone, this helper is the one
+// place it lives now). Net effect: any catalog with grouped/variant
 // products shows a bigger "total products" on Dashboard/Inventory stat
 // cards than the pagination footer on the listing right below them, and
 // stakeholders comparing the two pages get two different answers to
@@ -33,9 +34,17 @@
 // from the count entirely.
 import type { D1Compat } from './db'
 import { FAMILY_ROOT_KEY_SQL } from './familyPagination'
+import { lowStockThresholdSql, type LowStockConfig } from './lowStockSettings'
 
 export interface FamilyStockStatsOptions {
   db: D1Compat
+  // The owner's low-stock switch/amount/scope (lowStockSettings.ts), read
+  // once per request by the route. REQUIRED rather than defaulted on purpose:
+  // this one helper feeds the Dashboard tile, the Inventory stats block and
+  // the Branches stats, and a default here is exactly how one of those three
+  // would go on counting by the old hardcoded 10 while the list beside it
+  // counted by the owner's number.
+  lowStock: LowStockConfig
   // Extra JOINs beyond the family self-join this helper already adds
   // (e.g. a branch_stock join used by filters). Must only reference `p.`.
   joinSql: string
@@ -60,8 +69,35 @@ export interface FamilyStockStats {
   stock_value_khr: number
 }
 
+export type FamilyStockAlertState = 'low' | 'out'
+
+export interface FamilyStockAlertRow {
+  id: number
+  name: string | null
+  category: string | null
+  unit: string | null
+  stock_quantity: number
+  low_stock_threshold: number | null
+  out_of_stock_threshold: number | null
+  family_stock_quantity: number
+  family_size: number
+}
+
+export interface FamilyStockAlertPage {
+  items: FamilyStockAlertRow[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+  hasMore: boolean
+}
+
 export async function getFamilyStockStats(opts: FamilyStockStatsOptions): Promise<FamilyStockStats> {
-  const { db, joinSql, whereSql, params, qtyExpr } = opts
+  const { db, joinSql, whereSql, params, qtyExpr, lowStock } = opts
+  // Alerts off yields '-1' here, so `qty <= low_threshold` matches nothing and
+  // `qty > low_threshold` matches everything: the low_stock bucket empties into
+  // healthy without this query growing a branch, and out_of_stock is untouched.
+  const lowThresholdSql = lowStockThresholdSql(lowStock, 'p.low_stock_threshold')
   const row = await db.prepare(`
     WITH matched AS (
       SELECT
@@ -70,7 +106,7 @@ export async function getFamilyStockStats(opts: FamilyStockStatsOptions): Promis
         COALESCE(p.parent_id, 0) AS parent_id,
         ${qtyExpr} AS qty,
         COALESCE(p.out_of_stock_threshold, 0) AS out_threshold,
-        COALESCE(p.low_stock_threshold, 10) AS low_threshold,
+        ${lowThresholdSql} AS low_threshold,
         COALESCE(p.cost_price_usd, 0) AS unit_cost_usd,
         COALESCE(p.cost_price_khr, 0) AS unit_cost_khr
       FROM products p
@@ -132,5 +168,126 @@ export async function getFamilyStockStats(opts: FamilyStockStatsOptions): Promis
     stock_quantity: Number(row?.stock_quantity || 0),
     stock_value_usd: Number(row?.stock_value_usd || 0),
     stock_value_khr: Number(row?.stock_value_khr || 0),
+  }
+}
+
+/**
+ * Pages one representative row per low/out family using the same
+ * best-status-wins classification as getFamilyStockStats. Filtering raw
+ * product rows first would incorrectly report a low variant from a family
+ * that also has a healthy variant, so classification happens before paging.
+ */
+export async function getFamilyStockAlertPage(opts: {
+  db: D1Compat
+  lowStock: LowStockConfig
+  state: FamilyStockAlertState
+  page: number
+  pageSize: number
+}): Promise<FamilyStockAlertPage> {
+  const { db, lowStock, state } = opts
+  const page = Math.max(1, Math.trunc(opts.page) || 1)
+  const pageSize = Math.max(1, Math.trunc(opts.pageSize) || 1)
+  const offset = (page - 1) * pageSize
+  const lowThresholdSql = lowStockThresholdSql(lowStock, 'p.low_stock_threshold')
+  const eligibleSql = state === 'low'
+    ? 'has_healthy = 0 AND has_low = 1'
+    : 'has_healthy = 0 AND has_low = 0'
+  const ctes = `
+    WITH matched AS (
+      SELECT
+        ${FAMILY_ROOT_KEY_SQL} AS family_root_id,
+        p.id, p.name, p.category, p.unit,
+        COALESCE(p.stock_quantity, 0) AS qty,
+        p.low_stock_threshold,
+        p.out_of_stock_threshold,
+        COALESCE(p.out_of_stock_threshold, 0) AS out_threshold,
+        ${lowThresholdSql} AS low_threshold,
+        COALESCE(p.is_group, 0) AS is_group,
+        COALESCE(p.parent_id, 0) AS parent_id
+      FROM products p
+      LEFT JOIN products parent ON parent.id = p.parent_id
+      WHERE p.is_active = 1
+    ),
+    non_header_families AS (
+      SELECT DISTINCT family_root_id FROM matched WHERE NOT (is_group = 1 AND parent_id = 0)
+    ),
+    members AS (
+      SELECT m.* FROM matched m
+      WHERE NOT (m.is_group = 1 AND m.parent_id = 0)
+         OR m.family_root_id NOT IN (SELECT family_root_id FROM non_header_families)
+    ),
+    family_agg AS (
+      SELECT
+        family_root_id,
+        MIN(lower(trim(COALESCE(name, '')))) AS family_name,
+        MIN(qty) AS minimum_qty,
+        SUM(qty) AS total_qty,
+        COUNT(*) AS family_size,
+        MAX(CASE WHEN qty > out_threshold AND qty > low_threshold THEN 1 ELSE 0 END) AS has_healthy,
+        MAX(CASE WHEN qty > out_threshold AND qty <= low_threshold THEN 1 ELSE 0 END) AS has_low
+      FROM members
+      GROUP BY family_root_id
+    ),
+    eligible AS (
+      SELECT * FROM family_agg WHERE ${eligibleSql}
+    )
+  `
+  const params = {
+    __familyOffset: offset,
+    __familyOffsetEnd: offset + pageSize,
+    __alertState: state,
+  }
+  const totalRow = await db.prepare(`${ctes} SELECT COUNT(*) AS count FROM eligible`).get<{ count: number }>(params)
+  const total = Number(totalRow?.count || 0)
+  const items = await db.prepare(`
+    ${ctes},
+    ranked AS (
+      SELECT family_root_id,
+             ROW_NUMBER() OVER (ORDER BY minimum_qty ASC, family_name ASC, family_root_id ASC) AS family_rank
+      FROM eligible
+    ),
+    representatives AS (
+      SELECT m.*,
+             ROW_NUMBER() OVER (
+               PARTITION BY m.family_root_id
+               ORDER BY
+                 CASE
+                   WHEN @__alertState = 'low' AND m.qty > m.out_threshold AND m.qty <= m.low_threshold THEN 0
+                   WHEN @__alertState = 'out' AND m.qty <= m.out_threshold THEN 0
+                   ELSE 1
+                 END ASC,
+                 m.qty ASC, lower(trim(COALESCE(m.name, ''))) ASC, m.id ASC
+             ) AS representative_rank
+      FROM members m
+      JOIN eligible e ON e.family_root_id = m.family_root_id
+    )
+    SELECT
+      r.id, r.name, r.category, r.unit,
+      r.qty AS stock_quantity,
+      r.low_stock_threshold,
+      r.out_of_stock_threshold,
+      e.total_qty AS family_stock_quantity,
+      e.family_size
+    FROM representatives r
+    JOIN eligible e ON e.family_root_id = r.family_root_id
+    JOIN ranked ON ranked.family_root_id = r.family_root_id
+    WHERE r.representative_rank = 1
+      AND ranked.family_rank > @__familyOffset
+      AND ranked.family_rank <= @__familyOffsetEnd
+    ORDER BY ranked.family_rank ASC
+  `).all<FamilyStockAlertRow>(params)
+  const normalizedItems = (Array.isArray(items) ? items : []).map((row) => ({
+    ...row,
+    stock_quantity: Number(row.stock_quantity || 0),
+    family_stock_quantity: Number(row.family_stock_quantity || 0),
+    family_size: Number(row.family_size || 1),
+  }))
+  return {
+    items: normalizedItems,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    hasMore: offset + normalizedItems.length < total,
   }
 }

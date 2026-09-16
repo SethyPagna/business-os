@@ -2,10 +2,12 @@ import { useSyncExternalStore } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import {
-  dispatchRestore, getMinimizedWork, removeMinimizedWork, subscribeMinimizedWork,
+  canRestoreMinimizedWork, dispatchRestore, getMinimizedWork, removeMinimizedWork, subscribeMinimizedWork,
   type MinimizedWorkEntry, type MinimizedWorkKind,
+  discardTransferDraft,
 } from '../../utils/minimizedWork.ts'
-import { clearWorkDraft } from '../../utils/workDrafts.ts'
+import { discardStockAdjustDraft } from '../../utils/stockAdjustDraft.ts'
+import { clearWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 
 // F3 slice 2 (Part 424): the chips minimized flows park in. Mobile renders
 // this inside the top bar; desktop inside the sidebar header row (desktop
@@ -16,28 +18,71 @@ import { clearWorkDraft } from '../../utils/workDrafts.ts'
 // the draft's visible handle, so dismissing it silently keeping the draft
 // would resurrect "closed" work at the next open.
 
-const DRAFT_KEY_BY_KIND: Record<MinimizedWorkKind, string | null> = {
-  add_product: 'bos_draft_product_new',
-  fast_stockin: 'bos_draft_fast_stockin',
+const LEGACY_DRAFT_BASE_BY_KIND: Record<MinimizedWorkKind, string | null> = {
+  add_product: 'product_new_standalone-create',
+  // Product edit drafts are entity-specific. The host always supplies the
+  // exact actor-scoped key; an older chip must never clear a sibling edit.
+  edit_product: null,
+  fast_stockin: 'fast_stockin',
+  // Stock-adjust drafts are entity-specific; the parked entry carries the
+  // exact key and an older chip must not guess which product to discard.
+  stock_adjust: null,
+  create_products_session: 'create_products_session',
+  // Receive drafts are per product. New chips always carry their exact
+  // actor-scoped key; an older chip cannot safely guess which one to clear.
+  receive_batch: null,
+  // Branch add/edit drafts are keyed by entity and new chips carry that key.
+  branch_form: null,
+  fee_form: null,
   // detail tabs manage their own keyed drafts; nothing global to clear
   product_detail: null,
+  // Return details are read-only live records, so there is no draft to clear.
+  return_detail: null,
+  branch_transfer: null,
+  inventory_transfer: null,
 }
 
-const useApp = useAppHook as unknown as () => { navigateTo: (pageId: string) => void; t: (key: string) => string }
+const useApp = useAppHook as unknown as () => {
+  can: (permissionKey: string, actionKey: string) => boolean
+  language: string
+  navigateTo: (pageId: string, anchor?: string) => void
+  notify: (message: string, type?: string) => void
+  t: (key: string) => string
+  user: { id?: string | number; username?: string } | null
+}
 
 export default function MinimizedWorkTray({ variant }: { variant: 'mobile' | 'desktop' }) {
   const entries = useSyncExternalStore(subscribeMinimizedWork, getMinimizedWork, getMinimizedWork)
-  const { navigateTo, t } = useApp()
+  const { can, navigateTo, notify, t, language, user } = useApp()
+  const tr = (key: string, fallbackEn: string, fallbackKm: string): string => {
+    const translated = t(key)
+    if (translated && translated !== key) return translated
+    return language === 'km' ? fallbackKm : fallbackEn
+  }
   if (!entries.length) return null
 
   const restore = (entry: MinimizedWorkEntry) => {
-    navigateTo(entry.pageId)
+    if (!canRestoreMinimizedWork(entry, can)) {
+      notify(tr('access_denied', 'Access denied', 'គ្មានសិទ្ធិចូលប្រើ'), 'error')
+      return
+    }
+    navigateTo(entry.pageId, entry.anchor)
     dispatchRestore(entry)
   }
   const dismiss = (entry: MinimizedWorkEntry) => {
+    if (entry.kind === 'branch_transfer' || entry.kind === 'inventory_transfer') {
+      if (entry.draftKey) discardTransferDraft(entry.kind, user?.id, entry.draftKey)
+      return
+    }
     removeMinimizedWork(entry.key)
-    const draftKey = DRAFT_KEY_BY_KIND[entry.kind]
-    if (draftKey) clearWorkDraft(draftKey)
+    const legacyDraftBase = LEGACY_DRAFT_BASE_BY_KIND[entry.kind]
+    const draftKey = entry.draftKey || (legacyDraftBase ? scopedWorkDraftKey(legacyDraftBase) : null)
+    if (!draftKey) return
+    if (entry.kind === 'stock_adjust') {
+      discardStockAdjustDraft(draftKey, user?.id ?? user?.username ?? null)
+      return
+    }
+    clearWorkDraft(draftKey)
   }
 
   return (
@@ -51,15 +96,15 @@ export default function MinimizedWorkTray({ variant }: { variant: 'mobile' | 'de
             type="button"
             onClick={() => restore(entry)}
             className="min-w-0 truncate hover:underline"
-            title={`${t('restore') || 'Restore'} — ${entry.label}`}
+            title={`${tr('restore', 'Restore', 'ស្ដារ')} — ${entry.label}`}
           >
             {entry.label}
           </button>
           <button
             type="button"
             onClick={() => dismiss(entry)}
-            aria-label={t('dismiss') || 'Dismiss'}
-            title={t('minimized_dismiss_hint') || 'Dismiss and discard this draft'}
+            aria-label={tr('minimized_dismiss_hint', 'Dismiss and discard this draft', 'បិទ ហើយបោះបង់សេចក្តីព្រាងនេះ')}
+            title={tr('minimized_dismiss_hint', 'Dismiss and discard this draft', 'បិទ ហើយបោះបង់សេចក្តីព្រាងនេះ')}
             className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full hover:bg-amber-200 dark:hover:bg-amber-800"
           >
             <X className="h-3 w-3" />

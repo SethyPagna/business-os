@@ -1,5 +1,6 @@
 import { toMultiFilterSet, type MultiFilterValue } from '../../../utils/recordFilters.ts'
 import { matchesSearchTermGroups } from '../../../utils/searchMatch.ts'
+import { DEFAULT_LOW_STOCK_CONFIG, effectiveLowStockThreshold, type LowStockConfig } from '../../../utils/lowStockSettings.ts'
 export { buildProductSearchTerms } from '../../../utils/searchTerms.ts'
 
 interface BranchStockRecord {
@@ -39,6 +40,9 @@ interface ProductFilterState {
   searchTerms?: unknown[]
   stockFilter?: unknown
   supplierFilter?: MultiFilterValue
+  // The owner low-stock switch/amount/scope, handed in by the page (this
+  // helper is pure). Defaults to the exact behaviour it replaced.
+  lowStock?: LowStockConfig
 }
 
 // Mirrors cloudflare/src/lib/searchMatch.ts's ISSUE_STATE_KEYS/
@@ -96,6 +100,7 @@ export function filterProductsForPage(products: ProductRecord[] = [], filters: P
     searchTerms = [],
     stockFilter = 'all',
     supplierFilter = 'all',
+    lowStock = DEFAULT_LOW_STOCK_CONFIG,
   } = filters
 
   // Hoisted out of the per-product .filter() callback below -- these all
@@ -178,7 +183,9 @@ export function filterProductsForPage(products: ProductRecord[] = [], filters: P
     // function's filtering.
     const qty = branchFilter !== 'all' ? getProductBranchQuantity(product, branchFilter) : product.stock_quantity
     const outOfStockThreshold = toNumber(product.out_of_stock_threshold)
-    const lowStockThreshold = toNumber(product.low_stock_threshold, 10)
+    // Alerts off resolves this to -1, which empties the 'low' pill and folds
+    // those rows into 'healthy' -- no branch needed here.
+    const lowStockThreshold = effectiveLowStockThreshold(lowStock, product.low_stock_threshold)
 
     // Used to unconditionally drop out-of-stock rows here whenever a
     // branch was selected, regardless of stockFilter -- so picking a
@@ -200,7 +207,7 @@ export function filterProductsForPage(products: ProductRecord[] = [], filters: P
         : stockFilter === 'out' ? toNumber(qty) <= outOfStockThreshold
           : stockFilter === 'low' ? toNumber(qty) > outOfStockThreshold && toNumber(qty) <= lowStockThreshold
             : stockFilter === 'in_stock' ? toNumber(qty) > outOfStockThreshold
-              : stockFilter === 'healthy' ? toNumber(qty) > lowStockThreshold
+              : stockFilter === 'healthy' ? toNumber(qty) > outOfStockThreshold && toNumber(qty) > lowStockThreshold
                 : true
     // "Issues" -- surfaced when the product trips ANY of the selected
     // issue keys (same OR semantics as the server's own

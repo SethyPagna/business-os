@@ -1,12 +1,14 @@
+import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
 import type { ComponentType, SVGProps } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Truck from 'lucide-react/dist/esm/icons/truck.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
+import HubSectionNav, { type HubSectionDef, readStoredHubSection } from '../shared/HubSectionNav.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -14,8 +16,11 @@ type ContactTabId = 'customers' | 'suppliers' | 'delivery' | 'duplicates'
 type ContactTabIcon = ComponentType<SVGProps<SVGSVGElement>>
 
 interface AppContextValue {
+  can: (key: string, action: string) => boolean
   t: TranslateFn
   notify: NotifyFn
+  navigateTo: (page: string, anchor?: string) => void
+  getPermissionTier: (key: string) => string
   hasPermission: (key: string) => boolean
 }
 
@@ -45,6 +50,14 @@ const TABS = (t: TranslateFn): ContactTabDefinition[] => [
   { id: 'delivery', label: t('pos_delivery') || 'Delivery', icon: Truck },
   { id: 'duplicates', label: t('possible_duplicates') || 'Conflicts', icon: AlertTriangle },
 ]
+
+const CONTACTS_HUB_STORAGE_KEY = 'bos:hub:contacts:active'
+const CONTACT_DESC_KEYS: Record<ContactTabId, string> = {
+  customers: 'hub_desc_contacts_customers',
+  suppliers: 'hub_desc_contacts_suppliers',
+  delivery: 'hub_desc_contacts_delivery',
+  duplicates: 'hub_desc_contacts_duplicates',
+}
 
 const loadCustomersTab = async (): Promise<{ CustomersTab: ComponentType<ContactTabProps> }> => (
   await import('./CustomersTab') as unknown as { CustomersTab: ComponentType<ContactTabProps> }
@@ -123,7 +136,7 @@ function ContactTabFallback({ t, label }: ContactTabFallbackProps) {
 }
 
 export default function Contacts() {
-  const { t, notify, hasPermission } = useApp()
+  const { t, notify, hasPermission, getPermissionTier, can, navigateTo } = useApp()
   const isActive = useIsPageActive('contacts')
   // Supplier privacy (Part 383 R2): the Suppliers section is admin-managed
   // -- an employee only sees it when granted 'contacts_suppliers' (admins
@@ -132,7 +145,11 @@ export default function Contacts() {
   // the same gate on every /suppliers endpoint, so hiding the tab is
   // presentation, not the security boundary.
   const canSeeSuppliers = hasPermission('contacts_suppliers')
-  const [tab, setTab] = useState<ContactTabId>('customers')
+  const [tab, setTab] = useHubSection<ContactTabId>('contacts', () => {
+    const validIds = (['customers', 'suppliers', 'delivery', 'duplicates'] as ContactTabId[]).filter((id) =>
+      id !== 'suppliers' || canSeeSuppliers)
+    return (readStoredHubSection(CONTACTS_HUB_STORAGE_KEY, validIds) as ContactTabId | null) || 'customers'
+  }, getHubDestinations('contacts', { getPermissionTier, hasPermission, can }).map((item) => item.id), navigateTo)
   // Set when "Resolve" is clicked on a cluster in the Possible Duplicates
   // tab -- switches to the record's real tab and seeds that tab's own
   // search box with the contact's name, so the matching records land
@@ -141,68 +158,87 @@ export default function Contacts() {
   // switching tabs manually doesn't leave a stale search behind on a
   // tab the operator didn't ask to jump to.
   const [resolveSearch, setResolveSearch] = useState<Partial<Record<ContactTabId, string>>>({})
+  // EntityLink queues the exact name/phone before guarded navigation. Consume
+  // it once the Contacts hub is active so customer, supplier, and delivery
+  // links land on the matching tab and search result instead of the default
+  // Customers view.
+  useEffect(() => {
+    if (!isActive || typeof window === 'undefined') return
+    const consumeFocus = () => {
+      // Touching window.sessionStorage throws where site data is blocked
+      // (iOS Safari "Block All Cookies"), and this runs on every activation
+      // of the hub. Guarded the same way BranchesHubPage.tsx guards the twin
+      // inventory-focus handoff: no queued focus just opens the default tab.
+      let raw: string | null = null
+      try { raw = window.sessionStorage.getItem('bos:contacts:focus') } catch { return }
+      if (!raw) return
+      try {
+        const payload = JSON.parse(raw) as { tab?: unknown; search?: unknown }
+        const requestedTab = String(payload?.tab || '') as ContactTabId
+        const validTabs: ContactTabId[] = canSeeSuppliers ? ['customers', 'suppliers', 'delivery'] : ['customers', 'delivery']
+        const targetTab = validTabs.includes(requestedTab) ? requestedTab : 'customers'
+        const search = String(payload?.search || '').trim()
+        if (search) setResolveSearch((current) => ({ ...current, [targetTab]: search }))
+        setTab(targetTab)
+      } catch {
+        // A malformed handoff must not block the Contacts page.
+      } finally {
+        try { window.sessionStorage.removeItem('bos:contacts:focus') } catch { /* nothing to clear if the store is unusable */ }
+      }
+    }
+    consumeFocus()
+    window.addEventListener('bos:entity-focus', consumeFocus)
+    return () => window.removeEventListener('bos:entity-focus', consumeFocus)
+  }, [canSeeSuppliers, isActive, setTab])
   const resolveContact = (targetTab: ContactTabId, name: string): void => {
     setResolveSearch((current) => ({ ...current, [targetTab]: name }))
     setTab(targetTab)
   }
 
-  const prefetchTab = (tabId: ContactTabId): void => {
-    if (tabId === 'customers') {
-      void loadCustomersTab()
-    } else if (tabId === 'suppliers') {
-      void loadSuppliersTab()
-    } else if (tabId === 'delivery') {
-      void loadDeliveryTab()
-    } else if (tabId === 'duplicates') {
-      void loadDuplicatesTab()
-    }
-  }
+  const sections: HubSectionDef[] = TABS(t).map(({ id, label, icon }) => ({
+    id,
+    label,
+    icon,
+    hidden: !can('contacts', 'view') || (id === 'suppliers' && !canSeeSuppliers),
+    description: t(CONTACT_DESC_KEYS[id]) || undefined,
+  }))
 
   return (
-    <div className="page-scroll p-3 sm:p-6">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* Page-level Import All / Export All controls were removed: they
           duplicated each tab's own scoped Import/Export/Add row (which now
           lives in the merged toolbar below that tab's search row), so this
           page keeps a single Import/Export set per tab instead of two. */}
-      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
-        {TABS(t).filter(({ id }) => id !== 'suppliers' || canSeeSuppliers).map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            onMouseEnter={() => prefetchTab(id)}
-            onFocus={() => prefetchTab(id)}
-            className={`-mb-px inline-flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors sm:px-5 ${
-              tab === id
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
-          >
-            <Icon className="h-4 w-4" />
-            <span className="truncate">{label}</span>
-          </button>
-        ))}
+      <HubSectionNav
+        sections={sections}
+        active={tab}
+        onChange={(id) => setTab(id as ContactTabId)}
+        storageKey={CONTACTS_HUB_STORAGE_KEY}
+        pageId="contacts"
+      >
+      <div className="page-scroll min-h-0 flex-1 p-3 sm:p-6">
+        {tab === 'customers' ? (
+          <Suspense fallback={<ContactTabFallback t={t} label={t('customers') || 'customers'} />}>
+            <CustomersTab t={t} notify={notify} active={isActive} initialSearch={resolveSearch.customers} />
+          </Suspense>
+        ) : null}
+        {tab === 'suppliers' && canSeeSuppliers ? (
+          <Suspense fallback={<ContactTabFallback t={t} label={t('suppliers') || 'suppliers'} />}>
+            <SuppliersTab t={t} notify={notify} active={isActive} initialSearch={resolveSearch.suppliers} />
+          </Suspense>
+        ) : null}
+        {tab === 'delivery' ? (
+          <Suspense fallback={<ContactTabFallback t={t} label={t('pos_delivery') || 'delivery'} />}>
+            <DeliveryTab t={t} notify={notify} active={isActive} initialSearch={resolveSearch.delivery} />
+          </Suspense>
+        ) : null}
+        {tab === 'duplicates' ? (
+          <Suspense fallback={<ContactTabFallback t={t} label={t('possible_duplicates') || 'conflicts'} />}>
+            <DuplicatesTab t={t} notify={notify} active={isActive} onResolve={resolveContact} includeSuppliers={canSeeSuppliers} />
+          </Suspense>
+        ) : null}
       </div>
-
-      {tab === 'customers' ? (
-        <Suspense fallback={<ContactTabFallback t={t} label={t('customers') || 'customers'} />}>
-          <CustomersTab t={t} notify={notify} active={isActive} initialSearch={resolveSearch.customers} />
-        </Suspense>
-      ) : null}
-      {tab === 'suppliers' && canSeeSuppliers ? (
-        <Suspense fallback={<ContactTabFallback t={t} label={t('suppliers') || 'suppliers'} />}>
-          <SuppliersTab t={t} notify={notify} active={isActive} initialSearch={resolveSearch.suppliers} />
-        </Suspense>
-      ) : null}
-      {tab === 'delivery' ? (
-        <Suspense fallback={<ContactTabFallback t={t} label={t('pos_delivery') || 'delivery'} />}>
-          <DeliveryTab t={t} notify={notify} active={isActive} initialSearch={resolveSearch.delivery} />
-        </Suspense>
-      ) : null}
-      {tab === 'duplicates' ? (
-        <Suspense fallback={<ContactTabFallback t={t} label={t('possible_duplicates') || 'conflicts'} />}>
-          <DuplicatesTab t={t} notify={notify} active={isActive} onResolve={resolveContact} includeSuppliers={canSeeSuppliers} />
-        </Suspense>
-      ) : null}
+      </HubSectionNav>
     </div>
   )
 }

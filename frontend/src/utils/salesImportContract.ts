@@ -1,4 +1,10 @@
-import { fmtDateTime24 } from './formatters.ts'
+import { fmtBusinessIsoDateTime } from './formatters.ts'
+// N21: sales.customer_address may still hold the Contact Options JSON that
+// customers.address stores, so the export resolves it the same way every
+// on-screen reader does -- a CSV cell full of machine text is the same defect
+// in a different container.
+import { contactDisplayAddress } from '../components/contacts/contactOptionUtils.ts'
+import { isAnonymousCustomerIdentity } from './customerIdentity.ts'
 
 export const SALES_IMPORT_COLUMNS = [
   'receipt_number', 'sale_date', 'sale_status', 'payment_method', 'payment_currency', 'exchange_rate',
@@ -41,15 +47,23 @@ function saleItems(sale: DataRow): DataRow[] {
 function headerFields(sale: DataRow): DataRow {
   return {
     receipt_number: value(sale, 'receipt_number'),
-    sale_date: sale.created_at ? fmtDateTime24(sale.created_at as string) : '',
+    // ISO, deliberately, even though the app displays dates day-first: this
+    // cell is read BACK by parseSalesImportDateTime, whose slash branch is
+    // month-first forever (every sheet the shop already has keeps its
+    // present meaning). A day-first cell here would re-import as a
+    // different date without failing. Same instant, same business
+    // timezone, same 24-hour clock -- only the field order is ISO.
+    sale_date: sale.created_at ? fmtBusinessIsoDateTime(sale.created_at as string) : '',
     sale_status: value(sale, 'sale_status', 'completed'),
     payment_method: value(sale, 'payment_method', 'Cash'),
     payment_currency: value(sale, 'payment_currency', 'USD'),
     exchange_rate: value(sale, 'exchange_rate', 4100),
     branch: value(sale, 'branch_name'),
-    customer_name: value(sale, 'customer_name'),
-    customer_phone: value(sale, 'customer_phone'),
-    customer_address: value(sale, 'customer_address'),
+    // This is an import-compatible interchange, not a display report. A
+    // localized General placeholder would become a real name on re-import.
+    customer_name: isAnonymousCustomerIdentity(sale) ? '' : value(sale, 'customer_name'),
+    customer_phone: isAnonymousCustomerIdentity(sale) ? '' : value(sale, 'customer_phone'),
+    customer_address: contactDisplayAddress(value(sale, 'customer_address')),
     cashier_name: value(sale, 'cashier_name'),
     discount_usd: value(sale, 'discount_usd', 0),
     discount_khr: value(sale, 'discount_khr', 0),

@@ -11,13 +11,21 @@ import {
   shouldSuppressRuntimeError,
   shouldSuppressSecurityPolicyViolation,
 } from './runtime/runtimeErrorClassifier.ts'
+import { installNumberInputWheelGuard } from './runtime/numberInputWheelGuard.ts'
 
 type GuardedInsertRule = CSSStyleSheet['insertRule'] & { __businessOsGuarded?: boolean }
 type GuardedGetter = (() => CSSRuleList) & { __businessOsGuarded?: boolean }
+// The build this document was served as. Defined by vite.config.ts, exactly
+// as App.tsx and chunkReloadGuard.ts read it.
+declare const __FRONTEND_BUILD_HASH__: string | undefined
+const FRONTEND_BUILD_HASH = typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev'
 const AdminRoot = React.lazy(() => import('./AdminRoot.tsx')) as ComponentType
 const PublicCatalogRoot = React.lazy(() => import('./PublicCatalogRoot.tsx')) as ComponentType
 const SERVICE_WORKER_REGISTER_IDLE_TIMEOUT_MS = 5000
 const SERVICE_WORKER_REGISTER_FALLBACK_DELAY_MS = 1200
+const SERVICE_WORKER_UPDATE_POLL_MS = 15 * 60 * 1000
+const SERVICE_WORKER_UPDATE_MIN_GAP_MS = 60 * 1000
+const WAITING_WORKER_VERSION_TIMEOUT_MS = 2000
 const FORM_FIELD_ACCESSIBILITY_IDLE_TIMEOUT_MS = 3000
 const FORM_FIELD_ACCESSIBILITY_FALLBACK_DELAY_MS = 1200
 
@@ -40,6 +48,99 @@ function scheduleAfterLoadIdle(task: () => void, idleTimeoutMs: number, fallback
   window.addEventListener('load', schedule, { once: true })
 }
 
+// A shop tab stays open all day and never navigates, so the browser only ever
+// refetches sw.js at registration time. Without an explicit re-check the new
+// worker never reaches 'install', BUSINESS_OS_APP_UPDATE_AVAILABLE is never
+// broadcast, and the "Restart now" bar can never appear -- the till keeps
+// running a stale bundle across deploys. Re-check on the cheap signals plus a
+// slow interval. This only ASKS the browser to look; the service worker still
+// decides whether anything actually changed, and nothing here ever reloads the
+// page. Restarting stays exclusively the user's choice through
+// restartIntoLatestApp(), which guards unfinished work.
+function watchForNewAppShell(registration: ServiceWorkerRegistration) {
+  if (typeof window === 'undefined') return
+
+  let lastCheckedAt = Date.now()
+  let checking = false
+
+  const check = (minGapMs = 0) => {
+    if (checking) return
+    // An offline till would only burn a failing fetch every tick.
+    if (navigator.onLine === false) return
+    if (minGapMs > 0 && Date.now() - lastCheckedAt < minGapMs) return
+    checking = true
+    lastCheckedAt = Date.now()
+    Promise.resolve(registration.update?.())
+      .catch(() => {})
+      .finally(() => { checking = false })
+  }
+
+  window.setInterval(() => {
+    // A hidden tab can wait until someone looks at it again.
+    if (document.visibilityState === 'hidden') return
+    check()
+  }, SERVICE_WORKER_UPDATE_POLL_MS)
+
+  // Returning to the tab is the moment the bar is worth showing. The minimum
+  // gap keeps rapid tab-switching from hammering the network.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return
+    check(SERVICE_WORKER_UPDATE_MIN_GAP_MS)
+  })
+
+  // Reconnecting is the other moment a deploy missed while offline becomes
+  // reachable.
+  window.addEventListener('online', () => { check(SERVICE_WORKER_UPDATE_MIN_GAP_MS) })
+}
+
+// Asks a specific worker which build it is. Resolves to an empty string if it
+// does not answer in time -- a worker older than the reply handler, or one the
+// browser has already discarded.
+function requestWorkerVersion(worker: ServiceWorker): Promise<string> {
+  return new Promise((resolve) => {
+    let settled = false
+    const channel = new MessageChannel()
+    const finish = (version: string) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timer)
+      channel.port1.close()
+      resolve(version)
+    }
+    channel.port1.onmessage = (event) => finish(String(event.data?.version || ''))
+    const timer = window.setTimeout(() => finish(''), WAITING_WORKER_VERSION_TIMEOUT_MS)
+    try {
+      worker.postMessage({ type: 'BUSINESS_OS_APP_VERSION_REQUEST' }, [channel.port2])
+    } catch (_) {
+      finish('')
+    }
+  })
+}
+
+// A worker that installed during an EARLIER session and is still parked in
+// 'waiting' never announces itself again: BUSINESS_OS_APP_UPDATE_AVAILABLE is
+// broadcast from 'install' and 'activate' only. Reopening an installed iOS app
+// is exactly that case -- the new shell is already waiting, the page boots the
+// old bundle from cache, and nothing ever offers the user the update. Re-raise
+// the same event the page listens for, once, at registration time.
+//
+// The BUILD HASHES are compared first, never just "something is waiting": a
+// re-registration can park the build this page is already running, and a
+// standing "New version ready" bar that a restart cannot clear is worse than
+// no bar at all. An unanswered probe is treated the same way -- silence is
+// recoverable on the next visibility/online re-check, a wrong "restart now"
+// in the middle of a sale is not.
+async function announceWaitingAppShell(registration: ServiceWorkerRegistration) {
+  const waiting = registration.waiting
+  if (typeof window === 'undefined' || !waiting) return
+  const version = await requestWorkerVersion(waiting)
+  const waitingHash = version.replace(/^business-os-app-shell-/, '')
+  if (!waitingHash || waitingHash === FRONTEND_BUILD_HASH) return
+  window.dispatchEvent(new CustomEvent('sync:app-update-available', {
+    detail: { reason: 'waiting_worker', message: 'New version ready', version, ts: Date.now() },
+  }))
+}
+
 function registerOfflineAppShell() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
@@ -47,6 +148,8 @@ function registerOfflineAppShell() {
     try {
       const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
       registration.update?.().catch(() => {})
+      void announceWaitingAppShell(registration).catch(() => {})
+      watchForNewAppShell(registration)
     } catch (_) {}
   }
 
@@ -120,6 +223,14 @@ function installFormFieldAccessibility() {
     scan(document)
     observer.observe(document.body, { childList: true, subtree: true })
   }, { once: true })
+}
+
+// Armed synchronously, before first paint -- a wheel over a focused number
+// input can silently change its value from the moment a user can scroll,
+// so this cannot wait for the idle callback `scheduleFormFieldAccessibility`
+// below uses for its cosmetic pass.
+if (typeof document !== 'undefined') {
+  installNumberInputWheelGuard()
 }
 
 // Keep known browser-extension and CSS-injection noise away from React startup.

@@ -26,8 +26,8 @@ function requireSection(sections: FilterSection[], id: string): FilterSection {
 // `availabilitySection` branch, so every entry here is always a real
 // option at runtime; this just filters/narrows the type to match so the
 // assertions below don't have to null-check every access.
-function sectionOptions(section: FilterSection): Array<{ id: string | number; active?: boolean; onClick: () => void }> {
-  return (section.options || []).filter(Boolean) as Array<{ id: string | number; active?: boolean; onClick: () => void }>
+function sectionOptions(section: FilterSection): Array<{ id: string | number; active?: boolean; title?: string; onClick: () => void }> {
+  return (section.options || []).filter(Boolean) as Array<{ id: string | number; active?: boolean; title?: string; onClick: () => void }>
 }
 
 const filtered = [{ id: 1 }]
@@ -132,6 +132,7 @@ const sections = buildProductFilterSections({
   setProductSortDirection: action('sort'),
   setStockFilter: action('stock'),
   setSupplierFilter: multiAction('supplier'),
+  setHideZeroStockRows: (value: boolean) => actionLog.push(['hide_zero_stock_rows', String(value)]),
   suppliers: ['Supplier A'],
   t: (key) => ({
     all: 'All',
@@ -168,10 +169,32 @@ const sections = buildProductFilterSections({
 assert.deepEqual(
   sections.map((section) => section.id),
   // G1b order: everyday facets first (availability trio, category, brand),
-  // range/diagnostic controls (created) after them.
-  ['branch', 'group', 'stock', 'category', 'brand', 'created'],
+  // range/diagnostic controls (created, row visibility) after them.
+  ['branch', 'group', 'stock', 'category', 'brand', 'created', 'row_visibility'],
   'filter sections preserve Products menu ordering',
 )
+
+// Row visibility: hiding a group's out-of-stock child rows is an OPT-IN that
+// lives only inside this menu (never a toolbar chip), and it defaults to OFF
+// so no product row is unreachable from the Products page.
+{
+  const rowOptions = sectionOptions(requireSection(sections, 'row_visibility'))
+  assert.deepEqual(rowOptions.map((option) => option?.id), ['rows-all', 'rows-hide-out-of-stock'])
+  assert.equal(rowOptions[0]?.active, true, 'All rows is the default state')
+  assert.equal(rowOptions[1]?.active, false, 'hiding out-of-stock rows is off unless chosen')
+  assert.ok(rowOptions[1]?.title, 'the hiding option explains itself in a hint, not inline prose')
+  rowOptions[1]?.onClick()
+
+  const onSections = buildProductFilterSections({
+    filters: { hideZeroStockRows: true },
+    setHideZeroStockRows: (value: boolean) => actionLog.push(['hide_zero_stock_rows', String(value)]),
+  })
+  const onOptions = sectionOptions(requireSection(onSections, 'row_visibility'))
+  assert.equal(onOptions[0]?.active, false)
+  assert.equal(onOptions[1]?.active, true, 'the chosen state shows inside the menu')
+  onOptions[1]?.onClick()
+  onOptions[0]?.onClick()
+}
 assert.equal(sectionOptions(requireSection(sections, 'branch'))[2]?.active, true)
 assert.equal(sectionOptions(requireSection(sections, 'brand'))[1]?.active, true)
 assert.equal(requireSection(sections, 'created'), mockCreatedSection, 'createdSection is passed through unchanged')
@@ -184,6 +207,9 @@ sectionOptions(requireSection(sections, 'stock'))[4]?.onClick()
 assert.deepEqual(
   actionLog,
   [
+    ['hide_zero_stock_rows', 'true'],
+    ['hide_zero_stock_rows', 'false'],
+    ['hide_zero_stock_rows', 'false'],
     ['branch', 'all'],
     ['stock', 'out'],
   ],

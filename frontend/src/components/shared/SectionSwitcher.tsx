@@ -69,14 +69,14 @@ export default function SectionSwitcher({
   }
 
   return (
-    <div className={`max-w-full min-w-0 overflow-x-auto overscroll-x-contain pb-1 [touch-action:pan-x] ${className}`}>
-      <div className="flex min-w-max items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 text-xs shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        {label ? <span className="px-2 font-semibold text-slate-400 dark:text-slate-500">{label}</span> : null}
+    <div className={`section-switcher max-w-full min-w-0 pb-1 ${className}`}>
+      <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 text-xs shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        {label ? <span className="w-full px-2 py-1 font-semibold text-slate-400 dark:text-slate-500 sm:w-auto">{label}</span> : null}
         {safeOptions.map((option) => (
           <button
             key={option.value}
             type="button"
-            className={`h-8 whitespace-nowrap rounded-lg px-3 font-semibold transition ${activeValue === option.value ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+            className={`min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] break-words rounded-lg px-3 py-2 text-center font-semibold leading-snug transition sm:min-h-8 sm:flex-none sm:basis-auto sm:whitespace-nowrap sm:py-0 ${activeValue === option.value ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
             title={option.hint || (typeof option.label === 'string' ? option.label : undefined)}
             aria-pressed={activeValue === option.value}
             onClick={() => selectValue(option.value)}

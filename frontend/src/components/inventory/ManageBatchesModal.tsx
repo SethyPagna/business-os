@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { fmtDateOnly } from '../../utils/formatters'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import SectionCard from '../shared/SectionCard'
@@ -10,6 +12,9 @@ import { getInventoryMovements } from '../../api/inventoryTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
+import TruncatedText from '../shared/TruncatedText.tsx'
+import { buildHistoryRowModel, formatHistoryReference } from '../../utils/historyRowModel.ts'
 
 type DayMovement = {
   id?: number | string
@@ -19,6 +24,10 @@ type DayMovement = {
   branch_name?: string | null
   user_name?: string | null
   created_at?: string | null
+  // N13: which record the row belongs to, resolved by the Worker on the same
+  // /api/inventory/movements response this day drill already reads.
+  reference_kind?: 'sale' | 'return' | null
+  reference_label?: string | null
 }
 
 // Everyday use shows the batch DATE only; the day view is where the TIMES
@@ -141,10 +150,17 @@ export default function ManageBatchesModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId, branchId])
 
+  // S4-21: row edits here auto-save per row, so the ONLY unsaved thing is a
+  // row currently open in edit mode with a draft in it. Nothing else in
+  // this modal is authored -- the branch picker and the day drill-down are
+  // navigation.
+  const closeGuard = useCloseGuard({ dirty: editingId !== null }, onClose)
+
   if (!product) return null
 
+  // The backdrop and the ✕ both land here.
   const closeIfIdle = () => {
-    if (!savingId) onClose()
+    if (!savingId) closeGuard.requestClose()
   }
 
   const startEdit = (batch: ProductBatch) => {
@@ -157,7 +173,7 @@ export default function ManageBatchesModal({
   const saveEdit = async (batch: ProductBatch) => {
     const nextQuantity = Number(draft.quantity)
     const quantityChange = Number.isFinite(nextQuantity) && nextQuantity >= 0 && nextQuantity !== Number(batch.quantity)
-    const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Batch')
+    const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Received date')
     const quantityNote = quantityChange
       ? ` ${tr('batch_quantity_change_note', 'Quantity will change from {from} to {to} at this branch.')
           .replace('{from}', String(batch.quantity))
@@ -198,7 +214,7 @@ export default function ManageBatchesModal({
         }
       }
 
-      notify(tr('batch_updated', 'Batch updated'))
+      notify(tr('batch_updated', 'Received date updated'))
       setEditingId(null)
       await load()
       onChanged()
@@ -211,7 +227,7 @@ export default function ManageBatchesModal({
   }
 
   const deactivate = async (batch: ProductBatch) => {
-    const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Batch')
+    const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Received date')
     if (!window.confirm(tr(
       'confirm_deactivate_batch_details',
       'Deactivate {batch} for {product}? It will no longer be available for new stock operations.',
@@ -225,7 +241,7 @@ export default function ManageBatchesModal({
         notify((res as any)?.error || tr('deactivate_failed', 'Failed to deactivate'), 'error')
         return
       }
-      notify(tr('batch_deactivated', 'Batch deactivated'))
+      notify(tr('batch_deactivated', 'Received date deactivated'))
       if (editingId === batch.id) setEditingId(null)
       await load()
       onChanged()
@@ -241,7 +257,7 @@ export default function ManageBatchesModal({
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
-            <h2 className="font-bold text-gray-900 dark:text-white">{tr('manage_batches', 'Manage Batches')}</h2>
+            <h2 className="font-bold text-gray-900 dark:text-white">{tr('manage_batches', 'Manage Received Dates')}</h2>
             <div className="mt-0.5 truncate text-xs text-gray-400">{product.name}</div>
           </div>
           <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={!!savingId}>
@@ -291,6 +307,15 @@ export default function ManageBatchesModal({
                     : movement.movement_type || '—'
                   const inbound = type === 'add'
                   const time = movementTime(movement.created_at)
+                  const model = buildHistoryRowModel(movement)
+                  // N13 (round 2): a sale row here named nothing either. The
+                  // receipt leads the fact line -- same composition, same
+                  // wording as every other reader of a movement row.
+                  const receipt = formatHistoryReference(model.reference, {
+                    sale: tr('sale', 'Sale', 'ការលក់'),
+                    return: tr('return', 'Return', 'ការប្រគល់មកវិញ'),
+                  })
+                  const factLine = [receipt, model.reason, model.branch, model.actor].filter(Boolean).join(' · ')
                   return (
                     <div key={movement.id ?? index} className="flex items-center gap-2 rounded-lg border border-gray-100 px-2.5 py-1.5 text-xs dark:border-gray-700">
                       <span className="w-12 flex-shrink-0 font-mono text-gray-500 dark:text-gray-400">
@@ -302,7 +327,15 @@ export default function ManageBatchesModal({
                       <span className="flex-shrink-0 font-semibold text-gray-900 dark:text-white">
                         {inbound ? '+' : '-'}{Math.abs(Number(movement.quantity) || 0)}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-gray-400">{movement.reason || movement.branch_name || ''}</span>
+                      {/* N13: this printed `reason || branch_name`, so one cell
+                          silently meant two different things and you could not
+                          tell which. Same facts, same order, same shared
+                          placeholder as every other history surface -- with the
+                          receipt in front when the row names a record.
+                          Through TruncatedText, like the ledger's own receipt
+                          line: the line now LEADS with a receipt id, and a
+                          `title` on a clipped span is unreachable by tap. */}
+                      <TruncatedText text={factLine} className="min-w-0 flex-1 text-gray-400" />
                     </div>
                   )
                 })}
@@ -313,7 +346,7 @@ export default function ManageBatchesModal({
           ) : loadError ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">{loadError}</div>
           ) : batches.length === 0 ? (
-            <div className="py-8 text-center text-sm text-gray-400">{tr('no_batches_for_branch', 'No batches for this branch')}</div>
+            <div className="py-8 text-center text-sm text-gray-400">{tr('no_batches_for_branch', 'No received dates for this branch')}</div>
           ) : batches.map((batch) => {
             const isEditing = editingId === batch.id
             const isSaving = savingId === batch.id
@@ -323,12 +356,15 @@ export default function ManageBatchesModal({
                   <div className="space-y-2">
                     <div className="grid gap-2 sm:grid-cols-2">
                       <label className="block">
-                        <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch_date', 'Batch date')}</span>
-                        <input
-                          className="input w-full text-sm"
-                          type="date"
+                        <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch_date', 'Received date')}</span>
+                        {/* Typed, not a native picker (Sep 3) -- this date
+                            IS the lot code, and staff key it as digits. */}
+                        <DateEntryInput
+                          className="w-full text-sm"
+                          t={t}
+                          ariaLabel={tr('batch_date', 'Received date')}
                           value={draft.receivedAt}
-                          onChange={(event) => setDraft((prev) => ({ ...prev, receivedAt: event.target.value }))}
+                          onChange={(iso) => setDraft((prev) => ({ ...prev, receivedAt: iso }))}
                         />
                         {/* Preview only -- the backend always recomputes
                             and stores the authoritative code itself from
@@ -338,16 +374,17 @@ export default function ManageBatchesModal({
                             this date IS how the batch's code is
                             corrected. */}
                         <span className="mt-1 block text-[11px] text-gray-400">
-                          {tr('batch_code_preview', 'Batch code')}: {dateToBatchCode(draft.receivedAt) || '--'}
+                          {tr('batch_code_preview', 'Received date code')}: {dateToBatchCode(draft.receivedAt) || '--'}
                         </span>
                       </label>
                       <label className="block">
                         <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_date', 'Expiry date')}</span>
-                        <input
-                          className="input w-full text-sm"
-                          type="date"
+                        <DateEntryInput
+                          className="w-full text-sm"
+                          t={t}
+                          ariaLabel={tr('expiry_date', 'Expiry date')}
                           value={draft.expiryDate}
-                          onChange={(event) => setDraft((prev) => ({ ...prev, expiryDate: event.target.value }))}
+                          onChange={(iso) => setDraft((prev) => ({ ...prev, expiryDate: iso }))}
                         />
                       </label>
                     </div>
@@ -365,7 +402,7 @@ export default function ManageBatchesModal({
                         onChange={(event) => setDraft((prev) => ({ ...prev, quantity: event.target.value }))}
                       />
                       <span className="mt-1 block text-[11px] text-gray-400">
-                        {tr('batch_quantity_scoped_hint', 'A stock-take correction for this batch/lot only -- other batches of this product are not affected.')}
+                        {tr('batch_quantity_scoped_hint', 'A stock-take correction for this received date only -- other received dates of this product are not affected.')}
                       </span>
                     </label>
                     <label className="block">
@@ -376,7 +413,7 @@ export default function ManageBatchesModal({
                         onChange={(event) => setDraft((prev) => ({ ...prev, notes: event.target.value }))}
                       />
                     </label>
-                    <div className="sticky bottom-0 -mx-1 flex justify-end gap-2 border-t border-amber-100 bg-amber-50/95 px-1 pt-2 backdrop-blur-sm dark:border-amber-900/50 dark:bg-amber-950/95">
+                    <div className="sticky bottom-0 -mx-1 flex justify-end gap-2 border-t border-amber-100 bg-amber-50 px-1 pt-2 dark:border-amber-900/50 dark:bg-amber-950">
                       <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={cancelEdit} disabled={isSaving}>
                         {t('cancel') || 'Cancel'}
                       </button>
@@ -388,7 +425,7 @@ export default function ManageBatchesModal({
                 ) : (
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <div className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel(batch, tr('batch', 'Batch'))}</div>
+                      <div className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel(batch, tr('batch', 'Received date'))}</div>
                       {/* Compact product-card-style meta: received date (drills
                           to the day view where the times live), expiry and
                           supplier collapse onto ONE wrapping line instead of a
@@ -448,6 +485,7 @@ export default function ManageBatchesModal({
             "Close" button duplicated it (user ask); edits here auto-save per
             row, so there was no other footer action to keep. */}
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

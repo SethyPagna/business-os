@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
@@ -6,10 +6,11 @@ import ArrowRightCircle from 'lucide-react/dist/esm/icons/arrow-right-circle.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
-import { dismissContactDuplicateCluster, undismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts } from './contactDuplicates'
+import { dismissContactDuplicateCluster, undismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts, planBulkContactMerges } from './contactDuplicates'
 import type { ContactDuplicateCluster, ContactDuplicateClusterEntry, ContactDuplicateSeverity, ContactTableKind } from './contactDuplicates'
 import SaleLinkConflictsSection from './SaleLinkConflictsSection'
 import { useApp } from '../../AppContext.tsx'
+import PaginationControls, { DEFAULT_PAGE_SIZE, paginateItems } from '../shared/PaginationControls.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -87,7 +88,7 @@ const SEVERITY_TEXT: Record<ContactDuplicateSeverity, string> = {
 }
 
 function ClusterCard({
-  cluster, t, table, dismissing, merging, selected, selectable, canResolveConflicts, onToggleSelect, onResolve, onDismiss, onReopen, onMergeInto,
+  cluster, t, table, dismissing, merging, selected, selectable, canResolveConflicts, canMergeDuplicates, onToggleSelect, onResolve, onDismiss, onReopen, onMergeInto,
 }: {
   cluster: ContactDuplicateCluster
   t: TranslateFn
@@ -97,6 +98,7 @@ function ClusterCard({
   selected: boolean
   selectable: boolean
   canResolveConflicts: boolean
+  canMergeDuplicates: boolean
   onToggleSelect: () => void
   onResolve: (name: string) => void
   onDismiss: () => void
@@ -191,7 +193,7 @@ function ClusterCard({
                 })() : null}
               </div>
               <div className="flex flex-shrink-0 items-center gap-1">
-                {canResolveConflicts && cluster.contacts.length >= 2 ? (
+                {canMergeDuplicates && cluster.contacts.length >= 2 ? (
                   <button
                     type="button"
                     onClick={() => setPendingAction({ kind: 'merge', keeper: contact })}
@@ -265,6 +267,10 @@ function ClusterCard({
 export default function DuplicatesTab({ t, notify, active = true, onResolve, includeSuppliers = true }: DuplicatesTabProps) {
   const { can } = useApp() as { can: (permissionKey: string, actionKey: string) => boolean }
   const canResolveConflicts = can('contacts', 'resolve_conflicts')
+  const canBulkContacts = can('contacts', 'bulk')
+  const canBulkContactsRef = useRef(canBulkContacts)
+  canBulkContactsRef.current = canBulkContacts
+  const canMergeDuplicates = canBulkContacts && canResolveConflicts && can('contacts', 'merge')
   // Supplier privacy (Part 383 R2): without the contacts_suppliers grant
   // the supplier duplicates scan isn't offered (its endpoint would 403
   // server-side anyway).
@@ -283,6 +289,8 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   const [loaded, setLoaded] = useState(false)
   const [search, setSearch] = useState('')
   const [severityFilter, setSeverityFilter] = useState<ContactDuplicateSeverity | 'all'>('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   // Reveal already-kept (dismissed) clusters alongside the open queue so a
   // wrongly-kept conflict can be reopened and resolved -- "keep" is never a
   // one-way hide. Off by default (the queue leads with what still needs a
@@ -299,6 +307,10 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // are meaningless).
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
+
+  useEffect(() => {
+    if (!canBulkContacts) setSelectedKeys(new Set())
+  }, [canBulkContacts])
 
   const load = async (targetTable: ContactTableKind, includeDismissed: boolean) => {
     setLoading(true)
@@ -383,6 +395,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // the first failed merge rather than silently leaving some records
   // merged and others not with no indication which.
   const handleMergeInto = async (cluster: ContactDuplicateCluster, keeper: ContactDuplicateClusterEntry) => {
+    if (!canBulkContactsRef.current || !canMergeDuplicates) return
     const others = cluster.contacts.filter((contact) => contact.id !== keeper.id)
     if (!others.length) return
     const id = clusterKey(table, cluster)
@@ -401,6 +414,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   }
 
   const toggleSelected = (id: string) => {
+    if (!canBulkContactsRef.current) return
     setSelectedKeys((current) => {
       const next = new Set(current)
       if (next.has(id)) next.delete(id)
@@ -417,11 +431,13 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // fails just stays in the list, reported once at the end) rather than
   // aborting the whole batch on the first error.
   const bulkDismiss = async () => {
+    if (!canBulkContactsRef.current) return
     const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(table, cluster)))
     if (!targets.length) return
     setBulkBusy(true)
     let failed = 0
     for (const cluster of targets) {
+      if (!canBulkContactsRef.current) break
       const id = clusterKey(table, cluster)
       try {
         await dismissContactDuplicateCluster(table, { type: cluster.type, value: cluster.value })
@@ -439,24 +455,32 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     }
   }
 
-  // Bulk Merge -- only safe to automate for exactly-2-contact clusters,
-  // where "keep the older record" (lower id, i.e. created first) is an
-  // unambiguous, defensible default. A 3+-way cluster genuinely needs a
-  // human to pick which one survives (see ClusterCard's per-row "Keep
-  // this" flow), so those are skipped here and left for individual
-  // resolution rather than guessing at a keeper.
+  // Bulk Merge -- P3-9: runs on a cluster of ANY size, not just exactly two.
+  // The old two-only rule left the exact clusters this action exists for
+  // untouched: production holds a ten-row and a six-row supplier cluster minted
+  // by a hidden writer, identical apart from their ids, and Bulk Merge refused
+  // all sixteen rows. planBulkContactMerges() states the survivor rule (the one
+  // member with a phone, else the lowest id) instead of guessing, and the
+  // per-row "Keep this" flow on each card still overrides it by hand.
+  //
+  // A cluster's own losers merge in id order and STOP at the first failure, so
+  // a half-merged group is reported as one failure rather than being retried
+  // against a keeper that may no longer be the right one.
   const bulkMerge = async () => {
+    if (!canBulkContactsRef.current || !canMergeDuplicates) return
     const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(table, cluster)))
     if (!targets.length) return
-    const mergeable = targets.filter((cluster) => cluster.contacts.length === 2)
-    const skipped = targets.length - mergeable.length
+    const plans = planBulkContactMerges(targets)
+    const skipped = targets.length - plans.length
     setBulkBusy(true)
     let failed = 0
-    for (const cluster of mergeable) {
-      const id = clusterKey(table, cluster)
-      const [first, second] = [...cluster.contacts].sort((a, b) => a.id - b.id)
+    for (const plan of plans) {
+      if (!canBulkContactsRef.current) break
+      const id = clusterKey(table, plan.cluster)
       try {
-        await mergeContacts(table, first.id, second.id)
+        for (const loserId of plan.loserIds) {
+          await mergeContacts(table, plan.keeperId, loserId)
+        }
         removeCluster(id)
       } catch {
         failed += 1
@@ -467,7 +491,9 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     if (failed || skipped) {
       const parts = []
       if (failed) parts.push(replaceVars(t('bulk_merge_partial_failure') || '{count} could not be merged', { count: failed }))
-      if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_multiway') || '{count} group(s) with 3+ records were skipped -- merge those individually', { count: skipped }))
+      // Only a degenerate cluster (nothing left to merge into) can land here
+      // now; it is still counted out loud rather than dropped silently.
+      if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_single') || '{count} group(s) had nothing left to merge', { count: skipped }))
       notify(parts.join('. '), failed ? 'error' : 'info')
     } else {
       notify(t('bulk_merge_success') || 'Merged the selected duplicates')
@@ -484,6 +510,12 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     ].filter(Boolean).join(' ').toLowerCase()
     return haystack.includes(normalizedSearch)
   }), [clusters, normalizedSearch, severityFilter])
+  const pagedClusters = useMemo(
+    () => paginateItems(visibleClusters, page, pageSize),
+    [page, pageSize, visibleClusters],
+  )
+
+  useEffect(() => { setPage(1) }, [normalizedSearch, severityFilter, showKept, table])
 
   const counts = useMemo(() => {
     const result = { phone_conflict: 0, exact_match: 0, name_only: 0 }
@@ -618,15 +650,15 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
             {counts.name_only > 0 ? (
               <span>{counts.name_only} {(t(SEVERITY_LABEL_KEY.name_only[0]) || SEVERITY_LABEL_KEY.name_only[1]).toLowerCase()}</span>
             ) : null}
-            {canResolveConflicts ? <button
+            {canBulkContacts && canResolveConflicts ? <button
               type="button"
-              onClick={() => setSelectedKeys(new Set(visibleClusters.map((cluster) => clusterKey(table, cluster))))}
-              disabled={bulkBusy || !visibleClusters.length}
+              onClick={() => setSelectedKeys(new Set(pagedClusters.map((cluster) => clusterKey(table, cluster))))}
+              disabled={bulkBusy || !pagedClusters.length}
               className="ml-auto text-blue-600 hover:underline disabled:opacity-50 disabled:no-underline dark:text-blue-400"
             >
               {t('select_all') || 'Select all'}
             </button> : null}
-            {selectedKeys.size > 0 ? (
+            {canBulkContacts && selectedKeys.size > 0 ? (
               <button
                 type="button"
                 onClick={() => setSelectedKeys(new Set())}
@@ -638,20 +670,22 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
             ) : null}
           </div>
 
-          {canResolveConflicts && selectedKeys.size > 0 ? (
+          {canBulkContacts && canResolveConflicts && selectedKeys.size > 0 ? (
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs dark:border-blue-900/40 dark:bg-blue-950/30">
               <span className="font-medium text-blue-700 dark:text-blue-300">
                 {replaceVars(t('duplicates_bulk_selected_count') || '{count} selected', { count: selectedKeys.size })}
               </span>
-              <button
-                type="button"
-                onClick={() => void bulkMerge()}
-                disabled={bulkBusy}
-                className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50"
-              >
-                <Merge className="mr-1 inline h-3.5 w-3.5" />
-                {bulkBusy ? (t('saving') || 'Saving...') : (t('duplicates_bulk_merge_action') || 'Merge selected')}
-              </button>
+              {canMergeDuplicates ? (
+                <button
+                  type="button"
+                  onClick={() => void bulkMerge()}
+                  disabled={bulkBusy}
+                  className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50"
+                >
+                  <Merge className="mr-1 inline h-3.5 w-3.5" />
+                  {bulkBusy ? (t('saving') || 'Saving...') : (t('duplicates_bulk_merge_action') || 'Merge selected')}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => void bulkDismiss()}
@@ -665,7 +699,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
           ) : null}
 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {visibleClusters.map((cluster) => {
+            {pagedClusters.map((cluster) => {
               const id = clusterKey(table, cluster)
               return (
                 <ClusterCard
@@ -675,9 +709,10 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
                   table={table}
                   dismissing={dismissingId === id}
                   merging={mergingId === id}
-                  selected={selectedKeys.has(id)}
-                  selectable={canResolveConflicts && !bulkBusy}
+                  selected={canBulkContacts && selectedKeys.has(id)}
+                  selectable={canBulkContacts && canResolveConflicts && !bulkBusy}
                   canResolveConflicts={canResolveConflicts}
+                  canMergeDuplicates={canMergeDuplicates}
                   onToggleSelect={() => toggleSelected(id)}
                   onResolve={(name) => onResolve?.(TABLE_TO_TAB[table], name)}
                   onDismiss={() => void handleDismiss(cluster)}
@@ -687,6 +722,18 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
               )
             })}
           </div>
+          <PaginationControls
+            compact
+            rangeAsPageSize
+            page={page}
+            pageSize={pageSize}
+            totalItems={visibleClusters.length}
+            onPageChange={setPage}
+            onPageSizeChange={(next) => { setPageSize(next); setPage(1) }}
+            label={t('conflicts') || 'conflicts'}
+            t={t}
+            className="justify-center"
+          />
         </>
       )}
       </>

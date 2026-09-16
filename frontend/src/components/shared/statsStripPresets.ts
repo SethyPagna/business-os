@@ -16,7 +16,18 @@ export interface DateTimeRange {
 
 const FULL_DAY_TIMES = { startTime: '00:00', endTime: '23:59' }
 
-export type StatsPresetKey = 'all' | 'today' | '7d' | 'week' | 'month' | 'year'
+export type StatsPresetKey = 'all' | 'today' | 'yesterday' | '7d' | '30d' | 'week' | 'month' | 'year'
+
+export const STATS_PRESETS: ReadonlyArray<{ id: StatsPresetKey; key: string; fallback: string }> = [
+  { id: 'all', key: 'all_time', fallback: 'All time' },
+  { id: 'today', key: 'today', fallback: 'Today' },
+  { id: 'yesterday', key: 'yesterday', fallback: 'Yesterday' },
+  { id: '7d', key: 'last_7_days', fallback: 'Last 7 days' },
+  { id: '30d', key: 'last_30_days', fallback: 'Last 30 days' },
+  { id: 'week', key: 'this_week', fallback: 'This week' },
+  { id: 'month', key: 'this_month', fallback: 'This month' },
+  { id: 'year', key: 'this_year', fallback: 'This year' },
+]
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0')
@@ -40,9 +51,22 @@ export function statsPresetRange(preset: StatsPresetKey, now?: Date): DateTimeRa
   const current = presetNow(now)
   const end = isoDay(current)
   if (preset === 'today') return { ...FULL_DAY_TIMES, startDate: end, endDate: end }
+  if (preset === 'yesterday') {
+    // The old POS offered Yesterday beside Today (owner's reference screenshots,
+    // Sep 5 2026): the single full business day before the current one.
+    const start = new Date(current)
+    start.setDate(start.getDate() - 1)
+    const day = isoDay(start)
+    return { ...FULL_DAY_TIMES, startDate: day, endDate: day }
+  }
   if (preset === '7d') {
     const start = new Date(current)
     start.setDate(start.getDate() - 6)
+    return { ...FULL_DAY_TIMES, startDate: isoDay(start), endDate: end }
+  }
+  if (preset === '30d') {
+    const start = new Date(current)
+    start.setDate(start.getDate() - 29)
     return { ...FULL_DAY_TIMES, startDate: isoDay(start), endDate: end }
   }
   if (preset === 'week') {
@@ -60,7 +84,11 @@ export function statsPresetRange(preset: StatsPresetKey, now?: Date): DateTimeRa
 
 /** Which legacy preset (if any) the current range equals. */
 export function activeStatsPreset(range: DateTimeRange, now?: Date): StatsPresetKey | null {
-  const presets: StatsPresetKey[] = ['all', 'today', '7d', 'week', 'month', 'year']
+  // Custom partial-day ranges must not highlight a full-day preset.
+  if ((range.startTime && range.startTime !== '00:00') || (range.endTime && range.endTime !== '23:59')) return null
+  // Match the common picker order. On dates such as April 30, 30d and month
+  // are the same range; the first visible matching choice owns the highlight.
+  const presets: StatsPresetKey[] = ['all', 'today', 'yesterday', '7d', '30d', 'week', 'month', 'year']
   for (const preset of presets) {
     const candidate = statsPresetRange(preset, now)
     if (candidate.startDate === range.startDate && candidate.endDate === range.endDate) return preset

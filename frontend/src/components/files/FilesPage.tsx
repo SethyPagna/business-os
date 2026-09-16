@@ -1,7 +1,7 @@
 import type { ChangeEvent, ComponentProps, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
-import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CheckSquare from 'lucide-react/dist/esm/icons/check-square.js'
 import Copy from 'lucide-react/dist/esm/icons/copy.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
@@ -27,6 +27,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
+import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { getSyncServerUrl } from '../../api/http.ts'
 import { logicalAssetDisplayName, logicalAssetDownloadPath, logicalAssetKey } from './libraryLogicalRows.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -114,12 +115,17 @@ interface FileAsset {
   canDelete?: boolean
   // Breakdown behind usageCount, so the UI can say exactly what's using a
   // locked file ("Used by 2 products") instead of a generic "in use".
-  usage?: { products?: number; gallery?: number; avatars?: number; settings?: number }
+  usage?: { products?: number; gallery?: number; avatars?: number; promotions?: number; settings?: number }
 }
 
 interface FilesResponse {
   items?: FileAsset[]
   total?: number | string
+  physicalStorage?: {
+    totalBytes: number
+    fileCount: number
+    countsByType: { image: number; video: number; document: number; file: number }
+  } | null
 }
 
 interface ProviderMeta {
@@ -242,7 +248,10 @@ type FilesResponsesTabProps = {
 }
 
 interface FilesApi {
-  getFiles: (options: { search: string; mediaType: MediaTypeFilter; page: number; pageSize: number; includeMeta: boolean }) => Promise<FilesResponse>
+  getFiles: (
+    options: { search: string; mediaType: MediaTypeFilter; page: number; pageSize: number; includeMeta: boolean; includeStorageMeta?: boolean },
+    requestOptions?: { searchGroup?: string },
+  ) => Promise<FilesResponse>
   uploadFileAsset: (payload: { file: File; userId?: string | number; userName?: string; compressOptions?: typeof LIBRARY_IMAGE_COMPRESS_OPTIONS }) => Promise<unknown>
   deleteFileAsset: (id: string | number, options: { expectedUpdatedAt?: string; force?: boolean; confirmText?: string }) => Promise<unknown>
   renameFileAsset: (id: string | number, originalName: string) => Promise<unknown>
@@ -267,7 +276,9 @@ const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 
 const focusedFilesApi: FilesApi = {
-  getFiles: (options) => getFilesRequest(options) as Promise<FilesResponse>,
+  // Preserve the request ownership boundary from fileTransport. Dropping this
+  // second argument silently made every library search share the default group.
+  getFiles: (options, requestOptions) => getFilesRequest(options, requestOptions) as Promise<FilesResponse>,
   uploadFileAsset: (payload) => uploadFileAssetRequest(payload),
   deleteFileAsset: (id, options) => deleteFileAssetRequest(id, options),
   renameFileAsset: (id, originalName) => renameFileAssetRequest(id, originalName),
@@ -334,16 +345,17 @@ function AssetPreview({ asset, onOpenPreview }: AssetPreviewProps) {
 
 // 8.1 (Part 418): clicking an image opens DETAILS -- the full preview plus
 // what is actually USING this asset (named products/gallery rows/avatars/
-// settings keys, the drill-in behind the card's usage counts) and, for
+// promotions/settings keys, the drill-in behind the card's usage counts) and, for
 // Full Access, a rewire flow that repoints every product/avatar reference
 // to another library image. Rename/delete stay on the card.
-function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewired }: {
+function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewired, tr }: {
   asset: FileAsset
   onClose: () => void
   canManage: boolean
   notify: NotifyFunction
   filesApi: FilesApi
   onRewired: () => void
+  tr: TranslateWithFallback
 }) {
   const previewUrl = resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path
   const [usage, setUsage] = useState<FileUsageDetail | null>(null)
@@ -390,6 +402,9 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rewireOpen, rewireSearch])
 
+  // Promotion references protect a file but are intentionally not rewired:
+  // the promotion editor owns their replacement flow and its permissions.
+  const promotionReferences = usage?.promotions || []
   const referenceCount = usage ? usage.covers.length + usage.gallery.length + usage.avatars.length : 0
 
   const handleRewire = async () => {
@@ -412,10 +427,10 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
   }
 
   return (
-    <Modal title={sanitizeFallback(logicalAssetDisplayName(asset)) || 'Details'} onClose={onClose} size="xl">
+    <Modal title={sanitizeFallback(logicalAssetDisplayName(asset)) || 'Details'} onClose={onClose} size="xl" unsavedChanges="read-only">
       <div className="space-y-4">
-        <div className="flex max-h-[55vh] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 dark:bg-slate-800">
-          <img src={previewUrl || ''} alt={logicalAssetDisplayName(asset)} className="max-h-[55vh] w-full object-contain" />
+        <div className="flex max-h-[calc(55*var(--app-vh))] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 dark:bg-slate-800">
+          <img src={previewUrl || ''} alt={logicalAssetDisplayName(asset)} className="max-h-[calc(55*var(--app-vh))] w-full object-contain" />
         </div>
 
         <div className="rounded-xl border border-slate-200 p-3 text-sm dark:border-slate-700">
@@ -424,7 +439,7 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
             <div className="text-xs font-medium text-red-500">{usageError}</div>
           ) : !usage ? (
             <div className="text-xs text-slate-400">Loading usage…</div>
-          ) : referenceCount === 0 && usage.settings.length === 0 ? (
+          ) : referenceCount === 0 && promotionReferences.length === 0 && usage.settings.length === 0 ? (
             <div className="text-xs text-slate-400">Not used anywhere — safe to delete from the card.</div>
           ) : (
             <div className="space-y-2">
@@ -454,6 +469,19 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
                   <ul className="mt-0.5 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
                     {usage.avatars.map((row) => (
                       <li key={`avatar-${row.id}`} className="truncate">{row.name || row.username || `user #${row.id}`}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {promotionReferences.length > 0 ? (
+                <div>
+                  <div className="text-xs font-medium text-slate-600 dark:text-slate-300">{tr('promotions', 'Promotions', 'ប្រូម៉ូសិន')} ({promotionReferences.length})</div>
+                  <ul className="mt-0.5 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    {promotionReferences.map((row) => (
+                      <li key={`promotion-${row.id}`} className="truncate">
+                        {row.title || `${tr('promotion', 'promotion', 'ប្រូម៉ូសិន')} #${row.id}`}
+                        {' · '}{Number(row.is_active) === 0 ? tr('inactive', 'Inactive', 'អសកម្ម') : tr('active', 'Active', 'សកម្ម')}
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -558,7 +586,7 @@ function formatDateTime(value: string | number | Date | null | undefined): strin
   if (!value) return '-'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
-  // mm/dd/yyyy + 24-hour Phnom Penh via the shared formatter -- the viewer-
+  // dd/mm/yyyy + 24-hour Phnom Penh via the shared formatter -- the viewer-
   // locale Intl form rendered dd/mm + 12-hour on non-US devices (Part-77
   // finding, cross-surface date rule).
   return fmtDateTime24(date)
@@ -654,11 +682,24 @@ export default function FilesPage() {
   const [files, setFiles] = useState<FileAsset[]>([])
   const [search, setSearch] = useState('')
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all')
-  const deferredSearch = useDeferredValue(search)
+  // Keep typing immediate while waiting for a real trailing pause before
+  // issuing the expensive logical-library search. The transport's scoped
+  // group then aborts an already-started assets-page request only.
+  const deferredSearch = useDebouncedValue(search, 180)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(() => getDefaultFilesPageSize())
   const [totalFiles, setTotalFiles] = useState(0)
+  const [physicalStorage, setPhysicalStorage] = useState<NonNullable<FilesResponse['physicalStorage']> | null>(null)
   const [loadingFiles, setLoadingFiles] = useState(true)
+  // A write changes physical usage even when the next accepted list request
+  // is a search. Keep this latch until an accepted metadata response arrives;
+  // a stale/search response must never acknowledge the refresh for us.
+  const storageMetaRefreshNeededRef = useRef(true)
+  // The sync event has its own identity. Keeping the latest loader in a ref
+  // lets a new search replace a pending refresh without replaying that same
+  // sync event merely because the loader closure changed.
+  const loadFilesLatestRef = useRef<((options?: { refreshMeta?: boolean }) => Promise<void>) | null>(null)
+  const consumedFileSyncEventRef = useRef('')
   const [uploading, setUploading] = useState(false)
   const [deletingAssetId, setDeletingAssetId] = useState<string | number | null>(null)
   // Rename (inline, see renderAssetCard below): `renamingAssetId` is which
@@ -861,9 +902,11 @@ export default function FilesPage() {
     }
   }, [notify])
 
-  const loadFiles = useCallback(async () => {
+  const loadFiles = useCallback(async ({ refreshMeta = false }: { refreshMeta?: boolean } = {}) => {
+    if (refreshMeta) storageMetaRefreshNeededRef.current = true
     const requestId = beginTrackedRequest(fileLoadRequestRef)
     setLoadingFiles(true)
+    const includeMeta = storageMetaRefreshNeededRef.current || !filesLoadedOnceRef.current
     try {
       const result = await withLoaderTimeout(() => filesApi.getFiles({
         search: deferredSearch,
@@ -871,6 +914,9 @@ export default function FilesPage() {
         page,
         pageSize,
         includeMeta: true,
+        includeStorageMeta: includeMeta,
+      }, {
+        searchGroup: 'files:library-assets',
       }), 'Files library', FILES_LIBRARY_LOAD_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(fileLoadRequestRef, requestId)) return
       // A malformed/transient response must not erase a library that is
@@ -883,6 +929,10 @@ export default function FilesPage() {
       const nextFiles = result.items
       setFiles(nextFiles)
       setTotalFiles(Number(result?.total || nextFiles.length || 0))
+      if (includeMeta && Object.prototype.hasOwnProperty.call(result, 'physicalStorage')) {
+        setPhysicalStorage(result.physicalStorage || null)
+        storageMetaRefreshNeededRef.current = false
+      }
       filesLoadedOnceRef.current = true
       setSelectedAssetIds((current) => {
         const validIds = new Set(nextFiles.map(logicalAssetKey))
@@ -895,6 +945,7 @@ export default function FilesPage() {
       if (isTrackedRequestCurrent(fileLoadRequestRef, requestId)) setLoadingFiles(false)
     }
   }, [deferredSearch, filesApi, mediaType, notify, page, pageSize])
+  loadFilesLatestRef.current = loadFiles
 
   useEffect(() => {
     setPage(1)
@@ -1013,15 +1064,18 @@ export default function FilesPage() {
   useEffect(() => {
     if (!isActive || !syncChannel) return undefined
     const channel = String(syncChannel.channel || '')
+    const eventId = `${channel}:${String(syncChannel.ts ?? '')}`
+    if (consumedFileSyncEventRef.current === eventId) return undefined
+    consumedFileSyncEventRef.current = eventId
     if (channel === 'files' || channel === 'users') {
-      void loadFiles()
+      void loadFilesLatestRef.current?.({ refreshMeta: true })
       if (activeTab === 'responses') void loadResponses('AI responses refresh')
     }
     if ((channel === 'files' || channel === 'settings') && activeTab === 'providers') {
       void loadProviders('AI providers refresh')
     }
     return undefined
-  }, [activeTab, isActive, loadFiles, loadProviders, loadResponses, syncChannel?.channel, syncChannel?.ts])
+  }, [activeTab, isActive, loadProviders, loadResponses, syncChannel?.channel, syncChannel?.ts])
 
   useEffect(() => () => {
     invalidateTrackedRequest(fileLoadRequestRef)
@@ -1047,7 +1101,7 @@ export default function FilesPage() {
         FILES_ASSET_UPLOAD_TIMEOUT_MS,
       )
       notify(tr('upload_complete', 'Upload complete'), 'success')
-      await loadFiles()
+      await loadFiles({ refreshMeta: true })
     } catch (error) {
       notify(getErrorMessage(error, 'Upload failed'), 'error')
     } finally {
@@ -1092,7 +1146,7 @@ export default function FilesPage() {
       setDeleteConfirmAsset(null)
       setDeleteConfirmText('')
       setDeleteUnlockChecked(false)
-      await loadFiles()
+      await loadFiles({ refreshMeta: true })
     } catch (error) {
       notify(getErrorMessage(error, 'Delete failed'), 'error')
     } finally {
@@ -1110,6 +1164,7 @@ export default function FilesPage() {
     if (usage.products) parts.push(`${usage.products} product${usage.products === 1 ? '' : 's'}`)
     if (usage.gallery) parts.push(`${usage.gallery} product image${usage.gallery === 1 ? '' : 's'}`)
     if (usage.avatars) parts.push(`${usage.avatars} user avatar${usage.avatars === 1 ? '' : 's'}`)
+    if (usage.promotions) parts.push(`${usage.promotions} ${tr(usage.promotions === 1 ? 'promotion' : 'promotions', usage.promotions === 1 ? 'promotion' : 'promotions', 'ប្រូម៉ូសិន')}`)
     if (usage.settings) parts.push('a business/portal setting')
     if (!parts.length) return tr('file_in_use', 'This file is still in use.')
     return `${tr('used_by', 'Used by')} ${parts.join(', ')}`
@@ -1147,7 +1202,7 @@ export default function FilesPage() {
       notify(tr('file_renamed', 'File renamed'), 'success')
       setRenamingAssetId(null)
       setRenameDraft('')
-      await loadFiles()
+      await loadFiles({ refreshMeta: true })
     } catch (error) {
       notify(getErrorMessage(error, 'Rename failed'), 'error')
     } finally {
@@ -1231,7 +1286,7 @@ export default function FilesPage() {
       setSelectedAssetIds(new Set())
       setBulkDeleteConfirmOpen(false)
       setBulkDeleteConfirmText('')
-      await loadFiles()
+      await loadFiles({ refreshMeta: true })
     } catch (error) {
       notify(getErrorMessage(error, 'Bulk delete failed'), 'error')
     } finally {
@@ -1480,6 +1535,19 @@ export default function FilesPage() {
             </div>
           )}
 
+          {physicalStorage ? (
+            <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              <span className="font-semibold text-slate-800 dark:text-slate-100">
+                {tr('physical_storage', 'Physical storage', 'ទំហំផ្ទុកជាក់ស្តែង')}: {formatFileSize(physicalStorage.totalBytes)}
+              </span>
+              <span>{physicalStorage.fileCount} {tr('stored_files', 'stored files', 'ឯកសារដែលបានរក្សាទុក')}</span>
+              <span>{physicalStorage.countsByType.image} {tr('images', 'images')}</span>
+              <span>{physicalStorage.countsByType.video} {tr('videos', 'videos')}</span>
+              <span>{physicalStorage.countsByType.document} {tr('documents', 'documents')}</span>
+              <span>{physicalStorage.countsByType.file} {tr('other', 'other')}</span>
+            </div>
+          ) : null}
+
           {/* Search row, select-all summary, and bulk-action bar all pin to
               the top of the page's scroll container while scrolling (Aug 11
               2026 UI-polish request, same treatment as
@@ -1497,7 +1565,7 @@ export default function FilesPage() {
               input / filter chip aren't boxed twice. Only the bulk-action
               row below keeps card chrome, and only while a selection is
               active. */}
-          <div className="sticky top-0 z-30 -mx-1 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+          <div className="sticky top-0 z-30 -mx-1 bg-gray-50 pb-2 pt-2 dark:bg-gray-900 sm:mx-0">
             {/* Search row: media type + rows-per-page are now one icon-only
                 Filter trigger instead of two separate dropdowns. */}
             <div className="flex min-w-0 flex-wrap items-center gap-2 px-0.5">
@@ -1771,12 +1839,13 @@ export default function FilesPage() {
           canManage={canManageLibrary}
           notify={notify}
           filesApi={filesApi}
-          onRewired={() => { void loadFiles() }}
+          onRewired={() => { void loadFiles({ refreshMeta: true }) }}
+          tr={tr}
         />
       ) : null}
 
       {deleteConfirmAsset ? (
-        <Modal title={tr('delete_file', 'Delete file')} onClose={closeDeleteConfirm} size="sm">
+        <Modal title={tr('delete_file', 'Delete file')} onClose={closeDeleteConfirm} size="sm" unsavedChanges="read-only">
           <div className="flex flex-col gap-4">
             <p className="truncate text-sm font-medium text-slate-900 dark:text-white" title={deleteConfirmAsset.original_name || ''}>
               {deleteConfirmAsset.original_name || '-'}
@@ -1839,7 +1908,7 @@ export default function FilesPage() {
       ) : null}
 
       {bulkDeleteConfirmOpen ? (
-        <Modal title={tr('delete_files', 'Delete files')} onClose={closeBulkDeleteConfirm} size="sm">
+        <Modal title={tr('delete_files', 'Delete files')} onClose={closeBulkDeleteConfirm} size="sm" unsavedChanges="read-only">
           <div className="flex flex-col gap-4">
             <p className="text-sm text-slate-700 dark:text-slate-200">
               {selectedAssets.length - bulkDeletableAssets.length > 0

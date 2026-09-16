@@ -50,6 +50,7 @@ interface ContactImportModalProps {
 interface AppContextValue {
   notify: NotifyFn
   t: TranslateFn
+  can: (permissionKey: string, actionKey: string) => boolean
 }
 
 interface CsvDialogResult {
@@ -189,7 +190,10 @@ function countCsvDataRowsInWorker(text: string): Promise<number> {
 }
 
 export default function ContactImportModal({ type, onClose, onDone }: ContactImportModalProps) {
-  const { notify, t } = useApp()
+  const { notify, t, can } = useApp()
+  const canImportContacts = can('contacts', 'bulk') && can('contacts', 'import')
+  const canImportContactsRef = useRef(canImportContacts)
+  canImportContactsRef.current = canImportContacts
   const tr = (key: string, fallbackEn: string): string => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallbackEn
@@ -230,6 +234,12 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
   // Direct-apply: fire the approve once when a clean (no-conflict) import is
   // ready, so the operator doesn't click a second "approve now". Reset per run.
   const autoApproveAttemptedRef = useRef(false)
+
+  const ensureContactImportPermission = (): boolean => {
+    if (canImportContactsRef.current) return true
+    notify(t('no_permission') || 'No permission', 'error')
+    return false
+  }
 
   const stopPostStartPoll = () => {
     pollGenerationRef.current += 1
@@ -296,6 +306,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
   }
 
   const handleApproveNow = async (jobId: string | number, queuedRowCount: number, mode: ConflictMode) => {
+    if (!ensureContactImportPermission()) return
     setApproving(true)
     try {
       await approveImportJob(jobId, { source: 'contacts_modal' })
@@ -455,6 +466,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
   }
 
   const handleImport = async () => {
+    if (!ensureContactImportPermission()) return
     if (!config?.jobType) {
       notify(tr('contacts_import_unsupported_type', 'Unsupported import type'), 'error')
       return
@@ -496,6 +508,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
         'Contact import CSV upload',
         CONTACT_IMPORT_JOB_UPLOAD_TIMEOUT_MS,
       )
+      if (!ensureContactImportPermission()) return
       await withLoaderTimeout(
         () => api.startImportJob(jobId),
         'Contact import start',
@@ -543,7 +556,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
   }
 
   return (
-    <Modal title={tr('contacts_import_title', 'Import {type}').replace('{type}', typeLabel)} onClose={onClose} wide draggable>
+    <Modal title={tr('contacts_import_title', 'Import {type}').replace('{type}', typeLabel)} onClose={onClose} wide draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
       {postStartStep === 'polling' ? (
         <div className="space-y-4">
           <div className="flex flex-col items-center justify-center gap-3 py-10 text-center text-gray-500 dark:text-gray-400">
@@ -731,7 +744,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
         ) : null}
 
         <div className="flex gap-2">
-          <button type="button" className="btn-primary flex-1" disabled={loading || analyzingCsv || !rowCount} onClick={handleImport}>
+          <button type="button" className="btn-primary flex-1" disabled={!canImportContacts || loading || analyzingCsv || !rowCount} onClick={handleImport}>
             {loading ? (t('importing') || 'Importing...') : analyzingCsv ? tr('contacts_import_checking', 'Checking...') : tr('contacts_import_button', 'Import')}
           </button>
           <button type="button" className="btn-secondary" onClick={onClose}>{t('close') || 'Close'}</button>

@@ -7,10 +7,11 @@ type QuickAddModalProps = {
   onSave: () => void
   onClose: () => void
   saving?: boolean
+  saveDisabled?: boolean
   t?: (key: string) => string
 }
 
-export default function QuickAddModal({ title, children, onSave, onClose, saving = false, t }: QuickAddModalProps) {
+export default function QuickAddModal({ title, children, onSave, onClose, saving = false, saveDisabled = false, t }: QuickAddModalProps) {
   const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key) : fallback)
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -21,7 +22,7 @@ export default function QuickAddModal({ title, children, onSave, onClose, saving
             type="button"
             onClick={onClose}
             disabled={saving}
-            aria-label="Close"
+            aria-label={T('close', 'Close')}
             className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <X className="h-4 w-4" />
@@ -32,7 +33,7 @@ export default function QuickAddModal({ title, children, onSave, onClose, saving
           {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx's
               own fix. -mx-5 -mb-5 cancels this scroll area's own p-5. */}
           <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
-            <button type="button" className="btn-primary flex-1" onClick={onSave} disabled={saving}>
+            <button type="button" className="btn-primary flex-1" onClick={onSave} disabled={saving || saveDisabled}>
               {saving ? T('saving_label', 'Saving...') : T('save', 'Save')}
             </button>
             <button

@@ -17,6 +17,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import { assertLegacyReceiptEraStillCurrent } from './legacy-preflight.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(here, '../../..')
@@ -764,6 +765,7 @@ const summary = {
 console.log(JSON.stringify(summary, null, 2))
 
 if (process.argv.includes('--apply')) {
+  assertLegacyReceiptEraStillCurrent(queryRows)
   if (remoteCorrectionCount < corrections.length) d1File(correctionFile)
   for (const filename of phaseFiles) d1File(filename)
   const verification = queryRows(`

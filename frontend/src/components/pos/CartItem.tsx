@@ -1,7 +1,11 @@
+import { useState } from 'react'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { computeCartLineSavings } from './posCore.ts'
 import AppSelect from '../shared/AppSelect'
+import ProductNameRail from '../shared/ProductNameRail.tsx'
+import { branchCanSell } from '../../utils/branchRoles.ts'
+import { promotionLabelText } from '../../utils/saleItemNameLayout.ts'
 
 type Translate = (key: string) => string | undefined
 type CurrencyFormatter = (value: number) => string
@@ -15,6 +19,7 @@ interface CartLineItem {
   quantity: number
   branch_id?: string | number | null
   price_mode?: string
+  display_price_mode?: 'selling' | 'wholesale'
   product_discount_label?: string | null
   applied_price_usd: number
   applied_price_khr: number
@@ -26,12 +31,11 @@ interface CartLineItem {
   // when a special price or promotion is in effect.
   selling_price_usd?: string | number
   selling_price_khr?: string | number
-  // VIP (special) and wholesale prices carried from the source product onto
-  // the line, so the cart can still offer each tier-tag toggle after it's been
-  // deselected back to a plain 'selling' line (the price stays put; only the
-  // marker flips). See onToggleTierTag below.
-  special_price_usd?: string | number
-  special_price_khr?: string | number
+  // The wholesale price carried from the source product onto the line, so the
+  // cart can still offer the tier-tag toggle after it's been deselected back to
+  // a plain 'selling' line (the price stays put; only the marker flips). See
+  // onToggleTierTag below. The special_price_* pair that used to sit here went
+  // with the "VIP" tier the 2026-09-04 ruling deleted.
   wholesale_price_usd?: string | number
   wholesale_price_khr?: string | number
   manual_discount_type?: ManualDiscountType | null
@@ -56,6 +60,8 @@ interface BranchOption {
 }
 
 interface CartItemProps {
+  pricingQuote?: { total_usd: number; total_khr: number; manual_discount_usd: number }
+  moneyPrecisionVersion?: 0 | 1
   item: CartLineItem
   branches: BranchOption[]
   t?: Translate
@@ -63,12 +69,18 @@ interface CartItemProps {
   onPriceChange: (lineId: string | number, kind: MoneyKind, value: string) => void
   onDiscountChange: (lineId: string | number, type: ManualDiscountType | null, value: string) => void
   onBranchChange: (lineId: string | number, branchId: string) => void
-  // Flips a line's tier MARKER (VIP or wholesale) on/off (user). It only
-  // toggles whether the line is recorded/printed as that tier -- the price is
-  // never touched -- so deselecting leaves the exact number in place and just
-  // stops the tag printing on the receipt. Only offered on lines that carry
-  // the corresponding tier price.
-  onToggleTierTag: (lineId: string | number, tier: 'special' | 'wholesale') => void
+  // Flips a line's WHOLESALE marker on/off (user). It only toggles whether the
+  // line is recorded/printed as that tier -- the price is never touched -- so
+  // deselecting leaves the exact number in place and just stops the tag
+  // printing on the receipt. Only offered on lines that carry a wholesale
+  // price. The `tier` argument is gone with the 2026-09-04 ruling: with exactly
+  // one tier left there is no longer another tier to switch TO, so POS.tsx's
+  // toggleTierTag now takes only the line. That handler also stamps
+  // wholesale_auto:false / wholesale_auto_optout:true on the line, which is
+  // what stops the "wholesale above N units" automation from instantly
+  // re-applying the tier the cashier just tapped off (without it this chip
+  // would look broken on any line over the threshold).
+  onToggleTierTag: (lineId: string | number) => void
   onRemove: (lineId: string | number) => void
   onShowDetails: () => void
   fmtUSD: CurrencyFormatter
@@ -104,18 +116,38 @@ export default function CartItem({
   usdSymbol,
   khrSymbol,
   showItemDiscount = true,
+  moneyPrecisionVersion = 0,
+  pricingQuote,
 }: CartItemProps) {
   const lineId = item.cart_line_id || item.id
-  // Each tier the line carries a price for gets its own marker chip, kept
-  // separate from `price_mode` so the chip stays visible (just unhighlighted)
-  // after the marker is switched off. "VIP" reads the same in both packs;
-  // "Wholesale" uses the shared wholesale_price key (matches the POS
-  // grid/detail sheet).
-  const hasVipPrice = Number(item.special_price_usd || 0) > 0 || Number(item.special_price_khr || 0) > 0
-  const vipTagActive = item.price_mode === 'special'
+  const [moneyDraft, setMoneyDraft] = useState<{ field: 'usd' | 'khr' | 'discount'; text: string; original: string } | null>(null)
+  const beginMoneyEdit = (field: 'usd' | 'khr' | 'discount', value: number) => {
+    if (moneyPrecisionVersion === 1) setMoneyDraft({ field, text: String(value), original: String(value) })
+  }
+  const commitMoneyEdit = () => {
+    if (!moneyDraft) return
+    const draft = moneyDraft; setMoneyDraft(null)
+    if (draft.text === draft.original) return
+    if (draft.field === 'discount') onDiscountChange(lineId, item.manual_discount_type ?? 'fixed', draft.text)
+    else onPriceChange(lineId, draft.field, draft.text)
+  }
+  // Wholesale is the only discounted tier a line can be marked with since the
+  // 2026-09-04 ruling deleted the "VIP" tier -- it was the wholesale price
+  // misnamed, and migration 0111 moved its values into wholesale_price_*. The
+  // chip is kept separate from `price_mode` so it stays visible (just
+  // unhighlighted) after the marker is switched off, and it uses the shared
+  // wholesale_price key so it matches the POS grid/detail sheet.
   const hasWholesalePrice = Number(item.wholesale_price_usd || 0) > 0 || Number(item.wholesale_price_khr || 0) > 0
-  const wholesaleTagActive = item.price_mode === 'wholesale'
-  const promotionPriceLabel = item.product_discount_label || translate(t, 'promotion_price', 'Discount price')
+  const wholesaleTagActive = (item.display_price_mode ?? item.price_mode) === 'wholesale'
+  // Capped to the SAME 40 characters as the receipt and sale detail (see
+  // promotionLabelText in utils/saleItemNameLayout) -- a merchant's own
+  // promotion rule title has no length limit of its own, and this label sits
+  // on one line beside the product name in the cart just like it does on the
+  // printed receipt. The untruncated title stays reachable on the div's
+  // title= below, so a long rule name is never a dead end.
+  const promotionPriceLabel = item.product_discount_label
+    ? promotionLabelText(item.product_discount_label)
+    : translate(t, 'promotion_price', 'Discount price')
   const savings = showItemDiscount ? computeCartLineSavings(item) : null
 
   return (
@@ -134,49 +166,44 @@ export default function CartItem({
     >
       <div className="mb-2 flex items-start justify-between gap-1.5">
         <div className="mr-1 min-w-0 flex-1">
-          <p {...getKhmerTextProps(item.name, 'leading-snug text-sm font-semibold text-gray-900 dark:text-white')}>{item.name}</p>
-          {/* Tier tags (VIP / Wholesale) as on/off toggles (user): default
+          <div {...getKhmerTextProps(item.name, 'leading-snug text-sm font-semibold text-gray-900 dark:text-white')}>
+            <ProductNameRail name={item.name} />
+          </div>
+          {/* The Wholesale tier tag, an on/off toggle (user): default
               selected/highlighted; deselecting only unhighlights the chip and
               drops the tag from the receipt -- the price never changes. Shown
-              on any line that carries that tier's price so it can be
+              on any line that carries a wholesale price so it can be
               re-selected after being switched off. stopPropagation so tapping a
               chip doesn't open the line's detail sheet (the whole row is a
-              button). Only one tier can be the active mark at a time (price_mode
-              is a single value), so picking one clears the other's highlight. */}
-          {hasVipPrice || hasWholesalePrice ? (
+              button). The VIP chip that sat beside this one is deleted by the
+              2026-09-04 ruling, so wholesale is now the only tier mark; the
+              "only one tier can be active at a time" rule it shared with VIP
+              still holds because price_mode remains a single value. */}
+          {hasWholesalePrice ? (
             <div className="mt-0.5 flex flex-wrap items-center gap-1">
-              {hasVipPrice ? (
-                <button
-                  type="button"
-                  aria-pressed={vipTagActive}
-                  onClick={(event) => { event.stopPropagation(); onToggleTierTag(lineId, 'special') }}
-                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-none transition-colors ${
-                    vipTagActive
-                      ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm'
-                      : 'border-emerald-300 bg-transparent text-emerald-500 opacity-60 hover:opacity-100 dark:border-emerald-700 dark:text-emerald-400'
-                  }`}
-                >
-                  VIP
-                </button>
-              ) : null}
               {hasWholesalePrice ? (
                 <button
                   type="button"
                   aria-pressed={wholesaleTagActive}
-                  onClick={(event) => { event.stopPropagation(); onToggleTierTag(lineId, 'wholesale') }}
+                  onClick={(event) => { event.stopPropagation(); onToggleTierTag(lineId) }}
                   className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-none transition-colors ${
                     wholesaleTagActive
                       ? 'border-indigo-500 bg-indigo-500 text-white shadow-sm'
                       : 'border-indigo-300 bg-transparent text-indigo-500 opacity-60 hover:opacity-100 dark:border-indigo-700 dark:text-indigo-400'
                   }`}
                 >
-                  {translate(t, 'wholesale_price', 'Wholesale')}
+                  {translate(t, 'wholesale_price', 'Wholesale price')}
                 </button>
               ) : null}
             </div>
           ) : null}
           {item.price_mode === 'promotion' ? (
-            <div {...getKhmerTextProps(promotionPriceLabel, 'mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300')}>{promotionPriceLabel}</div>
+            <div
+              {...getKhmerTextProps(promotionPriceLabel, 'mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300')}
+              title={item.product_discount_label ? String(item.product_discount_label) : undefined}
+            >
+              {promotionPriceLabel}
+            </div>
           ) : null}
           {savings?.active ? (
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
@@ -217,6 +244,7 @@ export default function CartItem({
                 ...branches.map((branch) => ({
                   value: branch.id,
                   label: `${branch.name}${branch.is_default ? ' *' : ''}`,
+                  disabled: !branchCanSell(branch.name),
                 })),
               ]}
             />
@@ -239,9 +267,10 @@ export default function CartItem({
           <input
             className="w-10 border-x border-gray-200 bg-transparent py-1 text-center text-xs text-gray-900 dark:border-gray-600 dark:text-white"
             type="number"
-            min="1"
+            min={moneyPrecisionVersion === 1 ? '0' : '1'}
+            step={moneyPrecisionVersion === 1 ? 'any' : '1'}
             value={item.quantity}
-            onChange={(event) => onQtyChange(lineId, Number.parseInt(event.target.value, 10) || 1)}
+            onChange={(event) => onQtyChange(lineId, moneyPrecisionVersion === 1 ? Number(event.target.value) : Number.parseInt(event.target.value, 10) || 1)}
           />
           <button type="button" className="flex h-7 w-7 items-center justify-center text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" onClick={() => onQtyChange(lineId, item.quantity + 1)}>+</button>
         </div>
@@ -255,8 +284,10 @@ export default function CartItem({
             className="input w-full py-1 pl-5 text-xs"
             type="number"
             step="any"
-            value={normalizePriceValue((item.base_price_usd ?? item.applied_price_usd) || 0).toFixed(2)}
-            onChange={(event) => onPriceChange(lineId, 'usd', event.target.value)}
+            value={moneyPrecisionVersion === 1 ? moneyDraft?.field === 'usd' ? moneyDraft.text : String(item.base_price_usd ?? item.applied_price_usd) : normalizePriceValue((item.base_price_usd ?? item.applied_price_usd) || 0).toFixed(2)}
+            onFocus={() => beginMoneyEdit('usd', item.base_price_usd ?? item.applied_price_usd)}
+            onChange={(event) => moneyPrecisionVersion === 1 ? setMoneyDraft(current => ({ field: 'usd', text: event.target.value, original: current?.original ?? String(item.base_price_usd ?? item.applied_price_usd) })) : onPriceChange(lineId, 'usd', event.target.value)}
+            onBlur={commitMoneyEdit}
           />
         </div>
         <div className="relative min-w-[70px] flex-1">
@@ -266,8 +297,10 @@ export default function CartItem({
             step="any"
             // KHR is a whole-riel currency everywhere else in the app --
             // showing 4100.00 here was the one decimal-riel holdout.
-            value={normalizePriceValue((item.base_price_khr ?? item.applied_price_khr) || 0).toFixed(0)}
-            onChange={(event) => onPriceChange(lineId, 'khr', event.target.value)}
+            value={moneyPrecisionVersion === 1 ? moneyDraft?.field === 'khr' ? moneyDraft.text : String(item.base_price_khr ?? item.applied_price_khr) : normalizePriceValue((item.base_price_khr ?? item.applied_price_khr) || 0).toFixed(0)}
+            onFocus={() => beginMoneyEdit('khr', item.base_price_khr ?? item.applied_price_khr)}
+            onChange={(event) => moneyPrecisionVersion === 1 ? setMoneyDraft(current => ({ field: 'khr', text: event.target.value, original: current?.original ?? String(item.base_price_khr ?? item.applied_price_khr) })) : onPriceChange(lineId, 'khr', event.target.value)}
+            onBlur={commitMoneyEdit}
           />
           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">{khrSymbol}</span>
         </div>
@@ -298,8 +331,10 @@ export default function CartItem({
           step="any"
           disabled={!item.manual_discount_type}
           placeholder={item.manual_discount_type === 'percent' ? '0%' : '0.00'}
-          value={item.manual_discount_type ? String(item.manual_discount_value ?? '') : ''}
-          onChange={(event) => onDiscountChange(lineId, item.manual_discount_type ?? 'fixed', event.target.value)}
+          value={moneyPrecisionVersion === 1 && moneyDraft?.field === 'discount' ? moneyDraft.text : item.manual_discount_type ? String(item.manual_discount_value ?? '') : ''}
+          onFocus={() => beginMoneyEdit('discount', item.manual_discount_value ?? 0)}
+          onChange={(event) => moneyPrecisionVersion === 1 ? setMoneyDraft(current => ({ field: 'discount', text: event.target.value, original: current?.original ?? String(item.manual_discount_value ?? 0) })) : onDiscountChange(lineId, item.manual_discount_type ?? 'fixed', event.target.value)}
+          onBlur={commitMoneyEdit}
         />
         {item.manual_discount_type ? (
           <button
@@ -316,11 +351,11 @@ export default function CartItem({
       <div className="flex items-baseline justify-between">
         <span className="text-xs text-gray-400">{translate(t, 'line', 'Line')}</span>
         <div className="text-right">
-          <span className="text-sm font-bold text-blue-600">{fmtUSD(item.applied_price_usd * item.quantity)}</span>
-          {item.applied_price_khr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(item.applied_price_khr * item.quantity)}</div> : null}
-          {item.manual_discount_usd ? (
+          <span className="text-sm font-bold text-blue-600">{moneyPrecisionVersion === 1 ? pricingQuote ? fmtUSD(pricingQuote.total_usd) : '—' : fmtUSD(item.applied_price_usd * item.quantity)}</span>
+          {(moneyPrecisionVersion === 1 ? pricingQuote && pricingQuote.total_khr > 0 : item.applied_price_khr > 0) ? <div className="text-xs text-gray-400">{fmtKHR(moneyPrecisionVersion === 1 ? pricingQuote!.total_khr : item.applied_price_khr * item.quantity)}</div> : null}
+          {(moneyPrecisionVersion === 1 ? pricingQuote?.manual_discount_usd : item.manual_discount_usd) ? (
             <div {...getKhmerTextProps(translate(t, 'discount', 'Discount'), 'text-[10px] font-medium text-amber-600 dark:text-amber-400')}>
-              -{fmtUSD(item.manual_discount_usd * item.quantity)} {translate(t, 'discount', 'discount')}
+              -{fmtUSD(moneyPrecisionVersion === 1 ? pricingQuote!.manual_discount_usd : (item.manual_discount_usd || 0) * item.quantity)} {translate(t, 'discount', 'discount')}
             </div>
           ) : null}
         </div>

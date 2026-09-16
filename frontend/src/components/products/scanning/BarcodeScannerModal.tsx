@@ -28,6 +28,18 @@ const KNOWN_FORMATS = [
   'upc_e',
 ]
 
+// One constraints object for both decoders. The native BarcodeDetector loop and
+// the ZXing fallback open the SAME camera from the SAME single getUserMedia
+// call, so hoisting this keeps that one acquisition obvious at a glance.
+const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
+  audio: false,
+  video: {
+    facingMode: { ideal: 'environment' },
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+  },
+}
+
 type ScannerStatus = 'idle' | 'starting' | 'scanning' | 'blocked' | 'dismissed' | 'manual'
 type ScannerPermissionState = CameraPermissionState
 
@@ -65,8 +77,11 @@ interface ZxingControls {
 
 interface ZxingReader {
   reset?: () => void
-  decodeFromConstraints: (
-    constraints: MediaStreamConstraints,
+  /** Decode from a stream this component already owns. `decodeFromConstraints`
+   * is deliberately NOT used: it calls getUserMedia itself, which would put the
+   * permission prompt behind the decoder's own chunk download. */
+  decodeFromStream: (
+    stream: MediaStream,
     element: HTMLVideoElement,
     callback: (result: { getText?: () => unknown } | null) => void,
   ) => Promise<ZxingControls>
@@ -81,7 +96,7 @@ interface ScannerLabels {
   scanUnsupported: string
   scanPermissionDenied: string
   cameraPermissionNeeded: string
-  cameraPermissionReady: string
+  cameraPaused: string
   cameraPermissionBlocked: string
   cameraPermissionResetHint: string
   requestCameraAccess: string
@@ -120,7 +135,13 @@ function getScanErrorText(error: unknown): string {
 
 function stopStream(stream: MediaStream | null | undefined): void {
   try {
-    stream?.getTracks?.().forEach((track) => track.stop())
+    // Skip tracks that already ended. ZXing's controls.stop() disposes the
+    // stream it was handed (BrowserCodeReader's finalize callback calls
+    // disposeMediaStream), so cleanup() can reach the same tracks twice.
+    // track.stop() on an ended track is a no-op per spec, but skipping makes
+    // "each track is stopped exactly once" a property a test can assert
+    // instead of a hope.
+    stream?.getTracks?.().forEach((track) => { if (track.readyState !== 'ended') track.stop() })
   } catch (_) {}
 }
 
@@ -142,9 +163,15 @@ export default function BarcodeScannerModal({
   const photoInputRef = useRef<HTMLInputElement | null>(null)
   const startTokenRef = useRef(0)
   const startSequenceRef = useRef(0)
+  const detectionHandledRef = useRef(false)
   const lastScanAtRef = useRef(0)
   const [manualValue, setManualValue] = useState('')
-  const [status, setStatus] = useState<ScannerStatus>('idle')
+  // Seeded from `open` rather than 'idle': the modal is only ever mounted by
+  // the tap on a scanner button, and that tap already starts the camera (see
+  // the open effect). An 'idle' first frame would flash the "Request camera
+  // access" empty state for one paint before the effect flips it to
+  // 'starting' -- exactly the two-step screen the owner asked to remove.
+  const [status, setStatus] = useState<ScannerStatus>(open ? 'starting' : 'idle')
   const statusRef = useRef<ScannerStatus>('idle')
   const [error, setError] = useState('')
   const [permissionState, setPermissionState] = useState<ScannerPermissionState>('unknown')
@@ -161,7 +188,11 @@ export default function BarcodeScannerModal({
     scanUnsupported: tr('scan_unsupported', 'Camera scanning is not supported in this browser. You can still paste or type the value below.', 'ការស្កេនកាមេរ៉ាមិនត្រូវបានគាំទ្រដោយកម្មវិធីរុករកនេះទេ។ អ្នកនៅតែអាចបិទភ្ជាប់ ឬវាយតម្លៃខាងក្រោមបាន។'),
     scanPermissionDenied: tr('scan_permission_denied', 'Camera access was denied. Allow it or enter the code manually.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបដិសេធ។ សូមអនុញ្ញាតវា ឬបញ្ចូលកូដដោយដៃ។'),
     cameraPermissionNeeded: tr('camera_permission_needed', 'Camera access is needed to scan barcodes.', 'ត្រូវការការអនុញ្ញាតកាមេរ៉ាដើម្បីស្កេនបាកូដ។'),
-    cameraPermissionReady: tr('camera_permission_ready', 'Camera permission is saved. Start the camera only when you are ready to scan.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានរក្សាទុក។ ចាប់ផ្តើមកាមេរ៉ាតែនៅពេលអ្នកត្រៀមស្កេន។'),
+    // Shown only after a start already happened and the stream was released
+    // (page backgrounded, or the photo picker took over). Opening the modal
+    // never lands here, so this copy no longer tells anyone to "start the
+    // camera when you are ready" -- it explains a camera that was paused.
+    cameraPaused: tr('camera_paused_resume', 'Camera paused. Tap Start camera to resume scanning.', 'កាមេរ៉ាត្រូវបានផ្អាក។ ចុច «ចាប់ផ្តើមកាមេរ៉ា» ដើម្បីបន្តស្កេន។'),
     cameraPermissionBlocked: hideManualEntry
       ? tr('camera_permission_blocked_no_manual', 'Camera access is blocked. Allow it in your browser settings, then try again.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក រួចសាកម្តងទៀត។')
       : tr('camera_permission_blocked', 'Camera access is blocked. Allow it in browser settings, or use manual entry below.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក ឬប្រើការបញ្ចូលដោយដៃខាងក្រោម។'),
@@ -221,28 +252,46 @@ export default function BarcodeScannerModal({
     }
   }, [])
 
+  // Native BarcodeDetector, ZXing, photo decode, and manual entry can finish
+  // at different times. Make successful detection one guarded terminal path
+  // so a stale callback cannot publish twice or survive a newer camera run.
+  const completeDetection = useCallback((value: unknown, expectedStartToken?: number): void => {
+    const nextValue = String(value || '').trim()
+    if (!nextValue || detectionHandledRef.current) return
+    if (expectedStartToken !== undefined && startTokenRef.current !== expectedStartToken) return
+    detectionHandledRef.current = true
+    setManualValue(nextValue)
+    cleanup()
+    try {
+      onDetected(nextValue)
+    } finally {
+      onClose()
+    }
+  }, [cleanup, onClose, onDetected])
+
   const scanFrame = useCallback(async (): Promise<void> => {
     const detector = detectorRef.current
     const video = videoRef.current
-    if (!detector || !video) return
+    const scanToken = startTokenRef.current
+    if (!detector || !video || !scanToken || detectionHandledRef.current) return
 
     try {
       const now = Date.now()
       if (video.readyState >= 2 && (now - lastScanAtRef.current) > 250) {
         lastScanAtRef.current = now
         const results = await detector.detect(video)
+        if (detectionHandledRef.current || startTokenRef.current !== scanToken) return
         const raw = String(results?.[0]?.rawValue || '').trim()
         if (raw) {
-          setManualValue(raw)
-          cleanup()
-          onDetected(raw)
+          completeDetection(raw, scanToken)
           return
         }
       }
     } catch (_) {}
 
+    if (detectionHandledRef.current || startTokenRef.current !== scanToken) return
     frameRef.current = requestAnimationFrame(scanFrame)
-  }, [cleanup, onDetected])
+  }, [completeDetection])
 
   const startCamera = useCallback(async ({ preserveManualValue = false }: { preserveManualValue?: boolean } = {}): Promise<void> => {
     const startToken = ++startSequenceRef.current
@@ -272,11 +321,43 @@ export default function BarcodeScannerModal({
 
     const nextPermissionState = await readCameraPermissionState()
     setPermissionState(nextPermissionState)
+    const permissionWasDenied = nextPermissionState === 'denied'
+
+    // Re-requesting cannot repair a saved browser denial. Stay blocked until
+    // the user changes the site setting, avoiding a getUserMedia retry loop.
+    if (permissionWasDenied) {
+      cleanup()
+      setStatus('blocked')
+      setError(labels.cameraPermissionBlocked)
+      return
+    }
 
     try {
       const video = await waitForVideoElement(startToken)
       if (!video || startTokenRef.current !== startToken) return
       video.setAttribute('playsinline', 'true')
+
+      // The camera is acquired FIRST, before either decoder is chosen. WebKit
+      // ships no BarcodeDetector, so on iOS this used to fall through to
+      // decodeFromConstraints, which reaches getUserMedia only AFTER awaiting
+      // the 446 KB ZXing chunk -- the prompt arrived a download later than the
+      // tap that asked for it. One acquisition, immediately after the tap, on
+      // every browser.
+      const stream = await navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS)
+      if (startTokenRef.current !== startToken) {
+        stopStream(stream)
+        return
+      }
+      // Owned from here on: every later bail-out is a token change, and a token
+      // only changes through cleanup() (or a newer startCamera, which calls
+      // cleanup() first), which stops this stream. A throw lands in the catch
+      // below, whose first statement is cleanup() -- so a decoder that fails to
+      // load can never leave the camera light on.
+      streamRef.current = stream
+      setPermissionState('granted')
+      video.srcObject = stream
+      await video.play()
+      if (startTokenRef.current !== startToken) return
 
       const NativeBarcodeDetector = getNativeBarcodeDetector()
       if (NativeBarcodeDetector) {
@@ -288,48 +369,27 @@ export default function BarcodeScannerModal({
           .map((item) => String(item || ''))
           .filter((item) => KNOWN_FORMATS.includes(item))
         detectorRef.current = new NativeBarcodeDetector({ formats: formats.length ? formats : KNOWN_FORMATS })
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        })
-        if (startTokenRef.current !== startToken) {
-          stopStream(stream)
-          return
-        }
-        streamRef.current = stream
-        setPermissionState('granted')
-        video.srcObject = stream
-        await video.play()
         setStatus('scanning')
         frameRef.current = requestAnimationFrame(scanFrame)
         return
       }
 
+      // No native detector: load the compatibility decoder now that the camera
+      // is already live, and hand it the stream instead of letting it open its
+      // own. decodeFromStream is exactly what decodeFromConstraints calls once
+      // it has a stream, so this is the same supported path minus its
+      // getUserMedia.
       const { BrowserMultiFormatReader } = await import('@zxing/browser') as unknown as ZxingModule
       if (startTokenRef.current !== startToken) return
       const reader = new BrowserMultiFormatReader()
       zxingReaderRef.current = reader
-      const controls = await reader.decodeFromConstraints(
-        {
-          audio: false,
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        },
+      const controls = await reader.decodeFromStream(
+        stream,
         video,
         (result) => {
           const raw = String(result?.getText?.() || '').trim()
           if (!raw) return
-          setManualValue(raw)
-          cleanup()
-          onDetected(raw)
+          completeDetection(raw, startToken)
         },
       )
       if (startTokenRef.current !== startToken) {
@@ -337,14 +397,15 @@ export default function BarcodeScannerModal({
         return
       }
       zxingControlsRef.current = controls
-      setPermissionState('granted')
+      // permissionState was already set to 'granted' by the single acquisition
+      // above -- both decoders share it now, so it is not repeated per branch.
       setStatus('scanning')
       setError(labels.scanFallbackActive)
     } catch (scanError) {
       const scanErrorText = getScanErrorText(scanError)
       const documentBlocked = /camera is blocked by this browser view|permissions policy|camera is not allowed in this document/i.test(scanErrorText)
       const denied = /denied|permission|notallowed/i.test(scanErrorText)
-      const blocked = documentBlocked || (denied && nextPermissionState === 'denied')
+      const blocked = documentBlocked || (denied && permissionWasDenied)
       const dismissed = denied && !blocked
       cleanup()
       setPermissionState(documentBlocked ? 'blocked' : (blocked ? 'denied' : nextPermissionState))
@@ -366,6 +427,7 @@ export default function BarcodeScannerModal({
     labels.scanFailed,
     labels.scanPermissionDenied,
     labels.scanUnsupported,
+    completeDetection,
     scanFrame,
     tr,
     waitForVideoElement,
@@ -395,13 +457,16 @@ export default function BarcodeScannerModal({
 
     const nextPermissionState = await readCameraPermissionState()
     setPermissionState(nextPermissionState)
-    // Permission is durable browser state; a MediaStream is not. Never start
-    // the camera just because permission is already granted. getUserMedia is
-    // reached only from the visible Start/Request camera button below.
+    // Permission is durable browser state; a MediaStream is not. This is the
+    // RESUME path only (the page came back to the foreground), which is not a
+    // user gesture -- so it re-reads permission and parks on the Start camera
+    // button instead of calling getUserMedia. Opening the modal is a gesture
+    // and goes straight to startCamera; see the open effect below.
     setStatus('manual')
   }, [cleanup, labels.cameraDocumentBlocked, labels.scanUnsupported])
 
   const closeScanner = useCallback((): void => {
+    detectionHandledRef.current = true
     cleanup()
     onClose()
   }, [cleanup, onClose])
@@ -422,8 +487,7 @@ export default function BarcodeScannerModal({
       const value = await scanBarcodeFromImageFile(file)
       const nextValue = String(value || '').trim()
       if (!nextValue) throw new Error(labels.scanPhotoFailed)
-      setManualValue(nextValue)
-      onDetected(nextValue)
+      completeDetection(nextValue)
     } catch (scanError) {
       setStatus('manual')
       setError(scanError instanceof Error ? scanError.message : labels.scanPhotoFailed)
@@ -431,22 +495,37 @@ export default function BarcodeScannerModal({
       if (event?.target) event.target.value = ''
       setPhotoBusy(false)
     }
-  }, [labels.scanPhotoFailed, onDetected])
+  }, [completeDetection, labels.scanPhotoFailed])
+
+  // `startCamera` takes a new identity whenever the parent re-renders, because
+  // its labels close over the caller's `t`. Read it through a ref so `open` is
+  // the ONLY thing that can trigger a start: a parent re-render must never
+  // restart a live stream mid-scan, which with a one-tap start would read as a
+  // camera that keeps re-prompting.
+  const startCameraRef = useRef(startCamera)
+  useEffect(() => { startCameraRef.current = startCamera }, [startCamera])
 
   useEffect(() => {
     if (!open) return undefined
-    prepareScanner()
+    detectionHandledRef.current = false
+    // Owner rule (2026-09-14): pressing the scanner button opens the camera
+    // directly. The click that mounted this modal IS the user gesture, so the
+    // request happens here instead of behind a second "Start camera" tap; the
+    // guards inside startCamera (unsupported, document policy, saved denial)
+    // still decide whether getUserMedia is reached at all.
+    void startCameraRef.current()
     return () => {
+      detectionHandledRef.current = true
       cleanup()
       setStatus('idle')
       setError('')
       setPermissionState('unknown')
     }
-  }, [cleanup, open, prepareScanner])
+  }, [cleanup, open])
 
   // iOS can keep a PWA page mounted while it is backgrounded. Stop every
-  // camera track immediately, but never auto-resume it on foreground: the
-  // user must tap Start camera again.
+  // camera track immediately, but never auto-resume it on foreground: coming
+  // back to the page is not a user gesture, so the user taps Start camera.
   useEffect(() => {
     if (!open || typeof document === 'undefined') return undefined
     const handleVisibility = () => {
@@ -543,7 +622,7 @@ export default function BarcodeScannerModal({
             }
 
   return (
-    <Modal title={title} onClose={closeScanner} size="lg">
+    <Modal title={title} onClose={closeScanner} size="lg" layer="nested" unsavedChanges="read-only">
       <div className="space-y-3">
         {/* Sized off the viewport instead of a fixed 4:3 ratio, and with a
             bigger guide box relative to the frame -- the old fixed ratio
@@ -650,8 +729,7 @@ export default function BarcodeScannerModal({
               onClick={() => {
                 const nextValue = String(manualValue || '').trim()
                 if (!nextValue) return
-                cleanup()
-                onDetected(nextValue)
+                completeDetection(nextValue)
               }}
             >
               {labels.useValue}

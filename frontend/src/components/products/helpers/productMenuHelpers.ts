@@ -50,6 +50,8 @@ interface ProductFilterState {
   productSortDirection?: unknown
   stockFilter?: unknown
   supplierFilter?: MultiFilterValue
+  // Opt-in row visibility for same-name groups -- see setHideZeroStockRows.
+  hideZeroStockRows?: boolean
 }
 
 interface FilterOption {
@@ -138,6 +140,12 @@ interface BuildProductFilterSectionsOptions {
   searchModeSection?: FilterSection | null
   filters?: ProductFilterState
   isOpen?: boolean
+  // "Rows" section: the opt-in that collapses a same-name group down to the
+  // rows that still have stock (utils/productGrouping.ts's
+  // hideZeroStockGroupedChildRows). Off by default and reachable ONLY from
+  // this menu -- chosen filters live inside FilterMenu, never as chips in the
+  // toolbar row. Plain options, no JSX, so this file stays node-testable.
+  setHideZeroStockRows?: (value: boolean) => void
   setBrandFilter?: MultiSetter
   setBranchFilter?: Setter
   setCatFilter?: MultiSetter
@@ -314,11 +322,13 @@ export function buildProductFilterSections({
   setProductSortDirection = () => {},
   setStockFilter = () => {},
   setSupplierFilter = () => {},
+  setHideZeroStockRows = () => {},
   suppliers = [],
   t = (key) => key,
 }: BuildProductFilterSectionsOptions = {}): FilterSection[] {
   if (!isOpen) return []
   const {
+    hideZeroStockRows = false,
     brandFilter = 'all' as MultiFilterValue,
     branchFilter = 'all',
     catFilter = 'all' as MultiFilterValue,
@@ -428,7 +438,14 @@ export function buildProductFilterSections({
     // 'supplier' section removed from the filter menu (see comment above
     // 'created' section) -- suppliers/supplierFilter/setSupplierFilter
     // params stay for countActiveProductFilters and the export-menu
-    // "filtered supplier" item, just no longer rendered here.    promotionsSection ? promotionsSection : null,
+    // "filtered supplier" item, just no longer rendered here.
+    // G1b's Promotions facet. This expression was appended to the END of
+    // the comment line above in 642188a4, so `//` swallowed it and the
+    // section Products.tsx has been building and passing all along never
+    // reached the menu. On its own line it renders again -- the promoted /
+    // discounted / by-rule facet is a way of READING the catalogue, which
+    // is what this page is for.
+    promotionsSection ? promotionsSection : null,
     createdSection ? createdSection : null,
     // AND/OR search-mode section (see searchModeSection's own comment
     // above) -- right after Created, before Availability/Category, same
@@ -436,12 +453,32 @@ export function buildProductFilterSections({
     // the search box, which is directly above this menu).
     issuesSection ? issuesSection : null,
     mergedSection ? mergedSection : null,
+    // "Rows" -- the opt-in that collapses a same-name group to the rows that
+    // still hold stock. It is OFF by default and lives only here: hiding rows
+    // by default made an out-of-stock product that shares a name group
+    // unreachable from this page entirely (it could not be found, opened,
+    // edited or restocked), and the standing rule keeps a chosen filter inside
+    // this menu rather than spilling a chip into the toolbar row.
+    {
+      id: 'row_visibility',
+      label: t('rows') || 'Rows',
+      options: [
+        {
+          id: 'rows-all',
+          label: t('all_rows') || 'All rows',
+          title: t('all_rows_hint') || 'Every product row stays reachable, including rows that are out of stock at every branch.',
+          active: !hideZeroStockRows,
+          onClick: () => setHideZeroStockRows(false),
+        },
+        {
+          id: 'rows-hide-out-of-stock',
+          label: t('hide_out_of_stock_rows') || 'Hide out-of-stock rows',
+          title: t('hide_out_of_stock_rows_hint') || 'Inside a same-name group, hide the child rows that are out of stock at every branch. The group header shows how many are hidden.',
+          active: hideZeroStockRows,
+          onClick: () => setHideZeroStockRows(!hideZeroStockRows),
+        },
+      ],
+    },
     searchModeSection ? searchModeSection : null,
-    // Merged Branch/Groups/Stock "Availability" section when the .tsx
-    // caller built one (see components/shared/AvailabilityFilterOptions.tsx)
-    // -- covers all three, so the separate sections below are skipped.
-    // Falls back to those three separate sections when not supplied (e.g.
-    // the plain-node test harness, which can't construct the JSX render).
-
   ].filter(Boolean) as FilterSection[]
 }

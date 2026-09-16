@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import tailwindcss from 'tailwindcss'
+import { neutralPrimitiveChunk } from './build/chunkBoundaries.ts'
 
 function readGitRevision(): string {
   if (process.env.BUSINESS_OS_BUILD_REVISION) return process.env.BUSINESS_OS_BUILD_REVISION
@@ -111,10 +112,36 @@ function emitBuildManifest(): Plugin {
   return {
     name: 'business-os-build-manifest',
     generateBundle(_options, bundle) {
+      // woff2 belongs here with the JS and CSS. The Khmer UI font is
+      // SELF-HOSTED (@fontsource/noto-sans-khmer, three weights), and a font
+      // file that is only cached opportunistically is not cached at all on a
+      // phone that installs the app and is then taken offline: iOS falls back
+      // to whatever Khmer face the system has, which renders the app in a
+      // different, taller face than the one every line box is sized for. Only
+      // woff2 -- the .woff twins beside it exist for browsers this app does
+      // not support, and precaching both would double the bytes for nothing.
       const offlineAssetUrls = Object.values(bundle)
         .map((output) => `/${output.fileName.replace(/\\/g, '/')}`)
-        .filter((fileName) => /\.(?:js|css)$/i.test(fileName))
+        .filter((fileName) => /\.(?:js|css|woff2)$/i.test(fileName))
         .sort()
+      const eagerFromRoutes = new Set(
+        toRoutePreloadFiles(bundle, eagerPrecacheChunkNames).map((fileName) => `/${fileName.replace(/\\/g, '/')}`),
+      )
+      // Entry chunks (the ones index.html itself references) are always
+      // eager -- they are already a hard install gate via requiredEntryAssets
+      // in service-worker.ts; this just keeps the manifest's own eager/
+      // deferred split consistent with that gate instead of contradicting it.
+      for (const output of Object.values(bundle)) {
+        if (isBundleChunk(output) && output.isEntry) {
+          eagerFromRoutes.add(`/${output.fileName.replace(/\\/g, '/')}`)
+        }
+      }
+      // The Khmer font is always eager too -- it is only cached opportunistically
+      // otherwise, and a deferred pass could still be running when the user
+      // switches to Khmer, briefly showing the wrong font (see the woff2 comment
+      // above for why this actually matters on iOS).
+      const eagerAssetUrls = offlineAssetUrls.filter((url) => eagerFromRoutes.has(url) || url.endsWith('.woff2'))
+      const deferredAssetUrls = offlineAssetUrls.filter((url) => !eagerAssetUrls.includes(url))
       this.emitFile({
         type: 'asset',
         fileName: 'business-os-build.json',
@@ -127,7 +154,12 @@ function emitBuildManifest(): Plugin {
       this.emitFile({
         type: 'asset',
         fileName: 'business-os-precache.json',
-        source: JSON.stringify({ hash: buildHash, assets: offlineAssetUrls }, null, 2),
+        source: JSON.stringify({
+          hash: buildHash,
+          assets: offlineAssetUrls,
+          eager: eagerAssetUrls,
+          deferred: deferredAssetUrls,
+        }, null, 2),
       })
     },
     writeBundle(options): void {
@@ -242,6 +274,25 @@ function toRoutePreloadFiles(bundle: OutputBundle, names: readonly string[]): st
 
   return Array.from(files).sort()
 }
+
+// P4-4b fix 5: the service worker used to precache all generated chunks
+// (274 assets / 7.92 MB at the time this was measured) synchronously at
+// install, so a new build saturated a cellular/iOS connection before the
+// app shell could even finish activating -- part of the same "takes a
+// while to load" complaint fix 4 addressed for navigations. Only the app
+// shell chunks, the active language packs and the routes an offline POS
+// actually needs (POS itself plus the shared product/API chunks it
+// depends on) need to be ready before first paint; everything else is
+// precached lazily after the worker activates (see precacheDeferredAssets
+// in service-worker.ts). This reuses the SAME chunk-name lists already
+// computed for route preloading (routePreloadChunkNames,
+// toRoutePreloadFiles) instead of a new classification mechanism.
+const eagerPrecacheChunkNames = [...new Set([
+  ...routePreloadChunkNames.admin,
+  ...routePreloadChunkNames.pos,
+  'lang-en',
+  'lang-km',
+])]
 
 function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
   return `<script data-business-os-route-preloads>${escapeInlineScript(`(function installBusinessOsRoutePreloads() {
@@ -616,7 +667,11 @@ function manualChunks(id: string): string | undefined {
   // small enough that first-open admin pages do not drag the whole app shell
   // over the wire up front.
   const normalized = id.replace(/\\/g, '/')
-  if (normalized.includes('vite/preload-helper')) return 'vendor'
+  const neutralChunk = neutralPrimitiveChunk(normalized)
+  if (neutralChunk) return neutralChunk
+  // Font CSS has no JavaScript exports. Assigning it to generic vendor emits
+  // an entry-side effect import of unrelated media/export JavaScript as well.
+  if (normalized.includes('/node_modules/@fontsource/') && normalized.endsWith('.css')) return undefined
   if (normalized.includes('/node_modules/lucide-react/dist/esm/icons/')) {
     const iconName = path.basename(normalized, '.js')
     if (routeSharedIconNames.has(iconName) || appShellIconNames.has(iconName)) return 'shared-ui'
@@ -816,10 +871,7 @@ function manualChunks(id: string): string | undefined {
     ) {
       return 'catalog-public'
     }
-    if (
-      normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')
-      || normalized.includes('/src/components/catalog/catalogPagination.ts')
-    ) {
+    if (normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')) {
       return 'catalog-products'
     }
     if (normalized.includes('/src/components/catalog/CatalogSecondaryTabs.tsx')) {
@@ -827,9 +879,6 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/utils/initials.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/scriptTypography.ts')) return 'route-sync-utils'
-    if (normalized.endsWith('/src/utils/publicAssetUrls.ts')) {
-      return 'app-shared'
-    }
     if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) {
       return 'portal-translate-controller'
     }

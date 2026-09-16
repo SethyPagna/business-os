@@ -28,12 +28,10 @@ import bcrypt from 'bcryptjs'
 // Manager; pos, products, contacts for Employee) -- that meant a brand-new
 // Manager/Employee role on a freshly-seeded instance already had write
 // access to real business data before an admin had reviewed or granted
-// anything. Both now seed to `{}` (nothing granted), matching what
-// PermissionEditor.tsx's own "new role" form already defaults to
-// (Users.tsx line ~270, `permissions: {}`) -- so a freshly-created role
-// behaves the same everywhere it can be created, whether that's the
-// first-boot seed or the "Add role" button. Admin is unchanged (`{all:
-// true}`), the sole exception the spec calls out.
+// anything. Manager still seeds to `{}` (nothing granted), matching what
+// PermissionEditor.tsx's own "new role" form defaults to. Employee receives
+// only the explicitly approved front-line POS/Sales defaults below;
+// unrelated page grants remain absent. Admin is unchanged (`{all: true}`).
 //
 // This only affects instances seeded from empty -- the loop below only
 // force-rewrites the *admin* role's permissions back to this default on
@@ -41,10 +39,28 @@ import bcrypt from 'bcryptjs'
 // doesn't already exist) and are otherwise left alone as editable by the
 // org, so an existing installation's already-customized Manager/Employee
 // roles are not silently reset by this change.
-const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, boolean>> = {
+type DefaultRolePermissionValue = boolean | 'review' | 'view'
+const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRolePermissionValue>> = {
   admin: { all: true },
   manager: {},
-  employee: {},
+  employee: {
+    pos: true,
+    sales: true,
+    'sales:status': true,
+    'sales:customer': true,
+    'sales:add_items': true,
+    'sales:amend': true,
+    'sales:bulk': false,
+    'sales:import': false,
+    'sales:export': false,
+    returns: true,
+    'returns:bulk': false,
+    'returns:export': false,
+    contacts: 'review',
+    'contacts:bulk': false,
+    'contacts:financial_history': false,
+    contacts_suppliers: false,
+  },
 }
 
 export type CoreDataInvariants = {
@@ -228,28 +244,34 @@ export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvari
 
   const branchState = await db.prepare(`
     SELECT
+      COUNT(*) AS total_count,
       SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_count,
       SUM(CASE WHEN is_active = 1 AND is_default = 1 THEN 1 ELSE 0 END) AS default_count
     FROM branches
-  `).get<{ active_count: number | null; default_count: number | null }>()
+  `).get<{ total_count: number; active_count: number | null; default_count: number | null }>()
 
   let branchId: number | null = null
-  if (!Number(branchState?.active_count || 0)) {
-    const insertedBranch = await db.prepare(`
+  if (Number(branchState?.total_count || 0) === 0) {
+    // Factory reset and a genuinely fresh database are the only states that
+    // create branch identities. One conditional statement inserts the whole
+    // pair, so concurrent cold isolates cannot each create another pair.
+    await db.prepare(`
       INSERT INTO branches (name, notes, is_default, is_active, updated_at)
-      VALUES ('Main Store', 'Default branch created during factory reset.', 1, 1, CURRENT_TIMESTAMP)
+      SELECT seed.name, seed.notes, seed.is_default, 1, CURRENT_TIMESTAMP
+      FROM (
+        SELECT 'Shop' AS name, 'Default branch created during setup.' AS notes, 1 AS is_default
+        UNION ALL
+        SELECT 'Warehouse', 'Warehouse branch created during setup.', 0
+      ) AS seed
+      WHERE NOT EXISTS (SELECT 1 FROM branches)
     `).run()
-    branchId = insertedBranch.lastInsertRowid
-  } else if (!Number(branchState?.default_count || 0)) {
-    const firstActive = await db.prepare(`SELECT id FROM branches WHERE is_active = 1 ORDER BY id ASC LIMIT 1`).get<{ id: number }>()
-    if (firstActive?.id) {
-      await db.prepare(`UPDATE branches SET is_default = 0`).run()
-      await db.prepare(`UPDATE branches SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: firstActive.id })
-      branchId = firstActive.id
-    }
+    const shop = await db.prepare(`
+      SELECT id FROM branches WHERE lower(trim(name)) = 'shop' AND is_active = 1 ORDER BY id ASC LIMIT 1
+    `).get<{ id: number }>()
+    branchId = shop?.id ?? null
   }
 
-  const roleDefs: Array<[string, string, number, Record<string, boolean>]> = [
+  const roleDefs: Array<[string, string, number, Record<string, DefaultRolePermissionValue>]> = [
     ['Admin', 'admin', 1, DEFAULT_ROLE_PERMISSIONS.admin],
     ['Manager', 'manager', 0, DEFAULT_ROLE_PERMISSIONS.manager],
     ['Employee', 'employee', 0, DEFAULT_ROLE_PERMISSIONS.employee],
@@ -369,10 +391,52 @@ export function ensureCoreDataInvariantsOnce(env: Env): Promise<CoreDataInvarian
 // by it. Confirmed with an in-memory D1-equivalent test seeded with a
 // non-default org/branch/admin before wiping these tables too.
 export const FACTORY_RESET_TABLES = [
+  'transfer_operation_members',
+  'transfer_operation_receipts',
+  // Immutable Sales Records must be cleared before their sales/receipt
+  // parents, under the atomic reset guard in routes/system.ts.
+  'sale_record_events',
+  'return_mutation_receipts',
+  'return_create_receipts',
+  'return_create_guards',
+  // Reviewed conflict actions cannot survive product identity reuse. Clear
+  // both child receipt sets before their groups/reviews and product/history
+  // parents.
+  'product_conflict_action_group_members',
+  'product_remove_operations',
+  'product_conflict_action_groups',
+  'product_conflict_action_reviews',
+  // Selected-conflict cases reference their run, products, and action history.
+  // Clear children first so no request receipt survives a factory reset.
+  'product_conflict_merge_run_cases',
+  'product_conflict_merge_runs',
+  // Durable monetary-mutation members reference their receipts, whose history
+  // parent is cleared below. Guards are transient but must not survive reset.
+  'sale_mutation_members',
+  'sale_mutation_receipts',
+  'sale_mutation_guards',
+  'sale_incident_recovery_members',
+  'sale_incident_recovery_receipts',
+  'sale_incident_recovery_guards',
+  'sale_not_paid_stock_recovery_members',
+  'sale_not_paid_stock_recovery_receipts',
+  'sale_not_paid_stock_recovery_guards',
+  // Receipt children must go before their product/lot/movement/history parents.
+  // Keep revision tombstones: reused identities must never resurrect old guards.
+  'stock_session_members',
+  'stock_session_operations',
+  'stock_session_guards',
+  'return_bulk_members',
+  'return_bulk_operations',
+  'return_write_revisions',
   'return_item_batch_allocations',
   'sale_item_batch_allocations',
   'return_items',
   'returns',
+  // Expense receipts must be cleared before fees so their immutable replay
+  // provenance lasts until the reset guard authorizes the complete reset.
+  'fee_operation_receipts',
+  'fees',
   'sale_items',
   'sales',
   'rfid_session_items',
@@ -443,6 +507,21 @@ export const FACTORY_RESET_TABLES = [
 // collected (image paths) or cleared before 'products' itself, since this
 // D1 schema has no FK/cascade to do it automatically.
 export const PRODUCTS_RESET_TABLES = [
+  'transfer_operation_members',
+  'transfer_operation_receipts',
+  // Global reviewed-action receipts bind immutable product identities and
+  // graph snapshots, so products reset clears them child-first as well.
+  'product_conflict_action_group_members',
+  'product_remove_operations',
+  'product_conflict_action_groups',
+  'product_conflict_action_reviews',
+  // Product-conflict receipts cannot survive product identity reuse. Cases
+  // reference runs and products, so reset them child-first.
+  'product_conflict_merge_run_cases',
+  'product_conflict_merge_runs',
+  'stock_session_members',
+  'stock_session_operations',
+  'stock_session_guards',
   'product_images',
   'rfid_tags',
   'branch_batch_stock',

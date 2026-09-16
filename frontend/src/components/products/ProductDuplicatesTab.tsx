@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import ProductNameRail from '../shared/ProductNameRail'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useFormDirty } from '../../utils/formDirty.ts'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
@@ -6,9 +8,38 @@ import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import InfoHint from '../shared/InfoHint.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { ProductImg } from './shared/primitives.tsx'
-import { getPossiblySameProducts, dismissProductDuplicateCluster, mergePossiblySameProducts, updateProduct } from '../../api/productWriteTransport.ts'
+import {
+  getPossiblySameProducts,
+  dismissProductDuplicateCluster,
+  createSelectedConflictGroupReview,
+  applySelectedConflictGroupReview,
+  finalizeSelectedConflictGroupReview,
+  getSelectedConflictGroupReviewPage,
+  makeSelectedConflictGroupApplyBody,
+  updateProduct,
+  type SelectedConflictGroupReviewResult,
+  type SelectedConflictGroupFinalizeResult,
+  type SelectedConflictGroupApplyBody,
+  type SelectedConflictGroupApplyResult,
+} from '../../api/productWriteTransport.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
 import { normalizeProductGroupName } from '../../utils/productGrouping.ts'
+import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import Modal from '../shared/Modal'
+import { SelectedConflictGroupReviewModal } from './SelectedConflictMergeReviewModal.tsx'
+import {
+  createSelectedConflictRequestCoordinator,
+  selectedConflictCaseKey,
+  selectedConflictOutcomeIsUnknown,
+  type ProductConflictCluster,
+  type ProductConflictProduct,
+} from '../../utils/selectedConflictMerge.ts'
+import {
+  buildSelectedConflictGroupReviewRequest,
+  buildSelectedConflictGroupFinalizeRequest,
+  SELECTED_CONFLICT_GROUP_REVIEW_PAGE_LIMIT,
+  type SelectedConflictGroupResolutionChoice,
+} from '../../utils/selectedConflictActionReview.ts'
 
 // Products → Duplicates: the human-review residue the identity rule can't
 // settle on its own. Mirrors the contacts Possible Duplicates panel
@@ -22,45 +53,33 @@ import Modal from '../shared/Modal'
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
 
-type Severity = 'same_barcode' | 'same_name' | 'similar_name'
-
-type ClusterProduct = {
-  id: number
-  name: string | null
-  barcode: string | null
-  cost_price_usd: number | null
-  selling_price_usd: number | null
-  stock_quantity: number | null
-  image_path: string | null
-}
-
-type Cluster = {
-  type: 'barcode' | 'name' | 'similar'
-  value: string
-  severity: Severity
-  products: ClusterProduct[]
-}
+type Severity = ProductConflictCluster['severity']
+type ClusterProduct = ProductConflictProduct
+type Cluster = ProductConflictCluster
 
 const SEVERITY_STYLE: Record<Severity, string> = {
+  leading_zero: 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30',
   same_barcode: 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30',
   same_name: 'border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30',
   similar_name: 'border-violet-200 bg-violet-50 dark:border-violet-900/40 dark:bg-violet-950/30',
 }
 
 const SEVERITY_TEXT: Record<Severity, string> = {
+  leading_zero: 'text-emerald-700 dark:text-emerald-300',
   same_barcode: 'text-amber-800 dark:text-amber-300',
   same_name: 'text-blue-700 dark:text-blue-300',
   similar_name: 'text-violet-700 dark:text-violet-300',
 }
 
 const SEVERITY_LABEL_KEY: Record<Severity, [string, string]> = {
+  leading_zero: ['product_dup_leading_zero', 'Same barcode, extra zero'],
   same_barcode: ['product_dup_same_barcode', 'Same barcode'],
   same_name: ['product_dup_same_name', 'Same name'],
   similar_name: ['product_dup_similar_name', 'Similar name'],
 }
 
 function clusterKey(cluster: Cluster): string {
-  return `${cluster.type}:${cluster.value}`
+  return selectedConflictCaseKey(cluster)
 }
 
 // An EXACT duplicate cluster (user spec item #3): products that share BOTH a
@@ -84,8 +103,18 @@ function money(value: number | null | undefined): string {
   return `$${n % 1 === 0 ? n : n.toFixed(2)}`
 }
 
+function selectedConflictErrorMessage(t: TranslateFn, error: unknown, fallbackKey: string, fallback: string): string {
+  const code = String((error as { code?: unknown } | null)?.code || '').trim().toLowerCase()
+  if (code) {
+    const translated = t(`selected_conflict_${code}`)
+    if (translated && translated !== `selected_conflict_${code}`) return translated
+  }
+  if (error instanceof Error && error.message) return error.message
+  return t(fallbackKey) || fallback
+}
+
 function ClusterCard({
-  cluster, t, dismissing, merging, selected, selectable, isExact, onToggleSelect, onDismiss, onApplyDecisions, onEdit,
+  cluster, t, dismissing, merging, selected, selectable, isExact, canRemoveProduct, removalReasons, onToggleSelect, onRemovalChange, onDismiss, onApplyDecisions, onEdit,
 }: {
   cluster: Cluster
   t: TranslateFn
@@ -93,10 +122,13 @@ function ClusterCard({
   merging: boolean
   selected: boolean
   selectable: boolean
+  canRemoveProduct: boolean
+  removalReasons: Readonly<Record<number, string>>
   // Same barcode AND same name -> the Resolve (edit) button is hidden; the
   // Keep this / Keep both decision is the only sane next step (spec item #3).
   isExact: boolean
   onToggleSelect: () => void
+  onRemovalChange: (productId: number, reason: string | null) => void
   onDismiss: () => void
   onApplyDecisions: (keeper: ClusterProduct, removals: ClusterProduct[]) => void
   onEdit: (product: ClusterProduct) => void
@@ -107,19 +139,16 @@ function ClusterCard({
   // in the group takes an explicit Keep/Remove decision; Apply arms only
   // when EVERY row is decided and exactly ONE row is kept. Editing a row
   // (the in-place Resolve) never leaves this section.
-  const [decisions, setDecisions] = useState<Record<number, 'keep' | 'remove'>>({})
-  // A long product name truncates to "..." in the fixed row width, and
-  // hover-only `title` tooltips don't exist on touch -- so the name (and
-  // the cluster's shared value chip) toggle to full, wrapped text on
-  // click/tap (user, Aug 31: "if product name is long it uses '...' and
-  // can't click to view details").
-  const [expandedNames, setExpandedNames] = useState<Record<number, boolean>>({})
+  const [decisions, setDecisions] = useState<Record<number, 'keep' | 'merge'>>({})
+  // The cluster's shared value chip still toggles to full, wrapped text on
+  // click/tap because hover-only tooltips do not exist on touch. Product names
+  // scroll horizontally in place like the rest of the Products surface.
   const [valueExpanded, setValueExpanded] = useState(false)
   const busy = dismissing || merging
 
-  const decide = (productId: number, decision: 'keep' | 'remove') => {
+  const decide = (productId: number, decision: 'keep' | 'merge') => {
     setDecisions((current) => {
-      const next: Record<number, 'keep' | 'remove'> = { ...current }
+      const next: Record<number, 'keep' | 'merge'> = { ...current }
       if (current[productId] === decision) {
         delete next[productId]
         return next
@@ -137,9 +166,9 @@ function ClusterCard({
   }
 
   const keeper = cluster.products.find((product) => decisions[product.id] === 'keep') || null
-  const removals = cluster.products.filter((product) => decisions[product.id] === 'remove')
+  const merges = cluster.products.filter((product) => decisions[product.id] === 'merge')
   const everyDecided = cluster.products.every((product) => decisions[product.id])
-  const canApply = Boolean(keeper) && everyDecided && removals.length > 0 && !busy
+  const canApply = Boolean(keeper) && everyDecided && merges.length > 0 && !busy
 
   return (
     <div className={`rounded-xl border px-3 py-2.5 transition-shadow ${SEVERITY_STYLE[cluster.severity]} ${busy ? 'opacity-60' : ''} ${selected ? 'ring-2 ring-blue-400 dark:ring-blue-500' : ''}`}>
@@ -177,57 +206,76 @@ function ClusterCard({
       <div className="space-y-1.5">
         {cluster.products.map((product) => {
           const decision = decisions[product.id]
+          const removeIndependently = Object.prototype.hasOwnProperty.call(removalReasons, product.id)
           return (
-            <div key={product.id} className="flex items-center gap-2 text-sm">
-              <ProductImg src={product.image_path || ''} alt="" className="h-8 w-8 flex-shrink-0 rounded-lg object-cover" />
-              <div className="min-w-0 flex-1">
-                <button
-                  type="button"
-                  onClick={() => setExpandedNames((current) => ({ ...current, [product.id]: !current[product.id] }))}
-                  className={`block w-full text-left font-medium text-gray-900 dark:text-white ${expandedNames[product.id] ? 'whitespace-normal break-words' : 'truncate'}`}
-                  title={product.name || ''}
-                >
-                  {product.name || `#${product.id}`}
-                </button>
-                <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-gray-500 dark:text-gray-400">
-                  {cluster.type !== 'barcode' && product.barcode ? <span>{product.barcode}</span> : null}
-                  <span>{money(product.cost_price_usd)} → {money(product.selling_price_usd)}</span>
-                  <span>{Number(product.stock_quantity) || 0} {t('pcs') || 'pcs'}</span>
+            <div key={product.id} className="rounded-lg border border-black/5 p-1.5 dark:border-white/10">
+              <div className="flex items-center gap-2 text-sm">
+                <ProductImg src={product.image_path || ''} alt="" className="h-8 w-8 flex-shrink-0 rounded-lg object-cover" />
+                <div className="min-w-0 flex-1">
+                  <div className="min-w-0 font-medium text-gray-900 dark:text-white"><ProductNameRail name={String((product.name || `#${product.id}`) ?? '')} /></div>
+                  <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-gray-500 dark:text-gray-400">
+                    {cluster.type !== 'barcode' && product.barcode ? <span>{product.barcode}</span> : null}
+                    <span>{t('cost_price') || 'Cost price'}: {money(product.cost_price_usd)}</span>
+                    <span>{t('selling_price') || 'Selling price'}: {money(product.selling_price_usd)}</span>
+                    <span>{Number(product.stock_quantity) || 0} {t('pcs') || 'pcs'}</span>
+                    {(product.branch_stock || []).map((line) => (
+                      <span key={line.branch_id} className="rounded bg-black/5 px-1 dark:bg-white/10">
+                        {line.branch_name || `#${line.branch_id}`} {line.quantity}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div className="flex flex-shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => decide(product.id, 'keep')}
-                  disabled={busy}
-                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium transition disabled:opacity-50 ${decision === 'keep'
-                    ? 'bg-emerald-600 text-white'
-                    : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20'}`}
-                >
-                  {t('keep') || 'Keep'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => decide(product.id, 'remove')}
-                  disabled={busy}
-                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium transition disabled:opacity-50 ${decision === 'remove'
-                    ? 'bg-rose-600 text-white'
-                    : 'text-rose-600 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-900/20'}`}
-                >
-                  {t('remove') || 'Remove'}
-                </button>
-                {isExact ? null : (
+                <div className="flex flex-shrink-0 items-center gap-1">
                   <button
                     type="button"
-                    onClick={() => onEdit(product)}
+                    onClick={() => decide(product.id, 'keep')}
                     disabled={busy}
-                    title={t('resolve_duplicate_inline_hint') || 'Edit this product right here — name, barcode and prices — without leaving the review'}
-                    className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-blue-600 transition hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                    className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium transition disabled:opacity-50 ${decision === 'keep'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20'}`}
                   >
-                    {t('resolve') || 'Resolve'}
+                    {t('keep') || 'Keep'}
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => decide(product.id, 'merge')}
+                    disabled={busy}
+                    className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium transition disabled:opacity-50 ${decision === 'merge'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-900/20'}`}
+                  >
+                    {t('merge') || 'Merge'}
+                  </button>
+                  {isExact ? null : (
+                    <button
+                      type="button"
+                      onClick={() => onEdit(product)}
+                      disabled={busy}
+                      title={t('resolve_duplicate_inline_hint') || 'Edit this product right here — name, barcode and prices — without leaving the review'}
+                      className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-blue-600 transition hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                    >
+                      {t('resolve') || 'Resolve'}
+                    </button>
+                  )}
+                </div>
               </div>
+              {selected && canRemoveProduct ? (
+                <div className="mt-1.5 border-t border-black/5 pt-1.5 dark:border-white/10">
+                  <label className="flex items-center gap-1.5 text-[11px] font-medium text-rose-700 dark:text-rose-300">
+                    <input type="checkbox" checked={removeIndependently} disabled={busy} onChange={(event) => onRemovalChange(product.id, event.target.checked ? '' : null)} />
+                    {t('selected_conflict_remove_independently') || 'Remove independently in the global review'}
+                  </label>
+                  {removeIndependently ? (
+                    <input
+                      className="input mt-1 w-full text-xs"
+                      maxLength={500}
+                      value={removalReasons[product.id] || ''}
+                      placeholder={t('selected_conflict_remove_reason') || 'Reason for removing this product'}
+                      onChange={(event) => onRemovalChange(product.id, event.target.value)}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           )
         })}
@@ -236,14 +284,14 @@ function ClusterCard({
         <span className="text-[11px] text-gray-400">
           {everyDecided
             ? (keeper
-              ? `${t('keep') || 'Keep'} "${keeper.name || `#${keeper.id}`}" · ${removals.length} ${t('remove') || 'remove'}`
+              ? `${t('keep') || 'Keep'} "${keeper.name || `#${keeper.id}`}" · ${merges.length} ${t('merge') || 'merge'}`
               : (t('dup_pick_one_keep') || 'Pick one Keep'))
-            : (t('dup_decide_all_hint') || 'Decide every row (Keep / Remove) to apply')}
+            : (t('dup_decide_all_hint') || 'Decide every row (Keep / Merge) to apply')}
         </span>
         <button
           type="button"
           disabled={!canApply}
-          onClick={() => keeper && onApplyDecisions(keeper, removals)}
+          onClick={() => keeper && onApplyDecisions(keeper, merges)}
           className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Merge className="h-3 w-3" />
@@ -254,9 +302,13 @@ function ClusterCard({
   )
 }
 
-export default function ProductDuplicatesTab({ t, notify }: {
+export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMergeLeadingZero, reviewProductIds, onReviewProductIdsConsumed }: {
   t: TranslateFn
   notify: NotifyFn
+  canRemoveProduct: boolean
+  onMergeLeadingZero?: () => void
+  reviewProductIds?: readonly [number, number] | null
+  onReviewProductIdsConsumed?: () => void
 }) {
   const [clusters, setClusters] = useState<Cluster[]>([])
   const [loading, setLoading] = useState(false)
@@ -272,9 +324,20 @@ export default function ProductDuplicatesTab({ t, notify }: {
   // cluster are meaningless).
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
-  // "Merging 3/8…" -- bulk runs are sequential server calls, so tell the
-  // reviewer where it is instead of freezing on a bare disabled button.
   const [bulkProgress, setBulkProgress] = useState('')
+  const [groupReviewPages, setGroupReviewPages] = useState<SelectedConflictGroupReviewResult[]>([])
+  const [groupReviewPageIndex, setGroupReviewPageIndex] = useState(0)
+  const [groupReviewChoices, setGroupReviewChoices] = useState<Record<string, SelectedConflictGroupResolutionChoice>>({})
+  const [groupRemovalReasons, setGroupRemovalReasons] = useState<Record<number, string>>({})
+  const [groupFinalizeResult, setGroupFinalizeResult] = useState<SelectedConflictGroupFinalizeResult | null>(null)
+  const [groupApplyBody, setGroupApplyBody] = useState<SelectedConflictGroupApplyBody | null>(null)
+  const [groupApplyResult, setGroupApplyResult] = useState<SelectedConflictGroupApplyResult | null>(null)
+  const [groupApplyGroups, setGroupApplyGroups] = useState<SelectedConflictGroupApplyResult['groups']>([])
+  const [groupApplyRemovals, setGroupApplyRemovals] = useState<SelectedConflictGroupApplyResult['removals']>([])
+  const [groupApplyError, setGroupApplyError] = useState<{ code: string; message: string } | null>(null)
+  const [groupUnknownOutcome, setGroupUnknownOutcome] = useState(false)
+  const groupReviewRequestRef = useRef(createSelectedConflictRequestCoordinator())
+  const groupWriteInFlightRef = useRef(false)
 
   const load = async () => {
     setLoading(true)
@@ -294,6 +357,10 @@ export default function ProductDuplicatesTab({ t, notify }: {
     // Manual-refresh review panel, same as the contacts one -- the sweep
     // only changes when someone edits/merges a product.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => () => {
+    groupReviewRequestRef.current.cancel()
   }, [])
 
   const removeCluster = (id: string) => {
@@ -328,21 +395,37 @@ export default function ProductDuplicatesTab({ t, notify }: {
     }
   }
 
+  // The one shared "keep this, what happens to the other's stock?" flow, used
+  // by every surface that resolves a twin (see useMergeStockChoice).
+  const { mergeWithChoice, mergeStockChoiceDialog } = useMergeStockChoice(t)
+
   // Apply the group's explicit decisions (ONE keeper + the rows marked
   // Remove); one pair per call, stopping on the first failure so nothing
   // half-merges silently. Undecided rows (in an odd partial state) are
   // never touched -- but the card only arms Apply when every row is
   // decided, so normally removals covers the whole rest of the group.
+  //
+  // Marking a row Remove used to fold its stock onto the keeper anyway: the
+  // word said one thing and the write did the other. Each removal that still
+  // holds stock now asks -- merge the quantities across, or write them off --
+  // before anything is written, one question per row, since two rows in one
+  // group can hold different stock and deserve different answers. Cancelling
+  // stops the whole Apply where it stands rather than continuing down the list.
   const handleApplyDecisions = async (cluster: Cluster, keeper: ClusterProduct, removals: ClusterProduct[]) => {
     if (!removals.length) return
     const id = clusterKey(cluster)
     setMergingId(id)
     try {
+      let merged = 0
       for (const other of removals) {
-        await mergePossiblySameProducts(keeper.id, other.id)
+        const outcome = await mergeWithChoice(keeper, other)
+        if (outcome === 'cancelled') break
+        merged += 1
       }
-      notify(t('product_duplicate_merged') || 'Merged -- stock, lots and images were carried onto the kept product')
-      removeCluster(id)
+      if (!merged) return
+      notify(t('product_duplicate_merged') || 'Merged -- stock, received-date records and images were carried onto the kept product')
+      if (merged === removals.length) removeCluster(id)
+      else void load()
     } catch (e: unknown) {
       notify(e instanceof Error ? e.message : (t('merge_duplicate_failed') || 'Could not merge these records'), 'error')
     } finally {
@@ -356,6 +439,10 @@ export default function ProductDuplicatesTab({ t, notify }: {
   // -- a renamed/re-barcoded product simply drops out of its cluster.
   const [editTarget, setEditTarget] = useState<ClusterProduct | null>(null)
   const [editForm, setEditForm] = useState<{ name: string; barcode: string; cost: string; price: string }>({ name: '', barcode: '', cost: '', price: '' })
+  // S4-21: re-baselined per product, because one modal instance is
+  // reused for every row -- otherwise loading row B's values into a form
+  // baselined on row A reads as dirty without anyone typing.
+  const { dirty: editFormDirty } = useFormDirty(editTarget ? editForm : null, editTarget?.id ?? null)
   const [editSaving, setEditSaving] = useState(false)
   const openEdit = (product: ClusterProduct) => {
     setEditTarget(product)
@@ -409,6 +496,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
     setBulkBusy(false)
     setBulkProgress('')
     setSelectedKeys(new Set())
+    setGroupRemovalReasons({})
     if (failed) {
       notify(replaceVars(t('bulk_dismiss_partial_failure') || '{count} of the selected duplicates could not be dismissed', { count: failed }), 'error')
     } else {
@@ -416,42 +504,247 @@ export default function ProductDuplicatesTab({ t, notify }: {
     }
   }
 
-  // Bulk Merge -- only automated for exactly-2-product clusters, where
-  // "keep the older record" (lower id, created first) is an unambiguous,
-  // defensible default; its sales/lot history is the longer one. A 3+
-  // cluster genuinely needs a human to pick the survivor (the per-row
-  // "Keep this" flow), so those are skipped here and reported, never
-  // guessed at -- identical rule to the contacts panel's bulk merge.
-  const bulkMerge = async () => {
-    const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(cluster)))
+  const updateGroupRemoval = (productId: number, reason: string | null) => {
+    setGroupRemovalReasons((current) => {
+      const next = { ...current }
+      if (reason == null) delete next[productId]
+      else next[productId] = reason
+      return next
+    })
+  }
+
+  const openSelectedGroupReview = async (
+    targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(cluster))),
+    removalReasons: Readonly<Record<number, string>> = groupRemovalReasons,
+  ) => {
     if (!targets.length || bulkBusy) return
-    const mergeable = targets.filter((cluster) => cluster.products.length === 2)
-    const skipped = targets.length - mergeable.length
-    setBulkBusy(true)
-    let failed = 0
-    let done = 0
-    for (const cluster of mergeable) {
-      setBulkProgress(replaceVars(t('bulk_merging_progress') || 'Merging {done}/{total}…', { done: done + 1, total: mergeable.length }))
-      const [keeper, other] = [...cluster.products].sort((a, b) => a.id - b.id)
-      try {
-        await mergePossiblySameProducts(keeper.id, other.id)
-        removeCluster(clusterKey(cluster))
-      } catch {
-        failed += 1
-      }
-      done += 1
+    let body
+    try {
+      body = buildSelectedConflictGroupReviewRequest(targets, createClientRequestId('product-conflict-group-review'), removalReasons)
+    } catch (error: unknown) {
+      notify(error instanceof Error ? error.message : (t('selected_conflict_group_review_failed') || 'Could not create the group review'), 'error')
+      return
     }
+    if (!body.merge_groups.length && !body.remove_rows.length) {
+      notify(t('selected_conflict_group_none_reviewable') || 'None of the selected groups contains a merge group or an independent removal.', 'info')
+      return
+    }
+    const request = groupReviewRequestRef.current.begin()
+    setBulkBusy(true)
+    setBulkProgress(t('selected_conflict_loading_group_review') || 'Creating one combined group review…')
+    try {
+      const review = await createSelectedConflictGroupReview(body, { signal: request.signal })
+      if (!request.isCurrent()) return
+      setGroupReviewPages([review])
+      setGroupReviewPageIndex(0)
+      setGroupReviewChoices({})
+      setGroupFinalizeResult(null)
+      setGroupApplyBody(null)
+      setGroupApplyResult(null)
+      setGroupApplyGroups([])
+      setGroupApplyRemovals([])
+      setGroupApplyError(null)
+      setGroupUnknownOutcome(false)
+    } catch (error: unknown) {
+      if (request.isCurrent()) notify(selectedConflictErrorMessage(t, error, 'selected_conflict_group_review_failed', 'Could not create the group review'), 'error')
+    } finally {
+      if (request.finish()) {
+        setBulkBusy(false)
+        setBulkProgress('')
+      }
+    }
+  }
+
+  // An edit collision is only a request to review persisted evidence. Never
+  // copy the rejected draft barcode into a product or add unrelated siblings.
+  const consumedCollisionRef = useRef<readonly [number, number] | null>(null)
+  useEffect(() => {
+    if (!reviewProductIds || !loaded || loading || bulkBusy || groupReviewPages.length
+      || consumedCollisionRef.current === reviewProductIds) return
+    consumedCollisionRef.current = reviewProductIds
+    const ids = new Set(reviewProductIds)
+    const cluster = ids.size === 2 && [...ids].every((id) => Number.isSafeInteger(id) && id > 0)
+      ? clusters.find((candidate) => [...ids].every((id) => candidate.products.some((product) => Number(product.id) === id)))
+      : undefined
+    if (cluster) {
+      void openSelectedGroupReview([{ ...cluster, products: cluster.products.filter((product) => ids.has(Number(product.id))) }], {})
+    } else {
+      notify(t('product_collision_review_unavailable') || 'No saved conflict group contains both products. Verify their identities before merging.', 'error')
+    }
+    onReviewProductIdsConsumed?.()
+    // The fresh loaded catalog is the evidence; no automatic identity edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewProductIds, loaded, loading, bulkBusy, groupReviewPages.length, clusters])
+
+  const closeSelectedGroupReview = () => {
+    const writeWillReconcileWhenSettled = groupWriteInFlightRef.current
+    groupReviewRequestRef.current.cancel()
+    setGroupReviewPages([])
+    setGroupReviewPageIndex(0)
+    setGroupReviewChoices({})
+    setGroupFinalizeResult(null)
+    setGroupApplyBody(null)
+    setGroupApplyResult(null)
+    setGroupApplyGroups([])
+    setGroupApplyRemovals([])
+    setGroupApplyError(null)
+    setGroupUnknownOutcome(false)
     setBulkBusy(false)
     setBulkProgress('')
-    setSelectedKeys(new Set())
-    if (failed || skipped) {
-      const parts = []
-      if (failed) parts.push(replaceVars(t('bulk_merge_partial_failure') || '{count} could not be merged', { count: failed }))
-      if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_multiway') || '{count} group(s) with 3+ records were skipped -- merge those individually', { count: skipped }))
-      notify(parts.join('. '), failed ? 'error' : 'info')
-    } else {
-      notify(t('bulk_merge_success') || 'Merged the selected duplicates')
+    if (!writeWillReconcileWhenSettled) void load()
+  }
+
+  const showNextGroupReviewPage = async () => {
+    const current = groupReviewPages[groupReviewPageIndex]
+    if (!current || bulkBusy) return
+    if (groupReviewPageIndex < groupReviewPages.length - 1) {
+      setGroupReviewPageIndex((index) => index + 1)
+      return
     }
+    const cursor = current.page.next_cursor
+    if (cursor == null) return
+    const request = groupReviewRequestRef.current.begin()
+    setBulkBusy(true)
+    setBulkProgress(t('selected_conflict_loading_next_page') || 'Loading the next review page…')
+    try {
+      const next = await getSelectedConflictGroupReviewPage(current.review_id, cursor, SELECTED_CONFLICT_GROUP_REVIEW_PAGE_LIMIT, { signal: request.signal })
+      if (!request.isCurrent()) return
+      const sameReview = next.review_id === current.review_id
+        && next.draft_digest === current.draft_digest
+        && next.resolution_version === current.resolution_version
+      if (!sameReview || next.page.cursor !== cursor) throw new Error(t('selected_conflict_review_page_mismatch') || 'The review page did not match the saved review. Close and start again.')
+      setGroupReviewPages((pages) => [...pages, next])
+      setGroupReviewPageIndex((index) => index + 1)
+    } catch (error: unknown) {
+      if (request.isCurrent()) notify(selectedConflictErrorMessage(t, error, 'selected_conflict_group_review_failed', 'Could not load the next review page'), 'error')
+    } finally {
+      if (request.finish()) {
+        setBulkBusy(false)
+        setBulkProgress('')
+      }
+    }
+  }
+
+  const finalizeSelectedGroupReview = async () => {
+    const review = groupReviewPages[0]
+    if (!review || bulkBusy || groupFinalizeResult) return Boolean(groupFinalizeResult)
+    const groups = groupReviewPages.flatMap((page) => page.page.groups)
+    let body
+    try {
+      body = buildSelectedConflictGroupFinalizeRequest(review, groups, groupReviewChoices)
+    } catch (error: unknown) {
+      notify(error instanceof Error ? error.message : (t('selected_conflict_finalize_failed') || 'Complete the review before continuing.'), 'error')
+      return false
+    }
+    const request = groupReviewRequestRef.current.begin()
+    setBulkBusy(true)
+    setBulkProgress(t('selected_conflict_finalizing_review') || 'Freezing the reviewed choices…')
+    try {
+      const finalized = await finalizeSelectedConflictGroupReview(review.review_id, body, { signal: request.signal })
+      if (!request.isCurrent()) return false
+      if (finalized.review_id !== review.review_id || !finalized.manifest_digest) {
+        throw new Error(t('selected_conflict_review_page_mismatch') || 'The finalized review did not match the saved review.')
+      }
+      setGroupFinalizeResult(finalized)
+      setGroupApplyBody(makeSelectedConflictGroupApplyBody(finalized))
+      setGroupApplyError(null)
+      return true
+    } catch (error: unknown) {
+      if (request.isCurrent()) notify(selectedConflictErrorMessage(t, error, 'selected_conflict_finalize_failed', 'Could not finalize the reviewed actions.'), 'error')
+      return false
+    } finally {
+      if (request.finish()) {
+        setBulkBusy(false)
+        setBulkProgress('')
+      }
+    }
+  }
+
+  const executeSelectedGroupApply = async (body: SelectedConflictGroupApplyBody) => {
+    const finalized = groupFinalizeResult
+    if (!finalized || bulkBusy) return
+    const request = groupReviewRequestRef.current.begin()
+    groupWriteInFlightRef.current = true
+    setBulkBusy(true)
+    setGroupApplyError(null)
+    setGroupUnknownOutcome(false)
+    const totalWork = Number(finalized.counts.merge_folds || 0) + Number(finalized.counts.ready_removals || 0)
+    const callCeiling = Math.max(1, Math.min(4002, totalWork + 2))
+    let calls = 0
+    let previousProgress = 0
+    let lastResult: SelectedConflictGroupApplyResult | null = null
+    try {
+      while (calls < callCeiling) {
+        calls += 1
+        const result = await applySelectedConflictGroupReview(body, { signal: request.signal })
+        lastResult = result
+        if (!request.isCurrent()) return
+        if (result.review_id !== body.review_id || result.manifest_digest !== body.manifest_digest) {
+          throw new Error(t('selected_conflict_review_page_mismatch') || 'The apply receipt did not match the confirmed review.')
+        }
+        setGroupApplyResult(result)
+        setGroupApplyGroups((current) => {
+          const next = new Map(current.map((row) => [row.group_key, row]))
+          for (const row of result.groups) next.set(row.group_key, row)
+          return [...next.values()]
+        })
+        setGroupApplyRemovals((current) => {
+          const next = new Map(current.map((row) => [row.action_ordinal, row]))
+          for (const row of result.removals) next.set(row.action_ordinal, row)
+          return [...next.values()].sort((left, right) => left.action_ordinal - right.action_ordinal)
+        })
+        const progress = result.counts.committed_folds + result.counts.completed_removals
+          + result.counts.approval_pending_removals + result.counts.refused_folds + result.counts.refused_removals
+        setBulkProgress(replaceVars(t('selected_conflict_group_apply_progress') || '{done} processed · {total} reviewed actions', { done: progress, total: totalWork }))
+        if (!result.continuation_required) {
+          if (result.status === 'completed') {
+            setSelectedKeys(new Set())
+            setGroupRemovalReasons({})
+            notify(t('selected_conflict_group_apply_complete') || 'The reviewed product actions are complete.')
+          } else if (result.approval_required) {
+            notify(t('selected_conflict_group_approval_pending') || 'Removal requests were submitted for approval. No pending removal was reported as completed.', 'info')
+          } else if (result.status === 'interrupted') {
+            setGroupApplyError({
+              code: String(result.interruption_code || 'review_interrupted'),
+              message: String(result.interruption_message || t('selected_conflict_group_apply_interrupted') || 'The review stopped before every action completed.'),
+            })
+          }
+          break
+        }
+        if (progress <= previousProgress) {
+          const stalled = new Error(t('selected_conflict_group_apply_stalled') || 'The review made no progress. Check its status before resuming.') as Error & { code?: string; status?: number }
+          stalled.code = 'review_stalled'
+          stalled.status = 409
+          throw stalled
+        }
+        previousProgress = progress
+      }
+      if (calls >= callCeiling && lastResult?.continuation_required) {
+        const limited = new Error(t('selected_conflict_group_apply_limit') || 'The bounded continuation limit was reached. Check the review before resuming.') as Error & { code?: string; status?: number }
+        limited.code = 'review_call_limit'
+        limited.status = 409
+        throw limited
+      }
+    } catch (error: unknown) {
+      if (!request.isCurrent()) return
+      const code = String((error as { code?: unknown } | null)?.code || '')
+      const unknown = selectedConflictOutcomeIsUnknown(error)
+      setGroupUnknownOutcome(unknown)
+      setGroupApplyError({ code, message: selectedConflictErrorMessage(t, error, 'selected_conflict_group_apply_failed', 'The reviewed actions could not continue.') })
+      notify(selectedConflictErrorMessage(t, error, 'selected_conflict_group_apply_failed', 'The reviewed actions could not continue.'), 'error')
+    } finally {
+      groupWriteInFlightRef.current = false
+      await load()
+      if (request.finish()) {
+        setBulkBusy(false)
+        setBulkProgress('')
+      }
+    }
+  }
+
+  const applySelectedGroupReview = async () => {
+    if (!groupApplyBody || bulkBusy) return
+    await executeSelectedGroupApply(groupApplyBody)
   }
 
   const normalizedSearch = search.trim().toLowerCase()
@@ -464,7 +757,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
   }), [clusters, normalizedSearch, severityFilter])
 
   const counts = useMemo(() => {
-    const result: Record<Severity, number> = { same_barcode: 0, same_name: 0, similar_name: 0 }
+    const result: Record<Severity, number> = { leading_zero: 0, same_barcode: 0, same_name: 0, similar_name: 0 }
     for (const cluster of clusters) result[cluster.severity] += 1
     return result
   }, [clusters])
@@ -474,10 +767,10 @@ export default function ProductDuplicatesTab({ t, notify }: {
       <div className="flex flex-wrap items-center gap-1.5">
         <InfoHint
           label={t('product_duplicates_how') || 'How this review works'}
-          text={t('product_duplicates_hint') || 'Products that share one real barcode (strong same-item evidence — but an EDP/EDT pair or two shades can genuinely share one), one display name with different barcodes (usually genuinely different SKUs), or a similar name — the same name re-typed with different punctuation, accents or word order, each with its own barcode. Keep this = the other rows merge into it: stock, lots and photos carry over, old sales stay valid. Dismiss = reviewed, genuinely different items — it stays dismissed for everyone.'}
+          text={t('product_duplicates_hint') || 'Products that share one real barcode (strong same-item evidence — but an EDP/EDT pair or two shades can genuinely share one), one display name with different barcodes (usually genuinely different SKUs), or a similar name — the same name re-typed with different punctuation, accents or word order, each with its own barcode. Keep this = the other rows fold into it: received-date records, photos, sales and returns carry over and old sales stay valid. If a row you are removing still holds stock you are asked what happens to it — move the received-date records onto the kept product, or write them off against the ledger. Dismiss = reviewed, genuinely different items — it stays dismissed for everyone.'}
         />
         <div className="flex items-center gap-1">
-          {(['all', 'same_barcode', 'same_name', 'similar_name'] as const).map((severity) => {
+          {(['all', 'leading_zero', 'same_barcode', 'same_name', 'similar_name'] as const).map((severity) => {
             const [key, fallback] = severity === 'all' ? ['all_severities', 'All'] : SEVERITY_LABEL_KEY[severity]
             return (
               <button
@@ -518,6 +811,17 @@ export default function ProductDuplicatesTab({ t, notify }: {
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           {t('refresh') || 'Refresh'}
         </button>
+        {onMergeLeadingZero && counts.leading_zero > 0 ? (
+          <button
+            type="button"
+            onClick={() => void openSelectedGroupReview(clusters.filter((cluster) => cluster.severity === 'leading_zero'), {})}
+            disabled={loading || bulkBusy}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            <Merge className="h-3.5 w-3.5" />
+            {t('merge_leading_zero_products') || 'Merge leading-zero barcodes'}
+          </button>
+        ) : null}
       </div>
 
       {loading && !loaded ? (
@@ -545,7 +849,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
             {selectedKeys.size > 0 ? (
               <button
                 type="button"
-                onClick={() => setSelectedKeys(new Set())}
+                onClick={() => { setSelectedKeys(new Set()); setGroupRemovalReasons({}) }}
                 disabled={bulkBusy}
                 className="text-gray-500 hover:underline disabled:opacity-50 dark:text-gray-400"
               >
@@ -559,11 +863,21 @@ export default function ProductDuplicatesTab({ t, notify }: {
               <span className="font-medium text-blue-700 dark:text-blue-300">
                 {bulkProgress || replaceVars(t('duplicates_bulk_selected_count') || '{count} selected', { count: selectedKeys.size })}
               </span>
+              {/* One action, not two: this used to render both "Review selected
+                  actions" and "Merge selected" as separate buttons calling the
+                  exact same openSelectedGroupReview() handler with the same
+                  title -- a leftover from the group-review flow replacing the
+                  old exact-pairs-only preview (see git history) that left both
+                  labels wired to the new function. A single button that opens
+                  the auto-resolve review (it already computes the automatic
+                  decision -- merge / blocked with a reason -- for every
+                  selected group and shows before/after before anything is
+                  written) is what "Auto-resolve selected" means here. */}
               <button
                 type="button"
-                onClick={() => void bulkMerge()}
+                onClick={() => void openSelectedGroupReview()}
                 disabled={bulkBusy}
-                title={t('bulk_merge_products_hint') || 'Each selected pair merges into its older record (created first); groups of 3+ are skipped — pick their keeper by hand'}
+                title={t('selected_conflict_group_review_hint') || 'Review every selected merge group and independent removal in one durable, paged server review.'}
                 className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50"
               >
                 <Merge className="mr-1 inline h-3.5 w-3.5" />
@@ -594,7 +908,10 @@ export default function ProductDuplicatesTab({ t, notify }: {
                   selected={selectedKeys.has(id)}
                   selectable={!bulkBusy}
                   isExact={clusterIsExact(cluster)}
+                  canRemoveProduct={canRemoveProduct}
+                  removalReasons={groupRemovalReasons}
                   onToggleSelect={() => toggleSelected(id)}
+                  onRemovalChange={updateGroupRemoval}
                   onDismiss={() => void handleDismiss(cluster)}
                   onApplyDecisions={(keeper, removals) => void handleApplyDecisions(cluster, keeper, removals)}
                   onEdit={openEdit}
@@ -606,7 +923,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
       )}
 
       {editTarget ? (
-        <Modal title={`${t('resolve') || 'Resolve'} — ${editTarget.name || `#${editTarget.id}`}`} onClose={() => setEditTarget(null)} draggable>
+        <Modal title={`${t('resolve') || 'Resolve'} — ${editTarget.name || `#${editTarget.id}`}`} onClose={() => setEditTarget(null)} draggable unsavedChanges={{ dirty: editFormDirty }}>
           <div className="space-y-2.5">
             {([
               ['name', t('name') || 'Name', 'text'],
@@ -634,6 +951,35 @@ export default function ProductDuplicatesTab({ t, notify }: {
             </div>
           </div>
         </Modal>
+      ) : null}
+
+      {/* The stock merge/remove decision. Rendered here so it floats above the
+          review grid; the Apply and bulk flows AWAIT it (the shared
+          ConfirmDialog, never window.confirm). */}
+      {mergeStockChoiceDialog}
+      {groupReviewPages.length ? (
+        <SelectedConflictGroupReviewModal
+          pages={groupReviewPages}
+          pageIndex={groupReviewPageIndex}
+          choices={groupReviewChoices}
+          working={bulkBusy}
+          finalized={groupFinalizeResult}
+          applyResult={groupApplyResult}
+          appliedGroups={groupApplyGroups}
+          appliedRemovals={groupApplyRemovals}
+          applyError={groupApplyError}
+          unknownOutcome={groupUnknownOutcome}
+          onChoice={(groupKey, patch) => {
+            if (!groupFinalizeResult) setGroupReviewChoices((current) => ({ ...current, [groupKey]: { ...current[groupKey], ...patch } }))
+          }}
+          onPreviousPage={() => setGroupReviewPageIndex((index) => Math.max(0, index - 1))}
+          onNextPage={() => void showNextGroupReviewPage()}
+          onFinalize={finalizeSelectedGroupReview}
+          onApply={() => void applySelectedGroupReview()}
+          onResume={() => void applySelectedGroupReview()}
+          onClose={closeSelectedGroupReview}
+          t={t}
+        />
       ) : null}
     </div>
   )

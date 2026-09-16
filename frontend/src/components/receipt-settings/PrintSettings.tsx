@@ -6,8 +6,11 @@ import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import Ruler from 'lucide-react/dist/esm/icons/ruler.js'
 import Scaling from 'lucide-react/dist/esm/icons/scaling.js'
 import TestTube2 from 'lucide-react/dist/esm/icons/test-tube-2.js'
-import { downloadReceiptPdf, getPrintSettings, openReceiptPdf, savePrintSettings, PRINT_DEFAULTS } from '../../utils/printReceipt'
+import { downloadReceiptPdf, getPaperWidthMm, getPrintSettings, openReceiptPdf, printReceipt, savePrintSettings, PRINT_DEFAULTS } from '../../utils/printReceipt'
+import { normalizeReceiptTemplate } from '../../utils/receiptAppliedConfig'
+import { RECEIPT_SHELL_HORIZONTAL_PADDING_PX } from '../../utils/receiptItemColumns.ts'
 import type { ReceiptPrintSettings } from '../../types/receiptContracts'
+import InfoHint from '../shared/InfoHint.tsx'
 
 type Translate = (key: string, fallback?: string) => string | undefined
 type AppSettings = Record<string, unknown> & { receipt_print_settings?: unknown }
@@ -46,14 +49,29 @@ function Section({ icon: Icon, title, children }: SectionProps) {
   )
 }
 
-function buildFallbackPreviewHtml(printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string): string {
-  const highContrastStyle = printSettings.highContrastBold ? 'color:#000;font-weight:700;' : 'color:#111827;'
-  const mutedColor = printSettings.highContrastBold ? '#000' : '#555'
-  const footerColor = printSettings.highContrastBold ? '#000' : '#777'
+// The normal path for both Test Print buttons is `getPreviewSource()` below
+// finding the REAL, already-rendered receipt preview DOM (the live sidebar/
+// modal <ReceiptPreview>) via `[data-receipt-export-root="true"]` -- that
+// element already carries Receipt.tsx's `data-receipt-contrast` attribute and
+// main.css's override, so it honours Text Contrast automatically, the same
+// way print/PDF/image export does. This synthetic HTML string is only a
+// last-resort fallback for when that real preview DOM isn't mounted/found
+// (e.g. the ref hasn't attached yet) -- it must still honour the same setting
+// rather than silently reverting to grey, so the fallback also takes the
+// current contrast mode.
+function buildFallbackPreviewHtml(printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string, contrastMode: string): string {
+  // Either switch alone is enough to darken this fallback: Text contrast =
+  // maximum, or the older highContrastBold. Only the latter also bolds.
+  const isMaxContrast = contrastMode === 'maximum' || printSettings.highContrastBold
+  const highContrastStyle = printSettings.highContrastBold
+    ? 'color:#000;font-weight:700;'
+    : (isMaxContrast ? 'color:#000;' : 'color:#111827;')
+  const metaColor = isMaxContrast ? '#000000' : '#555'
+  const footerColor = isMaxContrast ? '#000000' : '#777'
   return `
     <div data-receipt-high-contrast="${printSettings.highContrastBold ? 'true' : 'false'}" style="padding:8px;text-align:center;${highContrastStyle}">
       <div style="font-size:16px;font-weight:bold;margin-bottom:4px;">Business OS</div>
-      <div style="font-size:11px;color:${mutedColor};margin-bottom:8px;">${T('receipt_test_pdf', 'Receipt Test')}</div>
+      <div style="font-size:11px;color:${metaColor};margin-bottom:8px;">${T('receipt_test_pdf', 'Receipt Test')}</div>
       <div style="border-top:1px dashed #000;margin:6px 0;"></div>
       <div style="font-size:12px;text-align:left;">
         <div style="display:flex;justify-content:space-between;gap:16px;"><span>Item 1 x2</span><span>$10.00</span></div>
@@ -67,15 +85,15 @@ function buildFallbackPreviewHtml(printSettings: ReceiptPrintSettings, T: (key: 
   `
 }
 
-function buildSafePreviewSource(previewNode: unknown, printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string): string | HTMLElement {
+function buildSafePreviewSource(previewNode: unknown, printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string, contrastMode: string): string | HTMLElement {
   if (!(previewNode instanceof HTMLElement)) {
-    return buildFallbackPreviewHtml(printSettings, T)
+    return buildFallbackPreviewHtml(printSettings, T, contrastMode)
   }
   try {
     const exportRoot = previewNode.querySelector('[data-receipt-export-root="true"]')
     return exportRoot instanceof HTMLElement ? exportRoot : previewNode
   } catch (_) {
-    return buildFallbackPreviewHtml(printSettings, T)
+    return buildFallbackPreviewHtml(printSettings, T, contrastMode)
   }
 }
 
@@ -144,16 +162,41 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     { id: 'custom', label: T('print_set_size', 'Custom'), desc: T('print_set_size', 'Set size') },
   ]
 
+  const pageSizeModes: Array<{ id: ReceiptPrintSettings['pageSizeMode']; label: string; desc: string }> = [
+    { id: 'measured', label: T('print_page_size_mode_measured', 'Measured (default)'), desc: T('print_page_size_mode_measured_desc', 'Auto-fits the roll to the printed receipt height, right before printing.') },
+    { id: 'fixed', label: T('print_page_size_mode_fixed', 'Fixed length'), desc: T('print_page_size_mode_fixed_desc', 'A page length you choose; long receipts continue onto further pages of that length.') },
+    { id: 'driver', label: T('print_page_size_mode_driver', 'Printer driver default'), desc: T('print_page_size_mode_driver_desc', 'Sends no page size; the printer driver\'s own registered paper/form decides.') },
+    { id: 'auto-longest', label: T('print_page_size_mode_auto_longest', 'Longest roll'), desc: T('print_page_size_mode_auto_longest_desc', 'One page as long as the printer\'s longest supported roll.') },
+  ]
+  const fixedLengthPresets = ['50', '100', '150', '200', '297']
+
   const marginFields: Array<[ReceiptMarginKey, string]> = [
     ['marginTop', T('print_top', 'Top')],
     ['marginRight', T('print_right', 'Right')],
     ['marginBottom', T('print_bottom', 'Bottom')],
     ['marginLeft', T('print_left', 'Left')],
   ]
+  const paperWidthMm = getPaperWidthMm(ps)
+  const marginNumber = (value: unknown): number => {
+    const parsed = Number.parseFloat(String(value ?? ''))
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+  }
+  // The fixed 80x50 card overrides normal margins to zero when it exports,
+  // but its shell still owns the same 16px design padding on each side. Show
+  // that real content width instead of incorrectly promising all 80mm.
+  const fixedCardPaddingMm = RECEIPT_SHELL_HORIZONTAL_PADDING_PX * 25.4 / 96
+  const effectiveLeftMm = ps.paperSize === '80x50mm' ? fixedCardPaddingMm / 2 : marginNumber(ps.marginLeft)
+  const effectiveRightMm = ps.paperSize === '80x50mm' ? fixedCardPaddingMm / 2 : marginNumber(ps.marginRight)
+  const contentWidthMm = Math.max(0, paperWidthMm - effectiveLeftMm - effectiveRightMm)
+  const mm = (value: number): string => Number.isInteger(value) ? String(value) : value.toFixed(1)
+
+  // Only the fallback synthetic HTML (buildFallbackPreviewHtml) reads this --
+  // the real preview DOM branch already carries its own contrast attribute.
+  const contrastMode = normalizeReceiptTemplate(settings.receipt_template).text_contrast
 
   const getPreviewSource = () => {
     const previewNode = previewTargetRef?.current
-    return buildSafePreviewSource(previewNode, ps, T)
+    return buildSafePreviewSource(previewNode, ps, T, contrastMode)
   }
 
   return (
@@ -195,7 +238,106 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
             </div>
           </div>
         ) : null}
+        <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs leading-relaxed text-blue-800 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
+          <div className="font-semibold">
+            {T('print_effective_dimensions', 'Paper {paper}mm · content {content}mm')
+              .replace('{paper}', mm(paperWidthMm))
+              .replace('{content}', mm(contentWidthMm))}
+          </div>
+          <div className="mt-1">
+            {T('print_driver_size_note', 'For physical printing, select the same paper size in Chrome and the printer driver, use 100% / Actual size, browser margins None, and disable headers and footers.')}
+          </div>
+          {['58mm', '72mm', '80mm'].includes(ps.paperSize) ? (
+            <div className="mt-1">
+              {T('receipt_preview_driver_hint', 'Set the printer driver to roll / continuous paper at Actual size (no "fit to page"). A driver form taller than the receipt shows as blank space before the print that this page cannot remove.')}
+            </div>
+          ) : null}
+        </div>
       </Section>
+
+      {['58mm', '72mm', '80mm'].includes(ps.paperSize) ? (
+        <Section icon={Ruler} title={T('print_page_size_mode_title', 'Page length handling')}>
+          <div className="mb-2 flex items-center gap-1.5">
+            <p className="text-xs text-gray-500">
+              {T('print_page_size_mode_desc', 'Choose how the printable page length is decided on continuous roll paper. If a print shows a blank band before the receipt or splits onto a second strip, try a different mode here.')}
+            </p>
+            <InfoHint
+              label={T('print_page_size_mode_title', 'Page length handling')}
+              text={T('receipt_preview_mode_troubleshoot', 'Still seeing a blank band or a split strip? In Print Settings, try Fixed length, then Longest roll, then Printer driver default.')}
+            />
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {pageSizeModes.map((mode) => (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => setValue('pageSizeMode', mode.id)}
+                className={`rounded-xl border-2 p-3 text-left ${
+                  (ps.pageSizeMode || 'measured') === mode.id
+                    ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30'
+                    : 'border-gray-200 dark:border-gray-600'
+                }`}
+              >
+                <div className={`text-sm font-bold ${(ps.pageSizeMode || 'measured') === mode.id ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>
+                  {mode.label}
+                </div>
+                <div className="text-xs text-gray-400">{mode.desc}</div>
+              </button>
+            ))}
+          </div>
+
+          {(ps.pageSizeMode || 'measured') === 'fixed' ? (
+            <div className="mt-3">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{T('print_fixed_page_length', 'Fixed page length')}</label>
+              <div className="flex flex-wrap gap-2">
+                {fixedLengthPresets.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setValue('fixedPageLengthMm', preset)}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-medium ${(ps.fixedPageLengthMm || '100') === preset ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}`}
+                  >
+                    {paperWidthMm} × {preset}mm
+                  </button>
+                ))}
+              </div>
+              <div className="mt-2 max-w-[160px]">
+                <label htmlFor="print-fixed-page-length" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{T('print_height_mm', 'Height (mm)')}</label>
+                <input
+                  id="print-fixed-page-length"
+                  name="print_fixed_page_length"
+                  autoComplete="off"
+                  className="input text-sm"
+                  type="number"
+                  min="10"
+                  max="2000"
+                  value={ps.fixedPageLengthMm || '100'}
+                  onChange={(event) => setValue('fixedPageLengthMm', event.target.value)}
+                />
+              </div>
+            </div>
+          ) : null}
+
+          <button
+            type="button"
+            className="btn-secondary mt-3 flex items-center gap-2 text-sm"
+            onClick={async () => {
+              try {
+                await printReceipt(getPreviewSource(), {
+                  title: T('receipt_test_pdf', 'Receipt Test'),
+                  printSettings: ps,
+                })
+              } catch (error) {
+                console.error('[PrintSettings] Test print failed:', error)
+                alert(`${T('print_test_failed', 'Test print failed')}: ${error instanceof Error ? error.message : T('unknown_error', 'unknown error')}`)
+              }
+            }}
+          >
+            <Printer className="h-4 w-4" />
+            {T('print_test_this_mode', 'Test print this mode')}
+          </button>
+        </Section>
+      ) : null}
 
       <Section icon={Printer} title={T('print_dark_bold_title', 'Receipt Text Darkness')}>
         <label

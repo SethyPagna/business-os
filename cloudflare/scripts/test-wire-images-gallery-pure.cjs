@@ -20,6 +20,8 @@
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
+// Load the actual dependency before any permissive per-module shim is active.
+const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const assert = require('assert')
 const Database = require('better-sqlite3')
 const Module = require('module')
@@ -45,6 +47,12 @@ const dbShim = {
     }
   },
   async batch(statements) {
+    if (statements.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))) {
+      return statements.map(({ sql, params }) => ({
+        success: true,
+        results: db.prepare(sql).all(params || {}),
+      }))
+    }
     const run = db.transaction(() => {
       for (const statement of statements) db.prepare(statement.sql).run(statement.params || {})
     })
@@ -66,6 +74,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
@@ -85,10 +94,34 @@ function loadReal(relPath, requireOverrides = {}) {
 const importImageMatch = loadReal('lib/importImageMatch.ts')
 const media = loadReal('lib/media.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
+const productImagePermission = loadReal('lib/productImagePermission.ts', {
+  './media': media,
+  './sqlBinding': sqlBinding,
+})
+const promotionRules = loadReal('lib/promotionRules.ts')
 const batchCode = loadReal('lib/batchCode.ts')
 const searchMatch = loadReal('lib/searchMatch.ts')
 const productDetailRule = loadReal('lib/productDetailRule.ts')
-const productWrites = loadReal('lib/productWrites.ts', {
+const productMerge = loadReal('lib/productMerge.ts')
+const productIdentity = loadReal('lib/productIdentity.ts', {
+  './db': { getDb: () => dbShim },
+  './sqlBinding': sqlBinding,
+  './productDetailRule': productDetailRule,
+})
+const productConflictMergeBatch = loadReal('lib/productConflictMergeBatch.ts', {
+  './productIdentity': productIdentity,
+  './productDetailRule': productDetailRule,
+  './productMerge': productMerge,
+})
+const productConflictActionGroups = loadReal('lib/productConflictActionGroups.ts', {
+  './productIdentity': productIdentity,
+  './productDetailRule': productDetailRule,
+  './productMerge': productMerge,
+  './productConflictMergeBatch': productConflictMergeBatch,
+})
+const productMergeSnapshot = loadReal('lib/productMergeSnapshot.ts', { './db': { getDb: () => dbShim } })
+const schemaProbeReal = loadReal('lib/schemaProbe.ts')
+const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schemaProbeReal,
   './db': { getDb: () => dbShim },
   './media': media,
   './importImageMatch': importImageMatch,
@@ -98,8 +131,26 @@ const productWrites = loadReal('lib/productWrites.ts', {
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ products: true }) }
 
+// Sep 6 2026: the owner's low-stock alert setting reaches this module through
+// lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
+// asserted below are the ones it composes -- while the settings READ answers
+// the shipped default, there being no settings row in this harness. The rule
+// itself is proven in scripts/test-low-stock-settings-pure.cjs.
+const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
+const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
+
+// N13: the shared actor / branch kernels these routes now import.
+const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+const productDelete = loadReal('lib/productDelete.ts', {
+  './actorSnapshot': actorSnapshotKernel,
+  './db': { getDb: () => dbShim },
+})
+const requestBodyGuard = loadReal('lib/requestBodyGuard.ts')
 const productsRoute = loadReal('routes/products.ts', {
+  '../lib/promotionRules': promotionRules,
+  '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => dbShim },
+  '../lib/lowStockSettings': lowStockStub,
   // routes/products.ts buckets the sales drill-down in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
   '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
@@ -138,7 +189,8 @@ const productsRoute = loadReal('routes/products.ts', {
   // undo snapshots; this test asserts image wiring and never hits the merge
   // routes. registerMergeFold runs at module load, so it must be a callable
   // no-op. (Added by 7651025a -- the loader wasn't updated for the new import.)
-  '../lib/undoAppliers': { registerMergeFold: () => {}, recordMergeUndoSnapshot: async () => null, recordBulkMergeUndoSnapshot: async () => null, recordSupplierBackfillSnapshot: async () => null },
+  // Merge budgeting reads this list at module load; no merge route runs here.
+  '../lib/undoAppliers': { MERGE_REPARENT_TABLES: [], registerMergeFold: () => {}, registerProductMergeGroupRedo: () => {}, recordMergeUndoSnapshot: async () => null, recordBulkMergeUndoSnapshot: async () => null, recordSupplierBackfillSnapshot: async () => null },
 
   '../lib/cache': { cachedJsonResponse: async (_r, _c, _v, _t, producer) => producer(), getVersion: async () => '0', bumpVersion: async () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
@@ -149,10 +201,23 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/importImageMatch': importImageMatch,
   '../lib/media': media,
   '../lib/sqlBinding': sqlBinding,
+  '../lib/productImagePermission': productImagePermission,
   '../lib/productWrites': productWrites,
-  '../lib/productIdentity': { findDuplicateProductGroups: async () => [] },
+  // Product merge economics has dedicated route/kernel tests. Gallery wiring
+  // never invokes it, but the identity lane imports it from products.ts.
+  '../lib/productMerge': productMerge,
+  '../lib/productMergeSnapshot': productMergeSnapshot,
+  '../lib/productConflictMergeBatch': productConflictMergeBatch,
+  '../lib/productConflictActionGroups': productConflictActionGroups,
+  '../lib/productDelete': productDelete,
+  '../lib/requestBodyGuard': requestBodyGuard,
+  '../lib/productIdentity': productIdentity,
   '../lib/productBatches': { attachBatchCounts: async () => {} },
   '../lib/searchMatch': searchMatch,
+  // The shared search-tail/ranking module products.ts now builds its search
+  // from -- loaded for real (it is pure SQL-string assembly over searchMatch,
+  // which is itself loaded for real here).
+  '../lib/productSearchQuery': loadReal('lib/productSearchQuery.ts', { './searchMatch': searchMatch }),
   '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
   '../lib/fileAssets': { getMediaType: () => 'image', buildUniqueStoredName: (n) => n, sanitizeOriginalFileName: (n) => n },
   '../lib/catalogText': { normalizeCatalogText: (v) => v, hasSuspiciousCatalogText: () => false },

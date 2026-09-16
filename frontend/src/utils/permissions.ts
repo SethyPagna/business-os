@@ -1,4 +1,52 @@
+import { actionAllowed, isActionOverriddenOff } from './permissionActions.ts'
+
 type PermissionMap = Record<string, unknown>
+
+export type PermissionUser = {
+  username?: unknown
+  role_code?: unknown
+  role_permissions?: unknown
+  permissions?: unknown
+} | null | undefined
+
+export function getEffectivePermissionMap(user: PermissionUser): Record<string, PermissionValue> {
+  const merged = { ...parsePermissionMap(user?.role_permissions), ...parsePermissionMap(user?.permissions) }
+  const normalized = normalizePermissionState(merged)
+  // Worker action overrides narrow only on explicit false. Interpret them
+  // after merging: a user's junk/no-op value still replaces a role's false.
+  // Section grants keep the strict normalizer and cannot become truthy grants.
+  for (const [key, value] of Object.entries(merged)) {
+    if (key.includes(':') && value !== true && value !== false) delete normalized[key]
+  }
+  return normalized
+}
+
+/** Reserved identities and the effective all grant match Worker authority. */
+export function isAdminControlUser(user: PermissionUser): boolean {
+  if (!user) return false
+  return String(user.username || '').trim().toLowerCase() === 'admin'
+    || String(user.role_code || '').trim().toLowerCase() === 'admin'
+    || getEffectivePermissionMap(user).all === true
+}
+
+/** Shared runtime authority; user overrides win before administrator detection. */
+export function effectivePermissions(user: PermissionUser) {
+  const merged = getEffectivePermissionMap(user)
+  const isAdmin = isAdminControlUser(user)
+  const getPermissionTier = (key: string): PermissionTier => getPermissionTierFromMap(merged, key, isAdmin)
+  const hasPermission = (key: string): boolean => {
+    if (!user) return false
+    const normalized = String(key || '').trim().toLowerCase()
+    if (!normalized || isAdmin) return true
+    return merged[normalized] === true
+      || (['drive_credentials', 'business_identity', 'sales_policy'].includes(normalized) && merged.settings === true)
+  }
+  const can = (section: string, action: string): boolean => !!user && (isAdmin || actionAllowed(
+    section, action, getPermissionTier(section), hasPermission,
+    (key, operation) => isActionOverriddenOff(merged, key, operation),
+  ))
+  return { merged, isAdmin, getPermissionTier, hasPermission, can }
+}
 
 function isPermissionMap(value: unknown): value is PermissionMap {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -65,6 +113,25 @@ export const REVIEW_TIER_KEYS = new Set<string>(['fees', 'branches', 'products',
 // REVIEW_/VIEW_TIER_KEYS.
 // audit_log's 'view' is OWN-scoped (see only your own entries), full = all.
 export const VIEW_TIER_KEYS = new Set<string>(['settings', 'sales', 'promotions', 'review', 'audit_log'])
+
+/** Preserve supported stored tiers without granting access for truthy junk. */
+export function normalizePermissionState(value: unknown): Record<string, PermissionValue> {
+  return Object.fromEntries(Object.entries(parsePermissionMap(value)).map(([key, raw]) => [key,
+    raw === 'review' && REVIEW_TIER_KEYS.has(key) ? 'review'
+      : raw === 'view' && VIEW_TIER_KEYS.has(key) ? 'view'
+        : raw === true,
+  ]))
+}
+
+/** Mirrors the Worker's optional sale-amendment window; 0 is unlimited. */
+export function saleAmendmentWindowAllows(rawSetting: unknown, createdAt: unknown, isAdmin: boolean, now = Date.now()): boolean {
+  const parsed = parseFloat(String(rawSetting ?? '').trim())
+  const minutes = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+  if (isAdmin || minutes === 0) return true
+  const text = String(createdAt || '').replace(' ', 'T')
+  const created = Date.parse(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(text) ? text : `${text}Z`)
+  return Number.isFinite(created) && now - created <= minutes * 60_000
+}
 
 export type PermissionTier = 'full' | 'review' | 'view' | 'none'
 

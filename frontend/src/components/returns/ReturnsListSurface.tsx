@@ -3,6 +3,8 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
+import { customerDisplayName } from '../../utils/customerIdentity.ts'
+import CopyableId from '../shared/CopyableId.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import type { TableColumnDef } from '../shared/columnPreferences.ts'
 
@@ -12,6 +14,9 @@ import type { TableColumnDef } from '../shared/columnPreferences.ts'
 // audit gap where the returns list had no status column.
 const RETURN_OPTIONAL_COLUMNS: TableColumnDef[] = [
   { key: 'status', label: 'Status' },
+  // N13: branch shown consistently with the sales list's branch column
+  // (default-visible), closing the gap where returns had no branch at all.
+  { key: 'branch', label: 'Branch' },
   { key: 'cashier', label: 'Cashier', defaultVisible: false },
 ]
 
@@ -38,9 +43,15 @@ interface ReturnRecord {
   return_type?: string
   supplier_name?: string
   customer_name?: string
+  customer_is_anonymous?: number | boolean
   reason?: string
   status?: string
   cashier_name?: string
+  branch_name?: string | null
+  // Counted by the list read itself (routes/returns.ts DAMAGED_ITEM_COUNT_SQL)
+  // so a damaged line is visible on the row -- the list shows one row per
+  // return and never its items, so this used to require opening the return.
+  damaged_item_count?: number
 }
 
 interface ReturnGroup {
@@ -77,6 +88,7 @@ interface ReturnsListSurfaceProps {
   scope: string
   selectAllRef: RefObject<HTMLInputElement>
   selectedIds: Set<number>
+  selectionEnabled: boolean
   // 11.1/11.2 (B6), same selection model as Products/Inventory/Sales:
   // checkboxes and the select column only exist while something IS
   // selected; enter select mode by long-pressing a row (click-and-hold
@@ -151,6 +163,7 @@ export default function ReturnsListSurface({
   scope,
   selectAllRef,
   selectedIds,
+  selectionEnabled,
   selectionModeActive,
   getReturnLongPressState,
   setDetailRet,
@@ -208,12 +221,13 @@ export default function ReturnsListSurface({
                   ) : null}
                 </th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('return_number', 'Return #')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('date', 'Date')}</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('time', 'Time')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('reference', 'Reference')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{scope === SUPPLIER_SCOPE ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('reason', 'Reason')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('type', 'Type')}</th>
                 {cols.isVisible('status') ? <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('status', 'Status')}</th> : null}
+                {cols.isVisible('branch') ? <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('branch', 'Branch')}</th> : null}
                 {cols.isVisible('cashier') ? <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('cashier', 'Cashier')}</th> : null}
                 <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{tr('amount', 'Amount')}</th>
                 <th className="w-10 px-2 py-2 text-right"><ColumnChooser columns={chooserColumns} isVisible={cols.isVisible} toggle={cols.toggle} reset={cols.reset} label={tr('columns', 'Columns')} resetLabel={tr('reset', 'Reset')} /></th>
@@ -297,7 +311,7 @@ export default function ReturnsListSurface({
                           // Inventory/Sales rows.
                           const rowLongPressState = getReturnLongPressState(Number(ret.id))
                           const longPress = createLongPressHandlers(rowLongPressState, {
-                            disabled: selectionModeActive,
+                            disabled: !selectionEnabled || selectionModeActive,
                             onLongPress: () => toggleSelected(ret.id),
                             onClick: () => setDetailRet(ret),
                           })
@@ -332,14 +346,36 @@ export default function ReturnsListSurface({
                                 />
                                 ) : null}
                               </td>
-                              <td className="dense-id whitespace-nowrap font-medium text-orange-600 dark:text-orange-400">{ret.return_number}</td>
+                              <td className="dense-id whitespace-nowrap font-medium text-gray-900 dark:text-white">
+                                <CopyableId
+                                  value={ret.return_number || ''}
+                                  copyLabel={tr('copy_return_id', 'Copy return ID')}
+                                  copiedLabel={tr('copied', 'Copied')}
+                                  valueClassName="font-mono text-sm font-semibold text-gray-900 dark:text-white"
+                                />
+                                {(ret.damaged_item_count || 0) > 0 ? (
+                                  <span
+                                    data-tag="damaged"
+                                    title={tr('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
+                                    className="ml-1 inline-flex items-center rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
+                                  >
+                                    {ret.damaged_item_count} {tr('damaged_items_tag', 'damaged')}
+                                  </span>
+                                ) : null}
+                              </td>
                               <td className="whitespace-nowrap text-gray-500">{fmtTime(ret.created_at)}</td>
                               <td>
                                 {ret.receipt_number
-                                  ? <span className="dense-cell-truncate dense-id text-blue-600 dark:text-blue-400" title={ret.receipt_number}>{ret.receipt_number}</span>
+                                  ? <CopyableId
+                                      value={ret.receipt_number}
+                                      copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
+                                      copiedLabel={tr('copied', 'Copied')}
+                                      className="dense-cell-truncate dense-id"
+                                      valueClassName="font-mono text-gray-700 dark:text-gray-300"
+                                    />
                                   : <span className="text-xs text-gray-400">{tr('manual_return', 'Manual')}</span>}
                               </td>
-                              <td className="text-gray-700 dark:text-gray-300"><span className="dense-cell-truncate" title={retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}>{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</span></td>
+                              <td className="text-gray-700 dark:text-gray-300"><span className="dense-cell-truncate" title={retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : customerDisplayName(ret, tr('walk_in', 'General'))}>{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : customerDisplayName(ret, tr('walk_in', 'General'))}</span></td>
                               <td className="text-gray-700 dark:text-gray-300"><span className="dense-cell-truncate" title={ret.reason || '-'}>{ret.reason || '-'}</span></td>
                               <td>
                                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-zinc-700 dark:text-gray-200">{typeLabel}</span>
@@ -348,6 +384,9 @@ export default function ReturnsListSurface({
                                 <td>
                                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${(ret.status || 'completed') === 'cancelled' ? 'bg-gray-100 text-gray-500 dark:bg-zinc-700 dark:text-gray-400' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>{tr(`status_${ret.status || 'completed'}`, ret.status || 'completed')}</span>
                                 </td>
+                              ) : null}
+                              {cols.isVisible('branch') ? (
+                                <td className="text-gray-500 dark:text-gray-400"><span className="dense-cell-truncate" title={ret.branch_name || '-'}>{ret.branch_name || '-'}</span></td>
                               ) : null}
                               {cols.isVisible('cashier') ? (
                                 <td className="text-gray-500 dark:text-gray-400"><span className="dense-cell-truncate" title={ret.cashier_name || '-'}>{ret.cashier_name || '-'}</span></td>
@@ -434,7 +473,7 @@ export default function ReturnsListSurface({
                     // interactive at a given viewport width).
                     const cardLongPressState = getReturnLongPressState(Number(ret.id))
                     const cardLongPress = createLongPressHandlers(cardLongPressState, {
-                      disabled: selectionModeActive,
+                      disabled: !selectionEnabled || selectionModeActive,
                       onLongPress: () => toggleSelected(ret.id),
                       onClick: () => setDetailRet(ret),
                     })
@@ -461,16 +500,50 @@ export default function ReturnsListSurface({
                           />
                         </div>
                         ) : null}
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">{ret.return_number}</div>
-                            <div className="text-xs text-gray-400">{fmtTime(ret.created_at)}</div>
-                            <div className="mt-0.5 truncate text-xs text-gray-600 dark:text-gray-400">{ret.reason}</div>
-                            <div className="mt-0.5 text-xs text-gray-400">{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</div>
+                        <div className="flex min-w-0 items-center justify-between gap-2">
+                          <div data-return-primary-meta className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-xs text-gray-500 dark:text-gray-400">
+                            <span className="shrink-0 tabular-nums">{fmtTime(ret.created_at)}</span>
+                            <span aria-hidden="true" className="shrink-0">·</span>
+                            <CopyableId
+                              value={ret.return_number || ''}
+                              copyLabel={tr('copy_return_id', 'Copy return ID')}
+                              copiedLabel={tr('copied', 'Copied')}
+                              className="max-w-[42%] shrink"
+                              valueClassName="truncate font-mono text-sm font-semibold text-gray-900 dark:text-white"
+                            />
                           </div>
-                          <div className="flex-shrink-0 text-right">
+                          <div className="flex shrink-0 items-center gap-1.5">
+                              {(ret.damaged_item_count || 0) > 0 ? (
+                                <span
+                                  data-tag="damaged"
+                                    title={tr('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
+                                  className="inline-flex items-center rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
+                                >
+                                  {ret.damaged_item_count} {tr('damaged_items_tag', 'damaged')}
+                                </span>
+                              ) : null}
                             {renderAmount(ret)}
                           </div>
+                        </div>
+                        {ret.receipt_number ? (
+                          <div data-return-receipt-meta className="mt-1 flex min-w-0 flex-nowrap items-center overflow-x-auto overscroll-x-contain whitespace-nowrap text-[11px] leading-4 text-gray-500 dark:text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                            <CopyableId
+                              value={ret.receipt_number}
+                              copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
+                              copiedLabel={tr('copied', 'Copied')}
+                              className="shrink-0"
+                              valueClassName="font-mono text-gray-700 dark:text-gray-300"
+                            />
+                          </div>
+                        ) : null}
+                        <div data-return-secondary-meta className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+                          <span className="min-w-0 truncate" aria-label={`${tr('cashier', 'Cashier')}: ${ret.cashier_name || '-'}`}>{ret.cashier_name || '-'}</span>
+                          <span aria-hidden="true" className="shrink-0">·</span>
+                          <span className="min-w-0 truncate" aria-label={`${tr('branch', 'Branch')}: ${ret.branch_name || '-'}`}>{ret.branch_name || '-'}</span>
+                          <span aria-hidden="true" className="shrink-0">·</span>
+                          <span className="min-w-0 truncate" aria-label={`${retScope === SUPPLIER_SCOPE ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}: ${retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : customerDisplayName(ret, tr('walk_in', 'General'))}`}>{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : customerDisplayName(ret, tr('walk_in', 'General'))}</span>
+                          <span aria-hidden="true" className="shrink-0">·</span>
+                          <span className="min-w-0 flex-1 truncate" aria-label={`${tr('reason', 'Reason')}: ${ret.reason || '-'}`}>{ret.reason || '-'}</span>
                         </div>
                       </div>
                     )

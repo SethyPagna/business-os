@@ -37,6 +37,7 @@ function loadModule(relPath, requireShim) {
 // backup.ts pulls in the R2 stream writer and restore stream; only the
 // exported constants/helpers are exercised here, so stub the heavy imports.
 const backup = loadModule('lib/backup.ts', (id) => {
+  if (id === './planTier') return loadModule('lib/planTier.ts', require)
   if (id === './backupRestoreStream') return { streamBackupEvents: async function* () {} }
   if (id === './r2') return {}
   if (id === './db') return {}
@@ -70,6 +71,38 @@ check('the other silently-dropped business tables are covered too', () => {
   }
 })
 
+check('shift sessions and their immutable amendment ledger are restored together', () => {
+  assert.ok(BACKUP_TABLES.includes('shift_sessions'))
+  assert.ok(BACKUP_TABLES.includes('shift_session_amendments'))
+  assert.ok(BACKUP_TABLES.indexOf('shift_session_amendments') > BACKUP_TABLES.indexOf('shift_sessions'))
+  const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0119_shift_restore_guard.sql'), 'utf8')
+  assert.match(migration, /key = 'maintenance'/)
+  assert.match(migration, /json_extract\(value, '\$\.mode'\) = 'restore'/)
+})
+
+check('selected-conflict run receipts survive in parent-first dependency order', () => {
+  assert.ok(BACKUP_TABLES.includes('product_conflict_merge_runs'))
+  assert.ok(BACKUP_TABLES.includes('product_conflict_merge_run_cases'))
+  assert.ok(BACKUP_TABLES.indexOf('product_conflict_merge_runs') > BACKUP_TABLES.indexOf('products'))
+  assert.ok(BACKUP_TABLES.indexOf('product_conflict_merge_run_cases') > BACKUP_TABLES.indexOf('product_conflict_merge_runs'))
+  assert.ok(BACKUP_TABLES.indexOf('product_conflict_merge_run_cases') > BACKUP_TABLES.indexOf('action_history'))
+})
+
+check('global conflict action receipts survive in parent-first dependency order', () => {
+  const ordered = [
+    'product_conflict_action_reviews',
+    'product_conflict_action_groups',
+    'product_conflict_action_group_members',
+    'product_remove_operations',
+  ]
+  for (const table of ordered) assert.ok(BACKUP_TABLES.includes(table), `${table} must be backed up`)
+  assert.ok(BACKUP_TABLES.indexOf('product_conflict_action_reviews') > BACKUP_TABLES.indexOf('undo_snapshots'))
+  assert.ok(BACKUP_TABLES.indexOf('product_conflict_action_groups') > BACKUP_TABLES.indexOf('product_conflict_action_reviews'))
+  assert.ok(BACKUP_TABLES.indexOf('product_conflict_action_group_members') > BACKUP_TABLES.indexOf('product_conflict_action_groups'))
+  assert.ok(BACKUP_TABLES.indexOf('product_remove_operations') > BACKUP_TABLES.indexOf('product_conflict_action_reviews'))
+  assert.ok(BACKUP_TABLES.indexOf('product_remove_operations') > BACKUP_TABLES.indexOf('pending_actions'))
+})
+
 check('FK dependency order holds: every child sits after every parent it references', () => {
   const at = (t) => BACKUP_TABLES.indexOf(t)
   const before = (parent, child) => assert.ok(
@@ -85,6 +118,11 @@ check('FK dependency order holds: every child sits after every parent it referen
   before('return_items', 'return_item_batch_allocations')
   before('return_items', 'return_replacement_items')
   before('sales', 'sale_items')
+  before('sales', 'return_mutation_receipts')
+  before('returns', 'return_mutation_receipts')
+  before('sales', 'return_create_receipts')
+  before('returns', 'return_create_receipts')
+  assert(!BACKUP_TABLES.includes('return_create_guards'), 'transient return-create guards are never backed up')
   before('returns', 'return_items')
   before('products', 'product_images')
   before('promotions', 'promotion_rules')

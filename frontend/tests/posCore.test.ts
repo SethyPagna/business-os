@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import './posNativeChangeIntent.test.ts'
 import fs from 'node:fs'
 import { buildVariantOptionLabels,
   applyManualDiscount,
@@ -15,6 +16,9 @@ import { buildVariantOptionLabels,
   getVariantRootProduct,
   isSaleRecorded,
   resolveCartPriceValues,
+  resolvePosDisplayStock,
+  batchReceivedInstant,
+  sortBatchesForPicker,
 } from '../src/components/pos/posCore.ts'
 
 let failed = 0
@@ -76,6 +80,23 @@ await runTest('product lookup ignores invalid ids', () => {
   assert.equal(productsById.get(1)?.name, 'Valid')
   assert.equal(productsById.has(Number.NaN), false)
   assert.equal(productsById.size, 1)
+})
+
+await runTest('POS stock is aggregate without a branch and scoped after branch selection or cart assignment', () => {
+  const product = {
+    id: 1,
+    stock_quantity: 8,
+    branch_stock: [
+      { branch_id: 1, quantity: 3 },
+      { branch_id: 2, quantity: 5 },
+    ],
+  }
+
+  assert.equal(resolvePosDisplayStock(product), 8, 'all-branch catalogue should show the aggregate quantity')
+  assert.equal(resolvePosDisplayStock(product, 1), 3, 'selected branch should show only that branch quantity')
+  assert.equal(resolvePosDisplayStock(product, null, 2), 5, 'cart assignment should show only its branch quantity')
+  assert.equal(resolvePosDisplayStock(product, 1, 2), 3, 'active branch filter keeps precedence over cart fallback')
+  assert.equal(resolvePosDisplayStock(product, 99), 0, 'a missing selected branch has no sellable stock')
 })
 
 await runTest('same-name standalone products collapse into one POS card with distinct choices', () => {
@@ -147,23 +168,32 @@ await runTest('cart line identity includes product, mode, and branch so modes do
   assert.equal(getCartLineId({ id: 4, price_mode: 'selling', branch_id: 2 }), '4:selling:2')
 })
 
-await runTest('special price mode prefers special prices and falls back to selling prices', () => {
-  const special = resolveCartPriceValues(
+// This test used to assert that 'special' mode priced off special_price_*.
+// The 2026-09-04 ruling deleted that tier -- it was the wholesale price under
+// the wrong name -- so the invariant is now the opposite one, and it matters
+// for a specific reason: this is a PWA whose till tabs stay open for days, so
+// after the deploy a stale tab can still add a line asking for price_mode
+// 'special'. The tier must fall through to the SELLING price. The dangerous
+// alternative would be pricing off special_price_*, which migration 0111
+// zeroed -- that would ring the sale up at $0.
+await runTest('the retired VIP/special mode falls through to the selling price, never to zero', () => {
+  const stale = resolveCartPriceValues(
     { selling_price_usd: 12, selling_price_khr: 49200, special_price_usd: 10, special_price_khr: 41000 },
     'special',
     4100,
   )
-  assert.equal(special.price_mode, 'special')
-  assert.equal(special.applied_price_usd, 10)
-  assert.equal(special.applied_price_khr, 41000)
+  assert.equal(stale.price_mode, 'selling', 'the VIP tier no longer exists and must not be honored')
+  assert.equal(stale.applied_price_usd, 12, 'a stale VIP line charges full price, not the retired tier')
+  assert.equal(stale.applied_price_khr, 49200)
 
-  const selling = resolveCartPriceValues(
+  // The realistic post-migration shape: special_price_* zeroed by 0111.
+  const zeroed = resolveCartPriceValues(
     { selling_price_usd: 12, selling_price_khr: 49200, special_price_usd: 0, special_price_khr: 0 },
     'special',
     4100,
   )
-  assert.equal(selling.price_mode, 'selling')
-  assert.equal(selling.applied_price_usd, 12)
+  assert.equal(zeroed.price_mode, 'selling')
+  assert.equal(zeroed.applied_price_usd, 12, 'a zeroed dead column must never become a $0 sale')
 })
 
 await runTest('wholesale price mode prefers wholesale prices and falls back to selling prices', () => {
@@ -310,11 +340,27 @@ await runTest('Z2: no discount means base equals applied (price edit sets the pr
   assert.equal(d.manual_discount_type, null)
 })
 
-await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled from the discount', () => {
+await runTest('Z2: USD discounts rebase a stale or empty KHR snapshot', () => {
+  // A cached line can carry a valid USD base with base_price_khr=0. KHR must
+  // be derived from the same rate before subtracting the discount, otherwise
+  // the old path recorded a negative manual KHR discount.
+  const d = applyManualDiscount(21, 0, 4050, 'fixed', 3)
+  assert.equal(d.applied_price_usd, 18)
+  assert.equal(d.applied_price_khr, 72900)
+  assert.equal(d.manual_discount_usd, 3)
+  assert.equal(d.manual_discount_khr, 12150)
+  assert.ok(d.manual_discount_khr >= 0)
+  const cleared = applyManualDiscount(21, 0, 4050, null, 0)
+  assert.equal(cleared.applied_price_khr, 85050)
+  assert.equal(cleared.manual_discount_khr, 0)
+})
+
+await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled from the discount', async () => {
+  await import('./posMoneyV1.test.ts') // real raw price update and receipt residual behavior
   const cartItem = fs.readFileSync(new URL('../src/components/pos/CartItem.tsx', import.meta.url), 'utf8')
   // The price inputs read the BASE price, not the (discounted) applied price.
-  assert.match(cartItem, /value=\{normalizePriceValue\(\(item\.base_price_usd \?\? item\.applied_price_usd\)/)
-  assert.match(cartItem, /value=\{normalizePriceValue\(\(item\.base_price_khr \?\? item\.applied_price_khr\)/)
+  assert.match(cartItem, /value=\{moneyPrecisionVersion === 1[^\n]*String\(item\.base_price_usd \?\? item\.applied_price_usd\) : normalizePriceValue\(\(item\.base_price_usd \?\? item\.applied_price_usd\)/)
+  assert.match(cartItem, /value=\{moneyPrecisionVersion === 1[^\n]*String\(item\.base_price_khr \?\? item\.applied_price_khr\) : normalizePriceValue\(\(item\.base_price_khr \?\? item\.applied_price_khr\)/)
 
   const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
   // updatePrice sets the base price and re-applies the manual discount --
@@ -325,23 +371,43 @@ await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled
   assert.doesNotMatch(updatePriceBody, /manual_discount_type: discountUsd > 0 \? 'fixed' : null/)
 
   const receipt = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
-  // The receipt's per-line "original" price is base + product-level cut, so
-  // the full discount shows (previously it used the charged price_usd).
-  assert.match(receipt, /baseUnitUsd > 0\s*\n\s*\? baseUnitUsd \+ productDiscUnitUsd/)
+  // The receipt's per-line list price is base + product-level cut, so the full
+  // discount shows (it once printed the charged price_usd). That derivation now
+  // lives in utils/receiptLineMath, where a test can EXECUTE it instead of only
+  // pattern-matching it, so this asserts the rule in its new home AND that the
+  // component still consumes it -- together, what this lock was always after.
+  assert.match(receipt, /import \{ receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd \} from '\.\.\/\.\.\/utils\/receiptLineMath'/)
+  assert.match(receipt, /const figures = receiptLineFigures\(item, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale\)/)
+  const lineMath = fs.readFileSync(new URL('../src/utils/receiptLineMath.ts', import.meta.url), 'utf8')
+  assert.match(lineMath, /baseUnitUsd > 0\s*\n\s*\? baseUnitUsd \+ num\(item\.product_discount_usd\)/)
 })
 
-await runTest('POS product cards keep VIP pricing inside the price options', () => {
-  const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
-  const cardStart = pos.indexOf('Product cards show only the normal selling price')
-  const cardEnd = pos.indexOf('Colored qty+unit', cardStart)
+// Formerly "POS product cards keep VIP pricing inside the price options".
+// After the 2026-09-04 ruling there is exactly ONE alternate tier, so this
+// guards two things: the tier still never leaks onto the outside grid (the
+// original point of the test), and the tier that IS offered is wholesale.
+await runTest('the POS offers wholesale as the only alternate tier, and never on the card face', () => {
+  // N19 round 3: the card body moved out of POS.tsx into the shared
+  // components/pos/ProductCard.tsx the sale screen mounts too, so the lock
+  // follows it -- the outside card face must not show a tier on EITHER
+  // surface now, which is more than this test used to cover.
+  const card = fs.readFileSync(new URL('../src/components/pos/ProductCard.tsx', import.meta.url), 'utf8')
+  const cardStart = card.indexOf('Product cards show only the normal selling price')
+  const cardEnd = card.indexOf('Colored qty+unit', cardStart)
   assert.ok(cardStart >= 0 && cardEnd > cardStart, 'the product-card price block should remain identifiable')
-  const cardPriceBlock = pos.slice(cardStart, cardEnd)
-  assert.doesNotMatch(cardPriceBlock, /special_price|t\('special_price'\)/, 'VIP labels and values must not appear outside on the POS product card')
+  const cardPriceBlock = card.slice(cardStart, cardEnd)
+  assert.doesNotMatch(cardPriceBlock, /special_price|wholesale_price/, 'tier labels and values must not appear on the outside POS product card')
 
   const sheet = fs.readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
-  assert.doesNotMatch(sheet, /<DetailField label=\{posCopy\('VIP'/, 'VIP pricing must not appear in the general read-only product details')
-  assert.match(sheet, /closeAfterAdd\(effectiveVariant, 'special'\)/, 'variant VIP pricing must remain available as a selectable option')
-  assert.match(sheet, /closeAfterAdd\(product, 'special'\)/, 'standalone-product VIP pricing must remain available as a selectable option')
+  assert.match(sheet, /closeAfterAdd\(effectiveVariant, 'wholesale'\)/, 'variant wholesale pricing must be a selectable option')
+  assert.match(sheet, /closeAfterAdd\(product, 'wholesale'\)/, 'standalone-product wholesale pricing must be a selectable option')
+  // The retired tier must be gone from the sheet entirely -- a leftover
+  // button would add a line priced off a column 0111 zeroed.
+  assert.doesNotMatch(sheet, /closeAfterAdd\([A-Za-z]+, 'special'\)/, 'the VIP tier must no longer be selectable anywhere')
+  // Comments are stripped first: the sheet documents WHY the columns went, and
+  // a tombstone naming them is the opposite of a leftover read.
+  const sheetCode = sheet.replace(/^\s*\/\/.*$/gm, '')
+  assert.doesNotMatch(sheetCode, /special_price_usd|special_price_khr/, 'the sheet must not read the retired VIP columns')
 })
 
 if (failed > 0) {
@@ -509,6 +575,154 @@ await runTest('ProductDetailSheet preselects the card badge branch, not alphabet
     pos,
     /activeBranchId=\{primaryBranchFilterId \?\? pickBestBranchId\(detailProduct\)\}/,
     'the sheet must be handed the branch the card resolved (filter first, else pickBestBranchId)',
+  )
+})
+
+// ---------------------------------------------------------------------------
+// POS lot picker: one list, in the order a cashier needs it
+// ---------------------------------------------------------------------------
+const ids = (rows: Array<{ id: number }>) => rows.map((row) => row.id)
+
+// S4-18 (the owner's exact words): "earliest to latest, with available
+// first, not split into available/unavailable sections". This is the
+// regression guard for the "not split into sections" clause specifically --
+// a test that only checked chronological order (the next test below) would
+// stay green even if a future edit re-partitioned by availability, since a
+// partitioned list can still be internally date-sorted within each half.
+// The negative control: reverting the `if (left.available ...)` line back
+// above the date check (the 9c282599 shape) turns this red, because it
+// re-groups every available lot ahead of every empty one regardless of date.
+await runTest('lot order: date dominates -- an old empty lot still lists ahead of a fresh available one', () => {
+  const sorted = sortBatchesForPicker([
+    { id: 1, received_at: '2026-01-05 08:00:00', quantity: 0 },
+    { id: 2, received_at: '2026-06-01 08:00:00', quantity: 4 },
+    { id: 3, received_at: '2026-02-01 08:00:00', quantity: 0 },
+    { id: 4, received_at: '2026-03-01 08:00:00', quantity: 9 },
+  ])
+  // Earliest to latest by date alone: 01-05 (empty), 02-01 (empty), 03-01
+  // (available), 06-01 (available) -- the two empty lots interleave ahead of
+  // both available ones because they were received first. Never grouped.
+  assert.deepEqual(ids(sorted), [1, 3, 4, 2])
+})
+
+// "Available first" is real, but only as a tie-break where the date can't
+// already decide the order -- two lots received at the exact same instant.
+await runTest('lot order: available breaks a tie on the exact same received date', () => {
+  const sorted = sortBatchesForPicker([
+    { id: 1, received_at: '2026-05-01 08:00:00', quantity: 0 },
+    { id: 2, received_at: '2026-05-01 08:00:00', quantity: 3 },
+  ])
+  assert.deepEqual(ids(sorted), [2, 1])
+})
+
+await runTest('lot order: within a group it is earliest received date to latest', () => {
+  const sorted = sortBatchesForPicker([
+    { id: 1, received_at: '2026-08-24 10:00:00', quantity: 2 },
+    { id: 2, received_at: '2026-08-24 06:00:00', quantity: 2 },
+    { id: 3, received_at: '2025-12-31 23:00:00', quantity: 2 },
+  ])
+  assert.deepEqual(ids(sorted), [3, 2, 1])
+})
+
+await runTest('lot order: a date-only received_at is a real date, not an undated lot', () => {
+  assert.equal(batchReceivedInstant({ received_at: '2026-08-24' }), Date.UTC(2026, 7, 24))
+  const sorted = sortBatchesForPicker([
+    { id: 1, received_at: '2026-09-01 00:00:00', quantity: 1 },
+    { id: 2, received_at: '2026-08-24', quantity: 1 },
+  ])
+  assert.deepEqual(ids(sorted), [2, 1])
+})
+
+await runTest('lot order: an MMDDYYYY lot code stands in for a missing received_at', () => {
+  assert.equal(batchReceivedInstant({ lot_code: '08242026', received_at: null }), Date.UTC(2026, 7, 24))
+  const sorted = sortBatchesForPicker([
+    { id: 1, lot_code: '09012026', received_at: null, quantity: 3 },
+    { id: 2, lot_code: '08242026', received_at: null, quantity: 3 },
+  ])
+  assert.deepEqual(ids(sorted), [2, 1])
+})
+
+await runTest('lot order: an undated or malformed lot sorts after every dated one, tied by availability', () => {
+  // Production holds ~9,900 synthetic `RECON-<productId>` lot codes; they are
+  // not dates, so a lot carrying one and nothing else must not sort as if it
+  // had been received at epoch 0. An unknown date can't be placed on the
+  // timeline, so it can't outrank a lot with a real date either way -- it
+  // clusters with the other undated lots at the end, and THERE (an actual
+  // tie) availability decides: the still-stocked RECON lot lists ahead of
+  // the empty one, not behind it.
+  assert.equal(batchReceivedInstant({ lot_code: 'RECON-7321', received_at: null }), null)
+  assert.equal(batchReceivedInstant({ lot_code: '13992026', received_at: 'not-a-date' }), null)
+  const sorted = sortBatchesForPicker([
+    { id: 1, lot_code: 'RECON-7321', received_at: null, quantity: 5 },
+    { id: 2, received_at: '2026-05-01 08:00:00', quantity: 0 },
+    { id: 3, received_at: '2026-06-01 08:00:00', quantity: 5 },
+    { id: 4, lot_code: 'RECON-7322', received_at: '', quantity: 0 },
+  ])
+  assert.deepEqual(ids(sorted), [2, 3, 1, 4])
+})
+
+await runTest('lot order: a RECON lot code with a real received_at still sorts by that date', () => {
+  const sorted = sortBatchesForPicker([
+    { id: 1, lot_code: 'RECON-7321', received_at: '2026-07-01 08:00:00', quantity: 2 },
+    { id: 2, lot_code: 'RECON-7322', received_at: '2026-02-01 08:00:00', quantity: 2 },
+  ])
+  assert.deepEqual(ids(sorted), [2, 1])
+})
+
+await runTest('lot order: undated ties fall back to batch_number, then the incoming FIFO order', () => {
+  const sorted = sortBatchesForPicker([
+    { id: 1, received_at: null, batch_number: null, quantity: 1 },
+    { id: 2, received_at: null, batch_number: 2, quantity: 1 },
+    { id: 3, received_at: null, batch_number: 1, quantity: 1 },
+  ])
+  assert.deepEqual(ids(sorted), [3, 2, 1])
+})
+
+await runTest('lot order: the input array is never mutated', () => {
+  const input = [
+    { id: 1, received_at: '2026-06-01 08:00:00', quantity: 0 },
+    { id: 2, received_at: '2026-01-01 08:00:00', quantity: 7 },
+  ]
+  sortBatchesForPicker(input)
+  assert.deepEqual(ids(input), [1, 2])
+})
+
+// ---------------------------------------------------------------------------
+// Wiring: the POS sheet shows ONE list, not the "#7321 / #7322" row-id pills
+// duplicating the lot list underneath.
+// ---------------------------------------------------------------------------
+await runTest('ProductDetailSheet drops the duplicate row-id option step and orders the lot list', () => {
+  const sheet = fs.readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
+  assert.match(sheet, /const mergeRowsIntoLotList = /, 'the merge condition must exist')
+  assert.match(sheet, /const optionStepShown = !mergeRowsIntoLotList/, 'the option step must be hidden when the lot list absorbs it')
+  assert.match(sheet, /\{optionStepShown \? \(/, 'the option pills must actually be gated on it')
+  assert.match(sheet, /const visibleBatches = loadedLotScope === currentLotScope \? batches : \[\]/, 'only current-scope lot responses are visible')
+  assert.match(sheet, /sortBatchesForPicker\(visibleBatches\)/, 'the current-scope lot list must be rendered in picker order')
+  assert.doesNotMatch(sheet, /pagedBatches = batches\.slice/, 'the lot pills must page over the ORDERED list')
+  assert.match(sheet, /lotSourceProductIds/, 'merged mode must fetch every indistinguishable row\'s lots')
+  assert.doesNotMatch(sheet, /'3\. Batch'/, 'the lot step number must be counted, not hardcoded')
+})
+
+// S4-18's remaining two clauses: every lot pill states its quantity, and the
+// list is never rendered as two headed blocks (an "Available" / "Out of
+// stock" divider would satisfy a naive ordering test while still splitting
+// the list the ruling forbids).
+await runTest('ProductDetailSheet: every lot pill states its quantity, and no availability header splits the list', () => {
+  const sheet = fs.readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
+  const quantityOnPill = sheet.match(/\(\{batch\.quantity\}/g) || []
+  // Two lot-picker blocks share this pill shape: the merged/group flow and
+  // the flat-product flow (see ProductDetailSheet.tsx's two `pagedBatches.map`
+  // call sites). Both must show quantity, not just one of them.
+  assert.equal(quantityOnPill.length, 2, 'both the group-flow and flat-flow lot pills must print the quantity')
+  assert.match(sheet, /selectedBatch\.quantity \|\| 0\)/, 'the collapsed trigger must also show the picked lot\'s quantity')
+  // Not "no occurrence of the word available" (that also appears in unrelated
+  // comments and the empty-list message "No lots available at this branch")
+  // -- specifically, no posCopy call that would print an "Available" / "Out
+  // of stock" heading as a divider between two blocks of lot pills.
+  assert.doesNotMatch(
+    sheet,
+    /posCopy\('(Available|Unavailable|Out of stock)'/i,
+    'the lot list must not carry an availability section heading',
   )
 })
 

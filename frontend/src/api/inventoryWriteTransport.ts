@@ -1,8 +1,111 @@
 import { apiFetch, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { executeTransferRun, loadTransferRun, prepareTransferRun, saveTransferRun, type PendingTransferRun } from './branchTransport.ts'
+import { receiveBatchWireBody, type ReceiveBatchPayload } from './batchesTransport.ts'
 
 type InventoryPayload = Record<string, unknown>
+
+export type PendingInventoryTransfer = PendingTransferRun & {
+  context: { kind: 'submit' | 'undo' | 'redo'; original: InventoryPayload; productName: string; entryId: string; serverId?: string | number | null }
+}
+
+// Separate actor-scoped storage prevents a Branch modal replaying an Inventory
+// request against a different endpoint. Keep the entire frozen intent on reload.
+function inventoryTransferStore(storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = window.sessionStorage) {
+  return {
+    getItem: (key: string) => storage.getItem(`inventory:${key}`),
+    setItem: (key: string, value: string) => storage.setItem(`inventory:${key}`, value),
+    removeItem: (key: string) => storage.removeItem(`inventory:${key}`),
+  }
+}
+export function loadInventoryTransfer(actorId: unknown, storage?: Storage): PendingInventoryTransfer | null {
+  const run = loadTransferRun(actorId, inventoryTransferStore(storage)) as PendingInventoryTransfer | null
+  if (run && (!run.context || !['submit', 'undo', 'redo'].includes(run.context.kind) || !run.context.entryId || !run.context.original || run.requests.length !== 1 || run.requests[0].bulk)) {
+    throw new Error('The saved transfer cannot be read. Check transfer history before clearing browser storage.')
+  }
+  return run
+}
+export function saveInventoryTransfer(actorId: unknown, run: PendingInventoryTransfer | null, storage?: Storage): void {
+  saveTransferRun(actorId, run, inventoryTransferStore(storage))
+}
+export function prepareInventoryTransfer(actorId: unknown, body: InventoryPayload, context: Omit<PendingInventoryTransfer['context'], 'entryId'> & { entryId?: string }): PendingInventoryTransfer {
+  const run = prepareTransferRun(actorId, [{ bulk: false, body }])
+  return { ...run, context: JSON.parse(JSON.stringify({ ...context, entryId: context.entryId || run.requests[0].body.client_request_id })) }
+}
+export function executeInventoryTransfer(run: PendingInventoryTransfer, checkpoint: (next: PendingInventoryTransfer) => void): Promise<PendingInventoryTransfer> {
+  // Old browser drafts contain reverse FIFO bodies with no lot provenance.
+  // Keep the saved evidence, but never submit that legacy reversal again.
+  if (run.context.kind !== 'submit') return Promise.reject(new Error('This legacy transfer reversal cannot be replayed. Check transfer history.'))
+  return executeTransferRun(run, (next) => checkpoint(next as PendingInventoryTransfer), (request) => transferInventoryStock(request.body)) as Promise<PendingInventoryTransfer>
+}
+
+export type InventoryStockSessionProduct = Record<string, unknown>
+
+export type InventoryStockSessionLine = {
+  line_id: string
+  kind: 'receive' | 'create_receive'
+  product_id?: number
+  product?: InventoryStockSessionProduct
+  batch_id?: number | null
+  branch_id: number
+  quantity: number
+  supplier_id?: number | null
+  supplier_name?: string | null
+  received_date: string
+  expiry_date?: string | null
+  notes?: string | null
+  // P3-L2: the reason written onto this line's movement, as typed; omitted
+  // keeps the Worker's generated "Stock-in session <id>" label.
+  reason?: string | null
+  unit_cost_usd?: number | null
+  // A $0.00 receipt is only accepted as a DECLARED gift. The flag is what
+  // distinguishes it from a cost nobody entered (lib/stockReceiptGate.ts).
+  free_goods?: boolean
+  payment_status?: 'paid' | 'credit' | null
+  credit_due_date?: string | null
+}
+
+export type InventoryStockSessionRequest = {
+  client_request_id: string
+  mode: 'stock_in'
+  items: InventoryStockSessionLine[]
+}
+
+export type InventoryStockSessionReceipt = {
+  success: true
+  replayed: boolean
+  operationId: string
+  clientRequestId: string
+  actionHistoryId: number
+  snapshotId: number
+  memberCount: number
+  createdCount: number
+  receivedCount: number
+  totalQuantity: number
+  totalCostUsd: number
+  items: Array<{
+    lineId: string
+    kind: 'receive' | 'create_receive'
+    productId: number
+    productName: string
+    createdProduct: boolean
+    branchId: number
+    batchId: number | null
+    batchNumber: number | null
+    lotCode: string | null
+    movementId: number | null
+    quantity: number
+    unitCostUsd: number | null
+  }>
+}
+
+// Atomic stock-session commits can include many validated product and lot
+// writes in one idempotent Worker transaction. Give only this replay-safe
+// endpoint enough time to return its immutable receipt; legacy per-line
+// stock mutations retain the shared short timeout because they do not carry
+// this session-level replay contract.
+export const INVENTORY_SESSION_TIMEOUT_MS = 60_000
 
 function getDevicePayload(): InventoryPayload {
   return { ...getClientDeviceInfo() }
@@ -15,6 +118,65 @@ export function adjustStock(payload: InventoryPayload = {}): Promise<unknown> {
     null,
     true,
   )
+}
+
+// P4-B: one input line for the batched fast stock-in commit. `wire` picks
+// which single-line kernel the Worker runs the line through (see
+// cloudflare/src/routes/stockInCommit.ts) -- 'adjust' carries the same
+// camelCase body adjustStock() above sends to POST /api/inventory/adjust;
+// 'receive' carries the same camelCase ReceiveBatchPayload
+// batchesTransport.ts's receiveBatchStock() takes (converted to the wire's
+// snake_case shape below, via the one shared conversion both callers use).
+export type FastStockInCommitLine =
+  | { key: string; wire: 'adjust'; body: InventoryPayload }
+  | { key: string; wire: 'receive'; body: ReceiveBatchPayload }
+
+export type FastStockInCommitLineResult = {
+  ok: boolean
+  key?: string
+  error?: string
+  [field: string]: unknown
+}
+
+// POST /api/inventory/fast-stock-in/commit -- the whole fast stock-in
+// session in one request instead of one per line (FastStockInModal.tsx used
+// to `for (const line of pending) await adjustStock(...)/receiveBatchStock(...)`,
+// N sequential Worker round trips for an N-line shipment).
+//
+// Returns null ONLY on a 404 -- the deployed Worker predates this route (a
+// rolling-deploy window with an old build still live) -- so the caller can
+// fall back to the original per-line loop. Any other failure (network, 5xx)
+// propagates as a thrown error; the caller decides how to report a whole-
+// commit failure, since there is no per-line detail to show in that case.
+export async function commitFastStockIn(lines: FastStockInCommitLine[]): Promise<FastStockInCommitLineResult[] | null> {
+  const wireLines = lines.map((line) => (
+    line.wire === 'receive' ? { key: line.key, wire: line.wire, body: receiveBatchWireBody(line.body) } : line
+  ))
+  try {
+    const result = await route(
+      'inventory:fastStockIn:commit',
+      () => apiFetch('POST', '/api/inventory/fast-stock-in/commit', { ...getDevicePayload(), lines: wireLines }),
+      null,
+      true,
+    ) as { results?: FastStockInCommitLineResult[] } | null
+    return result?.results ?? []
+  } catch (error) {
+    if (error && typeof error === 'object' && (error as { status?: number }).status === 404) return null
+    throw error
+  }
+}
+
+// Milestone A stock-session wire. The caller owns stable request/line ids:
+// retries must send the byte-equivalent logical request so the Worker can
+// return its immutable receipt instead of applying stock twice. Deliberately
+// network-only -- there is no offline/outbox replay contract for this write.
+export function createInventorySession(payload: InventoryStockSessionRequest): Promise<InventoryStockSessionReceipt> {
+  return route(
+    'inventory:session:create',
+    () => apiFetch('POST', '/api/inventory/sessions', payload, INVENTORY_SESSION_TIMEOUT_MS),
+    null,
+    true,
+  ) as Promise<InventoryStockSessionReceipt>
 }
 
 // Part 553: the Stock Change ledger's per-row write actions (Products page
@@ -40,12 +202,14 @@ export function editStockMovementReason(id: number, reason: string): Promise<unk
 }
 
 export function transferInventoryStock(payload: InventoryPayload = {}): Promise<unknown> {
+  const body = payload.client_request_id ? JSON.parse(JSON.stringify(payload)) : ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'transfer')
+  body.transfer_provenance_version = 1
   return route(
     'inventory:transfer',
     () => apiFetch(
       'POST',
       '/api/inventory/transfer',
-      ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'transfer'),
+      body,
     ),
     null,
     true,

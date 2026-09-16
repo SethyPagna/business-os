@@ -57,9 +57,47 @@ const contactOptionsModuleObj = { exports: {} }
 const contactOptionsWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', contactOptionsOutputText)
 contactOptionsWrapper(contactOptionsModuleObj.exports, require, contactOptionsModuleObj, contactOptionsSourcePath, path.dirname(contactOptionsSourcePath))
 
+// Phone identity and contact-option phone formatting are real import
+// dependencies of classifyContacts. Load both real helpers so import tests
+// exercise the same +855 fold and structured-option parsing as the route.
+const phoneSourcePath = path.join(__dirname, '..', 'src', 'lib', 'phone.ts')
+const { outputText: phoneOutputText } = ts.transpileModule(fs.readFileSync(phoneSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'phone.ts',
+})
+const phoneModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', phoneOutputText)(
+  phoneModuleObj.exports, require, phoneModuleObj, phoneSourcePath, path.dirname(phoneSourcePath),
+)
+const contactDuplicatesSourcePath = path.join(__dirname, '..', 'src', 'lib', 'contactDuplicates.ts')
+const { outputText: contactDuplicatesOutputText } = ts.transpileModule(fs.readFileSync(contactDuplicatesSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'contactDuplicates.ts',
+})
+const contactDuplicatesModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', contactDuplicatesOutputText)(
+  contactDuplicatesModuleObj.exports,
+  (request) => request === './contactOptions' ? contactOptionsModuleObj.exports : request === './phone' ? phoneModuleObj.exports : require(request),
+  contactDuplicatesModuleObj,
+  contactDuplicatesSourcePath,
+  path.dirname(contactDuplicatesSourcePath),
+)
+
 // salesStatus.ts is pure (no D1/Env dependency, per its own file comment)
 // and classifySales (tested below) genuinely calls normalizeSaleStatus and
 // reads RETURN_STATUSES/VALID_SALE_STATUSES at runtime -- same reasoning as
+// lib/membershipNumber.ts is the ONE membership-number minter (LC-#####,
+// gap-filling) -- classifyContacts calls createMembershipNumberAllocator for
+// every blank customer row, so it must be the real transpiled module.
+const membershipNumberSourcePath = path.join(__dirname, '..', 'src', 'lib', 'membershipNumber.ts')
+const { outputText: membershipNumberOutputText } = ts.transpileModule(fs.readFileSync(membershipNumberSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
+  fileName: membershipNumberSourcePath,
+})
+const membershipNumberModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', membershipNumberOutputText)(
+  membershipNumberModuleObj.exports, require, membershipNumberModuleObj, membershipNumberSourcePath, path.dirname(membershipNumberSourcePath),
+)
 // contactOptions.ts above, real transpiled module.
 const salesStatusSourcePath = path.join(__dirname, '..', 'src', 'lib', 'salesStatus.ts')
 const salesStatusSource = fs.readFileSync(salesStatusSourcePath, 'utf8')
@@ -70,6 +108,44 @@ const { outputText: salesStatusOutputText } = ts.transpileModule(salesStatusSour
 const salesStatusModuleObj = { exports: {} }
 const salesStatusWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', salesStatusOutputText)
 salesStatusWrapper(salesStatusModuleObj.exports, require, salesStatusModuleObj, salesStatusSourcePath, path.dirname(salesStatusSourcePath))
+
+// Sales imports share the live-sale branch-role authority. Load the real
+// pure helpers so the classifier tests exercise the canonical Shop rule.
+const branchRolesSourcePath = path.join(__dirname, '..', 'src', 'lib', 'branchRoles.ts')
+const { outputText: branchRolesOutputText } = ts.transpileModule(fs.readFileSync(branchRolesSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'branchRoles.ts',
+})
+const branchRolesModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', branchRolesOutputText)(
+  branchRolesModuleObj.exports, require, branchRolesModuleObj, branchRolesSourcePath, path.dirname(branchRolesSourcePath),
+)
+const importBranchAuthoritySourcePath = path.join(__dirname, '..', 'src', 'lib', 'importBranchAuthority.ts')
+const { outputText: importBranchAuthorityOutputText } = ts.transpileModule(fs.readFileSync(importBranchAuthoritySourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'importBranchAuthority.ts',
+})
+const importBranchAuthorityModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', importBranchAuthorityOutputText)(
+  importBranchAuthorityModuleObj.exports,
+  (request) => request === './branchRoles' ? branchRolesModuleObj.exports : require(request),
+  importBranchAuthorityModuleObj,
+  importBranchAuthoritySourcePath,
+  path.dirname(importBranchAuthoritySourcePath),
+)
+const branchRoleGuardsSourcePath = path.join(__dirname, '..', 'src', 'lib', 'branchRoleGuards.ts')
+const { outputText: branchRoleGuardsOutputText } = ts.transpileModule(fs.readFileSync(branchRoleGuardsSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'branchRoleGuards.ts',
+})
+const branchRoleGuardsModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', branchRoleGuardsOutputText)(
+  branchRoleGuardsModuleObj.exports,
+  (request) => request === './branchRoles' ? branchRolesModuleObj.exports : require(request),
+  branchRoleGuardsModuleObj,
+  branchRoleGuardsSourcePath,
+  path.dirname(branchRoleGuardsSourcePath),
+)
 
 // batchCode.ts is pure (no D1/Env dependency) -- productBatches.ts's
 // receiveBatchStock now derives lot_code/batch_key through it (dateToBatchCode/
@@ -95,6 +171,16 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', productD
   productDescriptionSectionsSourcePath, path.dirname(productDescriptionSectionsSourcePath),
 )
 
+const moneyPrecisionSourcePath = path.join(__dirname, '..', 'src', 'lib', 'moneyPrecision.ts')
+const { outputText: moneyPrecisionOutputText } = ts.transpileModule(fs.readFileSync(moneyPrecisionSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'moneyPrecision.ts',
+})
+const moneyPrecisionModule = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', moneyPrecisionOutputText)(
+  moneyPrecisionModule.exports, require, moneyPrecisionModule, moneyPrecisionSourcePath, path.dirname(moneyPrecisionSourcePath),
+)
+
 const productDetailRuleSourcePath = path.join(__dirname, '..', 'src', 'lib', 'productDetailRule.ts')
 const { outputText: productDetailRuleOutputText } = ts.transpileModule(fs.readFileSync(productDetailRuleSourcePath, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -102,7 +188,11 @@ const { outputText: productDetailRuleOutputText } = ts.transpileModule(fs.readFi
 })
 const productDetailRuleModuleObj = { exports: {} }
 new Function('exports', 'require', 'module', '__filename', '__dirname', productDetailRuleOutputText)(
-  productDetailRuleModuleObj.exports, require, productDetailRuleModuleObj, productDetailRuleSourcePath, path.dirname(productDetailRuleSourcePath),
+  productDetailRuleModuleObj.exports,
+  (request) => request === './moneyPrecision' ? moneyPrecisionModule.exports : require(request),
+  productDetailRuleModuleObj,
+  productDetailRuleSourcePath,
+  path.dirname(productDetailRuleSourcePath),
 )
 const { resolveMergedPricing } = productDetailRuleModuleObj.exports
 
@@ -140,11 +230,48 @@ const sqlBindingModuleObj = { exports: {} }
 const sqlBindingWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', sqlBindingOutputText)
 sqlBindingWrapper(sqlBindingModuleObj.exports, require, sqlBindingModuleObj, sqlBindingSourcePath, path.dirname(sqlBindingSourcePath))
 
+// The apply-time authorization guard shares the same permission, media-path,
+// and exact-first product-image identity helpers used by the HTTP routes.
+// Load those pure siblings for real so this legacy importEngine loader keeps
+// validating the shipping dependency graph instead of weakening it with
+// empty stubs. productImagePermission's D1 import is type-only; its runtime
+// dependencies are the real media and sqlBinding modules below.
+function loadPureSibling(name, requireShim = require) {
+  const siblingPath = path.join(__dirname, '..', 'src', 'lib', `${name}.ts`)
+  const siblingOutput = ts.transpileModule(fs.readFileSync(siblingPath, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: siblingPath,
+  }).outputText
+  const siblingModule = { exports: {} }
+  new Function('exports', 'require', 'module', '__filename', '__dirname', siblingOutput)(
+    siblingModule.exports, requireShim, siblingModule, siblingPath, path.dirname(siblingPath),
+  )
+  return siblingModule.exports
+}
+// planTier holds the free-vs-paid chunk/row ceilings importEngine reads per
+// request. A `{}` stub makes every ceiling undefined, so loops that compare
+// against them would never bound -- real module, like permissions/media.
+const planTierModule = loadPureSibling('planTier')
+// queueDispatch is pure too, and is now what every import producer calls
+// instead of env.IMPORT_QUEUE.send. Stubbed to {}, dispatchImportWork would
+// be undefined and every chunk tail would throw a TypeError.
+const queueDispatchModule = loadPureSibling('queueDispatch')
+const permissionsModule = loadPureSibling('permissions')
+const mediaModule = loadPureSibling('media')
+const productImagePermissionModule = loadPureSibling('productImagePermission', (request) => {
+  if (request === './media') return mediaModule
+  if (request === './sqlBinding') return sqlBindingModuleObj.exports
+  if (request === './moneyPrecision') return moneyPrecisionModule.exports
+  if (request === './db') return {}
+  return require(request)
+})
+
 function requireForProductBatches(request) {
   if (request === './productDetailRule') return productDetailRuleModuleObj.exports
   if (request === './productDescriptionSections') return productDescriptionSectionsModuleObj.exports
   if (request === './batchCode') return batchCodeModuleObj.exports
   if (request === './sqlBinding') return sqlBindingModuleObj.exports
+  if (request === './moneyPrecision') return moneyPrecisionModule.exports
   return require(request)
 }
 productBatchesWrapper(productBatchesModuleObj.exports, requireForProductBatches, productBatchesModuleObj, productBatchesSourcePath, path.dirname(productBatchesSourcePath))
@@ -164,7 +291,13 @@ const { outputText: importNumbersOutputText } = ts.transpileModule(importNumbers
 })
 const importNumbersModuleObj = { exports: {} }
 const importNumbersWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', importNumbersOutputText)
-importNumbersWrapper(importNumbersModuleObj.exports, require, importNumbersModuleObj, importNumbersSourcePath, path.dirname(importNumbersSourcePath))
+importNumbersWrapper(
+  importNumbersModuleObj.exports,
+  (request) => request === './moneyPrecision' ? moneyPrecisionModule.exports : require(request),
+  importNumbersModuleObj,
+  importNumbersSourcePath,
+  path.dirname(importNumbersSourcePath),
+)
 
 // searchMatch.ts is pure (no D1/Env dependency) and importEngine.ts now
 // calls its normalizeSearchText/compactSearchText directly at write time
@@ -202,9 +335,21 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './contactOptions') {
     return contactOptionsModuleObj.exports // real module -- classifyContacts actually calls into it
   }
+  if (request === './contactDuplicates') {
+    return contactDuplicatesModuleObj.exports // real module -- canonical phone matching/option formatting
+  }
+  if (request === './phone') {
+    return phoneModuleObj.exports // real module -- customers.phone_normalized authority
+  }
+  if (request === './membershipNumber') {
+    return membershipNumberModuleObj.exports // real module -- the one LC- membership minter classifyContacts uses
+  }
   if (request === './salesStatus') {
     return salesStatusModuleObj.exports // real module -- classifySales actually calls into it
   }
+  if (request === './branchRoles') return branchRolesModuleObj.exports
+  if (request === './importBranchAuthority') return importBranchAuthorityModuleObj.exports
+  if (request === './branchRoleGuards') return branchRoleGuardsModuleObj.exports
   if (request === './productBatches') {
     return productBatchesModuleObj.exports // real module -- sales-import apply path actually calls into it
   }
@@ -226,6 +371,11 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './sqlBinding') {
     return sqlBindingModuleObj.exports // real module -- keeps IN(...) lookups inside D1's bound-parameter limit
   }
+  if (request === './planTier') return planTierModule
+  if (request === './queueDispatch') return queueDispatchModule
+  if (request === './permissions') return permissionsModule
+  if (request === './media') return mediaModule
+  if (request === './productImagePermission') return productImagePermissionModule
   if (request === './salesImportCommit') {
     return { MAX_HISTORICAL_SALE_LINES: 100, applyHistoricalSaleImport: async () => ({ alreadyApplied: false }) }
   }
@@ -309,12 +459,12 @@ assert.strictEqual(
   'a selling-price difference alone must still merge -- price is not identity',
 )
 
-// -- Test 5b: special price is likewise not identity.
-const rowF2 = { ...rowA, special_price_usd: 2.99 }
+// -- Test 5b: the wholesale price is likewise not identity.
+const rowF2 = { ...rowA, wholesale_price_usd: 2.99 }
 assert.strictEqual(
   productImportRowSignature(rowA),
   productImportRowSignature(rowF2),
-  'a special-price difference alone must still merge',
+  'a wholesale-price difference alone must still merge',
 )
 
 // -- Test 5c: when rows DO merge and disagree on price, the HIGHEST wins --
@@ -322,36 +472,41 @@ assert.strictEqual(
 // expected to charge.
 {
   const merged = resolveMergedPricing([
-    { selling_price_usd: 3.49, special_price_usd: 2.00 },
-    { selling_price_usd: 2.99, special_price_usd: 2.75 },
+    { selling_price_usd: 3.49, wholesale_price_usd: 2.00 },
+    { selling_price_usd: 2.99, wholesale_price_usd: 2.75 },
   ])
   assert.strictEqual(merged.selling_price_usd, 3.49, 'highest selling price must win a merge')
-  assert.strictEqual(merged.special_price_usd, 2.75, 'each price field resolves independently to its own highest')
+  assert.strictEqual(merged.wholesale_price_usd, 2.75, 'each price field resolves independently to its own highest')
+  assert.ok(
+    !('special_price_usd' in resolveMergedPricing([{ special_price_usd: 2 }, { special_price_usd: 3 }])),
+    'the retired special_price_* pair must never be resolved or written again (migration 0111)',
+  )
 }
 
-// -- Test 5d: cost is identity even when a barcode exists. Different
-// receipt costs become sibling detail rows unless the DB-bound classifier
-// or the import rows carry the same explicit barcode+batch evidence.
+// -- Test 5d: cost is NOT identity, with or without a barcode, and neither
+// is the lot code. Since Sep 4 2026 only a different barcode forks a child
+// row; two receipts of one article at two costs, or from two batches, are
+// one row (the batches hang off it in product_batches).
 {
   const shopRow = { name: 'Blush Stick', barcode: '0689304186537', cost_price_usd: 18.5, cost_price_khr: 0, selling_price_usd: 30, selling_price_khr: 0, branch_id: 1 }
   const warehouseRow = { ...shopRow, cost_price_usd: 19.5, branch_id: 2 }
-  assert.notStrictEqual(
+  assert.strictEqual(
     productImportRowSignature(shopRow),
     productImportRowSignature(warehouseRow),
-    'barcoded rows with different costs are distinct child rows',
+    'barcoded rows with different costs are ONE row -- the costs average instead',
   )
   const sameBatchReceiptA = { ...shopRow, lot_code: '  LOT-SEP-01  ' }
   const sameBatchReceiptB = { ...warehouseRow, lot_code: 'lot-sep-01' }
   assert.strictEqual(
     productImportRowSignature(sameBatchReceiptA),
     productImportRowSignature(sameBatchReceiptB),
-    'same normalized name + barcode + explicit batch may share one option while retaining receipt-level costs',
+    'same normalized name + barcode + explicit batch is one product option',
   )
   const differentBatchReceipt = { ...warehouseRow, lot_code: 'LOT-SEP-02' }
-  assert.notStrictEqual(
+  assert.strictEqual(
     productImportRowSignature(sameBatchReceiptA),
     productImportRowSignature(differentBatchReceipt),
-    'a different batch cannot invoke the same-option receipt exception',
+    'a different lot code is a different BATCH under one row, never a child row',
   )
   // Same name + DIFFERENT barcode stays a separate child row.
   const childRow = { ...shopRow, barcode: '0689304186999' }
@@ -363,10 +518,10 @@ assert.strictEqual(
   // Barcode-less rows follow the same exact rule.
   const bareA = { ...shopRow, barcode: '' }
   const bareB = { ...bareA, cost_price_usd: 25 }
-  assert.notStrictEqual(
+  assert.strictEqual(
     productImportRowSignature(bareA),
     productImportRowSignature(bareB),
-    'barcode-less rows with different costs keep the conservative separate-row rule',
+    'barcode-less rows with different costs are one row too -- nothing else is a detail',
   )
 }
 
@@ -378,15 +533,31 @@ assert.notStrictEqual(
   'rows with different barcodes must NOT be merged',
 )
 
-// -- Test 7: different COST -> must NOT merge. Cost is a detail: it is what
-// was actually spent to buy the item, real money out, and must never be
-// silently replaced by another row's figure.
+// -- Test 7: different COST -> must MERGE, as of the Sep-4-2026 rule. Cost
+// is still real money out, so it is not discarded: the merged row carries
+// the mean of the distinct costs (resolveMergedCost), rounded up to 4dp.
+// This inverts the assertion that stood here before, which forked a child
+// row per purchase price and made the shelf show one article many times.
 const rowH = { ...rowA, cost_price_usd: 99.5 }
-assert.notStrictEqual(
+assert.strictEqual(
   productImportRowSignature(rowA),
   productImportRowSignature(rowH),
-  'rows with different cost prices must NOT be merged -- cost is a detail',
+  'rows differing only in cost must merge -- only the barcode is a detail',
 )
+
+// -- Test 7b: the fold that Test 7 now produces must ADD the second
+// receipt's units, not replace them. A folded row with no plannedMode falls
+// through to the legacy replace path, so runImportApply marks a
+// cost-differing or lot-differing fold as merge_stock at the point it folds.
+{
+  const engineSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'importEngine.ts'), 'utf8')
+  const foldIndex = engineSource.indexOf('const earlier = inBatchSignatureToId.get(signature)')
+  const additiveIndex = engineSource.indexOf('if (costsDiffer || lotsDiffer) {')
+  assert.ok(foldIndex !== -1 && additiveIndex > foldIndex,
+    'the in-batch fold must decide merge_stock from a cost or lot difference')
+  assert.ok(engineSource.includes("r.plannedMode = 'merge_stock'"),
+    'and the additive mode must actually be the one it sets')
+}
 
 console.log('PASS productImportRowSignature merges true in-batch duplicates and keeps genuinely different rows apart')
 
@@ -575,7 +746,7 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
 {
   const REQUIRED_PRODUCT_WRITE_COLUMNS = [
     'name', 'sku', 'barcode', 'category', 'unit', 'description', 'brand', 'supplier',
-    'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr',
+    'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr',
     'cost_price_usd', 'cost_price_khr',
     'low_stock_threshold', 'out_of_stock_threshold',
     'discount_enabled', 'discount_type', 'discount_percent',
@@ -606,7 +777,8 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
 
 // -- Batch/lot-code consistency on restock imports: re-importing the same
 // named batch (lot code) for a product that already has it must top up
-// that SAME product_batches row (and refresh its received_at) instead of
+// that SAME product_batches row (while preserving its first received_at)
+// instead of
 // always inserting a fresh row keyed by a generated import-only key. This
 // is a source-text assertion (same "no fake-D1 harness yet" reasoning as
 // the guards above) that checks the shape of the merge_stock/override_add
@@ -617,24 +789,25 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   const branchEnd = source.indexOf('// Legacy/default:', branchStart)
   const block = source.slice(branchStart, branchEnd)
 
-  assert.ok(/const batchByProductAndLot = new Map/.test(source), 'runImportApply should build a product+lot -> existing active batch lookup for restock rows')
-  assert.ok(/lot_code IS NOT NULL AND lot_code != ''/.test(source), 'the lot lookup should only consider batches that actually carry a lot code')
-  assert.ok(/WHERE is_active = 1 AND lot_code/.test(source), 'the lot lookup should only match ACTIVE batches, same as receiveBatchStock reactivating on an explicit match rather than matching a deactivated lot silently')
+  assert.ok(/indexImportRestockBatches\(existingBatches\)/.test(source), 'runImportApply should index exact batch keys and normalized lot codes for restock rows')
+  assert.ok(/SELECT id, variant_product_id, batch_key, lot_code, received_at, is_active FROM product_batches`/.test(source), 'the lot lookup must include inactive rows because they still own their unique batch key')
+  assert.ok(!/SELECT id, variant_product_id, batch_key, lot_code, received_at, is_active FROM product_batches WHERE is_active = 1/.test(source), 'an inactive same-key lot must be found and reactivated instead of falling through to a duplicate INSERT')
 
-  assert.ok(/const matchedBatch = lotKey \? batchByProductAndLot\.get\(lotKey\) : null/.test(block), 'the restock branch should check the lot lookup before deciding whether to top up or create')
-  assert.ok(/UPDATE product_batches SET received_at = @receivedAt, is_active = 1,[\s\S]*updated_at = @updatedAt WHERE id = @id/.test(block), 'a matched lot code must refresh received_at on the SAME existing batch row, not just leave the original untouched')
+  assert.ok(/const matchedBatch = findImportRestockBatch\(restockBatchIndex, Number\(r\.existingId\), importLotCode\)/.test(block), 'the restock branch should resolve the exact key before deciding whether to top up or create')
+  assert.ok(/UPDATE product_batches SET received_at = COALESCE\(NULLIF\(received_at,''\), @receivedAt\), is_active = 1,[\s\S]*updated_at = @updatedAt WHERE id = @id/.test(block), 'exact-lot top-ups retain first received date, filling only a missing value')
   assert.ok(/received_cost_usd = COALESCE\(received_cost_usd, 0\) \+ \(@qty \* COALESCE\(@unitCostUsd, 0\)\)/.test(block), 'same-batch top-ups must accumulate each receipt cost instead of overwriting catalog cost')
   assert.ok(/INSERT INTO inventory_movements[\s\S]*unit_cost_usd, total_cost_usd/.test(block), 'each receipt row must retain its own historical cost movement')
   assert.ok(/ON CONFLICT\(batch_id, branch_id\) DO UPDATE SET quantity = quantity \+ excluded\.quantity/.test(block), 'a matched lot code must ADD to its existing branch_batch_stock row, not insert a second row for the same batch+branch')
 
   assert.ok(/batchKey: importLotCode \|\| `import:\$\{r\.existingId\}:\$\{nowIso\}:\$\{r\.rowNumber\}`/.test(block), 'a genuinely NEW batch created from a restock row should key itself by the lot code when one was given (so a later import or manual receive naming the same lot can match it too), falling back to the old unique generated key only when no lot code was supplied')
-  assert.ok(/batchByProductAndLot\.set\(`\$\{r\.existingId\}\\u0001/.test(block), 'a newly-created batch within this branch should be recorded in the lookup so a second row in the SAME chunk naming the same product+lot tops it up too, instead of also creating a duplicate')
+  assert.ok(/restockBatchIndex\.byExactKey\.set\(`\$\{r\.existingId\}\\u0001/.test(block), 'a newly-created batch within this branch should be recorded in the exact-key lookup so a second row in the SAME chunk naming the same product+lot tops it up too, instead of also creating a duplicate')
 
-  console.log('PASS restock imports (merge_stock/override_add) match an existing ACTIVE batch by product+lot code and top it up (refreshing received_at, adding to branch_batch_stock) instead of always creating a new batch row, with a new batch keyed consistently by its lot code for future imports to match')
+  console.log('PASS restock imports (merge_stock/override_add) reuse active or inactive exact lots, reactivate before adding lot stock, preserve first received_at, and index new lots for same-chunk reuse')
 }
 
 // -- Multi-branch new-product seeding: a brand-new product's CSV row only
-// ever names ONE branch, but every OTHER active branch must still get an
+// ever names ONE branch, but every OTHER unambiguous active canonical branch
+// must still get an
 // explicit 0-quantity branch_stock row (not silently no row at all) --
 // same fix as seedBranchStockForNewProduct already applies to the manual
 // Add Product form. Source-text assertion (no fake-D1 harness for
@@ -646,19 +819,20 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   const newProductBlockEnd = source.indexOf("} else if (job.type === 'customers'", newProductBlockStart)
   const block = source.slice(newProductBlockStart, newProductBlockEnd)
 
-  assert.ok(/SELECT id FROM branches WHERE is_active = 1/.test(source), 'runImportApply should fetch every active branch id (allActiveBranchIds) so it knows which branches still need a 0 row seeded')
+  assert.ok(/SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1/.test(source), 'runImportApply should fetch active branch identities before deciding which canonical branches need a 0 row seeded')
+  assert.ok(/productSeedBranchIds = \[\.\.\.index\.byRole\.values\(\)\]/.test(source), 'zero-row seeding is limited to one unambiguous active Shop/Warehouse identity, never an arbitrary legacy branch')
 
   const chosenBranchInsertIdx = block.indexOf('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)')
   assert.ok(chosenBranchInsertIdx !== -1, 'the chosen branch should still get its real-quantity branch_stock insert')
 
   const seedZeroIdx = block.indexOf('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 0)')
-  assert.ok(seedZeroIdx !== -1, 'a brand-new product should get a 0-quantity branch_stock seed statement for every other active branch')
+  assert.ok(seedZeroIdx !== -1, 'a brand-new product should get a 0-quantity branch_stock seed statement for every other unambiguous active canonical branch')
   assert.ok(seedZeroIdx > chosenBranchInsertIdx, 'the 0-quantity seed loop must be built AFTER the chosen branch\'s real-quantity insert -- an in-batch duplicate row for the same product naming one of these branches has to be able to overwrite the seed with a real value, not the other way around')
 
   assert.ok(/branchId === d\.branch_id\) continue/.test(block), 'the seed loop must skip the chosen branch itself -- it already has its real quantity from the statement above')
   assert.ok(/ON CONFLICT\(product_id, branch_id\) DO NOTHING/.test(block.slice(seedZeroIdx, seedZeroIdx + 300)), 'the 0-quantity seed insert must use DO NOTHING (never DO UPDATE) so it can never stomp a real quantity written by an earlier statement in the same batch')
 
-  console.log('PASS a brand-new imported product seeds every OTHER active branch at 0 stock, not just the branch its CSV row named, matching seedBranchStockForNewProduct\'s existing fix for manual product creation')
+  console.log('PASS a brand-new imported product seeds every OTHER unambiguous active canonical branch at 0 stock, never an arbitrary legacy branch')
 }
 
 // -- Duplicate snapshot quantities: when identity merging turns two source
@@ -675,10 +849,26 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   assert.ok(/GROUP BY product_id, branch_id[\s\S]*HAVING COUNT\(\*\) > 1/.test(block), 'only duplicate resolved product+branch groups should be aggregated')
   assert.ok(/SUM\(quantity\) AS expected_quantity/.test(block), 'duplicate snapshot quantities must SUM rather than let the last row win')
   assert.ok(/json_extract\(result_json, '\$\.plannedMode'\) IS NULL/.test(block), 'explicit restock/override modes must not be reinterpreted as a snapshot total')
-  assert.ok(/ON CONFLICT\(product_id, branch_id\) DO UPDATE SET quantity = excluded\.quantity/.test(block), 'the grouped snapshot total should replace that branch count exactly')
-  assert.ok(/notes = 'Received via product import'/.test(block), 'new-product opening lots should be synchronized with the grouped snapshot quantity')
+  assert.ok(/planReconcileBranchSnapshot/.test(block), 'duplicate and single snapshot rows share the executable lot/branch reconciliation planner')
+  assert.ok(/receivedDate: group.received_date/.test(block), 'snapshot reconciliation carries the explicit import receipt date')
   assert.ok(/snapshotGroupsAggregated/.test(source), 'the completed import summary should expose how many duplicate snapshot groups were corrected')
+  assert.ok(/runD1BatchGroupsInChunks\(guardedDb, groups.map/.test(block), 'each duplicate snapshot correction keeps branch, lot, and aggregate writes in one guarded batch group')
   console.log('PASS duplicate product snapshot rows aggregate their quantities per resolved product+branch, exclude movement modes, sync new opening lots, and report the corrected group count')
+}
+
+// A product row's catalog, stock, batch, and auto-merge evidence writes are
+// built as one group and sent through the canonical branch adapter. Raw
+// statement chunking can split at arbitrary indexes, so routing these writes
+// through it would allow a branch mutation to strand half of one row.
+{
+  const productBlockStart = source.indexOf("if (job.type === 'products') {")
+  const productBlockEnd = source.indexOf("} else if (job.type === 'customers'", productBlockStart)
+  const block = source.slice(productBlockStart, productBlockEnd)
+  assert.ok(/const productStatementGroups/.test(source))
+  assert.ok(/finishProductRowWriteGroup/.test(block))
+  assert.ok(!/\bstatements\.push\(/.test(block), 'product row writes must never return to raw statement chunking')
+  assert.ok(/runD1BatchGroupsInChunks\(importWriteDb, productStatementGroups\)/.test(source), 'whole product rows use group-boundary batching through the branch authority adapter')
+  console.log('PASS product import keeps each row\'s catalog, stock, batch, and merge-evidence writes in one canonical-branch guarded batch')
 }
 
 // -- Everything above this point is synchronous; the new tests below need
@@ -821,7 +1011,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const { classifyProducts } = moduleObj.exports
   assert.strictEqual(typeof classifyProducts, 'function', 'classifyProducts should be exported from importEngine.ts')
 
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }]) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Shop', is_default: 1 }]) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
@@ -841,7 +1031,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const db = makeFakeProductsDb([])
     const results = await classifyProducts(db, [row({
       name: 'Widget', selling_price_usd: '10', cost_price_usd: '5',
-      special_price_usd: '8', out_of_stock_threshold: '2',
+      wholesale_price_usd: '8', out_of_stock_threshold: '2',
       discount_enabled: 'true', discount_type: 'percent', discount_percent: '15',
       discount_amount_usd: '0', discount_amount_khr: '0',
       discount_label: 'Sale', discount_badge_color: '#00ff00',
@@ -849,7 +1039,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       expiry_date: '2027-01-01', expiry_alert_days: '45',
     }, 1)], 'job-1', null, noImages)
     const d = results[0].data
-    assert.strictEqual(d.special_price_usd, 8)
+    assert.strictEqual(d.wholesale_price_usd, 8)
     assert.strictEqual(d.out_of_stock_threshold, 2)
     assert.strictEqual(d.discount_enabled, 1)
     assert.strictEqual(d.discount_type, 'percent')
@@ -862,21 +1052,31 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(d.expiry_alert_days, 45)
   }
 
-  // VIP price (stored in special_price_*; DB column name unchanged, label
-  // is "VIP" now). Two things this guards, both reported bugs:
-  //   1. the NEW `vip_price_*` header is read, and
-  //   2. the LEGACY `special_price_*` header still is (old export files),
-  //   3. a BLANK value defaults to 0, never the selling price.
+  // Wholesale price (products.wholesale_price_usd/khr -- migration 0111
+  // moved the tier off the dead special_price_* columns). Four things this
+  // guards, all reported bugs or the ruling itself:
+  //   1. the canonical `wholesale_price_*` header is read,
+  //   2. the LEGACY `vip_price_*` header lands in wholesale (that column
+  //      always held wholesale numbers, so an old "VIP" sheet is a
+  //      wholesale sheet and must not be dropped on the floor),
+  //   3. so does the even older `special_price_*` header, and an explicit
+  //      `wholesale_price_*` wins over both when a file carries them, and
+  //   4. a BLANK value defaults to 0, never the selling price.
   {
     const db = makeFakeProductsDb([])
-    const [viaVip, viaLegacy, blank] = await classifyProducts(db, [
-      row({ name: 'Vip New', selling_price_usd: '12', vip_price_usd: '8' }, 1),
-      row({ name: 'Vip Legacy', selling_price_usd: '12', special_price_usd: '7' }, 2),
-      row({ name: 'Vip Blank', selling_price_usd: '12' }, 3),
-    ], 'job-vip', null, noImages)
-    assert.strictEqual(viaVip.data.special_price_usd, 8, 'the new vip_price_usd header must be read into special_price_usd')
-    assert.strictEqual(viaLegacy.data.special_price_usd, 7, 'the legacy special_price_usd header must still be honored')
-    assert.strictEqual(blank.data.special_price_usd, 0, 'a row with no VIP price stores 0, not the selling price (12)')
+    const [viaWholesale, viaVip, viaLegacy, viaBoth, blank] = await classifyProducts(db, [
+      row({ name: 'Wholesale New', selling_price_usd: '12', wholesale_price_usd: '9' }, 1),
+      row({ name: 'Vip Legacy', selling_price_usd: '12', vip_price_usd: '8' }, 2),
+      row({ name: 'Special Legacy', selling_price_usd: '12', special_price_usd: '7' }, 3),
+      row({ name: 'Both Headers', selling_price_usd: '12', wholesale_price_usd: '9', vip_price_usd: '8', special_price_usd: '7' }, 4),
+      row({ name: 'Wholesale Blank', selling_price_usd: '12' }, 5),
+    ], 'job-wholesale', null, noImages)
+    assert.strictEqual(viaWholesale.data.wholesale_price_usd, 9, 'the canonical wholesale_price_usd header must be read into wholesale_price_usd')
+    assert.strictEqual(viaVip.data.wholesale_price_usd, 8, 'the legacy vip_price_usd header must land in wholesale_price_usd')
+    assert.strictEqual(viaLegacy.data.wholesale_price_usd, 7, 'the legacy special_price_usd header must land in wholesale_price_usd')
+    assert.strictEqual(viaBoth.data.wholesale_price_usd, 9, 'an explicit wholesale_price_usd header wins over both legacy spellings')
+    assert.strictEqual(blank.data.wholesale_price_usd, 0, 'a row with no wholesale price stores 0, not the selling price (12)')
+    assert.ok(!('special_price_usd' in viaLegacy.data), 'the dead special_price_usd column must never be written again')
   }
 
   // 2) Nothing set beyond the required fields -- every default must match
@@ -888,7 +1088,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const db = makeFakeProductsDb([])
     const results = await classifyProducts(db, [row({ name: 'Bare Product', selling_price_usd: '20' }, 1)], 'job-2', null, noImages)
     const d = results[0].data
-    assert.strictEqual(d.special_price_usd, 0, 'VIP (special) price with no CSV value defaults to 0, NOT the selling price -- defaulting to selling silently set VIP = selling on every row and the edit form then wrote it back, destroying real VIP prices')
+    assert.strictEqual(d.wholesale_price_usd, 0, 'wholesale price with no CSV value defaults to 0, NOT the selling price -- defaulting to selling silently set the discounted tier = selling on every row and the edit form then wrote it back, destroying real wholesale prices')
     assert.strictEqual(d.out_of_stock_threshold, 0)
     assert.strictEqual(d.discount_enabled, 0)
     assert.strictEqual(d.discount_type, 'percent')
@@ -929,7 +1129,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // that file's header explicitly warns about taking shortcuts on.
 {
   const { classifyProducts } = moduleObj.exports
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }]) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Shop', is_default: 1 }]) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
@@ -1015,7 +1215,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const { classifyProducts } = moduleObj.exports
   const { dateToBatchCode } = batchCodeModuleObj.exports
 
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }], batches = []) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Shop', is_default: 1 }], batches = []) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
@@ -1061,6 +1261,45 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(results[0].data.lot_code, '03102026', 'the old `date` column should still be read as a date fallback')
   }
 
+  // Sep 6 2026 (a2 datefmt): the warning guard used to RE-READ the cell with
+  // normalizeToIsoDate's bare default (month-first) instead of the order its
+  // own header dictates, so a row read correctly at line 1484 was still
+  // reported unreadable a few lines later. `batch(dd/mm/yyyy)` is the header
+  // the downloaded template ships, so this fired on the default path. 25 is
+  // the discriminating day: month-first cannot read it at all, day-first can.
+  {
+    const db = makeFakeProductsDb([])
+    const results = await classifyProducts(db, [row({ name: 'Day First Column', selling_price_usd: '10', 'batch(dd/mm/yyyy)': '25/12/2026' }, 1)], 'job-dayfirst-ok', null, noImages)
+    assert.strictEqual(results[0].data.received_date, '2026-12-25', 'the day-first header is read day-first')
+    assert.strictEqual(results[0].data.lot_code, '12252026', 'the lot code identifier stays MMDDYYYY')
+    assert.ok(
+      !(results[0].warnings || []).some((w) => w.kind === 'unreadable_batch_date'),
+      "a cell the column's own order reads cleanly must not be reported unreadable (and it was NOT received as today)",
+    )
+  }
+
+  // Positive control for the assertion above: a guard that was simply deleted
+  // would also stop warning. A cell that is unreadable under its OWN order
+  // must still warn, and the message must name that order.
+  {
+    const db = makeFakeProductsDb([])
+    const results = await classifyProducts(db, [row({ name: 'Unreadable Day First', selling_price_usd: '10', 'batch(dd/mm/yyyy)': '31/31/2026' }, 1)], 'job-dayfirst-bad', null, noImages)
+    const warning = (results[0].warnings || []).find((w) => w.kind === 'unreadable_batch_date')
+    assert.ok(warning, 'a genuinely unreadable cell still warns')
+    assert.ok(warning.message.includes('batch(dd/mm/yyyy)'), `the warning names the header it read: ${warning.message}`)
+  }
+
+  // The mirror case, which is why the order cannot simply be flipped: under
+  // the month-first header the SAME 25/12/2026 really is unreadable. One
+  // cell, two headers, two opposite verdicts.
+  {
+    const db = makeFakeProductsDb([])
+    const results = await classifyProducts(db, [row({ name: 'Month First Column', selling_price_usd: '10', 'batch(mm/dd/yyyy)': '25/12/2026' }, 1)], 'job-monthfirst-bad', null, noImages)
+    const warning = (results[0].warnings || []).find((w) => w.kind === 'unreadable_batch_date')
+    assert.ok(warning, 'month-first cannot read 25 as a month, so this one really is unreadable')
+    assert.ok(warning.message.includes('batch(mm/dd/yyyy)'), `the warning names the header it read: ${warning.message}`)
+  }
+
   // A blank/missing column still means "received now" -- unchanged
   // behavior, just confirming the new column name didn't break the
   // existing default.
@@ -1071,9 +1310,12 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.ok(results[0].data.lot_code, 'lot_code should still be derived from the defaulted received_date')
   }
 
-  // The same-batch receipt exception must be deterministic. One evidenced
-  // owner is safe; two same-name+barcode products claiming that active lot
-  // is an error, never a first-row-wins guess.
+  // Which product receives a receipt must be decided by evidence or by age,
+  // never by iteration order. Since Sep 4 2026 two same-name+barcode rows
+  // are exact duplicates awaiting a merge rather than two child rows, so a
+  // row naming them is received by the oldest instead of being refused --
+  // refusing would block restocks on precisely the products the new rule
+  // exists to heal. One evidenced lot owner still wins outright.
   {
     const existingProducts = [
       { id: 11, name: 'Batch Serum', sku: 'SERUM-A', barcode: 'BC-11', cost_price_usd: 1, cost_price_khr: 0, selling_price_usd: 5, selling_price_khr: 0, special_price_usd: 0, special_price_khr: 0, is_active: 1 },
@@ -1087,8 +1329,20 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       ]),
       [incoming], 'job-ambiguous-batch', null, noImages,
     )
-    assert.strictEqual(ambiguous[0].action, 'error', 'multiple candidate owners of one active batch must block the row')
-    assert.match(ambiguous[0].message, /belongs to 2 products/, 'the conflict should explain the exact ambiguity')
+    assert.strictEqual(ambiguous[0].action, 'update', 'two owners of one active batch no longer block the row')
+    assert.strictEqual(ambiguous[0].existingId, 11, 'with the lot evidence tied, the OLDEST duplicate receives it')
+    assert.strictEqual(ambiguous[0].plannedMode, 'merge_stock', 'and it is a receipt: it adds stock, it does not restate the catalog')
+
+    // Deterministic, not order-dependent: the same product wins when the
+    // candidates arrive the other way round.
+    const reversed = await classifyProducts(
+      makeFakeProductsDb(existingProducts.slice().reverse(), undefined, [
+        { variant_product_id: 12, lot_code: '09012026' },
+        { variant_product_id: 11, lot_code: '09012026' },
+      ]),
+      [incoming], 'job-ambiguous-batch-reversed', null, noImages,
+    )
+    assert.strictEqual(reversed[0].existingId, 11, 'candidate order must not change who receives the row')
 
     const unique = await classifyProducts(
       makeFakeProductsDb(existingProducts, undefined, [{ variant_product_id: 11, lot_code: '09012026' }]),
@@ -1099,23 +1353,171 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(unique[0].plannedMode, 'merge_stock', 'same-batch receipt must not replace catalog cost/details')
   }
 
-  console.log('PASS classifyProducts reads batch dates, applies the one-owner same-batch receipt exception, and blocks ambiguous batch ownership')
+  {
+    const baseRow = row({ name: 'Branch Guard Product', sku: 'BG-1', stock_quantity: 1 }, 1)
+    const unknown = await classifyProducts(makeFakeProductsDb([], [{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), [{ ...baseRow, branch: 'New Branch' }], 'job-branch-unknown', null, noImages)
+    assert.strictEqual(unknown[0].action, 'error', 'product import must leave an unknown branch for review')
+    assert.match(unknown[0].message, /New Branch/)
+    assert.strictEqual(unknown[0].data.branch_name_pending, undefined)
+
+    const warehouse = await classifyProducts(makeFakeProductsDb([], [{ id: 2, name: 'Warehouse', is_default: 1, is_active: 1 }]), [{ ...baseRow, branch: ' warehouse ' }], 'job-branch-warehouse', null, noImages)
+    assert.strictEqual(warehouse[0].action, 'create')
+    assert.strictEqual(warehouse[0].data.branch_id, 2)
+
+    const ambiguous = await classifyProducts(makeFakeProductsDb([], [
+      { id: 1, name: 'Shop', is_default: 1, is_active: 1 },
+      { id: 2, name: ' shop ', is_default: 0, is_active: 1 },
+    ]), [{ ...baseRow, branch: 'Shop' }], 'job-branch-ambiguous', null, noImages)
+    assert.strictEqual(ambiguous[0].action, 'error', 'duplicate canonical branch identity must never resolve by row order')
+
+    const blank = await classifyProducts(makeFakeProductsDb([], [{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), [baseRow], 'job-branch-default', null, noImages)
+    assert.strictEqual(blank[0].action, 'create')
+    assert.strictEqual(blank[0].data.branch_id, 1)
+
+    const blankWithDuplicateRole = await classifyProducts(makeFakeProductsDb([], [
+      { id: 1, name: 'Shop', is_default: 1, is_active: 1 },
+      { id: 2, name: ' shop ', is_default: 0, is_active: 1 },
+    ]), [baseRow], 'job-branch-default-ambiguous', null, noImages)
+    assert.strictEqual(blankWithDuplicateRole[0].action, 'error', 'blank input cannot bypass canonical-role uniqueness through the default row')
+  }
+
+  console.log('PASS classifyProducts reads batch dates, applies the one-owner same-batch receipt exception, blocks ambiguous batch ownership, and resolves only canonical branches')
+}
+
+// Inventory movements share the canonical branch rule. Unknown names stay
+// review errors, blank uses one canonical default, and Warehouse remains a
+// valid stock location.
+{
+  const { classifyInventory, validateResolvedImportBranches, inventoryMovementCostSnapshot, applyAnalyzedInventoryCostSnapshots } = moduleObj.exports
+  const product = { id: 1, sku: 'INV-1', barcode: 'BC-INV-1', name: 'Inventory Item', stock_quantity: 4, cost_price_usd: 1, cost_price_khr: 0 }
+  const makeDb = (branches) => ({
+    prepare: (sql) => ({ all: async () => String(sql).includes('FROM products') ? [product] : String(sql).includes('FROM branches') ? branches : [] }),
+  })
+  const input = (branch) => [{ _rowNumber: 1, sku: 'INV-1', quantity: 2, ...(branch === undefined ? {} : { branch }) }]
+
+  const unknown = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input('New Branch'), 'add')
+  assert.strictEqual(unknown[0].action, 'error')
+  assert.match(unknown[0].message, /New Branch/)
+  assert.strictEqual(unknown[0].data.branch_name_pending, undefined)
+
+  const warehouse = await classifyInventory(makeDb([{ id: 2, name: 'Warehouse', is_default: 1, is_active: 1 }]), input('WAREHOUSE'), 'add')
+  assert.strictEqual(warehouse[0].action, 'create')
+  assert.strictEqual(warehouse[0].data.branch_id, 2)
+
+  const blank = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input(undefined), 'add')
+  assert.strictEqual(blank[0].action, 'create')
+  assert.strictEqual(blank[0].data.branch_id, 1)
+  assert.strictEqual(blank[0].data.unit_cost_usd, 1, 'blank cost snapshots the product fallback during classification')
+  assert.strictEqual(blank[0].data.total_cost_usd, 2)
+  assert.strictEqual(blank[0].data.unit_cost_khr, 0, 'an existing zero fallback remains a recorded zero')
+
+  const explicitZero = await classifyInventory(
+    makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]),
+    [{ ...input(undefined)[0], unit_cost_usd: '0', unit_cost_khr: '0' }],
+    'add',
+  )
+  assert.strictEqual(explicitZero[0].data.unit_cost_usd, 0, 'explicit zero must not fall through to the product cost')
+  assert.strictEqual(explicitZero[0].data.total_cost_usd, 0)
+  assert.strictEqual(explicitZero[0].data.cost_price_usd, 0, 'explicit zero retains the existing add-row product update semantics')
+
+  const frozen = inventoryMovementCostSnapshot({ fallbackUsd: 3.25, fallbackKhr: 13000, quantity: 4 })
+  product.cost_price_usd = 99
+  product.cost_price_khr = 400000
+  assert.deepStrictEqual(frozen, {
+    unitCostUsd: 3.25, unitCostKhr: 13000, totalCostUsd: 13, totalCostKhr: 52000,
+  }, 'the planned cost remains immutable when the catalogue changes before apply')
+
+  const remove = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input(undefined), 'remove')
+  assert.strictEqual(remove[0].data.unit_cost_usd, 99, 'non-receipt actions still snapshot their plan-time product cost')
+  assert.strictEqual(remove[0].data.total_cost_usd, 198)
+
+  const reviewed = { ...blank[0], data: { ...blank[0].data, unit_cost_usd: 1, unit_cost_khr: 0, total_cost_usd: 2, total_cost_khr: 0 } }
+  const reclassifiedAtApply = { ...blank[0], data: { ...blank[0].data, unit_cost_usd: 99, unit_cost_khr: 400000, total_cost_usd: 198, total_cost_khr: 800000 } }
+  const applied = applyAnalyzedInventoryCostSnapshots([reclassifiedAtApply], new Map([[1, reviewed]]))
+  assert.deepStrictEqual(
+    {
+      unit_cost_usd: applied[0].data.unit_cost_usd,
+      unit_cost_khr: applied[0].data.unit_cost_khr,
+      total_cost_usd: applied[0].data.total_cost_usd,
+      total_cost_khr: applied[0].data.total_cost_khr,
+    },
+    { unit_cost_usd: 1, unit_cost_khr: 0, total_cost_usd: 2, total_cost_khr: 0 },
+    'apply uses the analyzed immutable valuation, including zero, after a catalogue price change',
+  )
+  assert.throws(
+    () => applyAnalyzedInventoryCostSnapshots([
+      { ...reclassifiedAtApply, data: { ...reclassifiedAtApply.data, quantity: 1, signedQuantity: 1 } },
+    ], new Map([[1, reviewed]])),
+    /changed product, branch, direction, or quantity/,
+    'a Set/action delta that changed after review must be re-analyzed instead of combining a new quantity with the old total',
+  )
+  assert.throws(
+    () => applyAnalyzedInventoryCostSnapshots([
+      { ...reclassifiedAtApply, data: { ...reclassifiedAtApply.data, product_id: 2 } },
+    ], new Map([[1, reviewed]])),
+    /changed product, branch, direction, or quantity/,
+    'row number alone never authorizes a different product identity',
+  )
+  const legacyReviewed = { ...reviewed, data: { ...reviewed.data } }
+  delete legacyReviewed.data.unit_cost_usd
+  delete legacyReviewed.data.unit_cost_khr
+  delete legacyReviewed.data.total_cost_usd
+  delete legacyReviewed.data.total_cost_khr
+  assert.throws(
+    () => applyAnalyzedInventoryCostSnapshots([reclassifiedAtApply], new Map([[1, legacyReviewed]])),
+    /no reviewed cost snapshot/,
+    'a pre-snapshot analyzed row must be re-analyzed instead of taking a new current price at Apply',
+  )
+  assert.throws(
+    () => inventoryMovementCostSnapshot({ explicitUsd: 1e308, quantity: 2 }),
+    /outside the supported numeric range/,
+    'overflowing totals are rejected before JSON can turn Infinity into null',
+  )
+
+  const blankWithDuplicateRole = await classifyInventory(makeDb([
+    { id: 1, name: 'Shop', is_default: 1, is_active: 1 },
+    { id: 2, name: ' shop ', is_default: 0, is_active: 1 },
+  ]), input(undefined), 'add')
+  assert.strictEqual(blankWithDuplicateRole[0].action, 'error', 'blank inventory input cannot choose an ambiguous canonical default role')
+
+  await validateResolvedImportBranches(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), blank)
+  await assert.rejects(
+    () => validateResolvedImportBranches(makeDb([
+      { id: 1, name: 'Shop', is_default: 1, is_active: 1 },
+      { id: 2, name: ' shop ', is_default: 0, is_active: 1 },
+    ]), blank),
+    /ambiguous/,
+  )
+  await assert.rejects(
+    () => validateResolvedImportBranches(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), [{ ...blank[0], data: { ...blank[0].data, branch_name_pending: 'Unknown' } }]),
+    /unresolved branch/,
+  )
+
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'importEngine.ts'), 'utf8')
+  assert.match(source, /INSERT INTO inventory_movements \(product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at\)/, 'the movement insert carries the frozen plan costs in its own atomic row')
+  const resolverBody = source.slice(source.indexOf('async function validateResolvedImportBranches'), source.indexOf('// Same-batch duplicate merge'))
+  assert.ok(!/INSERT INTO branches|Main Branch|backfillBranchStockForNewBranch/.test(resolverBody), 'apply-time branch resolver must remain validation-only')
+  console.log('PASS classifyInventory and apply branch validation never create unknown or synthetic branches')
 }
 
 // -- classifyContacts: customer membership-number auto-assignment
 // (creation-only), same-name-can't-coexist with a 'force_create' reviewer
-// override (both against the existing DB and within one file), and the
-// membership_number -> name match priority (phone deliberately dropped as
-// a customer match key -- phone/address can be shared by multiple
-// different customers, unlike name and membership_number). Real transpiled
-// classifyContacts against a small in-memory fake D1 (its only DB touch is
-// `db.prepare(sql).all()` to load the existing table once up front -- no
-// writes happen at classify time, those are a separate later apply phase).
+// override (both against the existing DB and within one file), canonical
+// phone conflict refusal, and membership_number -> phone+name match priority. Real transpiled
+// classifyContacts against a small in-memory fake D1 (its DB touch is two
+// `db.prepare(sql).all()` reads up front -- the existing table, and (for
+// customers) portal_accounts.membership_id, unioned into the allocator's
+// seed exactly like lib/membershipNumber.ts's own mintMembershipNumber does
+// -- no writes happen at classify time, those are a separate later apply
+// phase). The fake routes each query by table name in its SQL so the two
+// reads can be seeded independently.
 {
   const { classifyContacts } = moduleObj.exports
   assert.strictEqual(typeof classifyContacts, 'function', 'classifyContacts should be exported from importEngine.ts')
 
-  const makeFakeDb = (existingRows) => ({ prepare: () => ({ all: async () => existingRows }) })
+  const makeFakeDb = (existingRows, portalRows = []) => ({
+    prepare: (sql) => ({ all: async () => (String(sql).includes('portal_accounts') ? portalRows : existingRows) }),
+  })
   const row = (fields, rowNumber) => ({ _rowNumber: rowNumber, ...fields })
   const withDecisions = (decisionsByRowNumber) => JSON.stringify({ decisionsByRowNumber })
 
@@ -1126,7 +1528,29 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const results = await classifyContacts(db, 'customers', [row({ name: 'Dara' }, 1)], null)
     assert.strictEqual(results.length, 1)
     assert.strictEqual(results[0].action, 'create')
-    assert.ok(String(results[0].data.membership_number || '').startsWith('LCMN-'), 'new customer with no membership_number in the CSV gets one auto-generated')
+    assert.strictEqual(results[0].data.membership_number, 'LC-00001', 'a brand-new customer gap-fills the house LC- sequence from the shared authority')
+  }
+
+  // 1b) The allocator's seed must UNION portal_accounts.membership_id, same
+  // as lib/membershipNumber.ts's own mintMembershipNumber() does for every
+  // other minting path (manual add, storefront signup) -- an orphaned
+  // portal account (e.g. a signup whose contact fold failed, so it has no
+  // matching customer row) still reserves its slot for an import. Verified
+  // red on HEAD before this fix: with only 'LC-00001' in customers and no
+  // portal query, a blank row minted 'LC-00002' -- colliding with the
+  // portal-only 'LC-00002' the very next signup would have reserved.
+  {
+    const db = makeFakeDb(
+      [{ id: 1, name: 'Existing', membership_number: 'LC-00001' }],
+      [{ membership_id: 'LC-00002' }],
+    )
+    const results = await classifyContacts(db, 'customers', [row({ name: 'Blank' }, 1)], null)
+    assert.strictEqual(results.length, 1)
+    assert.strictEqual(
+      results[0].data.membership_number,
+      'LC-00003',
+      'the allocator must skip both the customers row (LC-00001) AND the orphaned portal_accounts row (LC-00002)',
+    )
   }
 
   // 2) Matched existing customer whose stored membership_number is
@@ -1160,29 +1584,23 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.ok(results[0].warnings?.some((w) => w.kind === 'name_match'), 'a name-only match is flagged with a name_match warning')
   }
 
-  // 4b) Phone is no longer a customer match key -- a matching phone with a
-  // DIFFERENT name must NOT merge (phone/address can be legitimately
-  // shared by more than one customer; only name and membership_number
-  // identify a customer for matching purposes now).
+  // 4b) A canonical phone match with a DIFFERENT name is the same hard
+  // conflict manual create/edit enforces. It must neither merge nor create.
   {
-    const db = makeFakeDb([{ id: 9, name: 'Household Account', phone: '099888777', membership_number: 'LCMN-HOUSE001' }])
-    const results = await classifyContacts(db, 'customers', [row({ name: 'A Different Person', phone: '099888777' }, 1)], null)
-    assert.strictEqual(results[0].action, 'create', 'a shared phone number alone must not merge two different-named customers into one')
-    assert.notStrictEqual(results[0].existingId, 9)
-    // Not silent, though -- a genuinely new customer whose phone is
-    // already on file under someone else gets flagged for review even
-    // though it isn't auto-merged/blocked.
+    const db = makeFakeDb([{ id: 9, name: 'Existing Account', phone: '099 888 777', membership_number: 'LCMN-HOUSE001' }])
+    const results = await classifyContacts(db, 'customers', [row({ name: 'A Different Person', phone: '+855 99 888 777' }, 1)], null)
+    assert.strictEqual(results[0].action, 'error', 'a canonical phone conflict must not merge or create a different-named customer')
+    assert.strictEqual(results[0].existingId, 9)
     assert.ok(
       results[0].warnings?.some((w) => w.kind === 'membership_phone_conflict'),
-      'a new customer whose phone already belongs to a different existing customer must be flagged for review, not imported silently',
+      'the refused canonical conflict remains visible in contact review',
     )
   }
 
   // 4c) membership_number match whose phone belongs to a DIFFERENT
   // existing customer than the one matched (typo'd/copy-pasted number) --
-  // must still match/update via membership_number (the stronger
-  // identifier), but flag the conflict and never let this row's phone
-  // overwrite the matched customer's real phone.
+  // must refuse the whole row like manual edit, rather than partially
+  // updating one account from a row whose phone belongs to another.
   {
     const db = makeFakeDb([
       { id: 10, name: 'Correct Owner', phone: '011222333', membership_number: 'LCMN-REAL001' },
@@ -1194,13 +1612,70 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       [row({ name: 'Correct Owner', phone: '099888777', membership_number: 'LCMN-REAL001' }, 1)],
       null,
     )
-    assert.strictEqual(results[0].action, 'update', 'membership_number still wins the match over the phone conflict')
-    assert.strictEqual(results[0].existingId, 10)
+    assert.strictEqual(results[0].action, 'error', 'a membership/phone split-identity row must be refused')
+    assert.strictEqual(results[0].existingId, 11)
     assert.ok(
       results[0].warnings?.some((w) => w.kind === 'membership_phone_conflict'),
       'a membership match whose phone belongs to a different existing customer must be flagged',
     )
-    assert.strictEqual(results[0].data.phone, '011222333', 'the conflicting imported phone must never overwrite the matched customer\'s real phone')
+    assert.strictEqual(results[0].data.phone, '099 888 777', 'the refused row is still normalized for an accurate review preview')
+  }
+
+  // 4d) The same canonical phone and same normalized name is the same
+  // contact. It may update, and any touched customer gets a fresh canonical
+  // key even if the stored row predates phone_normalized.
+  {
+    const db = makeFakeDb([{ id: 12, name: 'Sok Dara', phone: '012 345 678', phone_normalized: null, membership_number: 'LC-00012' }])
+    const results = await classifyContacts(db, 'customers', [row({ name: '  sok   dara ', phone: '+855 12 345 678' }, 1)], null)
+    assert.strictEqual(results[0].action, 'update')
+    assert.strictEqual(results[0].existingId, 12)
+    assert.strictEqual(results[0].data.phone, '012 345 678')
+    assert.strictEqual(results[0].data.phone_normalized, '012345678', 'a touched customer refreshes its canonical phone key')
+    assert.strictEqual(results[0].expectedUpdatedAt, null, 'contact updates carry the exact updated_at snapshot (including legacy null) to the apply guard')
+  }
+
+  // 4e) Secondary Contact Option phones participate in canonical identity.
+  {
+    const db = makeFakeDb([{ id: 13, name: 'Option Owner', phone: null, address: JSON.stringify([{ label: 'Other', phone: '+855 77 888 999' }]), membership_number: 'LC-00013' }])
+    const results = await classifyContacts(db, 'customers', [row({ name: 'Different Person', phone: '077888999' }, 1)], null)
+    assert.strictEqual(results[0].action, 'error')
+    assert.strictEqual(results[0].existingId, 13)
+  }
+
+  // Incoming secondary phones are identity too: the imported primary can be
+  // blank while an option collides with an existing primary or option.
+  {
+    const option = JSON.stringify([{ label: 'Other', phone: '+855 77 888 999' }])
+    const existingPrimary = await classifyContacts(
+      makeFakeDb([{ id: 130, name: 'Primary Owner', phone: '077 888 999', membership_number: 'LC-00130' }]),
+      'customers',
+      [row({ name: 'Different Person', contact_options: option }, 1)],
+      null,
+    )
+    assert.strictEqual(existingPrimary[0].action, 'error', 'an incoming option phone cannot duplicate an existing primary phone')
+    const existingOption = await classifyContacts(
+      makeFakeDb([{ id: 131, name: 'Option Owner', address: option, membership_number: 'LC-00131' }]),
+      'customers',
+      [row({ name: 'Another Person', contact_options: option }, 1)],
+      null,
+    )
+    assert.strictEqual(existingOption[0].action, 'error', 'an incoming option phone cannot duplicate an existing option phone')
+  }
+
+  // 4f) Multiple rows folded into one pending update cannot let the
+  // internal canonical key drift from the final phone, even when the
+  // reviewer configures a rule for the visible phone field only.
+  {
+    const db = makeFakeDb([{ id: 17, name: 'Folded Update', phone: null, phone_normalized: 'stale', membership_number: 'LC-00017' }])
+    const policy = JSON.stringify({ conflictMode: 'overwrite', fieldRules: { phone: 'use_imported', phone_normalized: 'keep_existing' } })
+    const results = await classifyContacts(db, 'customers', [
+      row({ name: 'Folded Update', phone: '012345678' }, 1),
+      row({ name: 'Folded Update', phone: '+855 70 111 222' }, 2),
+    ], policy)
+    assert.strictEqual(results[0].action, 'update')
+    assert.strictEqual(results[1].action, 'skip')
+    assert.strictEqual(results[0].data.phone, '070 111 222')
+    assert.strictEqual(results[0].data.phone_normalized, '070111222', 'the pending update key follows its final phone')
   }
 
   // 5) Two brand-new rows in the SAME file share a name -- must fold into
@@ -1232,6 +1707,56 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.notStrictEqual(results[0].data.phone, results[1].data.phone, 'the two rows stay genuinely separate, not merged')
   }
 
+  // 5c) Two differently named contacts in one file cannot queue creates
+  // for the same canonical phone, even when one uses +855 and one local.
+  {
+    const db = makeFakeDb([])
+    const results = await classifyContacts(db, 'suppliers', [
+      row({ name: 'Supplier One', phone: '+855 12 345 678' }, 1),
+      row({ name: 'Supplier Two', phone: '012345678' }, 2),
+    ], null)
+    assert.strictEqual(results[0].action, 'create')
+    assert.strictEqual(results[0].data.phone, '012 345 678')
+    assert.strictEqual(results[1].action, 'error', 'the second same-file canonical phone is refused')
+    assert.ok(results[1].warnings?.some((w) => w.kind === 'membership_phone_conflict'))
+  }
+
+  // 5d) Existing supplier phone matching is canonical and name-safe: same
+  // name updates, different name refuses rather than silently auto-merging.
+  {
+    const existing = [{ id: 21, name: 'Acme Supply', phone: '+855 70 111 222' }]
+    const same = await classifyContacts(makeFakeDb(existing), 'suppliers', [row({ name: ' acme  supply ', phone: '070111222' }, 1)], null)
+    assert.strictEqual(same[0].action, 'update')
+    assert.strictEqual(same[0].existingId, 21)
+    const different = await classifyContacts(makeFakeDb(existing), 'suppliers', [row({ name: 'Other Supply', phone: '070 111 222' }, 1)], null)
+    assert.strictEqual(different[0].action, 'error')
+    assert.strictEqual(different[0].existingId, 21)
+  }
+
+  // Pending creates also reserve every secondary phone, not only the primary.
+  {
+    const results = await classifyContacts(makeFakeDb([]), 'suppliers', [
+      row({ name: 'Option Supplier One', contact_options: JSON.stringify([{ label: 'Other', phone: '070111222' }]) }, 1),
+      row({ name: 'Option Supplier Two', phone: '+855 70 111 222' }, 2),
+    ], null)
+    assert.strictEqual(results[0].action, 'create')
+    assert.strictEqual(results[1].action, 'error', 'a later row cannot reuse an earlier pending create secondary phone')
+  }
+
+  // 5e) The review override is intentionally name-only. It cannot create a
+  // second contact with a stronger phone or membership identity already
+  // queued earlier in this same file.
+  {
+    const db = makeFakeDb([])
+    const results = await classifyContacts(db, 'customers', [
+      row({ name: 'Repeated Member', phone: '012345678', membership_number: 'legacy-55' }, 1),
+      row({ name: ' repeated  member ', phone: '+855 12 345 678', membership_number: ' LEGACY-55 ' }, 2),
+    ], withDecisions({ '2': { action: 'force_create' } }))
+    assert.strictEqual(results[0].action, 'create')
+    assert.strictEqual(results[1].action, 'skip', 'force_create cannot bypass the pending canonical phone/membership identity')
+    assert.match(results[1].message, /row 1/)
+  }
+
   // 6) Re-importing with a membership_number that matches an existing
   // customer finds that account even though the name on file changed --
   // membership_number is the account's real identifier, and outranks a
@@ -1252,6 +1777,47 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const results = await classifyContacts(db, 'customers', [row({ name: 'New Name', membership_number: 'LCMN-ACCT0010' }, 1)], withDecisions({ '1': { action: 'force_create' } }))
     assert.strictEqual(results[0].action, 'update', 'force_create cannot bypass a membership_number match -- that identifies one specific real account')
     assert.strictEqual(results[0].existingId, 10)
+  }
+
+  // 6c) Legacy/non-house membership values compare trim/case-normalized for
+  // collision review, while the stored identity bytes remain unchanged.
+  {
+    const db = makeFakeDb([{ id: 14, name: 'Original Member', membership_number: ' legacy-id ' }])
+    const results = await classifyContacts(db, 'customers', [row({ name: 'Different Name', membership_number: 'LEGACY-ID' }, 1)], null)
+    assert.strictEqual(results[0].action, 'update')
+    assert.strictEqual(results[0].existingId, 14)
+    assert.strictEqual(results[0].data.membership_number, ' legacy-id ', 'the existing legacy membership value is preserved byte-for-byte')
+    assert.ok(results[0].warnings?.some((w) => w.kind === 'membership_mismatch'), 'the normalized membership collision is flagged for review')
+  }
+
+  // 6d) If historical rows already contain a trim/case-normalized
+  // membership collision, import must not guess which customer owns it.
+  // The identity stays untouched and the row remains in review.
+  {
+    const db = makeFakeDb([
+      { id: 15, name: 'Member One', membership_number: ' legacy-duplicate ' },
+      { id: 16, name: 'Member Two', membership_number: 'LEGACY-DUPLICATE' },
+    ])
+    const results = await classifyContacts(db, 'customers', [row({ name: 'Imported Member', membership_number: 'Legacy-Duplicate' }, 1)], null)
+    assert.strictEqual(results[0].action, 'error')
+    assert.strictEqual(results[0].existingId, null)
+    assert.ok(results[0].warnings?.some((w) => w.kind === 'membership_mismatch'))
+    assert.match(results[0].message, /resolves to 2 existing customers/)
+  }
+
+  // 6e) Two different people in one file cannot queue the same normalized
+  // membership identity. This is review-only: neither value is rewritten.
+  {
+    const db = makeFakeDb([])
+    const results = await classifyContacts(db, 'customers', [
+      row({ name: 'First Person', membership_number: ' old-77 ' }, 1),
+      row({ name: 'Second Person', membership_number: 'OLD-77' }, 2),
+    ], null)
+    assert.strictEqual(results[0].action, 'create')
+    assert.strictEqual(results[0].data.membership_number, 'old-77')
+    assert.strictEqual(results[1].action, 'error')
+    assert.strictEqual(results[1].data.membership_number, 'OLD-77')
+    assert.ok(results[1].warnings?.some((w) => w.kind === 'membership_mismatch'))
   }
 
   // 7) DB name match with a 'force_create' override -- reviewer says the
@@ -1301,7 +1867,21 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(results[0].data.created_at, '2015-01-01T00:00:00.000Z', 'a matched customer keeps its real original created_at -- the imported created_date never overwrites it')
   }
 
-  console.log('PASS classifyContacts: creation-only membership_number backfill, membership_number/name match priority (phone dropped for customers), force_create reviewer override for name matches, and gender/created_date column parsing')
+  console.log('PASS classifyContacts: creation-only membership preservation, canonical phone identity/refusal/options/formatting, name-safe matching, force_create name override, and gender/created_date parsing')
+}
+
+// The apply writer must materialize the canonical customer key classified
+// above. No trigger fills phone_normalized, so omitting it here would make a
+// correctly classified import stale as soon as it reached D1.
+{
+  const applyStart = source.indexOf("} else if (job.type === 'customers' || job.type === 'suppliers' || job.type === 'delivery_contacts') {")
+  const applyEnd = source.indexOf("} else if (job.type === 'inventory')", applyStart)
+  const applyBody = source.slice(applyStart, applyEnd)
+  assert.match(applyBody, /\['name', 'phone', 'phone_normalized', 'address'/, 'customer import apply writes phone_normalized beside phone')
+  assert.match(applyBody, /columns\.filter\(\(c\) => c !== 'membership_number'\)/, 'updates preserve membership identity while still refreshing phone_normalized')
+  assert.match(applyBody, /contactDuplicateWriteGuardStatement\(table/, 'every contact create/update gets a canonical phone guard at apply time')
+  assert.match(applyBody, /updated_at IS @expectedUpdatedAt/, 'contact updates verify the freshly classified row snapshot in the atomic write group')
+  assert.match(applyBody, /guardedGroups\.push\(group\)/, 'contact guard and write remain one group instead of entering the split plain-statement path')
 }
 
 // -- classifySales: order grouping by receipt_number, sale_status
@@ -1319,7 +1899,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     { id: 1, sku: 'SKU-1', barcode: 'BAR-1', name: 'Widget', selling_price_usd: 10, selling_price_khr: 41000, cost_price_usd: 6, cost_price_khr: 24600 },
     { id: 2, sku: 'SKU-2', barcode: 'BAR-2', name: 'Gadget', selling_price_usd: 20, selling_price_khr: 82000, cost_price_usd: 12, cost_price_khr: 49200 },
   ]
-  const defaultBranches = [{ id: 5, name: 'Main Branch' }]
+  const defaultBranches = [{ id: 5, name: 'Shop', is_active: 1 }]
   const defaultBatches = [{ id: 9, variant_product_id: 1, lot_code: 'LOT-A', expiry_date: '2027-01-01' }]
 
   const makeFakeDb = (overrides = {}) => {
@@ -1377,16 +1957,37 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   }
 
   // 2b) A human-readable product name is a safe fallback only when it is
-  // unique. This makes the template usable without barcodes while never
-  // guessing between two catalog records sharing a name.
+  // unique -- OR when every same-name candidate's barcode is broken (non-
+  // numeric/word/too-short), per the Sep 15 2026 ruling ("if both is empty
+  // merge into one empty"): two BROKEN-barcode rows sharing a name are one
+  // identity, not an ambiguity, so the name-only fallback resolves them via
+  // the same real-barcode-first/stock/id winner ranking used elsewhere. Two
+  // DISTINCT REAL barcodes sharing a name remain genuinely ambiguous and
+  // must still error rather than guess.
   {
     const db = makeFakeDb()
     const results = await classifySales(db, [row({ receipt_number: 'R-2b', name: 'Gadget', quantity: 1 }, 1)], null)
     assert.strictEqual(results[0].data.items[0].product_id, 2, 'unique product name matches when sku/barcode are blank')
 
-    const ambiguousDb = makeFakeDb({ products: [...defaultProducts, { ...defaultProducts[0], id: 3, sku: 'SKU-3', barcode: 'BAR-3' }] })
-    const ambiguous = await classifySales(ambiguousDb, [row({ receipt_number: 'R-2c', name: 'Widget', quantity: 1 }, 1)], null)
-    assert.strictEqual(ambiguous[0].action, 'error', 'an ambiguous product name must not guess')
+    // BAR-1/BAR-3 are both word-shaped (non-numeric), so both are BROKEN
+    // under isRealBarcode -- the wildcard rule collapses them into one
+    // identity instead of leaving the name-only match ambiguous.
+    const wildcardDb = makeFakeDb({ products: [...defaultProducts, { ...defaultProducts[0], id: 3, sku: 'SKU-3', barcode: 'BAR-3' }] })
+    const wildcard = await classifySales(wildcardDb, [row({ receipt_number: 'R-2c', name: 'Widget', quantity: 1 }, 1)], null)
+    assert.strictEqual(wildcard[0].action, 'create', 'two broken/word barcodes sharing a name are one identity, not an ambiguity')
+
+    // '600001'/'700001' are both REAL (all-digit, >=6 digits) and distinct --
+    // a genuine sibling pair, so the name-only fallback must still refuse to
+    // guess between them.
+    const ambiguousDb = makeFakeDb({
+      products: [
+        { ...defaultProducts[0], barcode: '600001' },
+        defaultProducts[1],
+        { ...defaultProducts[0], id: 3, sku: 'SKU-3', barcode: '700001' },
+      ],
+    })
+    const ambiguous = await classifySales(ambiguousDb, [row({ receipt_number: 'R-2d', name: 'Widget', quantity: 1 }, 1)], null)
+    assert.strictEqual(ambiguous[0].action, 'error', 'an ambiguous product name (two distinct real barcodes) must not guess')
   }
 
   // 3) unknown sku/barcode -> the whole order errors (one bad line spoils
@@ -1452,37 +2053,126 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   }
 
   // 8) batch_label matching an existing active lot for that exact product
-  // resolves batch_id + carries its expiry_date; a label that matches no
-  // batch (or matches a DIFFERENT product's lot) leaves batch_id null
-  // rather than erroring -- an unmatched lot is not a blocking problem, it
-  // just means the restock (if any) lands at the branch level only.
+  // resolves batch_id + preserves its supplied label and expiry. Unknown
+  // or wrong-product labels refuse the receipt rather than becoming NULL.
   {
     const db = makeFakeDb()
     const matched = await classifySales(db, [row({ receipt_number: 'R-8', sku: 'SKU-1', quantity: 1, batch_label: 'LOT-A', sale_status: 'returned' }, 1)], null)
     assert.strictEqual(matched[0].data.items[0].batch_id, 9)
+    assert.strictEqual(matched[0].data.items[0].batch_label, 'LOT-A')
     assert.strictEqual(matched[0].data.items[0].batch_expiry_date, '2027-01-01')
 
     const unmatched = await classifySales(db, [row({ receipt_number: 'R-8b', sku: 'SKU-1', quantity: 1, batch_label: 'LOT-ZZZ', sale_status: 'returned' }, 1)], null)
-    assert.strictEqual(unmatched[0].data.items[0].batch_id, null, 'unmatched lot code does not error, just imports with no batch link')
+    assert.strictEqual(unmatched[0].action, 'error', 'an explicit unknown lot refuses the receipt')
+    assert.match(unmatched[0].message, /LOT-ZZZ/)
 
     const wrongProduct = await classifySales(db, [row({ receipt_number: 'R-8c', sku: 'SKU-2', quantity: 1, batch_label: 'LOT-A', sale_status: 'returned' }, 1)], null)
-    assert.strictEqual(wrongProduct[0].data.items[0].batch_id, null, "LOT-A belongs to product 1's batch, not product 2's -- must not cross-match")
+    assert.strictEqual(wrongProduct[0].action, 'error', "LOT-A belongs to product 1's batch, so product 2's receipt must be refused")
+
+    const blank = await classifySales(db, [row({ receipt_number: 'R-8d', sku: 'SKU-1', quantity: 1, sale_status: 'returned' }, 1)], null)
+    assert.strictEqual(blank[0].action, 'create', 'a genuinely blank lot remains an allowed unallocated historical line')
+    assert.strictEqual(blank[0].data.items[0].batch_id, null)
+
+    const ambiguousBatches = [
+      ...defaultBatches,
+      { id: 10, variant_product_id: 1, lot_code: ' lot-a ', expiry_date: '2028-01-01' },
+    ]
+    for (const orderedBatches of [ambiguousBatches, [...ambiguousBatches].reverse()]) {
+      const ambiguousBatch = await classifySales(
+        makeFakeDb({ batches: orderedBatches }),
+        [row({ receipt_number: 'R-8e', sku: 'SKU-1', quantity: 1, batch_label: 'LOT-A' }, 1)],
+        null,
+      )
+      assert.strictEqual(ambiguousBatch[0].action, 'error', 'normalized duplicate lots must never select by database row order')
+      assert.match(ambiguousBatch[0].message, /ambiguous/)
+    }
   }
 
-  // 9) a named branch that matches an existing branch resolves branch_id
-  // immediately (mirroring classifyProducts/classifyInventory); a branch
-  // name with no match yet sets branch_name_pending instead of erroring,
-  // to be created at apply time by the shared resolveAndCreateBranches --
-  // same three-case rule those two already use.
+  // 4a-ambiguity) Exact names are not unique in legacy data. The database
+  // may return either row first, so classification must expose a stable,
+  // sorted candidate list and refuse until the reviewer pins one id.
+  {
+    const classifyContactsForAmbiguity = moduleObj.exports.classifyContacts
+    const makeContactDb = (records) => ({
+      prepare: (sql) => ({ all: async () => String(sql).includes('portal_accounts') ? [] : records }),
+    })
+    const contactDecisions = (decisionsByRowNumber) => JSON.stringify({ decisionsByRowNumber })
+    const legacyDuplicates = [
+      { id: 32, name: 'Shared Legacy Name', phone: '012000032', membership_number: 'LC-00032' },
+      { id: 31, name: 'Shared Legacy Name', phone: '012000031', membership_number: 'LC-00031' },
+    ]
+    const undecided = await classifyContactsForAmbiguity(makeContactDb(legacyDuplicates), 'customers', [row({ name: 'Shared Legacy Name' }, 1)], null)
+    assert.strictEqual(undecided[0].action, 'error', 'multiple exact-name rows are never resolved by load order')
+    assert.deepStrictEqual(undecided[0].contactMatchCandidates.map((candidate) => candidate.id), [31, 32], 'candidate ids are deterministic')
+    assert.strictEqual(undecided[0].contactMatchTargetInvalid, true)
+
+    const selected = await classifyContactsForAmbiguity(
+      makeContactDb(legacyDuplicates),
+      'customers',
+      [row({ name: 'Shared Legacy Name' }, 1)],
+      contactDecisions({ '1': { action: 'apply', target_existing_id: 31 } }),
+    )
+    assert.strictEqual(selected[0].action, 'update')
+    assert.strictEqual(selected[0].existingId, 31, 'the explicit reviewed target, not array order, owns the update')
+
+    const drifted = await classifyContactsForAmbiguity(
+      makeContactDb([{ ...legacyDuplicates[1], name: 'Renamed after review' }, legacyDuplicates[0]]),
+      'customers',
+      [row({ name: 'Shared Legacy Name' }, 1)],
+      contactDecisions({ '1': { action: 'apply', target_existing_id: 31 } }),
+    )
+    assert.strictEqual(drifted[0].action, 'error', 'a selected id that left the live candidate set is refused')
+    assert.strictEqual(drifted[0].contactMatchTargetInvalid, true)
+    assert.match(drifted[0].message, /no longer a current match/)
+
+    for (const invalidTarget of [true, [31], '31']) {
+      const invalid = await classifyContactsForAmbiguity(
+        makeContactDb(legacyDuplicates),
+        'customers',
+        [row({ name: 'Shared Legacy Name' }, 1)],
+        contactDecisions({ '1': { action: 'apply', target_existing_id: invalidTarget } }),
+      )
+      assert.strictEqual(invalid[0].action, 'error', `non-number target ${JSON.stringify(invalidTarget)} must not select a contact`)
+      assert.strictEqual(invalid[0].existingId, null)
+      assert.strictEqual(invalid[0].contactMatchTargetInvalid, true)
+    }
+  }
+
+  // 9) only the active canonical Shop can carry a historical sale. Unknown,
+  // Warehouse, and inactive Shop names refuse before apply has any opportunity
+  // to create/backfill a branch or mutate stock. A legacy blank branch safely
+  // defaults only when exactly one active Shop exists.
   {
     const db = makeFakeDb()
-    const known = await classifySales(db, [row({ receipt_number: 'R-9', sku: 'SKU-1', quantity: 1, branch: 'Main Branch' }, 1)], null)
+    const known = await classifySales(db, [row({ receipt_number: 'R-9', sku: 'SKU-1', quantity: 1, branch: 'Shop' }, 1)], null)
     assert.strictEqual(known[0].data.branch_id, 5)
     assert.strictEqual(known[0].data.branch_name_pending, undefined)
 
     const unknown = await classifySales(db, [row({ receipt_number: 'R-9b', sku: 'SKU-1', quantity: 1, branch: 'New Branch' }, 1)], null)
-    assert.strictEqual(unknown[0].data.branch_id, null)
-    assert.strictEqual(unknown[0].data.branch_name_pending, 'New Branch')
+    assert.strictEqual(unknown[0].action, 'error')
+    assert.match(unknown[0].message, /New Branch/)
+    assert.strictEqual(unknown[0].data.branch_name_pending, undefined)
+
+    const warehouseDb = makeFakeDb({ branches: [{ id: 5, name: 'Shop', is_active: 1 }, { id: 6, name: 'Warehouse', is_active: 1 }] })
+    const warehouse = await classifySales(warehouseDb, [row({ receipt_number: 'R-9c', sku: 'SKU-1', quantity: 1, branch: 'Warehouse' }, 1)], null)
+    assert.strictEqual(warehouse[0].action, 'error')
+
+    const inactiveDb = makeFakeDb({ branches: [{ id: 5, name: 'Shop', is_active: 0 }] })
+    const inactive = await classifySales(inactiveDb, [row({ receipt_number: 'R-9d', sku: 'SKU-1', quantity: 1, branch: 'Shop' }, 1)], null)
+    assert.strictEqual(inactive[0].action, 'error')
+
+    const duplicateShopDb = makeFakeDb({ branches: [{ id: 5, name: 'Shop', is_active: 1 }, { id: 7, name: ' shop ', is_active: 1 }] })
+    const duplicateShop = await classifySales(duplicateShopDb, [row({ receipt_number: 'R-9-duplicate', sku: 'SKU-1', quantity: 1, branch: 'Shop' }, 1)], null)
+    assert.strictEqual(duplicateShop[0].action, 'error', 'two active Shop rows are ambiguous; load order must not select one')
+    assert.strictEqual(duplicateShop[0].data.branch_id, undefined)
+
+    const blankBranch = await classifySales(db, [row({ receipt_number: 'R-9e', sku: 'SKU-1', quantity: 1 }, 1)], null)
+    assert.strictEqual(blankBranch[0].action, 'create')
+    assert.strictEqual(blankBranch[0].data.branch_id, 5)
+
+    const noShopDb = makeFakeDb({ branches: [{ id: 6, name: 'Warehouse', is_active: 1 }] })
+    const noShop = await classifySales(noShopDb, [row({ receipt_number: 'R-9f', sku: 'SKU-1', quantity: 1 }, 1)], null)
+    assert.strictEqual(noShop[0].action, 'error')
   }
 
   // 10) order_reference is still accepted as a fallback grouping key for a
@@ -1567,11 +2257,19 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       { id: 101, name: 'Dara', phone: '012345678' },
       { id: 102, name: 'Dara', phone: '099999999' }, // ambiguous name, different customer
       { id: 103, name: 'Sreymom', phone: null },
+      { id: 104, name: 'General', phone: null, is_anonymous: 1 },
+      { id: 105, name: 'General', phone: '088123456', is_anonymous: 0 },
     ]
     const db = makeFakeDb({ customers })
 
     const byPhone = await classifySales(db, [row({ receipt_number: 'R-12a', sku: 'SKU-1', quantity: 1, customer_name: 'Someone Else', customer_phone: '012-345-678' }, 1)], null)
     assert.strictEqual(byPhone[0].data.customer_id, 101, 'phone match (formatting-tolerant) resolves customer_id even when the name on the row differs from what is on file')
+    assert.deepStrictEqual({
+      basis: byPhone[0].data.customer_match_basis,
+      key: byPhone[0].data.customer_match_key,
+      name: byPhone[0].data.customer_match_name_snapshot,
+      phone: byPhone[0].data.customer_match_phone_snapshot,
+    }, { basis: 'phone', key: '012345678', name: 'Dara', phone: '012345678' })
 
     const byName = await classifySales(db, [row({ receipt_number: 'R-12b', sku: 'SKU-1', quantity: 1, customer_name: 'Sreymom' }, 1)], null)
     assert.strictEqual(byName[0].data.customer_id, 103, 'unambiguous name match resolves customer_id when no phone is given')
@@ -1581,6 +2279,39 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 
     const noMatch = await classifySales(db, [row({ receipt_number: 'R-12d', sku: 'SKU-1', quantity: 1, customer_name: 'Nobody On File', customer_phone: '011000000' }, 1)], null)
     assert.strictEqual(noMatch[0].data.customer_id, null, 'no phone/name match still imports fine, just with no customer_id -- not a new error case')
+
+    const ambiguousGeneral = await classifySales(db, [row({ receipt_number: 'R-12e', sku: 'SKU-1', quantity: 1, customer_name: 'General', customer_phone: '' }, 1)], null)
+    assert.strictEqual(ambiguousGeneral[0].data.customer_id, null, 'blank-phone General must not name-match the real profile when an explicit anonymous identity shares that name')
+    assert.strictEqual(ambiguousGeneral[0].data.customer_name, 'General', 'ambiguous name-only evidence remains historical free text rather than being fabricated as anonymous')
+
+    const phoneGeneral = await classifySales(db, [row({ receipt_number: 'R-12f', sku: 'SKU-1', quantity: 1, customer_name: 'General', customer_phone: '088-123-456' }, 1)], null)
+    assert.strictEqual(phoneGeneral[0].data.customer_id, 105, 'an exact real-profile phone remains authoritative even when the display name is shared with General')
+
+    const explicitAnonymousId = await classifySales(db, [row({ receipt_number: 'R-12g', sku: 'SKU-1', quantity: 1, customer_id: 104, customer_name: 'General', customer_phone: '088-123-456' }, 1)], null)
+    assert.strictEqual(explicitAnonymousId[0].data.customer_id, null)
+    assert.strictEqual(explicitAnonymousId[0].data.customer_name, null)
+    assert.strictEqual(explicitAnonymousId[0].data.customer_phone, null)
+    assert.strictEqual(explicitAnonymousId[0].data.customer_is_anonymous, 1, 'an explicit marked source normalizes to canonical General even when another profile phone is present')
+
+    const duplicatePhoneCustomers = [
+      { id: 106, name: 'First phone owner', phone: '077 123 456' },
+      { id: 107, name: 'Second phone owner', phone: '077-123-456' },
+    ]
+    for (const ordered of [duplicatePhoneCustomers, [...duplicatePhoneCustomers].reverse()]) {
+      const duplicatePhone = await classifySales(makeFakeDb({ customers: ordered }), [row({
+        receipt_number: 'R-12h', sku: 'SKU-1', quantity: 1,
+        customer_name: 'First phone owner', customer_phone: '077123456',
+      }, 1)], null)
+      assert.strictEqual(duplicatePhone[0].data.customer_id, null, 'a duplicated normalized phone stays unlinked regardless of customer row order')
+      assert.strictEqual(duplicatePhone[0].data.customer_match_basis, null, 'an ambiguous phone must not fall back to a matching name')
+    }
+
+    const invalidPhone = await classifySales(makeFakeDb({ customers: [{ id: 108, name: 'Exact Name', phone: '012345678' }] }), [row({
+      receipt_number: 'R-12i', sku: 'SKU-1', quantity: 1,
+      customer_name: 'Exact Name', customer_phone: 'not-a-phone',
+    }, 1)], null)
+    assert.strictEqual(invalidPhone[0].data.customer_id, null, 'a supplied nonnumeric phone must not fall back to an exact name')
+    assert.strictEqual(invalidPhone[0].data.customer_match_basis, null)
   }
 
   // 13) Track F parity gap (part 70): cashier_id/delivery_contact_id
@@ -1780,7 +2511,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // real UPDATE write, which both read off this same object).
 {
   const { classifyProducts } = moduleObj.exports
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }]) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Shop', is_default: 1 }]) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
@@ -1885,7 +2616,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // test file doesn't have -- not covered here, flagged in progress.md.
 {
   const { classifyProducts } = moduleObj.exports
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }]) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Shop', is_default: 1 }]) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
@@ -2008,7 +2739,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
         all: async () => {
           if (/FROM import_job_files/.test(sql)) return []
           if (/FROM products/.test(sql)) return []
-          if (/FROM branches/.test(sql)) return [{ id: 1, name: 'Main Branch', is_default: 1 }]
+          if (/FROM branches/.test(sql)) return [{ id: 1, name: 'Shop', is_default: 1 }]
           return []
         },
       }),
@@ -2033,7 +2764,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
         all: async () => {
           if (/FROM import_job_files/.test(sql)) return []
           if (/FROM products/.test(sql)) return []
-          if (/FROM branches/.test(sql)) return [{ id: 1, name: 'Main Branch', is_default: 1 }]
+          if (/FROM branches/.test(sql)) return [{ id: 1, name: 'Shop', is_default: 1 }]
           return []
         },
       }),
@@ -2062,12 +2793,12 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 
   // Pure helper behavior first.
   {
-    const data = { cost_price_usd: 0, cost_price_khr: 0, selling_price_usd: 45, special_price_usd: 0 }
-    const match = { cost_price_usd: 38, cost_price_khr: 155800, selling_price_usd: 45, special_price_usd: 40 }
+    const data = { cost_price_usd: 0, cost_price_khr: 0, selling_price_usd: 45, wholesale_price_usd: 0 }
+    const match = { cost_price_usd: 38, cost_price_khr: 155800, selling_price_usd: 45, wholesale_price_usd: 40 }
     preserveExistingMoneyOnBlankCells(data, match, { name: 'X', selling_price_usd: '45' })
     assert.strictEqual(data.cost_price_usd, 38, 'blank cost cell must keep the existing cost')
     assert.strictEqual(data.cost_price_khr, 155800, 'blank khr cost cell must keep the existing khr cost')
-    assert.strictEqual(data.special_price_usd, 40, 'blank VIP cell on a matched row must keep the existing VIP price')
+    assert.strictEqual(data.wholesale_price_usd, 40, 'blank wholesale cell on a matched row must keep the existing wholesale price')
     assert.strictEqual(data.selling_price_usd, 45, 'provided selling cell is untouched')
   }
   {
@@ -2087,7 +2818,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   }
 
   // End-to-end through the real classify: matched row, blank cost cell.
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }]) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Shop', is_default: 1 }]) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []

@@ -33,8 +33,36 @@ fs.writeFileSync(tsPath, stripped)
 // pure dependency in so the isolated compile resolves and emits it.
 const winPath = path.join(tmpDir, 'businessDateWindow.ts')
 fs.writeFileSync(winPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+// P3-L5: salesAnalytics.ts now imports ./removalLosses (stock removed entirely,
+// priced at cost). It is dependency-free, so copying the real file in is enough.
+fs.writeFileSync(path.join(tmpDir, 'removalLosses.ts'), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'removalLosses.ts'), 'utf8'))
+// Shared per-isolate PRAGMA table_info() memoization reportTableColumns now
+// delegates to; dependency-free, so copying the real file in is enough.
+const schemaProbePath = path.join(tmpDir, 'schemaProbe.ts')
+fs.writeFileSync(schemaProbePath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'schemaProbe.ts'), 'utf8'))
+const moneyPath = path.join(tmpDir, 'moneyPrecision.ts')
+const reportMoneyPath = path.join(tmpDir, 'reportMoneyPrecision.ts')
+const customerReturnPath = path.join(tmpDir, 'customerReturnEntitlement.ts')
+const refundPrecisionPath = path.join(tmpDir, 'refundMoneyPrecision.ts')
+const saleMoneyPath = path.join(tmpDir, 'saleMoneyPrecision.ts')
+fs.writeFileSync(moneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'moneyPrecision.ts'), 'utf8'))
+fs.writeFileSync(reportMoneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'reportMoneyPrecision.ts'), 'utf8'))
+// salesAnalytics.ts (cc8b1e8d) recognizes reviewed legacy sale rounding through the
+// real sale money contract; it depends only on moneyPrecision, copied above.
+fs.writeFileSync(saleMoneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'saleMoneyPrecision.ts'), 'utf8'))
+// This legacy formula harness does not invoke the scalar snapshot reader. Give
+// its newly imported return helper a fail-closed compile stub; the native
+// reader test loads and exercises the real helper and snapshots end to end.
+fs.writeFileSync(customerReturnPath, `
+export type CustomerReturnRefundSnapshotV1 = any
+export function parseCustomerReturnRefundSnapshot(): never { throw new Error('reader_not_available_in_formula_harness') }
+export function prorateCustomerReturnMoney4(): never { throw new Error('reader_not_available_in_formula_harness') }
+`)
+fs.writeFileSync(refundPrecisionPath, `
+export function validateRefundMoneySnapshot(): never { throw new Error('reader_not_available_in_formula_harness') }
+`)
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${schemaProbePath} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundPrecisionPath} ${saleMoneyPath}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })
@@ -49,14 +77,42 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
     membership_discount_usd: 2,
     tax_usd: 4,
     delivery_usd: 6,        // customer-paid delivery (already excludes store-paid, per the SQL CASE)
-    store_delivery_usd: 3,  // store-absorbed delivery -- a cost, not revenue
+    store_delivery_usd: 3,  // fee waived by the store -- a memo, not revenue or a second cost
   }
-  const totals = lib.deriveTotals(level, /* costUsd */ 20)
+  const totals = lib.deriveTotals(level, /* costUsd */ 20, /* returnedCostUsd */ 0, { itemDiscountUsd: 0 })
   assert.equal(totals.discount_usd, 7, 'discount_usd = store + membership')
   assert.equal(totals.revenue_usd, 93, 'revenue_usd = gross_sales - discount (excludes tax/delivery)')
   assert.equal(totals.collected_total_usd, 103, 'collected_total = revenue + tax + customer-paid delivery')
-  assert.equal(totals.profit_usd, 70, 'profit = revenue - cost - store-paid delivery (93 - 20 - 3)')
+  // profit = revenue - cost + what delivery is worth (93 - 20 + 6).
+  //
+  // Was 70 = 93 - 20 - 3, which did two wrong things at once: it subtracted the
+  // $3 fee the shop WAIVED -- money it never had, and already absent from the
+  // $93 -- and it ignored the $6 the customer actually PAID for delivery. This
+  // level supplies no courier cost, so delivery contributes its full $6 here;
+  // where a courier payment is recorded it comes straight back off.
+  assert.equal(totals.profit_usd, 79, 'profit = revenue - cost + delivery net (93 - 20 + 6)')
+  assert.equal(totals.delivery_net_usd, 6, 'delivery contributes collected-minus-paid-out, once')
+  assert.equal(totals.store_delivery_usd, 3, 'the waived fee is still REPORTED -- it just is not a cost')
+  assert.notEqual(totals.profit_usd, 70, 'the waived fee must not be subtracted a second time')
   assert.equal(totals.avg_order_usd, Math.round((93 / 3) * 100) / 100, 'avg_order = revenue / tx_count')
+}
+
+// The store-waived fee is a memo, not a second courier payout. With $2 charged
+// to the customer and $4 actually paid to the courier, delivery contributes
+// -$2. A separate $2 store-paid memo must not turn that into -$4.
+{
+  const totals = lib.deriveTotals({
+    tx_count: 1,
+    gross_sales_usd: 20,
+    recognized_net_usd: 20,
+    recognized_delivery_usd: 2,
+    recognized_delivery_cost_usd: 4,
+    store_delivery_usd: 2,
+    recognized_store_delivery_usd: 2,
+  }, 5, 0, { itemDiscountUsd: 0 })
+  assert.equal(totals.delivery_net_usd, -2, 'delivery contribution = customer charge (2) - actual courier cost (4)')
+  assert.equal(totals.profit_usd, 13, 'profit uses the -2 delivery contribution exactly once')
+  assert.equal(totals.store_delivery_usd, 2, 'store-paid delivery remains visible as a memo')
 }
 
 // ---- deriveTotals: the fan-out bug this replaces can't reproduce here ----
@@ -76,30 +132,39 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
     store_delivery_usd: 0,
   }
   const realCostAcrossThreeItems = 12 + 8 + 4 // three distinct line costs, genuinely summed
-  const totals = lib.deriveTotals(oneSaleThreeItems, realCostAcrossThreeItems)
+  const totals = lib.deriveTotals(oneSaleThreeItems, realCostAcrossThreeItems, 0, { itemDiscountUsd: 0 })
   assert.equal(totals.revenue_usd, 50, 'revenue for a multi-item sale must equal its real subtotal, not subtotal * item_count')
   assert.equal(totals.tax_usd, 5, 'tax for a multi-item sale must not be multiplied by item count')
   assert.equal(totals.cost_usd, 24, 'cost is a genuine per-item sum (12+8+4), unrelated to the fan-out bug')
   assert.equal(totals.profit_usd, 26, 'profit = revenue - cost (50 - 24), not deflated/inflated by item count')
 }
 
-// ---- P6: delivery actual cost is display-only and never moves profit ----
+// ---- P6: delivery contributes to profit, once: charged minus paid out ----
+// 0068 recorded the courier cost but deliberately left it out of profit, saying
+// folding it in "is its own explicit decision later". Sep 4 2026 is that
+// decision (owner: "make sure the calculation for delivery fees are all scoped
+// in"). Note the figures were already right here -- delivery_margin_usd was
+// computing 12 - 9 = 3 and simply not reaching profit.
 {
   const level = {
     tx_count: 4, gross_sales_usd: 100, store_discount_usd: 0, membership_discount_usd: 0,
     tax_usd: 0, delivery_usd: 12, store_delivery_usd: 3,
     delivery_actual_cost_usd: 9, delivery_actual_cost_count: 3, delivery_sale_count: 4,
   }
-  const totals = lib.deriveTotals(level, 20)
+  const totals = lib.deriveTotals(level, 20, 0, { itemDiscountUsd: 0 })
   assert.equal(totals.delivery_actual_cost_usd, 9, 'actual courier cost sums straight through')
   assert.equal(totals.delivery_margin_usd, 3, 'margin = customer-charged delivery (12) - actual cost (9)')
   assert.equal(totals.delivery_actual_cost_count, 3, 'how many sales actually recorded a cost')
   assert.equal(totals.delivery_sale_count, 4, 'vs how many deliveries there were -- the gap is visible')
-  assert.equal(totals.profit_usd, 77, 'profit stays revenue - cost - store-paid delivery (100-20-3): actual cost is display-only until an explicit decision folds it in')
+  assert.equal(totals.delivery_net_usd, 3, 'the contribution is the charged fee (12) less the courier cost (9)')
+  assert.equal(totals.profit_usd, 83, 'profit = revenue - cost + delivery net (100 - 20 + 3)')
+  assert.equal(totals.profit_usd - totals.delivery_net_usd, 80, 'without delivery it would be 100 - 20')
+  assert.notEqual(totals.profit_usd, 77, 'the WAIVED 3 must not be subtracted -- it was never collected')
+  assert.notEqual(totals.profit_usd, 92, 'and the charged 12 must not arrive without its 9 of cost')
 }
 {
   // No actual costs recorded at all (every historical sale): zeros, not NaN.
-  const totals = lib.deriveTotals({ tx_count: 1, gross_sales_usd: 10, delivery_usd: 2 }, 0)
+  const totals = lib.deriveTotals({ tx_count: 1, gross_sales_usd: 10, delivery_usd: 2 }, 0, 0, { itemDiscountUsd: 0 })
   assert.equal(totals.delivery_actual_cost_usd, 0)
   assert.equal(totals.delivery_margin_usd, 2)
   assert.equal(totals.delivery_actual_cost_count, 0)

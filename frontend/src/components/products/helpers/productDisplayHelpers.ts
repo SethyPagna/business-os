@@ -1,5 +1,6 @@
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../../utils/promotionRules.ts'
+import { DEFAULT_LOW_STOCK_CONFIG, resolveStockTier, type LowStockConfig } from '../../../utils/lowStockSettings.ts'
 
 type StockStatus = 'out_of_stock' | 'low_stock' | 'in_stock'
 
@@ -49,11 +50,19 @@ interface BuildProductRowDisplayStateOptions {
   getBranchSummaryLabel?: (product: ProductRecord) => string
   getBrandColor?: (brand: unknown) => string
   t?: (key: string, fallback?: string) => string
+  lowStock?: LowStockConfig
 }
 
 interface ProductBranchSummaryOptions {
   branchFilter?: unknown
   getBranchQty?: (entry: ProductRecord, branchFilter?: unknown) => unknown
+  // The owner low-stock switch/amount/scope. This helper stays PURE (it is
+  // called from a plain function and from tests, not from a hook), so the
+  // config is handed in by the page that has AppContext rather than read
+  // here. The default is the exact behaviour this replaced -- on, per
+  // product, fall back to 10 -- so an unpassed config can only ever mean
+  // "same as before", never a silently different colour.
+  lowStock?: LowStockConfig
 }
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -162,11 +171,10 @@ export function buildProductBranchSummaryLabel(product: ProductRecord, branchNam
 export function getProductStockStatus(product: ProductRecord, {
   branchFilter = 'all',
   getBranchQty = (entry) => entry?.stock_quantity,
+  lowStock = DEFAULT_LOW_STOCK_CONFIG,
 }: ProductBranchSummaryOptions = {}): StockStatus {
   const qty = branchFilter !== 'all' ? getBranchQty(product, branchFilter) : product?.stock_quantity
-  if (toNumber(qty) <= toNumber(product?.out_of_stock_threshold)) return 'out_of_stock'
-  if (toNumber(qty) <= toNumber(product?.low_stock_threshold, 10)) return 'low_stock'
-  return 'in_stock'
+  return resolveStockTier(lowStock, toNumber(qty), product?.low_stock_threshold, product?.out_of_stock_threshold)
 }
 
 function buildRowPromotion(product: ProductRecord, exchangeRate: number, promotionRules: readonly PromotionRule[]) {
@@ -202,6 +210,7 @@ export function buildProductRowDisplayState(product: ProductRecord, {
   getBrandColor = () => '',
   t = (key, fallback) => fallback || key,
   promotionRules = [],
+  lowStock = DEFAULT_LOW_STOCK_CONFIG,
 }: BuildProductRowDisplayStateOptions = {}) {
   const costUsd = toNumber(product?.cost_price_usd)
   const costKhr = toNumber(product?.cost_price_khr)
@@ -209,7 +218,7 @@ export function buildProductRowDisplayState(product: ProductRecord, {
   const marginUsd = sellingUsd - costUsd
   const marginPct = sellingUsd > 0 ? (marginUsd / sellingUsd * 100) : 0
   const qty = branchFilter !== 'all' ? getBranchQty(product, branchFilter) : product?.stock_quantity
-  const stockStatus = getProductStockStatus(product, { branchFilter, getBranchQty })
+  const stockStatus = getProductStockStatus(product, { branchFilter, getBranchQty, lowStock })
   const selectedBranchName = branchFilter !== 'all' ? branchNameById.get(String(branchFilter)) : ''
   const branchSummaryLabel = branchFilter === 'all' ? getBranchSummaryLabel(product) : ''
   const compactMeta = [

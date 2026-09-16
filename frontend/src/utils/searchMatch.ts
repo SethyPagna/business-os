@@ -214,10 +214,26 @@ function typoBudgetForLength(length: number): number {
 // an exact match, a prefix/substring either direction (covers partial
 // typing and simple pluralization), or a small bounded edit distance
 // (covers genuine typos/transpositions).
+// The reverse-containment branch below (a typed word CONTAINING a stored
+// one) exists for the "typed more than is stored" case -- "lipsticks"
+// finding "lipstick", "9piece" finding "piece". It must not fire on a
+// stored word so short that it appears inside almost anything: a scanned
+// 13-digit barcode contains "1", so every product whose name holds a lone
+// digit or letter -- "Anessa Sunscreen Compact SPF 50+(1)", "Benefit Brow
+// Gel 4" -- came back as a match. Measured live in the Transfer bulk
+// picker on the production snapshot: scanning 3348901486385 returned the
+// ENTIRE loaded catalogue (101 rows) instead of the one product, so the
+// scan widened the list rather than narrowing it. Three characters is the
+// shortest stored token that still carries meaning here (a "9ml"/"75g"
+// size, a "sku" fragment); anything shorter is noise on this side of the
+// comparison and is left to the compact-substring and Levenshtein checks.
+const MIN_REVERSE_CONTAINMENT_LENGTH = 3
+
 function wordsFuzzyMatch(queryWord: string, haystackWord: string): boolean {
   if (!queryWord || !haystackWord) return false
   if (queryWord === haystackWord) return true
-  if (haystackWord.includes(queryWord) || queryWord.includes(haystackWord)) return true
+  if (haystackWord.includes(queryWord)) return true
+  if (haystackWord.length >= MIN_REVERSE_CONTAINMENT_LENGTH && queryWord.includes(haystackWord)) return true
   const budget = Math.min(typoBudgetForLength(queryWord.length), typoBudgetForLength(haystackWord.length))
   if (budget <= 0) return false
   return boundedLevenshtein(queryWord, haystackWord, budget) <= budget
@@ -226,17 +242,30 @@ function wordsFuzzyMatch(queryWord: string, haystackWord: string): boolean {
 interface HaystackIndex {
   tokens: string[]
   compact: string
+  barcodeKeys: string[]
 }
 
 // Pre-normalizes one record's searchable text once, so re-checking it
 // against multiple search-term groups (AND/OR mode) doesn't redo the same
 // normalization work per group.
 export function buildHaystackIndex(...fields: unknown[]): HaystackIndex {
-  const normalized = normalizeSearchText(fields.filter((field) => field !== null && field !== undefined).join(' '))
+  const flat = fields.flatMap((field) => (Array.isArray(field) ? field : [field]))
+  const present = flat.filter((field) => field !== null && field !== undefined)
+  const normalized = normalizeSearchText(present.join(' '))
+  const barcodeKeys: string[] = []
+  for (const field of present) {
+    for (const key of barcodeSearchKeys(field)) if (!barcodeKeys.includes(key)) barcodeKeys.push(key)
+  }
   return {
     tokens: tokenizeNormalized(normalized),
     compact: normalized.replace(/\s+/g, ''),
+    barcodeKeys,
   }
+}
+
+function termMatchesBarcode(term: string, index: HaystackIndex): boolean {
+  if (!index.barcodeKeys.length) return false
+  return barcodeSearchKeySetsMatch(searchTermBarcodeKeys(term), index.barcodeKeys)
 }
 
 // A single typed word ("query word") is considered present in the record if
@@ -246,6 +275,17 @@ export function buildHaystackIndex(...fields: unknown[]): HaystackIndex {
 // typos and simple word-order independence), tried against every alias of
 // that word too.
 function queryWordMatchesHaystack(queryWord: string, index: HaystackIndex): boolean {
+  // A valid UPC-E and its UPC-A expansion share a seven-digit stripped
+  // fragment. Once either side is in that checked UPC pair keyspace, a
+  // numeric scan must use the namespaced relation and must not fall through
+  // to compact substring matching (which would make 01234565 match the
+  // unrelated internal code 1234565).
+  if (/^[0-9]{7,14}$/.test(queryWord)) {
+    const queryBarcodeKeys = barcodeSearchKeys(queryWord)
+    const guarded = queryBarcodeKeys.some((key) => UPC_PAIR_KEY_PREFIX.test(key))
+      || index.barcodeKeys.some((key) => UPC_PAIR_KEY_PREFIX.test(key))
+    if (guarded) return barcodeSearchKeySetsMatch(queryBarcodeKeys, index.barcodeKeys)
+  }
   const candidates = aliasCandidates(queryWord)
   for (const candidate of candidates) {
     if (!candidate) continue
@@ -260,6 +300,7 @@ function queryWordMatchesHaystack(queryWord: string, index: HaystackIndex): bool
 // this is what lets "Concealer Cover" find a product literally named
 // "Cover Concealer".
 function termMatchesHaystack(term: string, index: HaystackIndex): boolean {
+  if (termMatchesBarcode(term, index)) return true
   const words = tokenizeNormalized(normalizeSearchText(term))
   if (!words.length) return true
   return words.every((word) => queryWordMatchesHaystack(word, index))
@@ -402,4 +443,194 @@ export function runFuzzyFallbackMatch<TId extends number | string = number>(
     if (matchesSearchTermGroups(candidate.haystack, searchTerms, mode)) matched.push(candidate.id)
   }
   return matched
+}
+
+// --- barcode identity: GTIN-14 / EAN-13 leading-zero folding ------------
+//
+// Mirror of the block at the end of cloudflare/src/lib/searchMatch.ts --
+// read that copy for the full reasoning (a production catalog that stores
+// ~3000 barcodes twice: once as a 14-character GTIN-14 with a leading zero,
+// once as the bare EAN-13 a scanner emits). Kept byte-for-byte equivalent
+// so a client-side re-filter can never drop a row the server matched, or
+// keep one the server would not.
+//
+// The rule: compare the leading-zero-stripped form of both sides; ignore
+// spaces and hyphens; a code shorter than MIN_REAL_BARCODE_LENGTH or made
+// only of zeros is NOT a real barcode (238 production rows share the
+// literal placeholder "0").
+export const MIN_REAL_BARCODE_LENGTH = 4
+
+export function normalizeBarcodeKey(value: unknown): string {
+  const raw = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '')
+  if (raw.length < MIN_REAL_BARCODE_LENGTH) return ''
+  const stripped = raw.replace(/^0+/, '')
+  return stripped
+}
+
+function upcCheckDigit(elevenDigits: string): string {
+  let sum = 0
+  for (let index = 0; index < 11; index += 1) {
+    const digit = elevenDigits.charCodeAt(index) - 48
+    sum += index % 2 === 0 ? digit * 3 : digit
+  }
+  return String((10 - (sum % 10)) % 10)
+}
+
+export function expandUpcE(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!/^[0-9]{8}$/.test(raw) || (raw[0] !== '0' && raw[0] !== '1')) return ''
+  const [d1, d2, d3, d4, d5, d6] = raw.slice(1, 7).split('')
+  const body = d6 === '0' || d6 === '1' || d6 === '2'
+    ? `${d1}${d2}${d6}0000${d3}${d4}${d5}`
+    : d6 === '3'
+      ? `${d1}${d2}${d3}00000${d4}${d5}`
+      : d6 === '4'
+        ? `${d1}${d2}${d3}${d4}00000${d5}`
+        : `${d1}${d2}${d3}${d4}${d5}0000${d6}`
+  const eleven = `${raw[0]}${body}`
+  const upcA = `${eleven}${upcCheckDigit(eleven)}`
+  return raw[7] === upcA[11] ? upcA : ''
+}
+
+export function compressUpcA(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!/^[0-9]+$/.test(raw)) return ''
+  const upcA = raw.length === 13 && raw[0] === '0' ? raw.slice(1) : raw
+  if (upcA.length !== 12 || (upcA[0] !== '0' && upcA[0] !== '1')) return ''
+  const manufacturer = upcA.slice(1, 6)
+  const item = upcA.slice(6, 11)
+  const check = upcA[11]
+  const payloads = [
+    `${manufacturer[0]}${manufacturer[1]}${item[2]}${item[3]}${item[4]}${manufacturer[2]}`,
+    `${manufacturer[0]}${manufacturer[1]}${manufacturer[2]}${item[3]}${item[4]}3`,
+    `${manufacturer[0]}${manufacturer[1]}${manufacturer[2]}${manufacturer[3]}${item[4]}4`,
+    `${manufacturer[0]}${manufacturer[1]}${manufacturer[2]}${manufacturer[3]}${manufacturer[4]}${item[4]}`,
+  ]
+  for (const payload of payloads) {
+    const candidate = `${upcA[0]}${payload}${check}`
+    if (expandUpcE(candidate) === upcA) return candidate
+  }
+  return ''
+}
+
+function upcPairKeys(digits: string): string[] {
+  if (!/^[0-9]+$/.test(digits)) return []
+  if (digits.length === 8) {
+    const upcA = expandUpcE(digits)
+    return upcA ? [`upce:${digits}`, `upca:${upcA}`] : []
+  }
+  if (digits.length < 12) return []
+  const stripped = digits.replace(/^0+/, '')
+  if (stripped.length > 12) return []
+  const upcA = stripped.padStart(12, '0')
+  const upcE = compressUpcA(upcA)
+  return upcE ? [`upca:${upcA}`, `upce:${upcE}`] : []
+}
+
+const UPC_PAIR_KEY_PREFIX = /^upc[ae]:/
+
+function barcodeSearchKeySetsMatch(leftKeys: readonly string[], rightKeys: readonly string[]): boolean {
+  if (!leftKeys.length || !rightKeys.length) return false
+  const sharedPair = leftKeys.some((key) => UPC_PAIR_KEY_PREFIX.test(key) && rightKeys.includes(key))
+  if (sharedPair) return true
+  // A valid UPC-E's stripped 7-digit text is not an identity key. When either
+  // side belongs to the UPC pair keyspace, require the namespaced relation.
+  if (leftKeys.some((key) => UPC_PAIR_KEY_PREFIX.test(key)) || rightKeys.some((key) => UPC_PAIR_KEY_PREFIX.test(key))) return false
+  return leftKeys.some((key) => rightKeys.includes(key))
+}
+
+export function barcodeSearchKeys(value: unknown): string[] {
+  const primary = normalizeBarcodeKey(value)
+  if (!primary) return []
+  const digits = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '')
+  return [...new Set([primary, ...upcPairKeys(digits)])]
+}
+
+export function barcodeKeysMatch(left: unknown, right: unknown): boolean {
+  const leftKeys = barcodeSearchKeys(left)
+  return barcodeSearchKeySetsMatch(leftKeys, barcodeSearchKeys(right))
+}
+
+// The barcode key a typed/scanned search-box value stands for, or '' when
+// the text isn't a lone code (a multi-word query stays a normal search).
+export function searchTermBarcodeKeys(raw: unknown): string[] {
+  const text = String(raw ?? '').trim()
+  if (!text || /[\s,]/.test(text)) return []
+  return barcodeSearchKeys(text)
+}
+
+export function searchTermBarcodeKey(raw: unknown): string {
+  return searchTermBarcodeKeys(raw)[0] || ''
+}
+
+// --- relevance ordering -------------------------------------------------
+//
+// Client mirror of THE ORDERING CONTRACT in
+// cloudflare/src/lib/productSearchQuery.ts. The tier numbers, the
+// normalization on each side of every comparison and the ordering of the
+// branches are deliberately identical, so a picker that re-filters or
+// re-orders in memory lands on the same first row the server would have
+// put first. Divergence here is exactly the reported bug in a different
+// costume: the server ranks the response and the client then shuffles it.
+//
+// A client cannot compute bm25, so within a tier this preserves the order
+// the rows arrived in -- which IS the server's rank for a server-backed
+// picker, and the caller's own stable order for a fully client-side one.
+// That makes the comparator total and the result deterministic, so paging
+// and re-renders never reshuffle equal rows.
+//
+// Never used to auto-select: every picker in this app requires the operator
+// to click the row (a scan fills the search box, the list narrows, the
+// person chooses).
+export const MATCH_TIER_EXACT_BARCODE = 0
+export const MATCH_TIER_EXACT_NAME = 1
+export const MATCH_TIER_NAME_PREFIX = 2
+export const MATCH_TIER_OTHER = 3
+
+export interface RelevanceSortOptions {
+  // false restricts the sort to the barcode tier, leaving name matches in
+  // the order they arrived. Used by sortExactBarcodeFirst below.
+  nameTiers?: boolean
+}
+
+export function searchRelevanceTier(
+  row: { name?: unknown; barcode?: unknown } | null | undefined,
+  rawQuery: unknown,
+  { nameTiers = true }: RelevanceSortOptions = {},
+): number {
+  const queryKeys = searchTermBarcodeKeys(rawQuery)
+  const rowKeys = queryKeys.length ? barcodeSearchKeys(row?.barcode) : []
+  if (barcodeSearchKeySetsMatch(queryKeys, rowKeys)) return MATCH_TIER_EXACT_BARCODE
+  if (!nameTiers) return MATCH_TIER_OTHER
+  const nameKey = normalizeSearchText(rawQuery)
+  if (!nameKey) return MATCH_TIER_OTHER
+  const name = normalizeSearchText(row?.name)
+  if (name === nameKey) return MATCH_TIER_EXACT_NAME
+  if (name.startsWith(nameKey)) return MATCH_TIER_NAME_PREFIX
+  return MATCH_TIER_OTHER
+}
+
+export function sortBySearchRelevance<T extends { name?: unknown; barcode?: unknown }>(
+  rows: readonly T[],
+  rawQuery: unknown,
+  options: RelevanceSortOptions = {},
+): T[] {
+  const source = Array.isArray(rows) ? rows : []
+  const barcodeKey = searchTermBarcodeKey(rawQuery)
+  const nameKey = options.nameTiers === false ? '' : normalizeSearchText(rawQuery)
+  // Nothing to rank by: hand back the caller's order untouched rather than
+  // imposing an arbitrary one.
+  if (!barcodeKey && !nameKey) return source.slice()
+  return source
+    .map((row, index) => ({ row, index, tier: searchRelevanceTier(row, rawQuery, options) }))
+    .sort((a, b) => (a.tier - b.tier) || (a.index - b.index))
+    .map((entry) => entry.row)
+}
+
+// The barcode-tier-only subset, kept because its narrower contract (a
+// non-barcode query changes nothing) is pinned by
+// tests/productPickerBarcodeSearch.test.ts. One implementation, two
+// contracts -- not a second copy of the ordering.
+export function sortExactBarcodeFirst<T extends { barcode?: unknown }>(rows: readonly T[], rawQuery: unknown): T[] {
+  return sortBySearchRelevance(rows as ReadonlyArray<T & { name?: unknown }>, rawQuery, { nameTiers: false })
 }

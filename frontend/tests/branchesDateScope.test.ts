@@ -1,34 +1,67 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
+import './branchProductsSurface.test.ts'
 
 const source = fs.readFileSync(new URL('../src/components/branches/Branches.tsx', import.meta.url), 'utf8')
 const hubSource = fs.readFileSync(new URL('../src/components/branches/BranchesHubPage.tsx', import.meta.url), 'utf8')
 const inventorySource = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
 
-test('Branches exposes one compact standalone date range beside one Export action', () => {
+test('Branches exposes one compact standalone date range and one Export action', () => {
   assert.equal((source.match(/<StatsRangeRow/g) || []).length, 1)
   assert.doesNotMatch(source, /<DateTimeRangePicker/)
   assert.equal((source.match(/onClick=\{\(\) => \{ void openBranchExport\(\) \}\}/g) || []).length, 1)
-  assert.match(source, /showDateRange \? \([\s\S]*?<StatsRangeRow[\s\S]*?actions=\{<>[\s\S]*?branchExportButton[\s\S]*?<\/>\}/)
+  assert.match(source, /showDateRange \? \([\s\S]*?<StatsRangeRow/)
+  assert.match(source, /actions=\{branchExportButton\}/)
 })
 
-test('the hub owns one range and controls both Inventory stats and Branches', () => {
+// N10 reverses the earlier contract this test used to pin. Products showed
+// per-product Net sold / Revenue / COGS / Profit that the Worker already
+// scopes by startDate/endDate, so leaving the tab rangeless did not mean "no
+// dated statistics" -- it meant those columns silently answered all-time
+// while Overview and Transfers answered the picked window. All three data
+// tabs now run off the hub's one clock.
+test('the hub owns ONE range for Overview, Products and Transfers', () => {
   assert.match(hubSource, /const \[sharedDateRange, setSharedDateRange\] = useState<DateTimeRange>/)
-  assert.match(hubSource, /<InventorySection[\s\S]{0,300}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}/)
-  assert.match(hubSource, /<BranchesSection[\s\S]{0,300}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}[\s\S]{0,160}showDateRange=\{!canInventory\}/)
+  assert.match(hubSource, /active === 'products'[\s\S]{0,300}<InventorySection[\s\S]{0,120}hostSection="products"/)
+  const productsMount = hubSource.match(/active === 'products'[\s\S]*?<InventorySection([\s\S]*?)\/>/)?.[1] || ''
+  assert.match(productsMount, /dateRange=\{sharedDateRange\}/)
+  assert.match(productsMount, /onDateRangeChange=\{setSharedDateRange\}/)
+  assert.doesNotMatch(hubSource, /Products uses\s*\n?\s*\/\/ branch\/search scope/, 'the stale rangeless-Products comment is gone')
+  assert.match(hubSource, /<BranchesSection[\s\S]{0,300}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}[\s\S]{0,160}showDateRange/)
   assert.match(hubSource, /view="transfers"[\s\S]{0,180}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}/)
   assert.match(inventorySource, /const stripRange = dateRange \?\? localStripRange/)
   assert.match(inventorySource, /const handleStripRangeChange = onDateRangeChange \?\? setLocalStripRange/)
   assert.match(inventorySource, /range=\{stripRange\} onRangeChange=\{handleStripRangeChange\}/)
+  // The products range row lives in the same sticky wrapper as the search
+  // row, per the app-wide sticky search + date rows convention, and only
+  // when the stats strip is not already drawing that one control.
+  assert.match(inventorySource, /showProductsSection && !showInventoryStats \? \([\s\S]{0,400}<StatsRangeRow/)
+  // Stock cards stay unscoped: the stats key never grows date dimensions.
+  assert.match(inventorySource, /const inventoryStatsScope = JSON\.stringify\(\[branchFilter, deferredSearch, searchMode\]\)/)
 })
 
-test('Branches restores branch-product Inventory and keeps Transfer history separate', () => {
-  assert.match(hubSource, /type BranchesHubSection = 'overview' \| 'inventory' \| 'transfers' \| 'rfid'/)
+// N10 sibling parity: SKU left the Products tab, so the Overview per-branch
+// stock cards must not keep printing it either -- SKU is now shown only on a
+// product's own detail surfaces, nowhere in the Branches hub.
+test('Branches overview stock cards no longer print a SKU line', () => {
+  assert.doesNotMatch(source, /font-mono text-\[10px\] leading-tight text-gray-400">\{product\.sku\}/)
+  assert.doesNotMatch(source, /\{product\.sku \? </, 'no conditional SKU sub-line is rendered in any card')
+  // The two-line rail preserves the original full name, including its suffix.
+  // Native full-tail/keyboard behavior is covered by productNameRail.test.ts.
+  assert.match(source, /className="min-w-0 font-medium text-gray-800 dark:text-gray-200"><ProductNameRail name=\{String\(\(product\.name\) \?\? ''\)\} \/>/, 'the stock card keeps its original product name and typography in the shared rail')
+  assert.doesNotMatch(source, /<ProductNameRail[^>]*(?:truncate|line-clamp-|\.slice\()/, 'the rail must receive full text without a local truncation contract')
+  // The CSV export keeps its SKU column: an extract is data, not screen copy.
+  assert.match(source, /SKU: product\.sku \|\| ''/)
+})
+
+test('Branches keeps branch Overview, product stock and Transfer history separate', () => {
+  assert.match(hubSource, /type BranchesHubSection = 'overview' \| 'products' \| 'transfers' \| 'rfid'/)
   assert.match(hubSource, /id: 'overview'.*'Overview'/)
-  assert.match(hubSource, /id: 'inventory'.*'Inventory'/)
+  assert.match(hubSource, /id: 'products'.*'Products'/)
   assert.match(hubSource, /id: 'transfers'.*trh\('transfer', 'Transfer'\)/)
-  assert.match(hubSource, /active === 'inventory'[\s\S]*view="branches"/)
+  assert.match(hubSource, /active === 'products'[\s\S]*hostSection="products"/)
+  assert.doesNotMatch(hubSource, /active === 'products'[\s\S]{0,500}view="branches"/)
   assert.doesNotMatch(hubSource, /hostSection="movements"/)
   assert.match(hubSource, /focus === 'movements'\) navigateTo\('products'\)/)
   assert.ok((hubSource.match(/showSectionNavigation=\{false\}/g) || []).length >= 2)
@@ -48,10 +81,13 @@ test('the shared branch range scopes both transfer history and its export', () =
   assert.doesNotMatch(source, /transferStartDate|transferEndDate/)
 })
 
-test('embedded Branches removes its duplicate picker but keeps one adaptive Export', () => {
+test('embedded Branches removes its duplicate picker and keeps actions on one row', () => {
   assert.match(source, /\{!showDateRange \? <div className="flex min-w-0 items-stretch gap-1 overflow-x-auto pt-1">[\s\S]*?\{branchExportButton\}/)
-  assert.equal((source.match(/const branchExportButton = \(/g) || []).length, 1)
-  assert.match(hubSource, /showDateRange=\{!canInventory\}/)
+  assert.equal((source.match(/const branchExportButton = canExportBranch \? \(/g) || []).length, 1)
+  assert.ok((hubSource.match(/showDateRange/g) || []).length >= 2)
+  assert.match(source, /\{showDateRange \? <ActionHistoryBar/)
+  assert.match(source, /leading=\{tab === 'branches'[\s\S]*?aria-expanded=\{statsOpen\}/)
+  assert.match(source, /actions=\{branchExportButton\}/)
 })
 
 test('Export follows the visible branch section and transfer remains icon plus label', () => {
@@ -72,6 +108,10 @@ test('Transfer is permission gated and available from both hub-controlled branch
 test('transfer rows use compact traceable references and restrained semantic columns', () => {
   assert.match(source, /function formatTransferReference/)
   assert.match(source, /return value \? `TRF-\$\{value\}` : 'TRF—'/)
+  assert.equal((source.match(/\{formatTransferReference\(transfer\.id\)\}/g) || []).length, 2, 'mobile and desktop rows keep the TRF reference')
+  assert.equal((source.match(/title=\{`Transfer #\$\{transfer\.id\}`\}/g) || []).length, 2, 'both TRF references keep their full-id tooltip')
+  assert.doesNotMatch(source, /formatTransferReference\(transfer\.id\)[\s\S]{0,180}tr\('transfer', 'Transfer'\)/, 'TRF already conveys the record type, so rows do not repeat a Transfer badge or suffix')
+  assert.equal((source.match(/\{formatTransferDate\(transfer\.created_at\)\}/g) || []).length, 2, 'mobile and desktop rows keep the transfer date')
   assert.match(source, /tr\('reference', 'Reference'\)/)
   assert.match(source, /tr\('route', 'Route'\)/)
   assert.match(source, /bg-violet-50\/70/)
@@ -81,6 +121,7 @@ test('transfer rows use compact traceable references and restrained semantic col
   const tableEnd = source.indexOf('</table>', tableStart)
   const transferTable = source.slice(tableStart, tableEnd)
   assert.doesNotMatch(transferTable, /tr\('from_branch', 'From'\)|tr\('to_branch', 'To'\)/)
+  assert.ok((source.match(/<ArrowRight className="h-3 w-3 shrink-0 text-gray-400"/g) || []).length >= 2)
 })
 
 test('transfer pagination keeps the server total and page-size controls', () => {

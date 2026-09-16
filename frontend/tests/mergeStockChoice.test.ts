@@ -1,0 +1,353 @@
+// "What happens when I save one and the other child row also has stock?"
+//
+// Keeping one of a name-twin pair used to fold the discarded row's stock onto
+// the keeper SILENTLY -- including rows the reviewer had explicitly marked
+// Remove -- and the product form's "that name already exists" collision was a
+// dead-end alert(). Merging the stock in and writing it off give OPPOSITE
+// inventory answers, so the operator has to say which, with the real numbers
+// in front of them, on EVERY surface that resolves a twin.
+//
+// This pins the shape of that contract:
+//   1. one shared flow (useMergeStockChoice) -- not three divergent copies;
+//   2. the question is asked through the shared ConfirmDialog, never
+//      window.confirm, and never with an option pre-selected;
+//   3. both dispositions are offered, with the lot/branch/summing behaviour
+//      spelled out and the per-branch stock shown;
+//   4. the price a merge would quietly raise is shown before -> after;
+//   5. all three twin-resolving surfaces route through the shared flow;
+//   6. the transport can carry the answer, and the server's refusal
+//      (stock_choice_required) reaches the UI with its breakdown attached.
+//
+// Run: node tests/mergeStockChoice.test.ts
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+import { costAverageRows, costMoveRows, mergeNeedsConfirmation } from '../src/components/products/mergeConfirmationRule.ts'
+
+const here = dirname(fileURLToPath(import.meta.url))
+const read = (...parts: string[]): string => readFileSync(join(here, '..', 'src', ...parts), 'utf8')
+
+const dialog = read('components', 'products', 'MergeStockChoiceDialog.tsx')
+const hook = read('components', 'products', 'useMergeStockChoice.tsx')
+const duplicatesTab = read('components', 'products', 'ProductDuplicatesTab.tsx')
+const selectedConflictMerge = read('utils', 'selectedConflictMerge.ts')
+const selectedConflictReview = read('components', 'products', 'SelectedConflictMergeReviewModal.tsx')
+const productsPage = read('components', 'products', 'Products.tsx')
+const reviewModal = read('components', 'products', 'MergeDuplicatesReviewModal.tsx')
+const previewValidator = read('components', 'products', 'mergeDuplicatesPreviewResponse.ts')
+const productForm = read('components', 'products', 'forms', 'ProductForm.tsx')
+const transport = read('api', 'productWriteTransport.ts')
+const http = read('api', 'http.ts')
+const en = JSON.parse(read('lang', 'en.json')) as Record<string, string>
+const km = JSON.parse(read('lang', 'km.json')) as Record<string, string>
+
+let failed = 0
+function test(name: string, fn: () => void): void {
+  try { fn(); console.log(`PASS ${name}`) } catch (e) { failed += 1; console.error(`FAIL ${name}`); console.error(e) }
+}
+
+test('the choice is asked through the shared ConfirmDialog, never window.confirm', () => {
+  assert.match(dialog, /import ConfirmDialog from '\.\.\/shared\/ConfirmDialog'/)
+  assert.match(dialog, /<ConfirmDialog/)
+  // Comments discuss window.confirm on purpose (it is what these replaced), so
+  // strip them before looking for a real call.
+  const code = (src: string): string => src.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+  for (const [label, src] of [['dialog', dialog], ['hook', hook], ['duplicates tab', duplicatesTab]] as const) {
+    assert.ok(!/window\.confirm|[^.\w]confirm\(/.test(code(src)), `${label} must not fall back to a native confirm()`)
+  }
+})
+
+test('both dispositions are offered and neither is pre-selected', () => {
+  assert.match(dialog, /value: 'merge'/)
+  assert.match(dialog, /value: 'write_off'/)
+  // Starting unanswered is the point: a pre-selected option would let a
+  // distracted Enter pick a disposition nobody chose.
+  assert.match(dialog, /useState<MergeStockChoice \| null>\(null\)/)
+  assert.match(dialog, /confirmDisabled=\{needsChoice && !choice\}/)
+  assert.match(dialog, /danger=\{choice === 'write_off' \|\| identityDiffers\}/, 'writing stock off is the destructive branch')
+})
+
+test('MERGE explains that same received-date same-branch quantities are ADDED, not replaced', () => {
+  const hint = en.merge_stock_choice_merge_hint
+  assert.ok(hint, 'merge_stock_choice_merge_hint must ship in the pack')
+  assert.match(hint, /received-date code/i)
+  assert.doesNotMatch(hint, /\blot code\b|\bbatch number\b/i)
+  assert.match(hint, /branch/i)
+  assert.match(hint, /added together/i)
+})
+
+test('REMOVE explains the balancing stock movement (reason, who, when)', () => {
+  const hint = en.merge_stock_choice_write_off_hint
+  assert.ok(hint, 'merge_stock_choice_write_off_hint must ship in the pack')
+  assert.match(hint, /stock movement/i)
+  assert.match(hint, /reason/i)
+  assert.match(hint, /ledger/i)
+})
+
+test('the dialog shows the stock the discarded row actually holds, per branch and per received date', () => {
+  assert.match(dialog, /impact\.branches\.map/)
+  assert.match(dialog, /branch\.quantity/)
+  assert.match(dialog, /branch\.lotCount/)
+  assert.match(dialog, /impact\.totalQuantity/)
+  assert.match(dialog, /impact\.lotCount/)
+})
+
+test('a merge that would raise the keeper\'s price says so, before -> after per field', () => {
+  assert.match(dialog, /pricing\?\.changes/)
+  assert.match(dialog, /change\.from/)
+  assert.match(dialog, /change\.to/)
+  // The discounted tier is wholesale_price_*, not the special_price_* pair
+  // migration 0111 zeroed. The dialog labelled the dead pair until N15, so the
+  // one price a merge actually moves showed as a raw column name -- when it
+  // showed at all, since the server's preview named the dead pair too.
+  for (const field of ['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr']) {
+    assert.ok(dialog.includes(field), `${field} must have a label in the price-change table`)
+  }
+  assert.ok(!/special_price_usd: \[/.test(dialog), 'a column zeroed by 0111 must not be labelled as a price')
+  assert.match(hook, /if \(!mergeNeedsConfirmation\(\{ needsChoice, pricing, identity \}\)\)/,
+    'a silent reprice must still stop for confirmation')
+  assert.equal(mergeNeedsConfirmation({
+    needsChoice: false,
+    pricing: { before: {}, after: {}, changes: [{ field: 'selling_price_usd', from: 14, to: 16 }] },
+    identity: { same: true, differs: [] },
+  }), true)
+})
+
+// THE CANONICAL N15 PAIR, as the merge preview actually describes it: one
+// article whose two rows differ only by a leading zero, both costs recorded
+// and close enough to average, no stock on the discarded row, selling prices
+// already equal. Every other gate is quiet on it, so before 2026-09-06 it
+// merged with NO dialog at all -- and the cost the fold wrote (the mean of two
+// figures neither row recorded) was discoverable only afterwards, on the kept
+// row. This is the case that discriminates: the pre-repair gate returns false
+// here, the repaired one returns true.
+const N15_IDENTITY = {
+  same: true,
+  differs: [],
+  costVerdict: 'differs' as const,
+  costFill: [],
+  costBefore: { cost_price_usd: 5, cost_price_khr: 0 },
+  costAfter: { cost_price_usd: 6.45, cost_price_khr: 0 },
+}
+
+test('a merge that AVERAGES a real cost stops for confirmation', () => {
+  assert.equal(mergeNeedsConfirmation({ needsChoice: false, pricing: null, identity: N15_IDENTITY }), true,
+    'the leading-zero twin rewrites the kept row’s cost to $6.45 -- never on the quiet')
+  // ...and the dialog it opens can actually say so: the section is fed by the
+  // SAME function the gate consults, so one cannot be reachable without the
+  // other.
+  assert.deepEqual(costAverageRows(N15_IDENTITY), [{ field: 'cost_price_usd', from: 5, to: 6.45 }])
+  assert.match(dialog, /const costAverages = costAverageRows\(identity\)/)
+  assert.match(dialog, /\{costAverages\.length \? \(/, 'the averaged cost must be rendered before -> after')
+})
+
+test('a merge that changes nothing but the row count still needs no dialog', () => {
+  // The control for the case above: same shape, but the mean lands back on the
+  // keeper's own cost, so there is nothing to show and nothing to ask.
+  assert.equal(mergeNeedsConfirmation({
+    needsChoice: false,
+    pricing: { before: {}, after: {}, changes: [] },
+    identity: { same: true, differs: [], costVerdict: 'same', costFill: [], costBefore: { cost_price_usd: 5 }, costAfter: { cost_price_usd: 5 } },
+  }), false)
+  assert.deepEqual(costAverageRows({ same: true, differs: [], costVerdict: 'differs', costBefore: { cost_price_usd: 5 }, costAfter: { cost_price_usd: 5 } }), [],
+    'a mean equal to the kept cost is not a change')
+  // Stock, a cross-identity difference and a cost FILL each stop it too.
+  assert.equal(mergeNeedsConfirmation({ needsChoice: true, pricing: null, identity: null }), true)
+  assert.equal(mergeNeedsConfirmation({
+    needsChoice: false, pricing: null,
+    identity: { same: false, differs: [{ field: 'barcode', keeper: '123', discarded: '456' }] },
+  }), true)
+  assert.equal(mergeNeedsConfirmation({
+    needsChoice: false, pricing: null,
+    identity: { same: true, differs: [], costVerdict: 'missing', costFill: [{ field: 'cost_price_usd', value: 6.45 }] },
+  }), true)
+})
+
+test('exact-identity twin surfaces use the shared stock choice flow', () => {
+  assert.match(hook, /export function useMergeStockChoice/)
+  for (const [label, src] of [
+    ['Conflicts/duplicates tab', duplicatesTab],
+    ['products list exact-duplicate resolver', productsPage],
+  ] as const) {
+    assert.match(src, /useMergeStockChoice/, `${label} must route through the shared flow`)
+    assert.match(src, /mergeWithChoice\(/, `${label} must merge through mergeWithChoice`)
+    assert.match(src, /\{mergeStockChoiceDialog\}/, `${label} must render the dialog`)
+  }
+  // No surface may reach past the flow and merge without an answer.
+  for (const [label, src] of [['duplicates tab', duplicatesTab], ['products page', productsPage], ['product form', productForm]] as const) {
+    assert.ok(!/mergePossiblySameProducts\(/.test(src), `${label} must not call the raw merge transport directly`)
+  }
+})
+
+test('saving a product into an existing twin offers the merge instead of dead-ending', () => {
+  assert.match(productForm, /duplicateCollisionFrom\(error\)/)
+  assert.match(productForm, /'duplicate_product'/, 'the 409 the server sends is what opens the merge')
+  assert.match(productForm, /setIdentityCollision\(collision\)/)
+  assert.match(productForm, /onReviewIdentityCollision\(productIds\)/)
+  assert.doesNotMatch(productForm, /mergeWithChoice\(/, 'a refused edit must not send the unchanged identity to the exact-pair endpoint')
+})
+
+test('the transport carries the answer and the server refusal keeps its breakdown', () => {
+  assert.match(transport, /stock\?: 'merge' \| 'write_off'/)
+  assert.match(transport, /stock \? \{ keepId, mergeId, stock \} : \{ keepId, mergeId \}/,
+    'an unanswered merge must omit the field so the server can refuse rather than guess')
+  assert.match(transport, /merge-preview/)
+  assert.match(http, /error\.stockImpact = parsed\?\.stockImpact \|\| null/)
+  assert.match(hook, /'stock_choice_required'/, 'the server refusal must reopen the same dialog')
+  // The two refusals that are decisions, not failures: their details must
+  // survive the transport, or the flow can only echo the server's English.
+  assert.match(http, /error\.costOutlier = parsed\?\.costOutlier \|\| null/)
+  assert.match(http, /error\.operationId = parsed\?\.operationId \|\| null/)
+  assert.match(hook, /'cost_outlier_review'/, 'an un-averageable cost pair must be reported, not merged')
+  assert.match(hook, /'stock_session_reversible'/, 'a merge must not break a stock session that can still be undone')
+  assert.match(hook, /localizeRefusal\(t, error\)/, 'and both must reach the operator translated')
+})
+
+test('every new string ships in BOTH packs', () => {
+  const keys = [
+    'merge_stock_choice_title', 'merge_stock_choice_lead', 'merge_stock_choice_lead_empty',
+    'merge_stock_choice_merge', 'merge_stock_choice_merge_hint',
+    'merge_stock_choice_write_off', 'merge_stock_choice_write_off_hint',
+    'merge_stock_choice_note', 'merge_price_change_title', 'merge_price_change_hint',
+    'merge_duplicate_confirm_title', 'bulk_merge_cancelled_count', 'special_price_khr',
+    // N15: the cost a merge writes, and the two refusals.
+    'merge_cost_average_title', 'merge_cost_average_hint',
+    'merge_cost_outlier_refused', 'merge_stock_session_blocked',
+    'wholesale_price', 'wholesale_price_khr', 'product_dup_leading_zero',
+  ]
+  for (const key of keys) {
+    assert.ok(en[key], `en.json is missing ${key}`)
+    assert.ok(km[key], `km.json is missing ${key}`)
+    assert.ok(/[ក-៿]/.test(km[key]), `km.json ${key} is not actually Khmer`)
+  }
+  // The Conflicts hint has to tell reviewers the stock question exists before
+  // they hit it mid-merge.
+  assert.match(en.product_duplicates_hint, /still holds stock/i)
+  assert.ok(/[ក-៿]/.test(km.product_duplicates_hint))
+})
+
+test('a barcode or identity mismatch is NEVER offered in the selected batch', () => {
+  // Name + barcode + cost is the identity rule: a row differing on barcode or
+  // cost is a legitimate sibling child row, not a duplicate. Bulk merge only
+  // ever automates a pair that agrees on all of them (a GTIN-14/EAN-13 leading
+  // zero being the one documented equivalence).
+  const guard = selectedConflictMerge.slice(
+    selectedConflictMerge.indexOf('export function selectedConflictEligibility'),
+    selectedConflictMerge.indexOf('export function chooseSelectedConflictKeeper'),
+  )
+  assert.ok(guard, 'the auto-merge guard must exist')
+  assert.match(guard, /leftName !== rightName/)
+  // COST NO LONGER BLOCKS THE AUTOMATIC PATH, and this assertion is the
+  // reversal of what it pinned before. Until 2026-09-06 the guard refused any
+  // pair whose costs DISAGREED -- the pre-Sep-4 policy, when a different cost
+  // forked a child row. The Sep-4 ruling reversed that ("add different costs
+  // together and divide by the number different costs") and the Worker has
+  // averaged ever since, so the client gate was refusing exactly the case the
+  // owner asked for while POST /merge-duplicates merged the identical pair.
+  // What still refuses is a cost pair too far apart to be one cost: the server
+  // returns 409 cost_outlier_review rather than inventing a mean nobody paid,
+  // so the bulk run must not offer that pair either.
+  assert.ok(!/compareCosts\(a, b\) === 'differs'/.test(guard),
+    'a differing cost is a MERGE under the Sep-4 ruling, not a fork')
+  assert.match(guard, /resolveMergedCostDetail\(products\)\.outliers\.length/,
+    'only an un-averageable cost pair may block the automatic path')
+  // Sep 15 2026 ruling: a leading-zero-equivalent REAL barcode pair still
+  // auto-merges, and now so does a real-vs-broken/empty/word pair (a broken
+  // barcode is a wildcard, never a second identity) -- both judged by the
+  // SHARED barcodeIdentityMatches fold, not plain key equality. Two
+  // DIFFERENT real barcodes still never auto-merge.
+  assert.match(guard, /barcodeIdentityMatches\(left\.barcode, right\.barcode\)/,
+    'only the shared wildcard-aware barcode fold may auto-merge a pair')
+  // Selected-merge is routed exclusively through the durable server-reviewed
+  // group flow (P7 debloat retired the client-side exact-pairs batch preview
+  // that used to call partitionSelectedConflictClusters directly); the server
+  // applies the equivalent eligibility rule per group and reports it back as
+  // group.blocked, rendered by SelectedConflictGroupReviewModal.
+  assert.match(duplicatesTab, /buildSelectedConflictGroupReviewRequest\(targets, createClientRequestId/, 'selected merge must run through the durable group review')
+})
+
+test('a cross-identity merge says which field differs, and is never silent', () => {
+  assert.match(dialog, /identity && !identity\.same && identity\.differs\.length/)
+  for (const field of ['name', 'barcode', 'cost_price_usd', 'cost_price_khr']) {
+    assert.ok(dialog.includes(field), `${field} must have a label in the identity table`)
+  }
+  assert.match(dialog, /diff\.keeper/)
+  assert.match(dialog, /diff\.discarded/)
+  assert.match(dialog, /danger=\{choice === 'write_off' \|\| identityDiffers\}/,
+    'moving stock onto a different-identity row is a destructive-looking decision')
+  // The hook must stop for it even when there is no stock and no price to move.
+  assert.match(hook, /if \(!mergeNeedsConfirmation\(\{ needsChoice, pricing, identity \}\)\)/)
+  assert.ok(en.merge_identity_differs_title && km.merge_identity_differs_title)
+  assert.match(en.merge_stock_choice_merge_cross_identity, /different barcode or cost/i)
+})
+
+test('every child row under the name is swept -- no rows[0], no LIMIT 1', () => {
+  // The list surfaces loop EVERY member/removal rather than acting on the first.
+  assert.match(productsPage, /info\.members\.filter\(\(m\) => Number\(m\.id\) !== Number\(keepId\)\)/)
+  assert.match(productsPage, /for \(const other of others\)/)
+  assert.match(duplicatesTab, /for \(const other of removals\)/)
+})
+
+// THE WHOLE-CATALOG RUN, at both ends. "Merge duplicate products" is the one
+// action that touches the entire catalog at once, and it described itself as
+// row-count bookkeeping: the dry run listed rows and quantities and never the
+// cost the fold averages, and the run reported plain success even when it had
+// refused pairs. The server has sent both since N15 -- costBefore/costAfter
+// and costRefusals per group, costRefusalCount and refusals for the run -- so
+// what is pinned here is that the UI stops dropping them on the floor.
+test('the whole-catalog dry run shows the cost it will write, and what it will refuse', () => {
+  // Behaviour first: the rows the modal renders come from the SAME function
+  // the one-pair dialog uses, so the two cannot describe one fold differently.
+  assert.deepEqual(
+    costMoveRows({ cost_price_usd: 5, cost_price_khr: 0 }, { cost_price_usd: 6.45, cost_price_khr: 0 }),
+    [{ field: 'cost_price_usd', from: 5, to: 6.45 }],
+  )
+  assert.deepEqual(costMoveRows({ cost_price_usd: 5 }, { cost_price_usd: 5 }), [],
+    'a fold that lands on the kept cost is not a change to announce')
+  assert.deepEqual(costMoveRows(undefined, undefined), [], 'an older Worker sends no cost -- show nothing, not NaN')
+  assert.match(reviewModal, /return costMoveRows\(group\.costBefore, group\.costAfter\)/)
+  assert.match(reviewModal, /\{costMoves\(group\)\.map\(\(move\) =>/, 'each group must render its cost before -> after')
+  assert.match(reviewModal, /group\.costRefusals \|\| \[\]/, 'and the rows this run will skip')
+  assert.match(reviewModal, /const costRefusalCount = preview\?\.costRefusalCount \|\| 0/)
+  assert.match(reviewModal, /merge_duplicates_preview_cost_refused/)
+  // The modal can only render a refusal count after the page has accepted a
+  // complete response whose aggregate matches the nested refusal rows.
+  assert.match(productsPage, /validateMergeDuplicatesPreviewResponse/,
+    'the preview loader must validate the complete preview before returning it')
+  assert.match(previewValidator, /costRefusalCount !== derivedCostRefusalCount/,
+    'the validated preview carries only a refusal count that matches its groups')
+})
+
+test('a whole-catalog run that skipped pairs does not report plain success', () => {
+  assert.match(productsPage, /for \(const refusal of Array\.isArray\(result\?\.refusals\) \? result\.refusals : \[\]\)/,
+    'each continuation response contributes its refusals to the completed run')
+  assert.match(productsPage, /refusals\.find\(\(r\) => r\?\.error\)\?\.error \|\| ''/,
+    'the first refusal sentence says what to do -- a bare count does not')
+  assert.match(productsPage, /merge_duplicates_refused_count/)
+  assert.match(productsPage, /undoPendingCount \+= Math\.max\(0, Number\(result\?\.undoPendingCount \|\| 0\)\)/)
+  assert.match(productsPage, /merge_duplicates_undo_unavailable/,
+    'committed cases whose recovery record is incomplete must stay visible to the operator')
+  // The selected Conflicts group review reports each applied group/removal's
+  // status (including refused/undo-ready) in the combined receipt list rather
+  // than reducing them to one toast.
+  assert.match(selectedConflictReview, /appliedGroups\.map\(\(row\) =>/)
+  assert.match(selectedConflictReview, /appliedRemovals\.map\(\(row\) =>/)
+  assert.match(selectedConflictReview, /status === 'undo_ready'\) return tr\('selected_conflict_undo_ready'/)
+  for (const key of ['merge_duplicates_refused_count', 'merge_duplicates_preview_cost_refused', 'merge_duplicates_preview_cost_refused_group']) {
+    assert.ok(en[key], `en.json is missing ${key}`)
+    assert.ok(km[key] && /[ក-៿]/.test(km[key]), `km.json is missing ${key}`)
+    assert.ok(en[key].includes('{count}') && km[key].includes('{count}'), `${key} must carry {count} in both packs`)
+  }
+})
+
+test('the explanations live in InfoHints, not inline prose', () => {
+  assert.match(dialog, /<InfoHint/)
+  assert.match(dialog, /text=\{option\.hint\}/)
+})
+
+if (failed > 0) {
+  console.error(`${failed} test(s) failed`)
+  process.exit(1)
+}
+console.log('\nAll mergeStockChoice tests passed')

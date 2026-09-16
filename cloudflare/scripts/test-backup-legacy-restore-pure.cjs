@@ -1,0 +1,286 @@
+// Actual streaming backup/restore + actual bulk/replay handlers on SQLite.
+// Reuse existing memory R2/KV adapters only; no network or persistent fixtures.
+const fs = require('node:fs')
+const path = require('node:path')
+const assert = require('node:assert/strict')
+function fixturePrefix(name, boundary, expose) {
+  const source = fs.readFileSync(path.join(__dirname, name), 'utf8')
+  const end = source.indexOf(boundary)
+  assert.ok(end > 0, `fixture boundary: ${name}`)
+  return new Function('require', '__dirname', source.slice(0, end) + '\nreturn ' + expose)(require, __dirname)
+}
+const bulk = fixturePrefix('test-sale-bulk-status-pure.cjs', 'async function run() {', '{fixture,seed,request,replay,sales}')
+const { backup, makeFakeR2, makeFakeKV } = fixturePrefix('test-backup-pure.cjs', 'let passed = 0', '{backup:backupModuleObj.exports,makeFakeR2,makeFakeKV}')
+function binding(sql, writes) {
+  function statement(text, params = []) {
+    return {
+      text, params, bind: (...values) => statement(text, values),
+      async first() { return sql.prepare(text).get(...params) || null },
+      async all() { return { results: sql.prepare(text).all(...params) } },
+      async run() {
+        writes.push(text)
+        const result = sql.prepare(text).run(...params)
+        return { success: true, meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
+      },
+    }
+  }
+  return { prepare: text => statement(text), async batch(items) {
+    return sql.transaction(() => items.map(s => {
+      writes.push(s.text)
+      const result = sql.prepare(s.text).run(...s.params)
+      return { success: true, meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
+    }))()
+  } }
+}
+async function main() {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => { throw new Error('Network forbidden in backup fixture') }
+  const f = bulk.fixture()
+  try {
+    // Simulate append-only 0127 without taking ownership of its migration.
+    // The backup implementation discovers live columns, so this exercises the
+    // exact full-row stream and legacy-default restore behavior.
+    const existingSaleColumns = new Set(f.sql.prepare('PRAGMA table_info(sales)').all().map(column => column.name))
+    if (!existingSaleColumns.has('change_is_actual')) f.sql.exec(`ALTER TABLE sales ADD COLUMN change_is_actual INTEGER NOT NULL DEFAULT 0 CHECK (change_is_actual IN (0,1))`)
+    if (!existingSaleColumns.has('change_exchange_rate')) f.sql.exec('ALTER TABLE sales ADD COLUMN change_exchange_rate REAL')
+    if (!existingSaleColumns.has('creation_snapshot_json')) {
+      f.sql.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0134_sale_creation_snapshot.sql'), 'utf8'))
+    }
+    bulk.seed(f, 3)
+    const immutableCreationSnapshot = JSON.stringify({
+      version: 1,
+      origin: 'pos',
+      recorded_at: '2026-09-07T10:00:00.000Z',
+      sale_at: null,
+      receipt_number: 'BACKUP-SNAPSHOT',
+      actor: { id: 1, username: 'synthetic-review' },
+      cashier: { id: 1, username: 'synthetic-review' },
+      sale_status: 'completed',
+      products: [{ product_id: 1, product: 'Original Product', sku: 'ORIGINAL', quantity: 1, unit_price_usd: 5, line_total_usd: 5 }],
+      total_usd: 5,
+      payment_method: 'Cash',
+      payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+      amount_paid_usd: 5,
+      amount_paid_khr: 0,
+      change_usd: 0,
+      change_khr: 0,
+      delivery: { is_delivery: false, driver_name: null, driver_phone: null, delivery_fee_usd: 0, delivery_actual_cost_usd: null },
+    })
+    f.sql.prepare('INSERT INTO sales(id,receipt_number,creation_snapshot_json) VALUES(999,?,?)')
+      .run('BACKUP-SNAPSHOT', immutableCreationSnapshot)
+    f.sql.exec("INSERT INTO users(id,username,name,password) VALUES(1,'synthetic-review','Synthetic','unused')")
+    f.sql.pragma('foreign_keys = ON')
+    f.sql.exec(`
+      INSERT INTO customers(id,name) VALUES(1,'Synthetic Customer');
+      INSERT INTO suppliers(id,name) VALUES(1,'Synthetic Supplier');
+      INSERT INTO sale_amendments(sale_id,kind) VALUES(1,'delivery_fee_changed');
+      INSERT INTO customer_receivables(legacy_id,customer_id,customer_name,invoice_date,total_amount_usd,outstanding_balance_usd,status,source_file,source_row)
+        VALUES(1,1,'Synthetic Customer','2026-09-05',15,5,'unpaid','synthetic-only',1);
+      INSERT INTO supplier_invoices(source_branch,branch_id,legacy_id,supplier_id,supplier_name,invoice_date,total_amount_usd,outstanding_balance_usd,status,source_file,source_row)
+        VALUES('Shop',1,1,1,'Synthetic Supplier','2026-09-05',25,10,'unpaid','synthetic-only',1);
+    `)
+    const writes = []
+    f.env.DB = binding(f.sql, writes)
+    f.env.ASSETS = makeFakeR2()
+    f.env.CACHE = makeFakeKV()
+    f.sql.prepare('UPDATE sales SET change_is_actual=1,change_exchange_rate=3950 WHERE id=1').run()
+    for (const id of [1, 2]) {
+      const req = bulk.request(f, 'cancelled', `request-roundtrip-${id}`)
+      req.items = req.items.filter(item => item.id === id)
+      const result = await f.call(bulk.sales, '/bulk-status', req)
+      assert.equal(result.status, 200, JSON.stringify(result))
+      if (id === 2) assert.equal((await bulk.replay(f, result.body.actionHistoryId)).status, 200)
+    }
+    const mutationHistory = f.sql.prepare('SELECT id FROM action_history ORDER BY id LIMIT 1').get().id
+    f.sql.prepare(`INSERT INTO sale_mutation_receipts(
+      id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_json,
+      before_json,after_json,response_json,history_id,generation,sale_revision
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      'mutation-fixture', 1, 1, 'settlement', 'mutation-request', 'digest', '{}',
+      '{"header":null,"lines":[null]}', '{"header":0,"lines":[0]}', '{"success":true}', mutationHistory, 0, 1,
+    )
+    f.sql.prepare('INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES(?,?,?,?)')
+      .run('mutation-fixture', 'sale_item', 1, 0)
+    f.sql.prepare(`INSERT INTO product_conflict_merge_runs(
+      id,actor_id,request_id,request_digest,manifest_version,manifest_digest,
+      request_json,status,result_json,created_at,updated_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+      'conflict-run-fixture', 1, 'conflict-request-fixture', 'request-digest', 1,
+      'manifest-digest', '{"cases":[1]}', 'interrupted', '{"complete":false}',
+      '2026-09-08 02:00:00', '2026-09-08 02:01:00',
+    )
+    f.sql.prepare(`INSERT INTO product_conflict_merge_run_cases(
+      run_id,ordinal,case_key,keeper_product_id,merged_product_id,
+      expected_state_digest,stock_choice,operation_id,status,error,created_at,updated_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      'conflict-run-fixture', 0, 'leadingzero:fixture', 1, 2,
+      'case-digest', 'merge', 'conflict-operation-fixture', 'history_pending',
+      'history finalization pending', '2026-09-08 02:00:00', '2026-09-08 02:01:00',
+    )
+    f.sql.prepare(`INSERT INTO sale_record_events(
+      id,sale_id,source_kind,source_id,generation,kind,via,actor_id,actor_username,occurred_at,changes_json
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+      '00000000-0000-4000-8000-000000000001', 1, 'sale_settlement', 'mutation-fixture', 0,
+      'payment_settled', 'apply', 1, 'synthetic-review', '2026-09-08T00:00:00.000Z',
+      JSON.stringify([{ field: 'payment_method', before: { state: 'known_value', value: 'Credit' }, after: { state: 'known_value', value: 'Cash' } }]),
+    )
+    f.sql.prepare("INSERT INTO returns(id,return_number,sale_id,branch_id) VALUES(991,'BACKUP-RETURN',999,1)").run()
+    const immutableReturnReceipt = {
+      id: '00000000-0000-4000-8000-000000000991',
+      requestJson: JSON.stringify({ return_id: 991, type: 'refund', notes: 'exact accepted intent' }),
+      responseJson: JSON.stringify({ id: 991, updated_at: '2026-09-08T00:00:00.000Z' }),
+    }
+    f.sql.prepare(`INSERT INTO return_mutation_receipts(
+      id,actor_id,return_id,sale_id,mutation_kind,request_id,request_digest,
+      request_json,response_json,occurred_at
+    ) VALUES(?,1,991,999,'edit','backup-return-edit',?,?,?,'2026-09-08T00:00:00.000Z')`).run(
+      immutableReturnReceipt.id, 'c'.repeat(64), immutableReturnReceipt.requestJson, immutableReturnReceipt.responseJson,
+    )
+    const immutableReturnCreateReceipt = {
+      id: '00000000-0000-4000-8000-000000000992',
+      requestJson: JSON.stringify({ sale_id: 999 }),
+      responseJson: JSON.stringify({ id: 991, returnNumber: 'BACKUP-RETURN', replacementSaleId: null, replacementReceiptNumber: null }),
+    }
+    f.sql.prepare(`INSERT INTO return_create_receipts(
+      id,actor_id,return_id,sale_id,request_id,request_digest,request_json,response_json,occurred_at
+    ) VALUES(?,1,991,999,'backup-return-create',?,?,?,'2026-09-08T00:00:00.000Z')`).run(
+      immutableReturnCreateReceipt.id, 'd'.repeat(64), immutableReturnCreateReceipt.requestJson, immutableReturnCreateReceipt.responseJson,
+    )
+    const snap = (tables = f.sql.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(t => t.name)) =>
+      Object.fromEntries(tables.map(t => [t, f.sql.prepare(`SELECT * FROM "${t.replaceAll('"', '""')}"`).all()
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]))
+    const before = snap(backup.BACKUP_TABLES)
+    const created = await backup.createCloudflareBackup(f.env, 'manual')
+    const document = JSON.parse(f.env.ASSETS._store.get(created.key).body)
+    assert.equal(Object.keys(document.tables).length, backup.BACKUP_TABLES.length)
+    assert.deepEqual(Object.keys(document.tables), [...backup.BACKUP_TABLES], 'full backup must include every table in exact dependency order')
+    for (const table of ['return_write_revisions', 'return_bulk_operations', 'return_bulk_members', 'return_mutation_receipts', 'return_create_receipts', 'stock_session_revisions', 'stock_session_operations', 'stock_session_members', 'sale_mutation_receipts', 'sale_mutation_members', 'sale_record_events']) {
+      assert.ok(Object.hasOwn(document.tables, table), `backup includes durable replay table ${table}`)
+    }
+    for (const table of ['product_conflict_merge_runs', 'product_conflict_merge_run_cases']) {
+      assert.ok(Object.hasOwn(document.tables, table), `backup includes selected-conflict receipt table ${table}`)
+      assert.equal(document.tables[table].rows.length, 1, `backup preserves the seeded ${table} receipt`)
+    }
+    assert.equal((await backup.validateCloudflareBackup(f.env, created.key)).restorable, true)
+    f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
+    await backup.restoreCloudflareBackup(f.env, created.key)
+    assert.deepEqual(snap(backup.BACKUP_TABLES), before)
+    assert.deepEqual(
+      f.sql.prepare('SELECT change_is_actual,change_exchange_rate FROM sales WHERE id=1').get(),
+      { change_is_actual: 1, change_exchange_rate: 3950 },
+      'full backup preserves explicit native-change provenance exactly',
+    )
+    assert.equal(
+      f.sql.prepare('SELECT creation_snapshot_json FROM sales WHERE id=999').get().creation_snapshot_json,
+      immutableCreationSnapshot,
+      'full backup preserves the immutable sale creation envelope byte-for-byte',
+    )
+    assert.deepEqual(
+      f.sql.prepare('SELECT id,status,result_json FROM product_conflict_merge_runs').get(),
+      { id: 'conflict-run-fixture', status: 'interrupted', result_json: '{"complete":false}' },
+      'selected-conflict parent receipt round-trips byte-for-byte',
+    )
+    assert.deepEqual(
+      f.sql.prepare('SELECT run_id,status,error FROM product_conflict_merge_run_cases').get(),
+      { run_id: 'conflict-run-fixture', status: 'history_pending', error: 'history finalization pending' },
+      'selected-conflict case continuation state round-trips byte-for-byte',
+    )
+    assert.deepEqual(
+      f.sql.prepare('SELECT request_json,response_json FROM return_mutation_receipts WHERE id=?').get(immutableReturnReceipt.id),
+      { request_json: immutableReturnReceipt.requestJson, response_json: immutableReturnReceipt.responseJson },
+      'full backup preserves immutable return request/response evidence byte-for-byte',
+    )
+    assert.deepEqual(
+      f.sql.prepare('SELECT request_json,response_json FROM return_create_receipts WHERE id=?').get(immutableReturnCreateReceipt.id),
+      { request_json: immutableReturnCreateReceipt.requestJson, response_json: immutableReturnCreateReceipt.responseJson },
+      'full backup preserves immutable return-create request/response evidence byte-for-byte',
+    )
+    assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
+    f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+    const operations = f.sql.prepare('SELECT * FROM sale_bulk_operations ORDER BY request_id').all()
+    assert.equal((await bulk.replay(f, operations[0].history_id, 'undo', 0)).status, 200)
+    assert.equal((await bulk.replay(f, operations[1].history_id, 'redo', 1)).status, 200)
+    const replayBundleTables = backup.BACKUP_TABLES.filter(table => backup.SALE_REPLAY_RESTORE_BUNDLE.includes(table))
+    const replayBundleBefore = snap(replayBundleTables)
+    const scopedCreated = await backup.createSectionBackup(f.env, ['products', 'sales', 'return_mutation_receipts', 'sale_record_events'], 'manual')
+    const scopedDocument = JSON.parse(f.env.ASSETS._store.get(scopedCreated.key).body)
+    assert.deepEqual(Object.keys(scopedDocument.tables), replayBundleTables,
+      'requesting any Sales replay table widens the generated section backup to the complete restorable bundle')
+    assert.equal((await backup.validateCloudflareBackup(f.env, scopedCreated.key)).restorable, true)
+    f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
+    await backup.restoreCloudflareBackup(f.env, scopedCreated.key)
+    f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+    assert.deepEqual(snap(replayBundleTables), replayBundleBefore)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM return_mutation_receipts').get().n, 1)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 1)
+    assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
+    console.log('PASS generated Sales reset backup widens to the complete replay bundle and restores FK-on')
+
+    console.log(`PASS actual FK-on streaming full ${backup.BACKUP_TABLES.length}-table roundtrip, Sales Records/sale/Returns/stock/conflict replay tables, and restored-generation undo/redo`)
+
+    const pre0127 = structuredClone(document)
+    const salesColumns = pre0127.tables.sales.columns
+    for (const column of ['change_is_actual', 'change_exchange_rate']) {
+      const index = salesColumns.indexOf(column)
+      assert.ok(index >= 0, `full backup records ${column}`)
+      salesColumns.splice(index, 1)
+      for (const row of pre0127.tables.sales.rows) delete row[column]
+    }
+    const pre0127Key = 'backups/cloudflare/pre-0127-sales-columns.json'
+    await f.env.ASSETS.put(pre0127Key, JSON.stringify(pre0127), { customMetadata: { format: document.format } })
+    assert.equal((await backup.validateCloudflareBackup(f.env, pre0127Key)).restorable, true)
+    f.sql.prepare('UPDATE sales SET change_is_actual=1,change_exchange_rate=4200 WHERE id=1').run()
+    f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
+    await backup.restoreCloudflareBackup(f.env, pre0127Key)
+    assert.deepEqual(
+      f.sql.prepare('SELECT change_is_actual,change_exchange_rate FROM sales WHERE id=1').get(),
+      { change_is_actual: 0, change_exchange_rate: null },
+      'legacy backup omits 0127 columns so schema defaults restore 0/NULL without inference',
+    )
+    f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+    console.log('PASS native-change provenance roundtrips, while pre-0127 sales rows restore marker/rate defaults without inference')
+
+    f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
+    async function variant(label, omit) {
+      const legacy = structuredClone(document)
+      for (const table of omit) delete legacy.tables[table]
+      legacy.summary.tableCount = Object.keys(legacy.tables).length
+      legacy.summary.rowCount = Object.values(legacy.tables).reduce((n, t) => n + t.rows.length, 0)
+      const key = `backups/cloudflare/${label}.json`
+      await f.env.ASSETS.put(key, JSON.stringify(legacy), { customMetadata: { format: document.format } })
+      return key
+    }
+    async function refused(key, missing) {
+      const allRows = snap()
+      writes.length = 0
+      const validation = await backup.validateCloudflareBackup(f.env, key)
+      assert.equal(validation.restorable, false, 'unsafe valid-count document must fail validation')
+      assert.match(validation.restoreError, /missing.*dependenc/i)
+      for (const table of missing) assert.ok(validation.restoreError.includes(table), table)
+      let progress = 0
+      await assert.rejects(() => backup.restoreCloudflareBackup(f.env, key, async () => { progress++ }), /missing.*dependenc/i)
+      assert.equal(progress, 0, 'refuse before deletion progress callbacks')
+      assert.deepEqual(writes, [], 'no DELETE, INSERT or UPDATE submitted')
+      assert.deepEqual(snap(), allRows, 'every DB table, including unbacked state and sequences, is unchanged')
+      assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
+    }
+    const omitted = ['customer_receivables', 'supplier_invoices', 'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_mutation_receipts', 'sale_mutation_members', 'sale_bulk_operations', 'sale_bulk_members']
+    await refused(await variant('legacy-nine-missing', omitted), ['sale_bulk_operations', 'sale_bulk_members', 'sale_mutation_receipts', 'sale_mutation_members', 'undo_snapshots'])
+    console.log('PASS valid legacy nine-table omission refuses before any write; every DB row preserved')
+    for (const table of ['sale_bulk_operations', 'sale_bulk_members', 'sale_mutation_receipts', 'sale_mutation_members', 'undo_snapshots', 'sale_write_revisions', 'sale_amendments', 'product_conflict_merge_runs', 'product_conflict_merge_run_cases']) {
+      await refused(await variant(`missing-${table}`, [table]), [table])
+    }
+    console.log('PASS individually incomplete replay bundles fail validation and direct restore without writes')
+    // A missing FK child is unsafe even outside the replay bundle.
+    f.sql.exec("INSERT INTO user_notes(user_id,title,content) VALUES(1,'Preserve','Unbacked note')")
+    await refused(await variant('missing-user-notes', ['user_notes']), ['user_notes'])
+    console.log('PASS missing FK-dependent table is rejected before deletion')
+    const scoped = await variant('settings-only', Object.keys(document.tables).filter(t => t !== 'settings'))
+    assert.equal((await backup.validateCloudflareBackup(f.env, scoped)).restorable, true)
+    const otherRows = snap(backup.BACKUP_TABLES.filter(t => t !== 'settings'))
+    await backup.restoreCloudflareBackup(f.env, scoped)
+    assert.deepEqual(snap(backup.BACKUP_TABLES.filter(t => t !== 'settings')), otherRows)
+    console.log('PASS unrelated scoped settings restore remains usable')
+  } finally { f.sql.close(); globalThis.fetch = originalFetch }
+}
+main().catch(error => { console.error(error); process.exitCode = 1 })

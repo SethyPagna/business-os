@@ -1,4 +1,5 @@
-import { normalizePriceValue } from '../../../utils/pricing.ts'
+import { normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
+import { addMoney4 } from '../../../utils/moneyPrecision.ts'
 import { normalizeProductGallery } from './productGalleryHelpers.ts'
 
 type StockAdjustmentType = 'add' | 'remove'
@@ -26,8 +27,8 @@ interface ProductRecord {
   description?: unknown
   selling_price_usd?: unknown
   selling_price_khr?: unknown
-  special_price_usd?: unknown
-  special_price_khr?: unknown
+  wholesale_price_usd?: unknown
+  wholesale_price_khr?: unknown
   purchase_price_usd?: unknown
   purchase_price_khr?: unknown
   cost_price_usd?: unknown
@@ -75,6 +76,16 @@ interface ProductStockAdjustmentOptions {
   unitCostKhr?: unknown
   reason?: unknown
   user?: UserRecord
+  /**
+   * N14-D. 'correction' marks a movement that restores a figure the ledger
+   * already held -- undo, redo of an undo, a snapshot restore. Those are the
+   * only writes exempt from the supplier + cost a stock-in must carry, and the
+   * exemption is stated on the wire rather than inferred from a reason string,
+   * so routes/inventory.ts can record which it was.
+   */
+  attribution?: 'receipt' | 'correction'
+  supplierId?: unknown
+  supplierName?: unknown
 }
 
 interface ProductBranchInitializePlan {
@@ -145,8 +156,17 @@ export function buildProductWritePayload(snapshot: ProductRecord = {}, user: Use
     description: stringOrEmpty(snapshot.description),
     selling_price_usd: normalizePriceValue(snapshot.selling_price_usd || 0),
     selling_price_khr: normalizePriceValue(snapshot.selling_price_khr || 0),
-    special_price_usd: normalizePriceValue(snapshot.special_price_usd ?? snapshot.selling_price_usd ?? 0),
-    special_price_khr: normalizePriceValue(snapshot.special_price_khr ?? snapshot.selling_price_khr ?? 0),
+    // The tier column, and NO `?? selling_price` fallback. The old VIP pair
+    // that stood here defaulted to the selling price whenever a snapshot
+    // omitted it, so any writer that built a payload from a partial record
+    // silently stamped the selling price into the tier column -- a
+    // client-composed value overwriting what the server held. That is
+    // exactly the defect that would have re-polluted this column right after
+    // migration 0111 moved 9,552 real prices into it. A snapshot that does
+    // not carry a wholesale price writes 0, which reads as "no wholesale
+    // price set" everywhere and offers no tier at the POS.
+    wholesale_price_usd: normalizePriceValue(snapshot.wholesale_price_usd ?? 0),
+    wholesale_price_khr: normalizePriceValue(snapshot.wholesale_price_khr ?? 0),
     purchase_price_usd: normalizePriceValue(snapshot.purchase_price_usd || snapshot.cost_price_usd || 0),
     purchase_price_khr: normalizePriceValue(snapshot.purchase_price_khr || snapshot.cost_price_khr || 0),
     cost_price_usd: normalizePriceValue(snapshot.cost_price_usd || snapshot.purchase_price_usd || 0),
@@ -222,11 +242,20 @@ export function buildProductStockAdjustmentPayload(product: ProductRecord = {}, 
     type: options.type || 'add',
     quantity: toFiniteNumber(options.quantity, 0),
     branchId: Number.isFinite(branchId) && branchId > 0 ? branchId : null,
-    unitCostUsd: options.unitCostUsd ?? (product?.purchase_price_usd || product?.cost_price_usd || 0),
-    unitCostKhr: options.unitCostKhr ?? (product?.purchase_price_khr || product?.cost_price_khr || 0),
+    // N14-D: NOT `?? (product.purchase_price_usd || product.cost_price_usd || 0)`.
+    // That answered "what did this cost?" with the product's stored price, or
+    // with zero -- a receipt cost that looks entered and is guessed, and a zero
+    // that reads as "free goods" nobody declared. What the caller supplies is
+    // what goes on the wire; a stock-in that supplies nothing is refused by the
+    // gate, on both sides.
+    unitCostUsd: options.unitCostUsd,
+    unitCostKhr: options.unitCostKhr,
     reason: options.reason || '',
     userId: options.user?.id,
     userName: options.user?.name,
+    supplierId: options.supplierId,
+    supplierName: options.supplierName,
+    attribution: options.attribution,
   }
 }
 
@@ -326,12 +355,21 @@ export function buildProductBulkPricingUpdates(form: ProductBulkForm = {}): Prod
   for (const field of [
     'selling_price_usd',
     'selling_price_khr',
-    'special_price_usd',
-    'special_price_khr',
+    'wholesale_price_usd',
+    'wholesale_price_khr',
     'purchase_price_usd',
     'purchase_price_khr',
   ]) {
-    if (hasBulkFormValue(form[field])) updates[field] = normalizePriceValue(form[field])
+    if (!hasBulkFormValue(form[field])) continue
+    updates[field] = field.startsWith('purchase_price_')
+      // Preserve the editor's decimal source until the server has loaded the
+      // authoritative before-image. Pre-quantizing here turns an unchanged
+      // historical value such as 2.345678 into a destructive 2.3457 update,
+      // and can turn a small raw negative into zero before server validation.
+      // Retain the legacy explicit-null => 0 behavior; normal inputs are the
+      // number/string supplied by the form and remain server-authoritative.
+      ? (form[field] === null ? 0 : form[field])
+      : normalizePriceValue(form[field])
   }
   return updates
 }
@@ -355,9 +393,9 @@ export function buildProductBulkPricingUpdates(form: ProductBulkForm = {}): Prod
 //   - Results are clamped at 0. A decrease bigger than the current price
 //     would otherwise produce a negative price, which is never a real
 //     intent and would corrupt totals downstream.
-//   - Money is rounded to 2 decimals for USD and to whole units for KHR
-//     (riel has no minor unit in practice here), so repeated adjustments
-//     cannot accumulate floating-point dust.
+//   - Selling/wholesale retains the existing catalogue display policy (USD
+//     cents, whole KHR for relative changes). Purchase price is internal
+//     cost, so it uses the four-decimal money kernel in both currencies.
 //   - A product whose every targeted field is skipped yields NO update at
 //     all, rather than an empty write. That keeps the "changed N products"
 //     count honest and avoids pointless round trips.
@@ -365,8 +403,8 @@ export function buildProductBulkPricingUpdates(form: ProductBulkForm = {}): Prod
 export type BulkPriceField =
   | 'selling_price_usd'
   | 'selling_price_khr'
-  | 'special_price_usd'
-  | 'special_price_khr'
+  | 'wholesale_price_usd'
+  | 'wholesale_price_khr'
   | 'purchase_price_usd'
   | 'purchase_price_khr'
 
@@ -390,9 +428,13 @@ export interface BulkPriceAdjustmentResult {
   updates: ProductUpdates
 }
 
-function roundMoney(value: number, field: BulkPriceField): number {
+function roundCatalogPrice(value: number, field: BulkPriceField): number {
   if (field.endsWith('_khr')) return Math.round(value)
   return Math.round(value * 100) / 100
+}
+
+function isPurchasePriceField(field: BulkPriceField): field is 'purchase_price_usd' | 'purchase_price_khr' {
+  return field.startsWith('purchase_price_')
 }
 
 export function buildProductBulkPriceAdjustments(
@@ -412,12 +454,30 @@ export function buildProductBulkPriceAdjustments(
 
     const updates: ProductUpdates = {}
     for (const field of fields) {
-      const current = normalizePriceValue(product?.[field])
-      if (adjustment.skipZeroPriced && current === 0) continue
-      const next = roundMoney(Math.max(0, current + delta), field)
+      const rawCurrent = toFiniteNumber(product?.[field], 0)
+      const current = isPurchasePriceField(field) ? normalizeInternalMoney(rawCurrent) : normalizePriceValue(rawCurrent)
+      // "Unpriced" means the stored value is actually zero. A positive
+      // historical value below one four-decimal tick is still priced and must
+      // not disappear merely because its canonical comparison rounds to 0.
+      if (adjustment.skipZeroPriced && rawCurrent === 0) continue
+      let next: number
+      if (isPurchasePriceField(field)) {
+        try {
+          const moved = addMoney4(rawCurrent, delta)
+          next = moved < 0 ? 0 : moved
+        } catch {
+          // Invalid/out-of-range input is not a usable product update. The
+          // caller's existing "nothing to change" path keeps it out of the
+          // network instead of emitting Infinity or a partially priced row.
+          continue
+        }
+      } else {
+        next = roundCatalogPrice(Math.max(0, current + delta), field)
+      }
       // Skip a field the adjustment does not actually move -- e.g. a
       // decrease against a price already at 0.
-      if (next === current) continue
+      if (next === current
+        && !(isPurchasePriceField(field) && adjustment.direction === 'decrease' && next === 0 && rawCurrent > 0)) continue
       updates[field] = next
     }
     if (Object.keys(updates).length) results.push({ id, updates })

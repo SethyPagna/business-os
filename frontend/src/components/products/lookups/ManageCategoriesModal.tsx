@@ -124,6 +124,13 @@ function getErrorMessage(error: unknown, fallback: string): string {
 function normalizeCategoryRows(rows: unknown): CategoryRow[] {
   if (!Array.isArray(rows)) return []
   return rows
+    // GET /api/categories now returns the lookup table UNION the category
+    // strings products actually carry (cloudflare/src/lib/lookupSuggestions.ts),
+    // so a product form can suggest a category that has no lookup row. The
+    // MANAGER is the other half of that rule: it renames and deletes lookup
+    // ROWS, and a used-only name has none -- listing it here would render
+    // rename/delete controls with nothing behind them.
+    .filter((entry) => (entry as { source?: unknown } | null | undefined)?.source !== 'products')
     .map((row) => {
       const source = row as Partial<CategoryRow> | null | undefined
       return {
@@ -510,7 +517,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
   }
 
   return (
-    <Modal title={t('manage_categories') || 'Manage Categories'} onClose={onClose}>
+    <Modal title={t('manage_categories') || 'Manage Categories'} onClose={onClose} unsavedChanges={{ dirty: Boolean(newName.trim()) || editing !== null }}>
       <div className="space-y-4">
         {err ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{err}</div> : null}
         <ActionHistoryBar history={actionHistoryForBar} t={t} />
@@ -545,7 +552,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
         <div className="max-h-80 space-y-2 overflow-auto">
           {loading ? <div className="rounded-lg border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-400 dark:border-gray-700">{t('loading') || 'Loading...'}</div> : null}
           {!loading && categories.length > 0 ? (
-            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white/95 px-3 py-2 text-xs shadow-sm backdrop-blur dark:border-gray-700 dark:bg-gray-900/95">
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <label className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
                 <input
                   type="checkbox"

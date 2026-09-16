@@ -1,8 +1,10 @@
 import bcrypt from 'bcryptjs'
+import { mintMembershipNumber, isMembershipCollision } from './membershipNumber'
 import { getDb } from './db'
 import { canonicalizePhone } from './phone'
-import { formatPhoneP8, collectContactPhones } from './contactDuplicates'
-import { passwordTooShort, passwordMinLengthError } from './passwordPolicy'
+import { formatPhoneP8, collectContactPhones, contactDuplicateWriteGuardStatement } from './contactDuplicates'
+import { passwordMinLengthError, passwordTooShort } from './passwordPolicy'
+import { customerIsProfileSql, customerProfileMutationGuardSql, isAnonymousCustomer } from './anonymousCustomer'
 import type { Env } from '../index'
 
 // The account decision engine for the storefront. Route code (routes/portal.ts)
@@ -24,8 +26,50 @@ const BCRYPT_COST = 10
 // whether or not the phone exists — no timing/enumeration oracle.
 const DUMMY_HASH = '$2b$10$bcwRkHdyVgPIxFMLWdK9sOKBez3Uv06DFpLaUR/Mq0c6w595bHNFq'
 
-export type SignupInput = { name?: unknown; phone?: unknown; membershipId?: unknown; password?: unknown }
-export type SigninInput = { identifier?: unknown; phone?: unknown; password?: unknown }
+// The storefront asks a visitor to agree to the Terms and the Privacy Policy
+// before creating an account, and we record WHICH version they agreed to --
+// a bare `consented: 1` proves nothing once the policy text changes. This
+// literal must match PORTAL_LEGAL_CONSENT_VERSION in
+// frontend/src/components/catalog/legal/legalContent.ts, which is the version
+// of the text actually shown; scripts/test-portal-legal-consent-pure.cjs pins
+// the two together so they cannot drift apart.
+export const PORTAL_CONSENT_VERSION = 'portal-legal-2026-09-07'
+
+// A ticked checkbox arrives as `true` over JSON and as 'true'/'on'/'1' from
+// anything that posts a form. Everything else -- absent, false, '', 'false'
+// -- is not consent. Silence is never agreement, and a pre-ticked or omitted
+// box must fail closed.
+export function consentGiven(value: unknown): boolean {
+  if (value === true) return true
+  const text = String(value ?? '').trim().toLowerCase()
+  return text === 'true' || text === 'on' || text === '1' || text === 'yes'
+}
+
+// consent_version / consent_at / consent_locale arrive with migration 0130.
+// Account creation and sign-in fail closed until all three exist: returning
+// success without the durable consent record would contradict the form and
+// make later policy-version checks impossible.
+const CONSENT_COLUMN_RECHECK_MS = 60_000
+let consentColumnState: { present: boolean; checkedAt: number } | null = null
+
+async function portalAccountsHaveConsentColumns(db: ReturnType<typeof getDb>): Promise<boolean> {
+  const now = Date.now()
+  if (consentColumnState?.present) return true
+  if (consentColumnState && now - consentColumnState.checkedAt < CONSENT_COLUMN_RECHECK_MS) return false
+  try {
+    const rows = await db.prepare('PRAGMA table_info("portal_accounts")').all<{ name?: string }>()
+    const names = new Set((Array.isArray(rows) ? rows : []).map((row) => String(row?.name || '')))
+    const present = names.has('consent_version') && names.has('consent_at') && names.has('consent_locale')
+    consentColumnState = { present, checkedAt: now }
+    return present
+  } catch {
+    consentColumnState = { present: false, checkedAt: now }
+    return false
+  }
+}
+
+export type SignupInput = { name?: unknown; phone?: unknown; membershipId?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown }
+export type SigninInput = { identifier?: unknown; phone?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown }
 
 // `abuse` marks a failure that should count toward the 10-fail signup cap
 // (probing phones/membership ids) vs. a benign form error (missing field,
@@ -48,22 +92,21 @@ function existingReject(): SignupResult {
   return { ok: false, status: 409, error: EXISTING_REMINDER, code: 'verification_failed', abuse: true }
 }
 
+// One membership-number authority for the whole app: lib/membershipNumber.ts
+// mints the next gap-filling `LC-#####`. This file used to carry a THIRD
+// independent generator (random `LCMN-` + 6 crypto bytes). A storefront id is
+// an account NUMBER, not a credential -- signup already requires a phone that
+// matches the customer record and login requires phone AND password -- so a
+// sequential id costs nothing that the old entropy was buying.
+//
+// mintMembershipNumber() reads BOTH customers.membership_number and
+// portal_accounts.membership_id directly, so a stale/orphaned account row
+// from older data can never collide with a fresh mint here. Every id issued
+// here is mirrored into customers too
+// (claimAccount either claims an existing customer's number or creates the
+// customer row). The INSERT below is still the final arbiter for a lost race.
 async function generateMembershipId(env: Env): Promise<string> {
-  const db = getDb(env)
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    // Account identifiers must not come from a predictable PRNG. Six random
-    // bytes provide 48 bits of Web-Crypto entropy; the uniqueness checks and
-    // INSERT constraint below remain the final race-safe arbiter.
-    const bytes = crypto.getRandomValues(new Uint8Array(6))
-    const entropy = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('').toUpperCase()
-    const candidate = `LCMN-${entropy}`
-    // Globally unique across BOTH stores — a membership id must never collide
-    // with an existing customer's number or another account's.
-    const inCustomers = await db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(@candidate)) LIMIT 1').get({ candidate })
-    const inAccounts = await db.prepare('SELECT id FROM portal_accounts WHERE lower(trim(membership_id)) = lower(trim(@candidate)) LIMIT 1').get({ candidate })
-    if (!inCustomers && !inAccounts) return candidate
-  }
-  throw new Error('Could not generate a unique membership id')
+  return mintMembershipNumber(getDb(env))
 }
 
 // Does any customer already carry this canonical phone (primary or a secondary
@@ -93,23 +136,48 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
   const canonical = canonicalizePhone(input.phone)
   const membershipId = String(input.membershipId ?? '').trim()
 
+  // Checked before anything is looked up: refusing after the phone probe
+  // would let a caller use signup as a phone-existence oracle while never
+  // consenting. A missing box is a form error, so it never counts as abuse.
+  if (!consentGiven(input.consent)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Please agree to the Terms & Conditions and the Privacy Policy to create an account.',
+      code: 'consent_required',
+      abuse: false,
+    }
+  }
+  const db = getDb(env)
+  if (!(await portalAccountsHaveConsentColumns(db))) {
+    return {
+      ok: false,
+      status: 503,
+      error: 'Account consent storage is not ready. Please try again later.',
+      code: 'consent_storage_unavailable',
+      abuse: false,
+    }
+  }
   if (!name) return { ok: false, status: 400, error: 'Your name is required.', code: 'name_required', abuse: false }
   if (!canonical) return { ok: false, status: 400, error: 'A valid phone number is required.', code: 'phone_required', abuse: false }
-  if (passwordTooShort(password)) return { ok: false, status: 400, error: passwordMinLengthError(), code: 'password_weak', abuse: false }
-
-  const db = getDb(env)
+  // Portal accounts get the stricter rule (lib/passwordPolicy.ts): the
+  // storefront privacy policy promises eight characters, and a phone number
+  // is both the login identifier here and the commonest password there is.
+  if (passwordTooShort(password)) {
+    return { ok: false, status: 400, error: passwordMinLengthError(), code: 'password_weak', abuse: false }
+  }
   const passwordHash = bcrypt.hashSync(password, BCRYPT_COST)
 
   if (membershipId) {
     // Existing-customer path: the id must resolve to a customer whose phone
     // matches. Every failure here returns the same reminder (no oracle).
     const customer = await db.prepare(
-      'SELECT id, name, phone, address FROM customers WHERE lower(trim(membership_number)) = lower(trim(@m)) LIMIT 1',
-    ).get<{ id: number; name: string | null; phone: string | null; address: string | null }>({ m: membershipId })
-    if (!customer) return existingReject()
+      'SELECT id, name, phone, address, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(@m)) LIMIT 1',
+    ).get<{ id: number; name: string | null; phone: string | null; address: string | null; is_anonymous: number }>({ m: membershipId })
+    if (!customer || isAnonymousCustomer(customer)) return existingReject()
     const phoneMatches = collectContactPhones(customer).some((raw) => canonicalizePhone(raw) === canonical)
     if (!phoneMatches) return existingReject()
-    return claimAccount(env, { membershipId, name, canonical, passwordHash, contactId: customer.id })
+    return claimAccount(env, { membershipId, name, canonical, passwordHash, contactId: customer.id, consentLocale: String(input.consentLocale || 'und').slice(0, 16) })
   }
 
   // New-customer path: the phone must be absent from customers entirely — if
@@ -118,61 +186,126 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
   if (existing) return existingReject()
 
   const newMembershipId = await generateMembershipId(env)
-  return claimAccount(env, { membershipId: newMembershipId, name, canonical, passwordHash, contactId: null, createContact: true })
+  return claimAccount(env, { membershipId: newMembershipId, name, canonical, passwordHash, contactId: null, createContact: true, consentLocale: String(input.consentLocale || 'und').slice(0, 16) })
 }
 
-// Race-safe creation: claim the phone by inserting portal_accounts FIRST and
-// letting the UNIQUE constraint arbitrate (D1 has no interactive transaction,
-// so a prior read can never be trusted for uniqueness). Only the winner goes
-// on to create/link the contact, so two concurrent signups can never produce
-// two contacts for one phone.
+// Race-safe creation: an existing customer claim only inserts the account.
+// A genuinely-new customer instead commits the canonical-phone guard, folded
+// contact, linked account and durable consent in ONE D1 batch. A staff-created
+// contact that wins after signup's advisory read therefore makes the guard
+// throw and rolls the account write back; an account constraint that fires
+// after the contact insert rolls the contact back too.
+//
+// Two UNIQUE indexes can fire here (migration 0087): idx_portal_accounts_phone
+// and idx_portal_accounts_membership. A phone collision (or a membership-id
+// collision on a USER-SUPPLIED id -- the existing-customer claim path, which
+// has no number of its own to change) is a genuine "you are not who you say
+// you are" case: existingReject(), no oracle. A membership-id collision on an
+// id WE minted (createContact === true, i.e. the new-customer auto-mint path)
+// is entirely this function's own doing -- two signups computed the same
+// gap-fill number because neither had written yet -- so it re-mints and
+// retries the INSERT, bounded, exactly like withMintedMembershipNumber does
+// for contacts.ts.
 async function claimAccount(
   env: Env,
-  args: { membershipId: string; name: string; canonical: string; passwordHash: string; contactId: number | null; createContact?: boolean },
+  args: { membershipId: string; name: string; canonical: string; passwordHash: string; contactId: number | null; createContact?: boolean; consentLocale: string },
 ): Promise<SignupResult> {
   const db = getDb(env)
-  let accountId: number
-  try {
-    const res = await db.prepare(
-      'INSERT INTO portal_accounts (membership_id, name, phone, password_hash, contact_id) VALUES (@membership_id, @name, @phone, @password_hash, @contact_id)',
-    ).run({
-      membership_id: args.membershipId,
+  let membershipId = args.membershipId
+  let accountId: number | null = null
+  let lastError: unknown = null
+  const maxAttempts = args.createContact ? 5 : 1
+  const columns = ['membership_id', 'name', 'phone', 'password_hash', 'contact_id', 'consent_version', 'consent_at', 'consent_locale']
+  const values = ['@membership_id', '@name', '@phone', '@password_hash', '@contact_id', '@consent_version', 'CURRENT_TIMESTAMP', '@consent_locale']
+  const sql = `INSERT INTO portal_accounts (${columns.join(', ')}) VALUES (${values.join(', ')})`
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const params: Record<string, unknown> = {
+      // Read from `membershipId`, never `args`: a retry has re-minted it.
+      membership_id: membershipId,
       name: args.name,
       phone: args.canonical,
       password_hash: args.passwordHash,
       contact_id: args.contactId,
-    })
-    accountId = res.lastInsertRowid
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (/UNIQUE constraint failed/i.test(message)) {
-      // Either the phone or the membership id was taken between our check and
-      // this insert — same reminder, no oracle.
-      return existingReject()
     }
-    throw error
-  }
-
-  // Fold the name into a new contact for a genuinely-new customer, then link
-  // it. Best-effort: the account already exists and is usable if this fails.
-  if (args.createContact) {
+    params.consent_version = PORTAL_CONSENT_VERSION
+    params.consent_locale = args.consentLocale || 'und'
     try {
-      const contact = await db.prepare(
-        'INSERT INTO customers (name, phone, phone_normalized, membership_number) VALUES (@name, @phone, @phone_normalized, @membership_number)',
-      ).run({
-        name: args.name,
-        phone: formatPhoneP8(args.canonical),
-        phone_normalized: args.canonical,
-        membership_number: args.membershipId,
-      })
-      await db.prepare('UPDATE portal_accounts SET contact_id = @cid WHERE id = @id').run({ cid: contact.lastInsertRowid, id: accountId })
-    } catch (_) {
-      // Contact fold failed — leave the account contact-less rather than fail
-      // the signup; staff can reconcile from Contacts.
+      if (args.createContact) {
+        const contactGuard = contactDuplicateWriteGuardStatement(
+          'customers',
+          { phones: [args.canonical] },
+        )
+        if (!contactGuard) throw new Error('portal_contact_guard_missing')
+
+        const batchResults = await db.batch([
+          contactGuard,
+          {
+            sql: 'INSERT INTO customers (name, phone, phone_normalized, membership_number) VALUES (@name, @phone, @phone_normalized, @membership_number)',
+            params: {
+              name: args.name,
+              phone: formatPhoneP8(args.canonical),
+              phone_normalized: args.canonical,
+              membership_number: membershipId,
+            },
+          },
+          {
+            sql: `INSERT INTO portal_accounts (
+              membership_id, name, phone, password_hash, contact_id,
+              consent_version, consent_at, consent_locale
+            ) VALUES (
+              @membership_id, @name, @phone, @password_hash,
+              COALESCE((
+                SELECT id FROM customers
+                WHERE lower(trim(membership_number)) = lower(trim(@membership_id))
+                  AND phone_normalized = @phone
+                LIMIT 1
+              ), json_extract('portal_contact_missing', '$')),
+              @consent_version, CURRENT_TIMESTAMP, @consent_locale
+            )`,
+            params,
+          },
+        ])
+        const insertedAccountId = Number(batchResults[2]?.meta?.last_row_id ?? 0)
+        if (!Number.isSafeInteger(insertedAccountId) || insertedAccountId <= 0) {
+          throw new Error('portal_account_insert_result_missing')
+        }
+        accountId = insertedAccountId
+      } else {
+        const results = await db.batch([
+          { sql: customerProfileMutationGuardSql('contactId'), params: { contactId: args.contactId } },
+          { sql, params },
+        ])
+        accountId = Number(results[1]?.meta?.last_row_id ?? 0) || null
+      }
+      break
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (args.contactId != null) {
+        const guardedContact = await db.prepare('SELECT is_anonymous FROM customers WHERE id = @id LIMIT 1')
+          .get<{ is_anonymous: number | null }>({ id: args.contactId })
+        if (isAnonymousCustomer(guardedContact)) return existingReject()
+      }
+      if (!/UNIQUE constraint failed/i.test(message)) throw error
+      // Only a collision on an id WE minted (createContact === true) may
+      // retry -- deliberately NOT gated on remaining-attempts here, so the
+      // loop's own bound (maxAttempts) is what stops it, and an id supplied
+      // by the caller always falls through to existingReject() below on its
+      // very first (and only, maxAttempts === 1) failure.
+      if (!(args.createContact === true && isMembershipCollision(error))) return existingReject()
+      lastError = error
+      membershipId = await mintMembershipNumber(db)
     }
   }
 
-  return { ok: true, accountId, membershipId: args.membershipId, name: args.name }
+  if (accountId === null) {
+    // Exhausted every retry -- mirrors withMintedMembershipNumber's own
+    // exhaustion behaviour (throw); the global error handler turns this into
+    // a 500 rather than the misleading "verification_failed" reminder.
+    throw lastError instanceof Error ? lastError : new Error('Could not mint a unique membership id')
+  }
+
+  return { ok: true, accountId, membershipId, name: args.name }
 }
 
 export async function signinPortalAccount(env: Env, input: SigninInput): Promise<SigninResult> {
@@ -182,10 +315,31 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
 
   const genericFail: SigninResult = { ok: false, status: 401, error: 'Invalid sign-in details. Please check and try again.', code: 'invalid_credentials' }
   if (!identifier || !canonical || !password) return genericFail
+  const db = getDb(env)
+  if (!(await portalAccountsHaveConsentColumns(db))) {
+    return { ok: false, status: 503, error: 'Account consent storage is not ready. Please try again later.', code: 'consent_storage_unavailable' }
+  }
+  if (!consentGiven(input.consent)) {
+    return { ok: false, status: 428, error: 'Please agree to the current Terms & Conditions and Privacy Policy to sign in.', code: 'consent_required' }
+  }
 
-  const account = await getDb(env).prepare(
-    'SELECT id, name, membership_id, password_hash FROM portal_accounts WHERE phone = @p LIMIT 1',
-  ).get<{ id: number; name: string; membership_id: string; password_hash: string }>({ p: canonical })
+  const account = await db.prepare(`
+    SELECT a.id, a.name, a.membership_id, a.password_hash, a.consent_version,
+           a.contact_id, c.id AS contact_exists, c.is_anonymous
+    FROM portal_accounts a
+    LEFT JOIN customers c ON c.id = a.contact_id
+    WHERE a.phone = @p
+    LIMIT 1
+  `).get<{
+    id: number
+    name: string
+    membership_id: string
+    password_hash: string
+    consent_version: string | null
+    contact_id: number | null
+    contact_exists: number | null
+    is_anonymous: number | null
+  }>({ p: canonical })
 
   if (!account) {
     // No account for this phone — still spend a bcrypt compare so timing does
@@ -197,7 +351,22 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   const idLower = identifier.toLowerCase()
   const identifierMatches = idLower === account.name.trim().toLowerCase() || idLower === account.membership_id.trim().toLowerCase()
   const passwordMatches = bcrypt.compareSync(password, account.password_hash)
-  if (!identifierMatches || !passwordMatches) return genericFail
+  const contactEligible = account.contact_id == null || (account.contact_exists != null && !isAnonymousCustomer(account))
+  if (!identifierMatches || !passwordMatches || !contactEligible) return genericFail
+
+  const consentUpdate = await db.prepare(`
+    UPDATE portal_accounts
+    SET consent_version = @version, consent_at = CURRENT_TIMESTAMP, consent_locale = @locale, updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id
+      AND (contact_id IS NULL OR EXISTS (
+        SELECT 1 FROM customers WHERE id = portal_accounts.contact_id AND ${customerIsProfileSql()}
+      ))
+  `).run({
+    version: PORTAL_CONSENT_VERSION,
+    locale: String(input.consentLocale || 'und').slice(0, 16),
+    id: account.id,
+  })
+  if (Number(consentUpdate.changes || 0) !== 1) return genericFail
 
   return { ok: true, accountId: account.id }
 }

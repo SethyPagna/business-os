@@ -2,25 +2,30 @@ import { Suspense, useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useLowStockConfig, useSync as useSyncHook } from '../../AppContext.tsx'
+import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { useMemo } from 'react'
 import { useRef } from 'react'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
-import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
+import StatsStrip, { statsPresetRange, type StatCardDef, type StatsPresetKey } from '../shared/StatsStrip.tsx'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers'
+import { buildEquation, revenueTerms, profitTerms } from '../../utils/statsFormulas'
 import Download from 'lucide-react/dist/esm/icons/download.js'
-import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRangePicker'
+import type { DateTimeRange } from '../shared/DateTimeRangePicker'
+import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
-import { getAnalytics, getDashboard, getDashboardStartup } from '../../api/dashboardTransport.ts'
+import { getAnalytics, getDashboard, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardStockAlertState } from '../../api/dashboardTransport.ts'
 import { isInvalidSessionError } from '../../api/http.ts'
 import { listImportJobs } from '../../api/importJobsTransport.ts'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import DollarSign from 'lucide-react/dist/esm/icons/dollar-sign.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
+import { getDashboardSaleStatusLabel, getDashboardSaleStatusTone } from './dashboardSaleStatus.ts'
+import { finishDashboardStockAlertRequest, invalidateDashboardStockAlertRequest } from './dashboardStockAlertRequests.ts'
 
 const ImportReportModal = lazyRetry(() => import('../shared/ImportReportModal'), 'ImportReportModal')
 const ExportChoiceDialog = lazyRetry(() => import('../shared/ExportChoiceDialog'), 'dashboard-export-choices')
@@ -33,7 +38,7 @@ type TranslateFn = (key: string) => string
 type FormatMoneyFn = (value: unknown) => string
 type NavigateFn = (page: string) => void
 type EntityId = string | number
-type DashboardRangeId = 'today' | '7d' | 'month' | 'year' | 'custom'
+type DashboardRangeId = StatsPresetKey | 'custom'
 type DashboardGranularity = 'day' | 'week' | 'month'
 type DashboardChartMode = 'revenue' | 'profit' | 'volume'
 type DashboardTopMode = 'revenue' | 'qty'
@@ -136,6 +141,8 @@ interface DashboardPeriodRow {
   revenue_usd?: number
   gross_sales_usd?: number
   discount_usd?: number
+  item_discount_usd?: number
+  total_discount_usd?: number
   tax_usd?: number
   delivery_usd?: number
   delivery_actual_cost_usd?: number
@@ -146,7 +153,6 @@ interface DashboardPeriodRow {
   profit_usd?: number
   cost_usd?: number
   tx_count?: number
-  refunds_usd?: number
   count?: number
   [key: string]: unknown
 }
@@ -220,6 +226,7 @@ interface DashboardAnalytics {
 }
 
 interface DashboardFilterPrefs {
+  version: 2
   rangeId: DashboardRangeId
   customStart: string
   customEnd: string
@@ -248,9 +255,10 @@ interface ImportFileSummary {
 }
 
 interface DashboardApi {
-  getDashboard: () => Promise<unknown>
+  getDashboard: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
   getAnalytics: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
   getDashboardStartup: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
+  getDashboardStockAlerts: (params: { state: DashboardStockAlertState; page: number; pageSize: number }) => Promise<unknown>
 }
 
 type DashboardExportModule = typeof import('./dashboardExport.ts')
@@ -260,7 +268,7 @@ const useSync = useSyncHook as () => SyncContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
 
 function getDashboardApi(): DashboardApi {
-  return { getDashboard, getAnalytics, getDashboardStartup }
+  return { getDashboard, getAnalytics, getDashboardStartup, getDashboardStockAlerts }
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -268,11 +276,12 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 const DASHBOARD_FILTER_STORAGE_PREFIX = 'bos_dashboard_filters:'
-const DASHBOARD_FILTER_STORAGE_FALLBACK_KEY = `${DASHBOARD_FILTER_STORAGE_PREFIX}last`
 const DASHBOARD_CHART_POINT_LIMIT = 180
 const DASHBOARD_SUMMARY_TIMEOUT_MS = 30000
 const DASHBOARD_ANALYTICS_TIMEOUT_MS = 30000
 const DASHBOARD_STARTUP_TIMEOUT_MS = 30000
+const DASHBOARD_STOCK_ALERT_PAGE_SIZE = 10
+const DASHBOARD_STOCK_ALERT_SCROLL_THRESHOLD_PX = 64
 const EMPTY_DASHBOARD_SUMMARY: DashboardSummary = {
   today_count: 0,
   today_total: 0,
@@ -314,40 +323,106 @@ const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
 
 // Shared list-body sizing for the dashboard's list cards (recent sales, top
 // products/customers, low/out of stock, expiry, branches, imports, payment).
-// The user REVISED the height rule (Sep 1): cards should be COMPACT and fit the
-// SHORTEST card in their row, NOT balloon up to a tall sibling (the analytics
-// chart, the best-hour heatmap). So the card grid rows below use items-start (no
-// stretch-to-tallest) and each list body clamps to a compact band -- a low min
-// floor so a short list stays short, and a max + scroll so a long one can't run
-// the card tall. flex-1 is kept so a card that IS structurally tall (best-hour:
-// fixed heatmap + list) still lets its list take the remaining height.
+// P6-7 (Sep 15, owner screenshots showed a misaligned "red line" under every
+// card row): the previous Sep-1 rule let each card size to its own content
+// and used items-start, so a short card's bottom border stopped short of a
+// tall sibling's. The owner reversed that explicitly ("cut the sales length
+// to match the analytics card... if the card went over, resize it, if the
+// card did not reach, resize it"). The card grid rows now use items-stretch
+// (CSS grid's default), so every card's outer box always matches the tallest
+// sibling in its row -- a short card's border grows to meet it, a tall card's
+// border stops there too. The list body itself keeps a compact min/max band
+// (a low min floor so a short list stays short when its row is also short,
+// a max + scroll so a very long list can't blow the row past a sane height)
+// and flex-1 so it fills whatever height the stretched card ends up with.
 const CARD_LIST_BODY = 'flex-1 min-h-[8rem] max-h-[16rem] overflow-y-auto'
 
-function getDashboardFilterStorageKey(user?: AppUser | null): string {
-  const userKey = user?.id || user?.username || user?.email || 'guest'
-  return `${DASHBOARD_FILTER_STORAGE_PREFIX}${userKey}`
+// A card's list body is capped at CARD_LIST_BODY's max-height and scrolls in
+// place, but scrolling inside a small tile is awkward on a phone -- so once a
+// card's full list is longer than fits comfortably (same >5 threshold the
+// Sales card already used), it also gets a "View more" row that opens the
+// same list at full size in a float. One shared modal shell (not a second
+// modal system) is reused by every card below instead of each pasting its
+// own header/close/backdrop markup.
+function DashboardListModal({ open, title, subtitle, closeLabel, onClose, children }: {
+  open: boolean
+  title: ReactNode
+  subtitle?: ReactNode
+  closeLabel: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  if (!open || typeof document === 'undefined') return null
+  return createPortal((
+    <div className="modal-viewport-safe fixed inset-0 z-[1040] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
+          <div className="min-w-0">
+            <h2 className="font-bold text-gray-900 dark:text-white">{title}</h2>
+            {subtitle ? <div className="mt-0.5 text-xs text-gray-400">{subtitle}</div> : null}
+          </div>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center text-sm text-gray-400 hover:text-gray-600">{closeLabel}</button>
+        </div>
+        <div className="modal-scroll divide-y divide-gray-100 dark:divide-gray-700">{children}</div>
+      </div>
+    </div>
+  ), document.body)
 }
 
-function readDashboardFilterPrefs(storageKeys: string | string[]): DashboardFilterPrefs | null {
-  if (typeof window === 'undefined') return null
+// Footer row shown at the bottom of a list card once its list is longer than
+// the compact CARD_LIST_BODY comfortably shows. mt-auto pins it to the
+// card's stretched bottom edge (see items-stretch on the grid rows) instead
+// of trailing right after a short list with blank space under it.
+function DashboardViewMoreFooter({ show, translateOr, onClick }: {
+  show: boolean
+  translateOr: (key: string, fallback: string, khmerFallback?: string) => string
+  onClick: () => void
+}) {
+  if (!show) return null
+  return (
+    <div className="relative z-10 mt-auto border-t border-gray-100 px-4 py-2 dark:border-gray-700">
+      <button type="button" onClick={onClick} className="relative z-10 w-full py-0.5 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400">{translateOr('view_more', 'View more')}</button>
+    </div>
+  )
+}
+
+function getDashboardFilterStorageKey(user?: AppUser | null): string {
+  const userKey = user?.id ?? user?.username ?? user?.email
+  return userKey == null || String(userKey).trim() === '' ? '' : `${DASHBOARD_FILTER_STORAGE_PREFIX}${userKey}`
+}
+
+function todayDashboardFilterPrefs(): DashboardFilterPrefs {
+  return { version: 2, rangeId: 'today', customStart: '', customEnd: '' }
+}
+
+function validDashboardCustomDates(start: unknown, end: unknown): boolean {
+  const valid = (value: unknown): value is string => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+    const parsed = new Date(`${value}T00:00:00.000Z`)
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+      && value >= '1970-01-01' && value <= '2999-12-31'
+  }
+  return valid(start) && valid(end) && start <= end
+}
+
+function readDashboardFilterPrefs(storageKey: string): DashboardFilterPrefs {
+  if (typeof window === 'undefined' || !storageKey) return todayDashboardFilterPrefs()
   try {
-    const keys = Array.isArray(storageKeys)
-      ? storageKeys.filter(Boolean)
-      : [storageKeys].filter(Boolean)
-    for (const key of keys) {
-      const raw = window.localStorage.getItem(key)
-      if (!raw) continue
-      const parsed = JSON.parse(raw)
-      if (!parsed || typeof parsed !== 'object') continue
-      return {
-        rangeId: typeof parsed.rangeId === 'string' ? normalizeDashboardRangeId(parsed.rangeId) : 'custom',
-        customStart: typeof parsed.customStart === 'string' ? parsed.customStart : '',
-        customEnd: typeof parsed.customEnd === 'string' ? parsed.customEnd : '',
-      }
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) || 'null')
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return todayDashboardFilterPrefs()
+    const rangeId = normalizeDashboardRangeId(parsed.rangeId)
+    if (!rangeId || (parsed.version !== undefined && parsed.version !== 2)) return todayDashboardFilterPrefs()
+    // Legacy custom dates may have been written automatically for Today;
+    // legacy empty dates cannot prove an intentional All-time selection.
+    if (parsed.version !== 2 && (rangeId === 'all' || rangeId === 'custom')) return todayDashboardFilterPrefs()
+    if (rangeId === 'custom') {
+      return validDashboardCustomDates(parsed.customStart, parsed.customEnd)
+        ? { version: 2, rangeId, customStart: parsed.customStart, customEnd: parsed.customEnd }
+        : todayDashboardFilterPrefs()
     }
-    return null
+    return { version: 2, rangeId, customStart: '', customEnd: '' }
   } catch {
-    return null
+    return todayDashboardFilterPrefs()
   }
 }
 
@@ -362,11 +437,30 @@ function downsampleChartRows(rows: DashboardPeriodRow[] = [], limit = DASHBOARD_
   return sampled
 }
 
-function normalizeDashboardRangeId(rangeId: unknown): DashboardRangeId {
-  if (rangeId === '30d') return 'month'
-  if (rangeId === '90d') return 'year'
-  if (rangeId === 'today' || rangeId === '7d' || rangeId === 'month' || rangeId === 'year' || rangeId === 'custom') return rangeId
-  return 'custom'
+function normalizeDashboardRangeId(rangeId: unknown): DashboardRangeId | null {
+  if (rangeId === 'all' || rangeId === 'today' || rangeId === 'yesterday' || rangeId === '7d' || rangeId === '30d' || rangeId === 'week' || rangeId === 'month' || rangeId === 'year' || rangeId === 'custom') return rangeId
+  return null
+}
+
+function resolveDashboardFilterRange(prefs: DashboardFilterPrefs | null): DateTimeRange {
+  if (!prefs) {
+    const today = todayStr()
+    return { startDate: today, endDate: today, startTime: '', endTime: '' }
+  }
+  if (prefs.rangeId === 'custom') {
+    return { startDate: prefs.customStart, endDate: prefs.customEnd, startTime: '', endTime: '' }
+  }
+  const preset = statsPresetRange(prefs.rangeId)
+  return { ...preset, startTime: '', endTime: '' }
+}
+
+function dashboardPrefsForSelection(nextRange: DateTimeRange, source: DashboardRangeId = 'custom'): DashboardFilterPrefs | null {
+  if (!normalizeDashboardRangeId(source)) return null
+  if (source === 'custom') {
+    if (!validDashboardCustomDates(nextRange.startDate, nextRange.endDate)) return null
+    return { version: 2, rangeId: 'custom', customStart: nextRange.startDate, customEnd: nextRange.endDate }
+  }
+  return { version: 2, rangeId: source, customStart: '', customEnd: '' }
 }
 
 function compactDashboardMetaParts(parts: unknown[] = []): string[] {
@@ -395,13 +489,6 @@ function formatDashboardHourLabel(hourValue: unknown): string {
   if (hour === 0) return '12 AM'
   if (hour === 12) return '12 PM'
   return hour < 12 ? `${hour} AM` : `${hour - 12} PM`
-}
-
-function getSaleStatusTone(status: unknown): string {
-  const key = String(status || '').toLowerCase()
-  if (key === 'refunded' || key === 'returned') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-  if (key === 'pending' || key === 'draft') return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-  return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
 }
 
 function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, translateOr, fmtUSD, onOpen }: {
@@ -484,17 +571,17 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
       <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
         {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.map((sale) => (
           <button key={sale.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
-            <div className="min-w-0"><p className="truncate text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="truncate text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name]).join(' | ')}</p></div>
-            <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
+            <div className="min-w-0"><p className="truncate text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="truncate text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}</p></div>
+            <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
           </button>
         ))}
       </div>
-      {sales.length > 5 ? <div className="relative z-10 border-t border-gray-100 px-4 py-2 dark:border-gray-700"><button type="button" onClick={onViewMore} className="relative z-10 w-full py-0.5 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400">{translateOr('view_more', 'View more')}</button></div> : null}
+      <DashboardViewMoreFooter show={sales.length > 5} translateOr={translateOr} onClick={onViewMore} />
     </div>
   )
 }
 
-function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, t, translateOr, fmtUSD, onOpen }: {
+function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, t, translateOr, fmtUSD, onOpen, onViewMore }: {
   analytics: DashboardAnalytics | null
   analyticsPending: boolean
   analyticsUnavailable: boolean
@@ -503,6 +590,7 @@ function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailab
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   fmtUSD: FormatMoneyFn
   onOpen: (branch: DashboardBranchRow) => void
+  onViewMore: () => void
 }) {
   const all = analytics?.byBranch || []
   const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0891b2']
@@ -510,38 +598,37 @@ function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailab
   return <div className="card flex flex-col p-3 sm:p-4">
     <h2 className="mb-2 text-base font-semibold text-gray-900 dark:text-white">{t('branch_performance')}</h2>
     {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : (
-      <div className={`space-y-1 ${CARD_LIST_BODY}`}>
-        {!all.length ? <p className="py-4 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : all.map((branch, index) => {
-          const percent = ((branch.revenue_usd || 0) / maxRevenue * 100).toFixed(0)
-          return <button key={`${branch.branch_id || branch.branch_name || 'branch'}-${index}`} type="button" onClick={() => onOpen(branch)} className="block w-full rounded-xl px-2 py-1.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"><div className="mb-0.5 flex justify-between text-xs"><span className="max-w-28 truncate text-gray-600 dark:text-gray-400">{branch.branch_name}</span><span className="font-medium text-gray-900 dark:text-white">{fmtUSD(branch.revenue_usd || 0)}</span></div><div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div className="h-full rounded-full" style={{ width: `${percent}%`, background: colors[index % colors.length] }} /></div><div className="mt-0.5 text-right text-xs text-gray-400">{branch.count} {t('sale')}</div></button>
-        })}
-      </div>
+      <>
+        <div className={`space-y-1 ${CARD_LIST_BODY}`}>
+          {!all.length ? <p className="py-4 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : all.map((branch, index) => {
+            const percent = ((branch.revenue_usd || 0) / maxRevenue * 100).toFixed(0)
+            return <button key={`${branch.branch_id || branch.branch_name || 'branch'}-${index}`} type="button" onClick={() => onOpen(branch)} className="block w-full rounded-xl px-2 py-1.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"><div className="mb-0.5 flex justify-between text-xs"><span className="max-w-28 truncate text-gray-600 dark:text-gray-400">{branch.branch_name}</span><span className="font-medium text-gray-900 dark:text-white">{fmtUSD(branch.revenue_usd || 0)}</span></div><div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div className="h-full rounded-full" style={{ width: `${percent}%`, background: colors[index % colors.length] }} /></div><div className="mt-0.5 text-right text-xs text-gray-400">{branch.count} {t('sale')}</div></button>
+          })}
+        </div>
+        <DashboardViewMoreFooter show={all.length > 5} translateOr={translateOr} onClick={onViewMore} />
+      </>
     )}
   </div>
 }
 
-function ExpiryAlertsCard({ summary, translateOr, onOpen }: {
+function ExpiryAlertsCard({ summary, translateOr, onOpen, onViewMore }: {
   summary: DashboardSummary | null
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   onOpen: (item: DashboardProduct) => void
+  onViewMore: () => void
 }) {
   const items = summary?.expiring_products || []
   return <div className="card flex flex-col">
     <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2.5 sm:px-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>{Number(summary?.expiring_count || 0) > 0 ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{summary?.expiring_count}</span> : null}</div>
     <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>{!items.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : items.map((item) => <button key={item.id} type="button" onClick={() => onOpen(item)} className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4"><p className="min-w-0 break-words text-[13px] leading-4 text-gray-700 dark:text-gray-300 sm:text-sm">{item.name}</p><span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span></button>)}</div>
+    <DashboardViewMoreFooter show={items.length > 5} translateOr={translateOr} onClick={onViewMore} />
   </div>
 }
 
-function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, t, translateOr, fmtUSD, onOpenHour }: {
-  analytics: DashboardAnalytics | null
-  analyticsPending: boolean
-  analyticsUnavailable: boolean
-  analyticsError: string
-  t: TranslateFn
-  translateOr: (key: string, fallback: string, khmerFallback?: string) => string
-  fmtUSD: FormatMoneyFn
-  onOpenHour: (hour: DashboardHourRow, rank?: number | null) => void
-}) {
+// Shared between BestHourCard and the dashboard's own "View more" float so
+// both agree on the exact same ranked list -- a single source of truth
+// instead of two copies of the merge/sort logic drifting apart.
+function computeDashboardBusyHours(analytics: DashboardAnalytics | null): DashboardHourRow[] {
   const hourly = analytics?.hourlyDist || []
   // The backend already emits UTC+7 business-hour buckets. Applying the
   // offset again here moved every value seven hours forward on the chart.
@@ -552,14 +639,40 @@ function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analy
     merged[localHour].count = (merged[localHour].count || 0) + (Number(hour.count) || 0)
     merged[localHour].revenue_usd = (merged[localHour].revenue_usd || 0) + (Number.parseFloat(String(hour.revenue_usd || 0)) || 0)
   })
+  return Object.values(merged).filter((hour) => (hour.count || 0) > 0).sort((left, right) => (right.count || 0) - (left.count || 0))
+}
+
+function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, t, translateOr, fmtUSD, onOpenHour, onViewMore }: {
+  analytics: DashboardAnalytics | null
+  analyticsPending: boolean
+  analyticsUnavailable: boolean
+  analyticsError: string
+  t: TranslateFn
+  translateOr: (key: string, fallback: string, khmerFallback?: string) => string
+  fmtUSD: FormatMoneyFn
+  onOpenHour: (hour: DashboardHourRow, rank?: number | null) => void
+  onViewMore: () => void
+}) {
+  const hourly = analytics?.hourlyDist || []
+  const merged: Record<number, DashboardHourRow> = {}
+  hourly.forEach((hour) => {
+    const localHour = ((Number.parseInt(String(hour.hour), 10) % 24) + 24) % 24
+    if (!merged[localHour]) merged[localHour] = { hour: localHour, count: 0, revenue_usd: 0 }
+    merged[localHour].count = (merged[localHour].count || 0) + (Number(hour.count) || 0)
+    merged[localHour].revenue_usd = (merged[localHour].revenue_usd || 0) + (Number.parseFloat(String(hour.revenue_usd || 0)) || 0)
+  })
   const maxCount = Math.max(...Object.values(merged).map((hour) => hour.count || 0), 1)
   const allHours = Array.from({ length: 24 }, (_, hour) => merged[hour] || { hour, count: 0, revenue_usd: 0 })
+  // Same merge, so this stays the same ranked list the "View more" float
+  // (computeDashboardBusyHours) shows -- one merge computed once, not two
+  // copies that could drift.
   const busyHours = Object.values(merged).filter((hour) => (hour.count || 0) > 0).sort((left, right) => (right.count || 0) - (left.count || 0))
   return <div className="card flex flex-col p-3 sm:p-4">
     <div className="mb-2 flex items-center justify-between gap-2"><h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('best_hour')}</h2><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{translateOr('tap_to_view', 'Tap to view')}</span></div>
     {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : <>
       <div className="relative mb-3"><div className="grid gap-px" style={{ gridTemplateColumns: 'repeat(24,1fr)' }}>{allHours.map((hour) => { const opacity = (hour.count || 0) === 0 ? 0.06 : 0.12 + (hour.count || 0) / maxCount * 0.88; return <button key={hour.hour} type="button" title={`${String(hour.hour).padStart(2, '0')}:00 - ${hour.count} ${t('sale')}(s), ${fmtUSD(hour.revenue_usd)}`} aria-label={`${translateOr('best_hour', 'Best hour')} ${formatDashboardHourLabel(hour.hour)}`} className="rounded-sm transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-700" style={{ height: 40, background: `rgba(37,99,235,${opacity.toFixed(2)})` }} onClick={() => onOpenHour(hour, busyHours.findIndex((item) => item.hour === hour.hour) + 1 || null)} /> })}</div><div className="relative mt-1 flex h-[18px] text-[11px] font-medium text-gray-400">{[0, 6, 12, 18, 23].map((hour) => <span key={hour} className="absolute" style={{ left: `${hour / 23 * 100}%`, transform: 'translateX(-50%)' }}>{formatDashboardHourLabel(hour).replace(' ', '')}</span>)}</div></div>
       <div className={`space-y-1 ${CARD_LIST_BODY}`}>{!busyHours.length ? <p className="text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : busyHours.map((hour, index) => <button key={hour.hour} type="button" className="flex w-full items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50/60 dark:border-gray-700 dark:bg-gray-900/40 dark:hover:border-blue-800 dark:hover:bg-blue-950/20" onClick={() => onOpenHour(hour, index + 1)}><div><div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{`#${index + 1} ${formatDashboardHourLabel(hour.hour)}`}</div><div className="text-[11px] text-gray-500 dark:text-gray-400">{String(hour.hour).padStart(2, '0')}:00 - {String((Number(hour.hour) + 1) % 24).padStart(2, '0')}:00</div></div><div className="text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{hour.count} {t('sale')}{hour.count !== 1 ? 's' : ''}</div><div className="text-[11px] text-green-600 dark:text-green-400">{fmtUSD(hour.revenue_usd)}</div></div></button>)}</div>
+      <DashboardViewMoreFooter show={busyHours.length > 5} translateOr={translateOr} onClick={onViewMore} />
     </>}
   </div>
 }
@@ -632,6 +745,9 @@ function normalizeDashboardAnalyticsPayload(value: unknown): DashboardAnalytics 
 
 export default function Dashboard() {
   const { t, fmtUSD, fmtKHR, navigateTo, user, hasPermission } = useApp()
+  // Settings > Stock Alerts -- the number the low-stock card's rows were
+  // judged by, shown in the drill panel and carried into the export.
+  const lowStockConfig = useLowStockConfig()
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('dashboard')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -651,13 +767,9 @@ export default function Dashboard() {
   // `close` key already used everywhere else in the app.
   const closeLabel = translateOr('close', 'Close')
   const dashboardFilterStorageKey = useMemo(() => getDashboardFilterStorageKey(user), [user?.email, user?.id, user?.username])
-  const dashboardFilterStorageKeys = useMemo(
-    () => [dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY],
-    [dashboardFilterStorageKey],
-  )
   const initialFilterPrefs = useMemo(
-    () => readDashboardFilterPrefs(dashboardFilterStorageKeys),
-    [dashboardFilterStorageKeys],
+    () => readDashboardFilterPrefs(dashboardFilterStorageKey),
+    [dashboardFilterStorageKey],
   )
 
   // Small-screen section chips. Labels use translateOr (the same guarded-
@@ -677,20 +789,46 @@ export default function Dashboard() {
   const [silentRefresh, setSilentRefresh] = useState(false)
   const [summaryError, setSummaryError] = useState('')
   const [analyticsError, setAnalyticsError] = useState('')
-  // Preset chips are gone. A legacy saved preset deliberately migrates to the
-  // new app-wide default (today); a range the user explicitly edited remains.
-  const [rangeId, setRangeId]     = useState<DashboardRangeId>('custom')
-  const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.rangeId === 'custom' ? (initialFilterPrefs.customStart || '') : '')
-  const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.rangeId === 'custom' ? (initialFilterPrefs.customEnd || '') : '')
+  // The shared preset rail and custom picker both write these dates. A new
+  // user starts on TODAY; a saved all-time range deliberately restores as two
+  // empty endpoints. The range governs the flow cards only; stock and alert
+  // cards stay catalog-wide whatever the range (see compat.ts).
+  const [filterSelection, setFilterSelection] = useState(() => ({ storageKey: dashboardFilterStorageKey, prefs: initialFilterPrefs }))
+  // Account changes resolve synchronously, before either the first request or
+  // persistence effect can reuse the previous account's selection.
+  const filterPrefs = filterSelection.storageKey === dashboardFilterStorageKey ? filterSelection.prefs : initialFilterPrefs
+  const businessDay = todayStr()
+  const dashboardRange = useMemo(() => resolveDashboardFilterRange(filterPrefs), [filterPrefs, businessDay])
+  const customStart = dashboardRange.startDate
+  const customEnd = dashboardRange.endDate
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
   const [productDetail, setProductDetail]       = useState<DashboardProduct | null>(null)
+  const [lowStockRows, setLowStockRows] = useState<DashboardProduct[]>([])
+  const [outOfStockRows, setOutOfStockRows] = useState<DashboardProduct[]>([])
+  const [lowStockPage, setLowStockPage] = useState(0)
+  const [outOfStockPage, setOutOfStockPage] = useState(0)
+  const [lowStockHasMore, setLowStockHasMore] = useState(false)
+  const [outOfStockHasMore, setOutOfStockHasMore] = useState(false)
+  const [lowStockLoadingMore, setLowStockLoadingMore] = useState(false)
+  const [outOfStockLoadingMore, setOutOfStockLoadingMore] = useState(false)
+  const [lowStockLoadError, setLowStockLoadError] = useState('')
+  const [outOfStockLoadError, setOutOfStockLoadError] = useState('')
   // Every list card fills its row height and scrolls in place (see
-  // CARD_LIST_BODY) instead of a per-card show-all toggle, so those show-all
-  // flags were removed.
+  // CARD_LIST_BODY); a card whose full list is longer than that still needs
+  // a comfortable way to see the rest, so each in-memory list card also gets
+  // a "View more" float, same as the recentSalesOpen pattern below (P6-7,
+  // owner: "do like sale ... click on view to open a float to show even
+  // more"). Reused through the single DashboardListModal shell.
   const [recentSalesOpen, setRecentSalesOpen]   = useState(false)
   const [recentSaleDetail, setRecentSaleDetail] = useState<DashboardSale | null>(null)
+  const [topProductsListOpen, setTopProductsListOpen] = useState(false)
+  const [topCustomersListOpen, setTopCustomersListOpen] = useState(false)
+  const [branchPerformanceListOpen, setBranchPerformanceListOpen] = useState(false)
+  const [expiryAlertsListOpen, setExpiryAlertsListOpen] = useState(false)
+  const [bestHourListOpen, setBestHourListOpen] = useState(false)
+  const [recentImportsListOpen, setRecentImportsListOpen] = useState(false)
   const [recentImportFiles, setRecentImportFiles] = useState<ImportFileSummary[]>([])
   const [recentImportFilesLoading, setRecentImportFilesLoading] = useState(true)
   const [importReportJobId, setImportReportJobId] = useState<string | null>(null)
@@ -703,11 +841,25 @@ export default function Dashboard() {
   const analyticsRequestRef = useRef(0)
   const startupRequestRef = useRef(0)
   const refreshRequestRef = useRef(0)
+  const lowStockRequestRef = useRef(0)
+  const outOfStockRequestRef = useRef(0)
+  const lowStockLoadInFlightRef = useRef(false)
+  const outOfStockLoadInFlightRef = useRef(false)
+  const lowStockListRef = useRef<HTMLDivElement | null>(null)
+  const outOfStockListRef = useRef<HTMLDivElement | null>(null)
   const analyticsLoadingRef = useRef(true)
   const startupLoadingRef = useRef(false)
   const startupAttemptedRef = useRef(false)
-  const filterStorageKeyRef = useRef(dashboardFilterStorageKey)
   const dashboardExportModulePromiseRef = useRef<Promise<DashboardExportModule> | null>(null)
+
+  const invalidateStockAlertPageRequests = useCallback(() => {
+    invalidateDashboardStockAlertRequest(lowStockRequestRef, lowStockLoadInFlightRef)
+    invalidateDashboardStockAlertRequest(outOfStockRequestRef, outOfStockLoadInFlightRef)
+    setLowStockLoadingMore(false)
+    setOutOfStockLoadingMore(false)
+    setLowStockHasMore(false)
+    setOutOfStockHasMore(false)
+  }, [])
 
   const loadDashboardExportModule = useCallback(() => {
     if (!dashboardExportModulePromiseRef.current) {
@@ -723,11 +875,17 @@ export default function Dashboard() {
 
   const openInventoryOverview = useCallback((stockState: InventoryStockFocus = 'all') => {
     if (typeof window !== 'undefined') {
-      window.sessionStorage.setItem(DASHBOARD_INVENTORY_FOCUS_KEY, JSON.stringify({
-        section: 'products',
-        tab: 'products',
-        stockFilter: stockState,
-      }))
+      try {
+        window.sessionStorage.setItem(DASHBOARD_INVENTORY_FOCUS_KEY, JSON.stringify({
+          section: 'products',
+          tab: 'products',
+          stockFilter: stockState,
+        }))
+      } catch {
+        // Storage blocked (iOS "Block All Cookies"): navigate without the
+        // optional focus payload rather than let a card tap throw. Same
+        // stance as the filter-prefs writer further down this file.
+      }
     }
     setProductDetail(null)
     // E1: the inventory page id retired into the Branches hub -- the focus
@@ -739,6 +897,10 @@ export default function Dashboard() {
   const getCurrentDashboardRange = useCallback(() => {
     return { start: customStart, end: customEnd, granularity: 'day' as DashboardGranularity }
   }, [customEnd, customStart])
+  const handleDashboardRangeChange = useCallback((nextRange: DateTimeRange, source?: DashboardRangeId) => {
+    const prefs = dashboardPrefsForSelection(nextRange, source)
+    if (prefs) setFilterSelection({ storageKey: dashboardFilterStorageKey, prefs })
+  }, [dashboardFilterStorageKey])
 
   const loadDashboardStartup = useCallback(async () => {
     const requestId = beginTrackedRequest(startupRequestRef)
@@ -793,10 +955,19 @@ export default function Dashboard() {
     label = 'Dashboard summary',
     markLoading = false,
   }: { label?: string; markLoading?: boolean } = {}) => {
+    // The summary is page 1 for both family-alert lists. Invalidate an old
+    // page request before fetching a new filter/refresh summary so its late
+    // response cannot append rows or advance the new cursor.
+    invalidateStockAlertPageRequests()
     const requestId = beginTrackedRequest(summaryRequestRef)
     if (markLoading) setLoading(true)
     try {
-      const data = await withLoaderTimeout(() => getDashboardApi().getDashboard(), label, DASHBOARD_SUMMARY_TIMEOUT_MS)
+      const { start, end, granularity } = getCurrentDashboardRange()
+      const data = await withLoaderTimeout(
+        () => getDashboardApi().getDashboard({ startDate: start, endDate: end, granularity }),
+        label,
+        DASHBOARD_SUMMARY_TIMEOUT_MS,
+      )
       if (!isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
       if (!isDashboardSummaryPayload(data)) {
         throw new Error('Dashboard summary returned incomplete data.')
@@ -819,6 +990,49 @@ export default function Dashboard() {
       if (markLoading && isTrackedRequestCurrent(summaryRequestRef, requestId)) {
         setLoading(false)
       }
+    }
+  }, [getCurrentDashboardRange, invalidateStockAlertPageRequests])
+
+  const loadStockAlertPage = useCallback(async (state: DashboardStockAlertState, page: number) => {
+    const requestRef = state === 'low' ? lowStockRequestRef : outOfStockRequestRef
+    const inFlightRef = state === 'low' ? lowStockLoadInFlightRef : outOfStockLoadInFlightRef
+    if (inFlightRef.current) return null
+    inFlightRef.current = true
+    const requestId = beginTrackedRequest(requestRef)
+    const setLoadingMore = state === 'low' ? setLowStockLoadingMore : setOutOfStockLoadingMore
+    const setLoadError = state === 'low' ? setLowStockLoadError : setOutOfStockLoadError
+    setLoadingMore(true)
+    setLoadError('')
+    try {
+      const data = await withLoaderTimeout(
+        () => getDashboardApi().getDashboardStockAlerts({ state, page, pageSize: DASHBOARD_STOCK_ALERT_PAGE_SIZE }),
+        state === 'low' ? 'Low-stock alerts' : 'Out-of-stock alerts',
+        DASHBOARD_SUMMARY_TIMEOUT_MS,
+      ) as { items?: unknown[]; page?: number; hasMore?: boolean } | null
+      if (!isTrackedRequestCurrent(requestRef, requestId)) return null
+      if (!data || !Array.isArray(data.items)) throw new Error('Dashboard stock alerts returned an invalid response.')
+      const nextRows = data.items.filter((item): item is DashboardProduct => !!item && typeof item === 'object')
+      const mergeRows = (current: DashboardProduct[]) => {
+        const byId = new Map(current.map((item) => [String(item.id), item]))
+        nextRows.forEach((item) => byId.set(String(item.id), item))
+        return Array.from(byId.values())
+      }
+      if (state === 'low') {
+        setLowStockRows(mergeRows)
+        setLowStockPage(Math.max(1, Number(data.page) || page))
+        setLowStockHasMore(Boolean(data.hasMore))
+      } else {
+        setOutOfStockRows(mergeRows)
+        setOutOfStockPage(Math.max(1, Number(data.page) || page))
+        setOutOfStockHasMore(Boolean(data.hasMore))
+      }
+      return data
+    } catch (error) {
+      if (!isTrackedRequestCurrent(requestRef, requestId)) return null
+      setLoadError(getErrorMessage(error, 'Could not load more stock alerts.'))
+      return null
+    } finally {
+      if (finishDashboardStockAlertRequest(requestRef, requestId, inFlightRef)) setLoadingMore(false)
     }
   }, [])
 
@@ -859,28 +1073,14 @@ export default function Dashboard() {
   }, [getCurrentDashboardRange, setAnalyticsLoading])
 
   useEffect(() => {
-    if (filterStorageKeyRef.current === dashboardFilterStorageKey) return
-    filterStorageKeyRef.current = dashboardFilterStorageKey
-    const nextPrefs = readDashboardFilterPrefs([dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY])
-    setRangeId('custom')
-    setCustomStart(nextPrefs?.rangeId === 'custom' ? (nextPrefs.customStart || '') : '')
-    setCustomEnd(nextPrefs?.rangeId === 'custom' ? (nextPrefs.customEnd || '') : '')
-  }, [dashboardFilterStorageKey])
-
-  useEffect(() => {
     if (typeof window === 'undefined' || !dashboardFilterStorageKey) return
     try {
-      const serialized = JSON.stringify({
-        rangeId,
-        customStart,
-        customEnd,
-      })
+      const serialized = JSON.stringify(filterPrefs)
       window.localStorage.setItem(dashboardFilterStorageKey, serialized)
-      window.localStorage.setItem(DASHBOARD_FILTER_STORAGE_FALLBACK_KEY, serialized)
     } catch {
       // Ignore persistence failures and keep the dashboard usable.
     }
-  }, [customEnd, customStart, dashboardFilterStorageKey, rangeId])
+  }, [filterPrefs, dashboardFilterStorageKey])
 
   useEffect(() => {
     if (!isActive) {
@@ -903,6 +1103,38 @@ export default function Dashboard() {
       markLoading: summary == null,
     })
   }, [isActive, loadSummary]) // eslint-disable-line
+
+  useEffect(() => {
+    invalidateStockAlertPageRequests()
+    if (!isActive) {
+      setLowStockRows([])
+      setOutOfStockRows([])
+      setLowStockPage(0)
+      setOutOfStockPage(0)
+      setLowStockHasMore(false)
+      setOutOfStockHasMore(false)
+      setLowStockLoadingMore(false)
+      setOutOfStockLoadingMore(false)
+      setLowStockLoadError('')
+      setOutOfStockLoadError('')
+      if (lowStockListRef.current) lowStockListRef.current.scrollTop = 0
+      if (outOfStockListRef.current) outOfStockListRef.current.scrollTop = 0
+      return
+    }
+
+    const initialLowRows = Array.isArray(summary?.low_stock) ? summary.low_stock : []
+    const initialOutRows = Array.isArray(summary?.out_of_stock) ? summary.out_of_stock : []
+    setLowStockRows(initialLowRows)
+    setOutOfStockRows(initialOutRows)
+    setLowStockPage(initialLowRows.length ? 1 : 0)
+    setOutOfStockPage(initialOutRows.length ? 1 : 0)
+    setLowStockHasMore(Boolean(summary?.low_stock_preview_truncated || Number(summary?.low_stock_count || 0) > initialLowRows.length))
+    setOutOfStockHasMore(Boolean(summary?.out_of_stock_preview_truncated || Number(summary?.out_of_stock_count || 0) > initialOutRows.length))
+    setLowStockLoadError('')
+    setOutOfStockLoadError('')
+    if (lowStockListRef.current) lowStockListRef.current.scrollTop = 0
+    if (outOfStockListRef.current) outOfStockListRef.current.scrollTop = 0
+  }, [invalidateStockAlertPageRequests, isActive, summary?.low_stock, summary?.low_stock_count, summary?.low_stock_preview_truncated, summary?.out_of_stock, summary?.out_of_stock_count, summary?.out_of_stock_preview_truncated])
 
   useEffect(() => {
     if (!isActive) {
@@ -931,7 +1163,7 @@ export default function Dashboard() {
     // (products/inventory/sales) usually did trigger a refresh moments
     // before. Listing it explicitly closes that gap instead of relying on
     // a sibling channel happening to still be "in flight".
-    if (ch === 'sales' || ch === 'products' || ch === 'returns' || ch === 'inventory' || ch === 'dashboard') {
+    if (ch === 'sales' || ch === 'products' || ch === 'returns' || ch === 'inventory' || ch === 'dashboard' || ch === 'settings') {
       const refreshId = beginTrackedRequest(refreshRequestRef)
       setSilentRefresh(true)
       Promise.allSettled([
@@ -949,7 +1181,8 @@ export default function Dashboard() {
     invalidateTrackedRequest(summaryRequestRef)
     invalidateTrackedRequest(analyticsRequestRef)
     invalidateTrackedRequest(refreshRequestRef)
-  }, [])
+    invalidateStockAlertPageRequests()
+  }, [invalidateStockAlertPageRequests])
 
   // "Recent imports" card -- a lightweight, independent fetch of the last
   // few import files/jobs (any type), regardless of whether they had any
@@ -1030,7 +1263,6 @@ export default function Dashboard() {
     return () => { cancelled = true }
   }, [isActive, syncChannel?.channel, syncChannel?.ts])
 
-  const profit    = (summary?.cost_out || 0) - (summary?.cost_in || 0)
   const summaryReady = isDashboardSummaryPayload(summary)
   const analyticsReady = isDashboardAnalyticsPayload(analytics)
   const summaryUnavailable = !loading && !summaryReady
@@ -1039,20 +1271,22 @@ export default function Dashboard() {
   const staleSummaryNotice = summaryReady && summaryError
   const staleAnalyticsNotice = analyticsReady && analyticsError
   const calcTrend = (curr: number, prev: number) => (!prev || prev === 0) ? undefined : ((curr - prev) / prev) * 100
+  const displayTotals = useMemo(
+    () => normalizeDashboardGrossMetrics(analytics?.totals || {}),
+    [analytics?.totals],
+  )
   const aRevenue  = analytics?.totals?.revenue_usd || 0
-  const aGrossSales = analytics?.totals?.gross_sales_usd || 0
-  const aDiscounts = analytics?.totals?.discount_usd || 0
+  const aGrossSales = Number(displayTotals.gross_sales_usd) || 0
+  const aDiscounts = Number(displayTotals.discount_usd) || 0
+  const aItemDiscounts = analytics?.totals?.item_discount_usd || 0
+  const aInvoiceDiscounts = analytics?.totals?.discount_usd || 0
   const aStoreDiscounts = analytics?.totals?.store_discount_usd || 0
-  const aMemberDiscounts = analytics?.totals?.membership_discount_usd || Math.max(0, aDiscounts - aStoreDiscounts)
+  const aMemberDiscounts = analytics?.totals?.membership_discount_usd || Math.max(0, aInvoiceDiscounts - aStoreDiscounts)
   const aTax = analytics?.totals?.tax_usd || 0
   const aDelivery = analytics?.totals?.delivery_usd || 0
   const aStockValue = summary?.stock_value_usd || 0
   const lowStockCount = summary?.low_stock_count ?? summary?.low_stock?.length ?? 0
   const outOfStockCount = summary?.out_of_stock_count ?? summary?.out_of_stock?.length ?? 0
-  const lowStockPreviewLimit = Number(summary?.low_stock_preview_limit || summary?.low_stock?.length || 0)
-  const outOfStockPreviewLimit = Number(summary?.out_of_stock_preview_limit || summary?.out_of_stock?.length || 0)
-  const lowStockPreviewTruncated = !!summary?.low_stock_preview_truncated
-  const outOfStockPreviewTruncated = !!summary?.out_of_stock_preview_truncated
   const aStoreDelivery = analytics?.totals?.store_delivery_usd || 0
   // P6: actual courier money out vs what customers were charged --
   // staff-only figures (this whole page is permission-gated), never on
@@ -1061,10 +1295,43 @@ export default function Dashboard() {
   const aDeliveryActualCount = analytics?.totals?.delivery_actual_cost_count || 0
   const aDeliverySales = analytics?.totals?.delivery_sale_count || 0
   const aDeliveryMargin = analytics?.totals?.delivery_margin_usd ?? (aDelivery - aDeliveryActual)
+  // Positive annotation: this amount is already included in revenue and
+  // profit by the server kernel. Showing it here must never add or subtract
+  // it from either headline.
+  const aCredit = analytics?.totals?.pending_revenue_usd || 0
+  // Stock removed entirely, priced at cost (owner, Sep 14 2026: "i want in
+  // stat a break down of revenue/profit excluding the losses caused by this.
+  // and including caused by this"). PRESENCE-signalled, never defaulted to 0:
+  // the server omits the block for a non-admin caller and for a window it
+  // cannot match to stock movements, and a 0 there would read as "nothing was
+  // removed". The headline revenue and profit above stay the canonical
+  // figures -- this is reported beside them, never subtracted from them.
+  const aHasLosses = typeof analytics?.totals?.removal_loss_usd === 'number'
+  const aRemovalLoss = analytics?.totals?.removal_loss_usd || 0
+  // p5/losses (Sep 15 2026): removed rows the loss chain still could not
+  // price at all -- the owner's own example ("i see the report says row
+  // removed has 1 no cost price") -- must say so beside the figure rather
+  // than silently reading as "every removal was accounted for".
+  const aRemovalUnvalued = Number(analytics?.totals?.removal_loss_unvalued_rows) || 0
+  const aRemovalLossLabel = aRemovalUnvalued > 0
+    ? `${fmtUSD(aRemovalLoss)} (${translateOr('rpt_note_removal_unvalued', '{count} removed row(s) had no recorded cost').replace('{count}', String(aRemovalUnvalued))})`
+    : fmtUSD(aRemovalLoss)
+  const aRevenueInclLosses = analytics?.totals?.revenue_after_losses_usd ?? (aRevenue - aRemovalLoss)
   const aPrevRevenue = analytics?.prevTotals?.revenue_usd || 0
   const aTxCount  = analytics?.totals?.tx_count || 0
   const aPrevTxCount = analytics?.prevTotals?.tx_count || 0
+  // PRESENCE-signalled like aHasLosses just above: cost_usd / profit_usd are
+  // admin-only money (routes/reports.ts's gateTotals, reused verbatim by
+  // routes/compat.ts's dashboardAnalytics -- F1, Sep 15 2026) and are OMITTED
+  // for a non-admin dashboard permission, never sent as 0. `|| 0` on an
+  // absent profit_usd used to read as a real zero-profit period; the Gross
+  // Profit card is hidden below instead when this is false.
+  const aHasProfit = typeof analytics?.totals?.profit_usd === 'number'
   const aProfit   = analytics?.totals?.profit_usd || 0
+  // Unclamped: a period that destroyed more stock than it earned really is
+  // negative here, and hiding that is the one thing this view exists to stop.
+  // The no-negative rule governs the canonical aProfit above, not this.
+  const aProfitInclLosses = analytics?.totals?.profit_after_losses_usd ?? (aProfit - aRemovalLoss)
   const aCost     = analytics?.totals?.cost_usd   || 0
   const aAvgOrder = analytics?.totals?.avg_order_usd || 0
   // "What actually changed hands" = net revenue + tax + customer-paid
@@ -1074,14 +1341,33 @@ export default function Dashboard() {
   const aProductCount = summary?.product_count || 0
   const aDiscountRate = aGrossSales > 0 ? (aDiscounts / aGrossSales) * 100 : 0
   const aAvgStockValue = aProductCount > 0 ? aStockValue / aProductCount : 0
+  // RETURN-DATE ACTIVITY: how many returns were processed in this range and
+  // what was paid out for them, counted on the date the RETURN happened. It
+  // answers "how busy was the returns desk", and it is NOT the figure revenue
+  // was reduced by -- a return processed today against a sale from last month
+  // is in this number and in last month's revenue. Nothing may subtract it
+  // from a revenue or profit figure. The sale-basis reversal, which revenue
+  // already has out, is `aKernelRefund` below.
   const aReturns   = analytics?.periodReturns?.return_count  || 0
   const aRefundUsd = analytics?.periodReturns?.refund_usd    || 0
+  const aKernelRefund = analytics?.totals?.refund_usd || 0
+  // net_sales_usd arrived with the Sep 6 kernel; an older Worker still in
+  // front of this bundle gets the identity read backwards rather than a
+  // formula that silently fails to foot.
+  const aFormulaTotals: DashboardMetricMap = {
+    ...displayTotals,
+    net_sales_usd: analytics?.totals?.net_sales_usd ?? (aRevenue + aKernelRefund),
+  }
   const aItemsRet  = analytics?.periodReturns?.items_returned || 0
   const aSupplierReturns = analytics?.periodSupplierReturns?.return_count || 0
   const aSupplierLossUsd = analytics?.periodSupplierReturns?.loss_usd || 0
-  const chartData = analytics?.periodData || []
+  const chartData = useMemo(
+    () => (analytics?.periodData || []).map((row) => normalizeDashboardGrossMetrics(row) as DashboardPeriodRow),
+    [analytics?.periodData],
+  )
   const chartRenderData = useMemo(() => downsampleChartRows(chartData), [chartData])
   const topList   = topMode === 'qty' ? (analytics?.topProductsQty || []) : (analytics?.topProducts || [])
+  const dashboardBusyHours = useMemo(() => computeDashboardBusyHours(analytics), [analytics])
   const revenueFlowLabel = translateOr('revenue_flow', 'Revenue Flow')
   const grossSalesLabel = translateOr('gross_sales', 'Gross Sales')
   const netRevenueLabel = translateOr('net_revenue', 'Net Revenue')
@@ -1102,18 +1388,18 @@ export default function Dashboard() {
   const revenueFormulaText = translateOr('dashboard_formula_revenue', 'Net revenue = Gross sales - Discounts - Refunds')
   const collectedFormulaText = translateOr('dashboard_formula_collected_total', 'Collected total = Net revenue + Tax + Delivery')
   const storeDiscountFormulaText = translateOr('dashboard_formula_store_discounts', 'Store discounts are the cashier-entered sale discounts and product promotions.')
-  const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = Net revenue - COGS - Store-paid delivery')
+  const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = revenue − cost of goods sold + delivery fees charged − actual delivery cost')
   const avgOrderFormulaText = translateOr('dashboard_formula_avg_order', 'Average order = Net revenue / transaction count')
   const returnsFormulaText = translateOr('dashboard_formula_returns', 'Returns decrease net revenue and loyalty points')
-  const revenueExampleText = `${fmtUSD(aRevenue)} = ${fmtUSD(aGrossSales)} - ${fmtUSD(aDiscounts)} - ${fmtUSD(aRefundUsd)}`
+  const revenueExampleText = `${fmtUSD(aRevenue)} = ${fmtUSD(aGrossSales)} - ${fmtUSD(aDiscounts)} - ${fmtUSD(aKernelRefund)}`
   const collectedExampleText = `${fmtUSD(aRevenue + aTax + aDelivery)} = ${fmtUSD(aRevenue)} + ${fmtUSD(aTax)} + ${fmtUSD(aDelivery)}`
-  const rangeLabel = (() => {
-    return `${customStart} - ${customEnd}`
-  })()
+  const rangeLabel = !customStart && !customEnd
+    ? translateOr('all_time', 'All time')
+    : `${customStart || '…'} - ${customEnd || '…'}`
 
   const periodShort = customStart === todayStr() && customEnd === todayStr()
     ? translateOr('range_today', 'Today')
-    : `${customStart} - ${customEnd}`
+    : rangeLabel
   const lowShortLabel = translateOr('low_stock_short', 'Low')
   const outShortLabel = translateOr('out_of_stock_short', 'Out')
   const matchStockShortLabel = translateOr('matching_stock_short', 'Matching')
@@ -1124,16 +1410,9 @@ export default function Dashboard() {
   const grossShortLabel = translateOr('gross_short', 'Gross')
   const saleShortLabel = translateOr('sale_short', 'sale')
   const marginShortLabel = translateOr('profit_margin_short', 'margin')
-  const completedStatusLabel = translateOr('completed', 'Completed')
-  const pendingStatusLabel = translateOr('pending', 'Pending')
-  const refundedStatusLabel = translateOr('refunded', 'Refunded')
-
   const formatSaleStatus = useCallback((status: unknown) => {
-    const key = String(status || '').toLowerCase()
-    if (key === 'refunded' || key === 'returned') return refundedStatusLabel
-    if (key === 'pending' || key === 'draft') return pendingStatusLabel
-    return completedStatusLabel
-  }, [completedStatusLabel, pendingStatusLabel, refundedStatusLabel])
+    return getDashboardSaleStatusLabel(status, t)
+  }, [t])
 
   // Still serves the Best Hour drill below (openHourDetail). The period
   // KPI cards no longer use it -- they fold inline via StatsStrip.
@@ -1206,7 +1485,7 @@ export default function Dashboard() {
   const periodKpis = useMemo(() => ([
       {
         id: 'products',
-        info: translateOr('dash_info_products', "How many products you carry. A group of same-name items counts as ONE product, matching how the Products list pages them."),
+        info: translateOr('dash_info_products', "How many products you carry. A group of same-name items counts as ONE product, matching how the Products list pages them. Always the current total, not the selected date range."),
         label: translateOr('products', 'Products'),
         value: summary?.product_count || 0,
         sub: `${lowStockCount} ${lowShortLabel} | ${outOfStockCount} ${outShortLabel}`,
@@ -1220,7 +1499,7 @@ export default function Dashboard() {
     },
     {
       id: 'stock-value',
-      info: translateOr('dash_info_stock_value', "What the stock you are holding right now cost you to buy. Not what it will sell for."),
+      info: translateOr('dash_info_stock_value', "What the stock you are holding right now cost you to buy. Not what it will sell for. Always the current total, not the selected date range."),
       label: translateOr('stock_value', 'Stock value'),
       value: fmtUSD(aStockValue),
       color: 'text-cyan-600',
@@ -1238,11 +1517,13 @@ export default function Dashboard() {
     {
       id: 'revenue',
       // Part 388: expressive/expression-based info -- the FORMULA with this
-      // period's real numbers substituted, not prose alone. COGS is merged
-      // into this card (its standalone card showed a single row).
+      // period's real numbers substituted. Built from statsFormulas so the
+      // sentence is the server's identity rather than prose: it used to read
+      // `Gross − Discounts`, which named no refund term at all and could not
+      // foot on any period where somebody returned something.
       info: `${translateOr('dash_info_revenue', "Money actually kept from sales in this period: gross sales, minus discounts and refunds.")}
 
-${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('gross_revenue', 'Gross')} ${fmtUSD(aGrossSales)} − ${translateOr('discounts', 'Discounts')} ${fmtUSD(aDiscounts)}`,
+${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, revenueTerms(aFormulaTotals), fmtUSD, translateOr)}`,
       label: translateOr('revenue', 'Revenue'),
       value: fmtUSD(aRevenue),
       sub: aGrossSales !== aRevenue ? `${grossShortLabel} ${fmtUSD(aGrossSales)}` : `${translateOr('net_revenue', 'Net revenue')} ${fmtUSD(aRevenue)}`,
@@ -1254,10 +1535,24 @@ ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('
       // Delivery card below (which also makes the outer count EVEN at 8).
       details: [
         { label: translateOr('revenue', 'Net revenue'), value: fmtUSD(aRevenue) },
+        // The equation's own two terms, in order, so the drill and the info
+        // formula are the same arithmetic. Refunds here is the SALE-basis
+        // reversal already taken off revenue -- not the Returns card's
+        // return-date total, which used to sit on this line and invited the
+        // reader to subtract it a second time.
+        { label: translateOr('rpt_net_sales', 'Net sales'), value: fmtUSD(Number(aFormulaTotals.net_sales_usd) || 0) },
+        { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aKernelRefund) },
+        ...(aCredit > 0 ? [{ label: translateOr('rpt_pending_credit', 'Not Paid'), value: fmtUSD(aCredit) }] : []),
         ...(aGrossSales !== aRevenue ? [{ label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) }] : []),
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
-        { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aRefundUsd) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
+        // The owner's excluding/including pair, inside this card rather than as
+        // a new one. The headline above IS the excluding figure, so only the
+        // loss and the including figure need naming.
+        ...(aHasLosses ? [
+          { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: aRemovalLossLabel },
+          { label: translateOr('rpt_revenue_after_losses', 'Revenue incl. losses'), value: fmtUSD(aRevenueInclLosses) },
+        ] : []),
       ],
     },
     {
@@ -1269,6 +1564,7 @@ ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('
       color: aStoreDiscounts > 0 ? 'text-amber-600' : 'text-gray-500',
       details: [
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
+        { label: translateOr('rpt_item_discounts', 'Item discounts'), value: fmtUSD(aItemDiscounts) },
         { label: translateOr('store_discounts', 'Store discounts'), value: fmtUSD(aStoreDiscounts) },
         { label: translateOr('membership_discounts', 'Membership discounts'), value: fmtUSD(aMemberDiscounts) },
         { label: translateOr('discount_rate', 'Discount rate'), value: `${aDiscountRate.toFixed(1)}%` },
@@ -1277,11 +1573,21 @@ ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('
     // The standalone COGS card is gone (Part 388: it held a single row --
     // "cogs only shows one stat inside"); COGS now lives inside Revenue
     // above and in Profit's own formula below.
-    {
+    //
+    // Omitted entirely (not a $0.00 placeholder) for a non-admin dashboard
+    // permission, the same way Reports hides its profit column/row when
+    // hasProfit() is false (reportModel.ts, GroupedReport.tsx / PeriodReport.tsx)
+    // -- cost/profit are admin-only money and a hidden card cannot be read
+    // as "this period broke even".
+    ...(aHasProfit ? [{
       id: 'profit',
-      info: `${translateOr('dash_info_profit', "What is left after subtracting what the goods cost you from what you kept.")}
+      // The delivery pair replaces the old `− Store-paid delivery` term: the
+      // waived fee was never charged, so there is no cash to take off profit
+      // (it is revenue foregone, reported on the Delivery card). What profit
+      // really carries is the fees charged minus what the couriers were paid.
+      info: `${translateOr('dash_info_profit', "What is left after subtracting what the goods cost you from what you kept, plus what delivery earned or cost.")}
 
-${translateOr('gross_profit', 'Gross profit')} ${fmtUSD(aProfit)} = ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} − ${translateOr('cogs', 'COGS')} ${fmtUSD(aCost)} − ${translateOr('store_paid_delivery', 'Store-paid delivery')} ${fmtUSD(aStoreDelivery)}
+${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: aProfit }, profitTerms(aFormulaTotals), fmtUSD, translateOr)}
 ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profit')} ÷ ${translateOr('revenue_short', 'Revenue')} = ${aRevenue > 0 ? ((aProfit / aRevenue) * 100).toFixed(2) : '0.00'}%`,
       label: translateOr('gross_profit', 'Gross Profit'),
       value: fmtUSD(aProfit),
@@ -1292,10 +1598,18 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
       details: [
         { label: translateOr('est_profit', 'Est. profit'), value: fmtUSD(aProfit) },
         { label: `${translateOr('cost_price', 'Cost price')} (${translateOr('cogs', 'COGS')})`, value: fmtUSD(aCost) },
-        { label: translateOr('store_paid_delivery', 'Store-paid delivery'), value: fmtUSD(aStoreDelivery) },
+        // The two delivery terms profit actually carries. Store-paid delivery
+        // is NOT one of them and moved to the Delivery card, where it is a
+        // memo figure rather than a subtraction nothing performs.
+        { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_usd) || 0) },
+        { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_cost_usd) || 0) },
         { label: translateOr('profit_margin', 'Profit margin'), value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
+        ...(aHasLosses ? [
+          { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: aRemovalLossLabel },
+          { label: translateOr('rpt_profit_after_losses', 'Profit incl. losses'), value: fmtUSD(aProfitInclLosses) },
+        ] : []),
       ],
-    },
+    }] : []),
     {
       id: 'transactions',
       info: translateOr('dash_info_transactions', "How many completed sales happened in this period."),
@@ -1315,12 +1629,13 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
     },
     {
       id: 'returns',
-      // Part 388: the net-sold story merges into Returns -- what left the
-      // shop, minus what came back, expressed as the formula with this
-      // period's numbers.
-      info: `${translateOr('dash_info_returns', "Items customers brought back in this period, and what you refunded for them.")}
-
-${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aRevenue - aRefundUsd)} = ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} − ${translateOr('total_refunded', 'Refunded')} ${fmtUSD(aRefundUsd)}`,
+      // This card is returns ACTIVITY, and says so. The "Net after refunds =
+      // Revenue − Refunded" line that used to sit here is deleted, not
+      // relabelled: it subtracted refunds from a revenue figure that already
+      // had them out, and it did it with the return-date total, so on a
+      // period whose returns mostly reversed older sales it printed a number
+      // far below revenue -- and, with enough of them, below zero.
+      info: translateOr('dash_info_returns', "Returns processed in this period, counted on the day the return was made, with what was paid out for them. Revenue already has its refunds taken off in the period of the original sale, so this figure is never subtracted from it."),
       label: translateOr('returns_count', 'Returns'),
       value: aReturns,
       color: aReturns > 0 ? 'text-orange-600' : 'text-gray-500',
@@ -1332,7 +1647,8 @@ ${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aReven
       details: [
         { label: translateOr('customer_returns', 'Customer returns'), value: aReturns },
         { label: translateOr('items', 'Items'), value: aItemsRet },
-        { label: translateOr('total_refunded', 'Refunded'), value: fmtUSD(aRefundUsd) },
+        { label: translateOr('stats_refunded_by_return_date', 'Refunded (by return date)'), value: fmtUSD(aRefundUsd) },
+        { label: translateOr('stats_refund_in_revenue', "Taken off this period's revenue"), value: fmtUSD(aKernelRefund) },
         { label: `${translateOr('supplier_returns', 'Supplier returns')} (${aSupplierReturns})`, value: fmtUSD(aSupplierLossUsd) },
       ],
     },
@@ -1345,7 +1661,7 @@ ${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aReven
       id: 'delivery',
       info: `${translateOr('dash_info_delivery', "Delivery in this period: what customers were charged, what the couriers actually cost, and the margin between them.")}
 
-${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} = ${translateOr('delivery_fees', 'Delivery fees')} ${fmtUSD(aDelivery)} − ${translateOr('delivery_actual_cost', 'Actual delivery cost')} ${fmtUSD(aDeliveryActual)}`,
+${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} = ${translateOr('delivery_fees', 'Delivery fees')} ${fmtUSD(aDelivery)} − ${translateOr('delivery_actual_cost', 'Actual delivery cost')} ${fmtUSD(aDeliveryActual)}`,
       label: translateOr('delivery', 'Delivery'),
       value: fmtUSD(aDelivery),
       color: 'text-violet-600',
@@ -1356,8 +1672,8 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           label: translateOr('delivery_actual_cost', 'Actual delivery cost'),
           value: `${fmtUSD(aDeliveryActual)}${aDeliverySales > 0 && aDeliveryActualCount < aDeliverySales ? ` (${aDeliveryActualCount}/${aDeliverySales} ${translateOr('recorded_short', 'recorded')})` : ''}`,
         },
-        { label: translateOr('delivery_margin', 'Delivery margin'), value: fmtUSD(aDeliveryMargin) },
-        { label: translateOr('store_paid_delivery', 'Store-paid delivery'), value: fmtUSD(aStoreDelivery) },
+        { label: translateOr('delivery_margin', 'Delivery profit'), value: fmtUSD(aDeliveryMargin) },
+        { label: translateOr('store_paid_delivery', 'Store-paid delivery fee'), value: fmtUSD(aStoreDelivery) },
       ],
     },
   ]), [
@@ -1374,11 +1690,14 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
     aDelivery,
     aDiscounts,
     aGrossSales,
+    aItemDiscounts,
     aItemsRet,
+    aKernelRefund,
     aMemberDiscounts,
     aPrevRevenue,
     aPrevTxCount,
     aProfit,
+    aHasProfit,
     aRefundUsd,
     aReturns,
     aRevenue,
@@ -1418,15 +1737,22 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
 
   const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
+  const displayAnalytics = useMemo(() => analytics ? {
+    ...analytics,
+    totals: displayTotals,
+    periodData: chartData,
+  } : null, [analytics, chartData, displayTotals])
+
   const buildDashboardExportContext = useCallback(() => ({
     activeChart,
-    analytics,
+    analytics: displayAnalytics,
     chartData,
     collectedExampleText,
     collectedFormulaText,
     exportStamp,
     fmtUSD,
     grossSalesLabel,
+    lowStock: lowStockConfig,
     lowStockCount,
     netRevenueLabel,
     outOfStockCount,
@@ -1443,13 +1769,14 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
     translateOr,
   }), [
     activeChart,
-    analytics,
+    displayAnalytics,
     chartData,
     collectedExampleText,
     collectedFormulaText,
     exportStamp,
     fmtUSD,
     grossSalesLabel,
+    lowStockConfig,
     lowStockCount,
     netRevenueLabel,
     outOfStockCount,
@@ -1465,13 +1792,6 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
     topMode,
     translateOr,
   ])
-
-  const lowStockPreviewLabel = lowStockPreviewTruncated
-    ? `${lowStockPreviewLimit} / ${lowStockCount} ${t('items') || 'items'}`
-    : `${lowStockCount} ${t('items') || 'items'}`
-  const outOfStockPreviewLabel = outOfStockPreviewTruncated
-    ? `${outOfStockPreviewLimit} / ${outOfStockCount} ${t('items') || 'items'}`
-    : `${outOfStockCount} ${t('items') || 'items'}`
 
   const buildExportAll = useCallback(async () => {
     const { exportDashboardFull } = await loadDashboardExportModule()
@@ -1593,93 +1913,51 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
         </div>
       ) : null}
 
-      {/* Range selector -- one picker, no preset chips. */}
-      <div className="px-0.5">
-        <div className="flex min-w-0 items-center gap-2">
-          {/* Label + range value + export all share one row -- the range
-              value pill previously grew (flex-1) to fill the row on its own
-              with nothing but blank pill background to its right; export
-              now sits in that same slack space instead of getting its own
-              near-empty row below the date picker. */}
-          <div className="flex min-w-0 flex-1 items-center gap-2 lg:max-w-[22rem]">
-            {/* Y19: the Start → End box both SHOWS the effective range and IS
-                the custom editor -- editing it switches to
-                the 'custom' rangeId. No "Range:" label: the rectangular,
-                full-width box reads as the range on its own. */}
-            <div className="min-w-0 flex-1">
-              <DateTimeRangePicker
-                value={{ startDate: getCurrentDashboardRange().start, endDate: getCurrentDashboardRange().end, startTime: '', endTime: '' } as DateTimeRange}
-                onChange={(r) => {
-                  setRangeId('custom')
-                  setCustomStart(r.startDate || '')
-                  setCustomEnd(r.endDate || '')
-                }}
-                t={t}
-                showTime={false}
-                triggerClassName="flex w-full min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-1 !min-h-9 sm:px-3"
-              />
+      {/* One shared control surface keeps Stats, the effective date range and
+          Export on a stable non-wrapping row. Its preset rail remains directly
+          below and every change writes the same dates used by fetches and
+          export context. */}
+      <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2 dark:border-blue-900/40 dark:bg-blue-950/20 sm:p-2.5">
+        <StatsStrip
+          t={(key: string) => t(key)}
+          range={dashboardRange}
+          onRangeChange={handleDashboardRangeChange}
+          showTime={false}
+          loading={analyticsPending}
+          rangeActions={hasPermission('dashboard_export') ? (
+            <button
+              type="button"
+              onClick={() => setExportChoicesOpen(true)}
+              className={toolbarIconButtonClassName}
+              aria-label={exportLabel}
+              title={exportLabel}
+            >
+              <Download className="h-5 w-5" aria-hidden="true" />
+            </button>
+          ) : null}
+          cards={periodKpis.map((kpi): StatCardDef => ({
+            key: kpi.id,
+            label: String(kpi.label),
+            value: kpi.value,
+            sub: kpi.sub,
+            trend: kpi.trend,
+            hint: (kpi as { info?: string }).info,
+            tone: /green|emerald/.test(String(kpi.color || '')) ? 'ok'
+              : /red|rose/.test(String(kpi.color || '')) ? 'crit'
+                : /amber|orange|yellow/.test(String(kpi.color || '')) ? 'warn'
+                  : /blue|purple|indigo|violet/.test(String(kpi.color || '')) ? 'accent'
+                    : undefined,
+            details: (kpi.details || []).map((row) => ({ label: String(row.label), value: row.value })),
+          }))}
+        />
+        {analyticsUnavailable ? (
+          <div className="mt-2 rounded-xl border border-amber-200 bg-white px-3 py-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-slate-900 dark:text-amber-100">
+            <div className="font-semibold">Analytics unavailable</div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {analyticsError || 'The dashboard analytics could not be loaded for this range.'}
             </div>
           </div>
-          <div className="flex shrink-0 items-center justify-end gap-1">
-            {/* Opens the float export-choices dialog -- no direct downloads
-                off a toolbar menu. */}
-            {hasPermission('dashboard_export') && (
-              <button
-                type="button"
-                onClick={() => setExportChoicesOpen(true)}
-                className="inline-flex shrink-0 min-h-7 items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-600 transition-colors hover:border-blue-300 hover:text-blue-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-400 sm:min-h-8 sm:px-3 sm:text-xs"
-                aria-label={exportLabel}
-              >
-                <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                {exportLabel}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Period KPI cards */}
-        <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2 dark:border-blue-900/40 dark:bg-blue-950/20 sm:p-2.5">
-          {/* No "PERIOD STATS + preset pill + range text" header any more
-              (user, Aug 30 2026): the KPIs always cover exactly the selected
-              date range, so the header only restated the range box above it.
-              periodShort/rangeLabel still exist -- exports and the KPI drill
-              panel use them. */}
-          {analyticsPending ? (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4 sm:gap-2.5">
-              {[...Array(8)].map((_, i) => <div key={i} className="card h-16 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" />)}
-            </div>
-          ) : analyticsUnavailable ? (
-            <div className="rounded-xl border border-amber-200 bg-white px-3 py-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-slate-900 dark:text-amber-100">
-              <div className="font-semibold">Analytics unavailable</div>
-              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                {analyticsError || 'The dashboard analytics could not be loaded for this range.'}
-              </div>
-            </div>
-          ) : (
-            // The foldable stats strip (shared StatsStrip, the app-wide
-            // stats pattern): the same KPI set, but tapping a card folds
-            // its breakdown open INLINE instead of a portal sheet. The
-            // range stays the dashboard's own range card above, so no
-            // range props are passed here.
-            <StatsStrip
-              t={(key: string) => t(key)}
-              cards={periodKpis.map((kpi): StatCardDef => ({
-                key: kpi.id,
-                label: String(kpi.label),
-                value: kpi.value,
-                sub: kpi.sub,
-                trend: kpi.trend,
-                hint: (kpi as { info?: string }).info,
-                tone: /green|emerald/.test(String(kpi.color || '')) ? 'ok'
-                  : /red|rose/.test(String(kpi.color || '')) ? 'crit'
-                    : /amber|orange|yellow/.test(String(kpi.color || '')) ? 'warn'
-                      : /blue|purple|indigo|violet/.test(String(kpi.color || '')) ? 'accent'
-                        : undefined,
-                details: (kpi.details || []).map((row) => ({ label: String(row.label), value: row.value })),
-              }))}
-            />
-        )}
+        ) : null}
       </div>
 
       {/* Small-screen section switcher -- splits the long card stack into
@@ -1705,8 +1983,8 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
 
       {/* Charts */}
       <section className={`${mobileSection === 'overview' ? '' : 'hidden'} lg:block`}>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 lg:items-start">
-        <div className="lg:col-span-2 card p-3 sm:p-3.5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 items-stretch">
+        <div className="lg:col-span-2 card flex flex-col p-3 sm:p-3.5">
           <div className="mb-1.5 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-white">{t('analytics')}</h2>
             <div className="inline-flex w-full max-w-full rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800/90 sm:w-auto">
@@ -1786,7 +2064,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           (user-reported: "the row of top product, best hour, top customer
           can take more space in large screens"). */}
       <section className={`${mobileSection === 'performers' ? '' : 'hidden'} lg:block`}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-start">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-stretch">
         {/* Branch */}
         <BestHourCard
           analytics={analytics}
@@ -1797,6 +2075,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           translateOr={translateOr}
           fmtUSD={fmtUSD}
           onOpenHour={openHourDetail}
+          onViewMore={() => setBestHourListOpen(true)}
         />
 
         {/* Top Products */}
@@ -1865,6 +2144,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                   )
                 })}
               </div>
+              <DashboardViewMoreFooter show={topList.length > 5} translateOr={translateOr} onClick={() => setTopProductsListOpen(true)} />
             </>
           )}
         </div>
@@ -1902,7 +2182,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                                   <div className="flex justify-between text-xs mb-0.5">
                                     <div className="flex items-center gap-1.5">
                                       <span className="text-gray-400 w-4 text-right">{i+1}.</span>
-                                      <span className="text-gray-700 dark:text-gray-300 truncate max-w-36">{c.customer_name}</span>
+                                      <span className="text-gray-700 dark:text-gray-300 truncate max-w-36">{c.customer_name || t('walk_in') || 'General'}</span>
                                     </div>
                                     <span className="font-medium text-green-700 dark:text-green-400">{fmtUSD(c.net_revenue_usd || 0)}</span>
                                   </div>
@@ -1914,6 +2194,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                             )
                           })}
                         </div>
+                        <DashboardViewMoreFooter show={customers.length > 5} translateOr={translateOr} onClick={() => setTopCustomersListOpen(true)} />
                       </>
                     )}
                 </>
@@ -1926,9 +2207,9 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
 
       {/* Hours, low stock, and recent activity */}
       <section className={`${mobileSection === 'inventory' ? '' : 'hidden'} lg:block`}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-start">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-stretch">
         {/* Best Hour */}
-        <ExpiryAlertsCard summary={summary} translateOr={translateOr} onOpen={openExpiryDetail} />
+        <ExpiryAlertsCard summary={summary} translateOr={translateOr} onOpen={openExpiryDetail} onViewMore={() => setExpiryAlertsListOpen(true)} />
 
         {/* Low Stock */}
         <div className="card flex flex-col">
@@ -1938,10 +2219,20 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               <span className="text-[10px] bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 px-2 py-0.5 rounded-full font-medium">{lowStockCount}</span>
             )}
           </div>
-          <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
-            {!summary?.low_stock?.length
+          <div
+            ref={lowStockListRef}
+            className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}
+            aria-busy={lowStockLoadingMore}
+            onScroll={(event) => {
+              const node = event.currentTarget
+              if (node.scrollHeight - node.scrollTop - node.clientHeight <= DASHBOARD_STOCK_ALERT_SCROLL_THRESHOLD_PX && lowStockHasMore) {
+                void loadStockAlertPage('low', lowStockPage + 1)
+              }
+            }}
+          >
+            {!lowStockRows.length
               ? <p className="p-4 text-sm text-gray-400 text-center">{t('in_stock')}</p>
-              : summary.low_stock.map(p => (
+              : lowStockRows.map(p => (
                 <button
                   key={p.id}
                   type="button"
@@ -1956,14 +2247,11 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                 </button>
               ))}
           </div>
-          {lowStockPreviewTruncated ? (
-            <div className="border-t border-gray-100 px-4 py-2 dark:border-gray-700">
-              <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-                <span>{translateOr('showing_preview', 'Showing preview')} {lowStockPreviewLabel}</span>
-                <button type="button" className="rounded-lg bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-blue-700" onClick={() => openInventoryOverview('low')}>
-                  {translateOr('review_in_inventory', 'Review in inventory')}
-                </button>
-              </div>
+          {lowStockLoadingMore || lowStockLoadError ? (
+            <div className="border-t border-gray-100 px-4 py-2 text-center text-[11px] text-slate-500 dark:border-gray-700">
+              {lowStockLoadingMore
+                ? (t('loading') || 'Loading...')
+                : <button type="button" className="font-semibold text-blue-600 hover:underline dark:text-blue-400" onClick={() => void loadStockAlertPage('low', lowStockPage + 1)}>{lowStockLoadError} {translateOr('try_again', 'Try again')}</button>}
             </div>
           ) : null}
         </div>
@@ -1976,10 +2264,20 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">{outOfStockCount}</span>
             )}
           </div>
-          <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
-            {!summary?.out_of_stock?.length
+          <div
+            ref={outOfStockListRef}
+            className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}
+            aria-busy={outOfStockLoadingMore}
+            onScroll={(event) => {
+              const node = event.currentTarget
+              if (node.scrollHeight - node.scrollTop - node.clientHeight <= DASHBOARD_STOCK_ALERT_SCROLL_THRESHOLD_PX && outOfStockHasMore) {
+                void loadStockAlertPage('out', outOfStockPage + 1)
+              }
+            }}
+          >
+            {!outOfStockRows.length
               ? <p className="p-4 text-sm text-gray-400 text-center">{t('in_stock')}</p>
-              : summary.out_of_stock.map(p => (
+              : outOfStockRows.map(p => (
                 <button
                   key={p.id}
                   type="button"
@@ -1994,14 +2292,11 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                 </button>
               ))}
           </div>
-          {outOfStockPreviewTruncated ? (
-            <div className="border-t border-gray-100 px-4 py-2 dark:border-gray-700">
-              <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-                <span>{translateOr('showing_preview', 'Showing preview')} {outOfStockPreviewLabel}</span>
-                <button type="button" className="rounded-lg bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-blue-700" onClick={() => openInventoryOverview('out')}>
-                  {translateOr('review_in_inventory', 'Review in inventory')}
-                </button>
-              </div>
+          {outOfStockLoadingMore || outOfStockLoadError ? (
+            <div className="border-t border-gray-100 px-4 py-2 text-center text-[11px] text-slate-500 dark:border-gray-700">
+              {outOfStockLoadingMore
+                ? (t('loading') || 'Loading...')
+                : <button type="button" className="font-semibold text-blue-600 hover:underline dark:text-blue-400" onClick={() => void loadStockAlertPage('out', outOfStockPage + 1)}>{outOfStockLoadError} {translateOr('try_again', 'Try again')}</button>}
             </div>
           ) : null}
         </div>
@@ -2016,6 +2311,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           translateOr={translateOr}
           fmtUSD={fmtUSD}
           onOpen={openBranchDetail}
+          onViewMore={() => setBranchPerformanceListOpen(true)}
         />
 
         {/* Recent imports -- a general list of the last few imported files
@@ -2072,6 +2368,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                   </button>
                 ))}
           </div>
+          <DashboardViewMoreFooter show={recentImportFiles.length > 5} translateOr={translateOr} onClick={() => setRecentImportsListOpen(true)} />
         </div>
 
         <PaymentMethodCard
@@ -2086,42 +2383,162 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
       </div>
       </section>
 
-      {recentSalesOpen && typeof document !== 'undefined' ? createPortal((
-        <div className="modal-viewport-safe fixed inset-0 z-[1040] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setRecentSalesOpen(false)}>
-          <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-              <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{t('sales') || 'Sales'}</h2>
-                <div className="mt-0.5 text-xs text-gray-400">{summary?.recent_sales?.length || 0} {t('entries') || 'entries'}</div>
+      <DashboardListModal
+        open={recentSalesOpen}
+        title={t('sales') || 'Sales'}
+        subtitle={`${summary?.recent_sales?.length || 0} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setRecentSalesOpen(false)}
+      >
+        {(summary?.recent_sales || []).map((sale) => (
+          <button
+            key={`recent-sale-${sale.id}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => setRecentSaleDetail(sale)}
+          >
+            <div className="min-w-0">
+              <div className="detail-scroll-text text-sm font-semibold text-gray-800 dark:text-gray-100">{sale.receipt_number || `#${sale.id}`}</div>
+              <div className="detail-scroll-text text-xs text-gray-400">
+                {compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}
               </div>
-              <button onClick={() => setRecentSalesOpen(false)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>
-            <div className="modal-scroll divide-y divide-gray-100 dark:divide-gray-700">
-              {(summary?.recent_sales || []).map((sale) => (
-                <button
-                  key={`recent-sale-${sale.id}`}
-                  type="button"
-                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                  onClick={() => setRecentSaleDetail(sale)}
-                >
-                  <div className="min-w-0">
-                    <div className="detail-scroll-text text-sm font-semibold text-gray-800 dark:text-gray-100">{sale.receipt_number || `#${sale.id}`}</div>
-                    <div className="detail-scroll-text text-xs text-gray-400">
-                      {compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name]).join(' | ')}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div>
-                    <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getSaleStatusTone(sale.sale_status)}`}>
-                      {formatSaleStatus(sale.sale_status)}
-                    </div>
-                  </div>
-                </button>
-              ))}
+            <div className="shrink-0 text-right">
+              <div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div>
+              <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>
+                {formatSaleStatus(sale.sale_status)}
+              </div>
             </div>
-          </div>
-        </div>
-      ), document.body) : null}
+          </button>
+        ))}
+      </DashboardListModal>
+
+      <DashboardListModal
+        open={topProductsListOpen}
+        title={t('top_products')}
+        subtitle={`${topList.length} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setTopProductsListOpen(false)}
+      >
+        {topList.map((p, i) => (
+          <button
+            key={`top-product-${i}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => { setTopProductsListOpen(false); setProductDetail({ ...p, insightType: 'top_product', rank: i + 1 }) }}
+          >
+            <div className="min-w-0"><span className="text-gray-400">{i + 1}.</span> <span className="text-sm text-gray-700 dark:text-gray-300">{p.product_name}</span></div>
+            <div className="shrink-0 text-right text-sm font-semibold text-gray-900 dark:text-white">
+              {topMode === 'qty' ? `${p.qty_sold} ${t('qty_sold')}` : fmtUSD(p.revenue_usd)}
+            </div>
+          </button>
+        ))}
+      </DashboardListModal>
+
+      <DashboardListModal
+        open={topCustomersListOpen}
+        title={t('top_customers')}
+        subtitle={`${(analytics?.topCustomers || []).length} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setTopCustomersListOpen(false)}
+      >
+        {(analytics?.topCustomers || []).map((c, i) => (
+          <button
+            key={`top-customer-${i}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => { setTopCustomersListOpen(false); setCustomerDetail({ ...c, rank: i + 1 }) }}
+          >
+            <div className="min-w-0"><span className="text-gray-400">{i + 1}.</span> <span className="text-sm text-gray-700 dark:text-gray-300">{c.customer_name || t('walk_in') || 'General'}</span></div>
+            <div className="shrink-0 text-sm font-semibold text-green-700 dark:text-green-400">{fmtUSD(c.net_revenue_usd || 0)}</div>
+          </button>
+        ))}
+      </DashboardListModal>
+
+      <DashboardListModal
+        open={branchPerformanceListOpen}
+        title={t('branch_performance')}
+        subtitle={`${(analytics?.byBranch || []).length} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setBranchPerformanceListOpen(false)}
+      >
+        {(analytics?.byBranch || []).map((branch, i) => (
+          <button
+            key={`branch-performance-${branch.branch_id || branch.branch_name || i}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => { setBranchPerformanceListOpen(false); openBranchDetail(branch) }}
+          >
+            <div className="min-w-0 text-sm text-gray-700 dark:text-gray-300">{branch.branch_name}</div>
+            <div className="shrink-0 text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{fmtUSD(branch.revenue_usd || 0)}</div><div className="text-xs text-gray-400">{branch.count} {t('sale')}</div></div>
+          </button>
+        ))}
+      </DashboardListModal>
+
+      <DashboardListModal
+        open={expiryAlertsListOpen}
+        title={translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}
+        subtitle={`${(summary?.expiring_products || []).length} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setExpiryAlertsListOpen(false)}
+      >
+        {(summary?.expiring_products || []).map((item) => (
+          <button
+            key={`expiry-${item.id}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => { setExpiryAlertsListOpen(false); openExpiryDetail(item) }}
+          >
+            <div className="min-w-0 break-words text-sm text-gray-700 dark:text-gray-300">{item.name}</div>
+            <span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span>
+          </button>
+        ))}
+      </DashboardListModal>
+
+      <DashboardListModal
+        open={bestHourListOpen}
+        title={t('best_hour')}
+        subtitle={`${dashboardBusyHours.length} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setBestHourListOpen(false)}
+      >
+        {dashboardBusyHours.map((hour, i) => (
+          <button
+            key={`best-hour-${hour.hour}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => { setBestHourListOpen(false); openHourDetail(hour, i + 1) }}
+          >
+            <div className="min-w-0 text-sm text-gray-700 dark:text-gray-300">{`#${i + 1} ${formatDashboardHourLabel(hour.hour)}`}</div>
+            <div className="shrink-0 text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{hour.count} {t('sale')}{hour.count !== 1 ? 's' : ''}</div><div className="text-xs text-green-600 dark:text-green-400">{fmtUSD(hour.revenue_usd)}</div></div>
+          </button>
+        ))}
+      </DashboardListModal>
+
+      <DashboardListModal
+        open={recentImportsListOpen}
+        title={translateOr('recent_imports', 'Recent imports')}
+        subtitle={`${recentImportFiles.length} ${t('entries') || 'entries'}`}
+        closeLabel={closeLabel}
+        onClose={() => setRecentImportsListOpen(false)}
+      >
+        {recentImportFiles.map((job) => (
+          <button
+            key={`recent-import-${job.id}`}
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => { setRecentImportsListOpen(false); setImportReportJobId(job.id) }}
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm text-gray-700 dark:text-gray-300">{job.fileName || `${job.type || 'products'} import`}</p>
+              <p className="truncate text-xs text-gray-400 capitalize">{[job.created_at ? fmtTime(job.created_at) : job.status, job.fileName ? `${job.type || 'products'} import` : null].filter(Boolean).join(' · ')}</p>
+            </div>
+            {(job.warning_count || 0) > 0 && (
+              <span className="badge-yellow flex-shrink-0 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{job.warning_count} {translateOr('warnings_short', 'warnings')}</span>
+            )}
+          </button>
+        ))}
+      </DashboardListModal>
 
       {recentSaleDetail && typeof document !== 'undefined' ? createPortal((
         <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setRecentSaleDetail(null)}>
@@ -2140,7 +2557,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                 { label: t('total') || 'Total', value: fmtUSD(recentSaleDetail.total_usd || recentSaleDetail.total || 0) },
                 { label: 'KHR', value: fmtKHR(recentSaleDetail.total_khr || 0) },
                 { label: t('branch') || 'Branch', value: recentSaleDetail.branch_name || '--' },
-                { label: t('customer') || 'Customer', value: recentSaleDetail.customer_name || '--' },
+                { label: t('customer') || 'Customer', value: recentSaleDetail.customer_name || t('walk_in') || 'General' },
                 { label: t('cashier') || 'Cashier', value: recentSaleDetail.cashier_name || '--' },
                 { label: t('items') || 'Items', value: String(getDashboardSaleItemCount(recentSaleDetail)) },
               ] as Array<{ label: ReactNode; value: ReactNode } | null>).filter((item): item is { label: ReactNode; value: ReactNode } => Boolean(item)).map((item, index) => (
@@ -2192,7 +2609,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                     ? [
                         { label: translateOr('current_stock', 'Current stock'), value: `${productDetail.stock_quantity || 0} ${productDetail.unit || ''}`.trim(), cls:'text-blue-600', bg:'bg-blue-50 dark:bg-blue-900/20' },
                         { label: translateOr('stock_status', 'Stock status'), value: productDetail.insightType === 'low_stock' ? translateOr('low_stock', 'Low stock') : translateOr('out_of_stock', 'Out of stock'), cls: productDetail.insightType === 'low_stock' ? 'text-amber-600' : 'text-red-600', bg: productDetail.insightType === 'low_stock' ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-red-50 dark:bg-red-900/20' },
-                        { label: translateOr('low_stock_threshold', 'Low threshold'), value: productDetail.low_stock_threshold ?? 0, cls:'text-slate-700 dark:text-slate-200', bg:'bg-slate-100 dark:bg-slate-800' },
+                        { label: translateOr('low_stock_threshold', 'Low threshold'), value: effectiveLowStockThreshold(lowStockConfig, productDetail.low_stock_threshold), cls:'text-slate-700 dark:text-slate-200', bg:'bg-slate-100 dark:bg-slate-800' },
                         { label: translateOr('out_of_stock_threshold', 'Out threshold'), value: productDetail.out_of_stock_threshold ?? 0, cls:'text-slate-700 dark:text-slate-200', bg:'bg-slate-100 dark:bg-slate-800' },
                       ]
                     : [
@@ -2245,7 +2662,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <div className="min-w-0 flex-1">
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('customer_details')}</h2>
-                <div className="detail-scroll-text text-xs text-gray-400 mt-0.5">{customerDetail.customer_name}</div>
+                <div className="detail-scroll-text text-xs text-gray-400 mt-0.5">{customerDetail.customer_name || t('walk_in') || 'General'}</div>
               </div>
               <button onClick={() => setCustomerDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>

@@ -54,6 +54,29 @@ export function canStartPull(scrollTop: number, rawDelta: number): boolean {
   return rawDelta > -PULL_START_THRESHOLD_PX
 }
 
+// Whether the gesture has actually become a downward pull -- i.e. whether the
+// hook is now entitled to call preventDefault() and take the scroll away from
+// the browser.
+//
+// Deliberately NOT canStartPull. Reported as "the public storefront cannot be
+// scrolled on my phone": the hook used to suppress native scrolling on the
+// FIRST touchmove of anything canStartPull accepted, and canStartPull accepts
+// the whole jitter band (-4px..0) precisely so a wobbling finger doesn't
+// abandon a pull already under way. A browser cancels native scrolling for the
+// remainder of a touch sequence as soon as one cancelable touchmove is
+// prevented, and WebKit dispatches 1-3px moves at the start of a swipe -- so
+// an ordinary upward swipe from the top of the page had its scroll eaten
+// before any pull existed, and the page looked frozen at the top.
+//
+// Tracking ("keep following this gesture") and suppression ("the finger has
+// pulled down past the noise threshold") are separate decisions, and
+// suppression is the strictly narrower one. It starts exactly where
+// computeIndicatorDistance starts producing a visible pull, so the scroll is
+// only ever taken once there is something on screen to justify it.
+export function shouldBlockNativeScroll(rawDelta: number): boolean {
+  return Number(rawDelta || 0) > PULL_START_THRESHOLD_PX
+}
+
 // Maps raw finger-travel distance to the damped on-screen indicator
 // distance, clamped to MAX_INDICATOR_DISTANCE_PX. Negative or
 // below-threshold raw deltas produce 0 (no visible indicator yet).

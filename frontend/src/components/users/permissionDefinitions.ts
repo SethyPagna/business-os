@@ -122,7 +122,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'full_access',
     tKey: 'perm_section_full_access',
     label: 'Full Administrator Access',
-    description: 'Overrides every section below -- full access to every page and action, with nothing gated.',
+    description: 'Overrides every section below. Administrator control also manages all Shifts, including cancellation and cross-account review; server capability flags remain authoritative.',
     permissions: [
       { key: 'all', tKey: 'perm_all', label: 'Administrator (full access)', sensitivity: 'critical' },
     ],
@@ -191,7 +191,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'pos',
     tKey: 'perm_section_pos',
     label: 'POS',
-    description: 'Full Access or None only -- no partial tier for checkout itself.',
+    description: 'Full Access or None for checkout. Full POS also opens Shifts: staff can close, reopen or amend their own eligible shifts, and see shop-wide shifts when configured. Cancellation and cross-account review require administrator control; server capability flags decide each action.',
     permissions: [
       { key: 'pos', tKey: 'perm_pos', label: 'POS', sensitivity: 'normal' },
     ],
@@ -258,7 +258,11 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         exclusiveWithTier: 'products',
         alsoClearsKeys: [
           'products_image_only_show_price',
-          'products_image_only_show_vip',
+          // products_image_only_show_vip is not listed any more: the key no
+          // longer exists (2026-09-04 ruling deleted the tier). Nothing is
+          // stranded -- 0 users and 0 roles held it when production was
+          // checked -- and a role that somehow still carries the stale key just
+          // carries an inert boolean nothing reads.
           'products_image_only_show_wholesale',
           'products_image_only_show_barcode',
           'products_image_only_show_category',
@@ -280,7 +284,10 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // mapping enforced server-side, and ProductsImageOnlyView.tsx for
       // where the UI reads these same keys via useApp().hasPermission().
       { key: 'products_image_only_show_price', tKey: 'perm_products_image_only_show_price', label: 'Image-only role: show selling price', sensitivity: 'normal' },
-      { key: 'products_image_only_show_vip', tKey: 'perm_products_image_only_show_vip', label: 'Image-only role: show VIP price', sensitivity: 'normal' },
+      // The 'products_image_only_show_vip' row is deleted (2026-09-04 ruling):
+      // the tier it revealed was the wholesale price under a wrong name, and
+      // migration 0111 emptied special_price_*, so the grant could only ever
+      // have exposed two permanently empty columns. Wholesale is the survivor.
       { key: 'products_image_only_show_wholesale', tKey: 'perm_products_image_only_show_wholesale', label: 'Image-only role: show wholesale price', sensitivity: 'normal' },
       { key: 'products_image_only_show_barcode', tKey: 'perm_products_image_only_show_barcode', label: 'Image-only role: show barcode', sensitivity: 'normal' },
       { key: 'products_image_only_show_category', tKey: 'perm_products_image_only_show_category', label: 'Image-only role: show category', sensitivity: 'normal' },
@@ -291,7 +298,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // per-branch array; batches opens the read-only lot list (the server
       // strips unit cost / paid-credit state for this grant).
       { key: 'products_image_only_show_branch_stock', tKey: 'perm_products_image_only_show_branch_stock', label: 'Image-only role: show per-branch stock', sensitivity: 'normal' },
-      { key: 'products_image_only_show_batches', tKey: 'perm_products_image_only_show_batches', label: 'Image-only role: show batches/lots (no costs)', sensitivity: 'normal' },
+      { key: 'products_image_only_show_batches', tKey: 'perm_products_image_only_show_batches', label: 'Image-only role: show received dates (no costs)', sensitivity: 'normal' },
     ],
   },
   {
@@ -325,20 +332,11 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'branches',
     tKey: 'perm_section_branches',
     label: 'Branches',
-    description: 'Branch records and inter-branch stock movement.',
+    description: 'Canonical Shop and Warehouse records, their editable details, exports, and inter-branch stock movement.',
     permissions: [
-      // tier: true -- Branch used to be folded into the 'inventory' key
-      // above; split into its own key so it can be granted independently
-      // (see cloudflare/src/lib/permissions.ts's ENTITY_PERMISSION_MAP
-      // comment for the backend half of this split). Review Required tier
-      // is wired end to end: create/update queue directly (no live-state
-      // risk), delete also queues but its applier re-checks "not the
-      // default branch" / "no stock left" at approval time, not just at
-      // request time. Transferring stock and repairing misplaced stock
-      // both move real quantities and are deliberately Full-Access-only
-      // for now -- a Review Required user can view branches and submit a
-      // create/edit/delete for approval, but cannot transfer stock between
-      // branches.
+      // Canonical branch identities are fixed: the editor therefore exposes
+      // no create/delete claim. Review Required can view/export and submit
+      // detail edits for approval; stock transfer and repair remain Full-only.
       {
         key: 'branches',
         tKey: 'perm_branches',
@@ -346,7 +344,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_branches_review_desc',
-        reviewDescription: 'Under Review Required, viewing branches works directly. Creating, editing, or deleting a branch goes to the Review/Approval queue for an admin to approve or reject. Transferring stock between branches and repairing misplaced stock both require Full Access.',
+        reviewDescription: 'Under Review Required, viewing and exporting branches works directly. Editing canonical branch details goes to the Review/Approval queue. Transferring stock and repairing misplaced stock require Full Access.',
       },
     ],
   },
@@ -354,7 +352,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'sales',
     tKey: 'perm_section_sales',
     label: 'Sales',
-    description: 'None / View only / Full. View only shows every sale, stat, report and export but blocks writes (cancel, change status, edit customer, import).',
+    description: 'None / View only / Full. View only permits reading Sales but blocks writes and does not open Shifts. Full Sales also opens Shifts with own-shift actions and configured shop-wide visibility; administrator control is required for cancellation and cross-account review. Server capability flags remain authoritative.',
     permissions: [
       // View-tier section (Part 557 slice 2): all sales READS
       // (list/stats/reports/export) admit a 'view' grant; the writes
@@ -422,7 +420,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_fees_review_desc',
-        reviewDescription: 'Under Review Required, create, edit, and search all work directly. Only delete goes to the Review/Approval queue for an admin to approve or reject.',
+        reviewDescription: 'Under Review Required, create, edit, search, and export work directly. Only delete goes to the Review/Approval queue for an admin to approve or reject.',
       },
     ],
   },

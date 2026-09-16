@@ -1,5 +1,17 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+
+/** Fail closed until the complete additive release schema is available. */
+async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
+  try {
+    const row = await db.prepare(`SELECT COUNT(*) AS ready FROM sqlite_master
+      WHERE (type='table' AND name='fee_operation_receipts')
+         OR (type='trigger' AND name='transfer_receipts_require_provenance_insert')`).get<{ ready: number }>()
+    return row?.ready === 2
+  } catch {
+    return false
+  }
+}
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
@@ -8,6 +20,20 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { businessToday } from '../lib/businessDateWindow'
 import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
+import { branchCanSell } from '../lib/branchRoles'
+import { normalizeTypedDate } from '../lib/batchCode'
+import { actorSnapshot } from '../lib/actorSnapshot'
+import { nativeChangeAmounts, type DecimalInput } from '../lib/moneyPrecision'
+import {
+  canonicalFeeCreateRequest,
+  feeCreateAuditStatement,
+  feeOperationReceiptResponse,
+  feeOperationReceiptStatement,
+  feeRequestDigest,
+  findFeeOperationReceipt,
+  normalizeFeeRequestId,
+  type FeeCreateIntent,
+} from '../lib/feeOperationReceipt'
 import type { Env } from '../index'
 
 // Standalone Fees page (migrations/0018_fees.sql) -- manual-entry fee
@@ -34,6 +60,10 @@ app.use('*', async (c, next) => {
   // directly under that tier (see the DELETE handler below for the one
   // exception). Only 'none' 403s here; 'full' and 'review' both pass.
   if (getPermissionTier(user, 'fees') === 'none') return c.json({ error: 'Forbidden' }, 403)
+  // A hidden read action does not revoke independently allowed writes.
+  if ((c.req.method === 'GET' || c.req.method === 'HEAD') && getActionTier(user, 'fees', 'view') === 'none') {
+    return c.json({ error: 'Forbidden' }, 403)
+  }
   await next()
 })
 
@@ -71,6 +101,26 @@ function toNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback
 }
 
+// Missing version is deliberately legacy-compatible, including frozen requests
+// that have not reached the server yet. It is not a fresh-input admission proof.
+function feeMoneyVersion(body: Record<string, unknown>): 1 | undefined {
+  if (!Object.prototype.hasOwnProperty.call(body, 'fee_money_version')) return undefined
+  if (body.fee_money_version !== 1) throw new Error('invalid_fee_money_version')
+  return 1
+}
+
+function feeMoney(body: Record<string, unknown>, currency: 'usd' | 'khr', version: 1 | undefined, fallback = 0): number {
+  const snake = `amount_${currency}`, camel = currency === 'usd' ? 'amountUsd' : 'amountKhr'
+  const present = Object.prototype.hasOwnProperty.call(body, snake) || Object.prototype.hasOwnProperty.call(body, camel)
+  if (!present) return fallback
+  if (!version) return round2(Math.max(toNumber(body[snake] ?? body[camel]), 0))
+  // Preserve explicit null/blank for strict validation rather than coalescing.
+  const value = (Object.prototype.hasOwnProperty.call(body, snake) ? body[snake] : body[camel]) as DecimalInput
+  const change = nativeChangeAmounts({ paidUsd: currency === 'usd' ? value : 0,
+    paidKhr: currency === 'khr' ? value : 0, payableUsd: 0, exchangeRate: 1, changeExchangeRate: 1 })
+  return currency === 'usd' ? change.changeUsd : change.changeKhr
+}
+
 function normalizeFeeType(value: unknown): FeeType {
   const normalized = String(value || '').trim().toLowerCase()
   return FEE_TYPES.includes(normalized) ? (normalized as FeeType) : 'other'
@@ -97,6 +147,44 @@ async function requireDeliveryContact(db: ReturnType<typeof getDb>, value: unkno
   return id
 }
 
+type FeeLink = { saleId: number | null; branchId: number }
+
+async function resolveFeeLink(
+  db: ReturnType<typeof getDb>,
+  saleValue: unknown,
+  branchValue: unknown,
+): Promise<FeeLink> {
+  const saleId = optionalPositiveId(saleValue)
+  const requestedBranchId = optionalPositiveId(branchValue)
+  if (saleValue !== undefined && saleValue !== null && saleValue !== '' && saleId == null) {
+    throw new Error('INVALID_SALE')
+  }
+  if (branchValue !== undefined && branchValue !== null && branchValue !== '' && requestedBranchId == null) {
+    throw new Error('INVALID_BRANCH')
+  }
+
+  if (saleId != null) {
+    const sale = await db.prepare(`
+      SELECT s.id, s.branch_id, b.name AS branch_name, b.is_active AS branch_active
+      FROM sales s LEFT JOIN branches b ON b.id=s.branch_id
+      WHERE s.id=@saleId
+    `).get<{ id: number; branch_id: number | null; branch_name: string | null; branch_active: number | null }>({ saleId })
+    const saleBranchId = Number(sale?.branch_id)
+    if (!sale || !Number.isSafeInteger(saleBranchId) || saleBranchId <= 0
+      || Number(sale.branch_active ?? 0) !== 1 || !branchCanSell(sale.branch_name)) {
+      throw new Error('INVALID_SALE')
+    }
+    if (requestedBranchId != null && requestedBranchId !== saleBranchId) throw new Error('SALE_BRANCH_MISMATCH')
+    return { saleId, branchId: saleBranchId }
+  }
+
+  if (requestedBranchId == null) throw new Error('BRANCH_REQUIRED')
+  const branch = await db.prepare('SELECT id,name,is_active FROM branches WHERE id=@id')
+    .get<{ id: number; name: string | null; is_active: number | null }>({ id: requestedBranchId })
+  if (!branch || Number(branch.is_active ?? 0) !== 1 || !branchCanSell(branch.name)) throw new Error('INVALID_BRANCH')
+  return { saleId: null, branchId: requestedBranchId }
+}
+
 // Labels are reusable tags (the /labels endpoint below feeds them back as
 // suggestions), so a whole sentence typed into one poisons the suggestion
 // list forever. Cap: 6 whitespace-separated words / 60 chars, enforced on
@@ -115,11 +203,12 @@ export function normalizeFeeLabel(value: unknown): string | null {
 
 function normalizeDate(value: unknown): string {
   const str = typeof value === 'string' ? value.trim() : ''
-  // fee_date is a business CALENDAR date. Preserve an explicit YYYY-MM-DD
-  // literally; do not round-trip it through UTC. If omitted/invalid, default
-  // to Cambodia's current business day rather than the UTC day.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str
-  if (str) {
+  // fee_date is a business CALENDAR date. Values typed in the app follow its
+  // day-first convention, while an ISO timestamp from an older integration
+  // still needs Cambodia's calendar-day conversion.
+  const typed = normalizeTypedDate(str)
+  if (typed && !/^\d{4}-\d{1,2}-\d{1,2}[T ]\d{1,2}:/.test(str)) return typed
+  if (/^\d{4}-\d{1,2}-\d{1,2}[T ]\d{1,2}:/.test(str)) {
     const parsed = new Date(str)
     if (!Number.isNaN(parsed.getTime())) return businessToday(parsed.getTime())
   }
@@ -387,37 +476,143 @@ app.post('/', async (c) => {
   // narrowing into the ordinary tier answer.
   if (getActionTier(user, 'fees', 'add') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const db = getDb(c.env)
-  const body = await c.req.json().catch(() => ({} as Record<string, unknown>))
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+
+  // A manual expense is a money-bearing write. The browser persists this
+  // identity before network I/O and reuses it after an unknown outcome; the
+  // receipt below makes that retry return the first commit instead of
+  // inserting a second expense. Missing/invalid identities fail before any
+  // validation query or write so an older client cannot silently retain the
+  // former duplicate-on-timeout behavior.
+  const clientRequestId = normalizeFeeRequestId(body.client_request_id)
+  if (!clientRequestId) {
+    return c.json({ error: 'client_request_id is required when creating an expense.', code: 'client_request_id_required' }, 400)
+  }
+  if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
 
   const feeType = normalizeFeeType(body.fee_type ?? body.feeType)
   const label = normalizeFeeLabel(body.label)
-  const amountUsd = round2(Math.max(toNumber(body.amount_usd ?? body.amountUsd), 0))
-  const amountKhr = round2(Math.max(toNumber(body.amount_khr ?? body.amountKhr), 0))
-  const feeDate = normalizeDate(body.fee_date ?? body.feeDate)
-  const saleId = body.sale_id != null && body.sale_id !== '' ? Number(body.sale_id) : null
-  const branchId = body.branch_id != null && body.branch_id !== '' ? Number(body.branch_id) : null
-  let deliveryContactId: number | null
+  let version: 1 | undefined, amountUsd: number, amountKhr: number
   try {
-    deliveryContactId = await requireDeliveryContact(db, body.delivery_contact_id ?? body.deliveryContactId)
+    version = feeMoneyVersion(body)
+    amountUsd = feeMoney(body, 'usd', version)
+    amountKhr = feeMoney(body, 'khr', version)
+    if (version && amountUsd === 0 && amountKhr === 0) throw new Error('fee_amount_required')
   } catch {
+    return c.json({ error: 'Invalid expense money or policy version.', code: 'invalid_fee_money' }, 400)
+  }
+  const feeDate = normalizeDate(body.fee_date ?? body.feeDate)
+  const requestedSaleId = optionalPositiveId(body.sale_id)
+  const requestedBranchId = optionalPositiveId(body.branch_id)
+  // Preserve an explicit snake_case null from the normal frontend. Using
+  // `??` here previously fell through to the absent legacy camelCase field,
+  // turning that valid null into undefined and then rejecting it below.
+  const deliveryContactValue = body.delivery_contact_id !== undefined
+    ? body.delivery_contact_id
+    : body.deliveryContactId
+  const requestedDeliveryContactId = optionalPositiveId(deliveryContactValue)
+  if (body.sale_id !== undefined && body.sale_id !== null && body.sale_id !== '' && requestedSaleId == null) {
+    return c.json({ error: 'Choose an existing sale recorded at the Shop.' }, 400)
+  }
+  if (body.branch_id !== undefined && body.branch_id !== null && body.branch_id !== '' && requestedBranchId == null) {
+    return c.json({ error: 'Every expense must use the active Shop branch.' }, 400)
+  }
+  if ((body.delivery_contact_id !== undefined || body.deliveryContactId !== undefined)
+    && deliveryContactValue !== null
+    && deliveryContactValue !== ''
+    && requestedDeliveryContactId == null) {
     return c.json({ error: 'Invalid delivery contact' }, 400)
   }
   const notes = normalizeText(body.notes, 2000)
+  const intent: FeeCreateIntent = {
+    ...(version ? { fee_money_version: version } : {}),
+    fee_type: feeType,
+    label,
+    amount_usd: amountUsd,
+    amount_khr: amountKhr,
+    fee_date: feeDate,
+    sale_id: requestedSaleId,
+    branch_id: requestedBranchId,
+    delivery_contact_id: requestedDeliveryContactId,
+    notes,
+  }
+  const requestJson = canonicalFeeCreateRequest(intent)
+  const requestDigest = await feeRequestDigest(requestJson)
+  const priorReceipt = await findFeeOperationReceipt(db, Number(user.id), clientRequestId)
+  if (priorReceipt) {
+    if (priorReceipt.request_digest !== requestDigest) {
+      return c.json({ error: 'client_request_id was already used with different expense data.', code: 'idempotency_conflict' }, 409)
+    }
+    return c.json(feeOperationReceiptResponse(priorReceipt))
+  }
+
+  let saleId: number | null
+  let branchId: number
+  try {
+    ({ saleId, branchId } = await resolveFeeLink(db, requestedSaleId, requestedBranchId))
+  } catch (error) {
+    const code = (error as Error).message
+    if (code === 'SALE_BRANCH_MISMATCH') return c.json({ error: 'The linked sale and expense must use the same Shop branch.' }, 400)
+    if (code === 'INVALID_SALE') return c.json({ error: 'Choose an existing sale recorded at the Shop.' }, 400)
+    return c.json({ error: 'Every expense must use the active Shop branch.' }, 400)
+  }
+  let deliveryContactId: number | null
+  try {
+    deliveryContactId = await requireDeliveryContact(db, requestedDeliveryContactId)
+  } catch {
+    return c.json({ error: 'Invalid delivery contact' }, 400)
+  }
   const now = new Date().toISOString()
+  const actorName = actorSnapshot(user)
+  const receiptId = crypto.randomUUID()
+  try {
+    await db.batch([
+      {
+        sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, delivery_contact_id, notes, created_by, created_by_name, created_at, updated_at)
+          VALUES (@feeType, @label, @amountUsd, @amountKhr, @feeDate, @saleId, @branchId, @deliveryContactId, @notes, @createdBy, @createdByName, @now, @now)`,
+        params: {
+          feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId,
+          deliveryContactId, notes, createdBy: user.id, createdByName: actorName, now,
+        },
+      },
+      feeOperationReceiptStatement({
+        receiptId,
+        actorId: Number(user.id),
+        actorName,
+        requestId: clientRequestId,
+        digest: requestDigest,
+        requestJson,
+        occurredAt: now,
+        intent: { ...intent, sale_id: saleId, delivery_contact_id: deliveryContactId },
+        resolvedBranchId: branchId,
+      }),
+      feeCreateAuditStatement({
+        actorId: Number(user.id),
+        actorName,
+        requestId: clientRequestId,
+        digest: requestDigest,
+        resolvedBranchId: branchId,
+      }),
+    ])
+  } catch (error) {
+    // Two equal requests can race past the pre-read. The receipt uniqueness
+    // constraint rolls the losing fee+audit batch back; read and return the
+    // winner. A different digest is an explicit conflict, never equality by
+    // amount/date/label guesswork.
+    const racedReceipt = await findFeeOperationReceipt(db, Number(user.id), clientRequestId)
+    if (racedReceipt) {
+      if (racedReceipt.request_digest === requestDigest) return c.json(feeOperationReceiptResponse(racedReceipt))
+      return c.json({ error: 'client_request_id was already used with different expense data.', code: 'idempotency_conflict' }, 409)
+    }
+    throw error
+  }
 
-  const result = await db.prepare(`
-    INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, delivery_contact_id, notes, created_by, created_by_name, created_at, updated_at)
-    VALUES (@feeType, @label, @amountUsd, @amountKhr, @feeDate, @saleId, @branchId, @deliveryContactId, @notes, @createdBy, @createdByName, @now, @now)
-  `).run({
-    feeType, label, amountUsd, amountKhr, feeDate,
-    saleId: Number.isFinite(saleId as number) ? saleId : null,
-    branchId: Number.isFinite(branchId as number) ? branchId : null,
-    deliveryContactId, notes, createdBy: user.id, createdByName: user.username || null, now,
-  })
-
-  const fee = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id: result.lastInsertRowid })
-  await audit(c.env, user.id, user.username || null, 'create', 'fee', result.lastInsertRowid, { fee_type: feeType, amount_usd: amountUsd, amount_khr: amountKhr })
-  await broadcast(c.env, 'fees', { type: 'created', id: result.lastInsertRowid })
+  const committedReceipt = await findFeeOperationReceipt(db, Number(user.id), clientRequestId)
+  if (!committedReceipt || committedReceipt.request_digest !== requestDigest) {
+    return c.json({ error: 'Expense commit could not be verified. Retry the exact saved request.', code: 'write_outcome_unknown' }, 503)
+  }
+  const response = feeOperationReceiptResponse(committedReceipt)
+  await broadcast(c.env, 'fees', { type: 'created', id: committedReceipt.fee_id })
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'fees',
     lines: [
@@ -428,7 +623,7 @@ app.post('/', async (c) => {
       notes ? `Note: ${notes}` : '',
     ],
   }).catch((error) => console.error('[telegram] fee notification failed', error)))
-  return c.json({ fee }, 201)
+  return c.json(response, 201)
 })
 
 // PUT /api/fees/:id -- edit, with the same optimistic-concurrency pattern
@@ -445,8 +640,9 @@ app.put('/:id', async (c) => {
   const existing = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
   if (!existing) return c.json({ error: 'Fee not found' }, 404)
 
+  const expectedUpdatedAt = getExpectedUpdatedAt(body)
   try {
-    assertUpdatedAtMatch('fee', existing, getExpectedUpdatedAt(body))
+    assertUpdatedAtMatch('fee', existing, expectedUpdatedAt)
   } catch (err) {
     if (err instanceof WriteConflictError) {
       const { body: conflictBody, status } = writeConflictResponse(err)
@@ -457,11 +653,29 @@ app.put('/:id', async (c) => {
 
   const feeType = body.fee_type !== undefined || body.feeType !== undefined ? normalizeFeeType(body.fee_type ?? body.feeType) : existing.fee_type
   const label = body.label !== undefined ? normalizeFeeLabel(body.label) : existing.label
-  const amountUsd = body.amount_usd !== undefined || body.amountUsd !== undefined ? round2(Math.max(toNumber(body.amount_usd ?? body.amountUsd), 0)) : existing.amount_usd
-  const amountKhr = body.amount_khr !== undefined || body.amountKhr !== undefined ? round2(Math.max(toNumber(body.amount_khr ?? body.amountKhr), 0)) : existing.amount_khr
+  let amountUsd: number, amountKhr: number
+  try {
+    const version = feeMoneyVersion(body)
+    amountUsd = feeMoney(body, 'usd', version, existing.amount_usd)
+    amountKhr = feeMoney(body, 'khr', version, existing.amount_khr)
+  } catch {
+    return c.json({ error: 'Invalid expense money or policy version.', code: 'invalid_fee_money' }, 400)
+  }
   const feeDate = body.fee_date !== undefined || body.feeDate !== undefined ? normalizeDate(body.fee_date ?? body.feeDate) : existing.fee_date
-  const saleId = body.sale_id !== undefined ? (body.sale_id === null || body.sale_id === '' ? null : Number(body.sale_id)) : existing.sale_id
-  const branchId = body.branch_id !== undefined ? (body.branch_id === null || body.branch_id === '' ? null : Number(body.branch_id)) : existing.branch_id
+  let saleId: number | null
+  let branchId: number
+  try {
+    ({ saleId, branchId } = await resolveFeeLink(
+      db,
+      body.sale_id !== undefined ? body.sale_id : existing.sale_id,
+      body.branch_id !== undefined ? body.branch_id : existing.branch_id,
+    ))
+  } catch (error) {
+    const code = (error as Error).message
+    if (code === 'SALE_BRANCH_MISMATCH') return c.json({ error: 'The linked sale and expense must use the same Shop branch.' }, 400)
+    if (code === 'INVALID_SALE') return c.json({ error: 'Choose an existing sale recorded at the Shop.' }, 400)
+    return c.json({ error: 'Every expense must use the active Shop branch.' }, 400)
+  }
   let deliveryContactId = existing.delivery_contact_id
   if (body.delivery_contact_id !== undefined || body.deliveryContactId !== undefined) {
     try {
@@ -473,15 +687,33 @@ app.put('/:id', async (c) => {
   const notes = body.notes !== undefined ? normalizeText(body.notes, 2000) : existing.notes
   const now = new Date().toISOString()
 
-  await db.prepare(`
+  const updateResult = await db.prepare(`
     UPDATE fees SET fee_type = @feeType, label = @label, amount_usd = @amountUsd, amount_khr = @amountKhr,
       fee_date = @feeDate, sale_id = @saleId, branch_id = @branchId,
       delivery_contact_id = @deliveryContactId, notes = @notes, updated_at = @now
-    WHERE id = @id
-  `).run({ feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId, deliveryContactId, notes, now, id })
+    WHERE id = @id${expectedUpdatedAt ? ' AND updated_at IS @expectedUpdatedAt' : ''}
+  `).run({ feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId, deliveryContactId, notes, now, id, expectedUpdatedAt })
+
+  // The pre-read check gives callers an immediate conflict response, while
+  // this predicate closes the interval between that read and the write. A
+  // concurrent editor can change the row in that interval; zero affected
+  // rows means this request lost that race and must not emit audit/broadcast
+  // side effects for a write that never happened.
+  if (updateResult.changes === 0) {
+    const current = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
+    if (!expectedUpdatedAt) return c.json({ error: current ? 'Fee was not updated' : 'Fee not found' }, current ? 409 : 404)
+    const conflict = new WriteConflictError('fee', current || null, expectedUpdatedAt, current ? 'updated' : 'deleted')
+    const { body: conflictBody, status } = writeConflictResponse(conflict)
+    return c.json(conflictBody, status)
+  }
 
   const fee = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
-  await audit(c.env, user.id, user.username || null, 'update', 'fee', id, { fee_type: feeType, amount_usd: amountUsd, amount_khr: amountKhr })
+  await audit(c.env, user.id, user.username || null, 'update', 'fee', id, {
+    before: existing,
+    after: fee,
+    sale_id: saleId,
+    branch_id: branchId,
+  })
   await broadcast(c.env, 'fees', { type: 'updated', id })
   return c.json({ fee })
 })
@@ -500,7 +732,7 @@ app.delete('/:id', async (c) => {
   const db = getDb(c.env)
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.json({ error: 'Invalid fee id' }, 400)
-  const existing = await db.prepare(`SELECT id FROM fees WHERE id = @id`).get<{ id: number }>({ id })
+  const existing = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
   if (!existing) return c.json({ error: 'Fee not found' }, 404)
 
   const pendingId = await maybeQueueForReview(c.env, user, 'fees', {
@@ -515,7 +747,7 @@ app.delete('/:id', async (c) => {
   }
 
   await db.prepare(`DELETE FROM fees WHERE id = @id`).run({ id })
-  await audit(c.env, user.id, user.username || null, 'delete', 'fee', id, null)
+  await audit(c.env, user.id, user.username || null, 'delete', 'fee', id, { before: existing, after: null })
   await broadcast(c.env, 'fees', { type: 'deleted', id })
   return c.json({ success: true })
 })
