@@ -64,6 +64,20 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
     assert.doesNotMatch(source, /function networkFirstStatic/, 'networkFirstStatic is dead now that its only caller was removed')
     assert.match(source, /if \(!isCacheableStaticPath\(url\.pathname\)\)[\s\S]{0,20}return[;\s]*\n[\s\S]{0,700}event\.respondWith\(cacheFirstStatic\(request, event\)\)/, 'the dispatcher must send every cacheable static path through cacheFirstStatic')
   })
+
+  runTest(`a 404 on a hashed /assets/ chunk refreshes the cached shell before the response returns (${label})`, () => {
+    const body = functionBody(source, 'async function cacheFirstStatic', 'function isStaleBuildAsset')
+    assert.match(body, /else if \(isStaleBuildAsset\(request, response\)\) \{[\s\S]{0,40}await recoverStaleShell\(event\)/, 'the network-miss branch must await the shell recovery on a stale asset')
+    const guard = functionBody(source, 'function isStaleBuildAsset', 'async function recoverStaleShell')
+    assert.match(guard, /response\.status !== 404/, 'only a 404 marks a stale build asset')
+    assert.match(guard, /startsWith\('\/assets\/'\)/, 'only hashed build assets count -- icons and manifests are unhashed')
+    const recover = functionBody(source, 'async function recoverStaleShell', "self.addEventListener('fetch'")
+    assert.match(recover, /caches\.open\(APP_SHELL_CACHE\)/, 'the shell cache is what goes stale')
+    assert.match(recover, /fetch\('\/index\.html', \{ cache: 'no-store' \}\)/, 'the fresh shell must bypass HTTP caches')
+    assert.match(recover, /response\.ok && response\.type === 'basic' && !response\.redirected/, 'a redirect or error page must not replace the shell')
+    assert.match(recover, /self\.registration\.update\(\)/, 'the new worker must be requested, not left to the periodic check')
+    assert.match(recover, /event\.waitUntil\(refresh\)[\s\S]{0,20}await refresh/, 'recovery is awaited so the reload that follows sees the fresh shell')
+  })
 }
 
 if (failed > 0) {
