@@ -203,6 +203,13 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/stockReason': loadReal('lib/stockReason.ts'),
   '../lib/sqlBinding': sqlBinding,
   '../lib/productIdentity': productIdentity,
+  // P10-4: the receipt wire re-derives products.cost_price_* from the
+  // DISTINCT non-zero active-lot costs after every add -- REAL, not stubbed,
+  // since this module writes to products via the same db the fixtures read.
+  '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
+    './db': { getDb: () => db },
+    './productDetailRule': productDetailRule,
+  }),
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },
   '../lib/familyStockStats': { getFamilyStockStats: async () => ({}) },
   '../lib/lowStockSettings': lowStockStub,

@@ -35,6 +35,9 @@ const subject = compile('stockActionCommit.ts', {
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
   './saleCreationSnapshot': saleCreationSnapshot,
+  // P10-4: not exercised (this file only drives applyUnifiedStockSale), but
+  // the module-level import must still resolve.
+  './catalogCostRecompute': { recomputeCatalogCost: async () => null },
 })
 
 function setup() {

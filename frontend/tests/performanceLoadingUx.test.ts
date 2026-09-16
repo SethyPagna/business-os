@@ -110,6 +110,7 @@ const productRowParts = fs.readFileSync(new URL('../src/components/products/surf
 const productPageConfig = fs.readFileSync(new URL('../src/components/products/config/productPageConfig.ts', import.meta.url), 'utf8')
 const inventoryImportModal = fs.readFileSync(new URL('../src/components/inventory/InventoryImportModal.tsx', import.meta.url), 'utf8')
 const productForm = fs.readFileSync(new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url), 'utf8')
+const supplierPickerField = fs.readFileSync(new URL('../src/components/shared/SupplierPickerField.tsx', import.meta.url), 'utf8')
 const bulkImportModal = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.tsx', import.meta.url), 'utf8')
 const manageCategoriesModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageCategoriesModal.tsx', import.meta.url), 'utf8')
 const manageUnitsModal = fs.readFileSync(new URL('../src/components/products/lookups/ManageUnitsModal.tsx', import.meta.url), 'utf8')
@@ -2842,10 +2843,23 @@ assert.match(
   /const PRODUCT_IMPORT_JOB_START_TIMEOUT_MS = 12000/,
   'product import job start should use an explicit timeout',
 )
+// P9-12 wave 2: ProductForm no longer imports contactsTransport directly --
+// it shares SupplierPickerField's cached loadSupplierNames() (which is the
+// one still making the underlying getSuppliers({fields:'names'}) read; see
+// pickerOptionsCache.test.ts and suggestionTextInput.test.ts's "the supplier
+// rows promise exactly what the read behind them returns"), so opening the
+// product form after any other supplier picker no longer refetches. The
+// timeout guarantee this test protects is unchanged: still `withLoaderTimeout`,
+// still `PRODUCT_SUPPLIERS_TIMEOUT_MS`, just wrapping the shared loader now.
 assert.match(
   productForm,
-  /function loadContactsTransportModule\(\): Promise<ContactsTransportModule>[\s\S]*import\('\.\.\/\.\.\/\.\.\/api\/contactsTransport\.ts'\)[\s\S]*withLoaderTimeout\(\s*(?:\/\/[^\n]*\n\s*)*async \(\) => \(await loadContactsTransportModule\(\)\)\.getSuppliers\(\{ fields: 'names' \}\),\s*'Product suppliers',\s*PRODUCT_SUPPLIERS_TIMEOUT_MS,\s*\)/,
-  'product supplier options should timeout slow supplier reads and use the name-only list every role may call (Part 383 supplier privacy)',
+  /function loadSupplierPickerModule\(\): Promise<SupplierPickerModule>[\s\S]*import\('\.\.\/\.\.\/shared\/SupplierPickerField\.tsx'\)[\s\S]*withLoaderTimeout\(\s*(?:\/\/[^\n]*\n\s*)*async \(\) => \(await loadSupplierPickerModule\(\)\)\.loadSupplierNames\(\),\s*'Product suppliers',\s*PRODUCT_SUPPLIERS_TIMEOUT_MS,\s*\)/,
+  'product supplier options should timeout slow supplier reads and use the shared cached name-only loader every role may call (Part 383 supplier privacy)',
+)
+assert.match(
+  supplierPickerField,
+  /getSuppliers\(\{ fields: 'names' \}\)/,
+  'and the shared loader behind it is the one making the name-only read',
 )
 assert.match(
   productForm,

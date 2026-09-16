@@ -321,10 +321,12 @@ await runTest('resolveReceiptPageGeometry: measured mode (default) keeps the in-
   assert.match(html, /data-receipt-length-line="true"/, 'measured mode still shows the pre-print length diagnostic')
 })
 
-await runTest('resolveReceiptPageGeometry: a missing/undefined saved pageSizeMode (pre-feature settings) defaults to measured', () => {
+await runTest('resolveReceiptPageGeometry: a missing/undefined saved pageSizeMode (pre-feature settings, the exact production shape reported 2026-09-16) now defaults to driver-forms', () => {
   const geometry = resolveReceiptPageGeometry({ fixedHeightMm: null, measuredHeightMm: 200, savedPageSizeMode: undefined, fixedPageLengthMm: undefined })
-  assert.equal(geometry.pageSizeMode, 'measured')
-  assert.equal(geometry.continuousRoll, true)
+  assert.equal(geometry.pageSizeMode, 'driver-forms')
+  assert.equal(geometry.continuousRoll, false)
+  // Owner's default four registered forms: 200mm content fits the 210mm form.
+  assert.equal(geometry.pageHeightMm, 210)
 })
 
 await runTest('resolveReceiptPageGeometry: fixed mode with a 25-item receipt uses the explicit 80x100mm page and paginates instead of clipping', () => {
@@ -396,8 +398,49 @@ await runTest('resolveReceiptPageGeometry: auto-longest emits one explicit longe
   assert.match(html, /page-break-after:\s*avoid/, 'auto-longest guards against a driver paginating anyway')
 })
 
+// --- P10-1/P10-3: driver-forms (2026-09-16 owner report + Chrome dialog photos) ---
+
+await runTest('resolveReceiptPageGeometry: driver-forms picks the smallest registered form that fits the measured content, for each band, and the largest form when content exceeds every form (pagination, never clipping)', () => {
+  const bands = [
+    { measuredHeightMm: 150, expected: 210 },
+    { measuredHeightMm: 250, expected: 297 },
+    { measuredHeightMm: 380, expected: 400 },
+    { measuredHeightMm: 700, expected: 800 },
+    { measuredHeightMm: 900, expected: 800 }, // exceeds every form: largest wins, must paginate not clip
+  ]
+  for (const band of bands) {
+    const geometry = resolveReceiptPageGeometry({
+      fixedHeightMm: null,
+      measuredHeightMm: band.measuredHeightMm,
+      savedPageSizeMode: 'driver-forms',
+      driverFormHeightsMm: [210, 297, 400, 800],
+    })
+    assert.equal(geometry.pageHeightMm, band.expected, `${band.measuredHeightMm}mm content picks the ${band.expected}mm form`)
+    assert.equal(geometry.continuousRoll, false)
+    assert.equal(geometry.pageSizeMode, 'driver-forms')
+
+    const html = buildPrintablePreviewDocument({
+      markup: '<section>ITEM-1|ITEM-2</section>',
+      widthMm: 72,
+      pageHeightMm: geometry.pageHeightMm,
+      continuousRoll: geometry.continuousRoll,
+      singleSheet: false,
+      pageSizeMode: geometry.pageSizeMode,
+    })
+    assert.match(html, new RegExp(`size: 72mm ${band.expected}\\.00mm`), `${band.measuredHeightMm}mm: emits an explicit 72x${band.expected}mm @page so Chrome auto-selects the matching driver form`)
+    assert.doesNotMatch(html, /overflow: hidden !important/, `${band.measuredHeightMm}mm: a driver-forms page never clips a receipt taller than the chosen form`)
+    assert.match(html, /break-inside: avoid-page/, `${band.measuredHeightMm}mm: pagination onto further forms still keeps an item/row intact`)
+    assert.doesNotMatch(html, /data-receipt-length-line="true">Receipt length/, 'driver-forms mode reports the chosen form, not a measured roll length')
+  }
+})
+
+await runTest('resolveReceiptPageGeometry: driver-forms with an empty/corrupted height list falls back to the owner\'s default four forms (210/297/400/800)', () => {
+  const geometry = resolveReceiptPageGeometry({ fixedHeightMm: null, measuredHeightMm: 250, savedPageSizeMode: 'driver-forms', driverFormHeightsMm: [] })
+  assert.equal(geometry.pageHeightMm, 297)
+})
+
 await runTest('resolveReceiptPageGeometry: a genuine fixed sheet (80x50mm/A4/Letter/custom height) always resolves to measured bookkeeping regardless of the saved pageSizeMode', () => {
-  for (const savedPageSizeMode of ['measured', 'fixed', 'driver', 'auto-longest', undefined]) {
+  for (const savedPageSizeMode of ['measured', 'fixed', 'driver', 'auto-longest', 'driver-forms', undefined]) {
     const geometry = resolveReceiptPageGeometry({ fixedHeightMm: 50, measuredHeightMm: 999, savedPageSizeMode, fixedPageLengthMm: '150' })
     assert.equal(geometry.pageHeightMm, 50, `paperSize's own explicit height wins regardless of pageSizeMode=${savedPageSizeMode}`)
     assert.equal(geometry.continuousRoll, false)
@@ -407,24 +450,46 @@ await runTest('resolveReceiptPageGeometry: a genuine fixed sheet (80x50mm/A4/Let
 })
 
 await runTest('normalizeReceiptPrintSettings: pageSizeMode/fixedPageLengthMm default and migrate existing saved settings', () => {
-  assert.equal(DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode, 'measured')
+  // 2026-09-16 (owner report + two Chrome print-dialog photos): the default
+  // changed from 'measured' to 'driver-forms' -- a page height the printer
+  // driver has no matching registered form for is exactly what forced the
+  // owner to pick a form by hand and left scaled-in side margins.
+  assert.equal(DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode, 'driver-forms')
   assert.equal(DEFAULT_RECEIPT_PRINT_SETTINGS.fixedPageLengthMm, '100')
+  assert.equal(DEFAULT_RECEIPT_PRINT_SETTINGS.driverFormWidthMm, '72')
+  assert.deepEqual(DEFAULT_RECEIPT_PRINT_SETTINGS.driverFormHeightsMm, [210, 297, 400, 800])
 
   // A settings blob saved before this feature existed (no pageSizeMode key at
-  // all) must migrate to 'measured' -- today's own behaviour -- not throw and
-  // not silently pick a different mode.
+  // all) -- the exact shape of the live org's settings when the owner filed
+  // this report -- must migrate to 'driver-forms', not throw and not stay on
+  // the old 'measured' default.
   const migrated = normalizeReceiptPrintSettings({ paperSize: '80mm', scale: '100' })
-  assert.equal(migrated.pageSizeMode, 'measured')
+  assert.equal(migrated.pageSizeMode, 'driver-forms')
   assert.equal(migrated.fixedPageLengthMm, '100')
+  assert.equal(migrated.driverFormWidthMm, '72')
+  assert.deepEqual(migrated.driverFormHeightsMm, [210, 297, 400, 800])
 
   const savedFixed = normalizeReceiptPrintSettings({ paperSize: '80mm', pageSizeMode: 'fixed', fixedPageLengthMm: '150' })
   assert.equal(savedFixed.pageSizeMode, 'fixed')
   assert.equal(savedFixed.fixedPageLengthMm, '150')
 
-  // A corrupted/foreign value must never resolve to anything but 'measured'.
+  const savedMeasured = normalizeReceiptPrintSettings({ paperSize: '80mm', pageSizeMode: 'measured' })
+  assert.equal(savedMeasured.pageSizeMode, 'measured', 'an explicit saved measured mode is never silently upgraded to driver-forms')
+
+  // A corrupted/foreign value must never resolve to anything but the current default.
   const bogus = normalizeReceiptPrintSettings({ pageSizeMode: 'nonsense-mode', fixedPageLengthMm: '-40' })
-  assert.equal(bogus.pageSizeMode, 'measured')
+  assert.equal(bogus.pageSizeMode, 'driver-forms')
   assert.equal(bogus.fixedPageLengthMm, '100')
+
+  // driverFormWidthMm/driverFormHeightsMm normalize independently: zero/
+  // negative/non-numeric collapse to defaults, duplicates and unsorted input
+  // collapse to a unique ascending list.
+  const customForms = normalizeReceiptPrintSettings({ driverFormWidthMm: '58', driverFormHeightsMm: [400, 210, 210, -5, 'nope', 800] })
+  assert.equal(customForms.driverFormWidthMm, '58')
+  assert.deepEqual(customForms.driverFormHeightsMm, [210, 400, 800])
+  const badForms = normalizeReceiptPrintSettings({ driverFormWidthMm: '-10', driverFormHeightsMm: 'not-an-array' })
+  assert.equal(badForms.driverFormWidthMm, '72')
+  assert.deepEqual(badForms.driverFormHeightsMm, [210, 297, 400, 800])
 })
 
 if (failed > 0) process.exitCode = 1

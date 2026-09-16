@@ -85,16 +85,36 @@ export interface ReceiptPrintSettings {
   // How the printable page length is decided for CONTINUOUS ROLL paper
   // (58/72/80mm) only -- a fixed physical sheet (80x50mm/A4/Letter/custom
   // with a height) already has an explicit height and ignores this field.
-  // 'measured' (default): current behaviour, in-document remeasure right
-  // before print(). 'fixed': a document-page length the owner chooses,
-  // long receipts flow onto further pages of that length. 'driver': no
-  // `@page size` at all, so the printer driver's own registered form/paper
-  // applies. 'auto-longest': one explicit page as long as the printer's
-  // longest supported roll, for drivers that ignore a measured height.
-  pageSizeMode: 'measured' | 'fixed' | 'driver' | 'auto-longest'
+  // 'driver-forms' (DEFAULT, 2026-09-16 owner report + two Chrome print-
+  // dialog photos): the printer driver only registers a fixed set of form
+  // heights at `driverFormWidthMm` (their 72mm thermal head registers
+  // 210/297/400/800mm forms, never a bare 72mm-wide/no-height form) -- emit
+  // an explicit `@page` at that width and the SMALLEST registered height
+  // that fits the measured receipt, so Chrome auto-selects the matching
+  // driver form instead of leaving the owner to pick one by hand and scale
+  // it. 'measured': in-document remeasure right before print(), one page
+  // exactly as tall as the content (no registered-form matching). 'fixed':
+  // a document-page length the owner chooses, long receipts flow onto
+  // further pages of that length. 'driver': no `@page size` at all, so the
+  // printer driver's own registered form/paper applies. 'auto-longest': one
+  // explicit page as long as the printer's longest supported roll, for
+  // drivers that ignore a measured height.
+  pageSizeMode: 'measured' | 'fixed' | 'driver' | 'auto-longest' | 'driver-forms'
   // The chosen page length in mm for pageSizeMode 'fixed' (a preset such as
   // 100/150/200/297, or a custom value). Ignored by every other mode.
   fixedPageLengthMm: string
+  // pageSizeMode 'driver-forms' only: the printer's registered form width in
+  // mm (the owner's photographed Chrome dialog only lists 72mm-wide forms).
+  // Independent of `paperSize`/`customWidth` -- a printer can be configured
+  // for 80mm continuous paper while its DRIVER only ever registers 72mm
+  // forms, which is exactly the mismatch that forced a manual paper pick and
+  // left scaled-in side margins.
+  driverFormWidthMm: string
+  // pageSizeMode 'driver-forms' only: the registered form heights in mm, in
+  // whatever order the owner edits them (normalized to unique, positive,
+  // ascending on read). Defaults to the four heights in the owner's own
+  // Chrome dialog screenshot: 210 / 297 / 400 / 800mm.
+  driverFormHeightsMm: number[]
 }
 
 export interface AppliedReceiptConfig {

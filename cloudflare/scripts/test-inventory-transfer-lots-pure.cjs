@@ -156,6 +156,9 @@ const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
   if (id === '../lib/movementReference') return { movementReferenceSelectSql: noop }
   if (id === '../lib/movementSearch') return { movementSearchHaystackSql: noop }
   if (id === '../index') return {}
+  // P10-4: not exercised by this transfer-focused fixture (no receipt path
+  // runs here), but the module-level import must still resolve.
+  if (id === '../lib/catalogCostRecompute') return { recomputeCatalogCost: asyncNoop }
   throw new Error(`unexpected inventory route import ${id}`)
 })
 const inventoryApp = inventoryRoute.default

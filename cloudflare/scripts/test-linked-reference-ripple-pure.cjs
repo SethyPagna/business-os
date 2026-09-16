@@ -70,7 +70,13 @@ check('open pages subscribe to every reference channel they render', () => {
   assert.match(files, /channel === 'files' \|\| channel === 'users'/)
   assert.match(review, /syncChannel\.channel === 'pendingActions' \|\| syncChannel\.channel === 'users'/)
   assert.match(sales, /syncChannel\.channel === 'users'\) setUserOptionsLoaded\(false\)/, 'cashier filter options must be invalidated')
-  assert.match(supplierPicker, /ensureSupplierSyncCacheListener\(\)/, 'shared supplier-name cache must subscribe to invalidation')
+  // p9/perf-2: the supplier-name cache moved into the shared picker option
+  // cache (frontend/src/api/pickerOptionsCache.ts); the invalidation
+  // subscription lives there once per channel, and the picker goes through it.
+  const pickerCache = readFrontend('src/api/pickerOptionsCache.ts')
+  assert.match(pickerCache, /window\.addEventListener\('sync:update'/, 'shared picker option cache must subscribe to invalidation')
+  assert.match(pickerCache, /invalidatePickerOptionsCache\(channel\)/, 'sync:update for a channel must drop that channel cache')
+  assert.match(supplierPicker, /loadPickerOptions|invalidatePickerOptionsCache/, 'supplier picker must use the shared picker option cache')
   assert.match(supplierPicker, /invalidateSupplierNamesCache\(\)/)
   assert.match(productForm, /setSupplierReferenceVersion\(\(version\) => version \+ 1\)/, 'open product form must reload supplier options')
 })

@@ -1,8 +1,22 @@
+## September 16 Program 10 checkpoint A LIVE
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| P10-1 Receipt auto-fits the printer's registered forms (72 × 210/297/400/800 mm), no manual pick | **Deployed** (Worker b846aa95-e7ff-4b42-89a5-7da5ed6f511a, commit a8a21c75); physical print still owner-side | 436a7526, 69d32bcd, 53330045, ab9fb82a; new default mode driver-forms. |
+| P10-2 Numbered products + "Items (n)" header on receipt and Telegram summary | **Deployed** | 3ca66bae, c8a6512f; receiptItemNumbering.test.ts. |
+| P10-3 No left/right margins on the strip | **Deployed** | 436a7526 (≤1 mm side margins in driver-forms mode). |
+| P10-4 Cost = mean of distinct non-zero costs on every add/receive/session writer | **Deployed** | a5a2169f, 8a2499f2; test-catalog-cost-recompute-native.cjs. Remove/set/transfer/returns record no cost (N/A). |
+| P10-5 Leading-zero barcode fold on create / edit / stock-in create (no prompt) | **In progress** | sweep verdict: products.ts create/edit 409, stockSession create_receive 409; lane p10/barcode-fold running. |
+| P10-6 Cost price click opens the calculation float | **Done**, not deployed | 790c68f9, 6237aafd; ships with P10-5. |
+| P9-12 Slow loading wave 2 | **Deployed** (partial) | 54d2f33a + cd2eff8c picker cache; list routes measured clean; Reports render pass open. |
+
+---
+
 ## September 16 Program 8/9 checkpoint LIVE
 
 | Item | State | Evidence |
 | --- | --- | --- |
-| P8-0 Push to GitHub incl. main; archive local branches | **Done** | `main` fast-forwarded to the release tip at this checkpoint; 552 refs archived on Sep 16. |
+| P8-0 Push to GitHub incl. main; archive local branches | **Done** | `main` merged up to the release tip at this checkpoint (7d1b2b28); 552 refs archived on Sep 16. |
 | P8-1 Tests for past fixes, errors and guards | **Deployed** (Worker 23615bfd-aba1-4862-a1a1-01e7b2240cce, commit f2488996) | 77b30a5f..20136e81; real fixes 5be431be (R2 edge-cache purge), 61105bcb (portal rail degrade), a835f548 (import barcode fold). |
 | P8-2 Debloat across the full codebase | **Deployed** | 36a1183f..2e7a978b, −1338/+138; reverts 65ee5141, 81c5d508; report items in progress.md. |
 | P8-3 Optimization / efficiency | **Deployed** (wave 1) | 257247bd (chunked DELETE); wave 2 open with P9-12. |

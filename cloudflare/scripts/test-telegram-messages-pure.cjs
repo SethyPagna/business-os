@@ -97,8 +97,9 @@ assert.deepEqual(lines, [
   'Branch: Shop',
   // P3-L3: the promotion is named inside the cut's parentheses; a label on
   // a line with no cut prints nothing (the offer did not apply).
-  '• Coca Cola 330ml 2 × $0.60 (−$0.20 Summer sale) = $1.00',
-  '• Rice 5kg 1 × $7.25 = $7.25',
+  // P10: numbered like the printed receipt, "1. name ...", not a bare bullet.
+  '1. Coca Cola 330ml 2 × $0.60 (−$0.20 Summer sale) = $1.00',
+  '2. Rice 5kg 1 × $7.25 = $7.25',
   'Delivery service: $1.50',
   'Total: $9.75',
   'Discount: −$0.25',
@@ -123,11 +124,11 @@ const equationLines = telegram.formatSaleTelegramLines({
   ],
   subtotalUsd: 157, discountUsd: 0, totalUsd: 157,
 }).filter(Boolean)
-assert.ok(equationLines.includes('• Gross 69 1 × $69.00 (−$4.00) = $65.00'), equationLines.join('\n'))
-assert.ok(equationLines.includes('• Quantity three 3 × $25.00 (−$12.00) = $63.00'), equationLines.join('\n'))
-assert.ok(equationLines.includes('• No discount 1 × $12.00 = $12.00'), equationLines.join('\n'))
-assert.ok(equationLines.includes('• Absent base 2 × $5.00 = $10.00'), equationLines.join('\n'))
-assert.ok(equationLines.includes('• Null base 1 × $7.00 = $7.00'), equationLines.join('\n'))
+assert.ok(equationLines.includes('1. Gross 69 1 × $69.00 (−$4.00) = $65.00'), equationLines.join('\n'))
+assert.ok(equationLines.includes('2. Quantity three 3 × $25.00 (−$12.00) = $63.00'), equationLines.join('\n'))
+assert.ok(equationLines.includes('3. No discount 1 × $12.00 = $12.00'), equationLines.join('\n'))
+assert.ok(equationLines.includes('4. Absent base 2 × $5.00 = $10.00'), equationLines.join('\n'))
+assert.ok(equationLines.includes('5. Null base 1 × $7.00 = $7.00'), equationLines.join('\n'))
 
 // The sale subtotal is already the sum of net item totals. An order-level
 // discount remains separate and must be subtracted exactly once below Total.
@@ -136,7 +137,7 @@ const orderDiscount = telegram.formatSaleTelegramLines({
   items: [{ name: 'Gross 69', quantity: 1, basePriceUsd: 69, unitPriceUsd: 65, lineTotalUsd: 65 }],
   subtotalUsd: 65, discountUsd: 4, totalUsd: 61,
 }).filter(Boolean)
-assert.ok(orderDiscount.includes('• Gross 69 1 × $69.00 (−$4.00) = $65.00'), orderDiscount.join('\n'))
+assert.ok(orderDiscount.includes('1. Gross 69 1 × $69.00 (−$4.00) = $65.00'), orderDiscount.join('\n'))
 assert.ok(orderDiscount.includes('Total: $65.00'), orderDiscount.join('\n'))
 assert.ok(orderDiscount.includes('Discount: −$4.00'), orderDiscount.join('\n'))
 assert.ok(orderDiscount.includes('Net Total: $61.00'), orderDiscount.join('\n'))
@@ -281,7 +282,10 @@ const many = telegram.formatSaleTelegramLines({
   status: 'paid', receiptNumber: 'R2', exchangeRate: 4100, subtotalUsd: 25, discountUsd: 0, totalUsd: 25,
   items: Array.from({ length: 25 }, (_, i) => ({ name: `Item ${i + 1}`, quantity: 1, unitPriceUsd: 1, lineTotalUsd: 1 })),
 }).filter(Boolean)
-assert.equal(many.filter((line) => line.startsWith('• ')).length, 20)
+const manyItemLines = many.filter((line) => /^\d+\. /.test(line))
+assert.equal(manyItemLines.length, 20, many.join('\n'))
+assert.equal(manyItemLines[0], '1. Item 1 1 × $1.00 = $1.00', many.join('\n'))
+assert.equal(manyItemLines[19], '20. Item 20 1 × $1.00 = $1.00', many.join('\n'))
 assert.ok(many.includes('+ 5 more item(s)'))
 
 // --- stock change with resulting on-hand ---

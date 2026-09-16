@@ -14,6 +14,7 @@ import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
+import { recomputeCatalogCost } from '../lib/catalogCostRecompute'
 
 // Batch / expiry-date tracking -- schema notes and design rationale live in
 // lib/productBatches.ts. Gated behind the same 'inventory' permission as
@@ -329,6 +330,11 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
     return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
   }
   const { batchId, batchNumber, lotCode } = received
+
+  // P10-4 (owner ruling 2026-09-16): a receipt just wrote a new lot cost --
+  // re-derive products.cost_price_* from the DISTINCT non-zero active-lot
+  // costs, same as the other two receipt wires. See catalogCostRecompute.ts.
+  await recomputeCatalogCost(db, productId)
 
   // P4-4a: the response below does not read the audit row, so it can run
   // alongside the cache bump/broadcasts instead of its own awaited round trip.
