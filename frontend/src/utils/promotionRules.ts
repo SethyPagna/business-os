@@ -316,8 +316,6 @@ export function evaluatePromotionPricing(
   for (const rule of rules) {
     if (!isRuleActive(rule, nowMs) || !ruleAppliesToProduct(rule, product)) continue
     if (rule.rule_type === 'percent_off') {
-      const perUnitUsd = percent(sellingUsd, rule.percent_off)
-      const perUnitKhr = percent(sellingKhr, rule.percent_off)
       candidates.push({ source: 'rule', rule, lineDiscountUsd: linePercent(sellingUsd, qty, rule.percent_off), lineDiscountKhr: linePercent(sellingKhr, qty, rule.percent_off), percentOff: rule.percent_off })
     } else if (rule.rule_type === 'fixed_off') {
       const perUnitUsd = Math.min(rule.save_usd, sellingUsd)
@@ -352,8 +350,6 @@ export function evaluatePromotionPricing(
         })
       }
     } else if (rule.rule_type === 'quantity_percent' && qty >= rule.min_quantity) {
-      const perUnitUsd = percent(sellingUsd, rule.percent_off)
-      const perUnitKhr = percent(sellingKhr, rule.percent_off)
       candidates.push({ source: 'rule', rule, lineDiscountUsd: linePercent(sellingUsd, qty, rule.percent_off), lineDiscountKhr: linePercent(sellingKhr, qty, rule.percent_off), percentOff: rule.percent_off })
     } else if (rule.rule_type === 'next_item') {
       // Per-LINE evaluation of "buy N get the next one off": every
