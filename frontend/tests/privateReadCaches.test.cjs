@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, '..')
 function storage() { const rows = new Map(); return { getItem: k => rows.get(k) ?? null, setItem: (k,v) => rows.set(k,String(v)), removeItem: k => rows.delete(k) } }
 const window = { localStorage: storage(), sessionStorage: storage(), location: { origin: 'https://app.test' }, addEventListener() {}, removeEventListener() {}, setTimeout: () => 1, clearTimeout() {} }
 let server = 'https://one.test'
-let hooks, scope, supplierReply, shiftReply, historyReply, usersReply = async () => []
+let hooks, scope, pickerOptionsCache, supplierReply, shiftReply, historyReply, usersReply = async () => []
 function harness() {
   const values = []; let cursor = 0; let effects = []
   return {
@@ -25,6 +25,7 @@ function load(relative, extra = {}) {
     if (extra[name]) return extra[name]
     if (name === 'react') return hooks
     if (name.includes('actorReadScope')) return scope
+    if (name.includes('pickerOptionsCache')) return pickerOptionsCache
     if (name.includes('httpState')) return { getSyncServerUrl: () => server }
     if (name.includes('contactsTransport')) return { getSuppliers: () => supplierReply() }
     if (name.includes('shiftTransport')) return { fetchCurrentShift: () => shiftReply() }
@@ -42,6 +43,12 @@ function deferred() { let resolve, reject; const promise = new Promise((yes,no) 
 const tick = () => new Promise(resolve => setImmediate(resolve))
 async function main() {
   hooks = harness(); scope = load('src/api/actorReadScope.ts')
+  // pickerOptionsCache.ts is the shared P9-12 module SupplierPickerField's
+  // loadSupplierNames now routes through (was its own private module cache
+  // before) -- loaded for real here too, over the SAME `scope` mock above,
+  // so this file keeps exercising the actual actor-isolation logic rather
+  // than an empty stub.
+  pickerOptionsCache = load('src/api/pickerOptionsCache.ts')
   const suppliers = load('src/components/shared/SupplierPickerField.tsx')
   actor('admin'); supplierReply = async () => [{ id: 1, name: 'admin private' }]
   assert.equal((await suppliers.loadSupplierNames())[0].name, 'admin private')

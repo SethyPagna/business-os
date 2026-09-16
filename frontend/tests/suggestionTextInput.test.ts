@@ -274,13 +274,21 @@ check('DISCRIMINATING: the supplier rows promise exactly what the read behind th
   // the "disambiguator" was present or absent depending on who you were and
   // whether you had been offline. Pinning BOTH sides here is what stops the
   // claim and the read drifting apart again.
+  //
+  // P9-12 wave 2: ProductForm no longer runs this fetch itself -- it now
+  // shares SupplierPickerField's cached loadSupplierNames() (see
+  // pickerOptionsCache.test.ts) so opening the product form after any other
+  // supplier picker on the page does not refetch. The chain below still
+  // proves the SAME fields=names shape reaches the form, just through one
+  // extra, explicitly-named hop instead of a literal call in this file.
   const contactsRoute = readRepo('cloudflare/src/routes/contacts.ts')
   assert.match(
     contactsRoute,
     /fields \|\| ''\) === 'names'[\s\S]{0,400}SELECT id, name FROM/,
     'fields=names really is id + name only',
   )
-  assert.match(productForm, /getSuppliers\(\{ fields: 'names' \}\)/, 'and that is the read ProductForm makes')
+  assert.match(productForm, /loadSupplierPickerModule\(\)\)\.loadSupplierNames\(\)/, 'ProductForm loads suppliers through the shared cached loader')
+  assert.match(supplierPicker, /getSuppliers\(\{ fields: 'names' \}\)/, 'and that shared loader is the one making the fields=names read')
   const supplierAt = productForm.indexOf('const supplierSuggestionOptions')
   assert.ok(supplierAt > 0, 'the supplier option mapping must exist')
   const block = productForm.slice(Math.max(0, supplierAt - 700), supplierAt + 500)

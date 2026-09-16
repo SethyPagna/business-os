@@ -275,15 +275,15 @@ const FilePickerModal = lazyRetry(async () => ({
   default: (await import('../../files/FilePickerModal')).default as ComponentType<FilePickerModalProps>,
 }), 'product-form-file-picker-modal')
 
-type ContactsTransportModule = typeof import('../../../api/contactsTransport.ts')
 type ProductImageUploadTransportModule = typeof import('../../../api/productImageUploadTransport.ts')
+type SupplierPickerModule = typeof import('../../shared/SupplierPickerField.tsx')
 
-let contactsTransportModulePromise: Promise<ContactsTransportModule> | null = null
 let productImageUploadTransportModulePromise: Promise<ProductImageUploadTransportModule> | null = null
+let supplierPickerModulePromise: Promise<SupplierPickerModule> | null = null
 
-function loadContactsTransportModule(): Promise<ContactsTransportModule> {
-  if (!contactsTransportModulePromise) contactsTransportModulePromise = import('../../../api/contactsTransport.ts')
-  return contactsTransportModulePromise
+function loadSupplierPickerModule(): Promise<SupplierPickerModule> {
+  if (!supplierPickerModulePromise) supplierPickerModulePromise = import('../../shared/SupplierPickerField.tsx')
+  return supplierPickerModulePromise
 }
 
 function loadProductImageUploadTransportModule(): Promise<ProductImageUploadTransportModule> {
@@ -810,11 +810,15 @@ export default function ProductForm({
     const requestId = beginTrackedRequest(supplierRequestRef)
     async function loadSuppliers() {
       try {
+        // Routed through the shared picker cache (pickerOptionsCache.ts via
+        // SupplierPickerField's loadSupplierNames) instead of its own
+        // getSuppliers({fields:'names'}) fetch: every OTHER manual add-stock
+        // surface already reads suppliers through that one cached entry, and
+        // this form used to run an independent network round trip on every
+        // open even when a picker on the same page had just loaded the same
+        // list seconds earlier.
         const data = await withLoaderTimeout(
-          // fields=names: the autocomplete only needs names, and the
-          // name-only list is the one suppliers read every role may call
-          // (Part 383 R2 -- the full list needs contacts_suppliers).
-          async () => (await loadContactsTransportModule()).getSuppliers({ fields: 'names' }),
+          async () => (await loadSupplierPickerModule()).loadSupplierNames(),
           'Product suppliers',
           PRODUCT_SUPPLIERS_TIMEOUT_MS,
         )

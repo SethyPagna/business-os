@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import InfoHint from './InfoHint.tsx'
-import { captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent, invalidateActorReadChannel, type ActorReadScope } from '../../api/actorReadScope.ts'
+import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
+import { loadPickerOptions, invalidatePickerOptionsCache } from '../../api/pickerOptionsCache.ts'
 import SuggestionTextInput, { type SuggestionOption } from './SuggestionTextInput.tsx'
 
 // D5a: the one supplier picker every manual add-stock/receive surface
@@ -63,44 +64,26 @@ export function resolveSupplierByExactName(rows: SupplierNameRow[], typed: strin
   return matches.length === 1 ? matches[0] : null
 }
 
-let supplierNamesCache: { rows: SupplierNameRow[]; at: number; scope: ActorReadScope } | null = null
-const SUPPLIER_NAMES_TTL_MS = 60_000
-let supplierSyncListenerInstalled = false
+const SUPPLIER_NAMES_CHANNEL = 'suppliers'
 
 export function invalidateSupplierNamesCache(): void {
-  supplierNamesCache = null
-  invalidateActorReadChannel('suppliers')
-}
-
-function ensureSupplierSyncCacheListener(): void {
-  if (supplierSyncListenerInstalled || typeof window === 'undefined') return
-  supplierSyncListenerInstalled = true
-  window.addEventListener('sync:update', (event: Event) => {
-    const detail = (event as CustomEvent<{ channel?: string }>).detail
-    if (String(detail?.channel || '') === 'suppliers') invalidateSupplierNamesCache()
-  })
+  invalidatePickerOptionsCache(SUPPLIER_NAMES_CHANNEL)
 }
 
 // Exported for other supplier-scoped controls (StockChangeSection's D2
-// ledger filter) so they share this one cached name-only read instead of
-// re-fetching or re-implementing it.
+// ledger filter, ProductForm's own supplier field) so they share this ONE
+// cached name-only read via pickerOptionsCache instead of each re-fetching
+// or re-implementing it.
 export async function loadSupplierNames(): Promise<SupplierNameRow[]> {
-  ensureSupplierSyncCacheListener()
-  const scope = captureActorReadScope('suppliers')
-  if (supplierNamesCache && isActorReadScopeCurrent(supplierNamesCache.scope) && Date.now() - supplierNamesCache.at < SUPPLIER_NAMES_TTL_MS) {
-    return supplierNamesCache.rows
-  }
-  const mod = await import('../../api/contactsTransport.ts')
-  assertActorReadScope(scope)
-  const data = await mod.getSuppliers({ fields: 'names' })
-  assertActorReadScope(scope)
-  const rows = Array.isArray(data)
-    ? (data as Array<Record<string, unknown>>)
-        .map((row) => ({ id: Number(row.id), name: String(row.name || '').trim() }))
-        .filter((row) => Number.isFinite(row.id) && row.id > 0 && row.name !== '')
-    : []
-  supplierNamesCache = { rows, at: Date.now(), scope }
-  return rows
+  return loadPickerOptions(SUPPLIER_NAMES_CHANNEL, async () => {
+    const mod = await import('../../api/contactsTransport.ts')
+    const data = await mod.getSuppliers({ fields: 'names' })
+    return Array.isArray(data)
+      ? (data as Array<Record<string, unknown>>)
+          .map((row) => ({ id: Number(row.id), name: String(row.name || '').trim() }))
+          .filter((row) => Number.isFinite(row.id) && row.id > 0 && row.name !== '')
+      : []
+  })
 }
 
 type SupplierPickerFieldProps = {
