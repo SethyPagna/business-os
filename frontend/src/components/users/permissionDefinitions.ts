@@ -532,7 +532,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'settings',
     tKey: 'perm_section_settings',
     label: 'Settings',
-    description: "Also covers the standalone Receipt Settings page, which gates on this same grant. The four detail rows below are this page's own finer-grained areas -- each currently mirrors the plain Settings grant one-for-one (see cloudflare/src/lib/permissions.ts) until they're each wired to their own independent check.",
+    description: "The standalone Receipt Settings page has its own grant below ('receipt_settings'), not the plain Settings grant -- it defaults ON for Employee so front-line staff can change print/paper modes without the rest of Settings. The other detail rows are this page's own finer-grained areas -- each currently mirrors the plain Settings grant one-for-one (see cloudflare/src/lib/permissions.ts) until they're each wired to their own independent check.",
     permissions: [
       // View-tier section (Part 557): reading settings is open to any signed-in
       // user already (routes/settings.ts GET / strips secrets and serves the
@@ -551,6 +551,16 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       },
       { key: 'business_identity', tKey: 'perm_business_identity', label: 'Business identity, logo, public profile', sensitivity: 'high' },
       { key: 'sales_policy', tKey: 'perm_sales_policy', label: 'Sales, return, and financial policy', sensitivity: 'high' },
+      // Own key (Sep 16 2026 owner request), separate from the plain
+      // `settings` grant -- the standalone Receipt Settings page (print
+      // modes, footer, template) is an operational tool for whoever prints
+      // receipts, not an admin-only setting. Defaults ON for Employee (see
+      // coreDataInvariants.ts's DEFAULT_ROLE_PERMISSIONS); an admin can still
+      // turn it off per role here. Enforced server-side by
+      // routes/settings.ts's settingsBucketPermissionFor() on
+      // receipt_template/receipt_footer/receipt_print_settings, and gates
+      // the page itself via AppContext.tsx's PAGE_PERMISSIONS.
+      { key: 'receipt_settings', tKey: 'perm_receipt_settings', label: 'Receipt / print settings', sensitivity: 'normal' },
       { key: 'security_settings', tKey: 'perm_security_settings', label: 'Security and sign-in settings', sensitivity: 'critical' },
       { key: 'drive_credentials', tKey: 'perm_drive_credentials', label: 'Google Drive credentials', sensitivity: 'critical' },
     ],
