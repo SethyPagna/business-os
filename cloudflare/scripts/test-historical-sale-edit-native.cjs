@@ -93,6 +93,7 @@ assert.equal(helper.planHistoricalSaleLine({...historical,manual_discount_type:n
  const added=f.raw.prepare('SELECT id FROM sale_items WHERE sale_id=? AND id<>?').get([id,line.id]).id
  await reviewed({client_request_id:'historical-replace',kind:'line_replaced',sale_item_id:added,replacement:plain('replacement')})
  const replacement=f.raw.prepare('SELECT id FROM sale_items WHERE sale_id=? AND id<>?').get([id,line.id]).id
+ assert.equal(f.raw.prepare('SELECT COALESCE(SUM(quantity-released_quantity),0) q FROM sale_item_batch_allocations WHERE sale_item_id=?').get([replacement]).q,1,'replacement line carries its lot row (0176 root cause)')
  await reviewed({client_request_id:'historical-remove',kind:'line_removed',sale_item_id:replacement})
  assert.equal(f.raw.prepare('SELECT total_usd FROM sales WHERE id=?').get([id]).total_usd,19)
  const lineBeforeFee=f.raw.prepare('SELECT * FROM sale_items WHERE id=?').get([line.id])
