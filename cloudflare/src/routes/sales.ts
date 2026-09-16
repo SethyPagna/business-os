@@ -5,7 +5,7 @@ import { hasColumn, tableColumnSet } from '../lib/schemaProbe'
 import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePricingError } from '../lib/historicalSalePricing'
 import { normalizePromotionRule } from '../lib/promotionRules'
-import { resolveProductMergeLineage, ProductMergeLineageError } from '../lib/productMergeLineage'
+import { resolveProductMergeLineage, ProductMergeLineageError, findSaleItemsRequiringIdentityReview } from '../lib/productMergeLineage'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
@@ -5442,18 +5442,34 @@ app.get('/', async (c) => {
       const refundKhr = refund?.khr??ReportExactDecimal.zero()
       const items=itemsBySale.get(sale.id)||[]
       let pricingIdentity:Record<string,unknown>={}
+      let itemsForResponse:unknown[]=items
       if(Number(sale.money_precision_version)===1){
-        const lineage=await resolveProductMergeLineage(db,Number(sale.id),items as Record<string,unknown>[])
-        validateCapturedSaleBasket(items as Record<string,unknown>[],sale,lineage.bindings)
-        if(lineage.bindings.length)await db.prepare(`SELECT CASE WHEN ${lineage.condition} THEN 1 ELSE json_extract('', '$') END`).get(lineage.params)
-        pricingIdentity={pricing_identity_bindings:lineage.bindings}
+        try{
+          const lineage=await resolveProductMergeLineage(db,Number(sale.id),items as Record<string,unknown>[])
+          validateCapturedSaleBasket(items as Record<string,unknown>[],sale,lineage.bindings)
+          if(lineage.bindings.length)await db.prepare(`SELECT CASE WHEN ${lineage.condition} THEN 1 ELSE json_extract('', '$') END`).get(lineage.params)
+          pricingIdentity={pricing_identity_bindings:lineage.bindings}
+        }catch(error){
+          // A read-only list must render the sale even when a historical
+          // merge's lineage cannot be proven (Sentry BUSINESS-OS-1F:
+          // migrations 0165/0168 reparented sale_items without writing
+          // matching undo_snapshots evidence). Flag only the diverging
+          // line(s) for review instead of failing the whole page; writes
+          // (amendments, returns, undo) still go through the strict
+          // resolver above/elsewhere and get a 409.
+          if(!(error instanceof ProductMergeLineageError))throw error
+          const flagged=findSaleItemsRequiringIdentityReview(items as Record<string,unknown>[])
+          itemsForResponse=(items as Record<string,unknown>[]).map((item)=>
+            flagged.has(Number((item as Record<string,unknown>).id))?{...(item as Record<string,unknown>),identity_review_required:true}:item)
+          pricingIdentity={pricing_identity_bindings:[],identity_review_required:true}
+        }
       }
       return {
         ...snapshot,
         ...pricingIdentity,
         delivery_contact_name: String(sale.delivery_contact_name ?? '').trim() ? sale.delivery_contact_name : linked_driver_name ?? null,
         delivery_contact_phone: String(sale.delivery_contact_phone ?? '').trim() ? sale.delivery_contact_phone : linked_driver_phone ?? null,
-        items,
+        items: itemsForResponse,
         refund_usd: refundUsd.toNumber(4),
         refund_khr: refundKhr.toNumber(4),
         return_count: refund?.count || 0,
