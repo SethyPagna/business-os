@@ -39,7 +39,7 @@ export function buildCacheBustedMediaPath(path: unknown, version: unknown): stri
     if (/^https?:\/\//i.test(rawPath)) return parsed.toString()
     return `${parsed.pathname}${parsed.search}${parsed.hash}`
   } catch (_) {
-    const withoutVersion = String(rawPath).replace(/([?&])v=[^&#]*(&?)/, (match, prefix, suffix) => (
+    const withoutVersion = String(rawPath).replace(/([?&])v=[^&#]*(&?)/, (_match, prefix, suffix) => (
       suffix ? prefix : ''
     )).replace(/[?&]$/, '')
     return `${withoutVersion}${withoutVersion.includes('?') ? '&' : '?'}v=${encodeURIComponent(rawVersion)}`
