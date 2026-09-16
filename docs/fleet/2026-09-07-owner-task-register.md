@@ -476,3 +476,16 @@ Release code 2317a9ca is live as Worker 0ec11718-b47e-4cbd-b30d-744c9c6af3cb (pa
 | Debloat dead locals / report items | **Done, not deployed** | p10/debloat-locals 9ef0a578; merge and re-gate at the next checkpoint. |
 | P9-9 tagged-stock error, P9-3/4/5/6 public items | **Not yet** | Carried; public items paused until the owner's go. |
 | Physical print with the driver-forms default | **Owner-side** | Cannot be exercised from this workstation. |
+
+## September 17 program 10 checkpoint D LIVE
+
+Release code c5af514a is live as Worker cb711dfa-d756-405f-8316-2b54279d106e (paid); no migration (chain tail 0177). Codex may take over from here; every item below is stated as deployed or open.
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| Debloat dead locals (145 → 48 diagnostics) with budget guards in both packages | **Deployed** | p10/debloat-locals 9ef0a578 merged 268d7df1; zombie scroll state removed c5af514a; gates 457/457. |
+| Debloat remainder (48 diagnostics, 983 unreferenced-key candidates) | **Open, not done** | Listed in progress.md checkpoint D. |
+| Storefront console 404 (non-app resource) | **Open, not done** | Seen on leangbeauty.com after deploy; not an asset, API or upload. |
+| P9-9 tagged-stock error | **Open, not done** | Carried. |
+| P9-3/4/5/6 public items | **Open, not done** | Paused until the owner's go. |
+| Physical print with the driver-forms default | **Open, owner-side** | Cannot be exercised from this workstation. |

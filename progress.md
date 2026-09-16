@@ -1,3 +1,15 @@
+## Program 10 checkpoint D LIVE — debloat (dead locals, unread state), budget guards — September 17
+
+Release code commit **c5af514a** on `codex/precision-final-candidate-20260914` (pushed; descends from dd45cbc9; merged into `main` at this checkpoint) is live as Worker version **cb711dfa-d756-405f-8316-2b54279d106e** (`/api/runtime/version` revision `c5af514a5b46`, sourceHash `7f45578869a1f41e`, tier paid, clean stamp). No migration in this checkpoint (chain tail stays 0177).
+
+Owner message J (Sep 17): get it right — no conflicts, zombies, orphans, reds or blank page; debloat, responsive and compact; deploy right away; other tasks stay open, not done; Codex may take over after this checkpoint.
+
+- **Debloat: dead locals across Products / Returns / Sales / shared / Users / utils-settings / mediaUpload / web-api and test files** — DEPLOYED. Lane p10/debloat-locals (9ef0a578, 12 commits) merged clean (268d7df1, no conflicts, no Worker source change); frontend unused-local diagnostics 145 → 48 with budget guards `frontend/tests/unusedLocalsBudget.test.ts` and `cloudflare/scripts/test-unused-locals-budget-pure.cjs`. Coordinator review of every removed line: hooks and side effects kept, only unused bindings dropped; one real zombie found and removed — CatalogPage's public-chrome scroll-direction state and anchor ref were set on every portal scroll and never read (c5af514a).
+- **Debloat remainder** — OPEN (not done). 48 unused-local diagnostics remain (ReportsHub.tsx branchId, OverviewReport.tsx prevReturns, ProductDetailSheet.tsx, products.ts ids and the kept-live flags); verify:i18n lists 983 pack keys with no literal call site (candidates, not proof).
+- **Live check** — storefront leangbeauty.com renders on desktop and 375-px phone from the new build, all assets, portal APIs and uploads 200, no runtime error; one console `404` for a resource that is not an app asset, API call or upload (unidentified, OPEN). Admin login page not exercised (managed challenge in the check browser).
+- **P9-9 tagged-stock error, public P9-3/4/5/6, physical print** — OPEN (not done).
+
+Gates on the release tip (fresh worktree, committed HEAD): frontend typecheck, `verify:i18n` (5883 keys), `verify:public-runtime`, `test:utils` 457/457, build (266 chunks, zero cycles); Worker `tsc --noEmit` clean, the lane's only Worker file (the budget test) green, cost/orphan/0177 tests green; the Worker source is byte-identical to checkpoint C's certified tip.
 ## Program 10 checkpoint C LIVE — manual cost override recorded, cost record rows show the lot, POS sheet cost line, Reports render pass — September 17
 
 Release code commit **2317a9ca** on \`codex/precision-final-candidate-20260914\` (pushed; descends from fc2c180c; merged into \`main\` at this checkpoint) is live as Worker version **0ec11718-b47e-4cbd-b30d-744c9c6af3cb** (\`/api/runtime/version\` revision \`2317a9ca515b\`, sourceHash \`606f50f2042498e1\`, tier paid, clean stamp). Migration **0177 applied** to production D1 (pre: \`product_cost_entries\` absent, chain tail 0176; post: table and index present, 0 rows, chain tail 0177).
