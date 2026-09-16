@@ -18,6 +18,7 @@ import { useLowStockConfig } from '../../../AppContext'
 import { effectiveLowStockThreshold } from '../../../utils/lowStockSettings.ts'
 import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../../shared/toolbarButtonStyles.ts'
+import CostCalculationFloat from '../../shared/CostCalculationFloat.tsx'
 
 const ProductDescriptionDetailModal = lazyRetry(() => import('./ProductDescriptionDetailModal'), 'products-description-detail-modal')
 // D3 (Part 422): the detail page's report sections (batch summary,
@@ -138,6 +139,8 @@ export default function ProductDetailModal({
   t,
 }: ProductDetailModalProps) {
   const [descriptionDetailOpen, setDescriptionDetailOpen] = useState(false)
+  // P10-6: the calculated-cost float.
+  const [costFloatOpen, setCostFloatOpen] = useState(false)
   const T = (key: string, fallback: string) => {
     const translated = typeof t === 'function' ? t(key) : ''
     return translated && translated !== key ? translated : fallback
@@ -388,7 +391,7 @@ export default function ProductDetailModal({
 
                 <div className="grid grid-cols-2 gap-2" data-detail-price-row="cost-wholesale">
                   <PriceCell label={T('label_cost', 'Cost')}>
-                    <span className="text-red-600">{fmtUSD(purchaseUsd)}</span>
+                    <button type="button" onClick={() => setCostFloatOpen(true)} className="text-left text-red-600 decoration-dotted underline-offset-2 hover:underline" title={T('cost_breakdown_title', 'Calculated cost price')}>{fmtUSD(purchaseUsd)}</button>
                     {purchaseKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
                   </PriceCell>
                   <PriceCell label={T('wholesale_price', 'Wholesale price')}>
@@ -534,6 +537,16 @@ export default function ProductDetailModal({
             t={t}
           />
         </Suspense>
+      ) : null}
+      {costFloatOpen ? (
+        <CostCalculationFloat
+          productId={Number((p as { id?: unknown }).id) || 0}
+          productName={productName}
+          onClose={() => setCostFloatOpen(false)}
+          fmtUSD={fmtUSD}
+          fmtKHR={fmtKHR}
+          t={(key, fallback) => T(key, fallback)}
+        />
       ) : null}
     </div>
   )
