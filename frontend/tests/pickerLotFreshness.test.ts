@@ -25,7 +25,7 @@ assert.equal(requests[0][3], 8000)
 assert.equal(requests[0][4].signal, ctrl.signal)
 
 const source = readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-const actorCode = source.slice(source.indexOf('  const { user, authReady } = useApp()'), source.indexOf('  const variants = getVariantChoices(product)'))
+const actorCode = source.slice(source.indexOf('  const { user, authReady, getPermissionTier } = useApp()'), source.indexOf('  // The cost price is only ever shown'))
 let actorRef: any
 const actorUser = { id: 7 }
 const actorKey = (user: { id: number } | null, authReady = true) => compile(actorCode, {
