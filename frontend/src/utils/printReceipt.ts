@@ -1,5 +1,7 @@
 import {
+  DEFAULT_DRIVER_FORM_WIDTH_MM,
   DEFAULT_RECEIPT_PRINT_SETTINGS,
+  normalizeDriverFormHeightsMm,
   normalizeReceiptPrintSettings,
   RECEIPT_PRINT_SETTINGS_STORAGE_KEY,
 } from './receiptAppliedConfig.ts'
@@ -91,6 +93,16 @@ const RECEIPT_AUTO_LONGEST_PAGE_MM = 3276
 function parsePrintNumber(value: unknown, fallback: number): number {
   const parsed = Number.parseFloat(String(value ?? ''))
   return Number.isFinite(parsed) ? parsed : fallback
+}
+
+// driver-forms mode: the printer's registered form IS the printable width
+// (see ReceiptPrintSettings.driverFormWidthMm), so the configured side
+// margins must not also eat into it -- that double-accounting is exactly the
+// "some margins left and right" the owner photographed. Cap left/right at
+// 1mm; leave top/bottom (and every other setting) untouched.
+function capDriverFormSideMargins(settings: ReceiptPrintSettings): ReceiptPrintSettings {
+  const cap = (value: unknown) => String(Math.min(1, Math.max(0, parsePrintNumber(value, 4))))
+  return { ...settings, marginLeft: cap(settings.marginLeft), marginRight: cap(settings.marginRight) }
 }
 
 const RECEIPT_INLINE_STYLE_PROPS = [
@@ -1125,17 +1137,30 @@ export function resolveReceiptPageGeometry({
   measuredHeightMm,
   savedPageSizeMode,
   fixedPageLengthMm,
+  driverFormHeightsMm,
 }: {
   fixedHeightMm: number | null
   measuredHeightMm: number
   savedPageSizeMode?: string
   fixedPageLengthMm?: unknown
+  driverFormHeightsMm?: unknown
 }): ReceiptPageGeometry {
   const pageSizeMode: ReceiptPrintSettings['pageSizeMode'] = fixedHeightMm == null
-    ? ((savedPageSizeMode as ReceiptPrintSettings['pageSizeMode']) || 'measured')
+    ? ((savedPageSizeMode as ReceiptPrintSettings['pageSizeMode']) || DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode)
     : 'measured'
   if (fixedHeightMm != null) {
     return { pageHeightMm: fixedHeightMm, continuousRoll: false, pageSizeMode }
+  }
+  if (pageSizeMode === 'driver-forms') {
+    // The smallest registered form that still fits the measured content, so
+    // Chrome auto-selects a matching form instead of leaving the owner to
+    // pick one by hand. A receipt taller than every registered form still
+    // gets the largest one and paginates onto further forms of that same
+    // height (continuousRoll: false below already keeps items/rows intact
+    // across that page break) -- it must never clip.
+    const heights = normalizeDriverFormHeightsMm(driverFormHeightsMm)
+    const chosen = heights.find((height) => height >= measuredHeightMm) ?? heights[heights.length - 1]
+    return { pageHeightMm: chosen, continuousRoll: false, pageSizeMode }
   }
   if (pageSizeMode === 'fixed') {
     // A document page of the owner's chosen length; a long receipt flows
@@ -1163,7 +1188,20 @@ export function resolveReceiptPageGeometry({
 
 async function createPrintableReceiptMarkup(content: ReceiptContent, options: ReceiptPrintOptions = {}): Promise<PrintableReceiptLayout> {
   const printSettings = options.printSettings || getPrintSettings()
-  const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
+  // driver-forms only ever governs CONTINUOUS ROLL paper (a fixed sheet keeps
+  // its own explicit paperSize width): render at the printer's registered
+  // form width, not the configured roll width, so a driver that only
+  // registers e.g. 72mm forms gets a page Chrome can actually auto-select
+  // instead of scaling an 80mm page down and leaving side margins.
+  const isDriverFormsRoll = getPaperHeightMm(printSettings) == null
+    && (printSettings.pageSizeMode || DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode) === 'driver-forms'
+  const widthMm = options.paperWidthMm
+    || (isDriverFormsRoll ? getDriverFormWidthMm(printSettings) : getPaperWidthMm(printSettings))
+  // PRINT-PATH ONLY (this function). PDF/image export keep the operator's
+  // configured side margins unchanged -- see createReceiptPdfBlob and
+  // createReceiptImageBlob, which call withReceiptElement with the
+  // untouched `printSettings`, not this capped copy.
+  const hostPrintSettings = isDriverFormsRoll ? capDriverFormSideMargins(printSettings) : printSettings
   return withReceiptElement(content, widthMm, async (host) => {
     await waitForElementAssets(host)
 
@@ -1181,6 +1219,7 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
       measuredHeightMm,
       savedPageSizeMode: printSettings.pageSizeMode,
       fixedPageLengthMm: printSettings.fixedPageLengthMm,
+      driverFormHeightsMm: printSettings.driverFormHeightsMm,
     })
 
     const clone = normalizePrintableRoot(cloneElementWithInlineStyles(host), widthMm)
@@ -1202,10 +1241,12 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
       pageHeightMm,
       continuousRoll,
       singleSheet: isSingleSheetPaperSize(printSettings.paperSize),
-      previewSettings: receiptPreviewSettings(printSettings),
+      // hostPrintSettings so the shown margins match what actually printed
+      // (capped side margins in driver-forms mode, unchanged otherwise).
+      previewSettings: receiptPreviewSettings(hostPrintSettings),
       pageSizeMode,
     }
-  }, printSettings)
+  }, hostPrintSettings)
 }
 
 export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: ReceiptPrintOptions = {}): string {
@@ -1695,6 +1736,17 @@ export function getPaperHeightMm(settings: ReceiptPrintSettings = getPrintSettin
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null
   }
   return null
+}
+
+/**
+ * The printer driver's registered form width in mm for pageSizeMode
+ * 'driver-forms' -- independent of `paperSize`, since a printer can be
+ * configured for e.g. 80mm continuous paper while its driver only ever
+ * registers narrower (e.g. 72mm) forms.
+ */
+export function getDriverFormWidthMm(settings: ReceiptPrintSettings = getPrintSettings()): number {
+  const parsed = Number.parseFloat(String(settings.driverFormWidthMm ?? ''))
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DRIVER_FORM_WIDTH_MM
 }
 
 export async function createReceiptPdfBlob(content: ReceiptContent, options: ReceiptPrintOptions = {}): Promise<Blob> {
