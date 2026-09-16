@@ -457,8 +457,6 @@ app.post('/transfer', async (c) => {
 
   const destProductId = mergeTarget?.id ?? productId
   const destProductName = mergeTarget?.name ?? product.name
-  const mergedNote = mergeTarget ? `Added to existing product "${destProductName}" (#${destProductId}) at ${toBranch?.name || 'destination'}` : null
-  const combinedNote = [reason, mergedNote].filter(Boolean).join(' -- ') || null
 
   const destBatchId = sourceBatch && !mergeTarget ? sourceBatch.id : null
   const responsePayload = mergeTarget

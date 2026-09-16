@@ -758,7 +758,6 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   }
   const rev = (type: string, key: unknown) => revisions.get(revisionKey(type, key)) || 0
   const operationId = crypto.randomUUID()
-  const stamp = new Date().toISOString()
   const snapshot: Row = {
     version: 2,
     operationId,
