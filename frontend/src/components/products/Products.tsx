@@ -1523,7 +1523,6 @@ function ProductsFullEditor() {
   // closed the modal without resetting it, and the next Add/Edit that
   // didn't pass a tab opened on the stale Stock section.
   const [formInitialTab, setFormInitialTab] = useState<ProductFormTab>('basic')
-  const [identityReviewProductIds, setIdentityReviewProductIds] = useState<readonly [number, number] | null>(null)
   // Minimized create flows restore here. Each modal's scoped draft repopulates
   // its own state, while this host rechecks the current action grant before it
   // reopens a write surface.
@@ -2332,14 +2331,30 @@ function ProductsFullEditor() {
         userName: user?.name,
       }
       let createdProductId = 0
-
+      // Sep 16 2026 owner ruling / P10-5: a same-name product whose barcode
+      // only differs by a leading zero (or is empty/broken) is the SAME
+      // product -- POST/PUT /products now folds the create/edit straight
+      // into that row and answers 200 with folded_into/merged_into (the
+      // survivor's id), never a 409 dead-end. extractHistoryResultId reads
+      // res.id first, which the route already sets to the survivor's id on
+      // a fold, so createdProductId/targetProductId below already resolve
+      // to the survivor and the refresh/pin logic already opens it -- the
+      // only thing missing was telling the person their product landed on
+      // an existing row instead of a new one.
+      let foldedIntoName: string | null = null
       if (!selected) {
         const res = await runProductWriteMutation(() => productApi.createProduct(payload), 'Create product')
         if (!res?.success) throw new Error(res?.error || 'Failed to create product')
         createdProductId = extractHistoryResultId(res)
+        if ((res as { folded_into?: unknown })?.folded_into) {
+          foldedIntoName = String((res as { item?: { name?: unknown } })?.item?.name || form.name || '')
+        }
       } else {
         const res = await runProductWriteMutation(() => productApi.updateProduct(selected.id || 0, payload), 'Update product')
         if (res?.success === false) throw new Error(res.error || 'Failed to update product')
+        if ((res as { merged_into?: unknown })?.merged_into) {
+          foldedIntoName = String((res as { item?: { name?: unknown } })?.item?.name || form.name || '')
+        }
       }
 
       // The write itself is now confirmed done -- tell the person right
@@ -2355,7 +2370,9 @@ function ProductsFullEditor() {
       // failed when it hadn't. Wrapped separately below so that can't
       // happen again.
       const targetProductId = selected ? Number(selected.id || 0) : createdProductId
-      notify(selected ? t('product_updated') || 'Product updated' : t('product_created') || 'Product created')
+      notify(foldedIntoName
+        ? tr('product_folded_into_existing', 'Added to existing product {name}', 'បានបន្ថែមទៅផលិតផលដែលមានស្រាប់ {name}').replace('{name}', foldedIntoName)
+        : (selected ? t('product_updated') || 'Product updated' : t('product_created') || 'Product created'))
 
       // Do not keep ProductForm mounted behind best-effort enrichment, but do
       // not close it here either: resolving onSave hands that ordered close to
@@ -5250,8 +5267,6 @@ function ProductsFullEditor() {
               notify={notify}
               canRemoveProduct={canRemoveProduct}
               onMergeLeadingZero={openLeadingZeroMergeReview}
-              reviewProductIds={identityReviewProductIds}
-              onReviewProductIdsConsumed={() => setIdentityReviewProductIds(null)}
             />
           </Suspense>
         </div>
@@ -5468,10 +5483,6 @@ function ProductsFullEditor() {
             }))}
             initialTab={formInitialTab}
             onSave={(payload) => handleSaveWithGallery((payload || {}) as unknown as ProductRecord)}
-            onReviewIdentityCollision={canMergeDuplicates ? (productIds) => {
-              setIdentityReviewProductIds(productIds)
-              setActiveProductSection('duplicates')
-            } : undefined}
             onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
             // S4-20: minimizing is silent otherwise -- the form just
             // vanishes, which reads as lost work. Say where it went.

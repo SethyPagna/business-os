@@ -39,20 +39,6 @@ import {
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES, MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
 import { effectivePermissions, isAdminControlUser } from '../../../utils/permissions.ts'
 
-// The server's "same name + same barcode (leading zeros folded) is the same
-// product -- merge into it instead of creating a twin" 409, unpacked into the
-// row it is pointing at. classifyCreateMatches asks this same question on the
-// client, so this 409 should now only be reachable on a genuine race.
-// Returns null for any other failure, so an unrelated error can never be
-// mistaken for an invitation to merge two products together.
-function duplicateCollisionFrom(error: unknown): { id: number; name: string | null } | null {
-  const err = error as { code?: unknown; duplicate?: { id?: unknown; name?: unknown } } | null
-  if (String(err?.code || '') !== 'duplicate_product') return null
-  const id = Number(err?.duplicate?.id)
-  if (!Number.isInteger(id) || id <= 0) return null
-  return { id, name: err?.duplicate?.name == null ? null : String(err.duplicate.name) }
-}
-
 const importBarcodeScannerModal = () => import('../scanning/BarcodeScannerModal')
 const BarcodeScannerModal = lazyRetry(importBarcodeScannerModal, 'product-form-barcode-scanner-modal')
 // The scanner opens its camera as soon as it mounts (one tap, no Start
@@ -213,7 +199,6 @@ interface ProductFormProps {
   groupCandidates?: GroupCandidate[]
   onSave: (payload?: ProductSavePayload) => unknown | Promise<unknown>
   onClose: () => void
-  onReviewIdentityCollision?: (productIds: readonly [number, number]) => void
   // Optional -- only supplied by callers that already have a delete flow
   // wired (Products.tsx routes this through its DeleteConfirmModal, same
   // as every other delete entry point on that page). Omitted entirely
@@ -388,14 +373,22 @@ export function useStableHydratedState<T>(initialState: T, hydrationKey: string)
   return [state, setState]
 }
 
+// Returns save()'s own resolved value instead of swallowing it: onSave's
+// caller (Products.tsx's handleSaveWithGallery) already reads its own
+// folded_into/merged_into off the API response it awaits internally to
+// toast+refresh the survivor, but a future caller that only has access to
+// what onSave resolves to (not its own inner request) needs this plumbed
+// through rather than discarded, same as every other write path in this
+// codebase (see extractHistoryResultId's callers).
 export async function clearAfterSuccessfulProductSave(
   save: () => unknown | Promise<unknown>,
   clear: () => void,
   close: () => void,
-): Promise<void> {
-  await Promise.resolve(save())
+): Promise<unknown> {
+  const result = await Promise.resolve(save())
   clear()
   close()
+  return result
 }
 
 function editableInitialForm(initialForm: ProductFormState): ProductFormState {
@@ -488,7 +481,6 @@ export default function ProductForm({
   onSave,
   onDelete,
   onClose,
-  onReviewIdentityCollision,
   onMinimize,
   createDefaults,
   draftScope,
@@ -885,10 +877,11 @@ export default function ProductForm({
   // Part 563: the final "confirm / double-check" gate the save flow awaits
   // before writing, using the shared ConfirmDialog. Same promise-based pattern
   // as askRenameChoice above -- saveForm opens it and blocks on the choice.
-  // Saving a rename/re-barcode into an existing twin is a merge decision, and
-  // it goes through the SAME flow (and the same stock question) the Conflicts
-  // review uses -- one answer to "the other row also has stock", everywhere.
-  const [identityCollision, setIdentityCollision] = useState<{ id: number; name: string | null } | null>(null)
+  // Sep 16 2026 owner ruling: saving a rename/re-barcode into an existing
+  // twin now folds straight into that row server-side (200 + merged_into,
+  // never a 409) instead of asking the operator to review it separately --
+  // see saveForm's catch block below, and Products.tsx's toast+refresh on
+  // the folded result.
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
   const saveConfirmResolveRef = useRef<((ok: boolean) => void) | null>(null)
   const askSaveConfirm = () => new Promise<boolean>((resolve) => {
@@ -1192,7 +1185,14 @@ export default function ProductForm({
     // automatically from the name only. No parent/group IDs are written.
     // 'new' keeps a different typed name where that is actually possible;
     // 'back' returns to editing.
-    if (isCreateMode && createVerdict.kind) {
+    //
+    // Sep 16 2026 owner ruling: an EXACT twin (same name + identity barcode,
+    // leading zeros folded) is never a dead-end prompt -- the server folds
+    // the create straight into the existing row (POST /products now returns
+    // 200 with `folded_into`, never 409). So this dialog no longer blocks
+    // that case at all; it still asks for the cases that genuinely differ
+    // (same name/different barcode, same barcode/different name).
+    if (isCreateMode && createVerdict.kind && createVerdict.kind !== 'exact_twin') {
       const ackKey = `${String(form.name || '').trim().toLowerCase()}|${String(form.barcode || '').trim()}`
       if (createMatchAckRef.current !== ackKey) {
         const choice = await askCreateVerdict()
@@ -1309,14 +1309,6 @@ export default function ProductForm({
         onClose,
       )
     } catch (error) {
-      // The rejected identity edit was never persisted. The ordinary exact-
-      // identity pair endpoint would therefore reject the original row again.
-      // Offer a reviewed identity resolution; retain this unsaved draft.
-      const collision = duplicateCollisionFrom(error)
-      if (collision && product?.id && onReviewIdentityCollision) {
-        setIdentityCollision(collision)
-        return
-      }
       alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
     } finally {
       saveInFlightRef.current = false
@@ -1375,7 +1367,7 @@ export default function ProductForm({
     })
   } : undefined
   const childSurfaceOpen = Boolean(
-    filePickerOpen || scannerField || renameRequest || identityCollision || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
+    filePickerOpen || scannerField || renameRequest || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
   )
   useEffect(() => {
     const dialog = productFormContentRef.current?.closest('[role="dialog"]')
@@ -1603,10 +1595,13 @@ export default function ProductForm({
                 </p>
               ) : isCreateMode && createVerdict.kind ? (
                 <p className={`mt-1 rounded-lg border px-2.5 py-1.5 text-xs ${createVerdict.kind === 'exact_twin'
-                  ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300'
                   : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300'}`}>
                   {createVerdict.kind === 'exact_twin'
-                    ? tr('create_match_twin_hint', 'This product already exists (same name and barcode; leading zeros are ignored) — it cannot be created twice.', 'ផលិតផលនេះមានរួចហើយ (ឈ្មោះ និងបាកូដដូចគ្នា; សូន្យនៅខាងដើមមិនរាប់បញ្ចូល) — មិនអាចបង្កើតម្តងទៀតបានទេ។')
+                    // Sep 16 2026 ruling: this is informative, not a block --
+                    // saving folds straight into the existing row (leading
+                    // zeros folded, never a new twin), no dead-end prompt.
+                    ? tr('create_match_twin_hint', 'This product already exists (same name and barcode; leading zeros are ignored) — saving will add to that existing product instead of creating a new one.', 'ផលិតផលនេះមានរួចហើយ (ឈ្មោះ និងបាកូដដូចគ្នា; សូន្យនៅខាងដើមមិនរាប់បញ្ចូល) — ការរក្សាទុកនឹងបន្ថែមទៅផលិតផលដែលមានរួចហើយ ជំនួសឲ្យការបង្កើតថ្មី។')
                     : createVerdict.kind === 'name_match'
                       ? tr('create_match_name_hint', 'This name already exists ({n} rows) — saving adds this as a new row of that group.', 'ឈ្មោះនេះមានរួចហើយ ({n} ជួរ) — ការរក្សាទុកនឹងបន្ថែមជាជួរថ្មីនៃក្រុមនោះ។').replace('{n}', String(createVerdict.groupRows.length))
                       : tr('create_match_barcode_hint', 'This barcode is already on "{name}".', 'បាកូដនេះមាននៅលើ "{name}" រួចហើយ។').replace('{name}', createVerdict.canonicalName)}
@@ -2119,24 +2114,6 @@ export default function ProductForm({
           root-level dialog (create verdict). Locked by
           tests/productFormContract.test.ts. */}
       <RenameCascadeModal request={renameRequest} busy={saving} layer={modalLayer} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
-      {/* Saving into an existing twin offers the merge here; a twin that still
-          holds stock is asked merge-or-write-off before anything is written. */}
-      {identityCollision && product?.id && onReviewIdentityCollision ? (
-        <Modal title={t('product_collision_review_title') || 'Review product identity'} onClose={() => setIdentityCollision(null)} size="sm" layer={modalLayer} unsavedChanges="read-only">
-          <p className="text-sm">{t('product_collision_review_description') || 'This edit matches another saved product. Review both saved rows and choose the barcode to keep. Your unsaved edits are not applied by the review.'}</p>
-          <p className="mt-2 text-sm font-medium">{identityCollision.name || `#${identityCollision.id}`}</p>
-          <div className="mt-4 flex justify-end gap-2">
-            <button type="button" className="btn-secondary" onClick={() => setIdentityCollision(null)}>{t('cancel') || 'Cancel'}</button>
-            <button type="button" className="btn-primary" disabled={imageUploading || !preserveAndMinimize} onClick={() => {
-              if (imageUploading || imageUploadInFlightRef.current || !preserveAndMinimize) return
-              const productIds = [Number(product.id), identityCollision.id] as const
-              preserveAndMinimize()
-              setIdentityCollision(null)
-              onReviewIdentityCollision(productIds)
-            }}>{t('selected_conflict_group_review_action') || 'Review selected actions'}</button>
-          </div>
-        </Modal>
-      ) : null}
       {saveConfirmOpen ? (
         <ConfirmDialog
           t={t}
@@ -2152,28 +2129,26 @@ export default function ProductForm({
         />
       ) : null}
       {createVerdictOpen ? (
+        // Sep 16 2026: this dialog only ever opens for name_match/barcode_match
+        // now -- an exact_twin never reaches askCreateVerdict (see saveForm),
+        // so the old red "Product already exists / Go back" dead-end branch
+        // is gone rather than kept as unreachable code.
         <Modal
-          title={createVerdict.kind === 'exact_twin'
-            ? tr('create_match_twin_title', 'Product already exists', 'ផលិតផលមានរួចហើយ')
-            : createVerdict.kind === 'name_match'
-              ? tr('create_match_name_title', 'Name already exists', 'ឈ្មោះមានរួចហើយ')
-              : tr('create_match_barcode_title', 'Barcode already in use', 'បាកូដកំពុងប្រើរួចហើយ')}
+          title={createVerdict.kind === 'name_match'
+            ? tr('create_match_name_title', 'Name already exists', 'ឈ្មោះមានរួចហើយ')
+            : tr('create_match_barcode_title', 'Barcode already in use', 'បាកូដកំពុងប្រើរួចហើយ')}
           onClose={() => resolveCreateVerdict('back')}
           size="sm"
           layer={modalLayer}
           unsavedChanges="read-only">
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
-            <div className={`flex items-start gap-3 rounded-lg border p-3 ${createVerdict.kind === 'exact_twin'
-              ? 'border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/30'
-              : 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30'}`}>
-              <AlertTriangleIcon className={`mt-0.5 h-4 w-4 shrink-0 ${createVerdict.kind === 'exact_twin' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} />
-              <div className={`space-y-1 ${createVerdict.kind === 'exact_twin' ? 'text-red-800 dark:text-red-300' : 'text-amber-800 dark:text-amber-300'}`}>
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/30">
+              <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="space-y-1 text-amber-800 dark:text-amber-300">
                 <p>
-                  {createVerdict.kind === 'exact_twin'
-                    ? tr('create_match_twin_body', 'The same product already exists — same name and barcode (leading zeros are ignored; a different cost does not make a new row). Go back and adjust, or open the existing product instead.', 'ផលិតផលដូចគ្នានេះមានរួចហើយ — ឈ្មោះ និងបាកូដដូចគ្នា (សូន្យនៅខាងដើមមិនរាប់បញ្ចូល; ថ្លៃដើមខុសគ្នាមិនបង្កើតជួរថ្មីទេ)។ ត្រឡប់ក្រោយ ហើយកែសម្រួល ឬបើកផលិតផលដែលមានស្រាប់ជំនួសវិញ។')
-                    : createVerdict.kind === 'name_match'
-                      ? tr('create_match_name_body', 'A product with this exact name already exists. Saving adds another ordinary row under the same automatic group title.', 'ផលិតផលដែលមានឈ្មោះដូចគ្នាបេះបិទមានរួចហើយ។ ការរក្សាទុកនឹងបន្ថែមជួរផលិតផលធម្មតាមួយទៀតក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា។')
-                      : tr('create_match_barcode_body', 'This barcode already belongs to "{name}". Use that same name to wrap this row under the same automatic group title, or keep your different name as a separate product.', 'បាកូដនេះជារបស់ "{name}" រួចហើយ។ ប្រើឈ្មោះដូចគ្នា ដើម្បីឲ្យជួរនេះត្រូវបានរុំក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា ឬរក្សាឈ្មោះផ្សេងរបស់អ្នកជាផលិតផលដាច់ដោយឡែក។').replace('{name}', createVerdict.canonicalName)}
+                  {createVerdict.kind === 'name_match'
+                    ? tr('create_match_name_body', 'A product with this exact name already exists. Saving adds another ordinary row under the same automatic group title.', 'ផលិតផលដែលមានឈ្មោះដូចគ្នាបេះបិទមានរួចហើយ។ ការរក្សាទុកនឹងបន្ថែមជួរផលិតផលធម្មតាមួយទៀតក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា។')
+                    : tr('create_match_barcode_body', 'This barcode already belongs to "{name}". Use that same name to wrap this row under the same automatic group title, or keep your different name as a separate product.', 'បាកូដនេះជារបស់ "{name}" រួចហើយ។ ប្រើឈ្មោះដូចគ្នា ដើម្បីឲ្យជួរនេះត្រូវបានរុំក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា ឬរក្សាឈ្មោះផ្សេងរបស់អ្នកជាផលិតផលដាច់ដោយឡែក។').replace('{name}', createVerdict.canonicalName)}
                 </p>
                 {createVerdict.priceMatches ? (
                   <p className="text-xs">
@@ -2200,15 +2175,13 @@ export default function ProductForm({
               >
                 {tr('create_match_back', 'Go back', 'ត្រឡប់ក្រោយ')}
               </button>
-              {createVerdict.kind !== 'exact_twin' ? (
-                <button
-                  type="button"
-                  className="rounded-lg bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700"
-                  onClick={() => resolveCreateVerdict('group')}
-                >
-                  {tr('create_match_group_button', 'Use name "{name}" and group automatically', 'ប្រើឈ្មោះ "{name}" ហើយដាក់ជាក្រុមដោយស្វ័យប្រវត្តិ').replace('{name}', createVerdict.canonicalName)}
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700"
+                onClick={() => resolveCreateVerdict('group')}
+              >
+                {tr('create_match_group_button', 'Use name "{name}" and group automatically', 'ប្រើឈ្មោះ "{name}" ហើយដាក់ជាក្រុមដោយស្វ័យប្រវត្តិ').replace('{name}', createVerdict.canonicalName)}
+              </button>
               {createVerdict.allowProceedAsNew ? (
                 <button
                   type="button"

@@ -206,7 +206,10 @@ const { STORAGE_KEYS } = await import('../src/constants.ts')
 // modules. Execute the exact hook/helper bodies from ProductForm.tsx with the
 // installed React runtime, matching the established lifecycle-test pattern.
 const hydrationHookStart = productFormSource.indexOf('export function useStableHydratedState')
-const hydrationHookEnd = productFormSource.indexOf('\n\nexport async function clearAfterSuccessfulProductSave', hydrationHookStart)
+// Cut at the NEXT export's signature line itself, not a preceding blank
+// line -- a doc comment directly above that export (no blank line before
+// it) would otherwise slide the cut past the end of this function.
+const hydrationHookEnd = productFormSource.indexOf('export async function clearAfterSuccessfulProductSave', hydrationHookStart)
 assert.ok(hydrationHookStart >= 0 && hydrationHookEnd > hydrationHookStart, 'hydration hook source must be extractable')
 const hydrationHookSource = productFormSource.slice(hydrationHookStart, hydrationHookEnd)
   .replace(
@@ -246,14 +249,14 @@ const saveGateEnd = productFormSource.indexOf('\n\nfunction editableInitialForm'
 assert.ok(saveGateStart >= 0 && saveGateEnd > saveGateStart, 'successful-save gate source must be extractable')
 const saveGateSource = productFormSource.slice(saveGateStart, saveGateEnd)
   .replace(
-    /export async function clearAfterSuccessfulProductSave[\s\S]*?\): Promise<void> \{/,
+    /export async function clearAfterSuccessfulProductSave[\s\S]*?\): Promise<unknown> \{/,
     'return async function clearAfterSuccessfulProductSave(save, clear, close) {',
   )
 const clearAfterSuccessfulProductSave = Function(saveGateSource)() as (
   save: () => unknown | Promise<unknown>,
   clear: () => void,
   close: () => void,
-) => Promise<void>
+) => Promise<unknown>
 
 type HarnessState = {
   name: string
@@ -430,7 +433,7 @@ assert.equal(closeCount, 1, 'only a resolved save closes the form')
 console.log('PASS failed saves preserve drafts and successful saves clear then close once')
 
 type LifecycleSave = () => Promise<unknown>
-let runLifecycleSave: (() => Promise<void>) | null = null
+let runLifecycleSave: (() => Promise<unknown>) | null = null
 let requestLifecycleClose: (() => void) | null = null
 let backFromLifecyclePrompt: (() => void) | null = null
 let discardLifecycleDraft: (() => void) | null = null

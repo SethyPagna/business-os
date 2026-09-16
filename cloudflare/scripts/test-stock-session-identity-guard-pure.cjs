@@ -181,40 +181,90 @@ async function main() {
   })
 
   // --- 2. a leading-zero retype is the SAME product, not a new row ---------
-  await check('a create_receive line whose barcode differs only by a leading zero is refused', async () => {
+  // Sep 16 2026 owner ruling / P10-5 writer 4: this used to be refused with
+  // 409 duplicate_product; it now FOLDS into the existing row instead (never
+  // a twin, never a 409) -- same rule as products.ts's foldCreateIntoExisting.
+  await check('a create_receive line whose barcode differs only by a leading zero FOLDS into the existing row', async () => {
     const { sql, env } = fixture()
     const before = sql.prepare('SELECT COUNT(*) c FROM products').get().c
-    const result = await refusal(commitStockSession, env, createRequest({
+    const receipt = await commitStockSession(env, user, createRequest({
       name: 'Rose Lip Oil', barcode: '03614274226546', cost_price_usd: 5,
     }))
-    assert.ok(result, 'the session must NOT mint a second row for one barcode')
-    assert.equal(result.status, 409)
-    assert.equal(result.code, 'duplicate_product')
-    assert.match(result.message, /already exists with this barcode/)
-    assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, before, 'and nothing was written')
+    assert.equal(receipt.success, true)
+    assert.equal(receipt.items[0].productId, 1, 'the line landed on the existing row, not a new one')
+    assert.equal(receipt.items[0].createdProduct, false)
+    assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, before, 'no second row was minted')
+    // the real (zero-stripped) barcode wins on the survivor
+    assert.equal(sql.prepare('SELECT barcode FROM products WHERE id=1').get().barcode, '3614274226546')
+    assert.equal(sql.prepare("SELECT COUNT(*) c FROM audit_logs WHERE action='fold' AND entity_id='1'").get().c, 1,
+      'a fold audit row is left for undo evidence')
   })
 
   // --- 3. a second cost for one article is a MERGE, not a child row --------
-  await check('a create_receive line that only differs in cost is refused', async () => {
+  // A quantity=0 line has no lot to receive, so there is nothing for
+  // catalogCostRecompute to weight against -- the incoming cost is simply
+  // not applied (the stored cost is untouched), same as it always was for a
+  // quantity=0 create before this line existed at all.
+  await check('a create_receive line that only differs in cost FOLDS without forking a second row', async () => {
     const { sql, env } = fixture()
-    const result = await refusal(commitStockSession, env, createRequest({
+    const receipt = await commitStockSession(env, user, createRequest({
       name: 'Rose Lip Oil', barcode: '3614274226546', cost_price_usd: 7.9,
     }))
-    assert.ok(result, 'a second cost forks nothing under the Sep-4 ruling')
-    assert.equal(result.code, 'duplicate_product')
-    // The message may no longer promise cost was part of the decision.
-    assert.doesNotMatch(result.message, /and cost/)
+    assert.equal(receipt.success, true)
+    assert.equal(receipt.items[0].productId, 1)
     assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, 1)
+    assert.equal(sql.prepare('SELECT cost_price_usd FROM products WHERE id=1').get().cost_price_usd, 5,
+      'quantity=0: no lot received, so the incoming cost is not applied')
   })
 
   // --- 4. both at once: the zero-form twin bought at a second price --------
-  await check('the canonical N15 line -- leading zero AND a different cost -- is refused', async () => {
-    const { env } = fixture()
-    const result = await refusal(commitStockSession, env, createRequest({
+  await check('the canonical N15 line -- leading zero AND a different cost -- FOLDS, not refused', async () => {
+    const { sql, env } = fixture()
+    const receipt = await commitStockSession(env, user, createRequest({
       name: '  rose   lip oil ', barcode: '03614274226546', cost_price_usd: 7.9,
     }))
-    assert.ok(result)
-    assert.equal(result.code, 'duplicate_product')
+    assert.equal(receipt.success, true)
+    assert.equal(receipt.items[0].productId, 1)
+    assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, 1)
+    assert.equal(sql.prepare('SELECT barcode FROM products WHERE id=1').get().barcode, '3614274226546')
+  })
+
+  // --- 4b. the same fold on a RECEIVE line (quantity>0): the lot lands on
+  // the survivor and the survivor's catalog cost re-derives from its lots,
+  // through the exact same catalogCostRecomputeStatement every other receive
+  // line already gets -- not a hand-merged average.
+  await check('a create_receive line with quantity>0 FOLDS and receives the lot onto the survivor', async () => {
+    const { sql, env } = fixture()
+    const request = createRequest({ name: 'Rose Lip Oil', barcode: '03614274226546', cost_price_usd: 7, stock_quantity: 4 })
+    request.items[0].quantity = 4
+    request.items[0].unit_cost_usd = 7
+    const receipt = await commitStockSession(env, user, request)
+    assert.equal(receipt.success, true)
+    assert.equal(receipt.createdCount, 0, 'nothing was created -- this folded onto row 1')
+    assert.equal(receipt.receivedCount, 1)
+    assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, 1)
+    assert.equal(sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 4,
+      'the received quantity landed on the survivor, not a phantom second row')
+    assert.equal(sql.prepare('SELECT COUNT(*) c FROM product_batches WHERE variant_product_id=1').get().c, 1,
+      'one lot was opened on the survivor')
+    assert.equal(sql.prepare('SELECT barcode FROM products WHERE id=1').get().barcode, '3614274226546')
+    // catalogCostRecomputeStatement re-derives products.cost_price_usd from
+    // the survivor's active lots (weighted), not a hand-merged average of
+    // the old 5 and the incoming 7 -- with a single lot at 7, that IS 7.
+    assert.equal(sql.prepare('SELECT cost_price_usd FROM products WHERE id=1').get().cost_price_usd, 7)
+  })
+
+  // --- 4c. idempotent: replaying the exact same client_request_id must not
+  // fold (or receive) a second time.
+  await check('a folded create_receive is idempotent on retry with the same client_request_id', async () => {
+    const { sql, env } = fixture()
+    const request = createRequest({ name: 'Rose Lip Oil', barcode: '03614274226546', cost_price_usd: 5 })
+    const first = await commitStockSession(env, user, request)
+    const second = await commitStockSession(env, user, request)
+    assert.equal(second.operationId, first.operationId)
+    assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, 1)
+    assert.equal(sql.prepare("SELECT COUNT(*) c FROM audit_logs WHERE action='fold'").get().c, 1,
+      'the retry replayed the stored receipt -- it did not fold a second time')
   })
 
   // --- 5. POSITIVE CONTROL: a genuinely different barcode still creates ----
@@ -227,17 +277,20 @@ async function main() {
     assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, 2)
     // A short numeric code (below MIN_REAL_BARCODE_DIGITS=6) is BROKEN, not
     // a real barcode, under the Sep 15 2026 ruling -- a wildcard, so a
-    // SECOND broken/short code on the SAME name is now refused as the same
-    // identity rather than minted as a second row.
+    // SECOND broken/short code on the SAME name is the SAME identity, and
+    // (Sep 16 2026) now FOLDS into the first row instead of either minting a
+    // second row or refusing.
     const short = await refusal(commitStockSession, env, createRequest({
       name: 'Tiny Balm', barcode: '0012', cost_price_usd: 1,
     }))
     assert.equal(short, null)
-    const alsoShort = await refusal(commitStockSession, env, createRequest({
+    const tinyBalmId = sql.prepare("SELECT id FROM products WHERE name='Tiny Balm'").get().id
+    const alsoShortReceipt = await commitStockSession(env, user, createRequest({
       name: 'Tiny Balm', barcode: '12', cost_price_usd: 1,
     }))
-    assert.ok(alsoShort, "'0012' and '12' are both broken/short codes -- a wildcard match under the Sep 15 2026 ruling, not two rows")
-    assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, 3)
+    assert.equal(alsoShortReceipt.success, true, "'0012' and '12' are both broken/short codes -- a wildcard match, so this folds rather than refuses")
+    assert.equal(alsoShortReceipt.items[0].productId, tinyBalmId, 'folded onto the SAME wildcard-matched row, not a second one')
+    assert.equal(sql.prepare('SELECT COUNT(*) c FROM products').get().c, 3, 'still 2 + this one row -- no third "Tiny Balm" row was minted')
     // Two DIFFERENT REAL (>=6 digit) barcodes on the same name remain two
     // genuinely different child rows -- the actual positive control for the
     // wildcard rule (only a real-vs-real mismatch stays a sibling).
