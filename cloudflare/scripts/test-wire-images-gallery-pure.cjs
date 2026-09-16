@@ -191,6 +191,10 @@ const productsRoute = loadReal('routes/products.ts', {
   // no-op. (Added by 7651025a -- the loader wasn't updated for the new import.)
   // Merge budgeting reads this list at module load; no merge route runs here.
   '../lib/undoAppliers': { MERGE_REPARENT_TABLES: [], registerMergeFold: () => {}, registerProductMergeGroupRedo: () => {}, recordMergeUndoSnapshot: async () => null, recordBulkMergeUndoSnapshot: async () => null, recordSupplierBackfillSnapshot: async () => null },
+  // P10-10: routes/products.ts now records/recomputes a manual cost-price
+  // entry on PUT /:id; this test asserts gallery wiring, never a cost edit,
+  // so inert stubs are honest.
+  '../lib/catalogCostRecompute': { recordManualCostEntry: async () => null, recomputeCatalogCost: async () => null },
 
   '../lib/cache': { cachedJsonResponse: async (_r, _c, _v, _t, producer) => producer(), getVersion: async () => '0', bumpVersion: async () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },

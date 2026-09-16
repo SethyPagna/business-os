@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import Modal from './Modal'
+import TruncatedText from './TruncatedText.tsx'
 import { getProductCostBreakdown } from '../../api/productReadTransport.ts'
-import { formatCostFormula, costExclusionLabelKey, normalizeCostBreakdown, type CostBreakdown } from '../../utils/costBreakdownFormat.ts'
+import { fmtDate } from '../../utils/formatters.ts'
+import {
+  formatCostFormula,
+  costExclusionLabelKey,
+  costRowPrimaryText,
+  costRowMeta,
+  normalizeCostBreakdown,
+  type CostBreakdown,
+} from '../../utils/costBreakdownFormat.ts'
 
 type TranslateFn = (key: string, fallback: string) => string
 
@@ -70,12 +79,27 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
               {breakdown.inputs.length ? breakdown.inputs.map((input, index) => {
                 const excludedKey = costExclusionLabelKey(input.excluded)
                 const excludedLabel = excludedKey ? tr(excludedKey, excludedKey) : ''
+                const isManual = input.source === 'manual'
+                const formattedDate = isManual
+                  ? (input.recorded_at ? fmtDate(input.recorded_at) : null)
+                  : (input.received_at ? fmtDate(input.received_at) : null)
+                const primaryText = isManual ? tr('cost_breakdown_manual_tag', 'Override') : costRowPrimaryText(input, formattedDate)
+                const meta = costRowMeta(input, formattedDate)
                 return (
+                  // ONE compact row per entry (P10-11 ruling): the lot
+                  // code/date or the "Manual" tag on the left with its
+                  // muted meta strip on the same line, the cost on the
+                  // right -- never a two-line "list number · shop" card.
                   <li
-                    key={`${input.label}-${index}`}
+                    key={`${input.source}-${input.lot_code || input.recorded_at || input.label}-${index}`}
                     className={`flex items-center justify-between gap-2 px-2.5 py-1.5 ${input.excluded ? 'opacity-50' : ''}`}
                   >
-                    <span className="min-w-0 truncate">{input.label}</span>
+                    <span className="min-w-0 flex-1">
+                      <TruncatedText
+                        text={`${primaryText}${meta ? ` · ${meta}` : ''}`}
+                        className={`block truncate text-sm ${isManual ? 'font-medium text-indigo-600 dark:text-indigo-400' : 'text-gray-800 dark:text-gray-200'}`}
+                      />
+                    </span>
                     <span className="shrink-0 text-right tabular-nums">
                       <span className="block font-medium">{input.cost_usd == null ? '—' : fmtUSD(input.cost_usd)}</span>
                       {excludedLabel ? <span className="block text-[11px] text-gray-400">{excludedLabel}</span> : null}

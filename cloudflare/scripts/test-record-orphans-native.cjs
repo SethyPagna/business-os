@@ -72,6 +72,15 @@ const NOT_A_REFERENCE = new Set([
   // Polymorphic: the owning table is decided by a sibling `entity`/`reference_type`
   // column, so a single join cannot audit it. Covered by each writer's own test.
   'entity', 'reference',
+  // product_cost_entries.baseline_batch_id (migration 0177) is a WATERMARK,
+  // not a strict live reference: it is 0 for a product with no lots yet at
+  // override time (recordManualCostEntry, catalogCostRecompute.ts), and 0
+  // never names a real product_batches row (AUTOINCREMENT starts at 1) -- a
+  // plain orphan join would misreport every such override forever. When it
+  // is non-zero it does name a real, never-hard-deleted product_batches row
+  // (lots are deactivated, not deleted), so there is no real dangling case
+  // this column could ever expose.
+  'baseline_batch',
 ])
 /**
  * Columns that record an id a row ONCE had, deliberately outliving the row.

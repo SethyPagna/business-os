@@ -165,8 +165,9 @@ import {
   seedBranchStockForNewProduct, seedInitialBatchForNewProduct, isImageOnlyWritePayload, restrictToImageOnlyFields,
   normalizeMultiValue, validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError,
 } from '../lib/productWrites'
-import { actorSnapshot } from '../lib/actorSnapshot'
+import { actorSnapshot, actorId } from '../lib/actorSnapshot'
 import { prepareProductMoneyWrite, readProductMoneyPlan, ProductMoneyWriteError, PRODUCT_MONEY_PLAN, PRODUCT_MONEY_VERSION } from '../lib/productWrites'
+import { recordManualCostEntry, recomputeCatalogCost } from '../lib/catalogCostRecompute'
 export {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
   cleanPayload, insertRow, updateRow, syncProductImageGallery, defaultBranchId,
@@ -2088,7 +2089,18 @@ app.put('/:id', async (c) => {
         delete rest[PRODUCT_MONEY_PLAN]
         delete rest[PRODUCT_MONEY_VERSION]
         if (Object.keys(rest).length) {
+          // Read the survivor's cost BEFORE this edit's own fields land on
+          // it (the fold above already merged the two rows' lot costs onto
+          // it -- this is the figure the operator's manual edit is actually
+          // changing, not the pre-fold value of either original row).
+          const costBefore = await db.prepare('SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id')
+            .get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id: duplicate.id })
           await updateRow(c.env, 'products', duplicate.id, rest)
+          const manualEntryId = await recordManualCostEntry(
+            db, duplicate.id, costBefore || { cost_price_usd: null, cost_price_khr: null }, rest,
+            { id: actorId(user), name: actorSnapshot(user) },
+          )
+          if (manualEntryId != null) await recomputeCatalogCost(db, duplicate.id)
         }
         const item = await db.prepare('SELECT * FROM products WHERE id = @id').get({ id: duplicate.id })
         c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
@@ -2157,9 +2169,23 @@ app.put('/:id', async (c) => {
     if (normalizedBrands !== undefined) body.brands = normalizedBrands
   }
 
+  // The money plan's own `before` image (fetched by prepareProductMoneyWrite
+  // above, against THIS row's id) is the pre-edit cost figure -- reading it
+  // back out of the plan avoids a second SELECT for the common (non-fold)
+  // case. Absent for a create/group-rename-only plan, in which case there is
+  // no cost field to record anyway.
+  const moneyPlanForCostRecord = readProductMoneyPlan(body)
   try { await updateRow(c.env, 'products', id, body) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
+  }
+  if (moneyPlanForCostRecord?.kind === 'update' && moneyPlanForCostRecord.before) {
+    const manualEntryId = await recordManualCostEntry(
+      getDb(c.env), Number(id),
+      moneyPlanForCostRecord.before as { cost_price_usd: number | null; cost_price_khr: number | null },
+      body, { id: actorId(user), name: actorSnapshot(user) },
+    )
+    if (manualEntryId != null) await recomputeCatalogCost(getDb(c.env), Number(id))
   }
   const appliedGroupRename = readProductMoneyPlan(body)?.group_rename
   if (appliedGroupRename) await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'product_group', id,

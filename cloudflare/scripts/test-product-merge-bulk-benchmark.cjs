@@ -169,14 +169,17 @@ async function main() {
   // (see routes/products.ts foldDuplicateProductInto, migration 0169's header).
   assert.deepEqual(
     [...new Set(foldBatchSizes)].sort((a, b) => a - b),
-    [3, 8, 18, 21],
+    // 21 -> 22: P10-10 added product_cost_entries to MERGE_REPARENT_TABLES
+    // (undoAppliers.ts) -- one more reparent UPDATE lands in the same write
+    // batch as every other relinked table.
+    [3, 8, 18, 22],
     'the no-stock fold has bounded snapshot/write/fingerprint/finalize statement groups',
   )
   const { batchStatementCounts: _batchStatementCounts, ...reportedCounters } = counters
 
   console.log(JSON.stringify({
     candidates: 1600, chunk: 25, scanMs: Number(scanMs.toFixed(1)), runMs: Number(runMs.toFixed(1)),
-    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [21, 18, 8, 3],
+    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [22, 18, 8, 3],
     ...reportedCounters,
   }))
   console.log('test-product-merge-bulk-benchmark: all checks passed')
