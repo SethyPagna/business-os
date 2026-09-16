@@ -274,6 +274,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // recomputeCatalogCost's call site.
   '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
     './db': { getDb: () => db },
+    './moneyPrecision': moneyPrecision,
     './productDetailRule': productDetailRule,
   }),
   // routes/products.ts + inventory.ts now build their search tail from the

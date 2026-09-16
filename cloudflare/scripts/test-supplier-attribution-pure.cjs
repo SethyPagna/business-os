@@ -197,6 +197,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // recomputeCatalogCost's call site.
   '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
     './db': { getDb: () => db },
+    './moneyPrecision': moneyPrecision,
     './productDetailRule': loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision }),
   }),
   // routes/products.ts + inventory.ts now build their search tail from the
@@ -255,6 +256,7 @@ const batchesRoute = loadReal('routes/batches.ts', {
   // recomputeCatalogCost's call site.
   '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
     './db': { getDb: () => db },
+    './moneyPrecision': moneyPrecision,
     './productDetailRule': loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision }),
   }),
 })

@@ -180,6 +180,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // recomputeCatalogCost's call site.
   '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
     './db': { getDb: () => db },
+    './moneyPrecision': moneyPrecision,
     './productDetailRule': loadReal('lib/productDetailRule.ts', { './moneyPrecision': loadReal('lib/moneyPrecision.ts') }),
   }),
   '../lib/productSearchQuery': {

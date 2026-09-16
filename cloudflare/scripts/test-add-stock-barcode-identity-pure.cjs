@@ -208,6 +208,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // since this module writes to products via the same db the fixtures read.
   '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
     './db': { getDb: () => db },
+    './moneyPrecision': moneyPrecision,
     './productDetailRule': productDetailRule,
   }),
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },
