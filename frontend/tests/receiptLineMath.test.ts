@@ -252,7 +252,10 @@ const sale16433 = {
   // EN, KM, and bilingual receipts; the item bodies and all other labels still
   // use the selected receipt language.
   assert.match(src, /data-receipt-cell="line-total"/, 'the fourth column must exist')
-  assert.match(src, /data-receipt-cell="name"[^>]*>Item<\/span>/)
+  // P10 (owner, photo of a printed receipt): "for the items do n items. as
+  // in total items" -- the header states the printed LINE count
+  // (items.length), never the summed quantity.
+  assert.match(src, /data-receipt-cell="name"[^>]*>\{`Items \(\$\{items\.length\}\)`\}<\/span>/)
   assert.match(src, /data-receipt-cell="qty"[^>]*>Qty<\/span>/)
   assert.match(src, /data-receipt-cell="price"[^>]*>Price<\/span>/)
   assert.match(src, /data-receipt-cell="line-total"[^>]*>Total<\/span>/)

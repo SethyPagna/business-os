@@ -626,7 +626,15 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             with nothing underneath it. One em base for the header and the rows
             is what gives the Price figures a shared right edge down the page. */}
         <div data-receipt-line="true" style={itemGridStyle} className="mb-1 grid border-b border-dashed border-gray-300 pb-1 font-semibold text-gray-500">
-          <span data-receipt-cell="name" className="text-[10px]">Item</span>
+          {/* P10 (owner, photo of a printed receipt): "for the items do n
+              items. as in total items" -- the item column's header states
+              the printed LINE count (items.length), never the summed
+              quantity, and stays the one literal-English caption the row
+              above already pins across every receipt_language (Qty/Price/
+              Total do the same) rather than acquiring a fourth Khmer string
+              a Khmer-language receipt would have to fit beside three others
+              already excluded from translation. */}
+          <span data-receipt-cell="name" className="text-[10px]">{`Items (${items.length})`}</span>
           <span data-receipt-cell="qty" className="whitespace-normal text-center text-[10px] leading-tight">Qty</span>
           {showUnitPriceCol ? <span data-receipt-cell="price" className="text-right text-[10px] leading-tight">Price</span> : null}
           <span data-receipt-cell="line-total" className="text-right text-[10px] leading-tight">Total</span>
@@ -676,6 +684,15 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
               <div data-receipt-line="true" style={itemGridStyle} className="grid items-start">
                 <div data-receipt-cell="name" className="min-w-0 overflow-visible whitespace-normal break-words font-semibold leading-snug">
                   <div data-receipt-main="true">
+                    {/* P10 (owner, photo of a printed receipt): "i want a
+                        numbered list for each products as well just before
+                        each products." The number is the FIRST inline run of
+                        text inside the flexible name column (receiptItemColumns
+                        .ts: minmax(0,1fr)) -- never its own column or its own
+                        row -- so it costs the name only the few px of "20. ",
+                        the same trade the qty/price/total floors already make
+                        for their own figures. */}
+                    <span data-receipt-cell="item-number" className="mr-1">{`${index + 1}.`}</span>
                     {item.product_name || item.name}
                     {/* Tier tag kept INLINE with the name (user: compact, don't
                         take extra space) -- a tiny marker beside the title, like

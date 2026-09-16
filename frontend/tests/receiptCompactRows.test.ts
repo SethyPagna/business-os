@@ -423,10 +423,14 @@ await runTest('the per-line qty column is untouched by the row removal', () => {
 })
 
 await runTest('item column headers stay literal English in every receipt language', () => {
+  // P10 (owner, photo of a printed receipt): "for the items do n items. as in
+  // total items" -- the Item header now states the printed LINE count
+  // (saleFixture carries 2), still the one literal-English caption this row
+  // has always pinned regardless of receipt_language.
   for (const receipt_language of ['en', 'km', 'both']) {
     const html = renderReceipt({ receipt_language })
     const header = html.split('data-receipt-line="true"').find((chunk) => chunk.includes('data-receipt-cell="name"')) || ''
-    for (const label of ['Item', 'Qty', 'Price', 'Total']) {
+    for (const label of ['Items (2)', 'Qty', 'Price', 'Total']) {
       assert.ok(header.includes(`>${label}</span>`), `${receipt_language}: missing literal ${label} header`)
     }
     assert.ok(!header.includes('ទំនិញ') && !header.includes('ចំនួន') && !header.includes('តម្លៃ'), `${receipt_language}: item headers must not be translated`)
