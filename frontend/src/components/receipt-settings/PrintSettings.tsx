@@ -163,12 +163,31 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
   ]
 
   const pageSizeModes: Array<{ id: ReceiptPrintSettings['pageSizeMode']; label: string; desc: string }> = [
-    { id: 'measured', label: T('print_page_size_mode_measured', 'Measured (default)'), desc: T('print_page_size_mode_measured_desc', 'Auto-fits the roll to the printed receipt height, right before printing.') },
+    { id: 'driver-forms', label: T('print_page_size_mode_driver_forms', 'Printer forms (default)'), desc: T('print_page_size_mode_driver_forms_desc', 'Auto-fits the smallest registered printer form (e.g. 72 x 297mm) that holds the receipt, so Chrome selects it automatically.') },
+    { id: 'measured', label: T('print_page_size_mode_measured', 'Measured'), desc: T('print_page_size_mode_measured_desc', 'Auto-fits the roll to the printed receipt height, right before printing.') },
     { id: 'fixed', label: T('print_page_size_mode_fixed', 'Fixed length'), desc: T('print_page_size_mode_fixed_desc', 'A page length you choose; long receipts continue onto further pages of that length.') },
     { id: 'driver', label: T('print_page_size_mode_driver', 'Printer driver default'), desc: T('print_page_size_mode_driver_desc', 'Sends no page size; the printer driver\'s own registered paper/form decides.') },
     { id: 'auto-longest', label: T('print_page_size_mode_auto_longest', 'Longest roll'), desc: T('print_page_size_mode_auto_longest_desc', 'One page as long as the printer\'s longest supported roll.') },
   ]
   const fixedLengthPresets = ['50', '100', '150', '200', '297']
+  const driverFormHeights = ps.driverFormHeightsMm && ps.driverFormHeightsMm.length ? ps.driverFormHeightsMm : [210, 297, 400, 800]
+  const setDriverFormHeight = (index: number, value: string) => {
+    const parsed = Number.parseFloat(value)
+    const next = driverFormHeights.slice()
+    next[index] = Number.isFinite(parsed) && parsed > 0 ? parsed : next[index]
+    setValue('driverFormHeightsMm', next)
+  }
+  const removeDriverFormHeight = (index: number) => {
+    if (driverFormHeights.length <= 1) return
+    setValue('driverFormHeightsMm', driverFormHeights.filter((_, i) => i !== index))
+  }
+  const addDriverFormHeight = () => {
+    setValue('driverFormHeightsMm', [...driverFormHeights, 297])
+  }
+  const resetDriverForms = () => {
+    setValue('driverFormWidthMm', '72')
+    setValue('driverFormHeightsMm', [210, 297, 400, 800])
+  }
 
   const marginFields: Array<[ReceiptMarginKey, string]> = [
     ['marginTop', T('print_top', 'Top')],
@@ -273,12 +292,12 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
                 type="button"
                 onClick={() => setValue('pageSizeMode', mode.id)}
                 className={`rounded-xl border-2 p-3 text-left ${
-                  (ps.pageSizeMode || 'measured') === mode.id
+                  (ps.pageSizeMode || 'driver-forms') === mode.id
                     ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30'
                     : 'border-gray-200 dark:border-gray-600'
                 }`}
               >
-                <div className={`text-sm font-bold ${(ps.pageSizeMode || 'measured') === mode.id ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>
+                <div className={`text-sm font-bold ${(ps.pageSizeMode || 'driver-forms') === mode.id ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>
                   {mode.label}
                 </div>
                 <div className="text-xs text-gray-400">{mode.desc}</div>
@@ -286,7 +305,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
             ))}
           </div>
 
-          {(ps.pageSizeMode || 'measured') === 'fixed' ? (
+          {(ps.pageSizeMode || 'driver-forms') === 'fixed' ? (
             <div className="mt-3">
               <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{T('print_fixed_page_length', 'Fixed page length')}</label>
               <div className="flex flex-wrap gap-2">
@@ -314,6 +333,67 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
                   value={ps.fixedPageLengthMm || '100'}
                   onChange={(event) => setValue('fixedPageLengthMm', event.target.value)}
                 />
+              </div>
+            </div>
+          ) : null}
+
+          {(ps.pageSizeMode || 'driver-forms') === 'driver-forms' ? (
+            <div className="mt-3">
+              <div className="mb-2 flex items-center gap-1.5">
+                <p className="text-xs text-gray-500">
+                  {T('print_driver_forms_desc', 'Enter the exact form width and heights Chrome\'s printer dialog lists for this printer, so the app can pick the one that fits automatically.')}
+                </p>
+                <InfoHint
+                  label={T('print_driver_forms_title', 'Registered printer forms')}
+                  text={T('print_driver_forms_hint', 'Open the printer\'s Chrome print dialog once, note the Paper size options it lists, and enter that exact width and every height here.')}
+                />
+              </div>
+              <div className="max-w-[160px]">
+                <label htmlFor="print-driver-form-width" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{T('print_driver_form_width', 'Form width (mm)')}</label>
+                <input
+                  id="print-driver-form-width"
+                  name="print_driver_form_width"
+                  autoComplete="off"
+                  className="input text-sm"
+                  type="number"
+                  min="30"
+                  max="300"
+                  value={ps.driverFormWidthMm || '72'}
+                  onChange={(event) => setValue('driverFormWidthMm', event.target.value)}
+                />
+              </div>
+              <div className="mt-3">
+                <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{T('print_driver_form_heights', 'Form heights (mm)')}</label>
+                <div className="flex flex-wrap gap-2">
+                  {driverFormHeights.map((height, index) => (
+                    <div key={`driver-form-height-${index}`} className="flex items-center gap-1 rounded-lg bg-gray-100 px-2 py-1 dark:bg-gray-700">
+                      <input
+                        aria-label={T('print_driver_form_heights', 'Form heights (mm)')}
+                        className="w-16 bg-transparent text-xs font-medium text-gray-700 outline-none dark:text-gray-200"
+                        type="number"
+                        min="10"
+                        max="3000"
+                        value={height}
+                        onChange={(event) => setDriverFormHeight(index, event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        aria-label={T('print_driver_form_remove_height', 'Remove this height')}
+                        className="text-xs font-bold text-gray-400 hover:text-red-600"
+                        onClick={() => removeDriverFormHeight(index)}
+                        disabled={driverFormHeights.length <= 1}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={addDriverFormHeight} className="rounded-lg px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+                    {T('print_driver_form_add_height', '+ Add height')}
+                  </button>
+                </div>
+                <button type="button" onClick={resetDriverForms} className="mt-2 text-xs text-blue-600 hover:underline">
+                  {T('print_driver_form_reset', 'Reset to 72 × 210/297/400/800mm')}
+                </button>
               </div>
             </div>
           ) : null}
