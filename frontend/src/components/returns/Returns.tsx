@@ -281,11 +281,6 @@ function countActiveFlags(flags: boolean[] = []): number {
   return count
 }
 
-function toNumericAmount(value: number | string | null | undefined): number {
-  const numericValue = Number(value || 0)
-  return Number.isFinite(numericValue) ? numericValue : 0
-}
-
 // H1+X5 (Part 402): the dialog's column list derives from this builder's own
 // keys, so chooser and file can never disagree.
 export const RETURN_EXPORT_KEYS = [
@@ -1602,7 +1597,6 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       </PagerActionRow>
       <ReturnsListSurface
         collapsedReturnSections={collapsedReturnSections}
-        CUSTOMER_SCOPE={CUSTOMER_SCOPE}
         filtered={filtered as ReturnsListSurfaceProps['filtered']}
         fmtTime={fmtClock24}
         isSelectionScopeFullySelected={isSelectionScopeFullySelected}
