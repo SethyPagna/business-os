@@ -2,7 +2,7 @@
 
 | Item | State | Evidence |
 | --- | --- | --- |
-| P8-0 Push to GitHub incl. main; archive local branches | **Done** | `main` fast-forwarded to the release tip at this checkpoint; 552 refs archived on Sep 16. |
+| P8-0 Push to GitHub incl. main; archive local branches | **Done** | `main` merged up to the release tip at this checkpoint (7d1b2b28); 552 refs archived on Sep 16. |
 | P8-1 Tests for past fixes, errors and guards | **Deployed** (Worker 23615bfd-aba1-4862-a1a1-01e7b2240cce, commit f2488996) | 77b30a5f..20136e81; real fixes 5be431be (R2 edge-cache purge), 61105bcb (portal rail degrade), a835f548 (import barcode fold). |
 | P8-2 Debloat across the full codebase | **Deployed** | 36a1183f..2e7a978b, −1338/+138; reverts 65ee5141, 81c5d508; report items in progress.md. |
 | P8-3 Optimization / efficiency | **Deployed** (wave 1) | 257247bd (chunked DELETE); wave 2 open with P9-12. |
