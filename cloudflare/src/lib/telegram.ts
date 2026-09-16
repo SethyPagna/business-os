@@ -1049,7 +1049,14 @@ function receivedDateText(receivedDate?: string | null, lotCode?: string | null)
 }
 
 export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
-  const items = sale.items.slice(0, TELEGRAM_MAX_ITEM_LINES).map((item) => {
+  // P10 (owner, photo of a printed receipt): "i want a numbered list for
+  // each products as well just before each products." The Telegram sale
+  // alert is the same receipt summary in text form (see the comment above
+  // this function), so each line gets the same "1. name ..." numbering the
+  // printed receipt now carries instead of a bare bullet -- the +N more
+  // line below still counts against sale.items.length, not this slice, so
+  // the numbering does not relabel the items it hides.
+  const items = sale.items.slice(0, TELEGRAM_MAX_ITEM_LINES).map((item, index) => {
     const quantity = Number(item.quantity) || 0
     const base = Number(item.basePriceUsd)
     const netUnitPrice = round2(Number(item.unitPriceUsd) || 0)
@@ -1060,7 +1067,7 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
       : 0
     const displayedUnitPrice = lineDiscount > 0 ? grossUnitPrice : netUnitPrice
     const promotionLabel = lineDiscount > 0 ? cleanLine(item.promotionLabel, 40) : ''
-    return `• ${cleanLine(item.name, 100)} ${quantity} × ${usd(displayedUnitPrice)}${lineDiscount ? ` (−${usd(lineDiscount)}${promotionLabel ? ` ${promotionLabel}` : ''})` : ''} = ${usd(netLineTotal)}`
+    return `${index + 1}. ${cleanLine(item.name, 100)} ${quantity} × ${usd(displayedUnitPrice)}${lineDiscount ? ` (−${usd(lineDiscount)}${promotionLabel ? ` ${promotionLabel}` : ''})` : ''} = ${usd(netLineTotal)}`
   })
   const deliveryFee = Number(sale.deliveryFeeUsd) || 0
   // Who paid it comes from the ONE rule that produced total_usd
