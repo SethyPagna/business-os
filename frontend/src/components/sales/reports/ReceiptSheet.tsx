@@ -24,6 +24,14 @@ export interface ReceiptBlock {
   title?: ReactNode
   meta?: ReactNode
   lines: ReceiptLine[]
+  /**
+   * Replaces the standard label/value ledger grid with a custom layout (the
+   * Products report's compact two-column stat grid, Part reports-products:
+   * "arrange as two columns, one row: sales, quantity, second row: line
+   * sales, third row cogs, fourth row profit"). Title/meta above it are
+   * unaffected -- only the body differs per surface.
+   */
+  body?: ReactNode
   onClick?: (el: HTMLElement) => void
   selected?: boolean
   /**
@@ -104,7 +112,9 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
                 {block.meta != null ? <div className="shrink-0 text-[length:var(--ui-size-receipt-meta,11px)] text-[var(--ui-ink-3)]">{block.meta}</div> : null}
               </div>
             ) : null}
-            {block.lines.length ? (
+            {block.body != null ? (
+              block.body
+            ) : block.lines.length ? (
               // The label/value row: ONE grid per block, not one flex row per
               // line. `justify-between` used to hand every line all the free
               // space in the box, so a label and its value could sit 300-450px

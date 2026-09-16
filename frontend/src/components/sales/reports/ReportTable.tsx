@@ -69,6 +69,12 @@ export interface ReportTableProps<Row> {
   selectedKey?: string | null
   /** Rendered under the rows (Load more, counts). */
   footer?: ReactNode
+  /**
+   * Receipt-style only: replaces the standard label/value line list with a
+   * custom card body (e.g. the Products report's compact stat grid). The
+   * primary column still supplies the card title; excel style is unaffected.
+   */
+  cardBody?: (row: Row) => ReactNode
   /** In-card scroll height for the spreadsheet style (kept compact per the dashboard-card rule). */
   maxHeight?: string
   className?: string
@@ -157,6 +163,7 @@ export default function ReportTable<Row>({
   footer,
   maxHeight,
   className = '',
+  cardBody,
 }: ReportTableProps<Row>) {
   const columnDefs = useMemo<TableColumnDef[]>(() => columns.map((c) => ({ key: c.key, label: c.label, defaultVisible: c.defaultVisible !== false })), [columns])
   const prefs = useColumnPreferences(surfaceKey, columnDefs)
@@ -192,6 +199,7 @@ export default function ReportTable<Row>({
         key,
         title: formatCell(primary, row, fmtMoney),
         lines,
+        body: cardBody ? cardBody(row) : undefined,
         onClick: onRowClick ? (el) => onRowClick(row, el) : undefined,
         selected: selectedKey != null && selectedKey === key,
       }
@@ -201,6 +209,7 @@ export default function ReportTable<Row>({
         key: '__totals',
         title: labels.total,
         lines: lineColumns.filter((c) => isNumericKind(c.kind)).map((c) => ({ key: c.key, label: c.label, value: formatCell(c, totalsRow, fmtMoney), kind: receiptLineKind(c) })),
+        body: cardBody ? cardBody(totalsRow) : undefined,
       })
     }
     return (

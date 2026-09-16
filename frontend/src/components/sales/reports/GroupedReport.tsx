@@ -64,6 +64,72 @@ export interface ProductRow {
   margin_pct?: number | null
   cost_missing_snapshot_lines?: number
 }
+/** The Products report row's own numbers, formatted -- the pure half of the
+ *  compact card (Part reports-products, owner: "no need click. Arrange as
+ *  two columns, one row: sales, quantity, second row: line sales, third row
+ *  cogs, fourth row profit"). cost_usd/profit_usd are admin-gated in the
+ *  API response (all rows carry them or none do, see cloudflare
+ *  routes/reports.ts:611) -- '—' here, never 0, keeps a missing figure from
+ *  reading as a real zero-profit product. */
+export interface ProductRowCells {
+  sales: string
+  quantity: string
+  lineSales: string
+  cogs: string
+  profit: string
+  marginPct: string
+  hasProfit: boolean
+}
+
+export function productRowCells(row: ProductRow, fmtMoney: (usd: number) => string): ProductRowCells {
+  const hasProfit = typeof row.profit_usd === 'number'
+  return {
+    sales: fmtInt(row.sale_count),
+    quantity: fmtQty(row.qty),
+    lineSales: fmtMoney(row.line_sales_usd),
+    cogs: hasProfit ? fmtMoney(num(row.cost_usd)) : '—',
+    profit: hasProfit ? fmtMoney(num(row.profit_usd)) : '—',
+    marginPct: hasProfit ? fmtPct(row.margin_pct ?? null) : '—',
+    hasProfit,
+  }
+}
+
+/** The receipt-style Products card body: a compact two-column stat grid
+ *  (Sales | Quantity), then one full-width row each for Line sales, COGS
+ *  and Gross profit -- replacing ReportTable's default one-line-per-column
+ *  ledger for this surface only, per the owner's explicit arrangement. */
+function renderProductCard(row: ProductRow, tr: Tr, fmtMoney: (usd: number) => string) {
+  const c = productRowCells(row, fmtMoney)
+  return (
+    <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[length:var(--ui-size-body,12px)] leading-[var(--ui-receipt-lh,16px)] [font-variant-numeric:tabular-nums]">
+      <div className="min-w-0">
+        <div className="truncate text-[length:var(--ui-size-receipt-meta,11px)] text-[var(--ui-ink-3)]">{tr('sales', 'Sales')}</div>
+        <div className="font-mono">{c.sales}</div>
+      </div>
+      <div className="min-w-0 text-right">
+        <div className="truncate text-[length:var(--ui-size-receipt-meta,11px)] text-[var(--ui-ink-3)]">{tr('quantity', 'Quantity')}</div>
+        <div className="font-mono">{c.quantity}</div>
+      </div>
+      <div className="col-span-2 mt-1 flex items-baseline justify-between gap-2 border-t border-[var(--ui-line-2)] pt-1">
+        <span className="min-w-0 truncate">{tr('rpt_line_sales', 'Line sales')}</span>
+        <span className="shrink-0 font-mono font-semibold">{c.lineSales}</span>
+      </div>
+      {c.hasProfit ? (
+        <>
+          <div className="col-span-2 flex items-baseline justify-between gap-2 text-[var(--ui-ink-2)]">
+            <span className="min-w-0 truncate">{tr('cogs', 'COGS')}</span>
+            <span className="shrink-0 font-mono">{c.cogs}</span>
+          </div>
+          <div className="col-span-2 flex items-baseline justify-between gap-2 font-semibold">
+            <span className="min-w-0 truncate">{tr('rpt_gross_profit', 'Gross profit')}</span>
+            <span className="shrink-0 font-mono">{c.profit} ({c.marginPct})</span>
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
 export interface CourierRow {
   delivery_contact_id: number | null
   delivery_contact_name: string
@@ -187,14 +253,14 @@ export default function GroupedReport(p: ReportViewProps) {
       { key: 'sale_count', label: tr('sales', 'Sales'), kind: 'int', value: (r) => r.sale_count },
       { key: 'qty', label: tr('quantity', 'Quantity'), kind: 'qty', value: (r) => r.qty },
       { key: 'line_sales_usd', label: tr('rpt_line_sales', 'Line sales'), kind: 'money', value: (r) => r.line_sales_usd, emphasis: true },
-      { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.line_sales_usd, totalLine), defaultVisible: false },
       ...(allProfit
         ? [
-            { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r: ProductRow) => r.cost_usd ?? null, defaultVisible: false } as ReportColumn<ProductRow>,
+            { key: 'cost_usd', label: tr('cogs', 'COGS'), kind: 'money', value: (r: ProductRow) => r.cost_usd ?? null } as ReportColumn<ProductRow>,
             { key: 'profit_usd', label: tr('rpt_gross_profit', 'Gross profit'), kind: 'money', value: (r: ProductRow) => r.profit_usd ?? null } as ReportColumn<ProductRow>,
             { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r: ProductRow) => r.margin_pct ?? null } as ReportColumn<ProductRow>,
           ]
         : []),
+      { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.line_sales_usd, totalLine), defaultVisible: false },
     ]
     const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), productRows)
     const open = productRows.find((r) => String(r.product_id ?? r.product_name) === openKey) || null
@@ -219,6 +285,7 @@ export default function GroupedReport(p: ReportViewProps) {
           labels={labels}
           loading={state.loading}
           totalsRow={productRows.length > 1 ? { product_id: null, product_name: labels.total, sale_count: productRows.reduce((s, r) => s + r.sale_count, 0), qty: totalQty, line_sales_usd: totalLine, ...(allProfit ? { cost_usd: round2(productRows.reduce((s, r) => s + num(r.cost_usd), 0)), profit_usd: totalProfit ?? 0, margin_pct: pct(totalProfit ?? 0, totalLine) } : {}) } : null}
+          cardBody={(row) => renderProductCard(row, tr, fmtMoney)}
           sort={sort}
           onSortChange={setSort}
           selectedKey={openKey}
