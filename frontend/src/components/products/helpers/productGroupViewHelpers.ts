@@ -55,7 +55,7 @@ export function buildProductGroupSummaryParts(group?: ProductGroupViewRecord | n
   includeCount = true,
   includeBranches = true,
   t = defaultTranslate,
-  fmtUSD = defaultFormatUsd,
+  fmtUSD: _fmtUSD = defaultFormatUsd,
 }: ProductGroupSummaryOptions = {}): string[] {
   // Prefer the merged row count (distinct products, branch-duplicates
   // collapsed) over the raw item count -- this is the number the person

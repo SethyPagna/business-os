@@ -6,7 +6,6 @@ import {
 } from '../src/components/products/helpers/productMenuHelpers.ts'
 import { buildProductSupplierOptions } from '../src/components/products/helpers/productSupplierOptions.ts'
 
-type ProductRow = Record<string, unknown>
 type ActionLogEntry = [name: string, value: string]
 type FilterSection = ReturnType<typeof buildProductFilterSections>[number]
 
