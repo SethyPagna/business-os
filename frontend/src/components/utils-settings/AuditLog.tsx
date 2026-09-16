@@ -672,7 +672,6 @@ export default function AuditLog() {
     sortDirection,
   }), [actionLabel, groupMode, monthFilter, orderedLogs, sortDirection, timeMode, yearFilter])
   const showActionGroups = groupMode === 'time+action'
-  const isInitialDesktopLoad = loading && !hasLoadedOnce
   const showDesktopLoadingOverlay = !initialDesktopRevealReady
 
   const visibleLogs = useMemo(

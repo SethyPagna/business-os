@@ -16,7 +16,6 @@ import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import DatabaseBackup from 'lucide-react/dist/esm/icons/database-backup.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical.js'
-import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import Package from 'lucide-react/dist/esm/icons/package.js'
 import Pin from 'lucide-react/dist/esm/icons/pin.js'
@@ -47,7 +46,7 @@ import {
   validateLowStockSettingsWrite,
 } from '../../utils/lowStockSettings.ts'
 import { useMobileSectionNavMode, writeMobileSectionNavMode, MOBILE_SECTION_NAV_SETTINGS_KEY, type MobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
-import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
+import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.ts'
 import type { SettingsConflictState } from './settingsConflict.ts'
@@ -652,10 +651,6 @@ export default function Settings() {
   // The tax switch, read through the SAME helper the till and the Worker use,
   // so the checkbox can never disagree with what is actually charged.
   const taxEnabled = resolveTaxEnabled(form.tax_enabled, form.tax_rate)
-  const getUploadState = useCallback(
-    (key: string) => uploadStates[key] || createInitialUploadState(),
-    [uploadStates],
-  )
   const updateUploadState = useCallback((key: string, action: UploadAction) => {
     setUploadStates((current) => reduceUploadState(current, { ...(action || {}), key }))
   }, [])
