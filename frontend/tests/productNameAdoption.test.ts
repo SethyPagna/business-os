@@ -150,50 +150,46 @@ try {
   await waitFor(async () => await evaluate('document.querySelectorAll(".product-name-rail").length === 5') ? true : null)
   await evaluate('document.fonts.ready.then(()=>true)')
   assert.equal(await evaluate('document.fonts.check("500 12px FixtureKhmer")'), true, 'bundled Khmer font loaded')
+  const names = await evaluate<string[]>('window.__names')
   for (const width of [320,390,1200]) {
     await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false})
-    const metrics = await evaluate<Array<{height:number;lineHeight:number;clientHeight:number;scrollHeight:number;weight:string;bar:string;overflow:boolean;copy:boolean;full:boolean;lines:number}>>(`Array.from(document.querySelectorAll('.product-name-rail'),(rail,index)=>{
-      const text=rail.firstElementChild, style=getComputedStyle(rail)
-      const range=document.createRange();range.selectNodeContents(text)
+    // No more nested column span (see productNameRail.test.ts): the rail IS
+    // the text node's direct parent.
+    const metrics = await evaluate<Array<{height:number;lineHeight:number;clientHeight:number;scrollHeight:number;weight:string;copy:boolean;full:boolean;clipped:boolean;hasReveal:boolean}>>(`Array.from(document.querySelectorAll('.product-name-rail'),(rail,index)=>{
+      const style=getComputedStyle(rail)
+      const range=document.createRange();range.selectNodeContents(rail)
       window.getSelection().removeAllRanges();window.getSelection().addRange(range)
       return {height:rail.getBoundingClientRect().height, lineHeight:parseFloat(style.lineHeight), clientHeight:rail.clientHeight,scrollHeight:rail.scrollHeight,
-        weight:style.fontWeight,bar:style.scrollbarWidth,overflow:rail.scrollWidth>rail.clientWidth,
+        weight:style.fontWeight,
         copy:window.getSelection().toString()===window.__names[index],
-        full:text.textContent===window.__names[index],lines:new Set([...range.getClientRects()].map(r=>r.top)).size}
+        full:rail.textContent===window.__names[index],
+        clipped:rail.scrollHeight>rail.clientHeight+1,
+        hasReveal:rail.hasAttribute('data-reveal-text')}
     })`)
     for(const [index,item] of metrics.entries()) {
       assert.ok(item.height<=2*item.lineHeight+0.5,'no more than two inherited lines with real card utilities')
-      assert.ok(item.scrollHeight<=item.clientHeight+1,'no vertical spill')
       assert.equal(item.weight,'500','actual card medium font weight inherited')
-      assert.equal(item.bar,'none','scrollbar hidden only on component')
       assert.equal(item.copy,true,`entire Unicode name selectable without CSS or ellipsis case ${index} width ${width}`)
-      assert.equal(item.full,true)
-      if(index===0) assert.equal(item.overflow,false,'short name needs no scrolling')
-      if(index>=2) assert.equal(item.overflow,true,'all long names have reachable horizontal overflow')
+      assert.equal(item.full,true,`full text stays in the DOM even when the clamp hides part of it (case ${index} width ${width})`)
+      assert.equal(item.hasReveal,true,'every rail opts into the shared reveal controller, clipped or not')
+      if(index===0) assert.equal(item.clipped,false,'short one-line name is not clipped')
+      if(index>=2) assert.equal(item.clipped,true,`long name case ${index} width ${width} must be clamped to two lines, not grown to fit`)
     }
-    assert.equal(metrics[0].lines,1,'short name remains one naturally wrapped line')
-    if(width===320) assert.equal(metrics[1].lines,2,'ordinary name wraps into two lines before overflow')
     for (const index of [2,3,4]) {
-      await evaluate(`document.querySelector('[data-case="${index}"] .product-name-rail').focus()`)
-      await send('Input.dispatchKeyEvent',{type:'keyDown',key:'End',code:'End',windowsVirtualKeyCode:35})
-      const tail=await evaluate<{scroll:number;visible:boolean}>(`(()=>{
-        const rail=document.activeElement,text=rail.firstElementChild.firstChild,range=document.createRange()
-        range.setStart(text,text.length-1);range.setEnd(text,text.length)
-        const r=range.getBoundingClientRect(),box=rail.getBoundingClientRect()
-        return {scroll:rail.scrollLeft,visible:r.left>=box.left-1&&r.right<=box.right+1}
-      })()`)
-      assert.ok(tail.scroll>0,'keyboard End scrolls beyond initial two lines')
-      assert.equal(tail.visible,true,'final character visible at horizontal end')
-      await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Home',code:'Home',windowsVirtualKeyCode:36})
-      assert.equal(await evaluate('document.activeElement.scrollLeft'),0)
-      await send('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39})
-      assert.ok(await evaluate('document.activeElement.scrollLeft>0'),'arrow key advances overflow')
-      await send('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowLeft',code:'ArrowLeft',windowsVirtualKeyCode:37})
-      assert.equal(await evaluate('document.activeElement.scrollLeft'),0)
+      // ProductCard's whole surface is a click target that opens the
+      // product, so the reveal only takes over hover/long-press here (see
+      // textAffordances.ts's claimsClick) -- a real mouseover is what
+      // opens the shared float with the complete name.
+      await evaluate(`document.querySelector('[data-case="${index}"] .product-name-rail').dispatchEvent(new MouseEvent('mouseover',{bubbles:true}))`)
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      const revealed = await evaluate<{open:boolean;text:string}>(`(()=>{const panel=document.querySelector('.text-affordance-float');return {open:!!panel && !panel.hasAttribute('hidden'), text:panel?.querySelector('.text-affordance-value')?.textContent || ''}})()`)
+      assert.equal(revealed.open,true,`case ${index} width ${width}: hover opens the shared reveal float`)
+      assert.equal(revealed.text,names[index],`case ${index} width ${width}: the float shows the complete, un-clamped name`)
+      await evaluate(`document.querySelector('[data-case="${index}"] .product-name-rail').dispatchEvent(new MouseEvent('mouseout',{bubbles:true,relatedTarget:document.body}))`)
     }
   }
 
-  assert.equal(await evaluate('window.__opens.length'),0,'scrolling never opens a product')
+  assert.equal(await evaluate('window.__opens.length'),0,'hovering a clamped name never opens a product')
   await evaluate('document.querySelector(".product-name-rail").click()')
   assert.equal(await evaluate('window.__opens.length'),1,'name tap still opens the card once')
   assert.deepEqual(await evaluate('window.__opens[0]'),{groupProduct:false,inStock:true})

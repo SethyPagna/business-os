@@ -15,9 +15,11 @@ const mod = { exports: {} as { render?: (name: string) => string } }
 new Function('require', 'module', 'exports', bundle)(require, mod, mod.exports)
 for (const name of ['Long product name '.repeat(40) + 'TAIL-END', 'ផលិតផលសម្រាប់ថែរក្សាសក់'.repeat(40) + 'TAIL-END']) {
   const html = mod.exports.render!(name)
-  assert.ok(html.includes(`title="${name}"`), 'actual CartItem preserves the full name')
+  assert.ok(html.includes(`data-reveal-text="${name}"`), 'actual CartItem wires the full name into the shared reveal')
   assert.ok(html.includes('class="product-name-rail '), 'actual CartItem mounts the shared rail')
-  assert.ok(html.includes('scrollbar-width:none') && html.includes('height:2lh'), 'shared two-line hidden-scrollbar geometry remains active')
+  assert.ok(html.includes('-webkit-line-clamp:2') && html.includes('-webkit-box-orient:vertical'), 'shared two-line clamp geometry remains active')
+  assert.ok(!html.includes('height:2lh') && !html.includes('column-count'), 'no fixed-height/multicolumn box that clips or fragments the name')
+  assert.ok(html.includes(`>${name}<`), 'the full name text is in the DOM, not just the reveal attribute')
   assert.ok(html.includes('value="12.34"') && html.includes('value="2"'), 'price and quantity controls remain unchanged')
 }
 const detail = fs.readFileSync(path.join(root, 'src/components/sales/SaleDetailModal.tsx'), 'utf8')

@@ -347,12 +347,15 @@ try {
       assert.equal(result.rootOverflow, 0, `${lang}/${width}: page must not overflow horizontally`)
       assert.equal(result.cardOverflow, 0, `${lang}/${width}: card must contain its rails`)
       assert.deepEqual(result.bands.map((band) => band.name), ['primary', 'reference', 'metadata'])
-      assert.equal(result.name.text, result.expected.name, `${lang}/${width}: full product name retained`)
+      assert.equal(result.name.text, result.expected.name, `${lang}/${width}: full product name text stays in the DOM even though it is visually clamped`)
       assert.ok(result.name.clientHeight <= 32.5, `${lang}/${width}: name is at most two 16px lines`)
-      assert.ok(result.name.scrollHeight <= result.name.clientHeight + 1, `${lang}/${width}: name has no hidden vertical tail`)
-      assert.ok(result.name.scrollWidth > result.name.clientWidth, `${lang}/${width}: long name has horizontal tail access`)
-      assert.equal(result.name.bar, 'none', `${lang}/${width}: product name scrollbar hidden`)
-      assert.equal(result.name.webkit, 'none', `${lang}/${width}: WebKit product name scrollbar hidden`)
+      // This fixture's name is many words too long for two lines at any
+      // tested width, so it MUST still report a taller scrollHeight than its
+      // clamped clientHeight -- that is line-clamp actually capping the box,
+      // not a box that grew to fit. The word wrap keeps it inside its own
+      // width, so there is no horizontal tail to speak of any more.
+      assert.ok(result.name.scrollHeight > result.name.clientHeight + 1, `${lang}/${width}: the clamp is actually hiding a third+ line, not just measuring two`)
+      assert.ok(result.name.scrollWidth <= result.name.clientWidth + 1, `${lang}/${width}: the name wraps inside its own width instead of overflowing sideways`)
       assert.equal(result.actor.text, result.expected.actor, `${lang}/${width}: recorded actor leads metadata`)
       assert.ok(Number(result.actor.weight) >= 700, `${lang}/${width}: actor is bold`)
       assert.equal(result.reference, result.expected.reference, `${lang}/${width}: localized exact reference retained`)
@@ -365,9 +368,18 @@ try {
         assert.equal(band.webkit, 'none', `${lang}/${width}: ${band.name} WebKit scrollbar hidden`)
       }
 
-      await evaluate(`(()=>{const rail=document.querySelector('.product-name-rail');rail.focus();rail.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true}))})()`)
-      const nameTailVisible = await evaluate<boolean>(`(()=>{const rail=document.querySelector('.product-name-rail'),text=rail.firstElementChild.firstChild,range=document.createRange();range.setStart(text,text.length-1);range.setEnd(text,text.length);const tail=range.getBoundingClientRect(),box=rail.getBoundingClientRect();return rail.scrollLeft>0&&tail.left>=box.left-1&&tail.right<=box.right+1})()`)
-      assert.equal(nameTailVisible, true, `${lang}/${width}: keyboard End reveals final product-name character`)
+      // The rail sits inside the card's own clickable <button>, so the shared
+      // reveal (textAffordances.ts) only takes over hover/long-press here,
+      // never the click that opens the detail dialog -- a real mouseover
+      // (not a synthetic one the touch-compatibility guard would ignore)
+      // after the controller's own HOVER_OPEN_DELAY_MS must open the float
+      // with the complete, un-clamped name.
+      await evaluate(`(()=>{document.querySelector('.product-name-rail').dispatchEvent(new MouseEvent('mouseover',{bubbles:true}))})()`)
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      const revealedName = await evaluate<{ open: boolean; text: string }>(`(()=>{const panel=document.querySelector('.text-affordance-float');return {open:!!panel && !panel.hasAttribute('hidden'), text:panel?.querySelector('.text-affordance-value')?.textContent || ''}})()`)
+      assert.equal(revealedName.open, true, `${lang}/${width}: hovering a clamped product name opens the shared reveal float`)
+      assert.equal(revealedName.text, result.expected.name, `${lang}/${width}: the float shows the complete, un-clamped product name`)
+      await evaluate(`(()=>{document.querySelector('.product-name-rail').dispatchEvent(new MouseEvent('mouseout',{bubbles:true,relatedTarget:document.body}))})()`)
 
       const reasonTail = await evaluate<{ visible: boolean; scrollLeft: number; maxScroll: number; tailLeft: number; tailRight: number; boxLeft: number; boxRight: number }>(`(async()=>{const rail=document.querySelector('[data-stock-mobile-row="metadata"]'),text=document.querySelector('[data-stock-mobile-reason]').lastChild;rail.scrollLeft=rail.scrollWidth;await new Promise(requestAnimationFrame);const range=document.createRange();range.setStart(text,text.length-1);range.setEnd(text,text.length);const tail=range.getBoundingClientRect(),box=rail.getBoundingClientRect();return {visible:rail.scrollLeft>0&&tail.left>=box.left-1&&tail.right<=box.right+1,scrollLeft:rail.scrollLeft,maxScroll:rail.scrollWidth-rail.clientWidth,tailLeft:tail.left,tailRight:tail.right,boxLeft:box.left,boxRight:box.right}})()`)
       assert.equal(reasonTail.visible, true, `${lang}/${width}: horizontal pan reveals final reason character (${JSON.stringify(reasonTail)})`)
