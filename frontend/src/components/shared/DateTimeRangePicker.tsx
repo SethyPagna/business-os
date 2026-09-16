@@ -382,8 +382,18 @@ export default function DateTimeRangePicker({
   // whole trigger into two lines whenever a time was set. The clamp floor
   // drops slightly when a time is shown so `dd/mm/yyyy HH:MM` still fits
   // at the narrowest (375px) width without wrapping.
+  //
+  // P9 (Sep 16 2026), owner verbatim: "the date start and date end are not
+  // responsive in the button row. too small and out of bounds." The floor
+  // used to go down to 9px, which is unreadable, AND the clamp scales off
+  // the VIEWPORT (`vw`), not this trigger's own box -- when a host row
+  // (StatsRangeRow) squeezed the trigger far narrower than the viewport,
+  // the text kept its viewport-sized floor and spilled past the box edge.
+  // Floor is now 11px everywhere (never below, per the rule), and
+  // `overflow-hidden` below is the hard guard: text can never paint outside
+  // the row even if a future host still under-sizes the box.
   const triggerEndpoint = (date: string, time: string) => (
-    <span className={`inline-flex min-w-0 items-baseline justify-center gap-1 whitespace-nowrap tabular-nums leading-none ${compactTriggerLabels ? 'text-[clamp(10px,2.75vw,11px)]' : (showTimes ? 'text-[clamp(9px,2.6vw,14px)]' : 'text-[clamp(10px,3vw,14px)]')}`}>
+    <span className={`inline-flex min-w-0 items-baseline justify-center gap-1 whitespace-nowrap tabular-nums leading-none overflow-hidden ${compactTriggerLabels ? 'text-[clamp(11px,2.75vw,12px)]' : (showTimes ? 'text-[clamp(11px,2.6vw,14px)]' : 'text-[clamp(11px,3vw,14px)]')}`}>
       <span>{date}</span>
       {showTimes ? <span className="font-medium opacity-80">{time}</span> : null}
     </span>
@@ -461,14 +471,14 @@ export default function DateTimeRangePicker({
           if (!current) setPickPhase('start')
           return !current
         })}
-        className={`min-h-10 min-w-0 max-w-full ${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3 py-1.5 sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[15rem]'} border text-sm font-semibold transition ${hasSelection
+        className={`min-h-10 min-w-0 max-w-full overflow-hidden ${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3 py-1.5 sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[15rem]'} border text-sm font-semibold transition ${hasSelection
           ? 'border-blue-400 bg-blue-50 text-blue-800 shadow-sm dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100'
           : 'border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50/50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-600'}`}
         aria-expanded={open}
         aria-label={t('date_time_range') || 'Date and time range'}
       >
         {showCalendarIcon && <CalendarDays className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" />}
-        <span className={`grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`} data-date-range-trigger-values>
+        <span className={`grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 overflow-hidden ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`} data-date-range-trigger-values>
           {triggerEndpoint(startTriggerDate, value.startTime || '00:00')}
           <ArrowRight className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} aria-hidden="true" />
           {triggerEndpoint(endTriggerDate, value.endTime || '23:59')}

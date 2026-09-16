@@ -191,7 +191,10 @@ test('compact Stats and range chrome are opt-in, accessible, and preserve full e
   assert.match(row, /showQuickRanges=\{!showPresets\}/, 'the picker hides its private presets exactly when the row already renders the external preset rail')
   assert.doesNotMatch(row, /min-w-fit/, 'compact dates must be allowed to shrink inside action-heavy phone rows')
   assert.match(picker, /showCalendarIcon = false/, 'calendar chrome is absent by default across range triggers')
-  assert.match(picker, /compactTriggerLabels \? 'text-\[clamp\(10px,2\.75vw,11px\)\]'/, 'compact endpoints use a readable bounded responsive size rather than an intrinsic-width floor')
+  // P9 (Sep 16 2026): floor bumped from 10px to 11px (owner: dates were
+  // "too small and out of bounds" on the phone control rows) -- still a
+  // bounded clamp(), never a fixed intrinsic-width floor.
+  assert.match(picker, /compactTriggerLabels \? 'text-\[clamp\(11px,2\.75vw,12px\)\]'/, 'compact endpoints use a readable bounded responsive size rather than an intrinsic-width floor')
   assert.match(picker, /data-date-range-trigger-values/, 'both complete endpoint values share one shrinkable three-column track')
   assert.match(picker, /triggerEndpoint\(startTriggerDate, value\.startTime \|\| '00:00'\)/, 'selected time remains visibly paired with the full start date')
   assert.doesNotMatch(picker, /min-w-0 truncate/, 'range endpoints must not be silently ellipsized')
