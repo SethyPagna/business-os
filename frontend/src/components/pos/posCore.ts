@@ -1,4 +1,4 @@
-import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
+import { normalizePriceValue } from '../../utils/pricing.ts'
 import { divideMoney4, multiplyMoney4, percentageMoney4, roundMoney2, roundMoney4, sellingPriceCeilCent, settlementRounding4, subtractMoney4, sumMoney4 } from '../../utils/moneyPrecision.ts'
 import { evaluatePromotionPricing, evaluateCartPromotionAdjustments, type PromotionRule } from '../../utils/promotionRules.ts'
 import { capturePricingProduct, evaluateCapturedPricingPool, type CapturedPricingPool, type ExactLinePricing, type PricingSource } from '../../utils/saleItemPricing.ts'

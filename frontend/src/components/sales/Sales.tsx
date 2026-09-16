@@ -2,7 +2,6 @@ import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'rea
 import type { ComponentProps } from 'react'
 import { toggleMultiValue, isMultiActive } from '../../utils/multiSelect'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
-import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
@@ -24,7 +23,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
-import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
+import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, SALES_LIST_REQUEST_TIMEOUT_MS, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type PreparedSaleStatusRequest, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
 import { getSalesCustomerPicker, getDeliveryContacts } from '../../api/contactReadTransport.ts'
@@ -1445,7 +1444,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
-    const previousSale = salesRef.current.find((entry) => Number(entry?.id || 0) === numericId) || null
     try {
       const result = await withLoaderTimeout(
         () => getSalesApi().amendSale(saleId, request),

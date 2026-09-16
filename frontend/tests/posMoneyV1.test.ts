@@ -350,7 +350,7 @@ async function reviewProbe(options: { proof?: unknown; marker?: boolean; denied?
     // touching window.localStorage throws outright on an iOS device with site
     // data blocked, so the raw stores are no longer referenced by the slice.
     readPosStorage: (_kind: string, key: string) => stored.get(key) ?? null,
-    setOrders: (value: unknown) => { calls.push('orders') }, setPromotionRules: () => {}, setPromotionReadVersion: () => {},
+    setOrders: (_value: unknown) => { calls.push('orders') }, setPromotionRules: () => {}, setPromotionReadVersion: () => {},
     setReceiptQueue: () => calls.push('print'), closeOrder: () => calls.push('close'),
     notify: (message: string) => notices.push(message), getErrorMessage: (error: Error) => error.message, t: (key: string) => key,
   }

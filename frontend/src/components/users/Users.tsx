@@ -319,7 +319,7 @@ function UsersMobileSkeletonCards() {
 }
 
 export default function Users() {
-  const { t, notify, hasPermission, user: currentUser } = useApp()
+  const { t, notify, user: currentUser } = useApp()
   const { syncChannel } = useSync()
   // E4: renders inside the Settings hub now.
   const isActive = useIsPageActive('settings')

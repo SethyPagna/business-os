@@ -734,15 +734,6 @@ function formatDateTime(raw: unknown): string {
   })
 }
 
-function formatBytes(value: unknown): string {
-  const amount = Number(value || 0)
-  if (!Number.isFinite(amount) || amount <= 0) return '0 B'
-  if (amount < 1024) return `${amount} B`
-  if (amount < 1024 * 1024) return `${(amount / 1024).toFixed(1)} KB`
-  if (amount < 1024 * 1024 * 1024) return `${(amount / (1024 * 1024)).toFixed(1)} MB`
-  return `${(amount / (1024 * 1024 * 1024)).toFixed(1)} GB`
-}
-
 function yieldToBrowser(): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve()
   if (typeof window.requestAnimationFrame === 'function') {

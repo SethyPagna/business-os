@@ -18,8 +18,6 @@ import { assertActorReadScope, assertActorSessionDispatchAllowed, beginActorCook
 import {
   getSyncServerUrl,
   getSyncToken,
-  setSyncServerUrl,
-  setSyncToken,
 } from './httpState.ts'
 
 export {

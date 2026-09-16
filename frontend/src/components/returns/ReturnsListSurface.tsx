@@ -71,7 +71,6 @@ interface ReturnSection {
 
 interface ReturnsListSurfaceProps {
   collapsedReturnSections: Set<string>
-  CUSTOMER_SCOPE: string
   filtered: ReturnRecord[]
   fmtTime: (value?: string) => string
   isSelectionScopeFullySelected: (ids: number[]) => boolean
@@ -150,7 +149,6 @@ function ReturnsMobileSkeletonCards() {
 
 export default function ReturnsListSurface({
   collapsedReturnSections,
-  CUSTOMER_SCOPE,
   filtered,
   fmtTime,
   isSelectionScopeFullySelected,

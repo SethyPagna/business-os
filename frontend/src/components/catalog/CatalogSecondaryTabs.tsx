@@ -19,7 +19,7 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
-import { SectionShell, StatusPill, SummaryTile } from './catalogUi'
+import { SectionShell } from './catalogUi'
 
 type IdValue = string | number
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string

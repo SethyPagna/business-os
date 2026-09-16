@@ -582,7 +582,6 @@ export default function BarcodeScannerModal({
   const {
     showCameraAction,
     requestCameraLabel,
-    statusMessage,
     emptyStateMessage,
     stateKind,
   } = deriveScannerPresentation({

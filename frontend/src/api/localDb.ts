@@ -277,17 +277,6 @@ export function parseCSV(text: string) {
   return parseCsvRows(text)
 }
 
-function splitCSVLine(line: string): string[] {
-  const result: string[] = []; let cur = ''; let inQ = false
-  for (const ch of line) {
-    if (ch === '"')            { inQ = !inQ }
-    else if (ch === ',' && !inQ) { result.push(cur); cur = '' }
-    else                       { cur += ch }
-  }
-  result.push(cur)
-  return result
-}
-
 export function buildCSVTemplate(headers: string[], filename: string, exampleRow?: Record<string, unknown>): void {
   buildCSVTemplateFile(headers, filename, exampleRow)
 }

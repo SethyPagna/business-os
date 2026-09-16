@@ -5,9 +5,6 @@ import ProductNameRail from '../shared/ProductNameRail'
 import { Suspense, memo, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
-import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
 import MoreVertical from 'lucide-react/dist/esm/icons/more-vertical.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
@@ -15,13 +12,11 @@ import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import { isBrokenLocalizedString, useApp, useLowStockConfig, useSync } from '../../AppContext'
 import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
 import { useLayeredSectionNav } from '../../utils/sectionNavPreference.ts'
-import Modal from '../shared/Modal'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import FilterMenu from '../shared/FilterMenu'
 import InfoHint from '../shared/InfoHint'
 import PortalMenu from '../shared/PortalMenu'
 import AppSelect from '../shared/AppSelect'
-import PageSizeSelect from '../shared/PageSizeSelect'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
@@ -121,7 +116,6 @@ import {
   normalizePositiveProductIds,
 } from './helpers/productSelectionHelpers.ts'
 import {
-  buildProductGroupPriceLabel,
   buildProductGroupSummaryParts,
 } from './helpers/productGroupViewHelpers.ts'
 import {
@@ -1490,7 +1484,7 @@ function ProductsFullEditor() {
   // end result (no active initial-letter filter, ever).
   const [initialFilter] = useState('all')
   const [selectedIds,    setSelectedIds]    = useState<Set<number>>(new Set())
-  const [bulkEditOpen,   setBulkEditOpen]   = useState(false)
+  const [, setBulkEditOpen]   = useState(false)
   const [exportFieldsOpen, setExportFieldsOpen] = useState(false)
   // Which scope (Selected/Filtered/Full) the export panel currently has
   // picked -- reset to the richest available scope each time the panel
@@ -3497,7 +3491,6 @@ function ProductsFullEditor() {
 
   const visibleIds = useMemo(() => buildVisibleProductIds(visibleProducts), [visibleProducts])
   const visibleIdsSignature = useMemo(() => visibleIds.join(','), [visibleIds])
-  const visibleIdSet = useMemo(() => new Set(visibleIds), [visibleIdsSignature])
   // ---------------------------------------------------------------- P3-L6
   // TAGGED stock: units the operator chose to KEEP inside a product group
   // under an English condition tag (broken/damaged/expired/opened/other)
@@ -3666,13 +3659,6 @@ function ProductsFullEditor() {
     setSelectedIds((current) => toggleIdSet(current, ids, checked))
   }, [])
 
-  const cycleProductPageSize = useCallback(() => {
-    const currentIndex = PAGE_SIZE_OPTIONS.findIndex((option) => Number(option) === Number(productSafePageSize))
-    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % PAGE_SIZE_OPTIONS.length : 0
-    setProductPageSize(PAGE_SIZE_OPTIONS[nextIndex])
-    setProductPage(1)
-  }, [productSafePageSize])
-
   const isSelectionScopeFullySelected = useCallback(
     (ids: EntityId[] = []) => isSelectionScopeFullySelectedHelper(ids, selectedVisibleIdsSet),
     [selectedVisibleIdsSet],
@@ -3802,10 +3788,6 @@ function ProductsFullEditor() {
     const node = nodes.find((entry) => entry.getClientRects().length > 0) || nodes[0]
     scrollNodeWithOffset(node instanceof HTMLElement ? node : null)
   }, [jumpTargetIdsByLetter])
-
-  const getGroupPriceLabel = useCallback((group: ProductGroupLike) => {
-    return buildProductGroupPriceLabel(group, fmtUSD)
-  }, [fmtUSD])
 
   const getGroupSummaryParts = useCallback((group: ProductGroupLike, { includeCount = true }: { includeCount?: boolean } = {}) => {
     return buildProductGroupSummaryParts(group, { includeCount, t: (key: string) => t(key) || key, fmtUSD })
@@ -5567,7 +5549,7 @@ function ProductsFullEditor() {
             selectedScopeId={exportScopeId}
             onScopeChange={setExportScopeId}
             onClose={() => setExportFieldsOpen(false)}
-            onConfirm={(groups, format) => {
+            onConfirm={(groups, _format) => {
               setExportFieldsOpen(false)
               const scope = productExportScopes.find((s) => s.id === exportScopeId) || productExportScopes[0]
               // 'full' scope explicitly means "ignore filters" (see

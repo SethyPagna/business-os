@@ -111,7 +111,6 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   // product, so it must not silently replace the selling price on this panel
   // the way the old special price did.
   const activePriceUsd = sellingPriceUsd
-  const activePriceKhr = sellingPriceKhr
   const stockQuantity = Number(p.stock_quantity || 0)
   // Settings > Stock Alerts. This read used to fall back to 0 where every
   // other surface fell back to 10, so a product with no limit of its own was

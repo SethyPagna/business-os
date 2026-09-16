@@ -26,7 +26,6 @@ import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard }
 import { persistentNoticeFingerprint, shouldRenderPersistentNotice } from './utils/persistentNoticeDismissal.ts'
 import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGuard.ts'
 import { hasDirtyWork } from './utils/dirtyWork.ts'
-import { withLoaderTimeout } from './utils/loaders.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 import { ACTOR_SESSION_RETRY_EVENT, actorSessionQuarantineStatus, isActorSessionQuarantined, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
 import { hasLocalSyncProblemPresentation, subscribeSyncProblemPresentation, shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
@@ -84,11 +83,6 @@ interface AppSettings {
   ui_app_favicon_position_x?: string | number
   ui_app_favicon_position_y?: string | number
   default_landing_page?: string
-}
-
-function toFiniteNumber(value: unknown, fallback: number): number {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : fallback
 }
 
 interface AppNotification {
@@ -479,12 +473,6 @@ async function triggerChunkRecoveryReload(marker: string): Promise<boolean> {
     .catch(() => {})
     .finally(reload)
   return true
-}
-
-function createChunkReloadStallError(key: string): Error {
-  const error = new Error(`Loading chunk recovery reload did not complete (${key}). Please tap Reload page.`)
-  error.name = 'ChunkReloadStallError'
-  return error
 }
 
 function lazyWithRetry(importer: ChunkImporter, key: string) {
@@ -1865,8 +1853,6 @@ export default function App() {
     reloadWriteConflict,
     syncUrl,
     canWriteToServer,
-    language,
-    theme,
     notify,
     t,
     storagePersisted,

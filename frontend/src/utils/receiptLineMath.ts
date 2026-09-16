@@ -121,8 +121,6 @@ export function receiptLineFigures(
   const chargedUnitUsd = num(item.applied_price_usd ?? item.price_usd ?? item.price)
   const chargedUnitKhr = num(item.applied_price_khr ?? item.price_khr)
   const baseUnitUsd = num(item.base_price_usd)
-  const productSavingsUsd = num(item.product_discount_usd)
-  const manualSavingsUsd = num(item.manual_discount_usd)
   // Keep the product-level list price derivation explicit; manual discounts
   // are an additional sale-level reduction layered on top of that amount.
   // This distinction matters for legacy lines where either component may be

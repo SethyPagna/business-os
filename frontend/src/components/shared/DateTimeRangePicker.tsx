@@ -407,8 +407,6 @@ export default function DateTimeRangePicker({
   const renderEndpointBox = (which: 'start' | 'end') => {
     const iso = which === 'start' ? value.startDate : value.endDate
     const invalid = which === 'start' ? startInvalid : endInvalid
-    const month1 = iso ? Number(iso.slice(5, 7)) : (which === 'start' ? viewMonth : Number((value.endDate || value.startDate || today).slice(5, 7)))
-    const year = iso ? Number(iso.slice(0, 4)) : (which === 'start' ? viewYear : Number((value.endDate || value.startDate || today).slice(0, 4)))
     const label = which === 'start' ? (t('range_start') || 'Start') : (t('range_end') || 'End')
     const active = pickPhase === which
     return (

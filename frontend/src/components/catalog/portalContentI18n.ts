@@ -3,7 +3,6 @@ import { getPortalLanguageText } from './portalLanguagePacks.ts'
 type PlainRecord = Record<string, unknown>
 type TextRecord = Record<string, string>
 type TextRecordByLanguage = Record<string, TextRecord>
-type PortalCollectionItem = PlainRecord & { id?: unknown }
 type PublicCopyPlaceholder = [token: string, original: string]
 
 const TRANSLATABLE_CONFIG_FIELDS = [

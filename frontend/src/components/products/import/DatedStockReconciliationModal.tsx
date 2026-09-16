@@ -45,7 +45,6 @@ type TranslateFn = (key: string, fallback?: string, km?: string) => string
 type EntityId = string | number
 
 interface ProductOption { id?: EntityId; name?: string | null }
-interface BranchOption { id: EntityId; name?: string | null }
 
 interface DatedStockReconciliationModalProps {
   onClose: () => void
