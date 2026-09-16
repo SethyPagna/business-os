@@ -207,15 +207,21 @@ const filters = { startDate: '2026-09-01', endDate: '2026-09-30', branchId: 2 }
     for (let id = 1; id <= 15_000; id += 1) sale.run(id)
     for (let id = 1; id <= 50_000; id += 1) item.run(id, (id % 15_000) + 1)
   })()
+  // P9-perf (Sep 16 2026): the page cap tracks reportMoneyPrecision.ts's
+  // REPORT_MONEY_PAGE_SIZE (raised 500 -> 2000 to cut D1 round trips), not
+  // a pinned literal -- this only checks reportKeysetRows honors whatever
+  // the constant currently says.
+  const { REPORT_MONEY_PAGE_SIZE } = load('src/lib/reportMoneyPrecision.ts')
   let pageCalls = 0
   const started = process.hrtime.bigint()
   const large = kernel(largeDb, (query, params) => {
-    if (query.includes('@reportPageSize')) { pageCalls += 1; assert.ok(params.reportPageSize <= 500) }
+    if (query.includes('@reportPageSize')) { pageCalls += 1; assert.ok(params.reportPageSize <= REPORT_MONEY_PAGE_SIZE) }
   })
   const snapshot = await large.readSalesReportSnapshot({}, filters)
   const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6
   assert.equal(snapshot.row_count, 65_000)
-  assert.ok(pageCalls >= 260, 'both passes page all contributing rows')
-  console.log(`PASS native 15k headers + 50k items, row_count=${snapshot.row_count}, page_max=500, elapsed_ms=${elapsedMs.toFixed(1)} (local SQLite instrumentation; not D1 latency)`)
+  const expectedPageCalls = (Math.ceil(15_000 / REPORT_MONEY_PAGE_SIZE) + Math.ceil(50_000 / REPORT_MONEY_PAGE_SIZE)) * 2
+  assert.ok(pageCalls >= expectedPageCalls, 'both passes page all contributing rows')
+  console.log(`PASS native 15k headers + 50k items, row_count=${snapshot.row_count}, page_max=${REPORT_MONEY_PAGE_SIZE}, elapsed_ms=${elapsedMs.toFixed(1)} (local SQLite instrumentation; not D1 latency)`)
   legacyDb.close(); preciseDb.close(); refundDb.close(); conflictDb.close(); largeDb.close()
 })().catch((error) => { console.error(error); process.exitCode = 1 })
