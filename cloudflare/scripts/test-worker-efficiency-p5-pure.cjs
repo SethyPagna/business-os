@@ -68,8 +68,13 @@ async function main() {
 
     // Every hot PRAGMA table_info/sqlite_master probe callsite in the Worker
     // must go through this one helper -- not reimplement its own memoization
-    // or fire a fresh PRAGMA per request.
-    for (const relPath of ['routes/sales.ts', 'lib/salesAnalytics.ts', 'lib/productWrites.ts', 'routes/compat.ts']) {
+    // or fire a fresh PRAGMA per request. routes/compat.ts dropped out of
+    // this list when P8-debloat (commit 6f547962) removed its dead
+    // insertTableRow/updateTableRow/deleteTableRow stub -- that stub was the
+    // only PRAGMA-probing consumer in the file, and it had zero callers
+    // (routes/users.ts fully superseded it). compat.ts no longer probes
+    // schema at all, so it no longer belongs on this list.
+    for (const relPath of ['routes/sales.ts', 'lib/salesAnalytics.ts', 'lib/productWrites.ts']) {
       const source = readSrc(relPath)
       assert.match(source, /from ['"].*schemaProbe['"]/, `${relPath} must import the shared schemaProbe helper`)
     }

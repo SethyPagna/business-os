@@ -74,7 +74,7 @@ export class BroadcastHub {
     } catch (_) { /* ignore malformed client messages */ }
   }
 
-  async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
+  async webSocketClose(ws: WebSocket, code: number, reason: string, _wasClean: boolean): Promise<void> {
     try { ws.close(code, reason) } catch (_) { /* already closing */ }
   }
 }

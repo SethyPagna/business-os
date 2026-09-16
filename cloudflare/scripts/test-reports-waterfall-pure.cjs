@@ -222,10 +222,13 @@ test('the level columns carry the whole pending cohort, and every cost query use
   for (const col of ['pending_tx_count', 'pending_gross_sales_usd', 'pending_store_discount_usd', 'pending_membership_discount_usd', 'pending_delivery_usd', 'pending_delivery_cost_usd']) {
     assert.ok(lib.RECOGNIZED_LEVEL_COLUMNS.includes(`AS ${col}`), `RECOGNIZED_LEVEL_COLUMNS emits ${col}`)
   }
-  // Four queries measure COGS; all four must read the one fragment, or a
-  // report's pending block disagrees with the Overview's.
+  // Three queries measure COGS (period series, grouped, day rows); all
+  // three must read the one fragment, or a report's pending block disagrees
+  // with the Overview's. salesCost() was a fourth, snapshot-superseded
+  // consumer removed as dead code in P8 debloat (zero callers; getSalesTotals
+  // is the snapshot-based replacement).
   const uses = src.match(/\$\{ITEM_COST_COLUMNS\}/g) || []
-  assert.equal(uses.length, 4, 'salesCost + period series + grouped + day rows all use ITEM_COST_COLUMNS')
+  assert.equal(uses.length, 3, 'period series + grouped + day rows all use ITEM_COST_COLUMNS')
   // getProductSalesRanking keeps its own COGS sum ON PURPOSE: it measures a
   // different thing (per-product `line_sales_usd - cost_usd`, no delivery
   // term, line-sales basis rather than net-sales revenue) and never feeds

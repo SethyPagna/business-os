@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
-import { tableColumnSet } from '../lib/schemaProbe'
 import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
 import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } from '../lib/backup'
@@ -71,82 +70,6 @@ for (const prefix of [
   app.use(`${prefix}/*`, requireAuth)
 }
 
-const WRITE_SKIP_KEYS = new Set([
-  'id', 'expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at',
-  'client_request_id', 'device_name', 'device_tz', 'client_time', 'currentPassword',
-  'current_password', 'confirmPassword', 'confirm_password',
-])
-
-function isoNow() {
-  return new Date().toISOString()
-}
-
-// Memoized per isolate by schemaProbe.ts -- was a fresh PRAGMA table_info()
-// on every write through this compat route that needed to know which
-// columns exist.
-async function columnsFor(env: Env, table: string): Promise<Set<string>> {
-  return tableColumnSet(getDb(env), table)
-}
-
-function payloadForColumns(body: Record<string, unknown>, columns: Set<string>) {
-  const payload: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(body || {})) {
-    if (WRITE_SKIP_KEYS.has(key) || !columns.has(key)) continue
-    if (typeof value === 'boolean') {
-      payload[key] = value ? 1 : 0
-    } else if (value !== null && typeof value === 'object') {
-      // D1's bind() only accepts null/number/string/ArrayBuffer -- binding a
-      // raw object (e.g. undo_payload/redo_payload) throws a D1 type error,
-      // which the global onError handler masks as a generic 500 ("Something
-      // went wrong processing that request"). Serialize JSON-shaped values
-      // instead of passing them through.
-      payload[key] = JSON.stringify(value)
-    } else {
-      payload[key] = value
-    }
-  }
-  return payload
-}
-
-async function insertTableRow(env: Env, table: string, body: Record<string, unknown>, required: Record<string, unknown> = {}) {
-  const columns = await columnsFor(env, table)
-  const payload = { ...payloadForColumns(body, columns), ...required }
-  if (columns.has('created_at') && payload.created_at == null) payload.created_at = isoNow()
-  if (columns.has('updated_at') && payload.updated_at == null) payload.updated_at = isoNow()
-  const keys = Object.keys(payload).filter((key) => columns.has(key))
-  // sql-bound-params: bounded by construction -- one parameter per COLUMN
-  // of a single row, not per row, so this is capped by the table's schema
-  // (the widest, `products`, is well under D1's 100-parameter limit).
-  const result = await env.DB.prepare(`INSERT INTO "${table}" (${keys.map((key) => `"${key}"`).join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`)
-    .bind(...keys.map((key) => payload[key]))
-    .run()
-  return result.meta?.last_row_id
-}
-
-async function updateTableRow(env: Env, table: string, id: string | number, body: Record<string, unknown>) {
-  const columns = await columnsFor(env, table)
-  const payload = payloadForColumns(body, columns)
-  if (columns.has('updated_at')) payload.updated_at = isoNow()
-  const keys = Object.keys(payload).filter((key) => columns.has(key))
-  if (!keys.length) return 0
-  const result = await env.DB.prepare(`UPDATE "${table}" SET ${keys.map((key) => `"${key}" = ?`).join(', ')} WHERE id = ?`)
-    .bind(...keys.map((key) => payload[key]), id)
-    .run()
-  return result.meta?.changes || 0
-}
-
-async function deleteTableRow(env: Env, table: string, id: string | number) {
-  const columns = await columnsFor(env, table)
-  if (columns.has('deleted_at')) {
-    return updateTableRow(env, table, id, { deleted_at: isoNow() })
-  }
-  if (columns.has('is_active')) {
-    return updateTableRow(env, table, id, { is_active: 0 })
-  }
-  const result = await env.DB.prepare(`DELETE FROM "${table}" WHERE id = ?`).bind(id).run()
-  return result.meta?.changes || 0
-}
-
 function num(value: unknown): number {
   const n = Number(value)
   return Number.isFinite(n) ? n : 0
@@ -211,22 +134,6 @@ function emptySummary() {
     expiring_products: [],
     expiring_count: 0,
     recent_sales: [],
-  }
-}
-
-function emptyAnalytics() {
-  return {
-    totals: {},
-    prevTotals: {},
-    periodReturns: {},
-    periodSupplierReturns: {},
-    periodData: [],
-    byPayment: [],
-    byBranch: [],
-    topProducts: [],
-    topProductsQty: [],
-    topCustomers: [],
-    hourlyDist: [],
   }
 }
 

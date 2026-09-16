@@ -214,11 +214,6 @@ export function saleRecordFieldRows(record: SaleRecord): SaleRecordFieldRow[] {
   })
 }
 
-/** True when this record has anything to expand. */
-export function saleRecordHasDetail(record: SaleRecord): boolean {
-  return saleRecordFieldRows(record).length > 0
-}
-
 /**
  * The kinds actually present, with counts, in the closed set's order.
  *

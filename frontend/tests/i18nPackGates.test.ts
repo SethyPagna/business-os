@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { duplicateTopLevelKeys, fallbackSlotRegressions } from '../../ops/scripts/frontend/i18nPackChecks.ts'
+import { duplicateTopLevelKeys, fallbackSlotRegressions, orphanPackKeys } from '../../ops/scripts/frontend/i18nPackChecks.ts'
 
 // Two whole classes of pack defect that every gate on this repo was blind to,
 // both found live in en.json/km.json on 2026-09-06.
@@ -123,6 +123,21 @@ runTest('the live confirm_complete_stock_session_mixed keeps all five slots', ()
       assert.ok(text.includes(slot), `${pack}.confirm_complete_stock_session_mixed lost ${slot}`)
     }
   }
+})
+
+runTest('orphanPackKeys clears a key referenced as a plain quoted string', () => {
+  const sources = [{ file: 'x.tsx', text: "translateOr('live_key', 'Fallback')" }]
+  assert.deepEqual(orphanPackKeys(['live_key'], sources), [])
+})
+
+runTest('orphanPackKeys clears a key inside a known dynamic-prefix family with no literal site', () => {
+  const sources = [{ file: 'x.tsx', text: "tr(`status_${value}`, fallback)" }]
+  assert.deepEqual(orphanPackKeys(['status_cancelled'], sources), [])
+})
+
+runTest('orphanPackKeys flags a key with no literal site and no matching family', () => {
+  const sources = [{ file: 'x.tsx', text: "translateOr('other_key', 'Fallback')" }]
+  assert.deepEqual(orphanPackKeys(['truly_dead_key'], sources), ['truly_dead_key'])
 })
 
 if (failed > 0) {
