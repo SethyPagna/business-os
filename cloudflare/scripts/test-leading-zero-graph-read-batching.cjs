@@ -91,6 +91,7 @@ function fixture(count, lots = false) {
     d1.db.prepare("INSERT INTO rfid_events(session_id,epc_id,event_type,product_id) VALUES(1,?,'scan',?)").run(`E${i}`, duplicate)
     d1.db.prepare("INSERT INTO rfid_session_items(session_id,epc_id,status,product_id) VALUES(1,?,'confirmed',?)").run(`E${i}`, duplicate)
     d1.db.prepare("INSERT INTO promotions(title,link_product_id) VALUES('Fixture',?)").run(duplicate)
+    d1.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source) VALUES(?,9,'manual')").run(duplicate)
     d1.db.prepare("INSERT INTO promotion_rules(title,product_ids) VALUES('Both',?)").run(JSON.stringify([keeper, duplicate]))
     d1.db.prepare("INSERT INTO products(id,name,barcode,parent_id) VALUES(?,'Child',?,?)").run(10000 + i, `child${i}`, duplicate)
     if (lots) {

@@ -392,6 +392,10 @@ export const MERGE_REPARENT_TABLES: ReadonlyArray<{ table: string; column: strin
   { table: 'rfid_events', column: 'product_id' },
   { table: 'rfid_session_items', column: 'product_id' },
   { table: 'promotions', column: 'link_product_id' },
+  // P10-10: the manual cost-price entry ledger (migration 0177) -- a merge
+  // must carry the discarded row's cost-edit history onto the survivor, the
+  // same as every other per-product ledger above, so undo gives it back.
+  { table: 'product_cost_entries', column: 'product_id' },
 ]
 
 const MERGE_REPARENT_ALLOWED = new Set(MERGE_REPARENT_TABLES.map((t) => `${t.table}.${t.column}`))

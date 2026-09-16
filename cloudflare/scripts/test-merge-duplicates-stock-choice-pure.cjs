@@ -204,6 +204,7 @@ function seed() {
   run(`INSERT INTO rfid_events (id, session_id, epc_id, product_id, event_type) VALUES (760, 1, 'EPC-1', ${DUP}, 'read')`)
   run(`INSERT INTO rfid_session_items (id, session_id, epc_id, product_id, status) VALUES (770, 1, 'EPC-1', ${DUP}, 'expected')`)
   run(`INSERT INTO promotions (id, title, link_product_id) VALUES (780, 'Twin promo', ${DUP})`)
+  run(`INSERT INTO product_cost_entries (id, product_id, cost_usd, source) VALUES (790, ${DUP}, 9, 'manual')`)
   return d1
 }
 
