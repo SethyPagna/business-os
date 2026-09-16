@@ -31,7 +31,7 @@ import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
 import { saleLineEditPreview, saleRemovalSubtotal } from '../../utils/saleLineEditor.ts'
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, type SaleMutationHeaderQuote } from '../../utils/saleMutationHeaderQuote.ts'
 import { useSaleMoneyCapability } from './useSaleMoneyCapability.ts'
-import { multiplyMoney4, roundMoney4, sellingPriceCeilCent, settlementRounding4, subtractMoney4, sumMoney4 } from '../../utils/moneyPrecision.ts'
+import { multiplyMoney4, sellingPriceCeilCent, sumMoney4 } from '../../utils/moneyPrecision.ts'
 import { promotionLabelText, saleEditorInputWidth } from '../../utils/saleItemNameLayout.ts'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
@@ -1049,37 +1049,8 @@ export default function SaleDetailModal({
     setAmendMutationError('')
   }
 
-  /**
-   * "1 and now 2", or "2 back to 1". One control for both directions, because
-   * a cashier types the number the line SHOULD say -- deriving which way that
-   * is, is the computer's job, not theirs.
-   */
-  const stageQuantityAmendment = (lineId: number, currentQuantity: number, name: string): void => {
-    const next = Number(amendQtyText)
-    if (!Number.isFinite(next) || next < 0) return
-    if (next === currentQuantity) return
-    if (next === 0) {
-      stageRemoval(lineId, currentQuantity, name)
-      return
-    }
-    const rising = next > currentQuantity
-    amendRequestIdRef.current = createSettlementRequestId()
-    setAmendMutationError('')
-    setAmendConfirm({
-      request: {
-        kind: rising ? 'line_quantity_increased' : 'line_quantity_decreased',
-        sale_item_id: lineId,
-        quantity: Math.abs(next - currentQuantity),
-      },
-      title: rising
-        ? translateOr('amend_increase_title', 'Add to this line?', 'បន្ថែមទៅជួរនេះ?')
-        : translateOr('amend_decrease_title', 'Reduce this line?', 'បន្ថយជួរនេះ?'),
-      summary: `${name}: ${currentQuantity} → ${next}`,
-    })
-  }
-
   /** Stage quantity and final selling-price edits as one atomic amendment. */
-  const stageLineUpdate = (lineId: number, currentQuantity: number, currentBasePrice: number, currentDiscountType: 'percent' | 'fixed' | null, currentDiscountValue: number, currentManualDiscount: number, productDiscount: number, name: string): void => {
+  const stageLineUpdate = (lineId: number, currentQuantity: number, currentBasePrice: number, currentDiscountType: 'percent' | 'fixed' | null, currentDiscountValue: number, currentManualDiscount: number, name: string): void => {
     if (Number(amendQtyText) === currentQuantity && Number(amendPriceText) === currentBasePrice && amendDiscountType === currentDiscountType && Number(amendDiscountText) === currentDiscountValue) {
       setAmendMutationError(translateOr('amend_no_change', 'Enter a new quantity, price, or discount.'))
       return
@@ -1359,7 +1330,6 @@ export default function SaleDetailModal({
   const actualCostRaw = sale.delivery_actual_cost_usd
   const actualCostParsed = actualCostRaw === null || actualCostRaw === undefined || String(actualCostRaw).trim() === '' ? null : Number(actualCostRaw)
   const actualCostUsd = actualCostParsed !== null && Number.isFinite(actualCostParsed) && actualCostParsed >= 0 ? actualCostParsed : null
-  const actualCostKhr = actualCostUsd === null ? null : toNumber(sale.delivery_actual_cost_khr)
   const isDelivery = !!toNumber(sale.is_delivery) || !!String(sale.delivery_contact_name || '').trim()
   // DISPLAY is forgiving, WRITING is not. `isDelivery` above is deliberately
   // loose so a sale that names a driver but was never flagged still reads as a
@@ -1962,7 +1932,6 @@ export default function SaleDetailModal({
                     const storedLineUsd = Number(item.total_usd)
                     const lineUsd = totals.moneyPrecisionVersion === 1 ? lineFigures.lineUsd : Number.isFinite(storedLineUsd) ? storedLineUsd : unitUsd * qty
                     const baseUnitUsd = unknownRecordedUnit ? NaN : item.base_price_usd == null ? unitUsd + toNumber(item.manual_discount_usd) : toNumber(item.base_price_usd)
-                    const productDiscountUsd = toNumber(item.product_discount_usd)
                     const manualDiscountUsd = toNumber(item.manual_discount_usd)
                     const manualDiscountType: 'percent' | 'fixed' | null = item.manual_discount_type === 'percent' || item.manual_discount_type === 'fixed'
                       ? item.manual_discount_type
@@ -2062,7 +2031,7 @@ export default function SaleDetailModal({
                               <button
                                 type="button"
                                 disabled={amendSaving}
-                                onClick={() => stageLineUpdate(lineId, qty, baseUnitUsd, manualDiscountType, manualDiscountValue, manualDiscountUsd, productDiscountUsd, String(item.product_name || item.name || ''))}
+                                onClick={() => stageLineUpdate(lineId, qty, baseUnitUsd, manualDiscountType, manualDiscountValue, manualDiscountUsd, String(item.product_name || item.name || ''))}
                                 className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
                               >
                                 {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
@@ -2176,6 +2145,7 @@ export default function SaleDetailModal({
                       label={t('discount') || 'Store discount'}
                       tone="discount"
                       amount={`-${fmtUSD(baseDiscountUsd)}`}
+                      sub={discountKhr > 0 ? `-${fmtKHR(discountKhr)}` : null}
                     />
                   ) : null}
                   {itemDiscountUsd > 0 ? (
@@ -2183,6 +2153,7 @@ export default function SaleDetailModal({
                       label={translateOr('item_discount', 'Item discount', 'បញ្ចុះតម្លៃទំនិញ')}
                       tone="discount"
                       amount={`-${fmtUSD(itemDiscountUsd)}`}
+                      sub={itemDiscountKhr > 0 ? `-${fmtKHR(itemDiscountKhr)}` : null}
                     />
                   ) : null}
                   {membershipDiscountUsd > 0 ? (
@@ -2190,6 +2161,7 @@ export default function SaleDetailModal({
                       label={t('membership_discount') || 'Membership discount'}
                       tone="credit"
                       amount={`-${fmtUSD(membershipDiscountUsd)}`}
+                      sub={membershipDiscountKhr > 0 ? `-${fmtKHR(membershipDiscountKhr)}` : null}
                     />
                   ) : null}
                   {[itemDiscountUsd, baseDiscountUsd, membershipDiscountUsd].filter((value) => value > 0).length > 1 ? (
@@ -2197,6 +2169,7 @@ export default function SaleDetailModal({
                       label={translateOr('total_discount', 'Total discount', 'បញ្ចុះតម្លៃសរុប')}
                       tone="discount"
                       amount={`-${fmtUSD(totalDiscountUsd)}`}
+                      sub={totalDiscountKhr > 0 ? `-${fmtKHR(totalDiscountKhr)}` : null}
                     />
                   ) : null}
                   {/* S4-24: "Points redeemed" is gone. It is not money -- it
@@ -2337,6 +2310,7 @@ export default function SaleDetailModal({
                       label={t('change') || 'Change'}
                       tone="change"
                       amount={fmtUSD(changeUsd)}
+                      sub={changeKhr > 0 ? fmtKHR(changeKhr) : null}
                     />
                   ) : null}
                   {/* S4-24: "Actual delivery cost" is gone from this summary.
