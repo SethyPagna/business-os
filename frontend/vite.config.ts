@@ -545,6 +545,7 @@ const deferredModulePreloadPrefixes = [
   'assets/app-local-db-',
   'assets/vendor-dexie-',
   'assets/vendor-zxing-',
+  'assets/vendor-xlsx-',
 ]
 
 const appShellIconNames = new Set([
@@ -983,7 +984,19 @@ function manualChunks(id: string): string | undefined {
   if (/[\\/]node_modules[\\/]dexie[\\/]/.test(id)) return 'vendor-dexie'
   if (/[\\/]node_modules[\\/]@zxing[\\/]/.test(id)) return 'vendor-zxing'
   if (/[\\/]node_modules[\\/]lucide-react[\\/]/.test(id)) return undefined
-  if (/[\\/]node_modules[\\/]@capacitor[\\/]/.test(id)) return 'vendor-capacitor'
+  // P9-perf (Sep 16 2026): xlsx (SheetJS) was falling into the generic
+  // catch-all 'vendor' bucket alongside qrcode and html2canvas. All three
+  // are dynamic-import()-only, but manualChunks groups by PHYSICAL file, not
+  // by call site -- so a receipt print (utils/printReceipt.ts's
+  // `import('html2canvas')` fallback render, hit on ordinary sale prints)
+  // or a receipt QR code (components/receipt/ReceiptQrCodes.tsx's
+  // `import('qrcode')`, hit on effectively every receipt) forced the browser
+  // to fetch the WHOLE bundle -- xlsx included -- even though xlsx is only
+  // needed by the Products/Dashboard/Inventory "Export to Excel" actions,
+  // which are rare by comparison. Splitting xlsx into its own vendor chunk
+  // means printing a receipt or rendering its QR code no longer downloads
+  // xlsx. See tests/chunkBoundaryPolicy.test.ts for the measured split.
+  if (/[\\/]node_modules[\\/]xlsx[\\/]/.test(id)) return 'vendor-xlsx'
   return 'vendor'
 }
 

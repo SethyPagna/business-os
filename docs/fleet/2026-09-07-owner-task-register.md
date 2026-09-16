@@ -1,3 +1,27 @@
+## September 16 Program 8/9 checkpoint LIVE
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| P8-0 Push to GitHub incl. main; archive local branches | **Done** | `main` fast-forwarded to the release tip at this checkpoint; 552 refs archived on Sep 16. |
+| P8-1 Tests for past fixes, errors and guards | **Deployed** (Worker 23615bfd-aba1-4862-a1a1-01e7b2240cce, commit f2488996) | 77b30a5f..20136e81; real fixes 5be431be (R2 edge-cache purge), 61105bcb (portal rail degrade), a835f548 (import barcode fold). |
+| P8-2 Debloat across the full codebase | **Deployed** | 36a1183f..2e7a978b, −1338/+138; reverts 65ee5141, 81c5d508; report items in progress.md. |
+| P8-3 Optimization / efficiency | **Deployed** (wave 1) | 257247bd (chunked DELETE); wave 2 open with P9-12. |
+| P9-1 Small-screen avatar button covered by the page menu | **Deployed** | 5b218d69; `navChrome.test.ts`. |
+| P9-2 Receipt settings in the page menu and for employees | **Deployed**; 0172 **applied** | 873d2eea, 7634d4cd, 3189ac3b; roles manager/employee now `receipt_settings: true`. |
+| P9-7 POS product name with large spaces per word | **Deployed** | 6aab43b5 (two-line clamp). |
+| P9-8 One-line names leave a blank row; title on click | **Deployed** | 6aab43b5; `isClipped()` vertical detection. |
+| P9-9 "err can't show tagged stock" | **In progress** | Not reproducible on production data; 4d6528b3 surfaces the real status; native check 0/1/150 ids. |
+| P9-10 Date start/end not responsive in the button row | **Deployed** | 4e7ebcde, 020a0cb4; `dateRangeTriggerResponsive.test.ts`, real-browser 320/360/390. |
+| P9-11 Products report rows show COGS and profit, compact two-column card | **Deployed** | 5ac138b3; `reportsProductsRowsInline.test.ts`. |
+| P9-12 Reports and pages load slowly | **Deployed** (wave 1) | a8d1669c (page size 2000), bd737177 (xlsx chunk). Wave 2: contacts/sales list routes, picker caching — not yet. |
+| P9-13 GET /api/sales 500 (Sentry BUSINESS-OS-1F) | **Deployed**; 0171 **applied** | 6c80bb1e, 49b70806, f8d5e964; 4 items → 0 without evidence. |
+| P9-3 Policies "how long we keep it" wording | **Not yet** (owner: pushed back) | standing rule saved. |
+| P9-4 Public assistant chat box first | **Not yet** (owner: pushed back) | 1 commit on stopped lane, unmerged. |
+| P9-5 Front page featured / trending / best sellers | **Not yet** (owner: pushed back) | stopped lane, unmerged. |
+| P9-6 Customer forgot-password / OTP (Telegram, email, Gmail) | **Not yet** (owner: pushed back) | stopped lane, unmerged (its draft 0170 file is not the applied 0171/0172). |
+
+---
+
 ## September 16 Program 7 checkpoint LIVE
 
 | Item | State | Evidence |

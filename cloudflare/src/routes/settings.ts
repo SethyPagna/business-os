@@ -180,6 +180,20 @@ const BUSINESS_IDENTITY_KEYS = new Set([
 function isRegisteredBusinessIdentityKey(key: string): boolean {
   return key === 'business_legal_name' || key === 'business_registration_number'
 }
+// Receipt/print settings (Sep 16 2026 owner request: "Receipt settings
+// should also show for employees as well"). These three keys are the only
+// ones the standalone Receipt Settings page (ReceiptSettings.tsx /
+// PrintSettings.tsx) ever writes -- see this file's own
+// sanitizeReceiptTemplateValue/sanitizeReceiptPrintSettingsValue just below,
+// which already special-case two of them. Bucketed on their own permission
+// (`receipt_settings`) rather than the blanket `settings` grant so an
+// Employee can be given the print/receipt tool without also getting Settings
+// as a whole -- mirrors the business_identity/sales_policy split above.
+const RECEIPT_SETTINGS_KEYS = new Set([
+  'receipt_template',
+  'receipt_footer',
+  'receipt_print_settings',
+])
 const SALES_POLICY_KEYS = new Set([
   'currency_usd_symbol',
   'currency_khr_symbol',
@@ -787,6 +801,7 @@ const PORTAL_ABOUT_KEYS = new Set([
 function settingsBucketPermissionFor(key: string): string | null {
   if (BUSINESS_IDENTITY_KEYS.has(key)) return 'business_identity'
   if (SALES_POLICY_KEYS.has(key)) return 'sales_policy'
+  if (RECEIPT_SETTINGS_KEYS.has(key)) return 'receipt_settings'
   if (PORTAL_POSTS_KEYS.has(key)) return 'portal_posts'
   if (PORTAL_FAQ_KEYS.has(key)) return 'portal_faq'
   if (PORTAL_ABOUT_KEYS.has(key)) return 'portal_about'
@@ -800,6 +815,7 @@ function settingsBucketPermissionFor(key: string): string | null {
 const SETTINGS_BUCKET_LABELS: Record<string, string> = {
   business_identity: 'Business identity',
   sales_policy: 'Sales policy',
+  receipt_settings: 'Receipt settings',
   portal_posts: 'Manage portal posts',
   portal_faq: 'Manage portal FAQ',
   portal_about: 'Manage portal About',

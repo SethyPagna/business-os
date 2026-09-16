@@ -113,17 +113,14 @@ runTest('the pages layer is anchored to the chrome, not to the bottom of the vie
   const layer = sidebar.slice(sidebar.indexOf(LAYER_ANCHOR))
   assert.match(sidebar, /const navLayerTop = mobileChromeViewportOffset\(\{ headerVisible: mobileHeaderVisible, appUpdateVisible \}\)/,
     'the layer offset comes from the shared kernel, in both auto-hide states')
-  assert.match(layer, /style=\{inline \? \{ top: navLayerTop \} : undefined\}/,
-    'pages mode pins the layer top to that offset')
+  assert.match(layer, /style=\{inline \? \{ top: navLayerTop \} : \{ maxHeight: `min\(calc\(70 \* var\(--app-vh\)\), calc\(100dvh - \$\{navLayerTop\}\)\)` \}\}/,
+    'pages mode pins the layer top to that offset; sections mode caps its height at the same header-bottom measurement instead')
   // The pre-fix shape, kept as a negative control: a bottom-anchored sheet
-  // capped at 70vh cannot be flush with a top-anchored bar, and the band it
-  // leaves is where the page you backed out of showed through.
-  // Unit-agnostic on purpose: the cap moved to the shared --app-vh helper in
-  // styles/main.css so it measures the viewport iOS actually shows. What these
-  // two pin is WHICH mode carries a viewport cap, never its spelling.
-  assert.doesNotMatch(layer, /inline \? '[^']*max-h-\[/, 'pages mode must not cap the layer against the viewport at all')
-  assert.match(layer, /\$\{inline \? 'bos-nav-chrome bos-nav-layer' : 'max-h-\[[^\]]+\][^']*'\}/,
-    'only the legacy sections-mode sheet keeps the viewport cap')
+  // capped at a flat 70vh with no top bound at all could still reach up and
+  // under the header on a short viewport. Unit-agnostic on purpose: the cap
+  // is the shared --app-vh helper in styles/main.css, combined via min()
+  // with a header-bottom bound so the tighter of the two always wins.
+  assert.doesNotMatch(layer, /inline \? '[^']*max-h-\[/, 'the viewport cap is no longer a static Tailwind class for either mode')
   assert.match(layer, /\{inline \? null : <div className="fixed inset-0 z-30 bg-black\/40 md:hidden"/,
     'an opaque full-height layer needs no scrim; the legacy sheet still gets one')
   assert.match(css, /\.bos-nav-layer \{[^}]*background-color: var\(--nav-ground\)/,
@@ -349,7 +346,7 @@ runTest('every color-mix value ships a flat hex fallback ahead of it', () => {
 
 runTest('the bar, the tiles and the title carry the design language, not grey utilities', () => {
   const header = sidebar.slice(sidebar.indexOf('data-bos-mobile-header'), sidebar.indexOf('{!inline ? ('))
-  assert.match(header, /bos-nav-chrome bos-nav-topbar fixed left-0 right-0 z-40/,
+  assert.match(header, /bos-nav-chrome bos-nav-topbar fixed left-0 right-0 z-50/,
     'the top bar is a chrome surface')
   assert.doesNotMatch(header, /border-b border-gray-200 bg-white/, 'and no longer a grey-on-white box')
   assert.match(header, /className="bos-nav-title min-w-0 flex-1 [^"]*text-sm font-semibold/,
@@ -522,6 +519,29 @@ runTest('mobile page titles scroll locally rather than losing their ending', () 
   assert.match(sidebar, /bos-nav-title[^"\n]*overflow-x-auto[^"\n]*whitespace-nowrap/)
   assert.doesNotMatch(sidebar, /bos-nav-title[^"\n]*truncate/)
   assert.match(sidebar, /bos-nav-title[^"\n]*\[scrollbar-width:none\]/)
+})
+
+runTest('the header always paints above the open page menu, and the sheet never grows under it', () => {
+  // Owner report (phone, Sep 16 2026): the avatar/account button is covered
+  // when the page menu is open. #mobile-nav-layer is a later DOM sibling of
+  // <header>, not a child, so equal z-index let it paint over the header.
+  const headerSlice = sidebar.slice(sidebar.indexOf('data-bos-mobile-header'), sidebar.indexOf('{!inline ? ('))
+  const headerZ = Number(headerSlice.match(/\bz-(\d+)\b/)?.[1])
+  const layerBlock = sidebar.slice(sidebar.indexOf('id="mobile-nav-layer"') - 40, sidebar.indexOf('id="mobile-nav-layer"') + 900)
+  const layerZ = Number(layerBlock.match(/\bz-(\d+)\b/)?.[1])
+  assert.ok(Number.isFinite(headerZ) && Number.isFinite(layerZ), 'both z-indexes parsed')
+  assert.ok(headerZ > layerZ, `header z-${headerZ} must paint above the nav layer z-${layerZ}`)
+  // Bottom nav (z-40) and its scrim (z-30) keep their own order -- only the
+  // header-vs-layer relationship changed.
+  assert.match(sidebar, /<nav className="safe-area-inset-bottom fixed bottom-0 left-0 right-0 z-40/)
+  assert.match(sidebar, /fixed inset-0 z-30 bg-black\/40 md:hidden" onClick=\{\(\) => setMoreOpen\(false\)\}/)
+  // Sections mode (the bottom sheet, `inline` false) used to have no top
+  // bound at all -- only `bottom` + a flat 70vh cap -- so on a short
+  // viewport it could still reach up and under the header. It now carries
+  // an explicit maxHeight derived from the same header-bottom measurement
+  // pages mode uses for `top`.
+  assert.match(layerBlock, /maxHeight: `min\(calc\(70 \* var\(--app-vh\)\), calc\(100dvh - \$\{navLayerTop\}\)\)`/,
+    'the sheet is capped at the header\'s bottom edge, not just a flat 70vh')
 })
 
 if (failed > 0) process.exitCode = 1

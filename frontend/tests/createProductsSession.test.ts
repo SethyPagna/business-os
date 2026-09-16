@@ -589,6 +589,35 @@ runTest('the catalog-identity helper remains narrower than the session warning',
   assert.equal(isSameQueuedProduct({ name: 'A', barcode: '', unitCostUsd: 1 }, { name: 'A', barcode: '', unitCostUsd: 1 }), true)
 })
 
+// Sep 15 2026 wildcard half of the barcode identity rule, reaching the
+// CREATE-session queue guard: a blank/broken barcode on either side never
+// forces a NEW queued line by itself. The plain `row.barcode.trim() ===
+// barcode` string comparison this replaced would say FALSE here (''
+// !== '748485110011'), letting the operator queue the same delivery twice;
+// barcodeIdentityMatches treats one side being non-real as a wildcard, so
+// this must be TRUE. Two DIFFERENT real barcodes are never a wildcard case
+// (both real, so the fold/compare runs and they disagree) -- that must stay
+// FALSE under both the old and the new code, so it is not by itself proof
+// the fix landed, but it pins the boundary the wildcard must not cross.
+runTest('the queued-twin guard treats a blank/broken barcode as a wildcard, not a mismatch', () => {
+  const real = { name: 'Padded Twin Serum', barcode: '748485110011', unitCostUsd: 3.5 }
+  assert.equal(
+    isSameQueuedProduct(real, { name: 'Padded Twin Serum', barcode: '', unitCostUsd: 3.5 }),
+    true,
+    'a blank barcode is a wildcard, not a different identity -- same name+cost must still be refused as a duplicate',
+  )
+  assert.equal(
+    isSameQueuedProduct(real, { name: 'Padded Twin Serum', barcode: 'N/A', unitCostUsd: 3.5 }),
+    true,
+    'a word-like placeholder barcode is broken, not real -- also a wildcard',
+  )
+  assert.equal(
+    isSameQueuedProduct(real, { name: 'Padded Twin Serum', barcode: '999999999999', unitCostUsd: 3.5 }),
+    false,
+    'two genuinely different REAL barcodes are never a wildcard match, even with the same name and cost',
+  )
+})
+
 runTest('same-session duplicate warning matches normalized name OR guarded barcode identity', () => {
   assert.equal(sessionProductDuplicateReason(
     { name: ' Rose   Lip Oil ', barcode: '111' },

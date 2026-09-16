@@ -156,10 +156,6 @@ export function normalizeReceiptTemplate(value: unknown): NormalizedReceiptTempl
   return merged
 }
 
-export function serializeReceiptTemplateValue(value: unknown): string {
-  return JSON.stringify(normalizeReceiptTemplate(value))
-}
-
 export function normalizeReceiptPrintSettings(value: unknown): ReceiptPrintSettings {
   const parsed = parseObject(value)
   const storedHighContrast = parsed.highContrastBold
@@ -191,10 +187,6 @@ export function normalizeReceiptPrintSettings(value: unknown): ReceiptPrintSetti
         : DEFAULT_RECEIPT_PRINT_SETTINGS.fixedPageLengthMm
     })(),
   }
-}
-
-export function serializeReceiptPrintSettings(value: unknown): string {
-  return JSON.stringify(normalizeReceiptPrintSettings(value))
 }
 
 export function readReceiptPrintSettingsFromSettings(settings: Record<string, unknown> = {}): ReceiptPrintSettings {

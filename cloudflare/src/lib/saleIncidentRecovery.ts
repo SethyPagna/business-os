@@ -168,7 +168,6 @@ function expectedRevisionAfter(target: TargetSpec): number {
 async function readCanonicalManifest(db: Pick<D1Compat, 'prepare'>) {
   const ids = TARGETS.map((target) => target.id).join(',')
   const productIds = TARGETS.flatMap((target) => target.lines.map((line) => line.product_id)).sort((a, b) => a - b)
-  const batchIds = TARGETS.flatMap((target) => target.lines.map((line) => line.batch_id)).sort((a, b) => a - b)
   const [sales, products, positiveLots, effects, amendments] = await Promise.all([
     db.prepare(`SELECT ${SALE_COLUMNS.map((column) => `s.${column}`).join(',')},r.revision
       FROM sales s LEFT JOIN sale_write_revisions r ON r.sale_id=s.id

@@ -618,41 +618,6 @@ async function fetchReturnItemBatchAllocations(
   return map
 }
 
-// Records the per-lot restock split for a freshly-written set of return_items.
-// Called AFTER the return_items rows are inserted (their ids don't exist
-// before): every returned line inserts exactly one return_items row in body
-// order, so fetching them back ordered by id lines them up 1:1 with
-// perItemSplits. Refuses to write on any count mismatch rather than risk
-// attributing a split to the wrong line.
-async function recordReturnItemBatchAllocations(
-  db: ReturnType<typeof getDb>,
-  returnId: number | string,
-  perItemSplits: ReturnBatchSplit[][],
-): Promise<void> {
-  if (!perItemSplits.some((splits) => splits.length > 0)) return
-  const rows = await db.prepare('SELECT id FROM return_items WHERE return_id = ? ORDER BY id ASC').all<{ id: number }>([returnId])
-  const returnItemIds = (rows || []).map((row) => Number(row.id))
-  if (returnItemIds.length !== perItemSplits.length) return
-  const inserts: Array<{ sql: string; params: Record<string, unknown> }> = []
-  for (let index = 0; index < perItemSplits.length; index += 1) {
-    for (const split of perItemSplits[index]) {
-      if (!(split.quantity > 0) || !(split.batchId > 0)) continue
-      inserts.push({
-        sql: `INSERT INTO return_item_batch_allocations (return_item_id, sale_item_id, batch_id, branch_id, quantity)
-              VALUES (@return_item_id, @sale_item_id, @batch_id, @branch_id, @quantity)`,
-        params: {
-          return_item_id: returnItemIds[index],
-          sale_item_id: split.saleItemId ?? null,
-          batch_id: split.batchId,
-          branch_id: split.branchId ?? null,
-          quantity: split.quantity,
-        },
-      })
-    }
-  }
-  if (inserts.length) await db.batch(inserts)
-}
-
 // The SALE decides a return's money version -- never the request body. A
 // pre-v1 client (an offline queue, or a cached PWA shell that never reloaded)
 // posts a legacy return body with no money_precision_version. The legacy

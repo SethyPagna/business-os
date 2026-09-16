@@ -76,3 +76,25 @@ export async function resolveProductMergeLineage(db:ReturnType<typeof getDb>,sal
       AND actual.kind=json_extract(expected.value,'$.kind') AND actual.status=json_extract(expected.value,'$.status')
       AND actual.payload_json=json_extract(expected.value,'$.payload_json')))`}
 }
+
+// Read-only companion for surfaces that must never 500 on an unprovable
+// merge lineage (Sentry BUSINESS-OS-1F: migrations 0165/0168 reparented
+// sale_items.product_id via raw SQL without writing the product.merge
+// undo_snapshots evidence resolveProductMergeLineage requires, so every
+// later GET /api/sales page containing one of those rows threw). This never
+// accepts or proves an identity -- it only tells a READ path which lines it
+// cannot prove, so the caller can render the sale and flag just those lines
+// instead of failing the whole response. The strict resolver above remains
+// the only path allowed to accept a binding, and stays the one writes use.
+export function findSaleItemsRequiringIdentityReview(lines:readonly Record<string,unknown>[]):Set<number>{
+  const flagged=new Set<number>()
+  for(const line of lines){
+    if(!positive(line.id))continue
+    let parsed:any
+    try{parsed=JSON.parse(String(line.pricing_snapshot_json))}catch{flagged.add(line.id as number);continue}
+    const poolLines=parsed?.pool?.lines
+    const original=Array.isArray(poolLines)?poolLines.find((entry:any)=>entry?.line_key===parsed.line_key)?.product?.id:undefined
+    if(!positive(original)||!positive(line.product_id)||original!==line.product_id)flagged.add(line.id as number)
+  }
+  return flagged
+}

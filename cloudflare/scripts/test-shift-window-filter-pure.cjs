@@ -118,7 +118,9 @@ for (const statement of cohortStatements) {
   assert.match(statement.sql, /> @reportAfterId/)
   assert.match(statement.sql, /ORDER BY[\s\S]*LIMIT @reportPageSize/)
   assert.equal(statement.params.reportAfterId, 0)
-  assert.equal(statement.params.reportPageSize, 500)
+  // Tracks reportMoneyPrecision.ts's REPORT_MONEY_PAGE_SIZE (P9-perf, raised
+  // 500 -> 2000 to cut D1 round trips), not a pinned literal.
+  assert.equal(statement.params.reportPageSize, reportMoneyPrecision.REPORT_MONEY_PAGE_SIZE)
 }
 // The window is bound, never interpolated.
 for (const statement of cohortStatements) {

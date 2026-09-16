@@ -131,13 +131,6 @@ export function workbookToDelimitedText(workbook: XLSX.WorkBook, sheetName?: str
   return lines.join('\n')
 }
 
-// List every sheet name in a workbook -- used when a file has multiple
-// tabs and the caller wants to let the operator pick one instead of
-// silently always taking the first.
-export function listWorkbookSheetNames(workbook: XLSX.WorkBook): string[] {
-  return workbook.SheetNames || []
-}
-
 export async function readWorkbook(file: File): Promise<XLSX.WorkBook> {
   const buffer = await file.arrayBuffer()
   // cellDates: true -- date-formatted cells come back as JS Date objects

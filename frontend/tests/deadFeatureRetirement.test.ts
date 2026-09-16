@@ -69,6 +69,33 @@ assert.deepEqual(
 )
 console.log('PASS the custom-tables cluster is gone from the frontend')
 
+// --- 1b. the @capacitor packages are gone (P8 debloat) ---------------------
+//
+// The four @capacitor/* packages (android, ios, cli, core) had zero source
+// importers, no android/ios native project and no capacitor.config in the
+// tree -- they were dependencies for a native build that was never wired up.
+// Removing them also retires the vendor-capacitor manualChunks branch in
+// vite.config.ts, which existed only to bundle those packages separately.
+
+const rootDir = path.join(here, '..')
+const packageJson = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')) as {
+  dependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
+}
+const allDeps = { ...(packageJson.dependencies || {}), ...(packageJson.devDependencies || {}) }
+const capacitorDeps = Object.keys(allDeps).filter((name) => name.startsWith('@capacitor/'))
+assert.deepEqual(capacitorDeps, [], `@capacitor/* packages must stay removed from package.json: ${capacitorDeps.join(', ')}`)
+
+assert.deepEqual(
+  filesMatching(/@capacitor\//),
+  [],
+  'no source file may import from @capacitor/* -- the packages are removed',
+)
+
+const viteConfigSource = fs.readFileSync(path.join(rootDir, 'vite.config.ts'), 'utf8')
+assert.doesNotMatch(viteConfigSource, /vendor-capacitor/, 'the vendor-capacitor manualChunks branch must stay removed with the dependency')
+console.log('PASS the @capacitor/* packages and their vendor chunk are gone')
+
 // --- 2. inventoryExport exports exactly what a caller can reach ------------
 //
 // Part 562 removed the Inventory products slice and its export menu, which

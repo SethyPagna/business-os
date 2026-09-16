@@ -1510,33 +1510,6 @@ export async function getBusinessSummarySalesRows(env: Env, f: SalesFilters): Pr
   })
 }
 
-// Sale-header-level aggregate. Deliberately has NO join to sale_items --
-// joining would fan out one row per line item and inflate every SUM here by
-// however many items each sale has (the bug this file replaces).
-async function salesLevelTotals(env: Env, f: SalesFilters) {
-  const db = getDb(env)
-  const { sql: whereSql, params } = whereActiveSales('sales', f)
-  const row = await db.prepare(`
-    SELECT COUNT(*) AS tx_count,
-           COALESCE(SUM(subtotal_usd), 0) AS gross_sales_usd,
-           COALESCE(SUM(discount_usd), 0) AS store_discount_usd,
-           COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
-           COALESCE(SUM(tax_usd), 0) AS tax_usd,
-           COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
-           COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
-           COALESCE(SUM(delivery_actual_cost_usd), 0) AS delivery_actual_cost_usd,
-           COALESCE(SUM(CASE WHEN delivery_actual_cost_usd IS NOT NULL THEN 1 ELSE 0 END), 0) AS delivery_actual_cost_count,
-           COALESCE(SUM(CASE WHEN COALESCE(is_delivery, 0) = 1 THEN 1 ELSE 0 END), 0) AS delivery_sale_count,
-           -- Canonical net-sales revenue components (recognized = not cancelled;
-           -- awaiting_payment credit is included and also isolated below):
-           ${RECOGNIZED_LEVEL_COLUMNS}
-    FROM sales
-    ${CUSTOMER_REFUND_JOIN}sales.id
-    WHERE ${whereSql}
-  `).get<Record<string, number>>(params)
-  return row || {}
-}
-
 // The item-level cost columns, written ONCE for the same reason
 // RECOGNIZED_LEVEL_COLUMNS is: four queries measure COGS and they have to
 // measure it identically. Each caller supplies its own bucket column and
@@ -1564,32 +1537,6 @@ export const ITEM_COST_COLUMNS = `
 export const ITEM_COST_STATUS_CLAUSE = `(${recognizedExpr('s.')} OR ${awaitingExpr('s.')})`
 
 interface ItemCostRow { cost_usd: number; unvalued_cost_usd: number; missing_snapshot_lines: number; pending_cost_usd: number; item_discount_usd: number; pending_item_discount_usd: number }
-
-// Item-level cost aggregate. Joins to sales only to apply the date/branch/
-// status filter -- the summed field itself (cost_price_usd * quantity)
-// is per-item, so there's no fan-out to worry about here. COGS is counted over
-// RECOGNIZED sales, i.e. every sale that is not cancelled, so
-// profit = recognized revenue - recognized cost stays a matched pair over one
-// population. The awaiting cohort's own cost is reported beside it as
-// pending_cost_usd -- the unpaid SLICE of cost_usd, not an addition to it.
-async function salesCost(env: Env, f: SalesFilters): Promise<ItemCostRow> {
-  const db = getDb(env)
-  const { sql: whereSql, params } = whereActiveSales('s', f)
-  const row = await db.prepare(`
-    SELECT ${ITEM_COST_COLUMNS}
-    FROM sale_items si
-    JOIN sales s ON s.id = si.sale_id
-    WHERE ${whereSql} AND ${ITEM_COST_STATUS_CLAUSE}
-  `).get<ItemCostRow>(params)
-  return {
-    cost_usd: num(row?.cost_usd),
-    unvalued_cost_usd: num(row?.unvalued_cost_usd),
-    missing_snapshot_lines: num(row?.missing_snapshot_lines),
-    pending_cost_usd: num(row?.pending_cost_usd),
-    item_discount_usd: num(row?.item_discount_usd),
-    pending_item_discount_usd: num(row?.pending_item_discount_usd),
-  }
-}
 
 // Cost of the goods a return put BACK on the sellable shelf, over the same
 // window and the same recognized sales as salesCost. Scoped to non-cancelled
@@ -1621,13 +1568,6 @@ function returnedCostSql(bucketExpr: string | null, whereSql: string): string {
       AND COALESCE(r.return_scope, 'customer') = 'customer'
     ${bucketExpr ? 'GROUP BY bucket' : ''}
   `
-}
-
-async function salesReturnedCost(env: Env, f: SalesFilters): Promise<number> {
-  const db = getDb(env)
-  const { sql: whereSql, params } = whereActiveSales('s', f)
-  const row = await db.prepare(returnedCostSql(null, whereSql)).get<{ returned_cost_usd: number }>(params)
-  return num(row?.returned_cost_usd)
 }
 
 // Same aggregate, bucketed. Returns a Map keyed the way the caller's cost query

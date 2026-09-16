@@ -73,13 +73,23 @@ export type AffordanceKind = 'copy' | 'reveal'
  * frontend/tests/truncatedText.test.ts -- no DOM required).
  * ------------------------------------------------------------------ */
 
-export interface ClipBox { scrollWidth: number; clientWidth: number }
+// scrollHeight/clientHeight are optional: every horizontal `.dense-cell-
+// truncate` caller (TruncatedText, the dense tables) only ever had a width
+// to compare. ProductNameRail's two-line `-webkit-line-clamp` box clips
+// vertically instead -- its width never overflows, since the text wraps to
+// fit -- so it passes both pairs and relies on the height branch below.
+export interface ClipBox { scrollWidth: number; clientWidth: number; scrollHeight?: number; clientHeight?: number }
 
-// Clipped when the rendered content is wider than the box showing it. The
-// +1 tolerance ignores sub-pixel rounding that would otherwise flag text
-// that visually fits (carried over from the original TruncatedText).
+// Clipped when the rendered content is wider, OR (line-clamp boxes) taller,
+// than the box showing it. The +1 tolerance ignores sub-pixel rounding that
+// would otherwise flag content that visually fits (carried over from the
+// original TruncatedText). `scrollHeight` keeps reporting the full,
+// un-clamped content height even though `overflow: hidden` visually caps
+// the box, so the same comparison that catches a wide value catches a tall
+// one.
 export function isClipped(box: ClipBox): boolean {
-  return box.scrollWidth > box.clientWidth + 1
+  if (box.scrollWidth > box.clientWidth + 1) return true
+  return box.scrollHeight != null && box.clientHeight != null && box.scrollHeight > box.clientHeight + 1
 }
 
 export type ClosestFn = (selector: string) => unknown

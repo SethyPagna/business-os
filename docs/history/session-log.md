@@ -19503,6 +19503,20 @@ Deploy: branch pushed a8036506..4b20bd68 (80 sliced commits, main untouched); `n
 
 **Housekeeping.** Lane worktrees lane-p7-* removed after the merge (junctions unlinked first).
 
+## Part 618 (Sep 16 2026, Claude Fable coordinator) — Programs 8 and 9: tests, debloat, efficiency; admin fixes and polish; 0171/0172 applied; public items pushed back
+
+**Provenance.** Release code tip **f2488996** on `codex/precision-final-candidate-20260914` (descends from 01e6866b, the Program 7 docs tip; integrate/p8 90650afd and integrate/p9 b545f98e merged, one `vite.config.ts` conflict resolved by keeping the xlsx chunk and dropping the removed capacitor chunk), pushed and deployed with the paid configuration as Worker **23615bfd-aba1-4862-a1a1-01e7b2240cce** (`/api/runtime/version` revision `f24889963443`, `tier: paid`). Migrations **0171** (merge-lineage evidence repair) and **0172** (roles receipt_settings backfill) applied after the deploy; pre 4 → post 0 unproven items, roles 2/3 NULL → true. `main` fast-forwarded to the release tip.
+
+**Owner messages.** A: push to GitHub incl. main, tests for fixes/errors/guards, debloat/optimization across the full codebase. B: page-menu layering over the avatar button, receipt settings in the page menu and for employees, POS name spacing/blank row, "err can't show tagged stock", four public items. C: date start/end not responsive, Products report rows with COGS/profit as a compact two-column card, slow loading, and the four public items pushed back ("record but not yet implement... do the admin fixes and polish first").
+
+**Lanes (nine merged, sonnet, one fix per commit).** p8/tests (11 commits, three real defects: R2 edge-cache purge, portal rail degrade, import barcode fold); p8/debloat (23 commits, −1338/+138, two of its own removals reverted; `test-worker-efficiency-p5-pure` schemaProbe pin dropped after the compat.ts stub removal); p8/efficiency (chunked DELETE); p9/ui-fixes (header z-index + sheet cap; two-line name clamp with vertical `isClipped()`; tagged-stock toast with the real status); p9/receipt-access (own permission key, page menu, Permission Editor row, 0172); p9/products-report (inline COGS/profit columns and the two-column phone card); p9/date-row (font floor + wrap; the Reports mobile CSS override that broke dates mid-string removed after the first cut missed it); p9/perf (report money page size 2000, xlsx vendor chunk); p9/sales-lineage (GET /api/sales degrades with `identity_review_required`; 0171, renumbered from 0170 after a collision with the receipt lane's number).
+
+**Gates on the committed tip in the integration worktree.** Frontend typecheck, verify:i18n, verify:public-runtime, test:utils 450/450, build 265 chunks zero cycles; Worker tsc clean, sweep 437 files with completion sentinel, one contention red (test-record-orphans-native) green standalone.
+
+**Exceptions to report.** P9-9 not reproducible (schema, query, roles, Sentry all clean); the toast now names the cause for the next occurrence. P9-12 wave 2 (contacts/sales list route timing, picker option caching) open. Debloat left ~100 frontend unused-local candidates and three kept-live flags as report items. Public items P9-3/4/5/6 not yet by owner decision; partial work sits on stopped lane worktrees.
+
+**Housekeeping.** Lane worktrees lane-p8-*/lane-p9-* removed after the merge (junctions unlinked first); the three stopped public lanes kept.
+
 ---
 
 ## Archived main-branch entries (Sep 4–9 2026 Codex status commits, merged into main on 2026-09-16; kept verbatim so nothing is lost — the sections above are authoritative)
