@@ -66,9 +66,9 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', portalAi
 )
 Module._load = originalLoad
 
-const { selectCandidateProducts, summarizeProfile, parseAssistantPayload } = portalAiModuleObj.exports
+const { selectCandidateProducts, summarizeProfile, parseAssistantPayload, sanitizeChatHistory } = portalAiModuleObj.exports
 
-for (const fn of [selectCandidateProducts, summarizeProfile, parseAssistantPayload]) {
+for (const fn of [selectCandidateProducts, summarizeProfile, parseAssistantPayload, sanitizeChatHistory]) {
   assert.strictEqual(typeof fn, 'function', 'expected portalAi.ts export missing -- source may have changed')
 }
 
@@ -344,6 +344,61 @@ check('the health-claim rules sit AFTER the merchant instructions in the prompt'
   for (const banned of ['cures', 'clinically proven', 'pharmacist']) {
     assert.ok(source.includes(banned), `the prompt must still name ${banned}`)
   }
+})
+
+// ---------------------------------------------------------------------
+// sanitizeChatHistory -- bounds/sanitizes the storefront chat UI's resent
+// history before it ever reaches the prompt/provider (P9 assistant chat).
+
+check('sanitizeChatHistory drops non-array input', () => {
+  assert.deepStrictEqual(sanitizeChatHistory(null), [])
+  assert.deepStrictEqual(sanitizeChatHistory(undefined), [])
+  assert.deepStrictEqual(sanitizeChatHistory('not an array'), [])
+  assert.deepStrictEqual(sanitizeChatHistory({ role: 'user', content: 'hi' }), [])
+})
+
+check('sanitizeChatHistory keeps only well-formed user/assistant turns', () => {
+  const result = sanitizeChatHistory([
+    { role: 'user', content: 'Hello' },
+    { role: 'assistant', content: 'Hi there' },
+    { role: 'system', content: 'ignored role' },
+    { role: 'user', content: '' },
+    null,
+    'not an object',
+    { role: 'user', text: 'content key fallback' },
+  ])
+  assert.deepStrictEqual(result, [
+    { role: 'user', content: 'Hello' },
+    { role: 'assistant', content: 'Hi there' },
+    { role: 'user', content: 'content key fallback' },
+  ])
+})
+
+check('sanitizeChatHistory trims whitespace, collapses internal runs, and caps each message length', () => {
+  const result = sanitizeChatHistory([{ role: 'user', content: '  hello   there  \n\n friend  ' }], 12, 500)
+  assert.strictEqual(result[0].content, 'hello there friend')
+
+  const oversized = sanitizeChatHistory([{ role: 'user', content: 'x'.repeat(900) }], 12, 500)
+  assert.strictEqual(oversized[0].content.length, 500)
+  assert.strictEqual(oversized[0].content, 'x'.repeat(500))
+})
+
+check('sanitizeChatHistory caps total turns and drops the OLDEST, keeping the recent tail', () => {
+  const turns = []
+  for (let i = 0; i < 20; i += 1) turns.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: `turn ${i}` })
+  const result = sanitizeChatHistory(turns, 12, 500)
+  assert.strictEqual(result.length, 12)
+  assert.strictEqual(result[0].content, 'turn 8')
+  assert.strictEqual(result[result.length - 1].content, 'turn 19')
+})
+
+check('sanitizeChatHistory cannot be used to smuggle an oversized payload past the small body cap', () => {
+  const huge = []
+  for (let i = 0; i < 5000; i += 1) huge.push({ role: 'user', content: 'x'.repeat(5000) })
+  const result = sanitizeChatHistory(huge)
+  const totalChars = result.reduce((sum, turn) => sum + turn.content.length, 0)
+  assert.ok(result.length <= 12, 'history must stay bounded regardless of input size (default cap is 12 messages)')
+  assert.ok(totalChars <= 12 * 500, 'bounded turns * bounded chars must cap total prompt growth (default 12 * 500 chars)')
 })
 
 console.log(`\n${checks} check(s) passed.`)

@@ -145,6 +145,43 @@ function sanitizeQuestion(question: unknown, maxChars: number): string {
   return trim(question).replace(/\s+/g, ' ').slice(0, maxChars)
 }
 
+// ---- Chat history (bounded conversation context) ----
+// The storefront chat UI persists a visitor's own turns client-side and
+// resends the recent tail with each new message so the assistant keeps
+// context across a conversation, instead of the old one-shot form/one-shot
+// answer. This is pure string trimming/validation -- no D1 read, no extra
+// CPU-heavy work -- so it stays inside the Workers free-plan per-request
+// budget (see plan-tier CLAUDE.md note): the cost of a longer conversation
+// is a slightly bigger prompt string, not an extra query.
+export type ChatHistoryTurn = { role: 'user' | 'assistant'; content: string }
+const MAX_HISTORY_MESSAGES = 12
+const MAX_HISTORY_MESSAGE_CHARS = 500
+
+// Bounds and sanitizes visitor-supplied chat history before it ever reaches
+// the prompt or a provider call. Defense in depth against an oversized or
+// malformed payload (the route also caps total body bytes): keeps only
+// well-formed {role,content} pairs, trims each message, and -- if there are
+// more turns than the cap -- drops from the FRONT (oldest) so the most
+// recent, most relevant turns survive.
+export function sanitizeChatHistory(
+  value: unknown,
+  maxMessages = MAX_HISTORY_MESSAGES,
+  maxCharsPerMessage = MAX_HISTORY_MESSAGE_CHARS,
+): ChatHistoryTurn[] {
+  if (!Array.isArray(value)) return []
+  const turns: ChatHistoryTurn[] = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue
+    const rawRole = (entry as AnyRow).role
+    const role = rawRole === 'assistant' ? 'assistant' : rawRole === 'user' ? 'user' : null
+    if (!role) continue
+    const content = trim((entry as AnyRow).content ?? (entry as AnyRow).text).replace(/\s+/g, ' ').slice(0, maxCharsPerMessage)
+    if (!content) continue
+    turns.push({ role, content })
+  }
+  return turns.length > maxMessages ? turns.slice(turns.length - maxMessages) : turns
+}
+
 function scoreProduct(product: AnyRow, profile: AnyRow = {}, queryTerms: Set<string> = new Set()): number {
   const haystack = [product.name, product.brand, product.category, product.description, product.unit]
     .join(' ')
@@ -234,13 +271,14 @@ export function selectCandidateProducts(products: AnyRow[], profile: AnyRow = {}
   return candidates
 }
 
-function buildPrompt({ businessName, profile, question, candidates, disclaimer, extraInstructions }: {
+function buildPrompt({ businessName, profile, question, candidates, disclaimer, extraInstructions, history = [] }: {
   businessName: string
   profile: AnyRow
   question: string
   candidates: AnyRow[]
   disclaimer: string
   extraInstructions: string
+  history?: ChatHistoryTurn[]
 }): string {
   // Deliberately omits price_usd/price_khr and the raw stock number -- the
   // model only ever sees stock_status/on_sale/expiry_date here, never an
@@ -274,6 +312,8 @@ function buildPrompt({ businessName, profile, question, candidates, disclaimer, 
     'Return valid JSON only with this shape:',
     '{"summary":"","off_topic":false,"notice":"","contact_note":"","follow_up_questions":[""],"recommendations":[{"product_id":0,"name":"","reason":"","fit_summary":"","how_to_use":"","cautions":"","ingredients_focus":[""]}]}',
     `Customer profile: ${JSON.stringify(profile)}`,
+    history.length ? 'Conversation so far (oldest first; the current question comes after):' : '',
+    history.length ? history.map((turn) => `${turn.role === 'assistant' ? 'Assistant' : 'Customer'}: ${turn.content}`).join('\n') : '',
     `Customer question: ${question}`,
     'Catalog candidates:',
     candidateLines.length ? candidateLines.join('\n') : '- none',
@@ -480,13 +520,18 @@ export async function generatePortalAiResponse(env: Env, {
   question,
   products,
   visitorFingerprint = 'anonymous',
+  history = [],
 }: {
   config: PortalAiConfig
   profile: AnyRow
   question: string
   products: AnyRow[]
   visitorFingerprint?: string
+  history?: unknown
 }) {
+  // Sanitized again here (not just at the route) so any future direct
+  // caller of this function gets the same bound/defense-in-depth for free.
+  const sanitizedHistory = sanitizeChatHistory(history)
   const providers = await listEnabledChatProviders(env, config.aiProviderId)
   if (!providers.length) {
     throw new Error('Portal AI provider is not configured yet')
@@ -540,6 +585,7 @@ export async function generatePortalAiResponse(env: Env, {
     candidates,
     disclaimer: config.aiDisclaimer,
     extraInstructions: config.aiPrompt,
+    history: sanitizedHistory,
   })
 
   const failovers: AnyRow[] = []

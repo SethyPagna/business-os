@@ -14,7 +14,7 @@ import { sanitizeMediaList } from '../lib/media'
 import { sanitizePortalImageMetadata } from '../lib/portalImagePrivacy'
 import { serveObject } from '../lib/r2'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { generatePortalAiResponse } from '../lib/portalAi'
+import { generatePortalAiResponse, sanitizeChatHistory } from '../lib/portalAi'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
@@ -1019,6 +1019,11 @@ app.post('/ai/chat', async (c) => {
     }
     const question = String(body?.question || '').trim().slice(0, 2000)
     const profile = sanitizeAiProfile(body?.profile)
+    // Bounded chat history -- the storefront chat UI resends the visitor's
+    // own recent turns from its client-side history so the assistant keeps
+    // conversational context. Sanitized here (bounded messages, capped
+    // length) before it ever reaches the prompt builder; see sanitizeChatHistory.
+    const history = sanitizeChatHistory(body?.messages)
     if (!question && !hasAiProfilePreference(profile)) {
       return c.json({ error: 'Add a question or at least one shopping preference first' }, 400)
     }
@@ -1035,6 +1040,7 @@ app.post('/ai/chat', async (c) => {
       question,
       products,
       visitorFingerprint,
+      history,
     })
 
     const citations = collectRecommendationCitations(response.recommendations)
