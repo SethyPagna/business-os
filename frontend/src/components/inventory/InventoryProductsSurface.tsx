@@ -3,6 +3,7 @@ import { Fragment, useMemo, useState } from 'react'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import PaginationControls from '../shared/PaginationControls.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
+import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 
 export type InventoryProductRow = Record<string, any> & {
   id?: number | string
@@ -123,6 +124,10 @@ export default function InventoryProductsSurface({
 }: Props) {
   const groups = useMemo(() => groupInventoryProducts(items), [items])
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+  // P10-6: the cost float opens for whichever row's cost cell was clicked --
+  // a merged display row opens against its own representative id, same row
+  // View details/Adjust already target.
+  const [costFloatProduct, setCostFloatProduct] = useState<{ id: number | string; name?: string } | null>(null)
   const toggle = (key: string) => setCollapsed((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next })
   const columnCount = 11
   const metric = (product: InventoryProductRow, field: InventoryMetric) => mergedInventoryMetric(product, items, field)
@@ -164,6 +169,19 @@ export default function InventoryProductsSurface({
   // flooring it would hide the next one the way the pane's clamps hid these.
   const profitTone = (value: number | null) => (value !== null && value < 0 ? 'text-yellow-600' : 'text-blue-600 dark:text-blue-400')
   const costTone = 'text-red-700 dark:text-red-400'
+  // P10-6: the same money() cell, but clickable -- opens the cost
+  // calculation float. Stops propagation so it never also triggers the
+  // row's own onOpenDetail.
+  const costCell = (product: InventoryProductRow) => (
+    <button
+      type="button"
+      className="block w-full cursor-pointer decoration-dotted underline-offset-2 hover:underline focus:outline-none focus-visible:underline"
+      title={t('cost_breakdown_title') || 'Calculated cost price'}
+      onClick={(event) => { event.stopPropagation(); setCostFloatProduct({ id: product.id as number | string, name: String(product.name || '') }) }}
+    >
+      {money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'), costTone)}
+    </button>
+  )
   const priceTone = 'text-green-700 dark:text-green-400'
   const branchLines = (product: InventoryProductRow) => (product.branch_stock || [])
     .filter((row) => branchFilter === 'all' || String(row.branch_id) === branchFilter)
@@ -251,7 +269,7 @@ export default function InventoryProductsSurface({
                     <td className="px-3 py-1.5 font-mono text-slate-500">{product.barcode || '—'}</td>
                     <td className="px-3 py-1.5 text-right font-semibold">{quantity(product)}</td>
                     <td className="min-w-28 px-3 py-1.5 text-[11px]">{branchLines(product)}</td>
-                    <td className="col-highlight-red px-3 py-1.5">{money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'), costTone)}</td>
+                    <td className="col-highlight-red px-3 py-1.5">{costCell(product)}</td>
                     <td className="col-highlight-green px-3 py-1.5">{money(product.selling_price_usd, product.selling_price_khr, priceTone)}</td>
                     <td className="px-3 py-1.5">{money(metric(product, 'stock_value_usd'), metric(product, 'stock_value_khr'))}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{metric(product, 'qty_sold') ?? '—'}</td>
@@ -282,7 +300,7 @@ export default function InventoryProductsSurface({
                   {/* Same colour language as the desktop columns, so a value
                       does not change meaning when the layout does. */}
                   <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-xs">
-                    <dt className="text-red-600 dark:text-red-400">{t('cost') || 'Cost'}</dt><dd>{money(inventoryCost(product, 'usd'), inventoryCost(product, 'khr'), costTone)}</dd>
+                    <dt className="text-red-600 dark:text-red-400">{t('cost') || 'Cost'}</dt><dd>{costCell(product)}</dd>
                     <dt className="text-green-600 dark:text-green-400">{t('price') || 'Price'}</dt><dd>{money(product.selling_price_usd, product.selling_price_khr, priceTone)}</dd>
                     <dt>{t('stock_val') || 'Stock value'}</dt><dd>{money(metric(product, 'stock_value_usd'), metric(product, 'stock_value_khr'))}</dd>
                     <dt>{t('net_sold') || 'Net sold'}</dt><dd className="text-right font-semibold tabular-nums">{metric(product, 'qty_sold') ?? '—'}</dd>
@@ -298,6 +316,16 @@ export default function InventoryProductsSurface({
       <div className="flex justify-center">
         <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={total} label={t('products') || 'products'} t={t} onPageChange={onPageChange} onPageSizeChange={onPageSizeChange} />
       </div>
+      {costFloatProduct ? (
+        <CostCalculationFloat
+          productId={costFloatProduct.id}
+          productName={costFloatProduct.name}
+          onClose={() => setCostFloatProduct(null)}
+          fmtUSD={fmtUSD}
+          fmtKHR={fmtKHR}
+          t={(key, fallback) => t(key) || fallback}
+        />
+      ) : null}
     </section>
   )
 }

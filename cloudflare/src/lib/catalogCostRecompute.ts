@@ -1,5 +1,6 @@
 import type { D1Compat } from './db'
 import { resolveMergedCostDetail, type MergedCostOutlier } from './productDetailRule'
+import { meanMoney4 } from './moneyPrecision'
 
 export type CatalogCostRecomputeResult = {
   productId: number
@@ -135,4 +136,114 @@ export function catalogCostRecomputeStatement(productId: number): { sql: string;
       WHERE id = @productId`,
     params: { productId },
   }
+}
+
+/**
+ * P10-6 (owner ruling, 2026-09-16, verbatim): "when clicked on cost price it
+ * opens a page that tells us the calculated cost price (n_i + n_{i+1} + ... +
+ * n_{i+k}) / i". GET /api/products/:id/cost-breakdown (routes/productCost.ts)
+ * shows exactly that arithmetic -- so this is the SAME selection
+ * recomputeCatalogCost uses (every one of the product row's own lots,
+ * `product_batches.variant_product_id = id`, not name-group scoped) fed
+ * through the SAME resolveMergedCostDetail, never a second formula.
+ */
+export type CostBreakdownLotInput = {
+  id: number
+  batch_number: number | string | null
+  lot_code: string | null
+  received_at: string | null
+  branch_name: string | null
+  unit_cost_usd: number | null
+  is_active: number | boolean | null
+}
+
+export type CostBreakdownInputRow = {
+  source: 'lot' | 'catalog'
+  label: string
+  cost_usd: number | null
+  cost_khr: number | null
+  excluded: 'zero' | 'duplicate' | 'inactive' | null
+}
+
+export type CatalogCostBreakdown = {
+  product_id: number
+  inputs: CostBreakdownInputRow[]
+  distinct_usd: number[]
+  distinct_khr: number[]
+  mean_usd: number
+  mean_khr: number
+  outlier_guard: { fired: boolean; kept: number | null }
+  result_usd: number
+  result_khr: number
+}
+
+/** The label a lot shows in the breakdown: batch code, else received date, else lot code -- with its branch appended when known. */
+function costBreakdownLotLabel(lot: CostBreakdownLotInput): string {
+  const core = lot.batch_number != null && lot.batch_number !== ''
+    ? String(lot.batch_number)
+    : (lot.received_at ? String(lot.received_at).slice(0, 10) : (lot.lot_code || `#${lot.id}`))
+  return lot.branch_name ? `${core} · ${lot.branch_name}` : core
+}
+
+/**
+ * Pure assembler -- no D1 access, so it is unit-testable with fixture rows.
+ * `product` carries the row's CURRENT stored cost_price_usd/khr, used only as
+ * the fallback `result_usd` when no active lot carries a real cost (mirrors
+ * recomputeCatalogCost's own "no real lot cost yet" guard) and as the
+ * (unformulaic) `result_khr` figure -- see the module doc on catalogCostRecompute:
+ * product_batches carries no per-lot KHR column, so KHR is never averaged
+ * here, only reported as the stored scalar.
+ */
+export function buildCatalogCostBreakdown(
+  productId: number,
+  product: { cost_price_usd: number | null; cost_price_khr: number | null },
+  lots: CostBreakdownLotInput[],
+): CatalogCostBreakdown {
+  const activeLots = lots.filter((lot) => !!lot.is_active)
+  const { merged, outliers } = resolveMergedCostDetail(activeLots.map((lot) => ({ cost_price_usd: lot.unit_cost_usd })))
+
+  const seenDistinct = new Set<number>()
+  const inputs: CostBreakdownInputRow[] = lots.map((lot) => {
+    const label = costBreakdownLotLabel(lot)
+    const cost = lot.unit_cost_usd != null && Number.isFinite(Number(lot.unit_cost_usd)) ? Number(lot.unit_cost_usd) : null
+    if (!lot.is_active) return { source: 'lot', label, cost_usd: cost, cost_khr: null, excluded: 'inactive' }
+    if (cost === null || cost <= 0) return { source: 'lot', label, cost_usd: cost, cost_khr: null, excluded: 'zero' }
+    if (seenDistinct.has(cost)) return { source: 'lot', label, cost_usd: cost, cost_khr: null, excluded: 'duplicate' }
+    seenDistinct.add(cost)
+    return { source: 'lot', label, cost_usd: cost, cost_khr: null, excluded: null }
+  })
+
+  const distinctUsd = [...seenDistinct].sort((a, b) => a - b)
+  const meanUsd = distinctUsd.length ? meanMoney4(distinctUsd) : 0
+  const outlierFired = outliers.some((outlier) => outlier.field === 'cost_price_usd')
+  const resultUsd = merged.cost_price_usd && merged.cost_price_usd > 0 ? merged.cost_price_usd : (Number(product.cost_price_usd) || 0)
+
+  return {
+    product_id: productId,
+    inputs,
+    distinct_usd: distinctUsd,
+    distinct_khr: [],
+    mean_usd: meanUsd,
+    mean_khr: 0,
+    outlier_guard: { fired: outlierFired, kept: outlierFired ? resultUsd : null },
+    result_usd: resultUsd,
+    result_khr: Number(product.cost_price_khr) || 0,
+  }
+}
+
+/** DB-backed wrapper: fetches the product row and every lot (active and inactive, for transparency), then assembles via {@link buildCatalogCostBreakdown}. */
+export async function getCatalogCostBreakdown(db: D1Compat, productId: number): Promise<CatalogCostBreakdown | null> {
+  const product = await db.prepare('SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id')
+    .get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
+  if (!product) return null
+
+  const lots = await db.prepare(`
+    SELECT pb.id, pb.batch_number, pb.lot_code, pb.received_at, pb.unit_cost_usd, pb.is_active, b.name AS branch_name
+    FROM product_batches pb
+    LEFT JOIN branches b ON b.id = pb.received_branch_id
+    WHERE pb.variant_product_id = @id
+    ORDER BY pb.received_at ASC, pb.id ASC
+  `).all<CostBreakdownLotInput>({ id: productId })
+
+  return buildCatalogCostBreakdown(productId, product, lots || [])
 }

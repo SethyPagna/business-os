@@ -13,6 +13,8 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { useLowStockConfig } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
+import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
+import { useState } from 'react'
 
 type TranslateFn = (key: string) => string | undefined
 type MoneyFormatter = (value: number) => string
@@ -91,6 +93,9 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   // (name, brand, supplier, barcode), same shared float. Declared with the
   // other hooks, above the early return.
   const copy = useCopyFloat(T)
+  // P10-6: the calculated-cost float. Declared with the other hooks, above
+  // the early return.
+  const [costFloatOpen, setCostFloatOpen] = useState(false)
   if (!p) return null
 
   const costPriceUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
@@ -140,6 +145,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   const batchCount = visibleBatches.length
 
   return createPortal(
+    <>
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={onClose}>
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
@@ -203,11 +209,16 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 Price" / VIP tier) is deleted by the 2026-09-04 ruling -- the
                 grid used to widen to three whenever that tier had a value. */}
             <div className="grid grid-cols-2 gap-2 sm:gap-3" data-detail-price-row="cost-wholesale">
-              <div className="rounded-xl bg-red-50 p-3 dark:bg-red-900/20">
+              <button
+                type="button"
+                onClick={() => setCostFloatOpen(true)}
+                className="rounded-xl bg-red-50 p-3 text-left dark:bg-red-900/20"
+                title={T('cost_breakdown_title', 'Calculated cost price')}
+              >
                 <div className="mb-1 text-xs font-semibold text-red-600 dark:text-red-400">{T('label_cost_purchase', 'Cost Price')}</div>
-                <div className="text-sm font-semibold tabular-nums text-red-700 dark:text-red-300">{fmtUSD(costPriceUsd)}</div>
+                <div className="text-sm font-semibold tabular-nums text-red-700 decoration-dotted underline-offset-2 hover:underline dark:text-red-300">{fmtUSD(costPriceUsd)}</div>
                 {costPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(costPriceKhr)}</div> : null}
-              </div>
+              </button>
               <div className="rounded-xl bg-indigo-50 p-3 dark:bg-indigo-900/20">
                 <div className="mb-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400">{T('wholesale_price', 'Wholesale price')}</div>
                 <div className="text-sm font-semibold tabular-nums text-indigo-700 dark:text-indigo-300">{wholesalePriceUsd > 0 ? fmtUSD(wholesalePriceUsd) : '—'}</div>
@@ -378,7 +389,18 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           ) : null}
         </div>
       </div>
-    </div>,
+    </div>
+    {costFloatOpen ? (
+      <CostCalculationFloat
+        productId={Number((p as { id?: unknown }).id) || 0}
+        productName={String(p.name || '')}
+        onClose={() => setCostFloatOpen(false)}
+        fmtUSD={fmtUSD}
+        fmtKHR={fmtKHR}
+        t={(key, fallback) => T(key, fallback)}
+      />
+    ) : null}
+    </>,
     document.body,
   )
 }

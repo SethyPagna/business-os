@@ -227,6 +227,14 @@ export function getProductSupplierPurchases(productId: number | string, supplier
   return apiFetch('GET', appendQuery(`/api/products/${encodeURIComponent(String(productId))}/supplier-purchases`, query))
 }
 
+// P10-6: the cost breakdown float's one transport -- every clickable cost
+// price display (Inventory, both product detail modals, StockAdjustModal,
+// the stock-in session line) reads through this, never a second fetch shape.
+// Fresh on every open like the drill-downs above, not the cached list path.
+export function getProductCostBreakdown(productId: number | string): Promise<unknown> {
+  return apiFetch('GET', `/api/products/${encodeURIComponent(String(productId))}/cost-breakdown`)
+}
+
 // D1: the Stock Change ledger read. Deliberately NOT routed through the
 // cached-query path -- a ledger must reflect the write that just happened,
 // and the section refetches on open/page/view changes anyway.
