@@ -19516,3 +19516,18 @@ Deploy: branch pushed a8036506..4b20bd68 (80 sliced commits, main untouched); `n
 **Exceptions to report.** P9-9 not reproducible (schema, query, roles, Sentry all clean); the toast now names the cause for the next occurrence. P9-12 wave 2 (contacts/sales list route timing, picker option caching) open. Debloat left ~100 frontend unused-local candidates and three kept-live flags as report items. Public items P9-3/4/5/6 not yet by owner decision; partial work sits on stopped lane worktrees.
 
 **Housekeeping.** Lane worktrees lane-p8-*/lane-p9-* removed after the merge (junctions unlinked first); the three stopped public lanes kept.
+
+
+## Part 619 (Sep 16 2026, Claude Fable coordinator) — Program 10 checkpoint A: receipt auto-fit to printer forms, numbered items, catalog cost recompute on every stock-add writer, picker cache
+
+**Provenance.** Release code tip **a8a21c75** on `codex/precision-final-candidate-20260914` (descends from 2f67b78f), pushed and deployed with the paid configuration as Worker **b846aa95-e7ff-4b42-89a5-7da5ed6f511a** (`/api/runtime/version` revision `a8a21c75e3c3`, `tier: paid`). No migrations.
+
+**Owner messages.** D (with photos): the printer works only when the Chrome paper size is set by hand to one of the driver's 72 mm forms (400 mm for long receipts, 210 mm for short ones); wants numbered products, an "n items" header, and no side margins; public items stay paused. E: cost = sum of the different costs divided by their count (zero/empty excluded) on every add/edit/remove/set/session writer; leading-zero barcodes must fold on add; clicking the cost price should show the calculation.
+
+**Root causes.** Live settings carried paperSize 80 mm with 4 mm margins while the driver registers only 72 mm forms: Chrome had no matching form (manual pick) and scaled the strip inside the margins (visible margins). The cost/identity sweep (14 writer rows) found the shared helper correct and used by import/merge, but add-stock, receive-batch, unified stock-in and session receive lines never recomputed the catalog cost, and create, edit and fast stock-in create-while-receiving still answer a leading-zero-only twin with a 409/modal.
+
+**Lanes (sonnet, one fix per commit).** p10/receipt-forms (436a7526, 69d32bcd, 53330045, ab9fb82a: driver-forms default mode, editable form list, ≤1 mm side margins); p10/receipt-numbering (3ca66bae, c8a6512f); p9/perf-2 (54d2f33a shared picker cache; its late sweep called a real red "pre-existing" — the coordinator reran it, found the stale pin and fixed it as cd2eff8c); p10/cost-identity-writers (a5a2169f, 8a2499f2: P10-4 only; P10-5/P10-6 relaunched as their own lanes). p10/cost-float finished after the deploy (790c68f9, 6237aafd) and waits for p10/barcode-fold.
+
+**Gates on the committed tip.** Frontend typecheck, verify:i18n 5872, verify:public-runtime, test:utils 454/454, build 266 chunks zero cycles; Worker tsc clean, sweep 438 files with sentinel, two contention reds green standalone.
+
+**Exceptions to report.** P10-5 in progress; P10-6 done but not deployed; Reports render pass not examined; physical print with the new default still owner-side.
