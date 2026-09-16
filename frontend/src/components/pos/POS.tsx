@@ -16,14 +16,12 @@
  */
 
 import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import type { ChangeEvent, KeyboardEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
 import { useApp, useLowStockConfig, useSync } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import {
-  PAYMENT_METHODS,
   DELIVERY_FEE_PAYER,
   CURRENCY,
   LAYOUT,
@@ -66,7 +64,6 @@ import {
 } from './posCore.ts'
 import { promotionBadgeForProduct, type PromotionRule } from '../../utils/promotionRules.ts'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
-import { businessDateTimeId } from '../../utils/timestampId.ts'
 import { effectiveTaxRate } from '../../utils/taxSettings.ts'
 import {
   beginTrackedRequest,
@@ -75,7 +72,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import type { QueryParams } from '../../api/query.ts'
-import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
+import { normalizePriceValue } from '../../utils/pricing.ts'
 import { cashierCollectKhr, cashierChangeKhr } from '../../utils/rielRounding.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
@@ -337,14 +334,6 @@ type DeliveryContactRecord = Record<string, unknown> & {
   area?: string
   id?: string | number | null
   name: string
-  phone?: string
-}
-
-type CustomerOption = {
-  address?: string
-  email?: string
-  label?: string
-  name?: string
   phone?: string
 }
 
