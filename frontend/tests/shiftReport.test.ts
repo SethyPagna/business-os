@@ -74,6 +74,32 @@ test('removal losses are three rows directly below unpaid, omitted when the Work
   assert.equal(shiftFigureRows(figures).filter((row) => row.key.startsWith('rpt_')).length, 0)
 })
 
+test('the removal-loss row carries unvaluedCount only when the Worker reports unpriced rows', () => {
+  // p5/losses (Sep 15 2026, owner: "i see the report says row removed has 1
+  // no cost price. this is impossible find issue and fix"). The row's
+  // unvaluedCount must be PRESENT (and equal to the reported count) when
+  // removal_loss_unvalued_rows > 0, and ABSENT (not 0, not undefined-but-
+  // truthy) when it is 0 or omitted -- a naive `unvaluedCount:
+  // figures.removal_loss_unvalued_rows` would instead set the key to 0 and
+  // ShiftReportFigures.tsx's `row.unvaluedCount ? ... : null` would still
+  // correctly hide it, but a naive `??` default of some non-zero sentinel
+  // would not, so this pins the actual reported number end to end.
+  const withUnvalued = shiftFigureRows({
+    ...figures, removal_loss_usd: 30, revenue_after_losses_usd: 70,
+    profit_after_losses_usd: -2, removal_loss_unvalued_rows: 1,
+  })
+  assert.equal(withUnvalued.find((row) => row.key === 'rpt_removal_loss')?.unvaluedCount, 1)
+
+  const zeroUnvalued = shiftFigureRows({
+    ...figures, removal_loss_usd: 30, revenue_after_losses_usd: 70,
+    profit_after_losses_usd: -2, removal_loss_unvalued_rows: 0,
+  })
+  assert.equal(zeroUnvalued.find((row) => row.key === 'rpt_removal_loss')?.unvaluedCount, undefined)
+
+  const noFieldSent = shiftFigureRows({ ...figures, removal_loss_usd: 30, revenue_after_losses_usd: 70, profit_after_losses_usd: -2 })
+  assert.equal(noFieldSent.find((row) => row.key === 'rpt_removal_loss')?.unvaluedCount, undefined)
+})
+
 test('negative stale Credit is floored without changing any other figure', () => {
   const rows = shiftFigureRows({ ...figures, credit_usd: -4 })
   assert.equal(rows.find((row) => row.key === 'credit_awaiting_payment')?.usd, 0)

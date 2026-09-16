@@ -154,6 +154,19 @@ assert.ok(ambiguous.conflicts.some((message) => /matches 2 products/.test(messag
 assert.ok(ambiguous.conflicts.every((message) => !/cost/i.test(message)))
 assert.strictEqual(ambiguous.plan, null, 'an ambiguous identity must never fall through to create')
 
+// An all-zero barcode ('000000') is a WILDCARD, not a distinct identity:
+// isRealBarcode explicitly rejects /^0+$/ strings, so matchProduct's
+// barcodeIdentityMatches must fold it the same way a blank/word barcode
+// folds -- matching the ONE existing same-name real-barcode product rather
+// than being treated as its own separate (and, before the Sep 15 2026
+// ruling, plain-string-unequal) identity.
+const zeroPlaceholder = subject.resolveUnifiedStockImportRows([
+  { name: 'Serum', barcode: '000000', shop: '1', date: '08/27/2026', action: 'add' },
+], 'direct', products, branches, current)[0]
+assert.strictEqual(zeroPlaceholder.productId, 10, 'an all-zero placeholder barcode resolves onto the existing same-name product, not a new/ambiguous row')
+assert.strictEqual(zeroPlaceholder.identityKey, 'product:10')
+assert.deepStrictEqual(zeroPlaceholder.conflicts, [])
+
 console.log('PASS unified stock import parses, matches, resolves branches/current stock, preserves every row, and flags ambiguity')
 
 const sqlBinding = loadCompiled('sqlBinding.ts', {})

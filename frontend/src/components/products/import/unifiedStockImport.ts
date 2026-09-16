@@ -6,7 +6,7 @@
 // grouping below must reach the same verdict the server's matchProduct does, or
 // the review screen reads a leading-zero pair as two products while the import
 // that follows treats them as one.
-import { identityBarcodeClassKey } from '../../../utils/productDetailRule.ts'
+import { clusterRowsByBarcodeIdentity } from '../../../utils/productDetailRule.ts'
 // The pre-submit half of the stock-in receipt gate (N14-D) -- the same kernel
 // FastStockInModal, ReceiveBatchModal and the adjust forms run. The Worker's
 // lib/stockActionCommit.ts enforces it on the wire; this only lets the operator
@@ -256,20 +256,30 @@ export function buildUnifiedStockTemplateCsv(): string {
 // Selling/wholesale differences are deliberately absent: only multiple batches
 // at multiple costs require the explicit Confirm Action gate.
 export function findUnifiedStockCostBatchConflicts(rows: readonly UnifiedStockParsedRow[]): Map<number, string> {
-  const groups = new Map<string, UnifiedStockParsedRow[]>()
+  // Group by collapsed name first, then cluster each name group's barcodes
+  // with the SAME wildcard rule the server's identity resolution uses
+  // (clusterRowsByBarcodeIdentity / productsShareExactIdentity): a broken
+  // barcode is never a second identity by itself. The plain CLASS-key
+  // equality this replaced (name + identityBarcodeClassKey(barcode)) only
+  // merged two broken/empty rows into each other -- a sheet pairing one
+  // broken-barcode row against a REAL-barcode row of the same product (e.g.
+  // 'N/A' vs '748485110011') folded to two DIFFERENT keys ('' vs the real
+  // key) and was wrongly treated as two products, so the cost/batch confirm
+  // gate below never fired for that exact pair even though the import that
+  // follows resolves them to one product server-side.
+  const byName = new Map<string, UnifiedStockParsedRow[]>()
   for (const row of rows) {
-    // Same key the server groups by: collapsed name + CLASS-folded barcode
-    // (Sep 15 2026: broken/short/word barcodes fold to '', same as empty --
-    // "if both is empty merge into one empty"). Keyed on the raw barcode,
-    // one sheet listing '0601' and '601' looked like two products here and
-    // the cost/batch gate below never fired for the pair.
-    const key = `${row.name.trim().toLowerCase().replace(/\s+/g, ' ')}|${identityBarcodeClassKey(row.barcode)}`
-    const group = groups.get(key) || []
+    const nameKey = row.name.trim().toLowerCase().replace(/\s+/g, ' ')
+    const group = byName.get(nameKey) || []
     group.push(row)
-    groups.set(key, group)
+    byName.set(nameKey, group)
+  }
+  const groups: UnifiedStockParsedRow[][] = []
+  for (const nameGroup of byName.values()) {
+    groups.push(...clusterRowsByBarcodeIdentity(nameGroup))
   }
   const conflicts = new Map<number, string>()
-  for (const group of groups.values()) {
+  for (const group of groups) {
     const costs = new Set(group.map((row) => row.costPrice).filter((value): value is number => value != null && value !== 0))
     const batches = new Set(group.map((row) => row.batch.trim()).filter(Boolean))
     if (costs.size <= 1 || batches.size <= 1) continue

@@ -55,4 +55,59 @@ async function request(method, cost, extra = {}) {
     assert.equal(raw.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=1').get().unit_cost_usd, expected)
   }
   console.log('PASS actual Hono batch POST/PATCH raw negative numeric/string refusal, prewrite invariance, rounded-zero gate and nullable four-decimal PATCH')
+
+  // Perf-2 deferred audit() (see test-worker-perf-2-round-trips-pure.cjs's
+  // source-level pin of the SAME change): the response is built and
+  // returned BEFORE the waitUntil-deferred Promise.all (which contains
+  // audit()) settles, so a route must still answer 200 even when audit()
+  // itself throws. Unlike the fixture above (whose context.waitUntil()
+  // discards its argument -- it would hide this exact bug), THIS context
+  // actually invokes the deferred promise and tracks whether it rejected,
+  // so a future regression that awaited audit() before responding (turning
+  // its rejection into a 500) would be caught here.
+  const raw2 = new SQLite(':memory:')
+  raw2.exec('CREATE TABLE product_batches(id INTEGER PRIMARY KEY, updated_at TEXT, unit_cost_usd REAL); INSERT INTO product_batches VALUES(1,NULL,1.2345)')
+  const db2 = { prepare(sql) {
+    const statement = raw2.prepare(sql)
+    const args = (p) => Array.isArray(p) ? p : p == null ? [] : [p]
+    return { get: async p => statement.get(...args(p)), all: async p => statement.all(...args(p)), run: async p => statement.run(...args(p)) }
+  } }
+  let deferredRejected = false
+  const throwingOverrides = {
+    '../lib/db': { getDb: () => db2 },
+    '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 1, username: 'test', role: 'admin' }); await next() } },
+    '../lib/permissions': { hasPermission: () => true, getActionTier: () => 'full', getPermissionTier: () => 'full', isActionBlocked: () => false },
+    '../lib/audit': { audit: async () => { throw new Error('audit sink is down') } },
+    '../durable-objects/broadcastHub': { broadcast: async () => {} },
+    '../lib/cache': { bumpVersion: async () => {} },
+    '../lib/productBatches': { receiveBatchStock: async () => { throw new Error('unexpected stock mutation') } },
+    '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
+  }
+  const throwingCache = new Map()
+  function loadThrowing(file) {
+    if (throwingCache.has(file)) return throwingCache.get(file)
+    const mod = { exports: {} }; throwingCache.set(file, mod.exports)
+    const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+    const resolve = request => Object.hasOwn(throwingOverrides, request) ? throwingOverrides[request]
+      : request.startsWith('.') ? loadThrowing(path.resolve(path.dirname(file), request + '.ts')) : require(request)
+    new Function('require', 'module', 'exports', output)(resolve, mod, mod.exports)
+    throwingCache.set(file, mod.exports); return mod.exports
+  }
+  const throwingApp = loadThrowing(path.resolve(__dirname, '../src/routes/batches.ts')).default
+  const throwingContext = {
+    waitUntil: (promise) => { promise.catch(() => { deferredRejected = true }) },
+    passThroughOnException: () => {},
+  }
+  const patchResponse = await throwingApp.request('/1', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unit_cost_usd: 2 }),
+  }, {}, throwingContext)
+  assert.equal(patchResponse.status, 200, 'PATCH must still answer success when the deferred audit() rejects')
+  assert.deepEqual(await patchResponse.json(), { success: true })
+  assert.equal(raw2.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=1').get().unit_cost_usd, 2, 'the write itself must still have committed')
+  // Give the deferred (fire-and-forget) promise a turn to settle before
+  // asserting it actually rejected -- otherwise this would pass even if
+  // audit() were silently never called at all.
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(deferredRejected, true, 'the deferred audit() promise must actually have run and rejected, not been swallowed before being scheduled')
+  console.log('PASS PATCH /api/batches/:id returns success even when the waitUntil-deferred audit() throws')
 })().catch(error => { console.error(error); process.exitCode = 1 })

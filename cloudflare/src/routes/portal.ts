@@ -694,16 +694,26 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   // and uses the existing index rather than a fresh expression.
   // G4: the rail indexes BRANDS now -- one letter per brand initial,
   // counting distinct products under brands starting with it.
+  // The A-Z rail is a facet, not the catalog itself: a shopper missing the
+  // letter filter for one request still needs the products below it. Before
+  // this fix, Promise.all rejected the WHOLE batch (including the real
+  // catalog page from attachPortalStockStatus) the moment this query alone
+  // failed, turning one degraded facet into a 500 for the entire storefront.
+  // Settle it independently and fall back to an empty rail.
   const [itemsWithStockStatus, initials] = await Promise.all([
     attachPortalStockStatus(env, (items || []) as Array<Record<string, unknown>>),
-    db.prepare(`
+    // Wrapped in Promise.resolve() before .catch() so this settles
+    // independently of the fixture's exact return shape (a real D1
+    // PreparedStatement.all() is already a Promise, but this must not
+    // assume every prepare().all() implementation returns one).
+    Promise.resolve(db.prepare(`
       SELECT upper(substr(trim(p.brand), 1, 1)) AS value,
              COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
       FROM products p
       WHERE ${visibleFilter} AND trim(COALESCE(p.brand, '')) <> ''
       GROUP BY value
       ORDER BY value ASC
-    `).all<{ value: string; count: number }>(),
+    `).all<{ value: string; count: number }>()).catch(() => [] as { value: string; count: number }[]),
   ])
   return {
     items: itemsWithStockStatus,
@@ -2186,9 +2196,15 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // storefront, so counting rows would promise more products under a letter
   // than the grid can possibly show. Matches buildPortalCatalog's rail above
   // and loadProductFilters' rail in admin.
+  // Same degrade-not-fail rule as buildPortalCatalog's rail above: a
+  // rejected initials query must not turn a real search-results page into a
+  // whole-request 500. Settle it independently and fall back to an empty
+  // rail.
   const [itemsWithStockStatus, initials] = await Promise.all([
     attachPortalStockStatus(c.env, (items || []) as Array<Record<string, unknown>>),
-    db.prepare(`
+    // See buildPortalCatalog's rail above for why this is wrapped in
+    // Promise.resolve() before .catch().
+    Promise.resolve(db.prepare(`
       SELECT upper(substr(trim(p.brand), 1, 1)) AS value,
              COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
       FROM products p
@@ -2196,7 +2212,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
       WHERE ${initialsWhere.join(' AND ')} AND trim(COALESCE(p.brand, '')) <> ''
       GROUP BY value
       ORDER BY value ASC
-    `).all<{ value: string; count: number }>(initialsParams),
+    `).all<{ value: string; count: number }>(initialsParams)).catch(() => [] as { value: string; count: number }[]),
   ])
 
   return {

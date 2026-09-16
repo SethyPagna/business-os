@@ -205,6 +205,25 @@ check(`a quiet shift drops every zero line (${quiet.split('\n').length} lines)`,
   && !quiet.includes('Not Paid') && !quiet.includes('Delivery') && !quiet.includes('Refunds')
   && !quiet.includes('Cancelled') && !quiet.includes('Edited'), quiet)
 
+// p5/losses (Sep 15 2026, owner: "i see the report says row removed has 1 no
+// cost price. this is impossible find issue and fix"): the Loss line's
+// unvalued-count suffix must survive into the KHMER half of the bilingual
+// report too, not just the English one. Reports here are ONE bilingual line
+// (labeled() glues both languages onto the SAME value string via SEP), so a
+// regression that only stripped the suffix on some language-specific path
+// would still slip through a check that only ever read the raw English text;
+// languageView('km') isolates the line as the reader actually sees it if a
+// future Khmer-only rendering path is ever split out.
+const lossReport = telegram.formatShiftReport('Sunrise Mart', shift, {
+  ...figures, removalLossUsd: 12.5, removalLossUnvaluedRows: 1,
+}, NOW)
+const lossKm = languageView(lossReport, 'km').find((line) => line.includes('ខាតបង់'))
+const lossEn = languageView(lossReport, 'en').find((line) => line.includes('Loss'))
+check('the shift report Loss line carries the unvalued-count suffix in English',
+  lossEn === 'Loss: $12.50 (1?)', lossReport)
+check('...and the SAME suffix survives in the Khmer half of the same line',
+  lossKm === 'ខាតបង់: $12.50 (1?)', lossReport)
+
 // ---- 3. bilingual structure parity -----------------------------------------
 // Every labelled line is `English / ខ្មែរ: value`. Strip one language and the
 // message must still have the same lines, in the same order, with the same

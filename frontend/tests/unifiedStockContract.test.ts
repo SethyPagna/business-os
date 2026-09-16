@@ -67,6 +67,21 @@ const shortCodes = parseUnifiedStockRows([
   { name: 'Short Code Balm', barcode: '12', shop: '1', date: '08/27/2026', action: 'add', cost_price: '8', batch: 'LOT-B' },
 ])
 assert.equal(findUnifiedStockCostBatchConflicts(shortCodes.rows).size, 2)
+// A broken/placeholder barcode ('N/A') is a WILDCARD against a REAL barcode
+// of the same name, not a second identity (productIdentity.ts's
+// productsShareExactIdentity is the server's canonical version of this same
+// rule). Before this fix the grouping key was name + identityBarcodeClassKey
+// (folds a broken barcode to '', a real one to its own key), so 'N/A' and
+// '748485110011' landed in two DIFFERENT groups and this exact pair -- one
+// blank/placeholder row, one real-barcode row, same product -- never raised
+// the cost/batch gate even though the server-side import resolves them to
+// one product at two costs across two lots unannounced.
+const brokenVsReal = parseUnifiedStockRows([
+  { name: 'Face Glow', barcode: 'N/A', shop: '1', date: '08/27/2026', action: 'add', cost_price: '3', batch: 'LOT-A' },
+  { name: 'Face Glow', barcode: '748485110011', shop: '1', date: '08/27/2026', action: 'add', cost_price: '8', batch: 'LOT-B' },
+])
+assert.deepEqual([...findUnifiedStockCostBatchConflicts(brokenVsReal.rows).keys()].sort(), [2, 3],
+  'a broken/placeholder barcode against a real barcode of the same name is one product, so the cost/batch gate must fire')
 const invalidUnified = parseUnifiedStockRows([{ name: '', barcode: '', shop: '-1', warehouse: '', date: '31/12/2026', selling_price: 'nope' }])
 assert.deepEqual(invalidUnified.issues.map((issue) => issue.code), ['missing_identity', 'invalid_quantity', 'invalid_date', 'invalid_price'])
 assert.equal(invalidUnified.rows.length, 1, 'invalid rows stay visible for review instead of disappearing')

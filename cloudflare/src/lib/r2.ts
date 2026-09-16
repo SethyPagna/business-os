@@ -7,16 +7,47 @@
 // no signing, no separate S3_* env vars. `env.ASSETS` in wrangler.toml's
 // [[r2_buckets]] binding IS the bucket.
 
-export async function putObject(bucket: R2Bucket, key: string, data: ArrayBuffer | ReadableStream | Blob, contentType?: string) {
-  return bucket.put(key, data, contentType ? { httpMetadata: { contentType } } : undefined)
+// serveObject's read-through cache (below) is keyed on the plain request
+// URL, never on the R2 key directly -- so a write/delete THROUGH THIS MODULE
+// must purge that same URL or a stale response keeps being served from
+// `caches.default` for up to a year (`max-age=31536000, immutable`) after
+// the object it was built from has changed or is gone entirely. `cacheOrigin`
+// is OPTIONAL and backward-compatible: every existing call site keeps
+// working with no cache awareness at all; a caller that also wants its write
+// to invalidate the edge cache passes the origin the object is served from
+// (e.g. `new URL(request.url).origin`) so this can rebuild serveObject's
+// exact cache key. Purging is best-effort and never blocks or fails the
+// write/delete it accompanies.
+async function purgeServedObjectCache(cacheOrigin: string | undefined, key: string): Promise<void> {
+  if (!cacheOrigin || typeof caches === 'undefined') return
+  try {
+    const url = new URL(`/${key}`, cacheOrigin).toString()
+    await caches.default.delete(new Request(url, { method: 'GET' }))
+  } catch {
+    // Never let a cache-purge failure surface as a write/delete failure.
+  }
+}
+
+export async function putObject(
+  bucket: R2Bucket,
+  key: string,
+  data: ArrayBuffer | ReadableStream | Blob,
+  contentType?: string,
+  cacheOrigin?: string,
+) {
+  const result = await bucket.put(key, data, contentType ? { httpMetadata: { contentType } } : undefined)
+  await purgeServedObjectCache(cacheOrigin, key)
+  return result
 }
 
 export async function getObject(bucket: R2Bucket, key: string) {
   return bucket.get(key)
 }
 
-export async function deleteObject(bucket: R2Bucket, key: string) {
-  return bucket.delete(key)
+export async function deleteObject(bucket: R2Bucket, key: string, cacheOrigin?: string) {
+  const result = await bucket.delete(key)
+  await purgeServedObjectCache(cacheOrigin, key)
+  return result
 }
 
 // R2's binding-level delete accepts up to 1,000 keys per call, and one call
@@ -32,7 +63,7 @@ export async function deleteObject(bucket: R2Bucket, key: string) {
 // so callers report exactly what was left behind instead of guessing.
 const R2_BULK_DELETE_MAX_KEYS = 1000
 
-export async function deleteObjectsBulk(bucket: R2Bucket, keys: string[]): Promise<{ deleted: number; errors: string[] }> {
+export async function deleteObjectsBulk(bucket: R2Bucket, keys: string[], cacheOrigin?: string): Promise<{ deleted: number; errors: string[] }> {
   let deleted = 0
   const errors: string[] = []
   for (let i = 0; i < keys.length; i += R2_BULK_DELETE_MAX_KEYS) {
@@ -40,6 +71,7 @@ export async function deleteObjectsBulk(bucket: R2Bucket, keys: string[]): Promi
     try {
       await bucket.delete(chunk)
       deleted += chunk.length
+      await Promise.all(chunk.map((key) => purgeServedObjectCache(cacheOrigin, key)))
     } catch (error) {
       errors.push(`keys ${i}-${i + chunk.length - 1}: ${(error as Error).message || 'unknown error'}`)
     }
