@@ -12,3 +12,4 @@
 #
 # Backstop: cloudflare/scripts/test-migration-line-endings-pure.cjs
 cloudflare/migrations/*.sql text eol=lf
+ops/scripts/migration/held/*.sql text eol=lf
