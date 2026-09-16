@@ -510,6 +510,7 @@ Owner message K (Sep 17, after checkpoint D): keep going on debloat and responsi
 | Debloat remainder, responsive/compact pass | **Open, in queue (go given)** | "keep going on debloat and responsive" |
 | Storefront console 404 | **Open, in queue (go given)** | "then storefront console" |
 | P9-9 tagged-stock error | **Open, in queue (go given)** | "p9-9 tagged" |
+| Storefront console 404 (follow-up) | **Checked, not reproducible** | Fresh load after deploy: 325 requests all 200, single host, sw precache and icons 200; the first-load message came from the previous service worker fetching a stale chunk. Retest at the next checkpoint. |
 ---
 
 ## Archived main-branch entries (Sep 4–9 2026 Codex status commits, merged into main on 2026-09-16; kept verbatim so nothing is lost — the sections above are authoritative)
