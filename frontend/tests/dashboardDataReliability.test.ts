@@ -104,4 +104,15 @@ assert.match(dashboard, /const aHasProfit = typeof analytics\?\.totals\?\.profit
 assert.match(dashboard, /\.\.\.\(aHasProfit \? \[\{\s*\n\s*id: 'profit'/,
   'the profit card must be omitted entirely (like Reports hides its profit column) when the server sent no profit_usd')
 
+// p5/losses (Sep 15 2026, owner: "i see the report says row removed has 1
+// no cost price. this is impossible find issue and fix"): the unvalued-rows
+// note must be gated on the count being > 0, never printed for a 0/absent
+// count (which would read as "an unpriced row exists" when none does) and
+// never silently skipped when the count IS positive (which would hide the
+// exact defect the owner reported).
+assert.match(dashboard, /const aRemovalUnvalued = Number\(analytics\?\.totals\?\.removal_loss_unvalued_rows\) \|\| 0/,
+  'the unvalued-rows count must come from removal_loss_unvalued_rows, defaulted to 0 (never undefined) so the > 0 gate below is well-defined')
+assert.match(dashboard, /const aRemovalLossLabel = aRemovalUnvalued > 0\s*\n\s*\? `\$\{fmtUSD\(aRemovalLoss\)\} \(\$\{translateOr\('rpt_note_removal_unvalued'/,
+  'rpt_note_removal_unvalued must only be appended to the loss label when aRemovalUnvalued > 0')
+
 console.log('PASS dashboard data reliability guards')
