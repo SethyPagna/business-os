@@ -1300,12 +1300,9 @@ export default function SaleDetailModal({
   const refundUsd = totals.refundUsd
   const refundKhr = totals.refundKhr
   const membershipDiscountUsd = totals.membershipDiscountUsd
-  const membershipDiscountKhr = totals.membershipDiscountKhr
   const baseDiscountUsd = totals.discountUsd
   const itemDiscountUsd = totals.itemDiscountUsd
-  const itemDiscountKhr = totals.itemDiscountKhr
   const totalDiscountUsd = totals.totalDiscountUsd
-  const totalDiscountKhr = Math.round(totalDiscountUsd * totals.exchangeRate)
   const taxUsd = totals.taxUsd
   const subtotalUsd = totals.subtotalUsd
   // subtotal_khr was already returned by GET /api/sales and already stored by
@@ -1318,7 +1315,6 @@ export default function SaleDetailModal({
   const amountPaidKhr = totals.paidKhr
   const changeUsd = totals.changeUsd
   const changeKhr = totals.changeKhr
-  const discountKhr = totals.discountKhr
   const taxKhr = totals.taxKhr
   // The fee AS STORED -- what the Edit control corrects -- plus the split by
   // who actually paid it. `total_usd` only ever carries a CUSTOMER-paid fee,
@@ -2145,7 +2141,6 @@ export default function SaleDetailModal({
                       label={t('discount') || 'Store discount'}
                       tone="discount"
                       amount={`-${fmtUSD(baseDiscountUsd)}`}
-                      sub={discountKhr > 0 ? `-${fmtKHR(discountKhr)}` : null}
                     />
                   ) : null}
                   {itemDiscountUsd > 0 ? (
@@ -2153,7 +2148,6 @@ export default function SaleDetailModal({
                       label={translateOr('item_discount', 'Item discount', 'បញ្ចុះតម្លៃទំនិញ')}
                       tone="discount"
                       amount={`-${fmtUSD(itemDiscountUsd)}`}
-                      sub={itemDiscountKhr > 0 ? `-${fmtKHR(itemDiscountKhr)}` : null}
                     />
                   ) : null}
                   {membershipDiscountUsd > 0 ? (
@@ -2161,7 +2155,6 @@ export default function SaleDetailModal({
                       label={t('membership_discount') || 'Membership discount'}
                       tone="credit"
                       amount={`-${fmtUSD(membershipDiscountUsd)}`}
-                      sub={membershipDiscountKhr > 0 ? `-${fmtKHR(membershipDiscountKhr)}` : null}
                     />
                   ) : null}
                   {[itemDiscountUsd, baseDiscountUsd, membershipDiscountUsd].filter((value) => value > 0).length > 1 ? (
@@ -2169,7 +2162,6 @@ export default function SaleDetailModal({
                       label={translateOr('total_discount', 'Total discount', 'បញ្ចុះតម្លៃសរុប')}
                       tone="discount"
                       amount={`-${fmtUSD(totalDiscountUsd)}`}
-                      sub={totalDiscountKhr > 0 ? `-${fmtKHR(totalDiscountKhr)}` : null}
                     />
                   ) : null}
                   {/* S4-24: "Points redeemed" is gone. It is not money -- it
