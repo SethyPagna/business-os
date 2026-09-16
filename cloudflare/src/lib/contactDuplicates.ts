@@ -1,6 +1,7 @@
 import type { D1Compat } from './db'
 import { parseStoredContactOptions, serializeContactOptions, type ContactOptionMode } from './contactOptions'
 import { canonicalizePhone } from './phone'
+import { buildInClause, chunkForBinding } from './sqlBinding'
 
 // Duplicate detection for customers/suppliers/delivery_contacts, backing
 // the rule these three tables now share: name, phone, and (customers
@@ -502,10 +503,14 @@ export async function undismissDuplicateCluster(
   }
   const rows = await db.prepare(`SELECT cluster_value FROM contact_duplicate_dismissals WHERE contact_table = @table AND cluster_type = 'name'`).all<{ cluster_value: string }>({ table })
   const target = normalizeContactName(value)
-  for (const row of rows) {
-    if (normalizeContactName(row.cluster_value) === target) {
-      await db.prepare(`DELETE FROM contact_duplicate_dismissals WHERE contact_table = @table AND cluster_type = 'name' AND cluster_value = @value`).run({ table, value: row.cluster_value })
-    }
+  // One DELETE per matching cluster_value used to mean one D1 round trip per
+  // row here; matching cluster values are collected first, then removed in
+  // a single chunked IN(...) delete (chunkForBinding keeps any oversized
+  // match set under D1's per-statement bound-parameter ceiling).
+  const matches = rows.filter((row) => normalizeContactName(row.cluster_value) === target).map((row) => row.cluster_value)
+  for (const chunk of chunkForBinding(matches)) {
+    const { sql, params } = buildInClause('value', chunk)
+    await db.prepare(`DELETE FROM contact_duplicate_dismissals WHERE contact_table = @table AND cluster_type = 'name' AND cluster_value IN (${sql})`).run({ table, ...params })
   }
 }
 

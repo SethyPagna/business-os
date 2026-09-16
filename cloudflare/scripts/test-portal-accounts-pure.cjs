@@ -74,9 +74,11 @@ const contactOptions = loadReal('lib/contactOptions.ts')
 // The ONE membership-number minter (house `LC-#####` format, gap-filling).
 // portalAccounts no longer generates its own id, so this must be the REAL module.
 const membershipNumber = loadReal('lib/membershipNumber.ts')
+const sqlBinding = loadReal('lib/sqlBinding.ts')
 const contactDuplicates = loadReal('lib/contactDuplicates.ts', {
   './contactOptions': contactOptions,
   './phone': phone,
+  './sqlBinding': sqlBinding,
 })
 const anonymousCustomer = loadReal('lib/anonymousCustomer.ts')
 const { canonicalizePhone } = phone

@@ -42,11 +42,13 @@ function transpileTs(tsPath) {
 }
 const contactOptionsExports = transpileTs(path.join(path.dirname(sourcePath), 'contactOptions.ts'))
 const phoneExports = transpileTs(path.join(path.dirname(sourcePath), 'phone.ts'))
+const sqlBindingExports = transpileTs(path.join(path.dirname(sourcePath), 'sqlBinding.ts'))
 
 const moduleObj = { exports: {} }
 function fakeRequire(specifier) {
   if (specifier === './contactOptions' || specifier === './contactOptions.ts') return contactOptionsExports
   if (specifier === './phone' || specifier === './phone.ts') return phoneExports
+  if (specifier === './sqlBinding' || specifier === './sqlBinding.ts') return sqlBindingExports
   return require(specifier)
 }
 const wrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)

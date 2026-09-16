@@ -35,7 +35,8 @@ function loadReal(relPath, requireOverrides = {}) {
 
 const contactOptions = loadReal('lib/contactOptions.ts')
 const phone = loadReal('lib/phone.ts')
-const { formatPhoneP8 } = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone })
+const sqlBinding = loadReal('lib/sqlBinding.ts')
+const { formatPhoneP8 } = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone, './sqlBinding': sqlBinding })
 
 let passed = 0
 function check(name, fn) {
@@ -120,7 +121,7 @@ async function realDbChecks() {
       }
     },
   }
-  const lib = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone })
+  const lib = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone, './sqlBinding': sqlBinding })
   rawDb.prepare("INSERT INTO customers (name, phone) VALUES ('Dara', '012 111 222')").run()
   rawDb.prepare("INSERT INTO suppliers (name, phone) VALUES ('Acme Co', '012 333 444')").run()
   rawDb.prepare("INSERT INTO delivery_contacts (name, phone) VALUES ('VET Express', '012 555 666')").run()

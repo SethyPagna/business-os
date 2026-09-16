@@ -59,7 +59,8 @@ function loadDuplicateGate(deps) {
 
 const contactOptions = loadTs('contactOptions.ts')
 const phone = loadTs('phone.ts')
-const subject = loadTs('contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone })
+const sqlBinding = loadTs('sqlBinding.ts')
+const subject = loadTs('contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone, './sqlBinding': sqlBinding })
 
 let passed = 0
 async function check(name, fn) {

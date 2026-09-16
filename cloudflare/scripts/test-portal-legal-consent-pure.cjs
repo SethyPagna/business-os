@@ -87,9 +87,11 @@ function buildAccounts(rawDb) {
   const passwordPolicy = loadReal('lib/passwordPolicy.ts')
   const contactOptions = loadReal('lib/contactOptions.ts')
   const membershipNumber = loadReal('lib/membershipNumber.ts')
+  const sqlBinding = loadReal('lib/sqlBinding.ts')
   const contactDuplicates = loadReal('lib/contactDuplicates.ts', {
     './contactOptions': contactOptions,
     './phone': phone,
+    './sqlBinding': sqlBinding,
   })
   const anonymousCustomer = loadReal('lib/anonymousCustomer.ts')
   return loadReal('lib/portalAccounts.ts', {

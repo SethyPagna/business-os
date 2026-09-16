@@ -69,6 +69,18 @@ const phoneModuleObj = { exports: {} }
 new Function('exports', 'require', 'module', '__filename', '__dirname', phoneOutputText)(
   phoneModuleObj.exports, require, phoneModuleObj, phoneSourcePath, path.dirname(phoneSourcePath),
 )
+// contactDuplicates.ts's own sqlBinding.ts dependency is loaded further
+// below (used there for productBatches.ts) -- reused here for the same
+// module identity rather than transpiling a second copy.
+const earlySqlBindingSourcePath = path.join(__dirname, '..', 'src', 'lib', 'sqlBinding.ts')
+const { outputText: earlySqlBindingOutputText } = ts.transpileModule(fs.readFileSync(earlySqlBindingSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'sqlBinding.ts',
+})
+const earlySqlBindingModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', earlySqlBindingOutputText)(
+  earlySqlBindingModuleObj.exports, require, earlySqlBindingModuleObj, earlySqlBindingSourcePath, path.dirname(earlySqlBindingSourcePath),
+)
 const contactDuplicatesSourcePath = path.join(__dirname, '..', 'src', 'lib', 'contactDuplicates.ts')
 const { outputText: contactDuplicatesOutputText } = ts.transpileModule(fs.readFileSync(contactDuplicatesSourcePath, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -77,7 +89,7 @@ const { outputText: contactDuplicatesOutputText } = ts.transpileModule(fs.readFi
 const contactDuplicatesModuleObj = { exports: {} }
 new Function('exports', 'require', 'module', '__filename', '__dirname', contactDuplicatesOutputText)(
   contactDuplicatesModuleObj.exports,
-  (request) => request === './contactOptions' ? contactOptionsModuleObj.exports : request === './phone' ? phoneModuleObj.exports : require(request),
+  (request) => request === './contactOptions' ? contactOptionsModuleObj.exports : request === './phone' ? phoneModuleObj.exports : request === './sqlBinding' ? earlySqlBindingModuleObj.exports : require(request),
   contactDuplicatesModuleObj,
   contactDuplicatesSourcePath,
   path.dirname(contactDuplicatesSourcePath),
