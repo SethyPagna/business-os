@@ -64,6 +64,7 @@ await runTest('costExclusionLabelKey maps every reason to its own key', () => {
   assert.equal(costExclusionLabelKey('duplicate'), 'cost_breakdown_excluded_duplicate')
   assert.equal(costExclusionLabelKey('inactive'), 'cost_breakdown_excluded_inactive')
   assert.equal(costExclusionLabelKey('superseded'), 'cost_breakdown_excluded_superseded')
+  assert.equal(costExclusionLabelKey('overridden'), 'cost_breakdown_excluded_overridden')
   assert.equal(costExclusionLabelKey(null), null)
 })
 
@@ -128,31 +129,38 @@ await runTest('normalizeCostBreakdown reads a real server payload end to end', (
   assert.equal(normalized!.result_khr, 16000)
 })
 
-// P10-11 -- the full contract: two lots, two manual entries (one
-// superseded) and an older-payload row that only carries `label`.
-await runTest('normalizeCostBreakdown reads two lots, two manual entries and an older label-only row', () => {
+// P10-11 -- the full contract: two lots (one overridden), two manual
+// entries (one superseded) and an older-payload row that only carries
+// `label`. A manual override REPLACES the cost going forward (owner
+// correction, 2026-09-17): a lot received before the latest override stops
+// counting ('overridden'), distinct from an earlier manual entry a later
+// one replaced ('superseded').
+await runTest('normalizeCostBreakdown reads two lots (one overridden), two manual entries and an older label-only row', () => {
   const payload = {
     product_id: 7,
     inputs: [
-      { source: 'lot', label: '1 · Shop', lot_code: 'L-0904', batch_number: 1, received_at: '2026-09-04', branch_name: 'Shop', cost_usd: 3, cost_khr: null, excluded: null },
-      { source: 'lot', label: '2 · Warehouse', lot_code: 'L-0910', batch_number: 2, received_at: '2026-09-10', branch_name: 'Warehouse', cost_usd: 5, cost_khr: null, excluded: null },
+      { source: 'lot', label: '1 · Shop', lot_code: 'L-0904', batch_number: 1, received_at: '2026-09-04', branch_name: 'Shop', cost_usd: 3, cost_khr: null, excluded: 'overridden' },
+      { source: 'lot', label: '2 · Warehouse', lot_code: 'L-0910', batch_number: 2, received_at: '2026-09-10', branch_name: 'Warehouse', cost_usd: 5, cost_khr: null, excluded: 'overridden' },
       { source: 'manual', label: 'Manual', user_name: 'dara', recorded_at: '2026-09-12', cost_usd: 3.5, cost_khr: null, excluded: 'superseded' },
       { source: 'manual', label: 'Manual', user_name: 'dara', recorded_at: '2026-09-16', cost_usd: 4.5, cost_khr: null, excluded: null },
       // Older payload shape: only the legacy sequence · branch label, no new fields.
       { source: 'lot', label: '3 · Shop', cost_usd: 6, cost_khr: null, excluded: null },
     ],
-    distinct_usd: [3, 5, 4.5, 6],
+    distinct_usd: [4.5, 6],
     distinct_khr: [],
-    mean_usd: 4.625,
+    mean_usd: 5.25,
     mean_khr: 0,
     outlier_guard: { fired: false, kept: null },
-    result_usd: 4.625,
+    result_usd: 5.25,
     result_khr: 0,
   }
   const normalized = normalizeCostBreakdown(payload)
   assert.ok(normalized)
   assert.equal(normalized!.inputs.length, 5)
   assert.equal(normalized!.inputs[0].lot_code, 'L-0904')
+  assert.equal(normalized!.inputs[0].excluded, 'overridden')
+  assert.equal(normalized!.inputs[1].excluded, 'overridden')
+  assert.equal(costExclusionLabelKey(normalized!.inputs[1].excluded), 'cost_breakdown_excluded_overridden')
   assert.equal(normalized!.inputs[2].source, 'manual')
   assert.equal(normalized!.inputs[2].excluded, 'superseded')
   assert.equal(normalized!.inputs[3].excluded, null)
