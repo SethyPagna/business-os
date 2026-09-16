@@ -1,3 +1,7 @@
+## Owner message K registered — September 17 (after checkpoint D)
+
+Queue with a go: debloat remainder and a responsive/compact pass, the storefront console 404, P9-9 tagged stock. New items P10-12 … P10-22 (old membership ids, points not zeroed, "unspecified" customers, supplier Excel-style table on large screens, Purchases double scroll / remaining column 0 / supplier payment null / Not Yet Paid date field, remove rows-per-page options, customer purchases without default dates with one-row stats and the sale rows) are registered in the owner task register as OPEN, need a go. Cost override rule restated by the owner: DEPLOYED since checkpoint C (P10-10), re-verify on the live product page at the next logged-in check. Usage at 96 % / 98 % weekly; Codex may take over from `main`.
+
 ## Program 10 checkpoint D LIVE — debloat (dead locals, unread state), budget guards — September 17
 
 Release code commit **c5af514a** on `codex/precision-final-candidate-20260914` (pushed; descends from dd45cbc9; merged into `main` at this checkpoint) is live as Worker version **cb711dfa-d756-405f-8316-2b54279d106e** (`/api/runtime/version` revision `c5af514a5b46`, sourceHash `7f45578869a1f41e`, tier paid, clean stamp). No migration in this checkpoint (chain tail stays 0177).

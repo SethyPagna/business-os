@@ -489,3 +489,24 @@ Release code c5af514a is live as Worker cb711dfa-d756-405f-8316-2b54279d106e (pa
 | P9-9 tagged-stock error | **Open, not done** | Carried. |
 | P9-3/4/5/6 public items | **Open, not done** | Paused until the owner's go. |
 | Physical print with the driver-forms default | **Open, owner-side** | Cannot be exercised from this workstation. |
+
+## September 17 owner message K — new items registered (all OPEN, need a go), continuation queue
+
+Owner message K (Sep 17, after checkpoint D): keep going on debloat and responsive, then the storefront console 404, then P9-9 tagged stock; add the issues below to the task list; usage weekly all models 96 %, Fable 98 %. The cost override rule was restated (before (n+n1+n2)/3, after override just n, later stock-adds average from n forward, override lives in edit on the product page) — that rule is DEPLOYED since checkpoint C (P10-10, Worker 0ec11718, migration 0177) and pinned by test-product-cost-breakdown-pure.cjs and test-product-manual-cost-entry-native.cjs; re-verify on the live product page when the next session logs in.
+
+| Item | State | Owner wording |
+| --- | --- | --- |
+| P10-12 customers still carry old membership ids | **Open, needs go** | "customer still have old membership ids" |
+| P10-13 some customers' membership points not zeroed | **Open, needs go** | "some still have membership points not zeroed" |
+| P10-14 some customers show "unspecified" | **Open, needs go** | "some still shows unspecified" |
+| P10-15 supplier display not consistent (Excel-style table on large screens) | **Open, needs go** | "the supplier display is not consistent like excel style in large screens" |
+| P10-16 Purchases page double scroll — compact and responsive, scroll only the product rows | **Open, needs go** | "Purchases have double scroll make it more compact and responsive so only need to scroll for products" |
+| P10-17 Purchases remaining column shows only 0 | **Open, needs go** | "remaining column are only showing 0" |
+| P10-18 payment to supplier is null | **Open, needs go** | "payment to supplier is null...should be fixed" |
+| P10-19 date field in Not Yet Paid (add stock and siblings) not working | **Open, needs go** | "the date in the not yet paid in add stock etc... are not working" |
+| P10-20 product count / back / next row: remove the rows-per-page options | **Open, needs go** | "no need to show rows per page options" |
+| P10-21 customer purchases: no default start/end date, show all | **Open, needs go** | "customers purchases are doing default date start and date end, remove that to show all" |
+| P10-22 customer purchases stats in one compact row, then the sale rows (records) listed | **Open, needs go** | "the stats can be one row, make it compact. then actually show rows of sales as well. records." |
+| Debloat remainder, responsive/compact pass | **Open, in queue (go given)** | "keep going on debloat and responsive" |
+| Storefront console 404 | **Open, in queue (go given)** | "then storefront console" |
+| P9-9 tagged-stock error | **Open, in queue (go given)** | "p9-9 tagged" |
