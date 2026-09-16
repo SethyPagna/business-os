@@ -26,7 +26,7 @@ import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
-import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { planReceiveBatchStock, receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, type ReceiptCostPreimage } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
@@ -182,16 +182,6 @@ function num(value: unknown): number {
 // joined and a space-separated query now split into individual words.
 function splitSearchTerms(raw: unknown): string[] {
   return tokenizeSearchWords(raw as string, 8)
-}
-
-// Comma splits into GROUPS, a space inside a group is ordinary
-// word-spacing -- see tokenizeSearchTermGroups' own comment in
-// lib/searchMatch.ts for why this replaced the flat splitSearchTerms
-// above for the AND/OR-toggle-driven product search below (the
-// movement-log search further down keeps splitSearchTerms' flat
-// word-level behavior -- it has no comma-groups use case reported).
-function splitSearchTermGroups(raw: unknown): string[][] {
-  return tokenizeSearchTermGroups(raw as string, 6, 8)
 }
 
 function getInitialKey(value: unknown): string {
@@ -1257,10 +1247,6 @@ const STOCK_ROW_COLUMNS = `id, name, sku, barcode, category, brand, unit, descri
   discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr,
   purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
   low_stock_threshold, out_of_stock_threshold`
-
-function lowerTrim(value: unknown): string {
-  return String(value ?? '').trim().toLowerCase()
-}
 
 // Sets purchase_price_* and cost_price_* to the same value -- the single
 // "Cost" input the frontend now sends. Kept as its own function (rather
