@@ -14,7 +14,7 @@
  */
 
 import { apiFetch, setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll, pingServerHealth } from './api/http.ts'
-import { connectWS, disconnectWS, reconnectWS, resumeWS, scheduleConnectWS } from './api/websocket.ts'
+import { disconnectWS, resumeWS, scheduleConnectWS } from './api/websocket.ts'
 import {
   dispatchSyncUpdates,
   emitSyncQueueChanged,

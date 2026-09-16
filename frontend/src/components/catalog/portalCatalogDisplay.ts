@@ -39,10 +39,6 @@ type PortalPriceFormatter = (usd: unknown, khr: unknown, config: PortalDisplayCo
 // the public customer portal a different one, purely from which file's
 // copy of "round the price" ran. Delegating to the shared implementation
 // here instead of maintaining a second one that can silently drift.
-function isPortalDiscountActive(product: PortalProduct = {}): boolean {
-  return isProductDiscountActive(product)
-}
-
 function calculatePortalDiscount(product: PortalProduct = {}, exchangeRate = 4100) {
   return calculateProductDiscount(product, exchangeRate)
 }

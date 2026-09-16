@@ -393,7 +393,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
 export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => void; branchId?: number | null }) {
   const { t, notify, fmtUSD, fmtKHR, user, settings } = useApp() as ShiftGateContext
 
-  const { state, publish } = useSharedShift(branchId, user?.id, settings?.shift_scope_mode)
+  const { state } = useSharedShift(branchId, user?.id, settings?.shift_scope_mode)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [countedUsd, setCountedUsd] = useState('')

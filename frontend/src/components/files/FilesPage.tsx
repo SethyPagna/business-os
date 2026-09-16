@@ -12,7 +12,6 @@ import KeyRound from 'lucide-react/dist/esm/icons/key-round.js'
 import Lock from 'lucide-react/dist/esm/icons/lock.js'
 import LockOpen from 'lucide-react/dist/esm/icons/unlock.js'
 import PencilLine from 'lucide-react/dist/esm/icons/pencil-line.js'
-import RefreshCcw from 'lucide-react/dist/esm/icons/refresh-ccw.js'
 import Square from 'lucide-react/dist/esm/icons/square.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
@@ -20,7 +19,6 @@ import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.t
 import PageHeader from '../shared/PageHeader'
 import Modal from '../shared/Modal'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
-import AppSelect from '../shared/AppSelect'
 import FilterMenu from '../shared/FilterMenu'
 import PaginationControls from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -141,7 +139,6 @@ interface ProviderMeta {
 }
 
 type ProviderMetaMap = Record<string, ProviderMeta>
-type ProviderOption = [string, ProviderMeta]
 
 interface AiProvider {
   id: string | number
@@ -1221,7 +1218,7 @@ export default function FilesPage() {
   }
 
   function toggleSelectAllAssets() {
-    setSelectedAssetIds((current) => {
+    setSelectedAssetIds(() => {
       if (allFilesSelected) return new Set()
       return new Set(selectableFileIds)
     })

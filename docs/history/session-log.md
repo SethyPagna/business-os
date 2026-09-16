@@ -19559,6 +19559,20 @@ Deploy: branch pushed a8036506..4b20bd68 (80 sliced commits, main untouched); `n
 **Gates on the committed tip.** Frontend typecheck, verify:i18n 5883, verify:public-runtime, test:utils 456/456, build; Worker tsc clean, full sweep with sentinel. Three sweep reds (test-d1-pattern-limit-native, test-product-conflict-action-apply-native, test-sale-customer-safety-native) all exit 0 standalone; the safety test runs 57 s and had been cut off under the parallel sweep.
 
 **Exceptions to report.** Debloat lane not merged. P9-9, public items, physical print still open.
+
+## Part 622 (Sep 17 2026, Claude Fable coordinator) — Program 10 checkpoint D: debloat lane merged, zombie scroll state removed, deployed
+
+**Provenance.** Release code tip **c5af514a** on `codex/precision-final-candidate-20260914` (descends from dd45cbc9), pushed, deployed with the paid configuration as Worker **cb711dfa-d756-405f-8316-2b54279d106e** (`/api/runtime/version` revision `c5af514a5b46`, sourceHash `7f45578869a1f41e`, builtAt 2026-09-16T22:45:33Z, clean stamp). No migration. Merged into `main`.
+
+**Owner message J.** Get it right: no conflict errors, zombies, orphans, reds or blank page; investigate the fixes; debloat, responsive and compact; deploy right away; the other tasks stay open, not done; Codex may take over after the checkpoint.
+
+**Work.** p10/debloat-locals (9ef0a578, 12 sonnet-lane commits) merged into integrate/p10 without conflicts (268d7df1); the lane touched no Worker source, only the new budget test. Every removed line reviewed: hook calls (`useSharedShift`, `useApp`, `useState`) kept where a binding was dropped, an uncalled `pickImageAsDataUrl` removed, no side effect lost. One zombie the lane had narrowed but not removed — CatalogPage's `publicChromeVisible` state written on every public-portal scroll and never read, plus its anchor ref — removed (c5af514a).
+
+**Gates on the committed tip.** Frontend typecheck, verify:i18n 5883, verify:public-runtime, test:utils 457/457, build 266 chunks zero cycles (run twice: on the merge tip and again on c5af514a); Worker tsc clean, budget test, record-orphans-native, cost breakdown pure, manual-cost-entry native and 0177 pure green; Worker source identical to the checkpoint C sweep-certified tip.
+
+**Live check.** leangbeauty.com renders on desktop and at 375 px from the new build; assets, portal bootstrap/auth/search and uploads all 200; one console 404 for a resource not in the app's request list — open. Admin root not exercised (managed challenge).
+
+**Open for the next owner (Codex or Claude).** Debloat remainder (48 diagnostics, unreferenced-key candidates), the storefront 404, P9-9, public P9-3/4/5/6, physical print. Lane worktrees under the session scratchpad can be removed; `main` and the release branch are in sync.
 ---
 
 ---

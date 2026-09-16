@@ -86,7 +86,7 @@ function installWindow(): () => void {
 function stubFetchCounting(): { calls: number; restore: () => void } {
   const originalFetch = globalThis.fetch
   const counter = { calls: 0 }
-  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+  globalThis.fetch = (async (..._args: Parameters<typeof fetch>) => {
     counter.calls += 1
     return new Response(JSON.stringify([{ id: 1, name: 'Acme Supplies' }]), {
       status: 200,

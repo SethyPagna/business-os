@@ -76,8 +76,7 @@ await runTest('many-key save self-heals when the conflict is a false positive (n
   const calls: FetchCall[] = []
   globalThis.fetch = ((...args: FetchCall) => {
     calls.push(args)
-    const [url, init] = args
-    const path = String(url)
+    const [, init] = args
     // With skipExpectedUpdatedAt, the first attempt's payload carries no
     // expectedUpdatedAt at all -- it's the retry (below) that starts
     // supplying one, once the server has told it what to use.
@@ -115,8 +114,7 @@ await runTest('many-key save surfaces a real conflict instead of overwriting a f
   for (const key of Object.keys(update)) baselineSettings[key] = `unchanged-${key}`
 
   globalThis.fetch = ((...args: FetchCall) => {
-    const [url, init] = args
-    const path = String(url)
+    const [, init] = args
     if (String(init?.method || 'GET').toUpperCase() === 'POST') {
       const body = JSON.parse(String(init?.body || '{}'))
       if (!body.expectedUpdatedAt) {

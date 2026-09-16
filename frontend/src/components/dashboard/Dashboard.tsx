@@ -6,13 +6,15 @@ import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAp
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { useMemo } from 'react'
 import { useRef } from 'react'
-import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
-import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import StatsStrip, { statsPresetRange, type StatCardDef, type StatsPresetKey } from '../shared/StatsStrip.tsx'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers'
 import { buildEquation, revenueTerms, profitTerms } from '../../utils/statsFormulas'
 import Download from 'lucide-react/dist/esm/icons/download.js'
+// Pinned by tests/performanceLoadingUx.test.ts: this component must keep a
+// direct lucide-react/dist/esm/icons/layout-dashboard.js module import
+// (not the app-wide barrel) even though the icon itself isn't rendered here.
+import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -48,14 +50,7 @@ type InventoryStockFocus = 'all' | 'low' | 'out'
 // not one long scroll of every card. lg+ ignores this and renders every group
 // as the normal grid (see the `lg:block` on each group section).
 type DashboardMobileSection = 'overview' | 'performers' | 'inventory'
-type DashboardMetricValue = string | number | boolean | null | undefined
 type DashboardMetricMap = Record<string, number | undefined>
-type DashboardExportItem = 'divider' | {
-  label: ReactNode
-  onClick?: () => void
-  color?: string
-  disabled?: boolean
-}
 
 interface AppUser {
   id?: EntityId

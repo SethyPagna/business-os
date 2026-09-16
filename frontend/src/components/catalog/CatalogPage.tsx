@@ -52,7 +52,6 @@ import { buildProductSearchTerms } from '../products/helpers/productFilterHelper
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import {
   ALL_PUBLIC_TRANSLATE_OPTIONS,
-  FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS,
   FIRST_PARTY_TRANSLATE_LANG_OPTIONS,
   GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
   isFirstPartyPortalLanguage,
@@ -533,17 +532,6 @@ function buildAiFaqStarterItems(t: ((key: string) => string) | null | undefined)
   }))
 }
 
-/** Convert hex color to rgba for layered hero background gradients. */
-function hexToRgba(hex: unknown, alpha: unknown): string {
-  const safeHex = normalizeHexColor(hex, '#0f172a')
-  const value = safeHex.replace('#', '')
-  const r = Number.parseInt(value.slice(0, 2), 16)
-  const g = Number.parseInt(value.slice(2, 4), 16)
-  const b = Number.parseInt(value.slice(4, 6), 16)
-  const safeAlpha = Number.isFinite(Number(alpha)) ? Number(alpha) : 1
-  return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`
-}
-
 /** Read cached portal payload to reduce visible loading delays on hard reload. */
 function readPortalCache(): LegacyCatalogRecord | null {
   if (typeof window === 'undefined') return null
@@ -1019,18 +1007,6 @@ async function readImageFilesAsDataUrls(
 }
 
 /** Open picker for one image and return data URL for immediate preview/save. */
-async function pickImageAsDataUrl(): Promise<string | null> {
-  const file = await new Promise<File | null>((resolve) => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = 'image/*'
-    input.onchange = () => resolve(input.files?.[0] || null)
-    input.click()
-  })
-  if (!file) return null
-  return readImageFileAsDataUrl(file)
-}
-
 /** Open picker for multiple images and return data URLs. */
 async function pickMultipleImagesAsDataUrls(): Promise<string[]> {
   const files = await new Promise<File[]>((resolve) => {
@@ -1306,7 +1282,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [portalProductRefreshing, setPortalProductRefreshing] = useState(false)
   const [portalConfigReady, setPortalConfigReady] = useState(() => !!cachedPortal?.config || !publicView)
   const [publicSecondaryTabsPrimed, setPublicSecondaryTabsPrimed] = useState(false)
-  const [publicChromeVisible, setPublicChromeVisible] = useState(true)
   const [publicScrollButtonsVisible, setPublicScrollButtonsVisible] = useState(false)
   const [publicPortalNavPinned, setPublicPortalNavPinned] = useState(false)
   const [publicPortalNavMetrics, setPublicPortalNavMetrics] = useState({ left: 0, width: 0, height: 0 })
@@ -1382,7 +1357,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const portalBootstrapRequestRef = useRef(0)
   const portalProductsRequestRef = useRef(0)
   const skipNextBootstrappedProductSearchRef = useRef(false)
-  const publicScrollAnchorRef = useRef(0)
   const publicPortalNavRef = useRef<HTMLElement | null>(null)
   const mediaUploadControllersRef = useRef(new Map<string, AbortController>())
   const mediaUploadInFlightTargetsRef = useRef(new Set<string>())
@@ -2115,13 +2089,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const updateVisibility = () => {
       frameRequested = false
       const scrollTop = Math.max(window.scrollY || 0, document.documentElement?.scrollTop || 0, document.body?.scrollTop || 0)
-      const delta = scrollTop - publicScrollAnchorRef.current
       setPublicScrollButtonsVisible(scrollTop > 220)
-      if (scrollTop <= 24) {
-        setPublicChromeVisible(true)
-      } else if (Math.abs(delta) >= 12) {
-        setPublicChromeVisible(delta < 0)
-      }
       if (publicPortalNavRef.current) {
         const rect = publicPortalNavRef.current.getBoundingClientRect()
         const shouldPin = rect.top <= topOffset
@@ -2139,7 +2107,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           ) ? current : next
         })
       }
-      publicScrollAnchorRef.current = scrollTop
     }
 
     const handleScroll = () => {
@@ -2305,7 +2272,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     })
   }, [displayProducts, portalSearchTerms, categoryFilter, brandFilter, branchFilter, stockFilter, displayConfig])
 
-  function toggleFilterValue(values: string[], setter: Dispatch<SetStateAction<string[]>>, value: string) {
+  function toggleFilterValue(_values: string[], setter: Dispatch<SetStateAction<string[]>>, value: string) {
     setter((current) => (
       current.includes(value)
         ? current.filter((item) => item !== value)
@@ -2319,7 +2286,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   // tap, same behavior as Products/Inventory/POS). See
   // components/shared/CategoryFilterOptions.tsx and PortalFilterCombobox's
   // onToggleGroup prop.
-  function toggleFilterValues(values: string[], setter: Dispatch<SetStateAction<string[]>>, batch: string[], checked: boolean) {
+  function toggleFilterValues(_values: string[], setter: Dispatch<SetStateAction<string[]>>, batch: string[], checked: boolean) {
     setter((current) => {
       const wanted = new Set(batch)
       const kept = current.filter((item) => !wanted.has(item))
