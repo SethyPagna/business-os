@@ -101,6 +101,9 @@ const env = {
   setAmendConfirm: (value: unknown) => staged.push(value), setAmendMutationError: (value: string) => errors.push(value),
   amendRequestIdRef: { current: '' }, createSettlementRequestId: () => 'historical-reviewed-id',
   t: (key: string) => key, translateOr: (key: string) => key, fmtUSD: (value: number) => value.toFixed(2),
+  // The modal's own payer label, which only picks a pack key; the summary line
+  // below is what the confirm dialog shows, so it has to resolve.
+  payerLabel: (payer: string) => (payer === 'store' ? 'fee_by_store' : 'fee_by_customer'),
 }
 callback('stageLineUpdate', env)(70, 2, 1.23454, null, 0, 0, 0, 'Old item')
 assert.equal(staged[0].request.pricing_quote.total_usd, 3.7036)
@@ -140,10 +143,27 @@ callback('stageReplacement', { ...env, sale: replacementResidualHeader, items: [
   headerQuote: (subtotal: number) => quoteSaleMutationHeader(replacementResidualHeader, subtotal, { tax_enabled: '0', tax_rate: '0' }),
   moneyCapability: { assertReady: () => {} }, stagedLineFromSheetPick, stagedLinePricingIntent, setAddQuery: () => {}, setAddCandidates: () => {} })({ id: 8, name: 'Replacement', selling_price_usd: .01, stock_quantity: 10 }, '2')
 assert.equal(staged.at(-1).request.expected_header_quote.subtotal_usd, .01, 'actual replacement combines complete expression before refusing a negative intermediate removal or rounding a half tie')
-callback('stageDeliveryFeeAmendment', { ...env, feeText: '1.2345', parseDeliveryAmountUsd, deliveryAmountChanged, DELIVERY_AMOUNT_ERROR_KEYS })(0)
+callback('stageDeliveryFeeAmendment', { ...env, feeText: '1.2345', feePayer: 'customer', deliveryPaidByStore: false, parseDeliveryAmountUsd, deliveryAmountChanged, DELIVERY_AMOUNT_ERROR_KEYS })(0)
 assert.equal(staged.at(-1).request.delivery_fee_usd, 1.2345)
 assert.equal(staged.at(-1).request.expected_header_quote.subtotal_usd, 2.46938, 'fee preview retains raw saved subtotal verbatim; no item sum')
 assert.equal(Object.hasOwn(staged.at(-1).request, 'items'), false)
+
+// P10-23: a delivery rung up as free must be correctable to customer-paid
+// after the sale. The amount does not move at all here -- only the payer --
+// which is precisely the shape the old "already that amount" refusal
+// swallowed, so the callback is run for real rather than source-matched.
+const freeHeader = { ...header, delivery_fee_usd: 1.5, delivery_fee_paid_by: 'store' }
+callback('stageDeliveryFeeAmendment', { ...env, sale: freeHeader, feeText: '1.5', feePayer: 'customer', deliveryPaidByStore: true,
+  headerQuote: (subtotal: number, overrides?: any) => quoteSaleMutationHeader(freeHeader, subtotal, { tax_enabled: '0', tax_rate: '0' }, overrides),
+  parseDeliveryAmountUsd, deliveryAmountChanged, DELIVERY_AMOUNT_ERROR_KEYS })(1.5)
+assert.equal(staged.at(-1).request.delivery_fee_paid_by, 'customer', 'a payer-only correction still stages a request')
+assert.equal(staged.at(-1).request.delivery_fee_usd, 1.5, 'and it leaves the amount exactly as recorded')
+// The opposite half: nothing moved at all is still refused, which is the
+// reason that refusal exists.
+const beforeNoop = staged.length
+callback('stageDeliveryFeeAmendment', { ...env, sale: freeHeader, feeText: '1.5', feePayer: 'store', deliveryPaidByStore: true,
+  parseDeliveryAmountUsd, deliveryAmountChanged, DELIVERY_AMOUNT_ERROR_KEYS })(1.5)
+assert.equal(staged.length, beforeNoop, 'an unchanged amount AND an unchanged payer stages nothing')
 callback('stageActualDeliveryCostAmendment', { ...env, actualCostText: '0.1234', parseDeliveryAmountUsd, deliveryAmountChanged, DELIVERY_AMOUNT_ERROR_KEYS })(null)
 assert.equal(staged.at(-1).request.delivery_actual_cost_usd, .1234)
 assert.equal(Object.hasOwn(staged.at(-1).request, 'expected_header_quote'), false, 'cost-only action cannot reprice basket')
