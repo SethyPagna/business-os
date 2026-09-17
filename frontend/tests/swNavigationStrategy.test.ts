@@ -65,12 +65,37 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
     assert.match(source, /if \(!isCacheableStaticPath\(url\.pathname\)\)[\s\S]{0,20}return[;\s]*\n[\s\S]{0,700}event\.respondWith\(cacheFirstStatic\(request, event\)\)/, 'the dispatcher must send every cacheable static path through cacheFirstStatic')
   })
 
-  runTest(`a 404 on a hashed /assets/ chunk refreshes the cached shell before the response returns (${label})`, () => {
+  runTest(`a chunk the deploy deleted refreshes the cached shell before the response returns (${label})`, () => {
     const body = functionBody(source, 'async function cacheFirstStatic', 'function isStaleBuildAsset')
     assert.match(body, /else if \(isStaleBuildAsset\(request, response\)\) \{[\s\S]{0,40}await recoverStaleShell\(event\)/, 'the network-miss branch must await the shell recovery on a stale asset')
     const guard = functionBody(source, 'function isStaleBuildAsset', 'async function recoverStaleShell')
-    assert.match(guard, /response\.status !== 404/, 'only a 404 marks a stale build asset')
     assert.match(guard, /startsWith\('\/assets\/'\)/, 'only hashed build assets count -- icons and manifests are unhashed')
+    // Sep 17 outage: wrangler.toml sets not_found_handling =
+    // "single-page-application", so a chunk the deploy deleted is NOT a 404 --
+    // the asset layer answers with index.html at status 200 and the page dies
+    // on "Expected a JavaScript-or-Wasm module script". Recognising only the
+    // 404 is what left every cached shell unable to recover, and this test
+    // used to pin that. Run the real function against both shapes instead of
+    // matching its text, so the wrong implementation and the right one
+    // actually disagree here.
+    const isStale = new Function('self', `${guard}
+return isStaleBuildAsset`)({ location: { origin: 'https://admin.example.com' } }) as
+      (request: { url: string }, response: unknown) => boolean
+    const res = (status: number, contentType: string) => ({
+      status,
+      ok: status >= 200 && status < 300,
+      headers: { get: (key: string) => (key.toLowerCase() === 'content-type' ? contentType : null) },
+    })
+    const chunk = { url: 'https://admin.example.com/assets/AdminRoot-AyyEAtBX.js' }
+    assert.equal(isStale(chunk, res(404, 'text/plain')), true, 'a 404 on a chunk is still a stale build')
+    assert.equal(isStale(chunk, res(200, 'text/html; charset=utf-8')), true, 'the SPA fallback answering a chunk with HTML is the shape that actually happens')
+    assert.equal(isStale(chunk, res(200, 'text/javascript')), false, 'a real chunk must never be treated as stale')
+    assert.equal(isStale(chunk, res(500, 'text/html')), false, 'a server error is not evidence that the build moved on')
+    assert.equal(
+      isStale({ url: 'https://admin.example.com/index.html' }, res(200, 'text/html')),
+      false,
+      'the app shell itself is HTML by definition -- only /assets/ counts',
+    )
     const recover = functionBody(source, 'async function recoverStaleShell', "self.addEventListener('fetch'")
     assert.match(recover, /caches\.open\(APP_SHELL_CACHE\)/, 'the shell cache is what goes stale')
     assert.match(recover, /fetch\('\/index\.html', \{ cache: 'no-store' \}\)/, 'the fresh shell must bypass HTTP caches')

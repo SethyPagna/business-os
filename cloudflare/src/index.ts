@@ -326,6 +326,32 @@ function rewriteAdminDocument(response: Response): Response {
 // own pages as missing.
 for (const route of APP_DOCUMENT_ROUTES) app.on(['GET', 'HEAD'], route, serveAppDocument)
 
+// Sep 17 outage. [assets] sets not_found_handling = "single-page-application",
+// which is right for app ROUTES and catastrophic for hashed build chunks: a
+// deploy replaces /assets/*, and any client still holding an older shell --
+// a service worker serves its cached index.html, and iOS keeps a PWA shell
+// for days -- asks for a chunk that no longer exists and gets index.html back
+// with status 200. The browser refuses to parse HTML as a module, the page
+// stays blank, and every recovery path the app has (the worker's
+// recoverStaleShell, utils/chunkReloadGuard.ts) is written against a 404 that
+// never arrives. So this prefix is served by the Worker and a miss is an
+// honest 404. Costs one Worker invocation per uncached chunk; the asset
+// layer's own immutable Cache-Control is passed through untouched, so a
+// warm client still pays nothing.
+app.on(['GET', 'HEAD'], '/assets/*', async (c) => {
+  const assets = c.env.STATIC_ASSETS
+  if (!assets) return c.text('Static assets are not bound to this Worker deployment.', 503)
+  const response = await assets.fetch(c.req.raw)
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase()
+  // The fallback document is the ONLY thing that arrives here as HTML: no
+  // real build asset is text/html. Anything else -- a 304, a range response,
+  // an error from the asset layer -- is passed through exactly as produced.
+  if (response.ok && contentType.includes('text/html')) {
+    return c.text('Not found', 404, { 'Cache-Control': 'no-store' })
+  }
+  return response
+})
+
 // P3-L3 (E): robots.txt and sitemap.xml, split by host (lib/publicSeo.ts).
 // The storefront is indexable and points at a minimal sitemap; the admin
 // host answers "Disallow: /" and has no sitemap. Registered here, above the

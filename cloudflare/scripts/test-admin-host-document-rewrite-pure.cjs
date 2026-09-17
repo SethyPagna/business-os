@@ -273,7 +273,10 @@ check('every document route the Worker handles is routed to the Worker', () => {
 check('no route is sent to the Worker without a handler', () => {
   // /robots.txt and /sitemap.xml: src/index.ts's public SEO handlers
   // (test-public-seo-pure.cjs).
-  const handled = new Set([...identity.APP_DOCUMENT_ROUTES, '/api/*', '/uploads/*', '/health', '/ws', '/robots.txt', '/sitemap.xml'])
+  // /assets/*: src/index.ts's build-asset handler, which turns a chunk the
+  // deploy deleted into an honest 404 instead of the SPA document (the Sep 17
+  // blank-page outage; test-stale-build-asset-404-pure.cjs).
+  const handled = new Set([...identity.APP_DOCUMENT_ROUTES, '/api/*', '/uploads/*', '/health', '/ws', '/robots.txt', '/sitemap.xml', '/assets/*'])
   for (const route of wranglerRunWorkerFirst()) {
     assert.ok(handled.has(route), route + ' reaches the Worker but nothing handles it; that 404s a whole page')
   }
