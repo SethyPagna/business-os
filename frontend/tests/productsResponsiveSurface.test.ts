@@ -159,7 +159,9 @@ const endOfPanelPrimaries: Array<[string, string, string, string]> = [
   ['ConfirmDialog', confirmDialog, 'onClick={onConfirm}', 'className="sticky bottom-0'],
   ['InventoryStockModals (adjust)', stockModals, 'onClick={onAdjust}', 'flex flex-shrink-0 gap-2 border-t'],
   ['InventoryStockModals (transfer)', stockModals, 'onClick={onTransfer}', 'flex flex-shrink-0 gap-2 border-t'],
-  ['ReceiveBatchModal', receiveBatch, 'onClick={submit}', 'flex items-center justify-end gap-2 border-t'],
+  // Handler renamed submit -> beginReceive since this was first pinned; the
+  // property (wired once, inside the end-of-panel footer) is unchanged.
+  ['ReceiveBatchModal', receiveBatch, 'onClick={beginReceive}', 'flex items-center justify-end gap-2 border-t'],
   ['FastStockInModal', fastStockIn, 'onClick={commitSession}', 'flex flex-shrink-0 flex-wrap'],
   ['TransferModal', transfer, 'onClick={handleBulkTransfer}', 'flex gap-3 border-t'],
 ]

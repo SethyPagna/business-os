@@ -345,13 +345,16 @@ runTest('public product discovery uses a sticky unified search, responsive brand
     'storefront paging should use the same current Back/Next control as the rest of the app')
   assert.match(catalogPaginationSource, /export const CATALOG_DEFAULT_PAGE_SIZE = 50/,
     'the default storefront page size remains aligned with the server response contract')
-  // Reverses the 2026-09-07 removal of the shopper-facing size control
-  // (owner decision, 2026-09-14): the selector is back, with exactly three
-  // sizes, handed straight to the shared pager.
+  // The option list and its handler/prop plumbing here in the wrapper survive
+  // P10-20 (owner, 2026-09-17: "no need to show rows per page options") even
+  // though the shared PaginationControls' centered branch no longer renders a
+  // selector for them (see storefrontPagerLayout.test.ts) -- this wrapper still
+  // forwards them unconditionally, so a future restore has a correct value to
+  // plug back in rather than a removed constant to reconstruct blind.
   assert.match(catalogPaginationSource, /export const CATALOG_PAGE_SIZE_OPTIONS: number\[\] = \[20, 50, 100\]/,
-    'the shopper picks between exactly 20, 50 and 100 products a page')
+    'the three sizes a shopper could pick between remain a named constant even while unrendered')
   assert.match(catalogPaginationSource, /onPageSizeChange=\{onPageSizeChange\}[\s\S]*pageSizeOptions=\{pageSizeOptions\}/,
-    'the centred public pager must forward the size handler and the option list')
+    'the centred public pager wrapper must still forward the size handler and the option list')
   assert.match(catalogPaginationSource, /layout="centered"/,
     'public paging remains one centred Back/page/Next control')
 })
@@ -407,18 +410,20 @@ runTest('public catalog scrolls through the document and keeps its pager control
   // Anchored on the page FIELD, not on `aria-label={pageLabel}`: the branch's
   // <nav> landmark is named from the same label and sits before Back, so that
   // string finds the wrapper first and the order check passes on any layout.
-  const pageSizeSelectAt = pagerBranch.indexOf('ariaLabel={perPageLabel}')
+  // P10-20 (owner, 2026-09-17: "no need to show rows per page options")
+  // retired the per-page selector this branch carried after its 2026-09-14
+  // restore and 2026-09-15 reorder (see storefrontPagerLayout.test.ts for the
+  // full retirement contract) -- so there is no selector position left to
+  // pin here, only that it is gone and the remaining three controls keep
+  // their order.
+  assert.doesNotMatch(pagerBranch, /<PageSizeSelect/, 'P10-20 retired the per-page selector from the storefront pill')
   const backAt = pagerBranch.indexOf('aria-label={backLabel}')
   const pageFieldAt = pagerBranch.indexOf('inputMode="numeric"')
   const totalPagesAt = pagerBranch.indexOf('/ {totalPages}')
   const nextAt = pagerBranch.indexOf('aria-label={nextLabel}')
   assert.ok(backAt > 0 && pageFieldAt > 0 && totalPagesAt > 0 && nextAt > 0,
     'the storefront pager must keep a Back control, an editable page field, a total-page count and a Next control')
-  // 2026-09-15 (owner, supersedes 2026-09-14's [size][Back] order): Back
-  // leads the row, then the page-size selector.
-  assert.ok(pageSizeSelectAt > backAt,
-    'the page-size selector must sit AFTER Back: [Back] [20/50/100] [page / total] [Next] (owner, 2026-09-15)')
-  assert.ok(backAt < pageSizeSelectAt && pageSizeSelectAt < pageFieldAt, 'Back and the size selector must precede the page indicator')
+  assert.ok(backAt < pageFieldAt, 'Back must precede the page indicator')
   assert.ok(pageFieldAt < totalPagesAt, 'the page number must precede its total')
   assert.ok(totalPagesAt < nextAt, 'the page indicator must precede Next')
   const navAt = pagerBranch.indexOf('<nav ')
@@ -432,26 +437,23 @@ runTest('public catalog scrolls through the document and keeps its pager control
   assert.match(paginationControlsSource, /const nextLabel = typeof t === 'function' \? \(t\('next'\) \|\| 'Next'\)/)
 })
 
-runTest('the public pager carries a 20/50/100 size selector, wired end to end on both public paths', () => {
+// P10-20 (owner, 2026-09-17: "no need to show rows per page options") retired
+// the storefront's rendered per-page selector for good -- see
+// storefrontPagerLayout.test.ts for the render-side retirement contract. This
+// test used to pin that selector's existence; it is inverted below to pin its
+// absence instead. What survives, and is still worth proving end-to-end, is
+// that the SURROUNDING plumbing (the products section's page-size state, its
+// persistence, and its precedence over a bootstrap payload) was left intact
+// rather than half-removed -- so a future restore of the selector has
+// something correct to plug back into.
+runTest('the public pager renders no size selector (P10-20), but the surrounding page-size plumbing survives intact', () => {
   const pagerBranch = paginationControlsSource.slice(
     paginationControlsSource.indexOf("if (layout === 'centered')"),
     paginationControlsSource.indexOf('if (compact && rangeAsPageSize)'),
   )
-  // The shared PageSizeSelect, the same control the admin pagers use -- a
-  // native <select> is banned in components/ (tests/sourceSyntaxCheck.ts).
-  assert.match(pagerBranch, /<PageSizeSelect[\s\S]{0,600}ariaLabel=\{perPageLabel\}/,
-    'the selector must be the shared control, named from the translated per-page label')
-  assert.match(pagerBranch, /options=\{sizeOptions\}/,
-    'the selector must offer the caller\'s sizes, plus any off-menu configured one')
-  assert.match(pagerBranch, /allowCustom=\{false\}/,
-    'the storefront must not let a shopper type an unbounded page size')
-  assert.match(paginationControlsSource, /const perPageLabel = typeof t === 'function' \? \(t\('per_page'\) \|\| 'per page'\)/,
-    'the per-page name comes from the shared pack key with an English fallback, never the raw key')
-  // A one-page result still has a size to change. Hiding the whole pill on
-  // totalPages <= 1 is exactly how the previous in-pill chooser became
-  // unreachable for a shopper who had narrowed the catalogue right down.
-  assert.match(pagerBranch, /if \(totalPages <= 1 && !showPageSizeSelect\) return null/,
-    'a one-page result must keep the pill when it carries the size selector')
+  assert.doesNotMatch(pagerBranch, /<PageSizeSelect/, 'P10-20 retired the per-page selector from the storefront pill; it must not silently come back')
+  assert.doesNotMatch(pagerBranch, /if \(totalPages <= 1 && !showPageSizeSelect\) return null/,
+    'the retired selector\'s one-page keep-alive exception must not come back either')
 
   // Wired at BOTH pager mounts of the products section...
   assert.equal((catalogProductsSectionSource.match(/onPageSizeChange=\{updatePageSize\}/g) || []).length, 2,

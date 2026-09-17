@@ -73,7 +73,24 @@ runTest('every direct stock receipt and batch mutation confirms before writing a
 
   assert.match(fastStockIn, /confirm_complete_stock_session/)
   assert.match(fastStockIn, /stock_session_completed/)
-  assert.match(receiveBatch, /confirm_receive_batch_details/)
+  // P10-19: ReceiveBatchModal's Receive used to end in a bare native
+  // window.confirm() with a generic sentence and no Payment/Due date; a typed
+  // "Not Yet Paid" due date was never reflected back before it committed. The
+  // single 'confirm_receive_batch_details' key it used to show was replaced by
+  // parking the validated request (setPendingReceipt) behind a ConfirmDialog
+  // review built from the actual request (buildReceiveReviewItems); the write
+  // (receiveBatchStock) only runs from commitReceive, after that review is
+  // confirmed.
+  assert.match(receiveBatch, /setPendingReceipt\(\{/, 'the validated receipt must be parked, not written immediately')
+  assert.match(receiveBatch, /onConfirm=\{\(\) => void commitReceive\(\)\}/, 'the receive ConfirmDialog must gate the write behind an explicit confirm')
+  const beginReceiveAt = receiveBatch.indexOf('const beginReceive = ()')
+  const commitReceiveAt = receiveBatch.indexOf('const commitReceive = async ()')
+  assert.ok(beginReceiveAt >= 0 && commitReceiveAt > beginReceiveAt, 'validation (beginReceive) must precede the write (commitReceive)')
+  assert.doesNotMatch(
+    receiveBatch.slice(beginReceiveAt, commitReceiveAt),
+    /receiveBatchStock\(/,
+    'the validating/parking step must not itself call the write API',
+  )
   assert.match(receiveBatch, /notify\(tr\('batch_received'/)
   assert.match(batches, /confirm_update_batch_details/)
   assert.match(batches, /confirm_deactivate_batch_details/)
@@ -91,7 +108,23 @@ runTest('stock adjustments, transfers, and ledger edits retain review plus feedb
   const bulk = source('products/forms/BulkAddStockModal.tsx')
   const ledger = source('products/StockChangeSection.tsx')
 
-  assert.match(inventory, /window\.confirm\(adjustConfirmLabel\)/)
+  // P10-19 (sibling parity with StockAdjustModal.tsx's own pendingAdjust,
+  // Part 563): the bare `window.confirm(adjustConfirmLabel)` sentence -- which
+  // showed no quantity, branch, reason, supplier or Payment/Due date -- was
+  // replaced by parking the validated request (setPendingAdjust) behind a
+  // ConfirmDialog review; commitAdjust performs the actual write only after
+  // that review is confirmed. Assert the parked-review shape survives instead
+  // of the retired inline sentence.
+  assert.match(inventory, /setPendingAdjust\(\{/, 'the validated adjustment must be parked, not written immediately')
+  assert.match(inventory, /onConfirm=\{\(\) => void commitAdjust\(\)\}/, 'the adjust ConfirmDialog must gate the write behind an explicit confirm')
+  const handleAdjustAt = inventory.indexOf('const handleAdjust = async ()')
+  const commitAdjustAt = inventory.indexOf('const commitAdjust = async ()')
+  assert.ok(handleAdjustAt >= 0 && commitAdjustAt > handleAdjustAt, 'validation (handleAdjust) must precede the write (commitAdjust)')
+  assert.doesNotMatch(
+    inventory.slice(handleAdjustAt, commitAdjustAt),
+    /getInventoryApi\(\)\.adjustStock/,
+    'the validating/parking step must not itself call the write API',
+  )
   assert.match(inventory, /confirm_transfer_stock_details/)
   assert.match(inventory, /stock_transferred_details/)
   assert.match(inventory, /pendingTransfer \|\| !transferRetryReady \|\| !canTransferStock/)

@@ -1,18 +1,24 @@
-// Y20: the user asked for a single-line pager shaped "‹ page (1-20) / total ›"
-// where the item-range chip "1-20" is ITSELF the per-page dropdown trigger --
-// tap it and the 20/50/100 options open -- so the separate per-page column
-// disappears and the whole control fits inline beside a Select-all checkbox.
+// Y20: the user asked for a single-line pager shaped "‹ page (1-20) / total ›".
+// It was originally built with the item-range chip "1-20" ALSO acting as the
+// per-page dropdown trigger -- tap it and the 20/50/100 options open.
 //
-// The redesign is an OPT-IN prop (`rangeAsPageSize`) layered on the existing
-// `compact` form, because the shared component is consumed by a page another
-// session owns (Products) whose current call must keep behaving exactly as it
-// did. These checks are structural on purpose: they pin the three facts that
-// make the feature both correct and backward-compatible, so a later edit that
-// quietly drops the opt-in gate, or wires the range to plain text instead of
-// the size dropdown, fails here instead of in the app.
+// P10-20 (owner, supersedes Y20): "no need to show rows per page options" --
+// the rows-per-page control is gone from every layout this shared component
+// renders (the plain form, the `compact` three-column form, and this
+// `rangeAsPageSize` form), not narrowed to a differently-shaped trigger. The
+// range chip is now always a plain, non-interactive span; `onPageSizeChange`
+// is still accepted on the props type (some callers still pass it) but
+// nothing in this branch reads it or renders a selector.
+//
+// The redesign is still an OPT-IN prop (`rangeAsPageSize`) layered on the
+// existing `compact` form, because the shared component is consumed by a page
+// another session owns (Products) whose current call must keep behaving
+// exactly as it did. These checks are structural on purpose: they pin the
+// facts that make the feature both correct and backward-compatible, so a
+// later edit that quietly drops the opt-in gate, or brings back a per-page
+// selector the owner asked removed, fails here instead of in the app.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import './paginationSurfaceContract.test.ts'
 
 let failed = 0
 
@@ -55,22 +61,23 @@ runTest('the merged pager is gated on BOTH compact and the opt-in flag', () => {
   )
 })
 
-runTest('the item range or its explicit compact page-size count triggers the per-page dropdown', () => {
-  // Inside the merged branch the PageSizeSelect must be told to render the
-  // range ("start-end") as its button, while still calling onPageSizeChange --
-  // i.e. the "1-20" chip IS the size selector, not a static label next to one.
+runTest('the item range renders as a plain span, not a per-page dropdown trigger (P10-20)', () => {
+  // P10-20 removed the rows-per-page control entirely, so the "1-20" chip is
+  // no longer a PageSizeSelect button -- it is a static span showing the
+  // start-end range, in both the plain and compactCentered forms.
   const branchStart = pagination.indexOf('if (compact && rangeAsPageSize)')
   const branchEnd = pagination.indexOf('if (compact) {', branchStart)
   const branch = pagination.slice(branchStart, branchEnd)
   assert.match(
     branch,
-    /const rangeText = compactCentered \? safePageSize\.toLocaleString\(\) : `\$\{start\.toLocaleString\(\)\}-\$\{end\.toLocaleString\(\)\}`[\s\S]*buttonContent=\{rangeText\}/,
-    'the normal branch shows its full range while the centered branch deliberately shows the selected page-size count',
+    /<span className="h-6 rounded-full border[^>]*>\{start\.toLocaleString\(\)\}-\{end\.toLocaleString\(\)\}<\/span>/,
+    'the range chip must be a plain span rendering the item range, not an interactive size selector',
   )
-  assert.match(
+  assert.doesNotMatch(branch, /<PageSizeSelect\b/, 'P10-20 removed the per-page dropdown from this branch entirely')
+  assert.doesNotMatch(
     branch,
-    /onChange=\{\(nextValue\) => onPageSizeChange\?\.\(nextValue\)\}/,
-    'tapping the range must still change the page size',
+    /onPageSizeChange\?\.\(/,
+    'nothing in this branch may call onPageSizeChange -- the prop is accepted for backward compatibility but unused here',
   )
 })
 
@@ -81,8 +88,10 @@ runTest('the merged pager keeps the editable page number and total-page count', 
   assert.ok(!branch.includes('hidden sm:inline'), 'Back and Next remain visible on phones')
   assert.ok(branch.includes('mx-auto flex w-fit'), 'pager centers without relying on page-specific alignment')
   assert.ok(branch.includes('h-10'), 'pager controls share the 40px target')
-  assert.ok(branch.indexOf('{backLabel}</span>') < branch.indexOf('<PageSizeSelect'), 'Back precedes items per page')
-  assert.ok(branch.indexOf('<PageSizeSelect') < branch.indexOf('aria-label={pageLabel}'), 'items per page precede the current page')
+  // P10-20 removed the per-page selector, so the order is now: Back, the
+  // static range chip, the editable current page, "/ totalPages", Next.
+  assert.ok(branch.indexOf('{backLabel}</span>') < branch.indexOf('{start.toLocaleString()}-{end.toLocaleString()}'), 'Back precedes the item-range chip')
+  assert.ok(branch.indexOf('{start.toLocaleString()}-{end.toLocaleString()}') < branch.indexOf('aria-label={pageLabel}'), 'the item-range chip precedes the current page')
   // "‹ page (1-20) / total ›": an editable current page, then the range, then
   // "/ totalPages", bracketed by the prev/next arrows.
   assert.match(branch, /onKeyDown=\{handlePageInputKeyDown\}/, 'the current page must stay editable')
@@ -115,7 +124,13 @@ runTest('the opt-in centered pager fits its parent without clipping meaningful c
   assert.match(branch, /mx-auto flex w-fit max-w-full/, 'the pager uses intrinsic width up to its actual centered parent instead of a clipping-prone arbitrary cap')
   assert.doesNotMatch(branch, /max-w-\[12\.5rem\]/, 'the old 200px cap must not silently compress legitimate values')
   assert.match(branch, /compactCentered \? 'px-0\.5 text-\[10px\]'/, 'the compact form reduces padding and type rather than removing controls')
-  assert.match(branch, /const rangeAriaLabel = compactCentered[\s\S]*showingLabel[\s\S]*start\.toLocaleString\(\)[\s\S]*end\.toLocaleString\(\)[\s\S]*total\.toLocaleString\(\)/, 'the concise page-size chip preserves the complete item range in its accessible name')
+  // P10-20 made the chip a plain span rather than a PageSizeSelect button, so
+  // there is no separate accessible-name computation to preserve any more --
+  // a screen reader reads the visible "start-end" text directly. Assert the
+  // text is present (in both compact and compactCentered forms, since the
+  // markup is shared) and that the old aria-label plumbing is gone.
+  assert.match(branch, /\{start\.toLocaleString\(\)\}-\{end\.toLocaleString\(\)\}/, 'the visible chip text must carry the complete item range')
+  assert.doesNotMatch(branch, /rangeAriaLabel/, 'the removed per-page trigger no longer needs its own accessible-name computation')
   assert.match(branch, /style=\{compactCentered \? \{ width: `max\(1\.75rem, calc\(\$\{compactPageDigits\}ch \+ 0\.75rem\)\)` \} : undefined\}/, 'five-digit pages reserve glyph width plus a browser-safe text-caret allowance')
   assert.match(branch, /min-w-7 shrink-0 text-\[10px\]/, 'the page input retains a usable floor and cannot sacrifice entered digits to neighboring flex items')
   assert.match(branch, /<span className="whitespace-nowrap">\{backLabel\}<\/span>/, 'localized Back text remains visible')
