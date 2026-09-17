@@ -222,13 +222,17 @@ test('the level columns carry the whole pending cohort, and every cost query use
   for (const col of ['pending_tx_count', 'pending_gross_sales_usd', 'pending_store_discount_usd', 'pending_membership_discount_usd', 'pending_delivery_usd', 'pending_delivery_cost_usd']) {
     assert.ok(lib.RECOGNIZED_LEVEL_COLUMNS.includes(`AS ${col}`), `RECOGNIZED_LEVEL_COLUMNS emits ${col}`)
   }
-  // Three queries measure COGS (period series, grouped, day rows); all
-  // three must read the one fragment, or a report's pending block disagrees
-  // with the Overview's. salesCost() was a fourth, snapshot-superseded
-  // consumer removed as dead code in P8 debloat (zero callers; getSalesTotals
-  // is the snapshot-based replacement).
+  // Two queries measure COGS (grouped, day rows); both must read the one
+  // fragment, or a report's pending block disagrees with the Overview's.
+  // salesCost() was a third, snapshot-superseded consumer removed as dead
+  // code in P8 debloat (zero callers; getSalesTotals is the snapshot-based
+  // replacement). The period series was a fourth until P11-14 (1da983cb):
+  // getSalesPeriodSeries opened with a braced block that RETURNED a
+  // snapshot-derived series, so the SQL path below it -- this fragment's
+  // third use included -- was unreachable from any input. Deleting dead
+  // code is what moved this count, not a report losing its shared basis.
   const uses = src.match(/\$\{ITEM_COST_COLUMNS\}/g) || []
-  assert.equal(uses.length, 3, 'period series + grouped + day rows all use ITEM_COST_COLUMNS')
+  assert.equal(uses.length, 2, 'grouped + day rows all use ITEM_COST_COLUMNS')
   // getProductSalesRanking keeps its own COGS sum ON PURPOSE: it measures a
   // different thing (per-product `line_sales_usd - cost_usd`, no delivery
   // term, line-sales basis rather than net-sales revenue) and never feeds

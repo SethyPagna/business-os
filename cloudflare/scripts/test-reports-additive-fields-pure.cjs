@@ -241,7 +241,13 @@ const src = fs.readFileSync(srcPath, 'utf8')
 check('DeriveTotalsOptions.itemDiscountUsd is REQUIRED, so a new caller cannot silently report a zero line-discount',
   /\n  itemDiscountUsd: number\n/.test(src.replace(/\r/g, '')) && !/itemDiscountUsd\?: number/.test(src))
 const deriveCalls = [...src.matchAll(/deriveTotals\([\s\S]{0,700}?itemDiscountUsd:/g)]
-check('every legacy deriveTotals entry point passes required item discount', deriveCalls.length === 3)
+// Two, not three, since P11-14 (1da983cb). getSalesPeriodSeries used to open
+// with a braced block that RETURNED a snapshot-derived series, followed by a
+// whole legacy SQL path -- deriveTotals call included -- that no input could
+// ever reach. 1da983cb deleted that unreachable half. The count here was
+// therefore counting a dead entry point; the two survivors (the grouped and
+// day-row queries) are the only ones a request can actually run through.
+check('every legacy deriveTotals entry point passes required item discount', deriveCalls.length === 2)
 check('the exact snapshot totals include item discounts in total discount',
   /const totalDiscount = discount\.add\(m\.itemDiscount\)/.test(src))
 
