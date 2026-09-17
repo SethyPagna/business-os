@@ -833,7 +833,6 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             previewConfig.showProductCategory !== false ? product.category : '',
             previewConfig.showProductBrand !== false ? product.brand : '',
           ].map((chip) => String(chip || '').trim()).filter(Boolean)
-          const showDescription = previewConfig.showProductDescription !== false
           const showDiscountDetails = previewConfig.showProductDiscount !== false
           const promotion = pricePresentation?.promotion
           const categoryHeaderLabel = categoryHeaderAt.get(index)
@@ -964,10 +963,24 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     {product.name}
                   </div>
                 )}
-                {showDescription ? (
-                  <p {...getKhmerTextProps(product.description || copy('noDescription', 'No description available.'), `${compactCatalogCards ? 'line-clamp-2 min-h-[2.2rem] text-[11px] leading-[1.15rem]' : 'line-clamp-2 min-h-[2.6rem] text-xs leading-5'} text-slate-500 dark:text-neutral-400`)}>
-                    {product.description || copy('noDescription', 'No description available.')}
-                  </p>
+                {/* The product description used to print straight on the
+                    card front (owner, 2026-09-18: "for the description can
+                    be removed from default display instead replace with
+                    click to view details"). The card is already the wrong
+                    place for it -- a two-line clamp either truncated real
+                    copy or, with nothing set, printed the "No description
+                    available." filler on every single card. The full text
+                    (or that same filler) still shows in the detail sheet
+                    ProductDetailFlyout opens; this link is what gets a
+                    shopper there. */}
+                {openProductDetail ? (
+                  <button
+                    type="button"
+                    onClick={(event) => { event.stopPropagation(); openProductDetail(product) }}
+                    className={`block text-left font-medium text-blue-700 underline-offset-2 hover:underline dark:text-amber-300 ${compactCatalogCards ? 'text-[10px]' : 'text-[11px]'}`}
+                  >
+                    {copy('clickToViewDetails', 'Click to view details', 'ចុចដើម្បីមើលព័ត៌មានលម្អិត')}
+                  </button>
                 ) : null}
                 {showDiscountDetails && promotion?.active ? (
                   <div className="flex flex-wrap items-center gap-1.5 pt-0.5">

@@ -1066,6 +1066,7 @@
   "click_add_column": "Click \"Add Column\" to define your table structure",
   "click_for_details": "Click row for details",
   "click_row_details": "Click row → full details + data changes",
+  "clickToViewDetails": "Click to view details",
   "client": "Client",
   "client_time": "Client Time",
   "close": "Close",
