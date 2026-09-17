@@ -131,3 +131,21 @@ export function localTodayRangeClause(col: string): string {
 export function businessToday(nowMs: number = Date.now()): string {
   return new Date(nowMs + BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000).toISOString().slice(0, 10)
 }
+
+/**
+ * JS-side mirror of `localDateExpr(col)`: the local (UTC+7) calendar date,
+ * 'YYYY-MM-DD', of an arbitrary stored UTC timestamp string. For matching a
+ * small in-memory candidate set (e.g. a page of rows already fetched) where
+ * writing SQL would mean a per-row correlated subquery -- see
+ * cloudflare/src/routes/contacts.ts's AR/AP invoice-to-sale matcher. Accepts
+ * either stored shape (ISO `T...Z` or SQLite's space-separated
+ * `YYYY-MM-DD HH:MM:SS`, both UTC, per this file's FORMAT ROBUSTNESS note);
+ * a naive (no zone) string is treated as UTC, matching SQLite's date().
+ */
+export function localDateOf(timestamp: string): string {
+  const normalized = timestamp.includes('T') ? timestamp : timestamp.replace(' ', 'T')
+  const withZone = /[zZ]|[+-]\d\d:?\d\d$/.test(normalized) ? normalized : `${normalized}Z`
+  const ms = Date.parse(withZone)
+  if (Number.isNaN(ms)) return ''
+  return new Date(ms + BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000).toISOString().slice(0, 10)
+}

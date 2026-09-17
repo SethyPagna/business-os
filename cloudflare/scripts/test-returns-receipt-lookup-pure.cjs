@@ -266,9 +266,11 @@ async function main() {
     seed()
     const baseColumns = rawDb.prepare('PRAGMA table_info("sales")').all().map((row) => row.name)
     if (baseColumns.includes('legacy_receipt_number')) {
-      // 0107 also indexes the column, and SQLite refuses to drop a column an
-      // index still references. Drop the index first, restore both below.
+      // 0107 and 0182 both index the column (0182's is an expression index
+      // over it, P11-11), and SQLite refuses to drop a column any index
+      // still references. Drop both indexes first, restore both below.
       rawDb.exec('DROP INDEX IF EXISTS idx_sales_legacy_receipt_number')
+      rawDb.exec('DROP INDEX IF EXISTS idx_sales_legacy_receipt_base')
       rawDb.exec('ALTER TABLE sales DROP COLUMN legacy_receipt_number')
     }
     const columns = rawDb.prepare('PRAGMA table_info("sales")').all().map((row) => row.name)

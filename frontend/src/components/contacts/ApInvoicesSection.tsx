@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import AppSelect from '../shared/AppSelect.tsx'
+import SuggestionTextInput, { type SuggestionOption } from '../shared/SuggestionTextInput.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 // fmtDate, not fmtDateOnly: these are full UTC instants converted from the
 // old system's Bangkok wall clock, so the calendar day must be read in the
@@ -64,6 +65,10 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [branch, setBranch] = useState('all')
   const [supplier, setSupplier] = useState('all')
+  // P11-13: same searchable-picker treatment as the AR ledger's customer
+  // filter -- a search box that lists its options rather than a click-to-
+  // open menu with nothing typeable.
+  const [supplierQuery, setSupplierQuery] = useState('')
   const [status, setStatus] = useState('all')
   // P3-10: ALL TIME on first open, not Today. `supplier_invoices` holds only
   // the legacy account-payable documents imported on Aug 30 -- nothing writes
@@ -130,6 +135,23 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
   const invoices = Array.isArray(data?.invoices) ? data!.invoices! : []
   const supplierOptions = Array.isArray(data?.meta?.suppliers) ? data!.meta!.suppliers! : []
   const totalInvoices = Number(data?.total_invoices) || 0
+
+  useEffect(() => {
+    if (supplier === 'all') { setSupplierQuery(''); return }
+    const match = supplierOptions.find((option) => option.key === supplier)
+    if (match) setSupplierQuery(String(match.name || match.key))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplier, supplierOptions.length])
+
+  const supplierSuggestionOptions = useMemo<SuggestionOption[]>(
+    () => supplierOptions.map((option) => ({
+      value: String(option.name || option.key),
+      key: option.key,
+      payload: option.key,
+      selected: supplier === option.key,
+    })),
+    [supplierOptions, supplier],
+  )
 
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
   const anyFilter = branch !== 'all' || supplier !== 'all' || status !== 'all' || fromDate !== '' || toDate !== ''
@@ -198,15 +220,24 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
             { value: 'shop', label: tr('shop', 'Shop') },
           ]}
         />
-        <AppSelect
+        {/* P11-13: a search box that also lists its options -- typing
+            filters the supplier list, focus with nothing typed lists every
+            supplier, matching the standing picker rule. */}
+        <SuggestionTextInput
+          id="ap-supplier-filter"
           ariaLabel={tr('supplier', 'Supplier')}
-          value={supplier}
-          onChange={(value) => changeFilter(() => setSupplier(value))}
+          value={supplierQuery}
+          options={supplierSuggestionOptions}
           className="min-w-[11rem]"
-          options={[
-            { value: 'all', label: tr('all_suppliers', 'All Suppliers') },
-            ...supplierOptions.map((option) => ({ value: option.key, label: String(option.name || option.key) })),
-          ]}
+          inputClassName="input h-9 w-full text-xs"
+          placeholder={tr('all_suppliers', 'All Suppliers')}
+          onChange={(next, option) => {
+            setSupplierQuery(next)
+            if (option) { changeFilter(() => setSupplier(String(option.payload))); return }
+            if (!next.trim()) { changeFilter(() => setSupplier('all')); return }
+            const exact = supplierOptions.find((row) => String(row.name || row.key).trim().toLowerCase() === next.trim().toLowerCase())
+            if (exact) changeFilter(() => setSupplier(exact.key))
+          }}
         />
         <AppSelect
           ariaLabel={tr('status', 'Status')}

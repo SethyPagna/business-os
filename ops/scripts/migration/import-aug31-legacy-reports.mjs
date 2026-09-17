@@ -337,6 +337,21 @@ if (newExpenses.length !== 2 || newExpenses.reduce((sum, row) => sum + row.amoun
 }
 
 // ---- Customer accounts-receivable ledger (all time) -------------------------
+// P11-12 (Sep 18 2026, found in production, NOT known when this script first
+// ran): the old system's AR export gives one row per INVOICE LINE, and while
+// "Taxable Amount"/"VAT Amount" are correctly split per line, "Amount Paid"
+// repeats the FULL invoice-level payment on every line -- so a multi-line
+// invoice's `row['Amount Paid']` taken at face value here landed multiplied
+// by its own line count (367 rows across 243 customers, -$98,742.52 in
+// production). Left AS-IS below because this script's assertion gate below
+// (arTotal/arPaid/arOutstanding/receivables.length) is a historical record of
+// exactly what ran in production and must not be rewritten after the fact --
+// see cloudflare/migrations/0181_customer_receivables_paid_multiple_repair.sql
+// for the one-time repair of the 367 already-imported rows. A FUTURE run of
+// this importer (or any new AR import) must route `paid`/`outstanding`
+// through cloudflare/src/lib/receivablesPaidGuard.ts's
+// normalizeReceivablePaidAmount() instead of trusting `row['Amount Paid']`
+// directly, so a re-import cannot reproduce the multiplication.
 const arSheet = workbookRows(files.receivable, 1, true)
 const arRows = arSheet.filter((row) => /^\d+$/.test(String(row.ID || '')) && String(row['Invoice No'] || '').trim())
 const receivables = arRows.map((row) => {

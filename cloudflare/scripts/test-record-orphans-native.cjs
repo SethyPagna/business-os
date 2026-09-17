@@ -142,6 +142,11 @@ const CHILD_SCOPED = {
   'sale_not_paid_repair_0173.allocation_id': 'sale_item_batch_allocations',
   'sale_not_paid_repair_0173.allocation_batch_id': 'product_batches',
   'sale_not_paid_repair_0173.deduct_batch_id': 'product_batches',
+  // 0181's repair table: every receivable_id names a live customer_receivables
+  // row (the repair only clamps amount_paid_usd/outstanding_balance_usd on an
+  // existing imported row; it never deletes one). Pinned by
+  // test-migration-0181-receivables-paid-repair-pure.cjs.
+  'customer_receivables_paid_multiple_repair.receivable_id': 'customer_receivables',
 }
 
 function resolveOwner(base, known) {

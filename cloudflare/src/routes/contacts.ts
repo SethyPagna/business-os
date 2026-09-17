@@ -40,7 +40,7 @@ import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } fro
 import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
-import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
+import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateOf } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { buildContactMergePlan, contactMergeHasDistinctMemberships } from '../lib/contactMerge'
@@ -2395,12 +2395,39 @@ app.get('/customers/reports/ar-invoices', async (c) => {
     customer_name: string; invoice_no: string | null; invoice_date: string
     taxable_amount_usd: number; vat_amount_usd: number; total_amount_usd: number
     amount_paid_usd: number; outstanding_balance_usd: number; status: string
+    matched_sale_id: number | null; matched_receipt_number: string | null
   }
   type ArTotals = {
     invoices: number; total_usd: number; paid_usd: number
     outstanding_usd: number; outstanding_count: number
   }
-  const [invoices, totals, customers] = await Promise.all([
+  // P11-11 (Sep 18 2026): a bare `invoice_no` here (e.g. '006416') never
+  // matches `sales.legacy_receipt_number`, which carries the retired
+  // 'NNNNNN@YYYY-MM-DD' form (migration 0107) -- so an AR row and the sale it
+  // belongs to looked like two different universes. `arSaleBaseExpr` strips
+  // the '@date' suffix (or passes the value through unchanged for a sale
+  // already rewritten to the bare business form). Among same-base-number
+  // candidates, require EITHER the same local calendar day (invoice_date is
+  // stored UTC like created_at, so both sides go through the same +7h
+  // conversion) OR the same total to the cent as a fallback, since the bare
+  // number alone repeats across years. A handful of rows (measured: 22)
+  // never resolve on day+total and stay honestly unlinked rather than being
+  // force-matched.
+  //
+  // The lookup is done in two steps instead of one correlated subquery per
+  // customer_receivables row: SQLite/D1 can SEEK migration 0182's expression
+  // index (idx_sales_legacy_receipt_base) when the right-hand side is a
+  // LITERAL, but not when it is a correlated column from another table in
+  // the same query (verified with EXPLAIN QUERY PLAN: the literal form
+  // SEEKs, the correlated form falls back to a full SCAN of `sales` per
+  // outer row). So step 1 fetches this page's customer_receivables rows,
+  // step 2 looks up sales for just this page's distinct invoice numbers as a
+  // literal IN-list (still a SEEK per value), and the day/total tiebreak
+  // runs in JS over that small candidate set -- at most `pageSize` rows on
+  // each side, never the full 13,304-row table.
+  const arSaleBaseExpr = (col: string): string =>
+    `CASE WHEN instr(${col}, '@') > 0 THEN substr(${col}, 1, instr(${col}, '@') - 1) ELSE ${col} END`
+  const [pageInvoices, totals, customers] = await Promise.all([
     db.prepare(`
       SELECT cr.id, cr.legacy_id, cr.customer_id, cr.customer_code, cr.customer_name,
              cr.invoice_no, cr.invoice_date, cr.taxable_amount_usd, cr.vat_amount_usd,
@@ -2409,7 +2436,7 @@ app.get('/customers/reports/ar-invoices', async (c) => {
       ${where}
       ORDER BY cr.invoice_date DESC, cr.id DESC
       LIMIT @limit OFFSET @offset
-    `).all<ArRow>({ ...params, limit: pageSize, offset: (page - 1) * pageSize }),
+    `).all<Omit<ArRow, 'matched_sale_id' | 'matched_receipt_number'>>({ ...params, limit: pageSize, offset: (page - 1) * pageSize }),
     db.prepare(`
       SELECT COUNT(*) AS invoices,
              COALESCE(SUM(cr.total_amount_usd), 0) AS total_usd,
@@ -2425,6 +2452,46 @@ app.get('/customers/reports/ar-invoices', async (c) => {
       ORDER BY name COLLATE NOCASE ASC
     `).all<{ key: string; name: string; invoice_count: number }>(),
   ])
+
+  const invoiceNos = [...new Set(pageInvoices.filter((row) => row.invoice_no).map((row) => row.invoice_no as string))]
+  type SaleCandidate = { id: number; receipt_number: string; created_at: string; total_usd: number; base: string }
+  const saleCandidatesByBase = new Map<string, SaleCandidate[]>()
+  if (invoiceNos.length) {
+    const placeholders = invoiceNos.map(() => '?').join(', ')
+    const candidates = await db.prepare(`
+      SELECT s.id, s.receipt_number, s.created_at, s.total_usd, (${arSaleBaseExpr('s.legacy_receipt_number')}) AS base
+      FROM sales s
+      WHERE (${arSaleBaseExpr('s.legacy_receipt_number')}) IN (${placeholders})
+    `).all<SaleCandidate>(invoiceNos)
+    for (const row of candidates) {
+      const list = saleCandidatesByBase.get(row.base)
+      if (list) list.push(row)
+      else saleCandidatesByBase.set(row.base, [row])
+    }
+  }
+  const matchSale = (cr: { invoice_no: string | null; invoice_date: string; total_amount_usd: number }): SaleCandidate | null => {
+    if (!cr.invoice_no) return null
+    const candidates = saleCandidatesByBase.get(cr.invoice_no)
+    if (!candidates || !candidates.length) return null
+    const crDay = localDateOf(cr.invoice_date)
+    const crTotal = Math.round((Number(cr.total_amount_usd) || 0) * 100)
+    let best: SaleCandidate | null = null
+    let bestDayMatch = false
+    for (const cand of candidates) {
+      const dayMatch = localDateOf(cand.created_at) === crDay
+      const totalMatch = Math.round((Number(cand.total_usd) || 0) * 100) === crTotal
+      if (!dayMatch && !totalMatch) continue
+      if (!best || (dayMatch && !bestDayMatch) || (dayMatch === bestDayMatch && cand.id < best.id)) {
+        best = cand
+        bestDayMatch = dayMatch
+      }
+    }
+    return best
+  }
+  const invoices: ArRow[] = pageInvoices.map((row) => {
+    const match = matchSale(row)
+    return { ...row, matched_sale_id: match?.id ?? null, matched_receipt_number: match?.receipt_number ?? null }
+  })
 
   return c.json({
     invoices: invoices.map((row) => ({
