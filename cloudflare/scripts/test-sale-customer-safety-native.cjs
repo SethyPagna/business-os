@@ -163,7 +163,14 @@ async function main() {
     // Reset only this in-memory fixture's points, then compare the shared
     // formula against the production display calculator with explicit KHR.
     await db.prepare('UPDATE sales SET membership_points_redeemed=0,loyalty_accrual=0,total_usd=0,total_khr=0').run()
-    await db.prepare("INSERT INTO settings(key,value) VALUES('customer_portal_points_basis','khr'),('customer_portal_points_per_khr','0.01') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
+    // loyalty_points_enabled is turned ON here on purpose. Migration 0179
+    // switched the programme off in production, and the chain replayed above
+    // applies it, so preparePointsRedemption now refuses with a 409
+    // ('Insufficient membership points or loyalty settings changed'). The
+    // redemption code path still ships, and 0179 deliberately wrote a value
+    // the Settings screen can flip back, so it still has to be proved safe.
+    // What follows is the captured-rate guard, not the on/off decision.
+    await db.prepare("INSERT INTO settings(key,value) VALUES('loyalty_points_enabled','true'),('customer_portal_points_basis','khr'),('customer_portal_points_per_khr','0.01') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
     await db.prepare('UPDATE sales SET customer_id=1,loyalty_accrual=1,total_usd=99,total_khr=10000 WHERE id=2').run()
     assert.equal(await helper.readCustomerPointsRaw(compat,1),100)
     const redemption=await helper.preparePointsRedemption(compat,1,100)
