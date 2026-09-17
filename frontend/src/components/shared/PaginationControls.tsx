@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
-import PageSizeSelect from './PageSizeSelect'
 import { clampPageNumber, pagerState } from '../../utils/pagerState.ts'
 
 export const PAGE_SIZE_OPTIONS: number[] = [20, 50, 100]
@@ -112,7 +111,6 @@ export default function PaginationControls({
   const safePage = state.page
   const pageLabel = typeof t === 'function' ? (t('page') || 'Page') : 'Page'
   const ofLabel = typeof t === 'function' ? (t('of') || 'of') : 'of'
-  const perPageLabel = typeof t === 'function' ? (t('per_page') || 'per page') : 'per page'
   const showingLabel = typeof t === 'function' ? (t('showing') || 'Showing') : 'Showing'
   const backLabel = typeof t === 'function' ? (t('back') || 'Back') : 'Back'
   const nextLabel = typeof t === 'function' ? (t('next') || 'Next') : 'Next'
@@ -168,13 +166,6 @@ export default function PaginationControls({
     // hit area and an inset keyboard focus ring so the rounded pill does not
     // clip the indicator.
     const focusRingClass = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500'
-    const showPageSizeSelect = typeof onPageSizeChange === 'function'
-    // A configured size that is not on the menu (the store's own 50 while the
-    // menu offers 20/50/100 is the common case, but a future config could be
-    // 30) still has to appear in it: PageSizeSelect marks nothing selected for
-    // an off-menu value, so the pager would offer 20/50/100 with none of them
-    // highlighted while the grid held 30.
-    const sizeOptions = pageSizeOptions.includes(safePageSize) ? pageSizeOptions : [...pageSizeOptions, safePageSize].sort((a, b) => a - b)
     const arrowButtonClass = `inline-flex h-10 shrink-0 items-center gap-0.5 px-3 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600 ${focusRingClass}`
     const countClass = 'h-10 shrink-0 whitespace-nowrap px-2 text-xs font-semibold leading-10 text-slate-500 dark:text-slate-400'
     // The page box takes its width from what it prints. `ch` is the width of
@@ -191,15 +182,11 @@ export default function PaginationControls({
     // flex child told it may collapse below its content is the one thing that
     // could undo the floor.
     const pageDigits = Math.max(1, String(editablePageInput ? pageDraft : safePage).length)
-    // Centered NAVIGATION has no useful action on a single page -- but the
-    // size selector does: a shopper who narrowed to 12 products on 20/page
-    // must still be able to go back to 100, and hiding the whole pill is
-    // exactly how the earlier in-pill chooser became unreachable. So the
-    // single-page early return only applies when this pill is navigation and
-    // nothing else. Keep the rule local: admin layouts still use
-    // `state.visible === total > 0` and may carry controls that remain useful
-    // when both arrows are disabled.
-    if (totalPages <= 1 && !showPageSizeSelect) return null
+    // P10-20: the per-page chooser this pill used to carry is gone (owner:
+    // "no need to show rows per page options"), so the single-page early
+    // return that existed only to keep that chooser reachable is gone with
+    // it -- this layout now falls back to the same `state.visible` gate
+    // (checked above) every other layout already uses.
     // A LANDMARK, not a bare div. This row is the storefront's whole
     // navigation between pages of the catalogue, and as a `<div>` it appeared
     // in no landmark list, so the one control a screen-reader user most needs
@@ -230,35 +217,6 @@ export default function PaginationControls({
             <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
             <span className="whitespace-nowrap">{backLabel}</span>
           </button>
-          {showPageSizeSelect ? (
-            // The same control the other two branches use, not a native OS
-            // dropdown: components/ may not ship one (tests/sourceSyntaxCheck.ts
-            // bans it repo-wide, naming page-size menus), and a square platform
-            // picker inside a rounded pill is exactly what that rule exists to
-            // prevent. `allowCustom={false}` keeps the storefront to the
-            // three offered sizes, so a shopper cannot ask for 5,000 products
-            // in one request.
-            //
-            // Digits only on the trigger. The row is already four controls
-            // wide at 320px, and "per page" spelled out in Khmer would wrap
-            // the pill; the words live in the accessible name instead, where
-            // the storefront packs already translate them.
-            <PageSizeSelect
-              value={safePageSize}
-              options={sizeOptions}
-              onChange={(nextValue) => onPageSizeChange?.(nextValue)}
-              ariaLabel={perPageLabel}
-              allowCustom={false}
-              className="shrink-0"
-              // `!text-xs` because Tailwind resolves conflicts by CSS order,
-              // not by the order classes appear here: the trigger's own
-              // `text-sm` would otherwise outrank a plain `text-xs` and print
-              // the size two pixels larger than the page number beside it.
-              buttonClassName="h-10 gap-1 rounded-none border-0 border-x border-slate-200 bg-white px-3 py-0 !text-xs font-semibold text-slate-800 shadow-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-              menuClassName="min-w-[6rem]"
-              optionClassName="text-xs"
-            />
-          ) : null}
           <div className="inline-flex min-w-0 shrink items-center">
             {editablePageInput ? (
               <>
@@ -305,26 +263,14 @@ export default function PaginationControls({
   if (compact && rangeAsPageSize) {
     // The user's "‹ page (1-20) / total ›" form. Everything lives on one line
     // inside a single pill so it can sit in the Select-all row: prev, the
-    // editable current page, the item-range chip (which is itself the per-page
-    // dropdown trigger), the total page count, and next.
-    // Consistent one-line pill: prev / editable page / the "1-20" range chip
-    // (which IS the per-page dropdown -- no caret, tap to open) / total pages
-    // / next. Everything is text-xs and font-semibold on the same slate ramp
-    // so the numbers read as one set; the prev/next arrows are the strongest
-    // element (darker, bolder stroke, solid hover) so the primary action --
-    // paging -- stands out and the disabled edge is unmistakable.
+    // editable current page, the item-range chip, the total page count, and
+    // next.
+    // P10-20: the range chip used to double as the per-page dropdown
+    // trigger; the owner no longer wants a rows-per-page control anywhere,
+    // so it is now always the plain item-range span -- onPageSizeChange is
+    // still accepted (some callers still pass it) but nothing renders it.
     const arrowButtonClass = `inline-flex h-10 shrink-0 items-center gap-0.5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600 ${compactCentered ? 'px-0.5 text-[10px]' : 'px-1'}`
     const arrowIconClass = compactCentered ? 'h-3 w-3' : 'h-4 w-4'
-    // The centered pager has only the middle 216px at a 320px viewport once
-    // PagerActionRow reserves its equal 40px side slots. A full item range
-    // such as "3,541-3,555" used to be silently flex-clipped by the old 200px
-    // cap. Show the selected page-size count in this constrained variant;
-    // the full range remains in its accessible name. This is a deliberate
-    // compact representation, not text hidden by overflow.
-    const rangeText = compactCentered ? safePageSize.toLocaleString() : `${start.toLocaleString()}-${end.toLocaleString()}`
-    const rangeAriaLabel = compactCentered
-      ? `${perPageLabel}: ${safePageSize.toLocaleString()}. ${showingLabel} ${start.toLocaleString()}-${end.toLocaleString()} ${ofLabel} ${total.toLocaleString()} ${label}`
-      : perPageLabel
     const compactPageDigits = Math.max(1, String(editablePageInput ? pageDraft : safePage).length)
     return (
       <div className={`mx-auto flex w-fit max-w-full items-center rounded-full border border-slate-300 bg-white font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 ${compactCentered ? 'text-[10px]' : 'text-xs'} ${className}`}>
@@ -339,21 +285,9 @@ export default function PaginationControls({
           <span className="whitespace-nowrap">{backLabel}</span>
         </button>
         <div className={`inline-flex min-w-0 items-center ${compactCentered ? 'gap-0 px-0' : 'gap-0.5 px-0.5'}`}>
-          {/* Order per request: the item-range chip (per-page trigger) FIRST,
-              then the editable page number, then the total page count. */}
-          {onPageSizeChange ? <PageSizeSelect
-            value={safePageSize}
-            options={pageSizeOptions}
-            onChange={(nextValue) => onPageSizeChange?.(nextValue)}
-            ariaLabel={rangeAriaLabel}
-            allowCustom={editablePageSizeInput}
-            hideCaret
-            buttonContent={rangeText}
-            className="min-w-0"
-            buttonClassName={`h-10 rounded-full border border-slate-200 bg-slate-100 py-0 font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 ${compactCentered ? 'px-0.5 text-[10px]' : 'px-1 text-xs'}`}
-            menuClassName="min-w-[9rem]"
-            optionClassName="text-xs"
-          /> : <span className="h-6 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">{start.toLocaleString()}-{end.toLocaleString()}</span>}
+          {/* Order per request: the item-range chip FIRST, then the editable
+              page number, then the total page count. */}
+          <span className="h-6 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">{start.toLocaleString()}-{end.toLocaleString()}</span>
           {editablePageInput ? (
             <>
               <span className="sr-only">{pageLabel}</span>
@@ -391,28 +325,14 @@ export default function PaginationControls({
   if (compact) {
     return (
       <div className={`max-w-full rounded-xl border border-slate-200 bg-white/80 px-2 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
-        {/* Per-page selector narrowed to fit a 3-digit value (its own values
-            top out at 999 via PageSizeSelect's custom-input maxValue where
-            callers don't override it) instead of a fixed wide column -- the
-            width that frees up goes to the prev/next buttons below, not to
-            growing the row: same h-7 everywhere, just wider touch targets. */}
-        <div className="grid max-w-full grid-cols-[minmax(5rem,1fr)_minmax(4.5rem,5.5rem)_minmax(12rem,14rem)] items-center gap-1">
+        {/* P10-20: the middle grid column used to hold the per-page selector
+            (owner: "no need to show rows per page options"). Two columns now
+            -- the item-range chip and the back/next pill -- so removing the
+            selector widens the count chip instead of leaving a hole. */}
+        <div className="grid max-w-full grid-cols-[minmax(5rem,1fr)_minmax(12rem,14rem)] items-center gap-1">
           <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-1.5 py-1 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
             {start.toLocaleString()}-{end.toLocaleString()} / {total.toLocaleString()}
           </span>
-          <div className="flex min-w-0 items-center gap-1">
-            <PageSizeSelect
-              value={safePageSize}
-              options={pageSizeOptions}
-              onChange={(nextValue) => onPageSizeChange?.(nextValue)}
-              ariaLabel={perPageLabel}
-              allowCustom={editablePageSizeInput}
-              className="h-7 w-full min-w-0"
-              buttonClassName="h-7 w-full rounded-full px-1 py-0 pl-1.5 pr-0.5 text-xs font-semibold shadow-none"
-              menuClassName="min-w-[9rem]"
-              optionClassName="text-xs"
-            />
-          </div>
           <div className="inline-flex min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
             <button
               type="button"
@@ -466,20 +386,10 @@ export default function PaginationControls({
       <div className="font-medium">
         {showingLabel} {start.toLocaleString()}-{end.toLocaleString()} {ofLabel} {total.toLocaleString()} {label}
       </div>
+      {/* P10-20: the "per page" label + selector that lived here is gone
+          (owner: "no need to show rows per page options"); only the
+          back/next pill remains next to the count above. */}
       <div className="flex flex-wrap items-center gap-2">
-        <label className="inline-flex items-center gap-2">
-          <span>{perPageLabel}</span>
-          <PageSizeSelect
-            value={safePageSize}
-            options={pageSizeOptions}
-            onChange={(nextValue) => onPageSizeChange?.(nextValue)}
-            ariaLabel={perPageLabel}
-            allowCustom={editablePageSizeInput}
-            buttonClassName="h-9 min-w-[5.5rem] rounded-lg px-2.5 py-1 text-xs font-semibold shadow-none"
-            menuClassName="min-w-[10rem]"
-            optionClassName="text-xs"
-          />
-        </label>
         <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
           <button
             type="button"
