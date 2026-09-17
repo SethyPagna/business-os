@@ -133,6 +133,11 @@ runTest('the choice is one compact row, in both modals that offer it', () => {
   // No responsive stacking: the row is the same row on every screen size.
   assert.doesNotMatch(control, /(sm|md|lg):flex-col/)
   assert.doesNotMatch(control, /flex-col[^"]*(sm|md|lg):flex-row/)
+  // Owner report (Sep 17): on a narrow screen "Restock as sellable" and
+  // "Restock with" were cut off. The row scrolls sideways instead of
+  // truncating, and the segments keep their own width until sm.
+  assert.match(control, /overflow-x-auto/)
+  assert.match(control, /const SEGMENT_BASE = '[^']*shrink-0[^']*whitespace-nowrap[^']*sm:flex-1[^']*sm:truncate/)
 
   for (const host of [
     'frontend/src/components/inventory/InventoryStockModals.tsx',
