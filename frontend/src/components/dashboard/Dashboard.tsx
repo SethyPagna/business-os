@@ -1997,18 +1997,27 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
               </div>
             </div>
           </div>
-          {analyticsPending ? <div className="h-52 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-700" />
-          : analyticsUnavailable ? <div className="flex h-52 flex-col items-center justify-center rounded-2xl border border-amber-200 bg-amber-50/60 px-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
-          : chartRenderData.length === 0 ? <div className="flex h-52 items-center justify-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</div>
+          {/* P11-15: this wrapper (and each branch's chart sub-wrapper below)
+              is flex-1 so the plot grows to fill whatever height the
+              stretched card ends up with (items-stretch on the grid row
+              above) -- the fixed h-52 this replaced never adapted, leaving
+              blank space under a short chart whenever a taller sibling card
+              (e.g. Recent Sales with a long list) stretched the row. */}
+          <div className="flex flex-1 flex-col">
+          {analyticsPending ? <div className="h-52 flex-1 min-h-[13rem] animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-700" />
+          : analyticsUnavailable ? <div className="flex flex-1 min-h-[13rem] flex-col items-center justify-center rounded-2xl border border-amber-200 bg-amber-50/60 px-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+          : chartRenderData.length === 0 ? <div className="flex flex-1 min-h-[13rem] items-center justify-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</div>
           : activeChart === 'revenue' ? (
             <>
-              <Suspense fallback={<ChartFallback />}>
-                <LineChart data={chartRenderData} lines={[
-                  { key:'gross_sales_usd', color:'#0891b2', label: grossSalesLabel },
-                  { key:'refund_usd', color:'#f97316', label: refundsLabel },
-                  { key:'revenue_usd', color:'#2563eb', label: netRevenueLabel },
-                ]} />
-              </Suspense>
+              <div className="flex-1 min-h-[13rem]">
+                <Suspense fallback={<ChartFallback />}>
+                  <LineChart data={chartRenderData} lines={[
+                    { key:'gross_sales_usd', color:'#0891b2', label: grossSalesLabel },
+                    { key:'refund_usd', color:'#f97316', label: refundsLabel },
+                    { key:'revenue_usd', color:'#2563eb', label: netRevenueLabel },
+                  ]} />
+                </Suspense>
+              </div>
               <div className="compact-analytics-legend mt-1.5 flex flex-nowrap items-center gap-1 overflow-x-auto">
                 <div className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-1.5 py-0.5 dark:bg-slate-800/70"><div className="h-1.5 w-2.5 shrink-0 rounded-full bg-cyan-600"/><span className="whitespace-nowrap text-[10px] font-semibold leading-tight text-slate-600 dark:text-slate-200">{grossSalesLabel}</span></div>
                 <div className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-1.5 py-0.5 dark:bg-slate-800/70"><div className="h-1.5 w-2.5 shrink-0 rounded-full bg-orange-500"/><span className="whitespace-nowrap text-[10px] font-semibold leading-tight text-slate-600 dark:text-slate-200">{refundsLabel}</span></div>
@@ -2017,9 +2026,11 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             </>
           ) : activeChart === 'profit' ? (
             <>
-              <Suspense fallback={<ChartFallback />}>
-                <LineChart data={chartRenderData} lines={[{ key:'revenue_usd', color:'#2563eb', label: profitRevenueLabel },{ key:'cost_usd', color:'#dc2626', label: cogsLabel },{ key:'profit_usd', color:'#16a34a', label: estProfitLabel }]} />
-              </Suspense>
+              <div className="flex-1 min-h-[13rem]">
+                <Suspense fallback={<ChartFallback />}>
+                  <LineChart data={chartRenderData} lines={[{ key:'revenue_usd', color:'#2563eb', label: profitRevenueLabel },{ key:'cost_usd', color:'#dc2626', label: cogsLabel },{ key:'profit_usd', color:'#16a34a', label: estProfitLabel }]} />
+                </Suspense>
+              </div>
               <div className="compact-analytics-legend mt-1.5 flex flex-nowrap items-center gap-1 overflow-x-auto">
                 <div className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-1.5 py-0.5 dark:bg-slate-800/70"><div className="h-1.5 w-2.5 shrink-0 rounded-full bg-blue-600"/><span className="whitespace-nowrap text-[10px] font-semibold leading-tight text-slate-600 dark:text-slate-200">{profitRevenueLabel}</span></div>
                 <div className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-1.5 py-0.5 dark:bg-slate-800/70"><div className="h-1.5 w-2.5 shrink-0 rounded-full bg-red-600"/><span className="whitespace-nowrap text-[10px] font-semibold leading-tight text-slate-600 dark:text-slate-200">{cogsLabel}</span></div>
@@ -2028,12 +2039,15 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             </>
           ) : (
             <>
-              <Suspense fallback={<ChartFallback className="h-48" />}>
-                <BarChart data={chartRenderData} valueKey="count" labelKey="period" color="#7c3aed" isCount />
-              </Suspense>
+              <div className="flex-1 min-h-[13rem]">
+                <Suspense fallback={<ChartFallback className="h-48" />}>
+                  <BarChart data={chartRenderData} valueKey="count" labelKey="period" color="#7c3aed" isCount />
+                </Suspense>
+              </div>
               <div className="mt-1.5 flex items-center gap-1.5"><div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-3.5 w-3.5 rounded bg-purple-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{salesCountLabel}</span></div></div>
             </>
           )}
+          </div>
         </div>
 
         <RecentSalesCard
