@@ -110,6 +110,36 @@ function makeContext(assetResponse, { bound = true } = {}) {
     check(`${file} routes /assets/* to the Worker`, /"\/assets\/\*"/.test(list))
   }
 
+  // --- 4b. The app document must not answer with a redirect --------------
+  // Measured live on Sep 17: GET /index.html -> 301 -> /. The service worker
+  // precaches /index.html, the Cache API keeps the `redirected` flag, and a
+  // redirected response served to a NAVIGATION request is a network error by
+  // spec. That is the owner's "the response served by the service worker has
+  // redirections" -- a blank page that survives every reload, because the
+  // poison is in the cache. serveAppDocument follows the hop so no client can
+  // ever store one.
+  const followStart = index.indexOf('  let response = await assets.fetch(c.req.raw)')
+  assert.ok(followStart >= 0, 'FAIL: serveAppDocument no longer follows the asset layer\'s own redirect')
+  const followEnd = index.indexOf('  const shouldRewrite = shouldRewriteAdminDocument({', followStart)
+  assert.ok(followEnd > followStart, 'FAIL: could not read the redirect-following block')
+  const follow = new Function('assets', 'c', 'URL', 'Request',
+    `return (async () => {${index.slice(followStart, followEnd)}; return response })()`)
+
+  const doc = makeResponse(200, 'text/html', '<!doctype html>')
+  const redirect = { status: 301, ok: false, headers: { get: (k) => (String(k).toLowerCase() === 'location' ? '/' : null) } }
+  const seen = []
+  const assets = { fetch: async (req) => { seen.push(String(req.url || req)); return seen.length === 1 ? redirect : doc } }
+  const ctx = { req: { url: 'https://admin.leangbeauty.com/index.html', raw: { url: 'https://admin.leangbeauty.com/index.html' } } }
+  check('an app document the asset layer redirects is followed, not passed through',
+    (await follow(assets, ctx, URL, class { constructor(url) { this.url = url } })) === doc)
+  check('the hop stays on the same origin', seen[1] === 'https://admin.leangbeauty.com/')
+
+  // An off-origin Location is never followed: that would make the Worker a
+  // proxy for whatever the asset layer names.
+  const offsite = { status: 302, ok: false, headers: { get: (k) => (String(k).toLowerCase() === 'location' ? 'https://evil.example.com/' : null) } }
+  const offsiteAssets = { fetch: async () => offsite }
+  check('an off-origin redirect is returned as-is, never followed',
+    (await follow(offsiteAssets, ctx, URL, class { constructor(url) { this.url = url } })) === offsite)
   // --- 5. Both halves of the recovery, not just this one ------------------
   // The Worker's 404 rescues clients running an OLDER service worker, which
   // already recognises a 404. The shipped worker additionally recognises the

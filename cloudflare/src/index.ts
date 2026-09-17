@@ -271,7 +271,25 @@ async function serveAppDocument(c: Context<{ Bindings: Env }>): Promise<Response
   // whose [assets] block has no binding; say so instead of serving a 404 page.
   if (!assets) return c.text('Static assets are not bound to this Worker deployment.', 503)
 
-  const response = await assets.fetch(c.req.raw)
+  let response = await assets.fetch(c.req.raw)
+  // Workers Assets normalises an app document with a redirect of its own:
+  // /index.html answers 301 -> / (html_handling). Passing that redirect
+  // through is what blanked the app on Sep 17. The service worker
+  // precaches /index.html, the Cache API stores the response with its
+  // `redirected` flag set, and serving a redirected response to a
+  // NAVIGATION request is a network error by spec -- the owner saw "the
+  // response served by the service worker has redirections" and a blank
+  // page that survived every reload, because the poison was in the cache.
+  // Following it here means no client can store a redirected app document
+  // in the first place. One hop only, same origin only.
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get('location')
+    const origin = new URL(c.req.url).origin
+    const target = location ? new URL(location, c.req.url) : null
+    if (target && target.origin === origin) {
+      response = await assets.fetch(new Request(target.toString(), c.req.raw))
+    }
+  }
   const shouldRewrite = shouldRewriteAdminDocument({
     hostname: new URL(c.req.url).hostname,
     method: c.req.method,

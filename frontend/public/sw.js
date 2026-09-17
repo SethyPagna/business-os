@@ -160,8 +160,21 @@ function broadcastSyncEvent(type, detail = {}) {
     })
         .catch(() => { });
 }
+// Owner (Sep 17): "the response served by the service worker has
+// redirections". That is not a warning -- it is fatal. The spec makes a
+// NAVIGATION request answered with a response whose `redirected` flag is
+// set a network error, so the page is blank and stays blank: the poisoned
+// entry lives in the cache, and every reload serves it again.
+//
+// A shell response gets that flag whenever the fetch behind it followed a
+// redirect -- a Cloudflare Access or login hop, a host-level rewrite, a
+// trailing-slash normalisation. `cache.add()` follows redirects silently
+// and stores the result, flag and all, which is how it got in.
+function isValidDocumentResponse(response) {
+    return Boolean(response && response.ok && response.type === 'basic' && !response.redirected);
+}
 function isValidStaticResponse(request, response) {
-    if (!response || !response.ok || response.type !== 'basic' || response.redirected)
+    if (!isValidDocumentResponse(response))
         return false;
     const pathname = new URL(request.url || request, self.location.origin).pathname.toLowerCase();
     const contentType = String(response.headers.get('content-type') || '').toLowerCase();
@@ -227,7 +240,17 @@ async function precacheAppShell() {
     // "waiting" forever. Cache every URL independently, then require only an
     // actual navigation shell before activating. This is especially important
     // on iOS, where the install worker may get very little execution time.
-    await Promise.allSettled(APP_SHELL_URLS.map((url) => (cache.add(new Request(url, { cache: 'reload' })))));
+    // NOT cache.add(): it follows redirects and stores the redirected response,
+    // and a redirected document served for a navigation is a network error --
+    // a permanently blank page (isValidDocumentResponse above says why). Fetch
+    // and store only what is safe to serve back.
+    await Promise.allSettled(APP_SHELL_URLS.map(async (url) => {
+        const request = new Request(url, { cache: 'reload' });
+        const response = await fetch(request);
+        if (!isValidDocumentResponse(response))
+            throw new Error(`Unusable shell response: ${url}`);
+        await cache.put(request, response.clone());
+    }));
     const shell = await cache.match('/index.html') || await cache.match('/');
     if (!shell)
         throw new Error('Application shell could not be cached');
@@ -660,12 +683,20 @@ function isCacheableStaticPath(pathname) {
 async function appShellFallback(request, event) {
     const cache = await caches.open(APP_SHELL_CACHE);
     const cached = await cache.match('/index.html') || await cache.match('/');
+    // A cached shell that cannot legally answer a navigation -- the redirected
+    // response an older worker stored -- is dropped here rather than served.
+    // Without this, a device already holding one never recovers on its own.
+    if (cached && !isValidDocumentResponse(cached)) {
+        await cache.delete('/index.html').catch(() => { });
+        await cache.delete('/').catch(() => { });
+        return fetchAndCacheShell(request, cache);
+    }
     if (cached) {
         const revalidate = fetch(request, { cache: 'no-store' })
             .then(async (response) => {
             // Do not let a Cloudflare Access/login redirect or an app-owned HTTP
             // error overwrite a good cached shell -- only a real 200 updates it.
-            if (response && response.ok && response.type === 'basic' && !response.redirected) {
+            if (isValidDocumentResponse(response)) {
                 await cache.put('/index.html', response.clone()).catch(() => { });
             }
         })
@@ -673,12 +704,14 @@ async function appShellFallback(request, event) {
         event.waitUntil(revalidate);
         return cached;
     }
-    return fetch(request, { cache: 'no-store' }).then(async (response) => {
-        if (response && response.ok && response.type === 'basic' && !response.redirected) {
-            await cache.put('/index.html', response.clone()).catch(() => { });
-        }
-        return response;
-    });
+    return fetchAndCacheShell(request, cache);
+}
+async function fetchAndCacheShell(request, cache) {
+    const response = await fetch(request, { cache: 'no-store' });
+    if (isValidDocumentResponse(response)) {
+        await cache.put('/index.html', response.clone()).catch(() => { });
+    }
+    return response;
 }
 async function cacheFirstStatic(request, event) {
     const cache = await caches.open(STATIC_CACHE);
@@ -747,7 +780,7 @@ async function recoverStaleShell(event) {
     const refresh = (async () => {
         const cache = await caches.open(APP_SHELL_CACHE);
         const response = await fetch('/index.html', { cache: 'no-store' }).catch(() => null);
-        if (response && response.ok && response.type === 'basic' && !response.redirected) {
+        if (isValidDocumentResponse(response)) {
             await cache.put('/index.html', response.clone()).catch(() => { });
         }
         await self.registration.update().catch(() => { });

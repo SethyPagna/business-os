@@ -52,7 +52,7 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
 
   runTest(`only a real 200 response overwrites the cached shell (${label})`, () => {
     const body = functionBody(source, 'async function appShellFallback', 'async function cacheFirstStatic')
-    assert.match(body, /response\.ok && response\.type === 'basic' && !response\.redirected/, 'a Cloudflare Access/login redirect or app error page must not overwrite a good cached shell')
+    assert.match(body, /isValidDocumentResponse\(response\)/, 'a Cloudflare Access/login redirect or app error page must not overwrite a good cached shell')
   })
 
   runTest(`the navigation handler passes the request event through (${label})`, () => {
@@ -65,6 +65,47 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
     assert.match(source, /if \(!isCacheableStaticPath\(url\.pathname\)\)[\s\S]{0,20}return[;\s]*\n[\s\S]{0,700}event\.respondWith\(cacheFirstStatic\(request, event\)\)/, 'the dispatcher must send every cacheable static path through cacheFirstStatic')
   })
 
+  runTest(`a redirected response is never stored as the shell, and never served as one (${label})`, () => {
+    // Owner (Sep 17): "the response served by the service worker has
+    // redirections". Serving a response whose `redirected` flag is set to a
+    // NAVIGATION request is a network error by spec -- the page is blank, and
+    // because the poisoned entry is in the cache, it is blank on every reload.
+    // cache.add() follows redirects and stores the result flag and all, so the
+    // install path is where it got in.
+    const guard = functionBody(source, 'function isValidDocumentResponse', 'function isValidStaticResponse')
+    const isValid = new Function(`${guard}
+return isValidDocumentResponse`)() as (response: unknown) => boolean
+    const res = (over: Record<string, unknown>) =>
+      ({ ok: true, type: 'basic', redirected: false, ...over })
+    assert.equal(isValid(res({})), true, 'a plain 200 shell is what the cache is for')
+    assert.equal(
+      isValid(res({ redirected: true })),
+      false,
+      'a redirected response is exactly the one that blanks the page -- it must never be stored or served',
+    )
+    assert.equal(isValid(res({ ok: false })), false, 'an error page must not become the shell')
+    assert.equal(isValid(res({ type: 'opaqueredirect' })), false, 'a Cloudflare Access hop must not become the shell')
+    assert.equal(isValid(undefined), false, 'no response at all is not a shell')
+
+    const install = functionBody(source, 'async function precacheAppShell', 'async function cacheNamesToRetain')
+    // The prose above the fix names cache.add(); only the CODE must be free of it.
+    const installCode = install.split(String.fromCharCode(10)).filter((line) => !line.trim().startsWith('//')).join(String.fromCharCode(10))
+    assert.doesNotMatch(
+      installCode,
+      /cache\.add\(/,
+      'cache.add() follows redirects and stores them -- the install path must fetch and check first',
+    )
+    assert.match(install, /isValidDocumentResponse\(response\)/, 'the install path must apply the guard')
+
+    // The fix must also HEAL the devices already holding a poisoned entry:
+    // they cannot reach the app to accept an update, so nothing else will.
+    const body = functionBody(source, 'async function appShellFallback', 'async function fetchAndCacheShell')
+    assert.match(
+      body,
+      /if \(cached && !isValidDocumentResponse\(cached\)\) \{[\s\S]{0,200}cache\.delete\('\/index\.html'\)[\s\S]{0,200}cache\.delete\('\/'\)/,
+      'a cached shell that cannot answer a navigation must be dropped, not served again',
+    )
+  })
   runTest(`a chunk the deploy deleted refreshes the cached shell before the response returns (${label})`, () => {
     const body = functionBody(source, 'async function cacheFirstStatic', 'function isStaleBuildAsset')
     assert.match(body, /else if \(isStaleBuildAsset\(request, response\)\) \{[\s\S]{0,40}await recoverStaleShell\(event\)/, 'the network-miss branch must await the shell recovery on a stale asset')
@@ -99,7 +140,7 @@ return isStaleBuildAsset`)({ location: { origin: 'https://admin.example.com' } }
     const recover = functionBody(source, 'async function recoverStaleShell', "self.addEventListener('fetch'")
     assert.match(recover, /caches\.open\(APP_SHELL_CACHE\)/, 'the shell cache is what goes stale')
     assert.match(recover, /fetch\('\/index\.html', \{ cache: 'no-store' \}\)/, 'the fresh shell must bypass HTTP caches')
-    assert.match(recover, /response\.ok && response\.type === 'basic' && !response\.redirected/, 'a redirect or error page must not replace the shell')
+    assert.match(recover, /isValidDocumentResponse\(response\)/, 'a redirect or error page must not replace the shell')
     assert.match(recover, /self\.registration\.update\(\)/, 'the new worker must be requested, not left to the periodic check')
     assert.match(recover, /event\.waitUntil\(refresh\)[\s\S]{0,20}await refresh/, 'recovery is awaited so the reload that follows sees the fresh shell')
   })
