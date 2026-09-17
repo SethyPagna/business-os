@@ -31,7 +31,7 @@ import {
 } from '../../../utils/stockAdjustOutcome.ts'
 import { clearWorkDraft, writeWorkDraft } from '../../../utils/workDrafts.ts'
 import { readStockAdjustDraft, stockAdjustDraftKey, type StockAdjustDraft } from '../../../utils/stockAdjustDraft.ts'
-import { buildStockAdjustQuantityReview } from '../../../utils/stockAdjustReview.ts'
+import { buildStockAdjustQuantityReview, buildStockReceiptPaymentReview } from '../../../utils/stockAdjustReview.ts'
 import { useRestoredStockAdjustDirty } from '../../../utils/useRestoredStockAdjustDirty.ts'
 
 // Full-featured "Adjust stock" flow for the Products page "Stock Changes"
@@ -841,6 +841,16 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     if (reqReason) items.push({ label: tr('reason', 'Reason'), value: reqReason })
     const reqSupplier = String(req.supplierName || '').trim()
     if (reqSupplier) items.push({ label: tr('supplier', 'Supplier'), value: reqSupplier })
+    // P10-19: reflect the Not Yet Paid due date (or Paid) back before the
+    // operator confirms -- stockReceiptWire only puts `paymentStatus` on the
+    // request when this submission was actually a receipt, so its presence
+    // alone is the isStockIn gate here.
+    items.push(...buildStockReceiptPaymentReview({
+      isStockIn: req.paymentStatus === 'paid' || req.paymentStatus === 'credit',
+      paymentStatus: req.paymentStatus,
+      creditDueDate: req.creditDueDate,
+      tr,
+    }))
     return items
   }
 

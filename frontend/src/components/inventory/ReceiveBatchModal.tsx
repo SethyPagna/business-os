@@ -17,6 +17,12 @@ import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import StockReasonField from '../shared/StockReasonField.tsx'
 import { useSavedStockReasons } from '../../utils/useSavedStockReasons.ts'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
+// P10-19: sibling parity with Inventory.tsx / StockAdjustModal.tsx's own
+// adjust confirm -- this modal's Receive used to end in a bare native
+// window.confirm() with a generic sentence and NO Payment/Due date, so a
+// typed "Not Yet Paid" due date was never reflected back before it committed.
+import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { buildStockReceiptPaymentReview } from '../../utils/stockAdjustReview.ts'
 
 function todayIsoDate(): string {
   return todayStr()
@@ -89,6 +95,15 @@ export default function ReceiveBatchModal({
   const [paymentStatus, setPaymentStatus] = useState<'' | 'paid' | 'credit'>('')
   const [creditDueDate, setCreditDueDate] = useState('')
   const [saving, setSaving] = useState(false)
+  // P10-19: the validated receive request, parked for an explicit review
+  // (quantity, branch, received date/lot, supplier and Payment/Due date)
+  // instead of writing straight off a bare window.confirm(). null = no
+  // confirm pending.
+  const [pendingReceipt, setPendingReceipt] = useState<{
+    request: Record<string, any>
+    branchName: string
+    lotLabel: string
+  } | null>(null)
   // D4b: the same existing-lot picker every adjust surface has -- 'new'
   // creates/matches by date (this modal's original behavior), a number
   // tops up that exact lot (its own received_at stays; the server
@@ -136,6 +151,7 @@ export default function ReceiveBatchModal({
     setUnitCost('')
     setPaymentStatus('')
     setCreditDueDate('')
+    setPendingReceipt(null)
   }, [product?.id])
 
   // N2: an open receive entry with anything typed beyond the defaults is
@@ -237,8 +253,13 @@ export default function ReceiveBatchModal({
     : null
   const lotAttributedName = selectedLot?.supplier_name?.trim() || null
 
-  const submit = async () => {
-    const productId = Number(product.id)
+  // P10-19: validate and PARK the request; commitReceive below does the
+  // actual write once the operator has reviewed it in ConfirmDialog. The
+  // review used to be a bare window.confirm() sentence with the quantity and
+  // lot baked into English prose but no Payment/Due date at all -- a typed
+  // "Not Yet Paid" due date was never reflected back before the write.
+  const beginReceive = () => {
+    if (saving || pendingReceipt) return
     const parsedBranchId = Number(branchId)
     const parsedQuantity = Number(quantity)
     if (!parsedBranchId) { notify(tr('choose_branch', 'Choose a branch'), 'error'); return }
@@ -247,20 +268,6 @@ export default function ReceiveBatchModal({
       notify(tr('credit_needs_due_date', 'A supplier purchase marked Not Yet Paid needs a due date — reminders use it.'), 'error')
       return
     }
-    const branchName = branchSelectOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'selected branch')
-    const lotLabel = typeof batchChoice === 'number'
-      ? batchDisplayLabel({ id: batchChoice, lot_code: selectedLot?.lot_code ?? null, received_at: selectedLot?.received_at ?? null, batch_number: selectedLot?.batch_number ?? null }, t('batch') || 'Received date')
-      : tr('new_batch', 'a new received date')
-    if (!window.confirm(tr(
-      'confirm_receive_batch_details',
-      'Receive {quantity} {unit} of {product} into {branch}, using received date {lot}? This posts stock movement(s).',
-    )
-      .replace('{quantity}', String(parsedQuantity))
-      .replace('{unit}', product.unit || 'unit(s)')
-      .replace('{product}', product.name || 'this product')
-      .replace('{branch}', String(branchName))
-      .replace('{lot}', lotLabel))) return
-
     // N14-D: the same rule POST /api/batches enforces
     // (cloudflare/src/lib/stockReceiptGate.ts). An already-attributed lot
     // supplies the supplier itself -- first attribution sticks, which is why
@@ -276,11 +283,13 @@ export default function ReceiveBatchModal({
       notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
       return
     }
-
-    setSaving(true)
-    try {
-      const res = await receiveBatchStock({
-        productId,
+    const branchName = branchSelectOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'selected branch')
+    const lotLabel = typeof batchChoice === 'number'
+      ? batchDisplayLabel({ id: batchChoice, lot_code: selectedLot?.lot_code ?? null, received_at: selectedLot?.received_at ?? null, batch_number: selectedLot?.batch_number ?? null }, t('batch') || 'Received date')
+      : tr('new_batch', 'a new received date')
+    setPendingReceipt({
+      request: {
+        productId: Number(product.id),
         branchId: parsedBranchId,
         quantity: parsedQuantity,
         expiryDate: expiryDate || null,
@@ -300,13 +309,25 @@ export default function ReceiveBatchModal({
         freeGoods,
         paymentStatus: paymentStatus || null,
         creditDueDate: paymentStatus === 'credit' ? creditDueDate : null,
-      })
+      },
+      branchName: String(branchName),
+      lotLabel,
+    })
+  }
+
+  const commitReceive = async () => {
+    const pending = pendingReceipt
+    if (!pending || saving) return
+    setSaving(true)
+    try {
+      const res = await receiveBatchStock(pending.request as any)
       if (res?.success === false) {
         notify((res as any)?.error || tr('receive_batch_failed', 'Failed to receive stock'), 'error')
         return
       }
       notify(tr('batch_received', 'Stock received'))
-      clearWorkDraft(scopedWorkDraftKey(`receive_${productId}`))
+      clearWorkDraft(scopedWorkDraftKey(`receive_${pending.request.productId}`))
+      setPendingReceipt(null)
       onReceived()
       onClose()
     } catch (e: unknown) {
@@ -314,6 +335,29 @@ export default function ReceiveBatchModal({
     } finally {
       setSaving(false)
     }
+  }
+
+  // The compact "what's about to happen" review rows -- quantity, branch,
+  // received date/lot and (always, for a receipt) Payment/Due date -- built
+  // from the PARKED request so what is shown always matches what is written.
+  const buildReceiveReviewItems = (): ConfirmReviewItem[] => {
+    const pending = pendingReceipt
+    if (!pending) return []
+    const req = pending.request
+    const items: ConfirmReviewItem[] = [
+      { label: tr('quantity', 'Quantity'), value: `+${req.quantity} ${product.unit || tr('unit', 'unit')}` },
+      { label: tr('branch', 'Branch'), value: pending.branchName },
+      { label: t('batch') || tr('batch', 'Received date'), value: pending.lotLabel },
+    ]
+    const reqSupplier = String(req.supplierName || '').trim()
+    if (reqSupplier) items.push({ label: tr('supplier', 'Supplier'), value: reqSupplier })
+    items.push(...buildStockReceiptPaymentReview({
+      isStockIn: true,
+      paymentStatus: req.paymentStatus,
+      creditDueDate: req.creditDueDate,
+      tr,
+    }))
+    return items
   }
 
   const modal = (
@@ -524,12 +568,24 @@ export default function ReceiveBatchModal({
           <button type="button" className="btn-secondary text-sm" onClick={closeIfIdle} disabled={saving}>
             {t('cancel') || 'Cancel'}
           </button>
-          <button type="button" className="btn-primary text-sm" onClick={submit} disabled={saving}>
+          <button type="button" className="btn-primary text-sm" onClick={beginReceive} disabled={saving}>
             {saving ? (t('saving') || 'Saving...') : tr('receive_stock', 'Receive stock')}
           </button>
         </div>
       </div>
       <UnsavedChangesPrompt guard={closeGuard} />
+      {pendingReceipt ? (
+        <ConfirmDialog
+          t={t}
+          title={tr('receive_stock', 'Receive stock')}
+          message={product.name || ''}
+          items={buildReceiveReviewItems()}
+          working={saving}
+          workingLabel={t('saving') || 'Saving...'}
+          onConfirm={() => void commitReceive()}
+          onClose={() => { if (!saving) setPendingReceipt(null) }}
+        />
+      ) : null}
     </div>
   )
 

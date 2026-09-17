@@ -24,6 +24,10 @@ import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
+// P10-19: the adjust confirm dialog (Part 563's shared review pattern,
+// already used by StockAdjustModal.tsx's Products-page twin of this flow).
+import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog'
+import { buildStockAdjustQuantityReview, buildStockReceiptPaymentReview } from '../../utils/stockAdjustReview.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 const ProductDetailModal = lazyRetry(() => import('./ProductDetailModal'), 'inventory-product-detail-modal') as any
 const InventoryImportModal = lazyRetry(() => import('./InventoryImportModal'), 'inventory-import') as any
@@ -560,6 +564,18 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [loading,       setLoading]       = useState(true)
   const [loadError,     setLoadError]     = useState<string | null>(null)
   const [adjustSaving,  setAdjustSaving]  = useState(false)
+  // P10-19: the validated adjustment request awaits an explicit confirm that
+  // shows what is about to be written -- quantity before/after, branch,
+  // reason, supplier and (for a receipt) Payment/Due date -- rather than the
+  // bare native `window.confirm("Add this quantity to stock?")` this used to
+  // be, which carried none of those values. Mirrors StockAdjustModal.tsx's
+  // own pendingAdjust (Part 563); null = no confirm pending.
+  const [pendingAdjust, setPendingAdjust] = useState<{
+    request: Record<string, any>
+    beforeQuantity: number
+    previousSnapshot: unknown
+    productName: string
+  } | null>(null)
   const [transferSaving, setTransferSaving] = useState(false)
   const [pendingTransfer, setPendingTransfer] = useState<PendingInventoryTransfer | null>(null)
   const [transferRetryError, setTransferRetryError] = useState('')
@@ -1242,7 +1258,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     : { selling_price_usd: 0, selling_price_khr: 0 }
 
   const handleAdjust = async () => {
-    if (adjustSaving) return
+    if (adjustSaving || pendingAdjust) return
     const qty = parseFloat(String(adjustForm.quantity))
     // A set is a TARGET, not a movement: 0 is how an operator records an
     // emptied shelf. One rule, shared with StockAdjustModal, FastStockInModal
@@ -1396,16 +1412,26 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         if (qty > totalQty) { notify(`Cannot remove ${qty} - only ${totalQty} available`, 'error'); return }
       }
     }
-    const adjustConfirmLabel = adjustForm.type === 'set'
-      ? tr('confirm_set_stock')
-      : adjustForm.type === 'remove'
-        ? tr('confirm_remove_stock')
-        : tr('confirm_add_stock')
+    // P10-19: park the validated request and open the review dialog instead
+    // of writing straight away. A bare native confirm ("Add this quantity to
+    // stock?") showed no values at all -- not the quantity, not the branch,
+    // and for a receipt not the Payment/Due date the operator just typed --
+    // so there was nothing on screen to prove a "Not Yet Paid" due date had
+    // been read before the write. commitAdjust below does the actual write
+    // once the operator has seen the values and confirmed.
+    setPendingAdjust({
+      request: adjustmentRequest,
+      beforeQuantity: previousQuantity,
+      previousSnapshot,
+      productName: String(previousSnapshot?.name || selectedAdjustProduct?.name || ''),
+    })
+  }
+
+  const commitAdjust = async () => {
+    const pending = pendingAdjust
+    if (!pending || adjustSaving) return
+    const adjustmentRequest = pending.request
     if (!beginSingleAction(adjustStockInFlightRef, { blocked: adjustSaving })) return
-    if (!window.confirm(adjustConfirmLabel)) {
-      finishSingleAction(adjustStockInFlightRef)
-      return
-    }
     setAdjustSaving(true)
     try {
       const res = await runInventoryMutation(() => getInventoryApi().adjustStock(adjustmentRequest), 'Adjust inventory stock')
@@ -1440,7 +1466,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         if (adjustmentRequest.conditionTag) {
           notify(tr('stock_tagged_undo_hint', 'Saved. Use the tagged row on the product to restore or remove these units.'), 'info')
         } else actionHistory.pushAction({
-          label: `Adjust stock for ${previousSnapshot?.name || adjustModal?.name || 'product'}`,
+          label: `Adjust stock for ${pending.productName || 'product'}`,
           undo: async () => {
             // N14-D: an undo puts the branch back to the figure it held before.
             // It is not a new receipt -- the inverse of a remove is an add with
@@ -1449,7 +1475,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
             // being handed invented receipt facts.
             const undoBase = { ...adjustmentRequest, attribution: 'correction' as const }
             const inverseRequest = adjustmentRequest.type === 'set'
-              ? { ...undoBase, type: 'set', quantity: previousQuantity, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+              ? { ...undoBase, type: 'set', quantity: pending.beforeQuantity, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
               : adjustmentRequest.type === 'remove'
                 ? { ...undoBase, type: 'add', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
                 : { ...undoBase, type: 'remove', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
@@ -1465,6 +1491,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         })
         notify('Stock adjusted')
         clearWorkDraft(stockAdjustDraftKey(adjustModal?.id))
+        setPendingAdjust(null)
         setAdjustModal(null)
         await load(true)
       }
@@ -1474,6 +1501,38 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       finishSingleAction(adjustStockInFlightRef)
       setAdjustSaving(false)
     }
+  }
+
+  // The compact "what's about to happen" review rows the confirm dialog
+  // shows -- quantity before/after, branch, reason, supplier and (for a
+  // receipt) Payment/Due date -- built from the PARKED request so what is
+  // shown always matches exactly what will be written.
+  const buildInventoryAdjustReviewItems = (): ConfirmReviewItem[] => {
+    const req = pendingAdjust?.request
+    if (!req) return []
+    const reqBranchId = req.branchId != null ? Number(req.branchId) : null
+    const branchName = reqBranchId ? (branches.find((b) => Number(b.id) === reqBranchId)?.name || String(reqBranchId)) : '--'
+    const items: ConfirmReviewItem[] = [
+      ...buildStockAdjustQuantityReview({
+        type: req.type,
+        quantity: req.quantity,
+        beforeQuantity: pendingAdjust?.beforeQuantity,
+        unit: adjustModal?.unit,
+        tr,
+      }),
+      { label: tr('branch', 'Branch'), value: branchName },
+    ]
+    const reqReason = String(req.reason || '').trim()
+    if (reqReason) items.push({ label: tr('reason', 'Reason'), value: reqReason })
+    const reqSupplier = String(req.supplierName || '').trim()
+    if (reqSupplier) items.push({ label: tr('supplier', 'Supplier'), value: reqSupplier })
+    items.push(...buildStockReceiptPaymentReview({
+      isStockIn: req.paymentStatus === 'paid' || req.paymentStatus === 'credit',
+      paymentStatus: req.paymentStatus,
+      creditDueDate: req.creditDueDate,
+      tr,
+    }))
+    return items
   }
 
   // A fresh search is exactly the "search again" moment
@@ -1490,6 +1549,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const receiptSessionIdRef = useRef(Date.now())
   const closeAdjustAndDiscardDraft = useCallback(() => {
     clearWorkDraft(stockAdjustDraftKey(adjustModal?.id))
+    setPendingAdjust(null)
     setAdjustModal(null)
   }, [adjustModal?.id])
   const preserveAndMinimizeAdjust = useCallback(() => {
@@ -1516,11 +1576,13 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
     })
     notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
+    setPendingAdjust(null)
     setAdjustModal(null)
   }, [adjustForm, adjustModal, adjustSaving, notify, tr])
   const openAdjust = (p: InventoryProduct) => {
     void ensureInventoryReasonsLoaded()
     receiptSessionIdRef.current = Date.now()
+    setPendingAdjust(null)
     setAdjustModal(p)
     const defaultBranchId = defaultBranch?.id?.toString() || ''
     // pricingLocked starts true (the fast "add to this row" path) --
@@ -2900,6 +2962,19 @@ ${inventoryFeesFormulaText}`,
             usdSymbol={usdSymbol}
           />
         </Suspense>
+      ) : null}
+
+      {pendingAdjust ? (
+        <ConfirmDialog
+          t={t}
+          title={tr('adjust_stock', 'Adjust stock')}
+          message={pendingAdjust.productName}
+          items={buildInventoryAdjustReviewItems()}
+          working={adjustSaving}
+          workingLabel={tr('saving', 'Saving...')}
+          onConfirm={() => void commitAdjust()}
+          onClose={() => { if (!adjustSaving) setPendingAdjust(null) }}
+        />
       ) : null}
 
       {reasonManager.open ? (
