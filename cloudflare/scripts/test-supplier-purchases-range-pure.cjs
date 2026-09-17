@@ -45,8 +45,21 @@ const buildFilters = eval(ts.transpileModule(builderSource, {
 const totalsSql = route.match(/const totalsRow = await db\.prepare\(`([\s\S]*?)`\)/)
 const batchesSql = route.match(/const batches = await db\.prepare\(`([\s\S]*?)`\)/)
 assert.ok(totalsSql && batchesSql, 'both purchase statements are readable from the source')
+// The lots statement also interpolates lib/lotRemaining.ts, which decides
+// whether a lot reads as sold out (0) or never tracked at lot level (NULL).
+// It is expanded from the REAL module rather than blanked: this file runs the
+// bound SQL against the real migration chain, so a stubbed expression would
+// be testing SQL the route does not ship.
+const lotRemainingSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'lotRemaining.ts'), 'utf8').replace(/\r\n/g, '\n')
+const lotRemainingModule = { exports: {} }
+new Function('exports', 'module', ts.transpileModule(lotRemainingSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+}).outputText)(lotRemainingModule.exports, lotRemainingModule)
+const { lotRemainingSql } = lotRemainingModule.exports
+
 function bind(sql, where) {
   const bound = sql.replace('${purchasesWhere}', where)
+    .replace(/\$\{lotRemainingSql\('([^']*)', '([^']*)'\)\}/g, (_match, alias, qty) => lotRemainingSql(alias, qty))
   assert.ok(!bound.includes('${'), 'every interpolation in the extracted SQL is accounted for')
   return bound
 }
