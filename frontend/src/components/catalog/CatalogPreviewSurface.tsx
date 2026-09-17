@@ -322,7 +322,16 @@ export default function CatalogPreviewSurface({
           only applied when publicView since the !publicView case is the
           admin "portal editor" preview embed, which is never opened
           full-screen on a device and shouldn't get extra top padding. */}
-      <div className={`mx-auto max-w-[1680px] px-5 py-3 sm:px-10 sm:py-4 lg:px-16 xl:px-20 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-[calc(1rem+env(safe-area-inset-top))]' : ''}`}>
+      {/* 2026-09-18 (owner): "the search and filter row. can fully utlize the
+          row. there are many space left and right to utilize." sm/lg/xl each
+          added their own further gutter on top of the last, and by xl that
+          stacked to 5rem (80px) of dead margin on EVERY row in this column,
+          the search/filter bar included -- not just the outer page edge, the
+          `mx-auto max-w-[1680px]` already keeps that in check on very wide
+          monitors. Trimmed back so the row (and everything else in this
+          column) actually uses the space instead of floating in a wide
+          gutter on ordinary desktop widths. */}
+      <div className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-[calc(1rem+env(safe-area-inset-top))]' : ''}`}>
         <div className="space-y-0">
           <div ref={previewSectionRef} className="space-y-0">
             {/* WCAG 2.4.1: the storefront opens with a row of social links,
