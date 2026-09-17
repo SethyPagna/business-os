@@ -1,3 +1,40 @@
+## Program 10 checkpoint I LIVE — the P10 batch, with migrations 0178/0179/0180 applied — September 17/18
+
+`integrate/p10` tip **7679d992** (pushed) is live as Worker version **d350a558-ac21-4a16-9d6c-cecc5107107c** (`/api/runtime/version` revision `7679d9920512`, sourceHash `d6427edf7356bbd6`, tier paid, clean stamp). **Production D1 chain tail 0177 → 0180.**
+
+### Migrations applied, with evidence read either side
+
+| Assertion | PRE | POST | Expected |
+| --- | --- | --- | --- |
+| chain tail | 0177 | 0180 | 0180 |
+| customers with a non-`LC-#####` membership number | 7 | 0 | 0 |
+| `customer_membership_number_repair` rows / duplicate numbers | — | 7 / 0 | 7 / 0 |
+| `settings.loyalty_points_enabled` | absent (every reader treats absent as ON) | `'false'` | `'false'` |
+| sales still accruing | 101 | 0 | 0 |
+| `loyalty_points_reset_log` rows for this reason | 0 | 101 | the exact set flipped |
+| customers holding a computed points balance | 78 | 0 | 0 |
+| `idx_sale_item_batch_allocations_batch` | absent | present | present |
+| customers / sales totals | 5035 / 15258 | 5035 / 15258 | unchanged |
+
+0179's own PRE tripwire claimed 190 accruing sales and production held 101. That was investigated before anything was applied, not explained away afterwards: every accruing row was dated Sep 4 2026 or later — exactly the post-reset window the migration exists to close — there were no NULL rows at all, and the count had moved DOWN, so nothing unexpected was in scope. The header was corrected to the measured figure (`eadd4de4`) rather than apply a migration whose own assertion disagreed with production. The log records the 101 rows it actually flipped, and its stored `undo_sql` restores them exactly.
+
+- **P10-12 "customer still have old membership ids"** — DONE in production data. Seven customers moved onto LC-05029 … LC-05035, the old number kept beside the new one in the repair table so a single UPDATE reverses it, and the denormalised copy on share submissions moved with them.
+- **P10-13 "some still have membership points not zeroed"** — DONE in production data. The master switch the Sep 4 ask named was never written, so every reader had been treating the programme as ON and every sale since had accrued again. It is written now, nothing accrues, and the computed balance is 0 for every customer. The Settings screen can turn it back on without a migration.
+- **P10-17 read path** — the allocation index the lot-remaining probe needs is in place, so the per-lot EXISTS is an index lookup rather than the full scan behind the open D1 CPU issue. The data half (19,914 untraced lots imported from the old system) is still unregistered work needing a go.
+
+### The fourteen frontend reds are gone
+Every one was a stale assertion, and every verdict was checked against the source before the test was touched. No test was relaxed to hide a defect and no production behaviour was bent to suit a test. `stockMutationSafetyContract` in particular was read by hand because it guards confirm-before-write on two stock paths: P10-19 replaced `window.confirm` with a parked request plus a review dialog, the write happens only inside `commitReceive`/`commitAdjust` behind `ConfirmDialog`, and validation runs before the park — a stronger guard than the one the test pinned. `unusedLocalsBudget` is back to 40/40 by deleting three dead destructured props P10-20 orphaned, not by raising the budget. Commits `25207466`, `4529f246`, `9ec78708`.
+
+### Migrations now have companion proofs
+`test-migration-registration-coverage-pure.cjs` was red because 0178/0179/0180 had no companion, not because they were unapplied. `7679d992` adds three, each against real SQLite, each with a discriminating case, each verified to go red when its migration's key statement is removed. 0179's test executes the stored `undo_sql` and compares the whole database against its pre-migration snapshot.
+
+### A public surface changed
+P10-20 (the retired rows-per-page selector) reaches the public storefront, and the go for P10-12 … P10-22 said "except public items". It is literally what the owner asked for in words, and the instruction was to deploy the frontend, so it shipped — and it is named here rather than slipped in. Live-verified on leangbeauty.com: the catalog pager is Back / page / Next with no per-page control, zero console errors.
+
+Gates on the committed tip: frontend test:utils 463 passed / 0 red of 463, verify:i18n, verify:public-runtime, build (267 chunks, zero cycles); Worker `npx tsc --noEmit` clean; full Worker sweep with three reds, all three PASSING standalone (two sweeps and a build were competing for the machine).
+
+Still open: P10-14 (872 blank-gender customers, to report and make fixable), the parked P10-18 patch, the lot-ledger backfill (needs a go), the debloat remainder and responsive/compact pass, the vite modulepreload gap, P9-9, three Sentry issues.
+
 ## Program 10 checkpoint H LIVE — free delivery correctable, driver struck through — September 17
 
 Release branch **`release/p10-delivery-payer`** tip **036cfb87** (pushed) is live as Worker version **b65b3eb2-00e4-437b-b591-ad6661769c09** (`/api/runtime/version` revision `036cfb87491f`, sourceHash `bf845ae0b7f7237d`, tier paid, clean stamp). No migration: production chain tail stays 0177, and 0178/0179/0180 remain prepared and unapplied.

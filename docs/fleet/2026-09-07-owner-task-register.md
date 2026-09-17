@@ -570,3 +570,22 @@ Release branch `release/p10-delivery-payer` tip **036cfb87** is live as Worker v
 | Migrations 0178 / 0179 / 0180 | **Prepared, not applied** | Production chain tail 0177. Deliberately out of this release; they belong to the P10 checkpoint. |
 | Fourteen frontend reds on `integrate/p10` | **Open, blocking the full P10 checkpoint** | contactsInvoiceRowFloat, contactsInvoiceStickyRows, dateRangeDefaults, fastStockInReasons, paginationRangeControl, paginationSurfaceContract, portalCatalogDisplay, productsResponsiveSurface, publicStorefrontPhoneFixesSep15, stockMutationSafetyContract, storefrontPagerLayout, storefrontPagerRow, storefrontPagerScenarios, unusedLocalsBudget. |
 | P10-12 … P10-22, P10-18 parked patch, lot-ledger backfill, debloat remainder, modulepreload gap, P9-9, three Sentry issues | **Unchanged** | Carried from checkpoint G. |
+
+## September 17/18 program 10 checkpoint I LIVE — owner message O, and the migrations
+
+`integrate/p10` tip **7679d992** is live as Worker version d350a558-ac21-4a16-9d6c-cecc5107107c (paid), revision `7679d9920512`, clean stamp. **Production D1 chain tail 0177 → 0180.** Owner: "continue deploy as soon as possible for the frontend, migrations, etc..."
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| P10-12 customer still have old membership ids | **Deployed, data repaired** | Migration 0178. PRE 7 malformed → POST 0, seven customers now LC-05029 … LC-05035, no duplicates, old numbers kept in `customer_membership_number_repair` for an exact undo, share-submission copies moved too. `test-migration-0178-pure.cjs`. |
+| P10-13 some still have membership points not zeroed | **Deployed, data repaired** | Migration 0179. The master switch the Sep 4 ask named had never been written, so every reader treated the programme as ON. PRE: flag absent, 101 sales accruing, 78 customers holding points. POST: flag `'false'`, 0 accruing, 0 customers holding points. The reset log names the exact 101 and stores the undo; the Settings screen can switch it back on. `test-migration-0179-pure.cjs`, which runs that undo for real. |
+| P10-17 remaining column shows 0 (read path) | **Deployed** | Migration 0180 adds `idx_sale_item_batch_allocations_batch`, so the per-lot probe is an index lookup, not the full scan behind the open D1 CPU issue. The DATA half — 19,914 lots imported from the old system with no lot-level trace — is separate and still needs a go. |
+| P10-19 receipt/adjust confirm-review step | **Deployed** | Confirmed live in the source while auditing `stockMutationSafetyContract`: the write happens only inside `commitReceive`/`commitAdjust` behind `ConfirmDialog`, validation ahead of the park. |
+| P10-20 remove the rows-per-page options | **Deployed — PUBLIC surface, flagged** | The go for P10-12 … P10-22 said "except public items" and this one reaches the storefront. It is literally the owner's wording ("no need to show rows per page options") and the instruction was to deploy the frontend, so it shipped. Live-verified on leangbeauty.com: Back / page / Next, no per-page control, zero console errors. |
+| P10-21 customer purchases opens on all time | **Deployed** | `dateRangeDefaults.test.ts` now asserts the new rule and proves the first request carries neither startDate nor endDate. |
+| Fourteen frontend reds | **Cleared** | 25207466, 4529f246, 9ec78708. All stale assertions, each verdict checked against the source; nothing relaxed. |
+| Migration companion tests | **Added** | 7679d992 — 0178/0179/0180 each proved against real SQLite, each verified to go red when its migration's key statement is removed. |
+| P10-14 blank-gender customers (872 measured) | **Open, not started** | Needs reporting and a way to fix the group. |
+| P10-18 parked patch | **Open, parked** | `scratchpad/p10-18-CreateProductsSessionModal.patch`. |
+| Lot-ledger backfill (19,914 untraced lots) | **Open, needs a go** | P10-17's data half. |
+| Debloat remainder, responsive/compact pass, modulepreload gap, P9-9, three Sentry issues | **Unchanged** | Carried. |
