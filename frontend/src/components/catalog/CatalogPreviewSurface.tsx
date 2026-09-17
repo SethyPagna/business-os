@@ -506,7 +506,7 @@ export default function CatalogPreviewSurface({
                           }
                           return (
                             <div className="w-72 max-w-[85vw]">
-                              <div className="px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                              <div className="px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">
                                 {copy('publicTranslation', 'Language tools')}
                               </div>
                               {allPublicTranslateOptions.length > 8 ? (

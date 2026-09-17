@@ -1496,7 +1496,7 @@ export default function PublicCatalogPage() {
   ) : null
 
   const secondaryTabSection = activeTab !== 'products' ? (
-    <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">{copy('loadingPortal', 'Loading customer portal...')}</div>}>
+    <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">{copy('loadingPortal', 'Loading customer portal...')}</div>}>
       <CatalogSecondaryTabs
         tab={activeTab}
         copy={copy}
