@@ -20,7 +20,7 @@ import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
-import { getAnalytics, getDashboard, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardStockAlertState } from '../../api/dashboardTransport.ts'
+import { getAnalytics, getDashboard, getDashboardInsightList, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardInsightKind, type DashboardStockAlertState } from '../../api/dashboardTransport.ts'
 import { isInvalidSessionError } from '../../api/http.ts'
 import { listImportJobs } from '../../api/importJobsTransport.ts'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
@@ -254,6 +254,7 @@ interface DashboardApi {
   getAnalytics: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
   getDashboardStartup: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
   getDashboardStockAlerts: (params: { state: DashboardStockAlertState; page: number; pageSize: number }) => Promise<unknown>
+  getDashboardInsightList: (params: { insight: DashboardInsightKind; startDate: string; endDate: string; branchId?: string }) => ReturnType<typeof getDashboardInsightList>
 }
 
 type DashboardExportModule = typeof import('./dashboardExport.ts')
@@ -263,7 +264,7 @@ const useSync = useSyncHook as () => SyncContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
 
 function getDashboardApi(): DashboardApi {
-  return { getDashboard, getAnalytics, getDashboardStartup, getDashboardStockAlerts }
+  return { getDashboard, getAnalytics, getDashboardStartup, getDashboardStockAlerts, getDashboardInsightList }
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -362,6 +363,35 @@ function DashboardListModal({ open, title, subtitle, closeLabel, onClose, childr
       </div>
     </div>
   ), document.body)
+}
+
+// P11-16: the shared body for a "View more" float once it fetches its own
+// real full list (see loadInsightList) instead of replaying the card's
+// truncated preview array. One shell handles the loading/error/empty states
+// so each of the four call sites below only supplies how to render a row.
+function DashboardInsightListBody<T>({ state, translateOr, renderRow, emptyLabel }: {
+  state: { items: unknown[]; truncated: boolean; loading: boolean; error: string } | undefined
+  translateOr: (key: string, fallback: string, khmerFallback?: string) => string
+  renderRow: (item: T, index: number) => ReactNode
+  emptyLabel: string
+}) {
+  if (state?.error) {
+    return <div className="px-4 py-6 text-center text-sm text-red-500">{state.error}</div>
+  }
+  if (!state || (state.loading && state.items.length === 0)) {
+    return <div className="px-4 py-6 text-center text-sm text-gray-400">{translateOr('loading', 'Loading...')}</div>
+  }
+  if (state.items.length === 0) {
+    return <div className="px-4 py-6 text-center text-sm text-gray-400">{emptyLabel}</div>
+  }
+  return (
+    <>
+      {(state.items as T[]).map((item, i) => renderRow(item, i))}
+      {state.truncated
+        ? <div className="px-4 py-2 text-center text-xs text-gray-400">{translateOr('insight_list_truncated', 'Showing the first results only -- narrow the date range for the rest.')}</div>
+        : null}
+    </>
+  )
 }
 
 // Footer row shown at the bottom of a list card once its list is longer than
@@ -1030,6 +1060,26 @@ export default function Dashboard() {
       if (finishDashboardStockAlertRequest(requestRef, requestId, inFlightRef)) setLoadingMore(false)
     }
   }, [])
+
+  // P11-16: real "View more" data for the cards that used to just replay
+  // their already-truncated preview array (recent sales, expiring products,
+  // top products/customers). Fetched fresh each time its float opens, scoped
+  // to the SAME window the card itself is showing.
+  const [insightLists, setInsightLists] = useState<Record<string, { items: unknown[]; truncated: boolean; loading: boolean; error: string }>>({})
+  const loadInsightList = useCallback(async (kind: DashboardInsightKind) => {
+    setInsightLists((prev) => ({ ...prev, [kind]: { items: prev[kind]?.items || [], truncated: prev[kind]?.truncated || false, loading: true, error: '' } }))
+    try {
+      const { start, end } = getCurrentDashboardRange()
+      const result = await withLoaderTimeout(
+        () => getDashboardApi().getDashboardInsightList({ insight: kind, startDate: start, endDate: end }),
+        'Dashboard insight list',
+        DASHBOARD_SUMMARY_TIMEOUT_MS,
+      )
+      setInsightLists((prev) => ({ ...prev, [kind]: { items: result.items, truncated: result.truncated, loading: false, error: '' } }))
+    } catch (error) {
+      setInsightLists((prev) => ({ ...prev, [kind]: { items: prev[kind]?.items || [], truncated: prev[kind]?.truncated || false, loading: false, error: getErrorMessage(error, 'Could not load the full list.') } }))
+    }
+  }, [getCurrentDashboardRange])
 
   const loadAnalytics = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     const requestId = beginTrackedRequest(analyticsRequestRef)
@@ -2058,7 +2108,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           fmtKHR={fmtKHR}
           formatStatus={formatSaleStatus}
           onOpenSale={setRecentSaleDetail}
-          onViewMore={() => setRecentSalesOpen(true)}
+          onViewMore={() => { setRecentSalesOpen(true); void loadInsightList('recent_sales') }}
         />
       </div>
       </section>
@@ -2153,7 +2203,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                   )
                 })}
               </div>
-              <DashboardViewMoreFooter show={topList.length > 5} translateOr={translateOr} onClick={() => setTopProductsListOpen(true)} />
+              <DashboardViewMoreFooter show={topList.length > 5} translateOr={translateOr} onClick={() => { setTopProductsListOpen(true); void loadInsightList(topMode === 'qty' ? 'top_products_qty' : 'top_products') }} />
             </>
           )}
         </div>
@@ -2203,7 +2253,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                             )
                           })}
                         </div>
-                        <DashboardViewMoreFooter show={customers.length > 5} translateOr={translateOr} onClick={() => setTopCustomersListOpen(true)} />
+                        <DashboardViewMoreFooter show={customers.length > 5} translateOr={translateOr} onClick={() => { setTopCustomersListOpen(true); void loadInsightList('top_customers') }} />
                       </>
                     )}
                 </>
@@ -2218,7 +2268,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
       <section className={`${mobileSection === 'inventory' ? '' : 'hidden'} lg:block`}>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-stretch">
         {/* Best Hour */}
-        <ExpiryAlertsCard summary={summary} translateOr={translateOr} onOpen={openExpiryDetail} onViewMore={() => setExpiryAlertsListOpen(true)} />
+        <ExpiryAlertsCard summary={summary} translateOr={translateOr} onOpen={openExpiryDetail} onViewMore={() => { setExpiryAlertsListOpen(true); void loadInsightList('expiring_products') }} />
 
         {/* Low Stock */}
         <div className="card flex flex-col">
@@ -2395,73 +2445,88 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
       <DashboardListModal
         open={recentSalesOpen}
         title={t('sales') || 'Sales'}
-        subtitle={`${summary?.recent_sales?.length || 0} ${t('entries') || 'entries'}`}
+        subtitle={`${insightLists.recent_sales?.items.length ?? summary?.recent_sales?.length ?? 0} ${t('entries') || 'entries'}`}
         closeLabel={closeLabel}
         onClose={() => setRecentSalesOpen(false)}
       >
-        {(summary?.recent_sales || []).map((sale) => (
-          <button
-            key={`recent-sale-${sale.id}`}
-            type="button"
-            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
-            onClick={() => setRecentSaleDetail(sale)}
-          >
-            <div className="min-w-0">
-              <div className="detail-scroll-text text-sm font-semibold text-gray-800 dark:text-gray-100">{sale.receipt_number || `#${sale.id}`}</div>
-              <div className="detail-scroll-text text-xs text-gray-400">
-                {compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}
+        <DashboardInsightListBody
+          state={insightLists.recent_sales}
+          translateOr={translateOr}
+          emptyLabel={translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}
+          renderRow={(sale: DashboardSale) => (
+            <button
+              key={`recent-sale-${sale.id}`}
+              type="button"
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+              onClick={() => setRecentSaleDetail(sale)}
+            >
+              <div className="min-w-0">
+                <div className="detail-scroll-text text-sm font-semibold text-gray-800 dark:text-gray-100">{sale.receipt_number || `#${sale.id}`}</div>
+                <div className="detail-scroll-text text-xs text-gray-400">
+                  {compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}
+                </div>
               </div>
-            </div>
-            <div className="shrink-0 text-right">
-              <div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div>
-              <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>
-                {formatSaleStatus(sale.sale_status)}
+              <div className="shrink-0 text-right">
+                <div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div>
+                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>
+                  {formatSaleStatus(sale.sale_status)}
+                </div>
               </div>
-            </div>
-          </button>
-        ))}
+            </button>
+          )}
+        />
       </DashboardListModal>
 
       <DashboardListModal
         open={topProductsListOpen}
         title={t('top_products')}
-        subtitle={`${topList.length} ${t('entries') || 'entries'}`}
+        subtitle={`${(insightLists[topMode === 'qty' ? 'top_products_qty' : 'top_products']?.items.length ?? topList.length)} ${t('entries') || 'entries'}`}
         closeLabel={closeLabel}
         onClose={() => setTopProductsListOpen(false)}
       >
-        {topList.map((p, i) => (
-          <button
-            key={`top-product-${i}`}
-            type="button"
-            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
-            onClick={() => { setTopProductsListOpen(false); setProductDetail({ ...p, insightType: 'top_product', rank: i + 1 }) }}
-          >
-            <div className="min-w-0"><span className="text-gray-400">{i + 1}.</span> <span className="text-sm text-gray-700 dark:text-gray-300">{p.product_name}</span></div>
-            <div className="shrink-0 text-right text-sm font-semibold text-gray-900 dark:text-white">
-              {topMode === 'qty' ? `${p.qty_sold} ${t('qty_sold')}` : fmtUSD(p.revenue_usd)}
-            </div>
-          </button>
-        ))}
+        <DashboardInsightListBody
+          state={insightLists[topMode === 'qty' ? 'top_products_qty' : 'top_products']}
+          translateOr={translateOr}
+          emptyLabel={translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}
+          renderRow={(p: DashboardProduct, i: number) => (
+            <button
+              key={`top-product-${i}`}
+              type="button"
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+              onClick={() => { setTopProductsListOpen(false); setProductDetail({ ...p, insightType: 'top_product', rank: i + 1 }) }}
+            >
+              <div className="min-w-0"><span className="text-gray-400">{i + 1}.</span> <span className="text-sm text-gray-700 dark:text-gray-300">{p.product_name}</span></div>
+              <div className="shrink-0 text-right text-sm font-semibold text-gray-900 dark:text-white">
+                {topMode === 'qty' ? `${p.qty_sold} ${t('qty_sold')}` : fmtUSD(p.revenue_usd)}
+              </div>
+            </button>
+          )}
+        />
       </DashboardListModal>
 
       <DashboardListModal
         open={topCustomersListOpen}
         title={t('top_customers')}
-        subtitle={`${(analytics?.topCustomers || []).length} ${t('entries') || 'entries'}`}
+        subtitle={`${insightLists.top_customers?.items.length ?? (analytics?.topCustomers || []).length} ${t('entries') || 'entries'}`}
         closeLabel={closeLabel}
         onClose={() => setTopCustomersListOpen(false)}
       >
-        {(analytics?.topCustomers || []).map((c, i) => (
-          <button
-            key={`top-customer-${i}`}
-            type="button"
-            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
-            onClick={() => { setTopCustomersListOpen(false); setCustomerDetail({ ...c, rank: i + 1 }) }}
-          >
-            <div className="min-w-0"><span className="text-gray-400">{i + 1}.</span> <span className="text-sm text-gray-700 dark:text-gray-300">{c.customer_name || t('walk_in') || 'General'}</span></div>
-            <div className="shrink-0 text-sm font-semibold text-green-700 dark:text-green-400">{fmtUSD(c.net_revenue_usd || 0)}</div>
-          </button>
-        ))}
+        <DashboardInsightListBody
+          state={insightLists.top_customers}
+          translateOr={translateOr}
+          emptyLabel={translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}
+          renderRow={(c: DashboardCustomer, i: number) => (
+            <button
+              key={`top-customer-${i}`}
+              type="button"
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+              onClick={() => { setTopCustomersListOpen(false); setCustomerDetail({ ...c, rank: i + 1 }) }}
+            >
+              <div className="min-w-0"><span className="text-gray-400">{i + 1}.</span> <span className="text-sm text-gray-700 dark:text-gray-300">{c.customer_name || t('walk_in') || 'General'}</span></div>
+              <div className="shrink-0 text-sm font-semibold text-green-700 dark:text-green-400">{fmtUSD(c.net_revenue_usd || 0)}</div>
+            </button>
+          )}
+        />
       </DashboardListModal>
 
       <DashboardListModal
@@ -2487,21 +2552,26 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
       <DashboardListModal
         open={expiryAlertsListOpen}
         title={translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}
-        subtitle={`${(summary?.expiring_products || []).length} ${t('entries') || 'entries'}`}
+        subtitle={`${insightLists.expiring_products?.items.length ?? (summary?.expiring_products || []).length} ${t('entries') || 'entries'}`}
         closeLabel={closeLabel}
         onClose={() => setExpiryAlertsListOpen(false)}
       >
-        {(summary?.expiring_products || []).map((item) => (
-          <button
-            key={`expiry-${item.id}`}
-            type="button"
-            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
-            onClick={() => { setExpiryAlertsListOpen(false); openExpiryDetail(item) }}
-          >
-            <div className="min-w-0 break-words text-sm text-gray-700 dark:text-gray-300">{item.name}</div>
-            <span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span>
-          </button>
-        ))}
+        <DashboardInsightListBody
+          state={insightLists.expiring_products}
+          translateOr={translateOr}
+          emptyLabel={translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}
+          renderRow={(item: DashboardProduct) => (
+            <button
+              key={`expiry-${item.id}`}
+              type="button"
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+              onClick={() => { setExpiryAlertsListOpen(false); openExpiryDetail(item) }}
+            >
+              <div className="min-w-0 break-words text-sm text-gray-700 dark:text-gray-300">{item.name}</div>
+              <span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span>
+            </button>
+          )}
+        />
       </DashboardListModal>
 
       <DashboardListModal

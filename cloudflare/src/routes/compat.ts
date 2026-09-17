@@ -437,6 +437,100 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
   }
 }
 
+// P11-16: every dashboard card whose row is truncated for the compact grid
+// (recent sales, expiring products, top products/customers) offered a "View
+// more" float, but the float replayed the SAME already-truncated array the
+// card itself received -- only the low-stock/out-of-stock cards actually
+// fetched more. This endpoint gives every other card a real full-list read,
+// same window/branch scope as /dashboard and /analytics, bounded generously
+// (not literally unbounded -- see DASHBOARD_INSIGHT_LIST_LIMIT) so a float
+// can never trigger the kind of unbounded scan P11-14 removed elsewhere.
+type DashboardInsightKind = 'recent_sales' | 'expiring_products' | 'top_products' | 'top_products_qty' | 'top_customers'
+const DASHBOARD_INSIGHT_LIST_LIMIT = 300
+
+async function dashboardInsightList(env: Env, query: Record<string, string>, kind: DashboardInsightKind) {
+  const db = getDb(env)
+  const range = dateRange(query)
+  const branchId = query.branchId || null
+
+  if (kind === 'recent_sales') {
+    const params = range.allTime
+      ? (branchId ? { branchId } : {})
+      : (branchId ? { startDate: range.startDate, endDate: range.endDate, branchId } : { startDate: range.startDate, endDate: range.endDate })
+    const saleBranchClause = branchId ? ' AND sales.branch_id = @branchId' : ''
+    const rows = await db.prepare(`
+      SELECT id, receipt_number, created_at, sale_status, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
+        (SELECT COALESCE(SUM(quantity), 0) FROM sale_items WHERE sale_id = sales.id) AS item_count
+      FROM sales
+      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')}${saleBranchClause}
+      ORDER BY created_at DESC, id DESC
+      LIMIT ${DASHBOARD_INSIGHT_LIST_LIMIT}
+    `).all(params)
+    const items = (rows || []).map((sale) => ({ ...(sale as Record<string, unknown>), item_count: num((sale as Record<string, unknown>).item_count) }))
+    return { items, truncated: items.length >= DASHBOARD_INSIGHT_LIST_LIMIT }
+  }
+
+  if (kind === 'expiring_products') {
+    // Same catalog-wide scope as the card -- not range/branch scoped, see
+    // dashboardSummary's own comment on why the expiry alert is deliberately
+    // the exception to the one-range-scopes-everything convention.
+    const rows = await db.prepare(`
+      SELECT id, name, category, unit, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
+      FROM products p
+      WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
+      ORDER BY date(expiry_date) ASC
+      LIMIT ${DASHBOARD_INSIGHT_LIST_LIMIT}
+    `).all()
+    return { items: rows || [], truncated: (rows || []).length >= DASHBOARD_INSIGHT_LIST_LIMIT }
+  }
+
+  // top_products / top_products_qty / top_customers: same recognized-sales
+  // window dashboardAnalytics uses for these three cards. The GROUP BY
+  // already computes every group before the preview's LIMIT 20 truncates it,
+  // so raising the limit here costs nothing extra -- it is the SAME query,
+  // just kept instead of cut.
+  const analyticsParams = range.allTime
+    ? (branchId ? { branchId } : {})
+    : (branchId ? { startDate: range.startDate, endDate: range.endDate, branchId } : { startDate: range.startDate, endDate: range.endDate })
+  const branchClause = branchId ? ' AND s.branch_id = @branchId' : ''
+  const activeSalesClause = `${range.allTime ? '1 = 1' : localDateRangeClause('s.created_at')} AND ${recognizedExpr('s.')}${branchClause}`
+  const attributedLineRevenue = `CASE
+    WHEN COALESCE(s.subtotal_usd, 0) > 0
+      THEN COALESCE(si.total_usd, 0) / s.subtotal_usd * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
+    ELSE 0
+  END`
+  if (kind === 'top_customers') {
+    const rows = await db.prepare(`
+      SELECT MAX(CASE WHEN ${identifiedCustomerExpr('s.')} IS NULL THEN '' ELSE ${reportCustomerNameExpr('s.')} END) AS customer_name, COUNT(*) AS sale_count,
+             COALESCE(SUM(s.subtotal_usd), 0) AS gross_revenue_usd,
+             COALESCE(SUM(s.discount_usd), 0) AS store_discount_usd,
+             COALESCE(SUM(s.membership_discount_usd), 0) AS membership_discount_usd,
+             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS net_revenue_usd
+      FROM sales s
+      ${CUSTOMER_REFUND_JOIN}s.id
+      WHERE ${activeSalesClause}
+      GROUP BY ${identifiedCustomerExpr('s.')}
+      ORDER BY net_revenue_usd DESC
+      LIMIT ${DASHBOARD_INSIGHT_LIST_LIMIT}
+    `).all(analyticsParams)
+    return { items: rows || [], truncated: (rows || []).length >= DASHBOARD_INSIGHT_LIST_LIMIT }
+  }
+  const orderBy = kind === 'top_products_qty' ? 'qty_sold DESC' : 'revenue_usd DESC'
+  const rows = await db.prepare(`
+    SELECT si.product_id, COALESCE(MAX(p.name), MAX(si.product_name)) AS product_name, SUM(si.quantity) AS qty_sold,
+           COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id
+    LEFT JOIN products p ON p.id = si.product_id
+    ${CUSTOMER_REFUND_JOIN}s.id
+    WHERE ${activeSalesClause}
+    GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
+    ORDER BY ${orderBy}
+    LIMIT ${DASHBOARD_INSIGHT_LIST_LIMIT}
+  `).all(analyticsParams)
+  return { items: rows || [], truncated: (rows || []).length >= DASHBOARD_INSIGHT_LIST_LIMIT }
+}
+
 // NOTE: /users and /roles routes moved to routes/users.ts (proper admin-
 // control/self-service permission model, primary-admin guardrails, and
 // duplicate-identity checks that this file's old generic
@@ -472,6 +566,16 @@ app.get('/analytics', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
   return c.json(await dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user'))))
+})
+app.get('/dashboard/insight-list', async (c) => {
+  const denied = denyUnless(c, 'dashboard')
+  if (denied) return denied
+  const kind = String(c.req.query('insight') || '')
+  const validKinds: DashboardInsightKind[] = ['recent_sales', 'expiring_products', 'top_products', 'top_products_qty', 'top_customers']
+  if (!validKinds.includes(kind as DashboardInsightKind)) {
+    return c.json({ error: 'insight must be one of ' + validKinds.join(', ') }, 400)
+  }
+  return c.json(await dashboardInsightList(c.env, c.req.query(), kind as DashboardInsightKind))
 })
 app.get('/dashboard/startup', async (c) => {
   const denied = denyUnless(c, 'dashboard')

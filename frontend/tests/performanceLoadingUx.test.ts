@@ -1379,7 +1379,7 @@ assert.match(
 )
 assert.match(
   dashboard,
-  /import \{ getAnalytics, getDashboard, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardStockAlertState \} from '\.\.\/\.\.\/api\/dashboardTransport\.ts'/,
+  /import \{ getAnalytics, getDashboard, getDashboardInsightList, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardInsightKind, type DashboardStockAlertState \} from '\.\.\/\.\.\/api\/dashboardTransport\.ts'/,
   'dashboard should use its narrow transport instead of the full app-api-methods registry',
 )
 assert.doesNotMatch(

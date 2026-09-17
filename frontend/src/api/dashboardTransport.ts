@@ -94,3 +94,27 @@ export function getDashboardStartup(params: QueryParams = {}): Promise<unknown> 
     () => apiFetch('GET', appendQuery('/api/dashboard/startup', query)),
   )
 }
+
+// P11-16: recent sales / expiring products / top products / top customers
+// each cap their preview at a handful of rows so the equal-height cards stay
+// compact; "View more" used to just replay that same capped array. This
+// fetches the real full list (bounded, see the Worker's
+// DASHBOARD_INSIGHT_LIST_LIMIT) so the float is not the exact set already on
+// screen. Low-stock/out-of-stock and branch performance/best-hour already
+// had a real full-list source and are unaffected.
+export type DashboardInsightKind = 'recent_sales' | 'expiring_products' | 'top_products' | 'top_products_qty' | 'top_customers'
+
+export type DashboardInsightList = {
+  items: unknown[]
+  truncated: boolean
+}
+
+export async function getDashboardInsightList(params: QueryParams & { insight: DashboardInsightKind }): Promise<DashboardInsightList> {
+  const query = buildQueryString(withDashboardRangeScope(params), { skipEmpty: false })
+  const result = await route<DashboardInsightList>(
+    `dashboard:insight-list:${query}`,
+    () => apiFetch('GET', appendQuery('/api/dashboard/insight-list', query)),
+  )
+  if (!result || !Array.isArray(result.items)) throw new Error('Dashboard insight list returned an invalid response')
+  return { items: result.items, truncated: Boolean(result.truncated) }
+}
