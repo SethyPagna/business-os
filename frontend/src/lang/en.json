@@ -2391,6 +2391,7 @@
   "infoText": "Customer-facing membership note",
   "infoTextHint": "This note appears in the customer portal membership panel under the point summary and redemption rules.",
   "initial_stock": "Initial Stock",
+  "insight_list_truncated": "Showing the first results only -- narrow the date range for the rest.",
   "insert_divider_below": "Insert divider below",
   "instagram": "Instagram",
   "insufficient_amount": "Amount paid is less than total",

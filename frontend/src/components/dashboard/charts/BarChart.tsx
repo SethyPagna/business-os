@@ -45,17 +45,24 @@ function formatAxisLabel(value: unknown, includeYear = false): string {
 export default function BarChart({ data, valueKey, labelKey, color = '#9c7a3c', isCount = false }: BarChartProps) {
   const chartRef = useRef<HTMLDivElement | null>(null)
   const [chartWidth, setChartWidth] = useState(760)
+  // P11-15: see LineChart.tsx's identical comment -- the card holding this
+  // chart stretches to its row's tallest sibling, so the plot must be able
+  // to grow into that space instead of always rendering at a fixed height.
+  const [chartHeight, setChartHeight] = useState(0)
   const [tooltip, setTooltip] = useState<BarTooltip | null>(null)
 
   useEffect(() => {
     const node = chartRef.current
     if (!node) return undefined
-    const updateWidth = () => {
-      const nextWidth = Math.round(node.getBoundingClientRect().width || 0)
+    const updateSize = () => {
+      const rect = node.getBoundingClientRect()
+      const nextWidth = Math.round(rect.width || 0)
+      const nextHeight = Math.round(rect.height || 0)
       if (nextWidth > 0) setChartWidth(nextWidth)
+      if (nextHeight > 0) setChartHeight(nextHeight)
     }
-    updateWidth()
-    const observer = new ResizeObserver(updateWidth)
+    updateSize()
+    const observer = new ResizeObserver(updateSize)
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
@@ -64,7 +71,8 @@ export default function BarChart({ data, valueKey, labelKey, color = '#9c7a3c', 
 
   const isCompact = chartWidth < 460
   const W = Math.max(300, chartWidth)
-  const H = isCompact ? 178 : 196
+  const defaultH = isCompact ? 178 : 196
+  const H = Math.max(defaultH, Math.min(340, chartHeight || defaultH))
   const PAD_L = isCompact ? 42 : 54
   const PAD_B = isCompact ? 28 : 32
   const PAD_T = 12
@@ -97,7 +105,7 @@ export default function BarChart({ data, valueKey, labelKey, color = '#9c7a3c', 
     : yTicks
 
   return (
-    <div ref={chartRef} className="relative">
+    <div ref={chartRef} className="relative h-full">
       {tooltip && (
         <div
           className="pointer-events-none absolute z-20 whitespace-nowrap rounded-xl bg-gray-900 px-3 py-2 text-sm text-white shadow-xl"

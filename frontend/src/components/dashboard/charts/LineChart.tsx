@@ -50,17 +50,29 @@ function formatAxisLabel(value: unknown, includeYear = false): string {
 export default function LineChart({ data, lines }: LineChartProps) {
   const chartRef = useRef<HTMLDivElement | null>(null)
   const [chartWidth, setChartWidth] = useState(760)
+  // P11-15: the card holding this chart stretches to match its tallest row
+  // sibling (items-stretch), but this SVG used to always render at a fixed
+  // 178/196px regardless -- so a short chart card left dead blank space
+  // below the chart once a taller sibling (e.g. Recent Sales with a long
+  // list) stretched the row. Measuring the container's own rendered height
+  // (it is a flex-1 child of the card body, see Dashboard.tsx) and using
+  // that for the SVG's height lets the chart actually fill the stretched
+  // card instead of floating a fixed size inside it.
+  const [chartHeight, setChartHeight] = useState(0)
   const [tooltip, setTooltip] = useState<LineTooltip | null>(null)
 
   useEffect(() => {
     const node = chartRef.current
     if (!node) return undefined
-    const updateWidth = () => {
-      const nextWidth = Math.round(node.getBoundingClientRect().width || 0)
+    const updateSize = () => {
+      const rect = node.getBoundingClientRect()
+      const nextWidth = Math.round(rect.width || 0)
+      const nextHeight = Math.round(rect.height || 0)
       if (nextWidth > 0) setChartWidth(nextWidth)
+      if (nextHeight > 0) setChartHeight(nextHeight)
     }
-    updateWidth()
-    const observer = new ResizeObserver(updateWidth)
+    updateSize()
+    const observer = new ResizeObserver(updateSize)
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
@@ -71,7 +83,11 @@ export default function LineChart({ data, lines }: LineChartProps) {
 
   const isCompact = chartWidth < 460
   const W = Math.max(300, chartWidth)
-  const H = isCompact ? 178 : 196
+  const defaultH = isCompact ? 178 : 196
+  // Only grow past the default (a stretched row is taller than its shortest
+  // card, never shorter) and cap the growth so a very tall row doesn't
+  // stretch the plot into something illegible.
+  const H = Math.max(defaultH, Math.min(340, chartHeight || defaultH))
   const PAD_L = isCompact ? 42 : 54
   const PAD_B = isCompact ? 28 : 32
   const PAD_T = 12
@@ -138,7 +154,7 @@ export default function LineChart({ data, lines }: LineChartProps) {
   }
 
   return (
-    <div ref={chartRef} className="relative">
+    <div ref={chartRef} className="relative h-full">
       {tooltip && (
         <div
           className="pointer-events-none absolute z-20 whitespace-nowrap rounded-xl bg-gray-900 px-3 py-2 text-sm text-white shadow-xl"
