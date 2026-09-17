@@ -557,3 +557,16 @@ Release code eca7aacd is live as Worker 78335b42-eaa7-400a-85b4-5c2164f4103d (pa
 | P9-9 tagged-stock error | **Open, go given, not started** | Root cause recorded; needs one logged-in check to close. |
 | Sentry BUSINESS-OS-X (D1 CPU limit), -6 (expression tree too large), -1F (recorded product identity) | **Open, not started** | Registered Sep 17. |
 | P10-12 … P10-22 | **Open, need a go** | Registered under message K. |
+
+## September 17 program 10 checkpoint H LIVE — owner message N
+
+Release branch `release/p10-delivery-payer` tip **036cfb87** is live as Worker version b65b3eb2-00e4-437b-b591-ad6661769c09 (paid), `/api/runtime/version` revision `036cfb87491f`, clean stamp; no migration (chain tail still 0177). It was cut from 327c460b, the commit already in production, because `integrate/p10` carries fourteen frontend reds and cannot be certified — so this deploy ships only certified work and needs none of the prepared migrations.
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| P10-23 — a delivery rung up as free could never be corrected to paid-by-customer | **Deployed** | 0d40835b. No code path moved `delivery_fee_paid_by` after a sale and the route refused a zero fee delta, which is the shape a payer-only correction has; the correction now rides on the existing `delivery_fee_changed` amendment and the response returns the payer. cloudflare/scripts/test-sale-amendments-pure.cjs §11e (real SQLite), frontend/tests/deliveryFeePayerAmendment.test.ts, frontend/tests/historicalSaleCallbacks.test.ts. |
+| P10-24 — a free delivery must strike the driver's name through | **Deployed** | f7e5f15c; frontend/tests/salesDriverColumn.test.ts. |
+| Service worker "response has redirections" outage | **Deployed** | 327c460b (live since the previous checkpoint); 330c05b2 drops the stale test assertion that pinned the `cache.add` which caused it. Shell live-verified in a browser: workspace opens, zero console errors. |
+| Migrations 0178 / 0179 / 0180 | **Prepared, not applied** | Production chain tail 0177. Deliberately out of this release; they belong to the P10 checkpoint. |
+| Fourteen frontend reds on `integrate/p10` | **Open, blocking the full P10 checkpoint** | contactsInvoiceRowFloat, contactsInvoiceStickyRows, dateRangeDefaults, fastStockInReasons, paginationRangeControl, paginationSurfaceContract, portalCatalogDisplay, productsResponsiveSurface, publicStorefrontPhoneFixesSep15, stockMutationSafetyContract, storefrontPagerLayout, storefrontPagerRow, storefrontPagerScenarios, unusedLocalsBudget. |
+| P10-12 … P10-22, P10-18 parked patch, lot-ledger backfill, debloat remainder, modulepreload gap, P9-9, three Sentry issues | **Unchanged** | Carried from checkpoint G. |
