@@ -120,7 +120,20 @@ check('the service worker precache fetch is still rewritten', () => {
   // precacheAppShell caches '/index.html' with a wildcard Accept. If that were
   // excluded, the OFFLINE admin shell would carry the storefront identity --
   // the same bug, one layer down.
-  assert.match(serviceWorker, /cache\.add\(new Request\(url, \{ cache: 'reload' \}\)\)/, 'the precache still uses a plain Request')
+  assert.match(serviceWorker, /new Request\(url, \{ cache: 'reload' \}\)/, 'the precache still asks for the shell with a plain, wildcard-Accept Request')
+  // This assertion used to read `cache.add(new Request(...))`, which pinned
+  // the Sep 17 blank-page outage in place. `cache.add` FOLLOWS redirects and
+  // stores the response with its `redirected` flag set; /index.html answers
+  // 301 -> / (Workers Assets html_handling), and the spec turns a redirected
+  // response served to a NAVIGATION into a network error. Every install
+  // re-poisoned its own cache. The shell is now fetched and put explicitly,
+  // so the response can be rejected before it is ever stored --
+  // frontend/tests/swNavigationStrategy.test.ts proves that half.
+  // Comment lines are stripped first: the source explains WHY cache.add is
+  // forbidden, and a naive match would find that warning and pass on it.
+  const workerCode = serviceWorker.split(String.fromCharCode(10))
+    .filter((line) => !line.trim().startsWith('//')).join(String.fromCharCode(10))
+  assert.doesNotMatch(workerCode, /cache\.add\(/, 'the shipped worker must never use cache.add: it stores redirected responses')
   assert.strictEqual(identity.shouldRewriteAdminDocument(documentRequest({ accept: '*/*' })), true, 'wildcard Accept')
   assert.strictEqual(identity.shouldRewriteAdminDocument(documentRequest({ accept: undefined })), true, 'no Accept header')
 })
