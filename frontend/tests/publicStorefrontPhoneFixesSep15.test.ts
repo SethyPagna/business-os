@@ -144,8 +144,10 @@ check('2 the header icon rows never wrap on a phone', () => {
   // wishlist/account from language/theme) onto a second row at 320-375px.
   assert.ok(!/flex min-w-0 flex-wrap items-center/.test(catalogPreviewSurface), 'the social-links row must not wrap')
   assert.ok(!/flex flex-wrap items-center justify-end/.test(catalogPreviewSurface), 'the account-side row must not wrap')
-  assert.match(catalogPreviewSurface, /flex min-w-0 flex-nowrap items-center gap-0\.5 sm:gap-1/, 'social links: nowrap + shrunk gap below sm')
-  assert.match(catalogPreviewSurface, /flex flex-nowrap items-center justify-end gap-0\.5 sm:gap-1/, 'account-side icons: nowrap + shrunk gap below sm')
+  // P11-9 (2026-09-18) added `row-start-2 ... sm:row-start-auto` to both rows
+  // (the business name now leads on the base grid) -- nowrap/gap survive it.
+  assert.match(catalogPreviewSurface, /row-start-2 flex min-w-0 flex-nowrap items-center gap-0\.5 sm:row-start-auto sm:gap-1/, 'social links: nowrap + shrunk gap below sm')
+  assert.match(catalogPreviewSurface, /row-start-2 flex flex-nowrap items-center justify-end gap-0\.5 sm:row-start-auto sm:gap-1/, 'account-side icons: nowrap + shrunk gap below sm')
   // Every icon button in both rows shrinks one size below `sm` rather than
   // wrapping -- catches a partial fix that stops wrapping but overflows the
   // header instead.
@@ -163,7 +165,14 @@ check('3 the contact FAB has a minimize control with a per-viewer memory', () =>
   // The X control must exist and be reachable on touch (not hover-only),
   // per the owner's "always reachable on touch" requirement.
   assert.match(publicCatalogPage, /setContactMinimized\(true\)/, 'there must be a control that minimizes the button')
-  assert.match(publicCatalogPage, /opacity-100[^"]*\[@media\(hover:hover\)\]:opacity-0[^"]*\[@media\(hover:hover\)\]:group-hover:opacity-100/, 'the X must default visible and only hide-until-hover on genuine hover-capable pointers')
+  // P11-1 (2026-09-18, owner): "the x button just keep the icon instead of
+  // filling it and bocking the contact us button" -- the hover-gated
+  // opacity-0/group-hover badge overlapping the main button's own corner is
+  // gone. It is now a plain sibling button, always filled, reachable on
+  // touch with no hover trick at all.
+  assert.doesNotMatch(publicCatalogPage, /-right-1\.5 -top-1\.5/, 'the minimize control must not overlap the main button corner')
+  assert.doesNotMatch(publicCatalogPage, /opacity-0.*group-hover:opacity-100/, 'the minimize control must not be hover-gated invisible by default')
+  assert.match(publicCatalogPage, /bg-slate-700 text-white shadow-md/, 'the minimize control is a plain always-filled pill')
   // Restoring from the minimized tab.
   assert.match(publicCatalogPage, /onClick=\{\(\) => setContactMinimized\(false\)\}/, 'tapping the minimized tab must restore the full button')
 })

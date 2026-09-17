@@ -322,7 +322,16 @@ export default function CatalogPreviewSurface({
           only applied when publicView since the !publicView case is the
           admin "portal editor" preview embed, which is never opened
           full-screen on a device and shouldn't get extra top padding. */}
-      <div className={`mx-auto max-w-[1680px] px-5 py-3 sm:px-10 sm:py-4 lg:px-16 xl:px-20 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-[calc(1rem+env(safe-area-inset-top))]' : ''}`}>
+      {/* 2026-09-18 (owner): "the search and filter row. can fully utlize the
+          row. there are many space left and right to utilize." sm/lg/xl each
+          added their own further gutter on top of the last, and by xl that
+          stacked to 5rem (80px) of dead margin on EVERY row in this column,
+          the search/filter bar included -- not just the outer page edge, the
+          `mx-auto max-w-[1680px]` already keeps that in check on very wide
+          monitors. Trimmed back so the row (and everything else in this
+          column) actually uses the space instead of floating in a wide
+          gutter on ordinary desktop widths. */}
+      <div className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-[calc(1rem+env(safe-area-inset-top))]' : ''}`}>
         <div className="space-y-0">
           <div ref={previewSectionRef} className="space-y-0">
             {/* WCAG 2.4.1: the storefront opens with a row of social links,
@@ -365,7 +374,17 @@ export default function CatalogPreviewSurface({
                       aria-label, which matched that rule and would otherwise
                       silently re-widen it past `h-8`/`h-9` and reopen this
                       same overflow. */}
-                  <div data-portal-header-icons="" className="flex min-w-0 flex-nowrap items-center gap-0.5 sm:gap-1">
+                  {/* 2026-09-18 (owner): "for the top of the website, the
+                      buttons can be below the business name... so Leang
+                      Cosmetics first" -- on the base (sub-`sm`) grid this row
+                      used to be `row-start-1` (implicit) with the business
+                      name pushed to `row-start-2` below it, i.e. the icon
+                      buttons led and the name came second. `row-start-2` here
+                      moves this row (and its opposite number below) under the
+                      name instead; `sm:row-start-auto` restores the ordinary
+                      single-row layout at `sm` and up, where all three sit
+                      side by side and there is no "first" to reorder. */}
+                  <div data-portal-header-icons="" className="row-start-2 flex min-w-0 flex-nowrap items-center gap-0.5 sm:row-start-auto sm:gap-1">
                     {headerLinks.map((item) => {
                       const Icon = item.icon
                       return (
@@ -388,7 +407,7 @@ export default function CatalogPreviewSurface({
                       </div>
                     ) : null}
                   </div>
-                  <div className="col-span-2 row-start-2 min-w-0 text-center sm:col-span-1 sm:row-start-auto">
+                  <div className="col-span-2 row-start-1 min-w-0 text-center sm:col-span-1 sm:row-start-auto">
                     {showBrandLabel ? (
                       <div className="notranslate truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-neutral-400" translate="no">
                         {displayConfig.businessName}
@@ -412,7 +431,7 @@ export default function CatalogPreviewSurface({
                       account/language/theme together even with all four
                       present. Same `data-portal-header-icons` exemption
                       hook too (see the social row's comment above). */}
-                  <div data-portal-header-icons="" className="flex flex-nowrap items-center justify-end gap-0.5 sm:gap-1">
+                  <div data-portal-header-icons="" className="row-start-2 flex flex-nowrap items-center justify-end gap-0.5 sm:row-start-auto sm:gap-1">
                     {/* Wishlist + Account live in the top bar (public storefront
                         only — the admin editor preview doesn't wire these
                         handlers, so they don't render there). Each opens its own
@@ -487,7 +506,7 @@ export default function CatalogPreviewSurface({
                           }
                           return (
                             <div className="w-72 max-w-[85vw]">
-                              <div className="px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                              <div className="px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">
                                 {copy('publicTranslation', 'Language tools')}
                               </div>
                               {allPublicTranslateOptions.length > 8 ? (

@@ -63,7 +63,12 @@ runTest('portal grid helpers honor configured mobile and desktop columns', () =>
   assert.match(catalogEditorSource, /customer_portal_grid_columns_mobile \?\? '1'/, 'mobile grid input should allow in-progress edits')
   assert.match(catalogEditorSource, /customer_portal_grid_columns_desktop \?\? '4'/, 'desktop grid input should allow in-progress edits')
   assert.match(catalogEditorSource, /customer_portal_show_product_brand/, 'portal display editor should persist brand chip toggles')
-  assert.match(catalogEditorSource, /customer_portal_show_product_description/, 'portal display editor should persist description toggles')
+  // The description toggle is deliberately gone (owner, 2026-09-18: the card
+  // description is replaced by a click-to-view-details link, so a control for
+  // showing it governs nothing). The brand toggle above still stands, which is
+  // what keeps this assertion honest: the editor still persists its display
+  // toggles -- there is simply no description one left to persist.
+  assert.doesNotMatch(catalogEditorSource, /customer_portal_show_product_description/, 'the retired description toggle must not come back')
 })
 
 runTest('branch matching uses branch presence instead of positive stock only', () => {

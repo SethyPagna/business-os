@@ -58,7 +58,6 @@ type PortalPreviewConfig = {
   showPrices?: boolean
   showProductCategory?: boolean
   showProductBrand?: boolean
-  showProductDescription?: boolean
   showProductDiscount?: boolean
   showStockStatus?: boolean
   // Legacy-fallback threshold config for resolvePortalStockStatus (only
@@ -515,7 +514,11 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
 
   return (
     <SectionShell
-      title={copy('products', 'Products')}
+      // publicView: the top nav already has a "Products" chip/tab naming this
+      // section (portalTabs, CatalogPreviewSurface), so a second "Products"
+      // heading right above the subtitle just repeated it. The admin editor
+      // preview has no such chip on this panel, so it keeps the heading.
+      title={publicView ? undefined : copy('products', 'Products')}
       subtitle={copy('liveCatalog', 'Browse our products and check availability.')}
     >
       {/* Desktop (lg+): an always-visible left rail replaces the floating
@@ -560,8 +563,21 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           setPromoFacet={setPromoFacet}
         />
       ) : null}
-      <div className="mb-5 space-y-3">
-        <div className="sticky top-16 z-20 -mx-1 space-y-2 rounded-[22px] border border-slate-200 bg-white p-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:border-neutral-700 dark:bg-neutral-900 sm:top-20">
+      {/* This row used to be wrapped in its own `<div className="mb-5
+          space-y-3">` with no other sibling inside it -- a "sticky" element
+          can only stay pinned while scrolling through the height of its OWN
+          parent (the parent is what CSS bounds the stuck range against), and
+          a parent that is exactly as tall as the sticky child itself gives it
+          nowhere to stick: the moment the page scrolled a few pixels the
+          whole (barely taller) parent had already scrolled past, so the row
+          unstuck immediately and just scrolled away with the page (owner,
+          2026-09-18: "the search row is not sticky when scrolled down").
+          Now the sticky div is a direct child of the tall `min-w-0
+          ${railGutterClass}` column that also holds the promotions block,
+          the pager and the whole product grid below, so it has real room to
+          stay pinned for the length of that section. `mb-5` moves onto this
+          div so the spacing below is unchanged. */}
+      <div className="sticky top-16 z-20 -mx-1 mb-5 space-y-2 rounded-[22px] border border-slate-200 bg-white p-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:border-neutral-700 dark:bg-neutral-900 sm:top-20">
           <div className="flex items-center gap-2">
           {/* The wrapping <label> held only the magnifier icon, so it gave the
               field no accessible name at all: a reader announced a bare "edit
@@ -631,11 +647,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 </div>
               )}
             />
-            {portalActiveFilterCount > 0 ? (
-              <button type="button" className="rounded-xl px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={clearPortalFilters}>
-                {copy('clear', 'Clear')}
-              </button>
-            ) : null}
+            {/* A second standalone "Clear" button used to sit here, beside
+                the Filters trigger, duplicating the one already inside the
+                filter menu's own header (see `closeMenu`'s sibling above) --
+                owner, 2026-09-18: "there is a clear button next to the
+                filter menu button after having filters. no need for that.
+                the clear in the filter menu is enough." One Clear control,
+                inside the menu, is what's left. */}
           </div>
           </div>
 
@@ -661,7 +679,6 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           </div>
         ) : null}
         </div>
-      </div>
 
       {previewConfig.showPromotions !== false && visiblePromotionItems.length ? (
         <div className="mb-5 space-y-3">
@@ -815,7 +832,6 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             previewConfig.showProductCategory !== false ? product.category : '',
             previewConfig.showProductBrand !== false ? product.brand : '',
           ].map((chip) => String(chip || '').trim()).filter(Boolean)
-          const showDescription = previewConfig.showProductDescription !== false
           const showDiscountDetails = previewConfig.showProductDiscount !== false
           const promotion = pricePresentation?.promotion
           const categoryHeaderLabel = categoryHeaderAt.get(index)
@@ -946,10 +962,24 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     {product.name}
                   </div>
                 )}
-                {showDescription ? (
-                  <p {...getKhmerTextProps(product.description || copy('noDescription', 'No description available.'), `${compactCatalogCards ? 'line-clamp-2 min-h-[2.2rem] text-[11px] leading-[1.15rem]' : 'line-clamp-2 min-h-[2.6rem] text-xs leading-5'} text-slate-500 dark:text-neutral-400`)}>
-                    {product.description || copy('noDescription', 'No description available.')}
-                  </p>
+                {/* The product description used to print straight on the
+                    card front (owner, 2026-09-18: "for the description can
+                    be removed from default display instead replace with
+                    click to view details"). The card is already the wrong
+                    place for it -- a two-line clamp either truncated real
+                    copy or, with nothing set, printed the "No description
+                    available." filler on every single card. The full text
+                    (or that same filler) still shows in the detail sheet
+                    ProductDetailFlyout opens; this link is what gets a
+                    shopper there. */}
+                {openProductDetail ? (
+                  <button
+                    type="button"
+                    onClick={(event) => { event.stopPropagation(); openProductDetail(product) }}
+                    className={`block text-left font-medium text-blue-700 underline-offset-2 hover:underline dark:text-amber-300 ${compactCatalogCards ? 'text-[10px]' : 'text-[11px]'}`}
+                  >
+                    {copy('clickToViewDetails', 'Click to view details', 'ចុចដើម្បីមើលព័ត៌មានលម្អិត')}
+                  </button>
                 ) : null}
                 {showDiscountDetails && promotion?.active ? (
                   <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
@@ -1008,7 +1038,19 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       return (
                         <button
                           type="button"
-                          className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${added ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200'}`}
+                          // `justify-center` matches the wishlist heart button
+                          // right beside it (both `inline-flex shrink-0
+                          // items-center justify-center`) -- this one was
+                          // missing it, so on screens below `sm` (where the
+                          // "Add" label is `hidden` and the button is
+                          // icon-only) its Plus icon was laid out against the
+                          // main-axis start instead of centred in the pill
+                          // like its neighbour (owner, 2026-09-18: "the add
+                          // to cart in smaller screens are also not being
+                          // centered correctly in the button"). `shrink-0` on
+                          // the icon itself stops it from ever losing width to
+                          // the qty badge once an item is added.
+                          className={`inline-flex shrink-0 items-center justify-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${added ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200'}`}
                           onClick={(event) => {
                             event.stopPropagation()
                             onAddToBucket(product, previewConfig.showPrices ? pricePresentation?.primaryText : undefined)
@@ -1016,7 +1058,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                           aria-label={added ? replaceVars(copy('addToBucketQty', 'Add another ({qty} added)'), { qty }) : copy('addToBucket', 'Add to list')}
                           title={added ? replaceVars(copy('addToBucketQty', 'Add another ({qty} added)'), { qty }) : copy('addToBucket', 'Add to list')}
                         >
-                          <Plus className="h-3.5 w-3.5" />
+                          <Plus className="h-3.5 w-3.5 shrink-0" />
                           <span className="hidden sm:inline">{copy('addToBucket', 'Add')}</span>
                           {added ? (
                             <span className="ml-0.5 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-white/25 px-1 text-[10px] font-bold leading-4">

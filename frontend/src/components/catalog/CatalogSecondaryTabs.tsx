@@ -778,9 +778,18 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
       <div className="space-y-4">
         <div className="grid gap-3 xl:grid-cols-[1.15fr,0.85fr]">
           <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
+            {/* Every label in this AI-assistant form was `text-slate-700`
+                with NO dark: override on a card that already paints
+                `dark:bg-neutral-900/90` -- slate-700 (#334155) on that near-
+                black card is ~1.7:1, nowhere near AA's 4.5:1 (owner,
+                2026-09-18: "the dark mode are not contrasted correctly for
+                the text and buttons"). portalContrast.ts's own audited dark
+                token (`dark:text-neutral-200`, the same ink the disclosure
+                checkbox label two lines below this block already used) is
+                what every label here takes now. */}
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <label htmlFor="portal-assistant-brand" className="block text-sm font-medium text-slate-700">{copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}</label>
+                <label htmlFor="portal-assistant-brand" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}</label>
                 <AppSelect
                   id="portal-assistant-brand"
                   name="portal_assistant_brand"
@@ -794,7 +803,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                 />
               </div>
               <div>
-                <label htmlFor="portal-assistant-skin-type" className="block text-sm font-medium text-slate-700">{copy('assistantSkinType', 'Skin type', 'ប្រភេទស្បែក')}</label>
+                <label htmlFor="portal-assistant-skin-type" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('assistantSkinType', 'Skin type', 'ប្រភេទស្បែក')}</label>
                 <AppSelect
                   id="portal-assistant-skin-type"
                   name="portal_assistant_skin_type"
@@ -816,7 +825,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                 />
               </div>
               <div>
-                <label htmlFor="portal-assistant-shopping-for" className="block text-sm font-medium text-slate-700">{copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}</label>
+                <label htmlFor="portal-assistant-shopping-for" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}</label>
                 <AppSelect
                   id="portal-assistant-shopping-for"
                   name="portal_assistant_shopping_for"
@@ -830,20 +839,20 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                 />
               </div>
               <div>
-                <label htmlFor="portal-assistant-goal" className="block text-sm font-medium text-slate-700">{copy('assistantGoal', 'Goal / use case', 'គោលបំណងប្រើប្រាស់')}</label>
+                <label htmlFor="portal-assistant-goal" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('assistantGoal', 'Goal / use case', 'គោលបំណងប្រើប្រាស់')}</label>
                 <input id="portal-assistant-goal" name="portal_assistant_goal" autoComplete="off" className="input mt-1" maxLength={180} value={assistantProfile.goal} onChange={(event) => setAssistantProfile((current) => ({ ...current, goal: event.target.value }))} placeholder={copy('assistantGoalPlaceholder', 'Daily use, brightening, long wear...', 'ប្រើរាល់ថ្ងៃ បំប៉នឲ្យភ្លឺ ឬជាប់បានយូរ...')} />
               </div>
             </div>
 
             <div className="mt-3">
-              <label htmlFor="portal-assistant-concerns" className="block text-sm font-medium text-slate-700">{copy('assistantConcerns', 'Skin concerns', 'បញ្ហាស្បែក')}</label>
+              <label htmlFor="portal-assistant-concerns" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('assistantConcerns', 'Skin concerns', 'បញ្ហាស្បែក')}</label>
               <input id="portal-assistant-concerns" name="portal_assistant_concerns" autoComplete="off" className="input mt-1" maxLength={220} value={assistantProfile.concerns} onChange={(event) => setAssistantProfile((current) => ({ ...current, concerns: event.target.value }))} placeholder={copy('assistantConcernsPlaceholder', 'Acne, sensitivity, dark spots, dryness...', 'មុន ស្បែកងាយប្រតិកម្ម ស្នាមខ្មៅ ឬស្បែកស្ងួត...')} />
             </div>
 
             <div className="mt-3">
-              <label htmlFor="portal-assistant-question" className="block text-sm font-medium text-slate-700">{copy('assistantQuestion', 'What would you like help finding?', 'តើអ្នកចង់ឲ្យជួយរកអ្វី?')}</label>
+              <label htmlFor="portal-assistant-question" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('assistantQuestion', 'What would you like help finding?', 'តើអ្នកចង់ឲ្យជួយរកអ្វី?')}</label>
               <textarea id="portal-assistant-question" name="portal_assistant_question" autoComplete="off" className="input mt-1 resize-none" rows={5} maxLength={questionCharLimit} value={assistantQuestion} onChange={(event) => setAssistantQuestion(event.target.value)} placeholder={copy('assistantQuestionPlaceholder', 'Example: I have oily acne-prone skin and want a gentle daily sunscreen.', 'ឧទាហរណ៍៖ ខ្ញុំមានស្បែកខ្លាញ់ងាយកើតមុន ហើយចង់បានឡេការពារកម្ដៅថ្ងៃប្រើរាល់ថ្ងៃដែលទន់ភ្លន់។')} />
-              <div className="mt-1 text-right text-xs text-slate-500">{assistantQuestion.length}/{questionCharLimit}</div>
+              <div className="mt-1 text-right text-xs text-slate-500 dark:text-neutral-400">{assistantQuestion.length}/{questionCharLimit}</div>
             </div>
 
             <label className="mt-3 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs leading-6 text-slate-700 dark:border-neutral-700 dark:bg-neutral-800/70 dark:text-neutral-200">

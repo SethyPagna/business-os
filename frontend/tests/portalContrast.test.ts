@@ -328,6 +328,44 @@ runTest('the storefront paints a real focus indicator and honours reduced motion
   assert.match(strip, /if \(!reduceMotion && !pausedRef\.current/, 'and the drift is what the flag actually gates')
 })
 
+// P11-8 (owner, 2026-09-18): "the dark mode are not contrasted correctly for
+// the text and buttons." The three sweeps above never covered these three --
+// they were introduced (or missed) after the last sweep -- because the audit
+// walks PORTAL_CONTRAST_PAIRS, and nobody had added these tokens to it.
+// CatalogSecondaryTabs' public AI-assistant labels were `text-slate-700` with
+// NO dark: override at all on a `dark:bg-neutral-900/90` card: ~1.7:1,
+// nowhere near AA. The Suspense loading fallback and the language-tools menu
+// heading were real but milder misses (~4.6:1 light-only text with no dark
+// ink, and slate-500 at ~3.7:1 against the menu's dark:bg-neutral-900).
+runTest('the AI-assistant form labels carry a dark ink, not just slate-700', () => {
+  const tabs = read('CatalogSecondaryTabs.tsx')
+  const labelBlock = /portal-assistant-brand[\s\S]{0,8000}portal-assistant-question/.exec(tabs)
+  assert.ok(labelBlock, 'the assistant form fields must still exist')
+  const bareLabels = labelBlock[0].match(/text-slate-700"/g) || []
+  assert.deepEqual(bareLabels, [], 'no assistant label may carry text-slate-700 with no dark: override')
+  assert.match(labelBlock[0], /text-slate-700 dark:text-neutral-200/, 'the labels take the audited dark ink instead')
+  assert.ok(meetsContrast('#e5e5e5', '#171717', 'text'), 'dark:text-neutral-200 clears AA on the card it sits on')
+})
+
+runTest('the secondary-tabs Suspense fallback paints a dark ground too', () => {
+  const publicPage = fs.readFileSync(path.join(here, '..', 'src', 'components', 'catalog', 'PublicCatalogPage.tsx'), 'utf8')
+  assert.match(
+    publicPage,
+    /rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400/,
+    'loadingPortal fallback must not stay a hardcoded white card while the page around it is dark',
+  )
+})
+
+runTest('the language-tools menu heading is legible on the dark menu surface', () => {
+  const surface = read('CatalogPreviewSurface.tsx')
+  assert.match(
+    surface,
+    /px-4 pb-2 pt-3 text-\[11px\] font-semibold uppercase tracking-\[0\.18em\] text-slate-500 dark:text-neutral-400/,
+    'the "Language tools" heading needs a dark ink -- PortalMenu\'s own menu surface is dark:bg-neutral-900',
+  )
+  assert.ok(meetsContrast('#a3a3a3', '#171717', 'text'), 'dark:text-neutral-400 clears AA text contrast on that menu')
+})
+
 if (failed > 0) {
   console.error(`\n${failed} failing test(s)`)
   process.exit(1)

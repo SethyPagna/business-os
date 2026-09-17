@@ -463,10 +463,6 @@ function CatalogEditorSurfaceContent() {
                 <input id="portal-show-product-category" name="customer_portal_show_product_category" type="checkbox" checked={editorDraft.customer_portal_show_product_category !== false} onChange={(event) => setDraft('customer_portal_show_product_category', event.target.checked)} />
               </label>
               <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-                <span className="text-sm font-medium text-slate-700">{copy('showProductDescription', 'Show short descriptions')}</span>
-                <input id="portal-show-product-description" name="customer_portal_show_product_description" type="checkbox" checked={editorDraft.customer_portal_show_product_description !== false} onChange={(event) => setDraft('customer_portal_show_product_description', event.target.checked)} />
-              </label>
-              <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                 <span className="text-sm font-medium text-slate-700">{copy('showProductDiscount', 'Show discount details')}</span>
                 <input id="portal-show-product-discount" name="customer_portal_show_product_discount" type="checkbox" checked={editorDraft.customer_portal_show_product_discount !== false} onChange={(event) => setDraft('customer_portal_show_product_discount', event.target.checked)} />
               </label>

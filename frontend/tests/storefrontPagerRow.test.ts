@@ -27,8 +27,10 @@ assert.ok(backAt > 0 && pageAt > backAt && totalAt > pageAt && nextAt > totalAt,
 
 assert.equal((centered.match(/<button\b/g) || []).length, 2, 'Back and Next are the only buttons this branch writes itself')
 assert.equal((centered.match(/<input\b/g) || []).length, 1, 'the page remains directly editable')
-assert.match(centered, /h-10/, 'the phone-first controls are 40px high')
-assert.match(centered, /max\(2\.5rem, calc\(\$\{pageDigits\}ch \+ 0\.5rem\)\)/, 'the editable field has a 40px width floor and grows with its digits')
+// 2026-09-18 (owner): "too fat and large. make it more consistent" -- the
+// pill was trimmed from a 40px floor (h-10) to 36px (h-9).
+assert.match(centered, /h-9/, 'the phone-first controls are 36px high')
+assert.match(centered, /max\(2\.25rem, calc\(\$\{pageDigits\}ch \+ 0\.5rem\)\)/, 'the editable field has a 36px width floor and grows with its digits')
 assert.match(centered, /focus-visible:ring-2/, 'all centered focusables share a visible keyboard ring')
 assert.match(centered, /focus-visible:ring-inset/, 'the pill cannot clip the focus ring')
 assert.doesNotMatch(centered, /hidden sm:inline/, 'Back and Next stay visible at 375px')
