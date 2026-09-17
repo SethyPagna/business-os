@@ -39,7 +39,7 @@ import {
   type SaleSettlementSnapshot,
 } from '../lib/saleSettlementAction'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
-import { CUSTOMER_REFUND_JOIN, getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr } from '../lib/salesAnalytics'
+import { CUSTOMER_REFUND_JOIN, getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr, whereActiveSales } from '../lib/salesAnalytics'
 import { readSalesReportSnapshot, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
 import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
 import { allocateAcrossLots, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
@@ -5825,9 +5825,22 @@ app.get('/delivery-contact-report', async (c) => {
   return c.json({ startDate, endDate, contacts:contacts.map(row=>gateSalesCourierMoney(row as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))) })
 })
 
-// GET /api/sales/customer-report?customerId&startDate&endDate -- X4: the
-// customer leg of the per-contact drills. Same sales-OR-contacts gate as
-// the courier report (the Customers tab lives behind 'contacts').
+// GET /api/sales/customer-report?customerId&startDate&endDate&page&page_size
+// -- X4: the customer leg of the per-contact drills. Same sales-OR-contacts
+// gate as the courier report (the Customers tab lives behind 'contacts').
+//
+// P10-21 (owner: "customers purchases are doing default date start and date
+// end, remove that to show all"): startDate/endDate are now OPTIONAL. Absent
+// bounds mean all-time, the same shape SupplierPurchasesModal's
+// GET /suppliers/:id/purchases already uses (contacts.ts, read-only model,
+// not edited here) -- whereActiveSales already treats missing start/end as
+// "no bound" (salesAnalytics.ts), so the totals query needed no change at
+// all, only this validation gate. A bound that IS supplied is still
+// validated as YYYY-MM-DD, so a malformed date is still a 400.
+//
+// P10-22b: also returns a server-paged slice of the customer's own sale rows
+// (receipt/date/branch/status/total) alongside the totals, modeled on
+// /suppliers/:id/purchases -- totals stay independent of the visible page.
 app.get('/customer-report', async (c) => {
   if (getActionTier(c.get('user'), 'contacts', 'financial_history') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
@@ -5837,12 +5850,18 @@ app.get('/customer-report', async (c) => {
   if (!Number.isInteger(customerId) || customerId <= 0) {
     return c.json({ error: 'A valid customerId is required' }, 400)
   }
-  const startDate = String(query.startDate || '').slice(0, 10)
-  const endDate = String(query.endDate || '').slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-    return c.json({ error: 'startDate and endDate (YYYY-MM-DD) are required' }, 400)
+  const dateFormat = /^\d{4}-\d{2}-\d{2}$/
+  const rawStart = String(query.startDate || '').slice(0, 10)
+  const rawEnd = String(query.endDate || '').slice(0, 10)
+  if (rawStart && !dateFormat.test(rawStart)) {
+    return c.json({ error: 'startDate must be YYYY-MM-DD' }, 400)
   }
-  const totals = await getCustomerSalesTotals(c.env, {
+  if (rawEnd && !dateFormat.test(rawEnd)) {
+    return c.json({ error: 'endDate must be YYYY-MM-DD' }, 400)
+  }
+  const startDate = rawStart || null
+  const endDate = rawEnd || null
+  const filters = {
     startDate,
     endDate,
     customerId,
@@ -5850,8 +5869,35 @@ app.get('/customer-report', async (c) => {
     startTime: query.startTime || null,
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
+  }
+  const db = getDb(c.env)
+  const page = Math.max(1, Number.parseInt(String(query.page || '1'), 10) || 1)
+  const pageSize = Math.max(1, Math.min(Number.parseInt(String(query.page_size ?? query.pageSize ?? '20'), 10) || 20, 100))
+  const offset = (page - 1) * pageSize
+  const { sql: whereSql, params: whereParams } = whereActiveSales('s', filters)
+  const rowsWhere = `${whereSql} AND s.customer_id = @customerId`
+  const rowsParams = { ...whereParams, customerId }
+  const [totals, countRow, saleRows] = await Promise.all([
+    getCustomerSalesTotals(c.env, filters),
+    db.prepare(`SELECT COUNT(*) AS total FROM sales s WHERE ${rowsWhere}`).get<{ total: number }>(rowsParams),
+    db.prepare(`
+      SELECT s.id, s.receipt_number, s.created_at, s.branch_name, ${saleStatusExpr('s.')} AS status,
+             COALESCE(s.total_usd, 0) AS total_usd
+      FROM sales s
+      WHERE ${rowsWhere}
+      ORDER BY s.created_at DESC, s.id DESC
+      LIMIT @limit OFFSET @offset
+    `).all<{ id: number; receipt_number: string | null; created_at: string; branch_name: string | null; status: string; total_usd: number }>(
+      { ...rowsParams, limit: pageSize, offset },
+    ),
+  ])
+  const totalRows = Number(countRow?.total) || 0
+  return c.json({
+    startDate, endDate, customerId,
+    totals: gateSalesReportMoney(totals as unknown as Record<string, unknown>, isAdminControlUser(c.get('user'))),
+    sales: saleRows || [],
+    page, page_size: pageSize, total_sales: totalRows, total_pages: Math.max(1, Math.ceil(totalRows / pageSize)),
   })
-  return c.json({ startDate, endDate, customerId, totals:gateSalesReportMoney(totals as unknown as Record<string,unknown>,isAdminControlUser(c.get('user'))) })
 })
 
 // GET /api/sales/export -- complete, snapshot-stable accounting export.

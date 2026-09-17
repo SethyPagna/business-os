@@ -510,7 +510,10 @@ export function getDeliveryContactReport(params: QueryParams = {}): Promise<unkn
 }
 
 export function getCustomerSalesReport(params: QueryParams = {}): Promise<unknown> {
-  const query = buildQueryString(params, { skipEmpty: false })
+  // P10-21: skipEmpty so an unset startDate/endDate (all-time) never reaches
+  // the Worker as a literal empty string -- the same shape the supplier
+  // purchases query drops empty from/to values with.
+  const query = buildQueryString(params, { skipEmpty: true })
   return route(
     `sales:customer-report:${query}`,
     () => apiFetch('GET', appendQuery('/api/sales/customer-report', query)),
