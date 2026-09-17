@@ -1931,12 +1931,21 @@ export default function PublicCatalogPage() {
   )
 
   // Minimized: a slim edge tab, same vertical slot as the full button, that
-  // restores it on tap. Full: the round button plus a small X pinned to its
-  // top-right corner that minimizes it. The X stays fully opaque on touch
-  // (there is no hover to reveal it there) and only fades in on genuine
-  // hover-capable pointers, via the `hover: hover` media feature rather than
-  // Tailwind's plain `hover:`, which also fires on a tap in most mobile
-  // browsers and would otherwise leave it stuck visible after one touch.
+  // restores it on tap. Full: the round button and its own minimize control.
+  //
+  // 2026-09-18 (owner): "the x button just keep the icon instead of filling
+  // it and bocking the contact us button". The minimize X used to be an
+  // `absolute` badge, offset negative-right/negative-top, laid ON TOP of the round button's own
+  // corner -- a real overlap, since a `rounded-full` button's hit box is still
+  // its full square, so that corner belonged to BOTH controls. It was also
+  // invisible until hover on any pointer that supports hover at all (hidden
+  // by default, only faded in once the pointer was already somewhere over
+  // the group -- which includes the main button,
+  // so the fade-in and the accidental hit could happen in the same gesture).
+  // Now the two are siblings in a plain flex row, side by side with a gap: no
+  // shared pixels, no hover-gated visibility, and the minimize control is
+  // always the same filled pill the rest of the storefront's icon buttons
+  // are (bg-slate-700, not just an outline that only fills on hover).
   const contactFab = contactChannels.length > 0 ? (
     contactMinimized ? (
       <button
@@ -1949,29 +1958,28 @@ export default function PublicCatalogPage() {
         <Headset className="h-4 w-4" />
       </button>
     ) : (
-      <div className="group fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50">
+      <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex items-center gap-1.5">
         <button
           type="button"
-          className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-slate-700 shadow-xl ring-1 ring-slate-200 transition hover:bg-slate-50 dark:bg-neutral-900 dark:text-neutral-100 dark:ring-neutral-700 dark:hover:bg-neutral-800"
-          onClick={() => setContactOpen((current) => !current)}
-          aria-label={copy('contactUs', 'Contact us')}
-          title={copy('contactUs', 'Contact us')}
-          aria-expanded={contactOpen}
-        >
-          <Headset className="h-5 w-5" />
-        </button>
-        <button
-          type="button"
-          className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-white opacity-100 shadow transition [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 dark:bg-neutral-200 dark:text-neutral-900"
-          onClick={(event) => {
-            event.stopPropagation()
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition hover:bg-slate-600 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-white"
+          onClick={() => {
             setContactOpen(false)
             setContactMinimized(true)
           }}
           aria-label={copy('contactUsMinimize', 'Minimize the contact us button')}
           title={copy('contactUsMinimize', 'Minimize the contact us button')}
         >
-          <X className="h-3 w-3" />
+          <X className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white text-slate-700 shadow-xl ring-1 ring-slate-200 transition hover:bg-slate-50 dark:bg-neutral-900 dark:text-neutral-100 dark:ring-neutral-700 dark:hover:bg-neutral-800"
+          onClick={() => setContactOpen((current) => !current)}
+          aria-label={copy('contactUs', 'Contact us')}
+          title={copy('contactUs', 'Contact us')}
+          aria-expanded={contactOpen}
+        >
+          <Headset className="h-5 w-5" />
         </button>
       </div>
     )
