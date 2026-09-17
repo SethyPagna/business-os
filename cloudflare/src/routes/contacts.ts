@@ -2395,16 +2395,39 @@ app.get('/customers/reports/ar-invoices', async (c) => {
     customer_name: string; invoice_no: string | null; invoice_date: string
     taxable_amount_usd: number; vat_amount_usd: number; total_amount_usd: number
     amount_paid_usd: number; outstanding_balance_usd: number; status: string
+    matched_sale_id: number | null; matched_receipt_number: string | null
   }
   type ArTotals = {
     invoices: number; total_usd: number; paid_usd: number
     outstanding_usd: number; outstanding_count: number
   }
+  // P11-11 (Sep 18 2026): a bare `invoice_no` here (e.g. '006416') never
+  // matches `sales.legacy_receipt_number`, which carries the retired
+  // 'NNNNNN@YYYY-MM-DD' form (migration 0107) -- so an AR row and the sale it
+  // belongs to looked like two different universes. Strip the '@date'
+  // suffix and require EITHER the same local calendar day (invoice_date is
+  // stored UTC like created_at, so both sides go through the same +7h
+  // conversion) OR the same total to the cent as a fallback, since the bare
+  // number alone repeats across years. `s.legacy_receipt_number = cr.
+  // invoice_no OR ... LIKE cr.invoice_no || '@%'` stays sargable against
+  // idx_sales_legacy_receipt_number for both the exact and the retired-form
+  // case. A handful of rows (measured: 22) never resolve on day+total and
+  // stay honestly unlinked rather than being force-matched.
+  const arSaleMatchJoin = `
+    (s.legacy_receipt_number = cr.invoice_no OR s.legacy_receipt_number LIKE cr.invoice_no || '@%')
+    AND (${localDateExpr('s.created_at')} = ${localDateExpr('cr.invoice_date')}
+         OR ROUND(s.total_usd, 2) = ROUND(cr.total_amount_usd, 2))
+  `
+  const arSaleMatchOrder = `(${localDateExpr('s.created_at')} = ${localDateExpr('cr.invoice_date')}) DESC, s.id ASC`
   const [invoices, totals, customers] = await Promise.all([
     db.prepare(`
       SELECT cr.id, cr.legacy_id, cr.customer_id, cr.customer_code, cr.customer_name,
              cr.invoice_no, cr.invoice_date, cr.taxable_amount_usd, cr.vat_amount_usd,
-             cr.total_amount_usd, cr.amount_paid_usd, cr.outstanding_balance_usd, cr.status
+             cr.total_amount_usd, cr.amount_paid_usd, cr.outstanding_balance_usd, cr.status,
+             (SELECT s.id FROM sales s WHERE cr.invoice_no IS NOT NULL AND ${arSaleMatchJoin}
+               ORDER BY ${arSaleMatchOrder} LIMIT 1) AS matched_sale_id,
+             (SELECT s.receipt_number FROM sales s WHERE cr.invoice_no IS NOT NULL AND ${arSaleMatchJoin}
+               ORDER BY ${arSaleMatchOrder} LIMIT 1) AS matched_receipt_number
       FROM customer_receivables cr
       ${where}
       ORDER BY cr.invoice_date DESC, cr.id DESC
