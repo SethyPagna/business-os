@@ -328,7 +328,10 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
     const beforeCacheCheck = body.slice(0, body.indexOf("if (cached)"))
     assert.doesNotMatch(beforeCacheCheck, /await fetch/, 'the network must not be awaited before a cache hit can answer')
     assert.match(body, /if \(cached\) \{[\s\S]*event\.waitUntil\(revalidate\)[\s\S]*return cached[;\s]*\}/, 'a cache hit returns immediately; the network refresh happens after, off the response path')
-    assert.match(body, /return fetch\(request, \{ ?cache: 'no-store' ?\}\)/, 'only a genuine cache miss (this worker\'s first navigation) still waits on the network')
+    // The miss path moved into fetchAndCacheShell when the Sep 17 redirect fix
+    // gave the poisoned-entry branch somewhere to jump to; what matters here is
+    // unchanged -- the network is awaited only when the cache could not answer.
+    assert.match(body, /await fetch\(request, \{ ?cache: 'no-store' ?\}\)/, 'only a genuine cache miss (this worker\'s first navigation) still waits on the network')
   })
 }
 
