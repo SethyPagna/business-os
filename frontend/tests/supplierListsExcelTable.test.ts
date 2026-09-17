@@ -4,9 +4,17 @@ import { readFileSync } from 'node:fs'
 // P10-15 -- owner: "the supplier display is not consistent like excel style
 // in large screens".
 //
-// The Suppliers tab's directory (SuppliersTab -> shared.tsx's ContactTable)
-// and its AP invoice ledger (ApInvoicesSection) both render the house
-// Excel-style shape on large screens: a bordered <table> with a header row,
+// NOTE (Sep 17 2026): this file only ever read the INVOICE ledgers. Its
+// opening line used to claim the Suppliers tab's own directory rendered the
+// house shape too -- an unchecked premise, and a false one: SuppliersTab was
+// passing a cardsAtAllWidths opt-out that hid the wide table at every width,
+// so the owner kept seeing cards on a large screen while this file stayed
+// green. The directory is fixed and pinned separately, in
+// tests/contactDirectoryWideTable.test.ts. This file is about the ledgers,
+// and says so.
+//
+// The AP invoice ledger (ApInvoicesSection) renders the house Excel-style
+// shape on large screens: a bordered <table> with a header row,
 // hidden on phones (`hidden ... md:block`), with a card list taking over
 // below `md`. The Stock-In Invoices ledger -- the literal sibling of
 // ApInvoicesSection, switched by one chip in the same section -- used to be
