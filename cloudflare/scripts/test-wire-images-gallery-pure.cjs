@@ -154,6 +154,9 @@ const productsRoute = loadReal('routes/products.ts', {
   // routes/products.ts buckets the sales drill-down in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
   '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
+  // Real, not a stub: it builds SQL that routes/products.ts interpolates,
+  // so a stub would have the test asserting against its own placeholder.
+  '../lib/lotRemaining': loadReal('lib/lotRemaining.ts'),
   '../lib/productDetailRule': productDetailRule,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/permissions': {
