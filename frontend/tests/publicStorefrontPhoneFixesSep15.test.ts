@@ -144,8 +144,10 @@ check('2 the header icon rows never wrap on a phone', () => {
   // wishlist/account from language/theme) onto a second row at 320-375px.
   assert.ok(!/flex min-w-0 flex-wrap items-center/.test(catalogPreviewSurface), 'the social-links row must not wrap')
   assert.ok(!/flex flex-wrap items-center justify-end/.test(catalogPreviewSurface), 'the account-side row must not wrap')
-  assert.match(catalogPreviewSurface, /flex min-w-0 flex-nowrap items-center gap-0\.5 sm:gap-1/, 'social links: nowrap + shrunk gap below sm')
-  assert.match(catalogPreviewSurface, /flex flex-nowrap items-center justify-end gap-0\.5 sm:gap-1/, 'account-side icons: nowrap + shrunk gap below sm')
+  // P11-9 (2026-09-18) added `row-start-2 ... sm:row-start-auto` to both rows
+  // (the business name now leads on the base grid) -- nowrap/gap survive it.
+  assert.match(catalogPreviewSurface, /row-start-2 flex min-w-0 flex-nowrap items-center gap-0\.5 sm:row-start-auto sm:gap-1/, 'social links: nowrap + shrunk gap below sm')
+  assert.match(catalogPreviewSurface, /row-start-2 flex flex-nowrap items-center justify-end gap-0\.5 sm:row-start-auto sm:gap-1/, 'account-side icons: nowrap + shrunk gap below sm')
   // Every icon button in both rows shrinks one size below `sm` rather than
   // wrapping -- catches a partial fix that stops wrapping but overflows the
   // header instead.
