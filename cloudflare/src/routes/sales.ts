@@ -4139,8 +4139,21 @@ app.post('/:id/amendments', async (c) => {
     if (!feeParsed.ok) {
       return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[feeParsed.code] }, 400)
     }
-    const feePlan = planDeliveryFeeChange({ moneyPrecisionVersion:1, saleId, sale, newFeeUsd: feeParsed.usd, exchangeRate })
-    if (feePlan.feeDeltaUsd === 0) {
+    // P10-23: who pays is part of the same fee terms, so it is corrected
+    // here rather than through a second amendment kind. Absent means "leave
+    // it as recorded"; anything other than the two real values is a typo in
+    // a caller, not a third policy to invent.
+    const payerRaw = body.delivery_fee_paid_by
+    let newPaidBy: 'customer' | 'store' | null = null
+    if (payerRaw !== null && payerRaw !== undefined) {
+      const payer = String(payerRaw).trim().toLowerCase()
+      if (payer !== 'customer' && payer !== 'store') {
+        return c.json({ error: 'Delivery fee must be paid by the customer or by the store.' }, 400)
+      }
+      newPaidBy = payer
+    }
+    const feePlan = planDeliveryFeeChange({ moneyPrecisionVersion:1, saleId, sale, newFeeUsd: feeParsed.usd, exchangeRate, newPaidBy })
+    if (feePlan.feeDeltaUsd === 0 && !feePlan.payerChanged) {
       return c.json({ error: 'That is already the delivery fee on this sale.' }, 400)
     }
     // A fee correction changes no line, so the taxable base is unchanged and
@@ -4156,6 +4169,7 @@ app.post('/:id/amendments', async (c) => {
       sale,
       subtotalUsd: subtotalBeforeUsd,
       deliveryFeeUsdOverride: feePlan.feeAfterUsd,
+      deliveryFeePaidByOverride: feePlan.payerAfter,
       taxUsdOverride: feeTaxPlan.taxUsdOverride,
       changeExchangeRate: moneySettings.changeExchangeRate,
       exchangeRateOverride: exchangeRate,
@@ -4168,11 +4182,21 @@ app.post('/:id/amendments', async (c) => {
       feeTaxPlan.outcome.taxUsd,
       feePlan.feeAfterUsd,
     )
-    const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,feeTaxPlan.outcome.taxUsd,{delivery_fee_usd:feePlan.feeAfterUsd})
+    const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,feeTaxPlan.outcome.taxUsd,{delivery_fee_usd:feePlan.feeAfterUsd,delivery_fee_paid_by:feePlan.payerAfter as 'customer'|'store'})
     if(headerConflict)return c.json(headerConflict,409)
-    const response = buildAmendmentResponsePayload({
-      saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped, tax: feeTaxPlan.outcome,
-    }, mutationStamp)
+    // The delivery header travels back with the money, exactly as the
+    // delivery_added branch already does it. Without this the browser keeps
+    // the row's old payer in its local copy, so a delivery just switched to
+    // customer-paid would still read as free -- struck-through driver and all
+    // -- until something else forced a refetch.
+    const response = {
+      ...buildAmendmentResponsePayload({
+        saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped, tax: feeTaxPlan.outcome,
+      }, mutationStamp),
+      deliveryFeeUsd: feePlan.feeAfterUsd,
+      deliveryFeeKhr: receiptKhrFromUsd(feePlan.feeAfterUsd, exchangeRate),
+      deliveryFeePaidBy: feePlan.payerAfter,
+    }
     try {
       await db.batch([
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
@@ -4226,6 +4250,7 @@ app.post('/:id/amendments', async (c) => {
     }
     await auditAmendment(c, user, saleId, sale, {
       kind, fee_before: feePlan.feeBeforeUsd, fee_after: feePlan.feeAfterUsd,
+      fee_paid_by_before: feePlan.payerBefore, fee_paid_by_after: feePlan.payerAfter,
       total_before: totalBeforeUsd, total_after: money.totalUsd,
       exchange_rate_before: sale.exchange_rate ?? null, exchange_rate_after: exchangeRate,
       outside_window: guard.outsideWindow, notes: note,

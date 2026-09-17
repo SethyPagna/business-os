@@ -783,27 +783,56 @@ export function guardDeliveryFeeAmendment(sale: AmendableSaleRow): DeliveryFeeGu
   return { ok: true }
 }
 
+// Owner (Sep 17, P10-23): "sales after made, the sale rows, free can't be
+// changed to paid by customer". Who pays the delivery was settled at the
+// till and never again: the fee AMOUNT could be corrected afterwards, the
+// PAYER could not, so a delivery rung up as free stayed free forever even
+// when the customer did pay. It is the same fact as the amount -- the terms
+// of this sale's delivery fee -- so it is corrected by the same amendment
+// kind rather than a second one that every ledger, record and undo surface
+// would then have to learn.
 export function planDeliveryFeeChange(input: {
   moneyPrecisionVersion?: 0 | 1
   saleId: number | string
   sale: AmendableSaleRow
   newFeeUsd: number
   exchangeRate: number
-}): { statements: StockStatement[]; feeBeforeUsd: number; feeAfterUsd: number; feeDeltaUsd: number } {
+  /** Omitted = leave the payer exactly as recorded. */
+  newPaidBy?: 'customer' | 'store' | null
+}): {
+  statements: StockStatement[]
+  feeBeforeUsd: number
+  feeAfterUsd: number
+  feeDeltaUsd: number
+  payerBefore: string
+  payerAfter: string
+  payerChanged: boolean
+} {
   const exchangeRate = Number(input.exchangeRate) || 4100
   const feeBeforeUsd = input.moneyPrecisionVersion === 1 ? Number(input.sale.delivery_fee_usd) : round2(Number(input.sale.delivery_fee_usd) || 0)
   const feeAfterUsd = input.moneyPrecisionVersion === 1 ? newSaleMoney4(input.newFeeUsd) : round2(Math.max(0, Number(input.newFeeUsd) || 0))
+  const payerBefore = String(input.sale.delivery_fee_paid_by || 'customer')
+  // Only an explicit value moves it. `undefined` from a caller that does not
+  // know about payers must never silently reset the sale to 'customer'.
+  const payerAfter = input.newPaidBy === undefined || input.newPaidBy === null
+    ? payerBefore
+    : (input.newPaidBy === 'store' ? 'store' : 'customer')
+  const payerChanged = payerAfter !== payerBefore
   return {
     statements: [{
-      sql: `UPDATE sales SET delivery_fee_usd = @fee_usd, delivery_fee_khr = @fee_khr, updated_at = CURRENT_TIMESTAMP WHERE id = @sale_id`,
+      sql: `UPDATE sales SET delivery_fee_usd = @fee_usd, delivery_fee_khr = @fee_khr, delivery_fee_paid_by = @paid_by, updated_at = CURRENT_TIMESTAMP WHERE id = @sale_id`,
       params: {
         sale_id: input.saleId,
         fee_usd: feeAfterUsd,
         fee_khr: input.moneyPrecisionVersion === 1 ? multiplyMoney4(feeAfterUsd,exchangeRate) : calculatedKhr(feeAfterUsd, exchangeRate),
+        paid_by: payerAfter,
       },
     }],
     feeBeforeUsd,
     feeAfterUsd,
+    payerBefore,
+    payerAfter,
+    payerChanged,
     feeDeltaUsd: input.moneyPrecisionVersion === 1 ? subtractMoney4(feeAfterUsd,feeBeforeUsd) : round2(feeAfterUsd - feeBeforeUsd),
   }
 }

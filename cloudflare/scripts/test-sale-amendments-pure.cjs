@@ -694,6 +694,62 @@ console.log('PASS 10 -- the edit window, its default, its setting, the admin byp
 }
 console.log('PASS 11/12 -- the delivery fee nets to one number on the receipt and shows both in the ledger; discounts frozen, tax untouched by a fee-only change')
 
+// ---- 11e: who pays the delivery fee is correctable after the sale -------
+// Owner, Sep 17 (P10-23): "sales after made, the sale rows, free can't be
+// changed to paid by customer". A delivery rung up as free -- the shop
+// absorbing the fee -- had no path back to customer-paid, so the money was
+// simply lost. The correction rides on the same amendment as the amount.
+//
+// Every case below is paired with its opposite, because the two ways to get
+// this wrong are both silent: a plan that ALWAYS writes the payer would
+// reset every ordinary fee correction to 'customer', and one that never
+// writes it is the defect itself.
+{
+  const { sqlite, apply } = setup()
+  seedShelf(sqlite)
+  // A free delivery: the shop ate a $1.50 fee, so the customer's total is
+  // 6 - 1 discount + 0.6 tax = $5.60, with no delivery in it.
+  seedSale(sqlite, { tax_usd: 0.6, discount_usd: 1, total_usd: 5.6, amount_paid_usd: 5.6 })
+  sqlite.prepare(`UPDATE sales SET tax_usd = 0.6, discount_usd = 1, delivery_fee_paid_by = 'store' WHERE id = 77`).run()
+  const free = sqlite.prepare('SELECT * FROM sales WHERE id = 77').get()
+
+  // The defect: correcting the payer alone, with the amount left alone.
+  const payerOnly = planDeliveryFeeChange({ saleId: 77, sale: free, newFeeUsd: 1.5, exchangeRate: 4100, newPaidBy: 'customer' })
+  assert.strictEqual(payerOnly.payerBefore, 'store')
+  assert.strictEqual(payerOnly.payerAfter, 'customer')
+  assert.strictEqual(payerOnly.payerChanged, true,
+    'the zero-delta refusal in routes/sales.ts reads this flag, and must let the correction through')
+  assert.strictEqual(payerOnly.feeDeltaUsd, 0, 'and it really is amount-neutral: only who pays moved')
+
+  // The opposite, and the one that would break every existing correction: a
+  // caller that says nothing about the payer must leave it exactly as it was.
+  const silent = planDeliveryFeeChange({ saleId: 77, sale: free, newFeeUsd: 2, exchangeRate: 4100 })
+  assert.strictEqual(silent.payerAfter, 'store', 'an absent payer is not a payer of customer')
+  assert.strictEqual(silent.payerChanged, false)
+  const nulled = planDeliveryFeeChange({ saleId: 77, sale: free, newFeeUsd: 2, exchangeRate: 4100, newPaidBy: null })
+  assert.strictEqual(nulled.payerAfter, 'store', 'and neither is an explicit null')
+
+  // What the sale row actually ends up holding.
+  apply(payerOnly.statements)
+  assert.strictEqual(
+    sqlite.prepare('SELECT delivery_fee_paid_by FROM sales WHERE id = 77').get().delivery_fee_paid_by,
+    'customer',
+    'the column the receipt and the strike-through both read must have moved',
+  )
+  assert.strictEqual(num(sqlite, 'SELECT delivery_fee_usd FROM sales WHERE id = 77'), 1.5,
+    'and the amount it was rung up at is untouched -- the shop stopped absorbing it, it did not change price')
+
+  // And the money: this is the whole point. The fee the shop was eating now
+  // sits on the customer's total, and nothing else moved.
+  const beforePayer = recomputeSaleMoneyAfterAmendment({ sale: free, subtotalUsd: 6, changeExchangeRate: null })
+  const afterPayer = recomputeSaleMoneyAfterAmendment({
+    sale: free, subtotalUsd: 6, deliveryFeeUsdOverride: 1.5, deliveryFeePaidByOverride: 'customer', changeExchangeRate: null,
+  })
+  assert.strictEqual(beforePayer.totalUsd, 5.6, 'free delivery: the fee was never in the total')
+  assert.strictEqual(afterPayer.totalUsd, 7.1, 'customer-paid: the total rose by exactly the fee')
+}
+console.log('PASS 11e -- a free delivery can be switched to customer-paid after the sale, and a silent caller never moves the payer')
+
 // ---- 11b: actual courier cost is editable, report-only, and separately logged
 {
   const { sqlite, apply } = setup()

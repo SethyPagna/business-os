@@ -232,6 +232,9 @@ interface SaleAmendmentRequest {
   manual_discount_type?: 'percent' | 'fixed' | null
   manual_discount_value?: number
   delivery_fee_usd?: number
+  /** P10-23: who pays the delivery fee, corrected by the same amendment
+      as the amount. Omitted leaves the recorded payer alone. */
+  delivery_fee_paid_by?: 'customer' | 'store'
   delivery_actual_cost_usd?: number | string | null
   delivery_contact_id?: number
   replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null } & Partial<ReturnType<typeof stagedLinePricingIntent>>
@@ -620,6 +623,10 @@ export default function SaleDetailModal({
   // wrong; the ledger derives the "+$0.50" the owner asked to see.
   const [feeEditing, setFeeEditing] = useState(false)
   const [feeText, setFeeText] = useState('')
+  // Owner (Sep 17, P10-23): "sales after made, the sale rows, free can't be
+  // changed to paid by customer". The payer is edited in the same row as the
+  // amount because it is the same fact -- the terms of this delivery's fee.
+  const [feePayer, setFeePayer] = useState<'customer' | 'store'>('customer')
   const [actualCostEditing, setActualCostEditing] = useState(false)
   const [actualCostText, setActualCostText] = useState('')
   const [deliveryAdding, setDeliveryAdding] = useState(false)
@@ -1140,6 +1147,12 @@ export default function SaleDetailModal({
     })
   }
 
+  // The two payer names, in one place: the confirm summary and the toggle
+  // must never disagree about what "Store" is called.
+  const payerLabel = (payer: 'customer' | 'store'): string => (payer === 'store'
+    ? translateOr('fee_by_store', 'Store', 'ហាង')
+    : translateOr('fee_by_customer', 'Customer', 'អតិថិជន'))
+
   // Both delivery editors validate through utils/deliveryAmounts.ts, which is
   // the browser mirror of the Worker's lib/deliveryAmounts.ts (parity pinned by
   // tests/deliveryAmountParity.test.ts). Refusing here therefore refuses
@@ -1155,19 +1168,27 @@ export default function SaleDetailModal({
       return
     }
     const next = parsed.usd
-    if (!deliveryAmountChanged(currentFeeUsd, next, 1)) {
+    const payerChanged = feePayer !== (deliveryPaidByStore ? 'store' : 'customer')
+    // Switching a free delivery to customer-paid leaves the AMOUNT alone, so
+    // the unchanged-amount refusal would have blocked exactly the correction
+    // the owner asked for. It still refuses a form where nothing moved.
+    if (!deliveryAmountChanged(currentFeeUsd, next, 1) && !payerChanged) {
       setAmendMutationError(translateOr('delivery_amount_unchanged', 'That is already the amount on this sale.', 'នេះជាចំនួនដែលមានស្រាប់លើការលក់នេះ។'))
       return
     }
     let expectedHeader: SaleMutationHeaderQuote
-    try { expectedHeader = headerQuote(Number(sale?.subtotal_usd), { delivery_fee_usd: next }) }
+    try { expectedHeader = headerQuote(Number(sale?.subtotal_usd), { delivery_fee_usd: next, delivery_fee_paid_by: feePayer }) }
     catch { setAmendMutationError(t('money_precision_unavailable')); return }
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
     setAmendConfirm({
-      request: { kind: 'delivery_fee_changed', delivery_fee_usd: next, expected_header_quote: expectedHeader },
+      request: { kind: 'delivery_fee_changed', delivery_fee_usd: next, delivery_fee_paid_by: feePayer, expected_header_quote: expectedHeader },
       title: translateOr('amend_fee_title', 'Correct the delivery fee?', 'កែថ្លៃដឹកជញ្ជូន?'),
-      summary: `${fmtUSD(currentFeeUsd)} → ${fmtUSD(next)}`,
+      // The payer is named in the summary only when it actually moves, so a
+      // plain amount correction still confirms in the owner's own terms.
+      summary: `${fmtUSD(currentFeeUsd)} → ${fmtUSD(next)}${payerChanged
+        ? ` · ${translateOr('fee_paid_by', 'Fee Paid By', 'ថ្លៃបង់ដោយ')}: ${payerLabel(deliveryPaidByStore ? 'store' : 'customer')} → ${payerLabel(feePayer)}`
+        : ''}`,
     })
   }
 
@@ -2188,9 +2209,9 @@ export default function SaleDetailModal({
                         <>
                           {translateOr('delivery_free', 'Free', 'ឥតគិតថ្លៃ')}{' '}
                           <span className="font-normal text-gray-400 line-through">{fmtUSD(deliveryFeeUsd)}</span>
-                          {canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { setFeeText(String(deliveryFeeUsd)); setFeeEditing(true); setAmendMutationError('') }} className="ml-1 rounded px-1 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}
+                          {canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { setFeeText(String(deliveryFeeUsd)); setFeePayer(deliveryPaidByStore ? 'store' : 'customer'); setFeeEditing(true); setAmendMutationError('') }} className="ml-1 rounded px-1 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}
                         </>
-                      ) : <span className="inline-flex items-center gap-1">{fmtUSD(deliveryFeeUsd)}{canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { setFeeText(String(deliveryFeeUsd)); setFeeEditing(true); setAmendMutationError('') }} className="rounded px-1 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}</span>}
+                      ) : <span className="inline-flex items-center gap-1">{fmtUSD(deliveryFeeUsd)}{canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { setFeeText(String(deliveryFeeUsd)); setFeePayer(deliveryPaidByStore ? 'store' : 'customer'); setFeeEditing(true); setAmendMutationError('') }} className="rounded px-1 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}</span>}
                       sub={deliveryFeeKhr > 0
                         ? (deliveryPaidByStore ? <span className="line-through">{fmtKHR(deliveryFeeKhr)}</span> : fmtKHR(deliveryFeeKhr))
                         : null}
@@ -2215,6 +2236,26 @@ export default function SaleDetailModal({
                     <tr className="bg-gray-50 dark:bg-gray-900/40">
                       <td colSpan={5} className="px-1.5 py-2 sm:px-2">
                         <div className="flex flex-wrap items-center justify-end gap-2">
+                          {/* P10-23. Two buttons rather than a select: there are
+                              exactly two payers, and the current one has to be
+                              readable at a glance while the fee is being typed. */}
+                          <span className="mr-auto inline-flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+                            <span>{translateOr('fee_paid_by', 'Fee Paid By', 'ថ្លៃបង់ដោយ')}</span>
+                            {(['customer', 'store'] as const).map((value) => (
+                              <button
+                                key={value}
+                                type="button"
+                                disabled={amendSaving}
+                                aria-pressed={feePayer === value}
+                                onClick={() => { setFeePayer(value); setAmendMutationError('') }}
+                                className={`rounded border px-2 py-1 text-[11px] font-semibold disabled:opacity-50 ${feePayer === value
+                                  ? 'border-blue-600 bg-blue-600 text-white'
+                                  : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-300'}`}
+                              >
+                                {payerLabel(value)}
+                              </button>
+                            ))}
+                          </span>
                           <button
                             type="button"
                             disabled={amendSaving}

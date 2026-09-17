@@ -334,6 +334,9 @@ export interface SaleAmendmentRequest {
   manual_discount_value?: number
   manual_discount_usd?: number
   delivery_fee_usd?: number
+  /** P10-23: who pays the delivery fee, corrected by the same amendment
+      as the amount. Omitted leaves the recorded payer alone. */
+  delivery_fee_paid_by?: 'customer' | 'store'
   delivery_actual_cost_usd?: number | string | null
   delivery_contact_id?: number
   replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
