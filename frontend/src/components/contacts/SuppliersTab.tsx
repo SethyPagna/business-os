@@ -1260,12 +1260,15 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
 
       <ContactTable
         loading={loading}
-        // One compact card per persisted supplier. Time/alphabet sections
-        // still determine ordering, but their synthetic header rows are not
-        // rendered as extra entries in the supplier directory.
+        // Time/alphabet sections still determine ordering, but their
+        // synthetic header rows are not rendered as extra entries in the
+        // supplier directory.
+        //
+        // No cards-at-all-widths opt-out here: suppliers get the same wide
+        // table on large screens as Customers and Delivery. The owner's rule
+        // is that a large screen shows the spreadsheet, and a directory that
+        // rendered cards at every width was the one surface disobeying it.
         rows={visibleSuppliers}
-        cardsAtAllWidths
-        cardGridClassName="items-stretch"
         emptyLabel={refreshing ? (t('searching') || 'Searching...') : (t('no_suppliers') || 'No suppliers')}
         columns={supplierColumns}
         selectAll={selectAllProp}

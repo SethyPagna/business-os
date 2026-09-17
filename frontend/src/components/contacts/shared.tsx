@@ -87,8 +87,6 @@ interface ContactTableProps<T extends ContactRow> {
   renderCard?: (row: T) => ReactNode
   // Supplier directory opts into cards at every width. Keep the default
   // responsive table/card split for Customers and Delivery.
-  cardsAtAllWidths?: boolean
-  cardGridClassName?: string
   totalCount?: number
   page?: number
   pageSize?: number
@@ -296,8 +294,6 @@ export function ContactTable<T extends ContactRow>({
   selectionModeActive = false,
   renderRow,
   renderCard,
-  cardsAtAllWidths = false,
-  cardGridClassName = '',
   totalCount,
   page: controlledPage,
   pageSize: controlledPageSize,
@@ -341,7 +337,7 @@ export function ContactTable<T extends ContactRow>({
           details={loadingDetails}
           onRetry={onRetry}
         />
-        <div className={cardsAtAllWidths ? 'hidden' : 'hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-zinc-700 md:block'}>
+        <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-zinc-700 md:block">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500 dark:bg-zinc-800 dark:text-gray-400">
               <tr>
@@ -374,7 +370,7 @@ export function ContactTable<T extends ContactRow>({
             </tbody>
           </table>
         </div>
-        <div className={cardsAtAllWidths ? `grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3 ${cardGridClassName}` : 'space-y-3 md:hidden'}>
+        <div className="space-y-3 md:hidden">
           {skeletonRows.slice(0, 6).map((row) => (
             <div key={`contact-mobile-skeleton-${row}`} className="card animate-pulse p-3">
               <div className="mb-3 flex items-start justify-between gap-3">
@@ -418,7 +414,7 @@ export function ContactTable<T extends ContactRow>({
           Refreshing...
         </div>
       ) : null}
-      <div className={cardsAtAllWidths ? 'hidden' : 'hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-zinc-700 md:block'}>
+      <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-zinc-700 md:block">
         <table className="w-full border-collapse text-xs">
           <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 dark:bg-zinc-800 dark:text-slate-400">
             <tr>
@@ -450,7 +446,7 @@ export function ContactTable<T extends ContactRow>({
           </tbody>
         </table>
       </div>
-      <div className={cardsAtAllWidths ? `grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3 ${cardGridClassName}` : 'space-y-2 md:hidden'}>
+      <div className="space-y-2 md:hidden">
         {pagedRows.map((row) => renderCard?.(row))}
       </div>
       <div className="mt-3 flex justify-center">
