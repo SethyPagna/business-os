@@ -1,3 +1,44 @@
+## Program 10 checkpoint J — the supplier directory gets the wide table, and why it was recorded as done — September 18
+
+Owner: *"supplier page/section still not using excel style for the suppliers in large screens. these are part of previous sessions fixes. i want you to check what went wrong why was this not implemented and are there others that are not implemented as well."*
+
+`integrate/p10` tip **f2c25510** (pushed) is live as Worker version **87e0608f-f4cc-4e4c-b176-99b69068300d** (`/api/runtime/version` revision `f2c25510da0c`, sourceHash `8b67765cd7645c22`, tier paid, clean stamp). No migration: production D1 chain tail stays **0180**, and every migration file in `cloudflare/migrations/` is applied.
+
+### The defect — DEPLOYED (`e3a6c866`)
+
+The wide table was never missing. `ContactTable` in `frontend/src/components/contacts/shared.tsx` has always rendered both halves of the house shape — a bordered `<table>` at `md:block` and a card list at `md:hidden` — and Customers and Delivery both got it. `SuppliersTab.tsx` was the one caller in the repository passing `cardsAtAllWidths`, a prop whose only effect was to replace the table's className with a bare `hidden` and grow the cards into a grid. One prop at one call site hid the table at every width, which is exactly what the owner kept seeing.
+
+The fix removes the prop from the call site **and deletes it from the shared component** together with its companion `cardGridClassName`, so no call site can opt out again. The four conditionals in `shared.tsx` collapse to literals. `supplierColumns` already listed Name · Phone · Email · Contact · Gender · Added: the table was built and ready, and only the flag was hiding it.
+
+It was introduced by `01b12378 feat(contacts): show suppliers as compact cards`, which predates the owner's excel-style instruction and was never revisited when that instruction arrived.
+
+### What went wrong — why it was recorded as done
+
+Two repository-level causes, both found and both repaired (`f2c25510`):
+
+1. **A test claimed a surface it never read.** `frontend/tests/supplierListsExcelTable.test.ts` is named for the supplier lists and its opening comment stated that the Suppliers tab's directory *and* its AP invoice ledger both render the house shape. Every assertion in the file reads only `StockInInvoicesSection.tsx` and `ApInvoicesSection.tsx`. It never opened `SuppliersTab.tsx`. The claim in the comment was an unchecked premise, and it was false — so the file stayed green while the directory disobeyed, and the green file was read at checkpoint time as coverage for the directory.
+2. **A green test actively pinned the wrong behaviour.** `frontend/tests/supplierCompactCards.test.ts` asserted `cardsAtAllWidths` existed, defaulted to false, and produced the desktop grid. The layout the owner was complaining about was protected by a passing test. Its other guarantees — real supplier records rather than section pseudo-rows, keyboard-reachable cards, the detail modal, localized option labels — are unchanged and still pinned; only the three assertions that pinned the opt-out are gone, with the supersession recorded in the file's own header.
+
+Underneath both: **P10-15 "the supplier display is not consistent like excel style in large screens" was closed against the supplier *invoice* sections** — a different surface that shares the word "supplier". The named surface was never opened.
+
+The directory is now pinned by `frontend/tests/contactDirectoryWideTable.test.ts` (new, three suites): the two `md:block` tables and their two `md:hidden` card mirrors survive in `shared.tsx`; `cardsAtAllWidths` and `cardGridClassName` exist nowhere in `shared.tsx` or in any of the three tab files; and all three directories render `<ContactTable` with real columns.
+
+### Are there others — the audit
+
+Two sweeps, and what each found.
+
+**A. Every claimed-done item in the owner register with a runnable proof.** All ~500 rows of `docs/fleet/2026-09-07-owner-task-register.md` were read and every layout/responsive claim that ties to a pinned test was re-run in a clean worktree on this tip. All green, matching their claims: dashboard card rows and the View-more float (P6-7), sales last-row scrolling (P6-8), searchable pickers (P6-3), the one-row date range (P5-2/P9-10), Products report inline COGS/profit (P9-11), the page-menu avatar (P9-1), receipt settings access (P9-2), receipt item numbering (P10-2), receipt page-size modes (P7-1/P6-5), the struck-through driver (P10-24), the payer correction (P10-23), the confirm-review gate (P10-19), the storefront pager (P10-20), all-time customer purchases (P10-21), plus the fourteen formerly-red files. **No second instance of the Suppliers shape — a real component switched off at one call site — was found.**
+
+Two things the sweep would not have caught and that are now recorded as open:
+- the searchable-picker regression guard in `searchablePickersP6.test.ts` only watches `category|brand|supplier|unit` bindings, while the owner's rule names product name and barcode too, so a future click-only product or barcode picker would not trip it (no live violation found by hand);
+- the register's own "modulepreload deferral" row is correct: `shouldDeferModulePreload` in `vite.config.ts` has no caller anywhere. Still open.
+
+**B. A mechanical sweep for the same failure shape — code that exists but nothing reaches.** Every exported symbol in `frontend/src` and `cloudflare/src` was checked for a production caller. 114 have none. Spot-checking the ones that touch owner rules found the capability present by another path every time, so these are dead helpers, not missing features: the username rename cascade runs through `buildUserRenameStatements` in `routes/users.ts` (with the carry/record-only choice the owner asked for), and the barcode scanner runs the native `BarcodeDetector` with a ZXing fallback inside `BarcodeScannerModal`, not the unused Scanbot entry point. The full list is in the session ledger; it is debloat work, and it is registered as such, not as a defect list.
+
+Gates on the committed tip: frontend `typecheck`, `verify:i18n`, `test:utils` 464 passed / 0 red of 464, `build`; Worker `npx tsc --noEmit` clean.
+
+Still open, unchanged: P10-14 (872 blank-gender customers), the parked P10-18 patch, the lot-ledger backfill (19,914 untraced lots, needs a go), the debloat remainder and responsive/compact pass, the vite modulepreload gap, the picker guard widening above, P9-9, three Sentry issues, and the P10-20 public-surface question (the retired rows-per-page selector reaches the storefront; say the word and that one surface goes back).
+
 ## Program 10 checkpoint I LIVE — the P10 batch, with migrations 0178/0179/0180 applied — September 17/18
 
 `integrate/p10` tip **7679d992** (pushed) is live as Worker version **d350a558-ac21-4a16-9d6c-cecc5107107c** (`/api/runtime/version` revision `7679d9920512`, sourceHash `d6427edf7356bbd6`, tier paid, clean stamp). **Production D1 chain tail 0177 → 0180.**
