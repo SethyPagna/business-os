@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { hasSupplier, supplierDisplay } from '../../utils/supplierDisplay.ts'
 import { createPortal } from 'react-dom'
 import { fmtDateOnly } from '../../utils/formatters'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -8,6 +9,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import SectionCard from '../shared/SectionCard'
 import { deactivateBatch, getProductBatches, updateBatch, updateBatchBranchQuantity, type ProductBatch } from '../../api/batchesTransport.ts'
+import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import { getInventoryMovements } from '../../api/inventoryTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
@@ -91,7 +93,7 @@ export default function ManageBatchesModal({
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [editingId, setEditingId] = useState<InventoryId | null>(null)
-  const [draft, setDraft] = useState<{ expiryDate: string; receivedAt: string; notes: string; quantity: string }>({ expiryDate: '', receivedAt: '', notes: '', quantity: '' })
+  const [draft, setDraft] = useState<{ expiryDate: string; receivedAt: string; notes: string; quantity: string; supplierId: number | null; supplierName: string }>({ expiryDate: '', receivedAt: '', notes: '', quantity: '', supplierId: null, supplierName: '' })
   const [savingId, setSavingId] = useState<InventoryId | null>(null)
   // Synchronous double-submit guard for the batch edit save. State (savingId)
   // updates asynchronously, so two fast clicks can both pass a state check
@@ -165,7 +167,7 @@ export default function ManageBatchesModal({
 
   const startEdit = (batch: ProductBatch) => {
     setEditingId(batch.id)
-    setDraft({ expiryDate: batch.expiry_date || '', receivedAt: (batch.received_at || '').slice(0, 10), notes: batch.notes || '', quantity: String(batch.quantity ?? 0) })
+    setDraft({ expiryDate: batch.expiry_date || '', receivedAt: (batch.received_at || '').slice(0, 10), notes: batch.notes || '', quantity: String(batch.quantity ?? 0), supplierId: batch.supplier_id ?? null, supplierName: String(batch.supplier_name || '') })
   }
 
   const cancelEdit = () => setEditingId(null)
@@ -193,6 +195,12 @@ export default function ManageBatchesModal({
         expiryDate: draft.expiryDate || null,
         receivedAt: draft.receivedAt || null,
         notes: draft.notes.trim() || null,
+        // Owner (Sep 17): a batch that arrived without a supplier can be
+        // given one here, and a wrong one corrected -- the same PATCH the
+        // stock-in session editor already used, on the surface that edits
+        // one batch directly.
+        supplierId: draft.supplierName.trim() ? draft.supplierId : null,
+        supplierName: draft.supplierName.trim() || null,
         expectedUpdatedAt: batch.updated_at ?? null,
       })
       if (res?.success === false) {
@@ -405,6 +413,12 @@ export default function ManageBatchesModal({
                         {tr('batch_quantity_scoped_hint', 'A stock-take correction for this received date only -- other received dates of this product are not affected.')}
                       </span>
                     </label>
+                    <SupplierPickerField
+                      idPrefix={`manage-batch-${batch.id}`}
+                      value={{ supplierId: draft.supplierId, supplierName: draft.supplierName }}
+                      onChange={(next) => setDraft((prev) => ({ ...prev, supplierId: next.supplierId, supplierName: next.supplierName }))}
+                      tr={(key, fallbackEn) => tr(key, fallbackEn || '')}
+                    />
                     <label className="block">
                       <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('notes') || 'Notes'}</span>
                       <textarea
@@ -443,7 +457,7 @@ export default function ManageBatchesModal({
                             </button>
                           ) : null,
                           <span>{tr('expiry', 'Expiry')} {batch.expiry_date ? fmtDateOnly(batch.expiry_date) : tr('no_expiry', 'No expiry')}</span>,
-                          batch.supplier_name ? <span className="max-w-[9rem] truncate" title={String(batch.supplier_name)}>{batch.supplier_name}</span> : null,
+                          <span className={`max-w-[9rem] truncate ${hasSupplier(batch.supplier_name) ? '' : 'text-gray-400'}`} title={supplierDisplay(batch.supplier_name, tr)}>{supplierDisplay(batch.supplier_name, tr)}</span>,
                           !batch.is_active ? <span className="font-medium text-gray-400">{tr('deactivated', 'Deactivated')}</span> : null,
                         ].filter(Boolean).map((node, i) => (
                           <span key={i} className="inline-flex min-w-0 items-center gap-1.5">

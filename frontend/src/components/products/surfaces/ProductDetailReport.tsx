@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { supplierDisplay } from '../../../utils/supplierDisplay.ts'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -466,7 +467,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                     {supplier.supplier_name}
                   </EntityLink>
                 ) : (
-                  <span className="detail-scroll-text min-w-0 flex-1 font-semibold text-gray-700 dark:text-gray-200">{tr('unknown', 'Unknown')}</span>
+                  <span className="detail-scroll-text min-w-0 flex-1 font-semibold text-gray-400">{supplierDisplay(supplier.supplier_name, tr)}</span>
                 )}
                 <button type="button" onClick={() => toggleSupplierRow(supplier.supplier_key)} aria-expanded={open} className="flex shrink-0 items-center gap-2 rounded px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-700">
                   <span className="tabular-nums text-gray-500">{supplier.lot_count} {tr('batches', 'Received dates').toLowerCase()} · {supplier.current_qty}</span>
@@ -489,7 +490,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                 ) : drill.map((lot) => (
                   <div key={lot.id} className="flex items-center justify-between gap-2">
                     <span className="detail-scroll-text min-w-0 flex-1 text-gray-500">{batchDisplayLabel({ id: lot.id, lot_code: lot.lot_code, received_at: lot.received_at }, tr('batch', 'Received date'))}</span>
-                    {lot.supplier_name ? <EntityLink page="contacts" anchor="hub:contacts:suppliers" search={lot.supplier_name} navigate={navigateTo} className="detail-scroll-text max-w-[8rem] text-gray-400" title={tr('open_supplier', 'Open supplier')}>{lot.supplier_name}</EntityLink> : null}
+                    {lot.supplier_name ? <EntityLink page="contacts" anchor="hub:contacts:suppliers" search={lot.supplier_name} navigate={navigateTo} className="detail-scroll-text max-w-[8rem] text-gray-400" title={tr('open_supplier', 'Open supplier')}>{lot.supplier_name}</EntityLink> : <span className="detail-scroll-text max-w-[8rem] text-gray-400">{supplierDisplay(lot.supplier_name, tr)}</span>}
                     <span className="shrink-0 whitespace-nowrap text-gray-400">{lot.received_at ? fmtDate(lot.received_at) : '--'}</span>
                     <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{lot.total_qty}</span>
                     <span className="shrink-0 tabular-nums text-gray-500">{lot.unit_cost_usd != null ? fmtUSD(lot.unit_cost_usd) : '--'}</span>

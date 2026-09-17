@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { createPortal } from 'react-dom'
 import { useApp as useAppHook } from '../../AppContext.tsx'
@@ -206,7 +207,7 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, fm
               ) : null}
               <DetailRow
                 label={isSupplier ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}
-                value={isSupplier ? ret.supplier_name || '-' : customerDisplayName(ret, tr('walk_in', 'General'))}
+                value={isSupplier ? supplierDisplay(ret.supplier_name, tr) : customerDisplayName(ret, tr('walk_in', 'General'))}
               />
               <DetailRow label={tr('branch', 'Branch')} value={ret.branch_name || '-'} />
               <DetailRow label={tr('cashier', 'Cashier')} value={ret.cashier_name || '-'} />

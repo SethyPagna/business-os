@@ -1158,8 +1158,12 @@ app.get('/filters', async (c) => {
 // unlinked supplier still shows as its own row (not silently merged into another).
 const RESOLVED_SUPPLIER_ID_SQL =
   `COALESCE(pb.supplier_id, (SELECT s.id FROM suppliers s WHERE lower(trim(s.name)) = lower(trim(pb.supplier_name)) ORDER BY s.id LIMIT 1))`
+// 'none' is a real group, not a gap: a lot nobody attributed is exactly what
+// the owner asked to be able to SEE ("some items have no supplier ... make it
+// 'No supplier'"). Without the final fallback the key was NULL and the group
+// was filtered away below, so no frontend label could ever reach it.
 const SUPPLIER_KEY_SQL =
-  `COALESCE('id:' || (${RESOLVED_SUPPLIER_ID_SQL}), 'name:' || lower(trim(pb.supplier_name)))`
+  `COALESCE('id:' || (${RESOLVED_SUPPLIER_ID_SQL}), NULLIF('name:' || lower(trim(COALESCE(pb.supplier_name, ''))), 'name:'), 'none')`
 
 // D3 (Part 422): the product detail page's report read -- per-supplier
 // totals from batch attribution plus the sales breakdown (kernel). One
@@ -1207,7 +1211,6 @@ app.get('/:id/detail-report', async (c) => {
     ) bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = @productId
       AND pb.is_active = 1
-      AND (pb.supplier_id IS NOT NULL OR trim(COALESCE(pb.supplier_name, '')) <> '')
       AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
     GROUP BY supplier_key
     ORDER BY last_received_at DESC

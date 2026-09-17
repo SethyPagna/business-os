@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import { useApp } from '../../AppContext'
 import { getStockLedger } from '../../api/productReadTransport.ts'
 import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
@@ -46,7 +47,7 @@ import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { STOCK_ADJUST_RESTORE_HOST } from '../../utils/stockAdjustDraft.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
-import { buildHistoryRowModel, formatHistoryReference, historyExportField, historyField } from '../../utils/historyRowModel.ts'
+import { buildHistoryRowModel, formatHistoryReference, historyExportField } from '../../utils/historyRowModel.ts'
 import {
   isRevertibleStockMovement,
   isStockSessionGenerationMovement,
@@ -786,7 +787,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                     <td className="text-center tabular-nums text-gray-500">{row.before_qty} → <b className="text-gray-800 dark:text-gray-100">{row.after_qty}</b></td>
                     <td><span className="dense-cell-truncate" title={model.branch}>{model.branch}</span></td>
                     <td>
-                      <span className="block dense-cell-truncate" title={row.batch_supplier_name || ''}>{historyField(row.batch_supplier_name)}</span>
+                      <span className="block dense-cell-truncate" title={supplierDisplay(row.batch_supplier_name, (key, fallback) => tr(t, key, fallback))}>{supplierDisplay(row.batch_supplier_name, (key, fallback) => tr(t, key, fallback))}</span>
                       {row.batch_id ? (
                         // Titled with the label itself, like every sibling cell in this
                         // row. The line truncates, so its tooltip is the only way to
@@ -1109,7 +1110,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
                 <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'batch', 'Received date')}: </span>
                 {batchDisplayLabel({ id: detail.batch_id, lot_code: detail.batch_lot_code, received_at: detail.batch_received_at }, tr(t, 'batch', 'Received date'))}
-                {detail.batch_supplier_name ? <span className="text-gray-400"> · {detail.batch_supplier_name}</span> : null}
+                <span className="text-gray-400"> · {supplierDisplay(detail.batch_supplier_name, (key, fallback) => tr(t, key, fallback))}</span>
               </p>
             ) : null}
             {/* N13: the record this movement belongs to. Shown as a fact of

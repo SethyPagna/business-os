@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { supplierDisplay } from '../../../utils/supplierDisplay.ts'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useCloseGuard } from '../../../utils/useCloseGuard.ts'
@@ -146,7 +147,7 @@ export default function AttributeSupplierModal({
                   <input type="checkbox" checked={on} onChange={() => toggleLot(lot.id)} className="h-3.5 w-3.5 shrink-0 accent-purple-600" />
                   <span className="min-w-0 flex-1 truncate text-gray-600 dark:text-gray-300">
                     {batchDisplayLabel({ id: lot.id, lot_code: lot.lot_code, received_at: lot.received_at })}
-                    {lot.supplier_name ? <span className="ml-1 text-gray-400">· {lot.supplier_name}</span> : null}
+                    <span className="ml-1 text-gray-400">· {supplierDisplay(lot.supplier_name, tr)}</span>
                   </span>
                   <span className="shrink-0 whitespace-nowrap text-gray-400">{lot.received_at ? fmtDate(lot.received_at) : '--'}</span>
                 </label>
