@@ -46,12 +46,34 @@ function sliceBetween(source, startMarker, endMarker, label) {
 
 // ---- 1. Source lock ----------------------------------------------------
 check('compat.ts topProducts/topProductsQty group by product_id only, name from live products', () => {
-  const block = sliceBetween(compatSource, 'async function dashboardAnalytics', "app.get('/dashboard'", 'compat.ts dashboardAnalytics fan-out')
+  // End the slice at the next top-level declaration, not at the first
+  // app.get('/dashboard' -- P11-16 (4cde5947) inserted dashboardInsightList
+  // between the two, and that function legitimately reuses the SAME id-only
+  // GROUP BY (its whole point is to serve the untruncated form of these very
+  // lists), so the old window swallowed a third correct occurrence and read
+  // it as a drift. This asserts the shape of dashboardAnalytics alone.
+  const block = sliceBetween(compatSource, 'async function dashboardAnalytics', 'async function dashboardInsightList', 'compat.ts dashboardAnalytics fan-out')
   const groupByMatches = block.match(/GROUP BY COALESCE\(si\.product_id, 0\), CASE WHEN si\.product_id IS NULL THEN lower\(trim\(COALESCE\(si\.product_name, ''\)\)\) ELSE '' END/g) || []
   assert.equal(groupByMatches.length, 2, 'expected the id-only GROUP BY shape on both topProducts and topProductsQty')
   const nameExprMatches = block.match(/COALESCE\(MAX\(p\.name\), MAX\(si\.product_name\)\) AS product_name/g) || []
   assert.equal(nameExprMatches.length, 2, 'expected the live-name expression on both topProducts and topProductsQty')
   assert.match(block, /LEFT JOIN products p ON p\.id = si\.product_id/, 'expected a LEFT JOIN to products for the live name')
+})
+
+// P11-16 (4cde5947) gave the dashboard's four truncated insight lists an
+// untruncated backing endpoint. dashboardInsightList's top_products query is
+// the SAME list as dashboardAnalytics' topProducts, just uncapped, so it must
+// merge identically -- a sibling surface that grouped by (id, name) would show
+// one renamed product as two rows the moment the customer clicked View more.
+check('compat.ts dashboardInsightList reuses the id-only GROUP BY and the live-name expression', () => {
+  const block = sliceBetween(compatSource, 'async function dashboardInsightList', "app.get('", 'compat.ts dashboardInsightList')
+  assert.match(
+    block,
+    /GROUP BY COALESCE\(si\.product_id, 0\), CASE WHEN si\.product_id IS NULL THEN lower\(trim\(COALESCE\(si\.product_name, ''\)\)\) ELSE '' END/,
+    'the untruncated product list must group by product_id only, exactly like the preview it replaces',
+  )
+  assert.match(block, /COALESCE\(MAX\(p\.name\), MAX\(si\.product_name\)\) AS product_name/, 'and take the live name the same way')
+  assert.match(block, /LEFT JOIN products p ON p\.id = si\.product_id/, 'and LEFT JOIN products for it')
 })
 
 check('sales.ts export product_totals groups by product_id only, name from live products', () => {
