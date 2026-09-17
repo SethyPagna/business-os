@@ -6,7 +6,7 @@ import StatusBadge from './StatusBadge.tsx'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
-import { resolveDriverLabel } from '../../utils/salesDriverLabel.ts'
+import { isDeliveryFreeForCustomer, resolveDriverLabel } from '../../utils/salesDriverLabel.ts'
 import { SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS } from './salesListColumns.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import type OriginalEntityLink from '../shared/EntityLink.tsx'
@@ -58,6 +58,11 @@ interface SaleRecord {
   // linked driver's live name in GET /sales) -- see utils/salesDriverLabel.ts.
   linked_driver_name?: string | null
   delivery_contact_name?: string | null
+  // GET /sales projects s.*, so every row carries the delivery header. Read
+  // here only to strike the driver through when the shop absorbed the fee
+  // (utils/salesDriverLabel.ts).
+  is_delivery?: number | boolean | null
+  delivery_fee_paid_by?: string | null
   // N41: how many RECORDS this sale has -- every change anybody ever made to
   // it, unioned server-side from the amendment ledger, audit_logs, the bulk
   // operation receipts and the sale's own creation. GET /api/sales delivers it
@@ -301,6 +306,9 @@ export default function SalesListSurface({
                           const status = sale.sale_status || 'completed'
                           const branchLabel = getSaleBranchLabel(sale)
                           const driverLabel = resolveDriverLabel(sale)
+                          // A delivery the shop paid for reads as struck through
+                          // wherever the driver is shown (salesDriverLabel.ts).
+                          const driverFree = isDeliveryFreeForCustomer(sale)
                           const rowSelected = selectedIds.has(Number(sale.id))
                           // Same long-press-to-select-mode pattern as Products/
                           // Inventory rows: out of select mode a plain click
@@ -352,7 +360,7 @@ export default function SalesListSurface({
                               <td className="px-3 py-1.5">{sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo}><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method}</span></EntityLink> : <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">N/A</span>}</td>
                               {cols.isVisible('branch') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{branchLabel ? <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink> : 'N/A'}</td> : null}
                               {/* Driver empty-state contract: {driverLabel || 'N/A'} */}
-                              {cols.isVisible('driver') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{driverLabel ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={driverLabel} navigate={navigateTo}>{driverLabel}</EntityLink> : 'N/A'}</td> : null}
+                              {cols.isVisible('driver') ? <td className={`hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell${driverFree ? ' line-through' : ''}`}>{driverLabel ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={driverLabel} navigate={navigateTo}>{driverLabel}</EntityLink> : 'N/A'}</td> : null}
                               <td className="px-3 py-1.5 text-right">
                                 <div className={`font-semibold ${status === 'cancelled' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{fmtUSD(totalUsd)}</div>
                                 {totalKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
@@ -480,6 +488,7 @@ export default function SalesListSurface({
                     const status = sale.sale_status || 'completed'
                     const branchLabel = getSaleBranchLabel(sale)
                     const driverLabel = resolveDriverLabel(sale)
+                    const driverFree = isDeliveryFreeForCustomer(sale)
                     const cardSelected = selectedIds.has(Number(sale.id))
                     // Mobile mirror of the desktop rows' long-press pattern --
                     // the card and the row share one per-sale state slot, which
@@ -535,7 +544,7 @@ export default function SalesListSurface({
                                   Assistive text still identifies the value as
                                   delivery information. */}
                               {/* Mobile delivery contract: {driverLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('delivery')}: ${driverLabel}`}>{driverLabel}</span></> : null} */}
-                              {driverLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('delivery') || 'Delivery'}: ${driverLabel}`}><EntityLink page="contacts" anchor="hub:contacts:delivery" search={driverLabel} navigate={navigateTo}>{driverLabel}</EntityLink></span></> : null}
+                              {driverLabel ? <><span aria-hidden="true">|</span><span className={driverFree ? 'line-through' : undefined} aria-label={`${t('delivery') || 'Delivery'}: ${driverLabel}`}><EntityLink page="contacts" anchor="hub:contacts:delivery" search={driverLabel} navigate={navigateTo}>{driverLabel}</EntityLink></span></> : null}
                             </div>
                             {/* Third row on small screens: branch, status,
                                 payment and item count get their own line.
