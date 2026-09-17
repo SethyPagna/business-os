@@ -189,7 +189,6 @@ type PortalConfig = LooseRecord & {
   showPrices?: boolean
   showProductBrand?: boolean
   showProductCategory?: boolean
-  showProductDescription?: boolean
   showProductDiscount?: boolean
   showPromotions?: boolean
   showRecommendedBadge?: boolean
@@ -268,7 +267,6 @@ const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   showPrices: true,
   showProductBrand: true,
   showProductCategory: true,
-  showProductDescription: true,
   showProductDiscount: true,
   showPromotions: true,
   showRecommendedBadge: true,

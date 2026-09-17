@@ -58,7 +58,6 @@ type PortalPreviewConfig = {
   showPrices?: boolean
   showProductCategory?: boolean
   showProductBrand?: boolean
-  showProductDescription?: boolean
   showProductDiscount?: boolean
   showStockStatus?: boolean
   // Legacy-fallback threshold config for resolvePortalStockStatus (only
