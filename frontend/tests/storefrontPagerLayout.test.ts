@@ -80,10 +80,12 @@ runTest('the centred branch prints no summary, and Back leads the row', () => {
   )
 })
 
-runTest('the centred page field grows with its digits and keeps a 40px floor', () => {
+runTest('the centred page field grows with its digits and keeps a 36px floor', () => {
+  // 2026-09-18 (owner): "too fat and large. make it more consistent" --
+  // trimmed from a 40px floor (h-10) to 36px (h-9) across the whole pill.
   const branch = centeredBranch()
-  assert.match(branch, /max\(2\.5rem, calc\(\$\{pageDigits\}ch \+ 0\.5rem\)\)/)
-  assert.match(branch, /className=\{`h-10 min-w-10/)
+  assert.match(branch, /max\(2\.25rem, calc\(\$\{pageDigits\}ch \+ 0\.5rem\)\)/)
+  assert.match(branch, /className=\{`h-9 min-w-9/)
 })
 
 runTest('the centred branch centres the pill and orders it Back / page / total / Next', () => {

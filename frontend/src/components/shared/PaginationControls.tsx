@@ -164,23 +164,30 @@ export default function PaginationControls({
     //
     // Order is the owner's (2026-09-15, supersedes 2026-09-14's page-size-
     // first order): Back, then the page-size selector, then the editable
-    // page field and total page count, then Next. All controls keep a 40px
-    // hit area and an inset keyboard focus ring so the rounded pill does not
-    // clip the indicator.
+    // page field and total page count, then Next. All controls keep a 36px
+    // hit area (2026-09-18: trimmed from 40px, see below) and an inset
+    // keyboard focus ring so the rounded pill does not clip the indicator.
+    // 2026-09-18 (owner): "the back items per page, page number and number
+    // of pages and next button are too fat and large. make it more
+    // consistent." 40px controls (h-10, px-3) on a pill whose only job is
+    // Back / page / Next read oversized next to the rest of the storefront's
+    // compact chrome (the header's own icon buttons are h-8/h-9). Trimmed to
+    // 36px (h-9, px-2.5) -- still a real tap target, just no longer the
+    // biggest thing on the row.
     const focusRingClass = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500'
-    const arrowButtonClass = `inline-flex h-10 shrink-0 items-center gap-0.5 px-3 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600 ${focusRingClass}`
-    const countClass = 'h-10 shrink-0 whitespace-nowrap px-2 text-xs font-semibold leading-10 text-slate-500 dark:text-slate-400'
+    const arrowButtonClass = `inline-flex h-9 shrink-0 items-center gap-0.5 px-2.5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600 ${focusRingClass}`
+    const countClass = 'h-9 shrink-0 whitespace-nowrap px-2 text-xs font-semibold leading-9 text-slate-500 dark:text-slate-400'
     // The page box takes its width from what it prints. `ch` is the width of
     // "0" in the current font, which is the right unit for a numeric field.
     //
     // With a FLOOR, though. Removing the fixed `w-9` closed the gap the owner
     // circled, and then overshot: at text-xs a `ch` is about 6-7px, so a
-    // one-digit page gave `calc(1ch + 0.5rem)` ~= 15px of tap target -- 21px
-    // narrower than the 36px box it replaced, on the storefront's only
-    // page-jump control, and half the 40px floor the arrows beside it keep.
-    // `max()` keeps both facts: 40px minimum, and it still grows with the
+    // one-digit page gave `calc(1ch + 0.5rem)` ~= 15px of tap target -- far
+    // narrower than the box it replaced, on the storefront's only page-jump
+    // control, and below the 36px floor the arrows beside it now keep.
+    // `max()` keeps both facts: 36px minimum, and it still grows with the
     // digits so "108" is snug and nothing reserves room for digits that are
-    // not there. `min-w-10` rather than `min-w-0` for the same reason -- a
+    // not there. `min-w-9` rather than `min-w-0` for the same reason -- a
     // flex child told it may collapse below its content is the one thing that
     // could undo the floor.
     const pageDigits = Math.max(1, String(editablePageInput ? pageDraft : safePage).length)
@@ -227,8 +234,8 @@ export default function PaginationControls({
                   type="text"
                   inputMode="numeric"
                   aria-label={pageLabel}
-                  style={{ width: `max(2.5rem, calc(${pageDigits}ch + 0.5rem))` }}
-                  className={`h-10 min-w-10 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100 ${focusRingClass}`}
+                  style={{ width: `max(2.25rem, calc(${pageDigits}ch + 0.5rem))` }}
+                  className={`h-9 min-w-9 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100 ${focusRingClass}`}
                   value={pageDraft}
                   onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                   onBlur={(event) => commitPageDraft(event.currentTarget.value)}
