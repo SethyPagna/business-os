@@ -1,3 +1,40 @@
+## September 18 — owner message P, program 11 registered (for the Codex handoff)
+
+Received on the tip live in production (`f2c25510`, Worker 87e0608f, D1 tail 0180). Sixteen items in four groups. Nothing here is deployed yet; each row carries its state.
+
+### Public website (storefront)
+
+| Item | State | Owner's words / what it means |
+| --- | --- | --- |
+| P11-1 close (X) button stays an outline and covers Contact us | Not yet | "The x button just keep the icon instead of filling it and bocking the contact us button". The X must fill, and it must not overlap the Contact-us control. |
+| P11-2 add-to-cart button contents off-centre on small screens | Not yet | "the add to cart in smaller screens are also not being centered correctly in the button. the add icon and its button display." Icon + label centred inside the button at every width. |
+| P11-3 a redundant "Products" heading | Not yet | "We already have products section so no need to say Products again... above the 'Browse our prod[ucts and check availability.'" Drop the duplicate heading, keep the section chip. |
+| P11-4 the search + filter row wastes its width | Not yet | "the search and filter row. can fully utlize the row. there are many space left and right to utilize." |
+| P11-5 the product description is shown by default | Not yet | "for the description can be removed from default display instead replace with click to view details." |
+| P11-6 a second Clear beside the filter-menu button | Not yet | "no need for that. the clear in the filter menu is enough." One clear affordance, inside the menu. |
+| P11-7 the pager is too fat | Not yet | "the back items per page, page number and number of pages and next button are too fat and large. make it more consistent." |
+| P11-8 dark mode contrast | Not yet | "the dark mode are not contrasted correctly for the text and buttons." |
+| P11-9 header order | Not yet | "the buttons can be below the business name... so Leang Cosmetics first." |
+| P11-10 the search row is not sticky | Not yet | "the search row is not sticky when scrolled down." Matches the standing sticky search/date-row convention, which the storefront never got. |
+
+### Imported invoices, balances and their surfaces
+
+| Item | State | Owner's words / what it means |
+| --- | --- | --- |
+| P11-11 customer/supplier invoices do not match the Sales page | Not yet, investigation first | "invoices in customers and in suppliers etc... don't have sales in sales not matching a lot". A reader/joining defect or an import gap; production data must be measured before anything is written. |
+| P11-12 a "customer balance" status showing owed | Not yet, investigation first | "it should all be paid no owed. also, these are all imported from old system. check the data." Imported history arrived settled; an owed balance on imported rows is a data defect, not a debt. |
+| P11-13 the design of those sections, and the customer options picker | Not yet | "the design for this needs some change, the customer options search make it searchable like can enter and show options and search row." The standing searchable-picker rule has not reached this control. |
+
+### Dashboard
+
+| Item | State | Owner's words / what it means |
+| --- | --- | --- |
+| P11-14 all-time scope times out | Not yet | "dashboard, all time scope failed. timedout." |
+| P11-15 the equal-height cards kept their old content | Not yet | "we made them same fixed row card length but the details in the card did not update and get corrected with the change, still previous fixed content." The row-alignment change shipped; the content inside the cards was never refitted to it. |
+| P11-16 View more does not actually show more | Not yet | "view more for all the cards except for the low stock items and out of stock did not actually view more. seems limited." Only the two stock cards open a real full list; the rest open a float holding the same truncated set. |
+
+Carried over and still open: the searchable-picker regression guard does not watch product-name/barcode bindings; `shouldDeferModulePreload` has no caller; P10-14 (872 blank-gender customers); the parked P10-18 patch; the lot-ledger backfill (19,914 untraced lots, needs a go); the debloat remainder (114 exported symbols with no production caller, listed in the session ledger) and the responsive/compact pass; P9-9; three Sentry issues; and the P10-20 public-surface question.
+
 ## Program 10 checkpoint J — the supplier directory gets the wide table, and why it was recorded as done — September 18
 
 Owner: *"supplier page/section still not using excel style for the suppliers in large screens. these are part of previous sessions fixes. i want you to check what went wrong why was this not implemented and are there others that are not implemented as well."*
