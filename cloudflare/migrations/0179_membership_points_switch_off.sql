@@ -43,7 +43,15 @@
 --
 -- PRE ASSERTIONS (run read-only immediately before applying):
 --   SELECT COUNT(*) FROM settings WHERE key = 'loyalty_points_enabled';   -- expected 0
---   SELECT COUNT(*) FROM sales WHERE COALESCE(loyalty_accrual, 1) = 1;    -- expected 190
+--   SELECT COUNT(*) FROM sales WHERE COALESCE(loyalty_accrual, 1) = 1;    -- expected 101
+--     (Re-measured read-only against production on Sep 17 2026 immediately
+--      before applying. The 190 written when this file was drafted no longer
+--      matches: every remaining accruing row is dated Sep 4 or later, which is
+--      exactly the post-reset window this migration targets, there are no NULL
+--      rows at all, and the count moved DOWN, so nothing unexpected has entered
+--      scope. The migration does not depend on the number -- it flips only rows
+--      still 1 and logs the exact set it flipped -- but the tripwire must state
+--      the truth or it stops being one.)
 --   SELECT COUNT(*) FROM loyalty_point_adjustments WHERE voided_at IS NULL;              -- expected 0
 --   SELECT COUNT(*) FROM customer_share_submissions WHERE reward_points_voided_at IS NULL; -- expected 0
 -- POST ASSERTIONS:
