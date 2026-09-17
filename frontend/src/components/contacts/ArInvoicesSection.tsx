@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import AppSelect from '../shared/AppSelect.tsx'
+import SuggestionTextInput, { type SuggestionOption } from '../shared/SuggestionTextInput.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
@@ -37,6 +38,12 @@ type ArInvoice = {
   amount_paid_usd?: number
   outstanding_balance_usd?: number
   status?: string
+  // P11-11: the sale this receivable belongs to, resolved server-side by
+  // stripping the retired '@date' suffix off legacy_receipt_number and
+  // matching on the same calendar day (falling back to the same total) --
+  // null when the row is one of the handful that never resolves.
+  matched_sale_id?: number | null
+  matched_receipt_number?: string | null
 }
 
 type ArTotals = {
@@ -70,6 +77,12 @@ const AR_OPTIONAL_COLUMNS: TableColumnDef[] = [
 export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [customer, setCustomer] = useState('all')
+  // P11-13: the customer filter is a search box that lists its options (the
+  // standing rule every picker in the app follows), not a click-to-open menu
+  // with nothing typeable. `customerQuery` is the text actually shown in the
+  // box; it stays in sync with `customer` (the value sent to the server) via
+  // the effect below, and diverges only while the operator is mid-type.
+  const [customerQuery, setCustomerQuery] = useState('')
   const [status, setStatus] = useState('all')
   // P3-10: ALL TIME on first open, not Today -- same reason as the AP ledger
   // it mirrors. `customer_receivables` is the legacy AR import (migration
@@ -137,6 +150,27 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
   const totalInvoices = Number(data?.total_invoices) || 0
   const ledgerReady = data?.ledger_ready !== false
 
+  // Keep the search box's text in sync with the applied filter (e.g. after
+  // "Clear", or once the option list arrives and can resolve the display
+  // name for an already-applied key). Never fires while the operator is
+  // mid-type: the box's own onChange is the only writer during that window.
+  useEffect(() => {
+    if (customer === 'all') { setCustomerQuery(''); return }
+    const match = customerOptions.find((option) => option.key === customer)
+    if (match) setCustomerQuery(String(match.name || match.key))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer, customerOptions.length])
+
+  const customerSuggestionOptions = useMemo<SuggestionOption[]>(
+    () => customerOptions.map((option) => ({
+      value: String(option.name || option.key),
+      key: option.key,
+      payload: option.key,
+      selected: customer === option.key,
+    })),
+    [customerOptions, customer],
+  )
+
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
   const anyFilter = customer !== 'all' || status !== 'all' || fromDate !== '' || toDate !== ''
   // The open receivable may not survive the new filter, so the float closes
@@ -176,15 +210,24 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
         t={t}
       />
       <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
-        <AppSelect
+        {/* P11-13: a search box that also lists its options, matching the
+            standing picker rule -- typing filters, an empty focus lists
+            every customer, and picking or clearing applies the filter. */}
+        <SuggestionTextInput
+          id="ar-customer-filter"
           ariaLabel={tr('customer', 'Customer')}
-          value={customer}
-          onChange={(value) => changeFilter(() => setCustomer(value))}
+          value={customerQuery}
+          options={customerSuggestionOptions}
           className="min-w-[11rem]"
-          options={[
-            { value: 'all', label: tr('all_customers', 'All Customers') },
-            ...customerOptions.map((option) => ({ value: option.key, label: String(option.name || option.key) })),
-          ]}
+          inputClassName="input h-9 w-full text-xs"
+          placeholder={tr('all_customers', 'All Customers')}
+          onChange={(next, option) => {
+            setCustomerQuery(next)
+            if (option) { changeFilter(() => setCustomer(String(option.payload))); return }
+            if (!next.trim()) { changeFilter(() => setCustomer('all')); return }
+            const exact = customerOptions.find((row) => String(row.name || row.key).trim().toLowerCase() === next.trim().toLowerCase())
+            if (exact) changeFilter(() => setCustomer(exact.key))
+          }}
         />
         <AppSelect
           ariaLabel={tr('status', 'Status')}
@@ -374,9 +417,28 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
               title: tr('invoice_lines', 'Lines'),
               // Migration 0094 imported these as balances only -- an AR row
               // never rewrites a sale's payment and holds no item linkage --
-              // so there is nothing to fetch. Said out loud instead of
-              // rendering an empty frame.
-              note: tr('ar_invoice_no_lines_note', 'Customer receivables are imported balances from the old system and carry no product lines. The matching items are on the sale itself.'),
+              // so there is nothing to fetch here directly. P11-11: the sale
+              // itself is now resolved server-side (base legacy number +
+              // invoice date, falling back to base number + total), so a
+              // resolved row shows its receipt number instead of a dead end;
+              // find it on the Sales page by that receipt number.
+              facts: detail.matched_receipt_number
+                ? [{
+                    key: 'matched_sale',
+                    label: tr('ar_matched_sale', 'Matching sale'),
+                    value: (
+                      <CopyableId
+                        value={detail.matched_receipt_number}
+                        copyLabel={tr('copy', 'Copy')}
+                        copiedLabel={tr('copied', 'Copied')}
+                        valueClassName="text-sm leading-6 text-gray-900 dark:text-white"
+                      />
+                    ),
+                  }]
+                : undefined,
+              note: detail.matched_receipt_number
+                ? tr('ar_invoice_lines_note_matched', 'Customer receivables are imported balances and carry no product lines of their own -- find the items on the sale above, searchable on the Sales page by its receipt number.')
+                : tr('ar_invoice_no_lines_note', 'Customer receivables are imported balances from the old system and carry no product lines. The matching items are on the sale itself.'),
             },
           ]}
         />

@@ -5525,6 +5525,8 @@
   "customer_code": "Customer code",
   "ap_invoice_no_lines_note": "Supplier AP invoices are billing documents from the old system and carry no product lines. What physically arrived is in the Stock-In Invoices ledger.",
   "ar_invoice_no_lines_note": "Customer receivables are imported balances from the old system and carry no product lines. The matching items are on the sale itself.",
+  "ar_invoice_lines_note_matched": "Customer receivables are imported balances and carry no product lines of their own -- find the items on the sale above, searchable on the Sales page by its receipt number.",
+  "ar_matched_sale": "Matching sale",
   "purchase_line_details": "Received line",
   "ar_invoices_failed": "Failed to load the customer receivables ledger.",
   "ar_ledger_not_ready": "The customer receivables ledger has not been imported yet.",
