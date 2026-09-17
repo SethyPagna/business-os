@@ -19597,3 +19597,15 @@ Deploy: branch pushed a8036506..4b20bd68 (80 sliced commits, main untouched); `n
 **Gates.** Frontend typecheck, verify:i18n, verify:public-runtime, test:utils, build on the committed tip; Worker unchanged since checkpoint C.
 
 **Open.** Debloat remainder (40), responsive/compact pass, modulepreload gap, P9-9, P10-12 … P10-22 (need a go).
+
+## Part 625 (Sep 17 2026, Claude Opus 5 coordinator) — Program 10 checkpoint G: owner message M
+
+**Provenance.** Release code tip **eca7aacd** on `codex/precision-final-candidate-20260914`, pushed, deployed with the paid configuration as Worker **78335b42-eaa7-400a-85b4-5c2164f4103d** (`/api/runtime/version` revision `eca7aacd7d02`, sourceHash `28960f4673b5ba7a`, clean stamp). No migration; production D1 verified at chain tail 0177 before the deploy.
+
+**Owner message M.** Three reports: the cost-price field pushed out of line on the add/edit/set stock row with the required marker wrapping, "Free goods" to read "Free" with no info tooltip and the declaration on its own row; the restock condition row cut off on small screens; and items with no supplier, which should read "No supplier", be visible in Contacts and on the supplier page, and be fixable by editing the batch. A follow-up asked that an edit be "fully linkover".
+
+**Work.** 0337efb2 widened the cost track and moved the declaration out of the cost label — the tall cell was what `sm:items-end` had been aligning, which is why one input sat higher than its neighbours. 421acfb9 turned the condition row into a horizontal scroll container instead of truncating its labels. 113cc554 replaced five different missing-supplier renderings with one helper and one pack key across fifteen surfaces, and removed the Worker filter plus the NULL group key that had made unattributed lots unreachable in the product's supplier breakdown; it also wired the batch editor to the supplier fields the PATCH route had always accepted. eca7aacd proves the cascade: the readers all take the supplier live from `product_batches`, and the test performs the route's UPDATE and re-runs them.
+
+**Gates.** Frontend typecheck, verify:i18n, verify:public-runtime, test:utils, build on the committed tip; Worker `npx tsc --noEmit` and the full `scripts/test-*.cjs` sweep. Two frontend files and one Worker file reported red under the parallel sweep and passed standalone (timing/contention); one genuine red, a 41st unused-local diagnostic from an import left behind by the change, was fixed before the commit.
+
+**Open.** Debloat remainder and responsive pass, the vite modulepreload gap, P9-9, three Sentry issues, P10-12 … P10-22 (need a go).

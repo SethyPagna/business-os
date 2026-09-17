@@ -541,3 +541,19 @@ Release code 467ecf9b is live as Worker 93976b00-ff08-46d5-b123-612ca0f70b4e (pa
 | --- | --- | --- |
 | P9-9 "err can't show tagged stock" | **Root cause found, no recurrence; verify on the live page at the next logged-in check** | Sentry BUSINESS-OS-1E/1D: GET /api/batches/damaged-lots failed with D1_ERROR no such column condition_tag (16 + 6 events, 2026-09-15 01:37–04:06 UTC) — the Worker referencing condition_tag on damaged_stock_lots was deployed before migration 0162 was applied; production now has the column and no event since. Process fix: apply a lane's migration in the same checkpoint as its Worker code, never after. |
 | Sentry, still active | **Open, needs a lane** | BUSINESS-OS-X D1 CPU time limit (58 events, last 7 h ago), BUSINESS-OS-6 expression tree too large depth 100 (7 events, 8 h ago), BUSINESS-OS-1F recorded product identity requires review (68 events). |
+
+## September 17 program 10 checkpoint G LIVE — owner message M
+
+Release code eca7aacd is live as Worker 78335b42-eaa7-400a-85b4-5c2164f4103d (paid); no migration (chain tail 0177).
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| Cost price marker wrapped and the cost input sat above the row; "Free goods" → "Free"; no info tooltip; declaration on its own row | **Deployed** | 0337efb2; tests/stockReceiptFields.test.ts. |
+| Restock-as-sellable / restock-with-tag cut off on small screens | **Deployed** | 421acfb9; tests/stockConditionTag.test.ts. |
+| "No supplier" on every surface; the no-supplier lots reachable; a batch editable to add a supplier | **Deployed** | 113cc554; frontend/tests/noSupplierLabel.test.ts. |
+| A supplier edit reaches every reader (no stale snapshot) | **Deployed** | eca7aacd; cloudflare/scripts/test-batch-supplier-edit-cascade-pure.cjs. |
+| Debloat remainder (40 diagnostics), responsive/compact pass | **Open, go given** | Budget still 40/40. |
+| Modulepreload deferral list pinned by a test but never applied | **Open, feature gap** | vite.config.ts shouldDeferModulePreload has no caller. |
+| P9-9 tagged-stock error | **Open, go given, not started** | Root cause recorded; needs one logged-in check to close. |
+| Sentry BUSINESS-OS-X (D1 CPU limit), -6 (expression tree too large), -1F (recorded product identity) | **Open, not started** | Registered Sep 17. |
+| P10-12 … P10-22 | **Open, need a go** | Registered under message K. |
