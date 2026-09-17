@@ -1717,7 +1717,7 @@ export default function SaleDetailModal({
                     walk-in sale is unchanged and a free delivery still names
                     its driver, which the fee row could not do when the fee was
                     zero and the row did not render. */}
-                <DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} valueLink={deliveryDriverName ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverName} navigate={navigateTo}>{deliveryDriverName}</EntityLink> : undefined} />
+                <DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} valueLink={deliveryDriverName ? <span className={deliveryPaidByStore ? 'line-through' : undefined}><EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverName} navigate={navigateTo}>{deliveryDriverName}</EntityLink></span> : undefined} />
                 <DetailRow label={translateOr('driver_phone', 'Driver phone', 'ទូរស័ព្ទអ្នកដឹក')} value={deliveryDriverPhone} valueLink={deliveryDriverPhone ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverPhone} navigate={navigateTo}>{deliveryDriverPhone}</EntityLink> : undefined} />
                 {!toNumber(sale.is_delivery) && canAmendThisSale ? (
                   <div className="py-1.5">
