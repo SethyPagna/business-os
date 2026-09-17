@@ -648,11 +648,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 </div>
               )}
             />
-            {portalActiveFilterCount > 0 ? (
-              <button type="button" className="rounded-xl px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={clearPortalFilters}>
-                {copy('clear', 'Clear')}
-              </button>
-            ) : null}
+            {/* A second standalone "Clear" button used to sit here, beside
+                the Filters trigger, duplicating the one already inside the
+                filter menu's own header (see `closeMenu`'s sibling above) --
+                owner, 2026-09-18: "there is a clear button next to the
+                filter menu button after having filters. no need for that.
+                the clear in the filter menu is enough." One Clear control,
+                inside the menu, is what's left. */}
           </div>
           </div>
 
