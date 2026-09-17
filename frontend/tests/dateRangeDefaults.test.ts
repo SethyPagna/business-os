@@ -273,20 +273,55 @@ const auditParams = evaluate(variable(audit.source, 'params'), {
 const auditRequest = evaluate(requestArgs(audit.source, 'getAuditLogsRequest')[0], { params: auditParams })
 assert.deepEqual([auditRequest.startDate, auditRequest.endDate], [day1, day1])
 
-for (const [file, endpoint, idKey] of [
-  ['contacts/CustomerPurchasesReportModal.tsx', 'getCustomerSalesReport', 'customerId'],
-  ['contacts/DeliveryContactReportModal.tsx', 'getDeliveryContactReport', 'contactId'],
-] as const) {
+// DeliveryContactReportModal still opens on Today, same [range, setRange] shape
+// as the rest of the app's stats surfaces.
+{
+  const file = 'contacts/DeliveryContactReportModal.tsx'
+  const endpoint = 'getDeliveryContactReport'
   const source = read(file)
   const cell = stateCell(source, '[range, setRange]', { todayDateTimeRange: () => preset('today') })
   expectDates(cell.initial, day1)
-  const params = evaluate(variable(source, 'params'), { range: cell.initial, [idKey]: 17 })
+  const params = evaluate(variable(source, 'params'), { range: cell.initial, contactId: 17 })
   const request = evaluate(requestArgs(source, endpoint)[0], { params })
   assert.deepEqual([request.startDate, request.endDate], [day1, day1], `${endpoint} first request is Today`)
   cell.set({ startDate: '2026-08-01', endDate: '2026-08-31', startTime: '', endTime: '' })
   expectDates(cell.current(), '2026-08-01', '2026-08-31')
   cell.set(preset('all'))
   expectDates(cell.current(), '')
+}
+
+// P10-21 (owner: "customers purchases are doing default date start and date
+// end, remove that to show all"): CustomerPurchasesReportModal deliberately
+// dropped the shared [range, setRange]/Today default for two independent
+// `fromDate`/`toDate` strings that start EMPTY (all-time), matching its
+// SupplierPurchasesModal sibling. The old assertion here (same shape as
+// Delivery, opens on Today) pinned exactly the behaviour the owner asked
+// removed; this proves the new rule instead: first request carries no
+// startDate/endDate, and picking a range narrows it.
+{
+  const file = 'contacts/CustomerPurchasesReportModal.tsx'
+  const source = read(file)
+  const fromCell = stateCell(source, '[fromDate, setFromDate]')
+  const toCell = stateCell(source, '[toDate, setToDate]')
+  assert.equal(fromCell.initial, '', 'CustomerPurchasesReportModal opens with no start bound (all-time)')
+  assert.equal(toCell.initial, '', 'CustomerPurchasesReportModal opens with no end bound (all-time)')
+  // The production `params` builder for getCustomerSalesReport, executed for
+  // real (lifted verbatim from `const params = ... }` through the last
+  // `params.<field> = <field>` line): startDate/endDate are only ever ADDED
+  // when the field is non-empty, never defaulted, so an all-time open sends
+  // neither key.
+  const paramsStart = source.indexOf('const params: Record')
+  const paramsEnd = source.indexOf('const response = await getCustomerSalesReport')
+  assert.ok(paramsStart >= 0 && paramsEnd > paramsStart, 'CustomerPurchasesReportModal still builds params before calling getCustomerSalesReport')
+  const paramsBuilderBody = source.slice(paramsStart, paramsEnd)
+  const buildParams = evaluate(`(fromDate, toDate) => { ${paramsBuilderBody} return params }`, { customerId: 17, page: 1, pageSize: 20 })
+  const firstRequestParams = buildParams(fromCell.initial, toCell.initial)
+  assert.equal('startDate' in firstRequestParams, false, 'getCustomerSalesReport first request carries no startDate')
+  assert.equal('endDate' in firstRequestParams, false, 'getCustomerSalesReport first request carries no endDate')
+  fromCell.set('2026-08-01')
+  toCell.set('2026-08-31')
+  const rangedParams = buildParams(fromCell.current(), toCell.current())
+  assert.deepEqual([rangedParams.startDate, rangedParams.endDate], ['2026-08-01', '2026-08-31'], 'a chosen range still narrows the request')
 }
 
 const salesExport = read('sales/ExportModal.tsx')

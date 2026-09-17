@@ -145,7 +145,11 @@ for (const file of sections) {
 // modal rows. If the check below ever starts reporting `true`, the instrument
 // is broken and the assertions above are meaningless.
 const control = read('CustomerPurchasesReportModal.tsx')
-assert.ok(control.includes('<DateTimeRangePicker'), 'the control must actually be a date-range surface')
+// This modal has since moved to the shared StatsRangeRow wrapper too (same
+// migration the ledger sections got in P3-10), so it no longer draws a bare
+// `<DateTimeRangePicker` -- check with the same hasRangeControl() detector the
+// sweep above uses, rather than pinning the one control shape that moved.
+assert.ok(hasRangeControl(control), 'the control must actually be a date-range surface')
 assert.equal(
   pinsItsDateRow(control),
   false,

@@ -165,7 +165,14 @@ runTest("the branch Receive stock modal asks for a reason and sends it", () => {
   assert.match(receiveModal, /<StockReasonField\n\s+id="receive-batch-reason"[^]*?savedReasons=\{savedReasons\}/)
   assert.doesNotMatch(receiveModal, /savedReasons\.map/, 'no second copy of the chip markup')
   // Blank sends null so the Worker keeps its own "Stock received (<lot>)" label.
-  assert.match(receiveModal, /await receiveBatchStock\(\{[^]*?reason: reason\.trim\(\) \|\| null,[^]*?\}\)/)
+  // P10-19 inserted a confirm-review step: the payload is now built into
+  // `pendingReceipt.request` at submit time and sent later as
+  // `receiveBatchStock(pending.request)`, rather than inline at the call
+  // site. Assert both halves instead of the single inline call the old
+  // regex pinned, so the property (reason still rides the wire, blank -> null)
+  // survives that split.
+  assert.match(receiveModal, /setPendingReceipt\(\{[^]*?reason: reason\.trim\(\) \|\| null,[^]*?\}\)/)
+  assert.match(receiveModal, /await receiveBatchStock\(pending\.request as any\)/)
   // In-progress work: dirty guard, draft write, draft restore, and the reset
   // that runs when another product is opened -- same as every other field.
   assert.match(receiveModal, /notes !== '' \|\| reason !== ''/)

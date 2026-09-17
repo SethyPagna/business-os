@@ -182,19 +182,23 @@ for (const surface of surfaces) {
   assert.match(source, /onClose=\{\(\) => set\w+\(null\)\}/, `${surface.file}: closing the float clears its slot`)
 }
 
-// The three ledgers must also stop hiding their rows behind a sideways scroll
+// The four ledgers must also stop hiding their rows behind a sideways scroll
 // on a phone: the wide table is large-screen only and a wrapped card list takes
 // its place below md, both opening the same float.
-for (const file of ['ApInvoicesSection.tsx', 'ArInvoicesSection.tsx', 'SupplierPurchasesModal.tsx']) {
+//
+// P10-15 (owner: "the supplier display is not consistent like excel style in
+// large screens") brought StockInInvoicesSection into this same table/card
+// split, matching its AP-invoices sibling -- it used to be the one ledger with
+// no sideways-scroll table (a bare stacked list of buttons at every width),
+// which is why an earlier version of this test pinned it as a "positive
+// control" that must NOT match md:hidden. That control is stale now that the
+// rule applies to all four surfaces; folding it into the same sweep instead of
+// carving it out.
+for (const file of ['ApInvoicesSection.tsx', 'ArInvoicesSection.tsx', 'SupplierPurchasesModal.tsx', 'StockInInvoicesSection.tsx']) {
   const source = read(file)
   assert.match(source, /className="hidden [^"]*\bmd:block\b/, `${file}: the wide ledger table is large-screen only`)
   assert.match(source, /className="space-y-2 md:hidden"/, `${file}: the phone gets a wrapped card list instead`)
 }
-
-// Positive control: the Stock-In ledger's rows were already wrapping flex rows
-// rather than a table, so it must NOT have grown a md:hidden card list -- if it
-// had, the sweep above would be matching something other than the mobile split.
-assert.doesNotMatch(read('StockInInvoicesSection.tsx'), /md:hidden/, 'positive control: Stock-In rows already wrap and need no card mirror')
 
 // A row opens the float and does NOTHING else. The owner asked for this
 // twice -- "the invoice is doing click to expand. instead it should be click
@@ -228,7 +232,13 @@ for (const file of ['StockInInvoicesSection.tsx', 'ApInvoicesSection.tsx', 'ArIn
 {
   const stockIn = read('StockInInvoicesSection.tsx')
   const float = stockIn.indexOf('<InvoiceDetailFloat')
-  assert.ok(stockIn.indexOf('data-invoice-ledger-scroll') > float, 'the Stock-In lines table is the float\'s content')
+  // P10-15 gave the OUTER invoice-group table (large-screen list, before the
+  // float) the same `data-invoice-ledger-scroll` marker as a styling match for
+  // its AP-invoices sibling, so a bare indexOf now finds that first, unrelated
+  // occurrence instead of the lines table inside the float. Searching from the
+  // float's own position keeps the property this control actually checks: the
+  // lines table (its second, inner occurrence) still lives inside the float.
+  assert.ok(stockIn.indexOf('data-invoice-ledger-scroll', float) > float, 'the Stock-In lines table is the float\'s content')
   assert.ok(stockIn.indexOf('loadLines(detailGroup, nextPage)') > float, 'and its line pager pages the lines inside the float')
   assert.match(stockIn, /const \[lineCache, setLineCache\]/, 'the per-group line cache is named for what it is, not for an expand that no longer exists')
 }
