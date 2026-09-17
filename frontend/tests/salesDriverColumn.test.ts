@@ -86,7 +86,11 @@ assert.match(
   'the surface must use the shared column definitions, not a local copy',
 )
 
-assert.match(salesSurface, /import \{ resolveDriverLabel \} from '\.\.\/\.\.\/utils\/salesDriverLabel\.ts'/)
+// The point of this assertion is that the surface takes the label from the
+// shared pure module instead of re-deriving it inline. It deliberately does
+// NOT pin the rest of the import list: P10-24 added isDeliveryFreeForCustomer
+// from the same module, and a helper arriving beside it is not a regression.
+assert.match(salesSurface, /import \{[^}]*\bresolveDriverLabel\b[^}]*\} from '\.\.\/\.\.\/utils\/salesDriverLabel\.ts'/, 'the surface must import resolveDriverLabel from the shared module')
 assert.match(salesSurface, /cols\.isVisible\('driver'\)/, 'the desktop table must gate the driver cell on the column chooser')
 // Header cell exists.
 assert.match(salesSurface, /cols\.isVisible\('driver'\) \? <th[\s\S]{0,120}>\{t\('driver'\)}<\/th> : null/)
