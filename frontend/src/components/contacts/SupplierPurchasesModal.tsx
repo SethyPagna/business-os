@@ -121,7 +121,16 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
 
   return (
     <Modal title={`${tr('supplier_purchases', 'Purchases')} -- ${supplierName}`} onClose={onClose} wide unsavedChanges="read-only">
-      <div className="space-y-3">
+      {/* P10-16: the shared Modal's own body (.modal-scroll, styles/main.css)
+          already scrolls the whole panel, so the old max-h + overflow-auto on
+          the table container below gave the operator TWO nested scrollbars.
+          Fix: make this a flex column that fills that outer scroll area
+          exactly (h-full so it never itself overflows) and let only the
+          middle list region take flex-1 + its own overflow-y-auto. The
+          range row, stat cells and pagination keep their natural height and
+          never move; the shared Modal's .modal-scroll then has nothing left
+          to scroll, so there is exactly one live scrollbar -- the list's. */}
+      <div className="flex h-full min-h-0 flex-col gap-3">
         {/* Start → End on its own full-width row above the report, the same
             control and preset chips the three invoice ledgers now lead with.
             Outside the loading branch on purpose: re-ranging must stay
@@ -144,7 +153,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
             {/* Part 567: 4 stat cells, not 5 (user: "the stats can be 4 stats
                 not 5... made more compact"). Batches and Products -- both plain
                 counts -- share one cell so nothing is dropped. */}
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4">
               {[
                 [`${tr('purchase_batches', 'Received dates')} / ${tr('products', 'Products')}`, `${totals.batches ?? 0} / ${totals.products ?? 0}`],
                 [tr('units_received', 'Units received'), qty(totals.units_received)],
@@ -158,19 +167,19 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
               ))}
             </div>
             {Number(totals.batches_without_cost) > 0 ? (
-              <div className="text-[11px] text-gray-400">
+              <div className="shrink-0 text-[11px] text-gray-400">
                 {tr('purchase_cost_partial_hint', 'Some received dates have no recorded quantity/cost yet (received before tracking, or cost unknown) -- the totals above only count received dates where both are known:')} {totals.batches_without_cost}
               </div>
             ) : null}
             {batches.length === 0 ? (
               <div className="py-6 text-center text-sm text-gray-400">{tr('no_purchases_yet', 'No received dates are attributed to this supplier yet.')}</div>
             ) : (
-              <>
+              <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700">
               {/* Large screens keep the full table; the phone gets the wrapped
                   card list below rather than a 640px table dragged sideways
                   inside an already-narrow modal. Either one opens the same
                   per-line float on click. */}
-              <div className="hidden max-h-[calc(55*var(--app-vh))] overflow-auto rounded-xl border border-gray-200 dark:border-gray-700 md:block">
+              <div className="hidden md:block">
                 <table className="w-full min-w-[640px] text-left text-xs">
                   <thead className="sticky top-0 bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                     <tr>
@@ -229,8 +238,9 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                   </div>
                 ))}
               </div>
-              </>
+              </div>
             )}
+            <div className="shrink-0">
             <PaginationControls
               page={Number(data?.page || page)}
               pageSize={Number(data?.page_size || pageSize)}
@@ -241,6 +251,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
               t={t}
               compact
             />
+            </div>
           </>
         )}
         {/* No footer Close. The shared Modal already renders the header ✕ that
