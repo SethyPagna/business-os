@@ -421,6 +421,38 @@ runTest('a bulk SET states its receipt facts, because a set that raises stock is
   assert.ok(!bulk.includes("isStockIn: action === 'add'"), 'a bulk set-up is a stock-in the Worker gates; the form must gate it too')
 })
 
+
+runTest('the free-goods declaration sits under the receipt row, not inside the cost cell', () => {
+  // Owner report (Sep 17): on a wide screen the cost input sat higher than the
+  // other inputs in the row. Cause: the declaration lived inside the cost
+  // <label>, making that grid cell taller, and sm:items-end aligned the tall
+  // cell's bottom -- lifting its input. It is its own full-width child now,
+  // and the cost track is wide enough that the required marker stays inline.
+  const src = (rel: string) => readFileSync(new URL(`../src/${rel}`, import.meta.url), 'utf8')
+  const source = src('components/inventory/FastStockInModal.tsx')
+  const costCell = source.slice(source.indexOf("{tr('cost_price_usd'"))
+  const costCellEnd = costCell.indexOf('</label>')
+  assert.ok(costCellEnd > 0, 'cost label not found')
+  assert.doesNotMatch(costCell.slice(0, costCellEnd), /stock_receipt_free_goods/, 'the declaration must not live inside the cost label')
+  assert.match(source, /sm:grid-cols-\[5rem_8\.5rem_8rem_1fr\]/, 'the cost track must fit the label and its required marker on one line')
+  assert.match(source, /whitespace-nowrap[^"]*">\{tr\('cost_price_usd'/, 'the cost label must not wrap')
+  assert.match(source, /col-span-2[\s\S]{0,400}?sm:col-span-4[\s\S]{0,200}?title=\{tr\('stock_receipt_free_goods_hint'/, 'the declaration is its own full-width row and keeps the hint as a title')
+  // The owner asked for the bare word, and for no info tooltip beside it.
+  const en = JSON.parse(src('lang/en.json')) as Record<string, string>
+  assert.equal(en.stock_receipt_free_goods, 'Free')
+  for (const host of [
+    'components/inventory/FastStockInModal.tsx',
+    'components/inventory/InventoryStockModals.tsx',
+    'components/inventory/ReceiveBatchModal.tsx',
+    'components/products/CreateProductsSessionModal.tsx',
+    'components/products/forms/BulkAddStockModal.tsx',
+  ]) {
+    const text = src(host)
+    assert.doesNotMatch(text, /<InfoHint[^>]*stock_receipt_free_goods\b/, `${host} still shows an info tooltip beside the declaration`)
+    assert.doesNotMatch(text, /'Free goods/, `${host} still falls back to the old wording`)
+  }
+})
+
 if (failed > 0) {
   process.exitCode = 1
   console.error(`\n${failed} stock-receipt-field test(s) failed`)

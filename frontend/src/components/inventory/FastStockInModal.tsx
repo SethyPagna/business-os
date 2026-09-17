@@ -1024,24 +1024,26 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                   />
                 </div>
               ) : null}
-              <div className={`mt-2 grid grid-cols-2 gap-2 sm:items-end ${mode === 'remove' ? 'sm:grid-cols-[5rem_1fr]' : 'sm:grid-cols-[5rem_6rem_8rem_1fr]'}`}>
+              <div className={`mt-2 grid grid-cols-2 gap-2 sm:items-end ${mode === 'remove' ? 'sm:grid-cols-[5rem_1fr]' : 'sm:grid-cols-[5rem_8.5rem_8rem_1fr]'}`}>
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{mode === 'set' ? tr('set_to', 'Set to') : tr('quantity', 'Qty')}</span><input type="number" min={mode === 'set' ? 0 : 1} step="1" className="input text-center text-sm" value={quantity} onChange={(event) => setQuantity(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addLine() }} /></label>
                 {mode !== 'remove' ? <>
-                <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('cost_price_usd', 'Cost price $')} <span className="text-red-500" aria-hidden="true">*</span></span><input type="number" min="0" step="0.01" className="input text-sm" required disabled={freeGoods} value={freeGoods ? 0 : unitCost} onChange={(event) => {
+                <label className="block"><span className="mb-1 block whitespace-nowrap text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('cost_price_usd', 'Cost price $')} <span className="text-red-500" aria-hidden="true">*</span></span><input type="number" min="0" step="0.01" className="input text-sm" required disabled={freeGoods} value={freeGoods ? 0 : unitCost} onChange={(event) => {
                   const next = event.target.value
                   setUnitCost(next)
                   setCreatePriceVariant(costChanged(picked, next))
-                }} />
-                  {/* N14-D: $0.00 is a claim the operator makes, never a default. */}
-                  <span className={`mt-1 flex items-center gap-1 rounded text-[10px] text-gray-600 dark:text-gray-400 ${zeroCostNeedsDeclaration ? 'bg-amber-50 px-1 py-0.5 font-medium text-amber-900 ring-1 ring-amber-300 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-700' : ''}`}>
-                    <input type="checkbox" className="h-3 w-3" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) { setUnitCost('0'); setCreatePriceVariant(costChanged(picked, '0')) } }} />
-                    {tr('stock_receipt_free_goods', 'Free goods')}
-                    <InfoHint label={tr('stock_receipt_free_goods', 'Free goods')} text={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')} />
-                  </span></label>
+                }} /></label>
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={expiryDate} onChange={(iso) => setExpiryDate(iso)} /></label>
                 <div className="flex min-w-0 items-end gap-1.5">
                   <span className="mb-2 whitespace-nowrap text-[10px] tabular-nums text-gray-500 sm:text-[11px]">{tr('total_cost', 'Total cost')}: ${(Math.max(0, Number(quantity) || 0) * Math.max(0, Number(unitCost) || 0)).toFixed(2)}</span>
                 </div>
+                {/* N14-D: $0.00 is a claim the operator makes, never a default.
+                    Its own row under the inputs: inside the cost cell it made that
+                    cell taller than its siblings, and sm:items-end then lifted the
+                    cost input off the line the other inputs sit on. */}
+                <label className={`col-span-2 flex w-fit cursor-pointer items-center gap-1.5 rounded text-[11px] text-gray-600 sm:col-span-4 dark:text-gray-400 ${zeroCostNeedsDeclaration ? 'bg-amber-50 px-1 py-0.5 font-medium text-amber-900 ring-1 ring-amber-300 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-700' : ''}`} title={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')}>
+                  <input type="checkbox" className="h-3.5 w-3.5" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) { setUnitCost('0'); setCreatePriceVariant(costChanged(picked, '0')) } }} />
+                  {tr('stock_receipt_free_goods', 'Free')}
+                </label>
                 {mode === 'add' && costChanged(picked, unitCost) ? (
                   <label className="col-span-2 flex cursor-pointer items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:col-span-4 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
                     <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0" checked={createPriceVariant} onChange={(event) => setCreatePriceVariant(event.target.checked)} />

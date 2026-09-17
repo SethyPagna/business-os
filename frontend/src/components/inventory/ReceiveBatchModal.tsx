@@ -463,8 +463,7 @@ export default function ReceiveBatchModal({
               {/* N14-D: a zero cost is a claim, and this is where it is made. */}
               <span className="mt-1 flex items-center gap-1 text-[10px] text-gray-600 dark:text-gray-400">
                 <input type="checkbox" className="h-3 w-3" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) setUnitCost('0') }} />
-                {tr('stock_receipt_free_goods', 'Free goods')}
-                <InfoHint label={tr('stock_receipt_free_goods', 'Free goods')} text={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')} />
+                <span title={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')}>{tr('stock_receipt_free_goods', 'Free')}</span>
               </span>
             </label>
           </div>

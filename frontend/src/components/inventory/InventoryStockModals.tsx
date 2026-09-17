@@ -716,8 +716,7 @@ export default function InventoryStockModals({
                           checked={adjustForm.free_goods}
                           onChange={e => setAdjustForm(f => ({ ...f, free_goods: e.target.checked, unit_cost_usd: e.target.checked ? 0 : f.unit_cost_usd }))}
                         />
-                        <span>{tr('stock_receipt_free_goods', 'Free goods')}</span>
-                        <InfoHint label={tr('stock_receipt_free_goods', 'Free goods')} text={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')} />
+                        <span title={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')}>{tr('stock_receipt_free_goods', 'Free')}</span>
                       </label>
                     </div>
                     <div>
