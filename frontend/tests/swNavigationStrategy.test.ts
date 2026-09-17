@@ -29,6 +29,9 @@ function runTest(name: string, fn: () => void): void {
   try { fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
 }
 
+async function runTestAsync(name: string, fn: () => Promise<void>): Promise<void> {
+  try { await fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
+}
 const swSource = fs.readFileSync(new URL('../src/public-runtime/service-worker.ts', import.meta.url), 'utf8')
 const builtSw = fs.readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
 
@@ -146,6 +149,63 @@ return isStaleBuildAsset`)({ location: { origin: 'https://admin.example.com' } }
   })
 }
 
+for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]] as const) {
+  await runTestAsync(`an install that finds an unservable shell takes over instead of waiting (${label})`, async () => {
+    // A worker already serving a poisoned shell answers every navigation with
+    // a response the browser rejects, so the user sees a blank page and there
+    // is no app left in which to press Update -- and a waiting worker parks
+    // until the last client of the old one goes away. That is a deadlock the
+    // user cannot break, so the new install claims the registration itself.
+    const guard = functionBody(source, 'function isValidDocumentResponse', 'function isValidStaticResponse')
+    const probe = functionBody(source, 'async function priorShellIsUnservable', 'async function cacheNamesToRetain')
+    const build = (entries: Record<string, Record<string, unknown>>) => {
+      const cachesStub = {
+        keys: async () => Object.keys(entries),
+        open: async (name: string) => ({
+          match: async (url: string) => entries[name][url] ?? null,
+        }),
+      }
+      return new Function('caches', 'APP_SHELL_CACHE', `${guard}
+${probe}
+return priorShellIsUnservable`)(cachesStub, 'business-os-app-shell-new') as
+        (keys: string[]) => Promise<boolean>
+    }
+    const ok = { ok: true, type: 'basic', redirected: false }
+    const poison = { ok: true, type: 'basic', redirected: true }
+
+    const poisoned = build({
+      'business-os-app-shell-old': { '/index.html': poison, '/': ok },
+      'business-os-app-shell-new': { '/index.html': ok },
+    })
+    assert.equal(
+      await poisoned(['business-os-app-shell-old', 'business-os-app-shell-new']),
+      true,
+      'a previous generation holding a redirected shell is exactly the stuck case',
+    )
+
+    const healthy = build({
+      'business-os-app-shell-old': { '/index.html': ok, '/': ok },
+      'business-os-app-shell-new': { '/index.html': ok },
+    })
+    assert.equal(
+      await healthy(['business-os-app-shell-old', 'business-os-app-shell-new']),
+      false,
+      'an ordinary update must still wait for the user -- this must not become skipWaiting for everyone',
+    )
+
+    // Only the generations being REPLACED are inspected; the cache this
+    // install just wrote is its own business.
+    const selfOnly = build({ 'business-os-app-shell-new': { '/index.html': poison } })
+    assert.equal(await selfOnly(['business-os-app-shell-new']), false, 'the install never judges its own cache')
+
+    const install = functionBody(source, "self.addEventListener('install'", "self.addEventListener('activate'")
+    assert.match(
+      install,
+      /priorShellIsUnservable\([\s\S]{0,120}skipWaiting\(\)/,
+      'the install handler must act on the probe, not merely define it',
+    )
+  })
+}
 if (failed > 0) {
   console.error(`${failed} test(s) failed`)
   process.exit(1)

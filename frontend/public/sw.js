@@ -304,6 +304,29 @@ async function precacheAppShell() {
     // already looking at finishes loading.
     pendingDeferredAssets = [...new Set(deferredAssets.filter((url) => (!requiredEntryAssets.includes(url) && !optionalEagerAssets.includes(url))))];
 }
+// A worker that is ALREADY running with a poisoned shell cannot be waited
+// out politely. It answers every navigation with a response the browser
+// rejects (see isValidDocumentResponse), so the user sees a blank page and
+// there is no app left in which to press Update -- and a waiting worker
+// parks until the last client using the old one goes away. The phone that
+// hit the Sep 17 outage is in exactly that state: it is holding the poison
+// right now, and the fix has to reach it without the user being able to ask
+// for it. So a new install checks the generations it is replacing, and takes
+// over immediately when one of them cannot serve a navigation at all.
+async function priorShellIsUnservable(keys) {
+    const priorShells = keys.filter((key) => key.startsWith('business-os-app-shell-') && key !== APP_SHELL_CACHE);
+    for (const name of priorShells) {
+        const cache = await caches.open(name).catch(() => null);
+        if (!cache)
+            continue;
+        for (const url of ['/index.html', '/']) {
+            const entry = await cache.match(url).catch(() => null);
+            if (entry && !isValidDocumentResponse(entry))
+                return true;
+        }
+    }
+    return false;
+}
 async function cacheNamesToRetain(keys) {
     const retained = new Set([APP_SHELL_CACHE, STATIC_CACHE]);
     const priorShells = keys.filter((key) => key.startsWith('business-os-app-shell-') && key !== APP_SHELL_CACHE);
@@ -581,6 +604,13 @@ self.addEventListener('install', (event) => {
         // wait until the user closes the old client or explicitly chooses Update;
         // the first install still activates normally because there is no incumbent.
         if (self.registration.active) {
+            // The one case where waiting is worse than taking over: the incumbent
+            // is serving a shell the browser refuses, so the session it is
+            // protecting does not exist.
+            if (await priorShellIsUnservable(await caches.keys()).catch(() => false)) {
+                await self.skipWaiting();
+                return;
+            }
             await broadcastSyncEvent('BUSINESS_OS_APP_UPDATE_AVAILABLE', {
                 version: APP_SHELL_VERSION,
                 message: 'New version ready',
