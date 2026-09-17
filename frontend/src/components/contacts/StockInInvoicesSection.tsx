@@ -365,7 +365,58 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           {invoices.length === 0 ? (
             <div className="py-6 text-center text-sm text-gray-400">{tr('stock_in_invoices_empty', 'No stock-in invoices match these filters.')}</div>
           ) : (
-            <div className="space-y-2">
+            <>
+            {/* P10-15 (owner: "the supplier display is not consistent like
+                excel style in large screens"): this ledger used to be a bare
+                stacked list of buttons at every width -- the only supplier
+                list in the Suppliers tab without the dense header-row table
+                its own sibling (Supplier AP Invoices, immediately below in
+                the same chip switcher) already uses. Matching that sibling's
+                exact table/card split rather than inventing a third shape. */}
+            <div data-invoice-ledger-scroll className="hidden max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-gray-200 dark:border-gray-700 md:block">
+              <table className="w-full min-w-[860px] text-left text-xs tabular-nums">
+                <thead className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                  <tr>
+                    <th className="px-3 py-2">{tr('received_date', 'Received date')}</th>
+                    <th className="px-3 py-2">{tr('supplier', 'Supplier')}</th>
+                    <th className="px-3 py-2">{tr('received_branch', 'Received into')}</th>
+                    <th className="px-3 py-2 text-right">{tr('invoice_lines', 'Lines')}</th>
+                    <th className="px-3 py-2 text-right">{tr('units_received', 'Units received')}</th>
+                    <th className="px-3 py-2 text-right">{tr('purchase_cost', 'Purchase cost')}</th>
+                    <th className="px-3 py-2">{tr('on_credit', 'Not Yet Paid')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((group) => {
+                    const key = groupKeyOf(group)
+                    const branchNames = groupBranchNames(group)
+                    return (
+                      <tr
+                        key={key}
+                        className="cursor-pointer border-t border-gray-100 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-700/40"
+                        onClick={() => openGroup(group)}
+                        aria-haspopup="dialog"
+                      >
+                        <td className="whitespace-nowrap px-3 py-2 text-gray-800 dark:text-gray-100">
+                          {group.received_day ? <time dateTime={group.received_day}>{fmtDateOnly(group.received_day)}</time> : tr('no_date_recorded', 'No date recorded')}
+                        </td>
+                        <td className="px-3 py-2 text-gray-800 dark:text-gray-100">{supplierLabel(group)}</td>
+                        <td className="px-3 py-2 text-gray-500">{branchNames || tr('not_recorded', 'Not recorded')}</td>
+                        <td className="px-3 py-2 text-right text-gray-500">{group.line_count}</td>
+                        <td className="px-3 py-2 text-right text-gray-500">{qty(group.units_received)}</td>
+                        <td className="px-3 py-2 text-right font-medium text-gray-800 dark:text-gray-100">{money(group.cost_usd)}</td>
+                        <td className="px-3 py-2">
+                          {group.credit_lines > 0 ? (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">{group.credit_lines}</span>
+                          ) : <span className="text-[11px] text-gray-400">--</span>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="space-y-2 md:hidden">
               {invoices.map((group) => {
                 const key = groupKeyOf(group)
                 const branchNames = groupBranchNames(group)
@@ -397,6 +448,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                 )
               })}
             </div>
+            </>
           )}
 
           <div className="flex justify-center">
