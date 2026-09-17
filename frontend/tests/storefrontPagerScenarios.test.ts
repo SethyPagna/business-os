@@ -219,21 +219,19 @@ await runTest('bootstrapPageSizeMatchesViewer: stored choice x bootstrap size ca
 // of leaving the selector showing 20/50/100 with none of them selected while
 // the grid actually holds an unlisted size.
 // ---------------------------------------------------------------------------
-await runTest('the centered pill merges an off-menu configured size into its own option list', () => {
+await runTest('the centered pill no longer carries the retired off-menu-size merge for a selector it does not render', () => {
+  // This test used to prove the merge that fed an off-menu safePageSize into
+  // the rendered size-select options. P10-20 (owner, 2026-09-17: "no need to
+  // show rows per page options") retired the selector itself from this
+  // branch, so a merge that fed it is dead code if it survived -- prove it
+  // did not, rather than leaving an assertion that pins logic nothing reads.
   const branch = centeredBranch()
-  assert.match(
+  assert.doesNotMatch(
     branch,
     /const sizeOptions = pageSizeOptions\.includes\(safePageSize\) \? pageSizeOptions : \[\.\.\.pageSizeOptions, safePageSize\]\.sort\(\(a, b\) => a - b\)/,
-    'an off-menu safePageSize must be added to the options, not silently dropped',
+    'the merge that only ever fed the retired selector must not linger as dead code',
   )
-  // Discriminating: a naive `pageSizeOptions` pass-through (no merge) would
-  // still satisfy every OTHER assertion in this file, since 20/50/100 is the
-  // only combination exercised elsewhere. Prove the merge logic itself here
-  // by evaluating it exactly as written.
-  const pageSizeOptions = [20, 50, 100]
-  const merge = (safePageSize: number) => (pageSizeOptions.includes(safePageSize) ? pageSizeOptions : [...pageSizeOptions, safePageSize].sort((a, b) => a - b))
-  assert.deepEqual(merge(30), [20, 30, 50, 100])
-  assert.deepEqual(merge(50), [20, 50, 100], 'an on-menu size must not duplicate itself')
+  assert.doesNotMatch(branch, /<PageSizeSelect/, 'and the selector itself must stay retired')
 })
 
 // ---------------------------------------------------------------------------
@@ -241,16 +239,18 @@ await runTest('the centered pill merges an off-menu configured size into its own
 // present (the exact 2026-09 regression storefrontPagerLayout.test.ts pins
 // with one case); this sweeps every size at the boundary instead of one.
 // ---------------------------------------------------------------------------
-await runTest('single-page results at every offered size still surface the size selector', () => {
+await runTest('single-page results at every offered size still surface the pill, with no selector-only exception left', () => {
+  // P10-20 retired the size selector this pill used to keep alive on a
+  // single page; a single page now stays up purely because the shared
+  // `state.visible` gate (total > 0) already keeps it up for every layout,
+  // with no branch-local exception to prove separately any more.
   for (const size of [20, 50, 100]) {
     const state = pagerState(1, Math.max(1, size - 5), size)
     assert.equal(state.totalPages, 1, `size=${size}`)
-    // The pill's own early-return rule (centered branch): drop only when
-    // totalPages <= 1 AND there is no size selector. With a selector present
-    // (onPageSizeChange truthy) the pill must stay up.
+    assert.equal(state.visible, true, `size=${size} single page must still show the pill`)
   }
   const branch = centeredBranch()
-  assert.match(branch, /if \(totalPages <= 1 && !showPageSizeSelect\) return null/)
+  assert.doesNotMatch(branch, /if \(totalPages <= 1 && !showPageSizeSelect\) return null/, 'the retired per-page-only exception must not come back')
 })
 
 // ---------------------------------------------------------------------------
@@ -283,16 +283,17 @@ await runTest('server bootstrap/search responses never overwrite the viewer-sele
   assert.match(publicCatalogPage, /pageSize: productPageSize,/, 'the product search request must send the CURRENT viewer size back to the server')
 })
 
-await runTest('the row order is [Back] [size] [page / total] [Next] -- and both mounts share one gate', () => {
+await runTest('the row order is [Back] [page / total] [Next] -- and both mounts share one gate', () => {
   // 2026-09-15 (owner, supersedes 2026-09-14's [size][Back] order): Back
-  // leads the row, then the page-size selector.
+  // leads the row, then the page-size selector. P10-20 (owner, 2026-09-17)
+  // retired the selector itself, leaving Back / page / total / Next.
   const branch = centeredBranch()
   const backAt = branch.indexOf('aria-label={backLabel}')
-  const sizeAt = branch.indexOf('ariaLabel={perPageLabel}')
   const pageAt = branch.indexOf('aria-label={pageLabel}', backAt)
   const totalAt = branch.indexOf('<span className={countClass}>')
   const nextAt = branch.indexOf('aria-label={nextLabel}')
-  assert.ok(backAt > 0 && sizeAt > backAt && pageAt > sizeAt && totalAt > pageAt && nextAt > totalAt)
+  assert.ok(backAt > 0 && pageAt > backAt && totalAt > pageAt && nextAt > totalAt)
+  assert.doesNotMatch(branch, /<PageSizeSelect/, 'P10-20: the per-page chooser must not come back to this row')
 
   const mounts = catalogProducts.match(/<CatalogPaginationControls\b/g) || []
   assert.equal(mounts.length, 2)

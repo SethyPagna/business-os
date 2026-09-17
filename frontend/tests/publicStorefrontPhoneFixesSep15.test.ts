@@ -181,21 +181,28 @@ check('3 the minimize/restore labels exist in both language packs', () => {
 
 // --- 4. Pagination row order + results count + dead hint removed ----------
 
-check('4 the storefront pager reads Back, page size, page/total, Next', () => {
+check('4 the storefront pager reads Back, page/total, Next', () => {
+  // P10-20 (owner, 2026-09-17: "no need to show rows per page options")
+  // retired the per-page selector from every PaginationControls branch,
+  // including this centred one -- the same retirement the 'default' and
+  // 'compact' branches already carry their own comments for. The three
+  // controls that remain (Back, the editable page box, Next) are the
+  // property this check still proves; the size-select assertion is gone
+  // with the control, not narrowed around it.
   const centeredBranch = paginationControls.slice(
     paginationControls.indexOf("if (layout === 'centered') {"),
     paginationControls.indexOf("if (compact && rangeAsPageSize) {"),
   )
   const backIndex = centeredBranch.indexOf('aria-label={backLabel}')
-  const sizeSelectIndex = centeredBranch.indexOf('<PageSizeSelect')
   // The FIRST `aria-label={pageLabel}` in this branch is the enclosing
   // <nav>'s own accessible name, not the editable page box -- search past it.
   const pageBoxIndex = centeredBranch.indexOf('aria-label={pageLabel}', centeredBranch.indexOf('aria-label={pageLabel}') + 1)
   const nextIndex = centeredBranch.indexOf('aria-label={nextLabel}')
-  assert.ok(backIndex > -1 && sizeSelectIndex > -1 && pageBoxIndex > -1 && nextIndex > -1, 'all four controls must exist')
+  assert.ok(backIndex > -1 && pageBoxIndex > -1 && nextIndex > -1, 'all three controls must exist')
+  assert.doesNotMatch(centeredBranch, /<PageSizeSelect/, 'P10-20: the per-page chooser is retired from the storefront pill')
   assert.ok(
-    backIndex < sizeSelectIndex && sizeSelectIndex < pageBoxIndex && pageBoxIndex < nextIndex,
-    `expected Back < size select < page box < Next in source order, got ${JSON.stringify({ backIndex, sizeSelectIndex, pageBoxIndex, nextIndex })}`,
+    backIndex < pageBoxIndex && pageBoxIndex < nextIndex,
+    `expected Back < page box < Next in source order, got ${JSON.stringify({ backIndex, pageBoxIndex, nextIndex })}`,
   )
 })
 

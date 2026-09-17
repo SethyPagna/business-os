@@ -9,10 +9,11 @@
 // branch, which catalogPagination.tsx reached by passing no layout at all.
 // This test pins the storefront's own shape instead: one centred single-line
 // pill, mounted symmetrically above AND below the grid, with no summary row
-// anywhere. The compact page-size selector was restored by the owner on
-// 2026-09-14 (after the 2026-09-07 decision to drop it) leading the row; the
-// owner's 2026-09-15 report superseded that order -- Back now leads, then the
-// page-size selector, then the editable page/total, then Next, with the
+// anywhere. The page-size selector went through two reversals -- dropped
+// 2026-09-07, restored 2026-09-14, reordered behind Back on 2026-09-15 -- and
+// then P10-20 (owner, 2026-09-17: "no need to show rows per page options")
+// retired it for good, from this branch along with every other. What
+// survives here is Back, then the editable page/total, then Next, with the
 // total result count printed on the SAME row as the pill.
 //
 // It is a source-shape test on purpose -- the storefront pager is JSX with no
@@ -65,15 +66,17 @@ runTest('the centred branch prints no summary, and Back leads the row', () => {
   const branch = centeredBranch()
   assert.doesNotMatch(branch, /\{showingLabel\}/, 'the storefront pager must not render the Showing summary')
   assert.doesNotMatch(branch, /\{label\}/, 'the storefront pager must not render the "products" tail of the summary')
-  // Restored 2026-09-14 by the owner, reversing the 2026-09-07 removal: the
-  // shared PageSizeSelect (a native <select> is banned in components/ --
-  // tests/sourceSyntaxCheck.ts), named from the translated per-page label.
-  // 2026-09-15 (owner, supersedes 2026-09-14's order): Back leads the row,
-  // ahead of the size selector.
-  assert.match(branch, /ariaLabel=\{perPageLabel\}/, 'the size selector carries the translated per-page name')
+  // P10-20 (owner, 2026-09-17: "no need to show rows per page options")
+  // retired the shared PageSizeSelect this branch carried after its
+  // 2026-09-14 restore and 2026-09-15 reorder -- the selector itself is gone,
+  // not just its position, so the property left to prove is that Back leads
+  // straight into the editable page box with nothing selector-shaped between.
+  assert.doesNotMatch(branch, /<PageSizeSelect/, 'the per-page selector is retired from the storefront pill')
+  const backIdx = branch.indexOf('aria-label={backLabel}')
+  const pageBoxIdx = branch.indexOf('aria-label={pageLabel}', branch.indexOf('aria-label={pageLabel}') + 1)
   assert.ok(
-    branch.indexOf('aria-label={backLabel}') < branch.indexOf('ariaLabel={perPageLabel}'),
-    'Back comes BEFORE the size selector: [Back] [20/50/100] [page / total] [Next]',
+    backIdx > -1 && pageBoxIdx > backIdx,
+    'Back comes BEFORE the editable page box: [Back] [page / total] [Next]',
   )
 })
 
@@ -83,16 +86,17 @@ runTest('the centred page field grows with its digits and keeps a 40px floor', (
   assert.match(branch, /className=\{`h-10 min-w-10/)
 })
 
-runTest('the centred branch centres the pill and orders it Back / size / page / total / Next', () => {
+runTest('the centred branch centres the pill and orders it Back / page / total / Next', () => {
+  // P10-20 dropped the size selector this order used to route through
+  // (see the top-of-file comment); the remaining three controls keep their
+  // relative order.
   const branch = centeredBranch()
   assert.match(branch, /flex w-full flex-wrap items-center justify-center gap-2/, 'the pager row must centre itself')
   const backAt = branch.indexOf('aria-label={backLabel}')
-  const sizeAt = branch.indexOf('ariaLabel={perPageLabel}')
   const pageAt = branch.indexOf('aria-label={pageLabel}', backAt)
   const countAt = branch.indexOf('<span className={countClass}>')
   const nextAt = branch.indexOf('aria-label={nextLabel}')
-  assert.ok(backAt > 0 && sizeAt > backAt, 'the size selector must follow Back')
-  assert.ok(pageAt > sizeAt, 'page must follow the size selector')
+  assert.ok(backAt > 0 && pageAt > backAt, 'the editable page must follow Back')
   assert.ok(countAt > pageAt, 'total page count must follow the editable page')
   assert.ok(nextAt > countAt, 'Next must close the pill')
 })
@@ -163,7 +167,7 @@ runTest('an empty result renders no pager at all, and a real multi-page result p
   assert.equal(junk.totalPages, 3)
 })
 
-runTest('the shared control takes arrow state from the kernel and hides centered one-page navigation', () => {
+runTest('the shared control takes arrow state from the kernel, with no per-page-only exception left in centered', () => {
   assert.match(pagination, /import \{ clampPageNumber, pagerState \} from '\.\.\/\.\.\/utils\/pagerState\.ts'/, 'one kernel, not a second copy of the arithmetic')
   assert.match(pagination, /const state = pagerState\(page, totalItems, pageSize, DEFAULT_PAGE_SIZE\)/)
   assert.match(pagination, /if \(!state\.visible\) return null/, 'the render gate and the storefront gate must be the same fact')
@@ -172,10 +176,13 @@ runTest('the shared control takes arrow state from the kernel and hides centered
   const branch = centeredBranch()
   assert.match(branch, /disabled=\{backDisabled\}/, 'so a single-page storefront pill shows a dead Back')
   assert.match(branch, /disabled=\{nextDisabled\}/, 'and a dead Next')
-  // NAVIGATION has no useful one-page action -- but the size selector does,
-  // so the pill survives a single page whenever it carries one.
-  assert.match(branch, /if \(totalPages <= 1 && !showPageSizeSelect\) return null/, 'a one-page pill is dropped only when it is pure navigation')
-  assert.match(branch, /<PageSizeSelect/, 'the storefront reuses the shared page-size control')
+  // P10-20 retired the size selector that used to keep a one-page pill alive
+  // as a rows-per-page control; this branch has no selector-shaped exception
+  // left, so a single page falls back to the same `state.visible` gate every
+  // other layout already uses (checked once, above, before this branch even
+  // runs) -- there is no second, branch-local early return to prove here.
+  assert.doesNotMatch(branch, /if \(totalPages <= 1 && !showPageSizeSelect\) return null/, 'the retired per-page-only exception must not come back')
+  assert.doesNotMatch(branch, /<PageSizeSelect/, 'the storefront no longer carries the shared page-size control')
 })
 
 runTest('both pager mounts translate Back and Next instead of leaking the raw keys', () => {

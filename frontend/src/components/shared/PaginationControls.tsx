@@ -58,10 +58,11 @@ export interface PaginationControlsProps {
   // left, then a labelled per-page column and the pager pushed to the right
   // edge -- is what a shopper was being shown above and below the product
   // grid. This variant drops the summary, keeps an editable page number
-  // between visible Back/Next controls, and centres the whole thing. It shows
-  // a page-size selector only when the caller passes onPageSizeChange.
-  // 2026-09-15 (owner, supersedes the 2026-09-14 order): Back first, then the
-  // size selector, then page/total, then Next. 'default' stays the default,
+  // between visible Back/Next controls, and centres the whole thing.
+  // 2026-09-15 (owner): Back first, then the size selector, then page/total,
+  // then Next. 2026-09-17, P10-20 (owner: "no need to show rows per page
+  // options"): the size selector is gone from every layout, so the row is
+  // simply Back, page/total, Next. 'default' stays the default,
   // so every admin consumer of this control renders exactly as before.
   layout?: 'default' | 'centered'
   /** `centered` layout only: printed on the SAME row as the pill, e.g.
@@ -88,15 +89,16 @@ export default function PaginationControls({
   pageSize = DEFAULT_PAGE_SIZE,
   totalItems = 0,
   onPageChange,
-  onPageSizeChange,
-  pageSizeOptions = PAGE_SIZE_OPTIONS,
+  // onPageSizeChange, pageSizeOptions and editablePageSizeInput stay in
+  // PaginationControlsProps (many callers still pass them) but P10-20
+  // removed the last rows-per-page selector that read them, so they are no
+  // longer destructured here -- doing so is a dead local, not behaviour.
   label = 'records',
   t,
   className = '',
   compact = false,
   compactPageInput = false,
   editablePageInput = true,
-  editablePageSizeInput = true,
   rangeAsPageSize = false,
   compactCentered = false,
   layout = 'default',
