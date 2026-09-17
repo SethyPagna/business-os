@@ -21,6 +21,7 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit } from '../lib/audit'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
@@ -1224,7 +1225,7 @@ app.get('/:id/detail-report', async (c) => {
   const batches = await db.prepare(`
     SELECT pb.id, pb.lot_code, pb.batch_number, pb.received_at, pb.expiry_date,
            pb.supplier_id, pb.supplier_name, pb.unit_cost_usd,
-           COALESCE(bbs.qty, 0) AS total_qty
+           ${lotRemainingSql('pb', 'bbs.qty')} AS total_qty
     FROM product_batches pb
     LEFT JOIN (
       SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
@@ -1302,7 +1303,7 @@ app.get('/:id/supplier-purchases', async (c) => {
   const rows = await getDb(c.env).prepare(`
     SELECT pb.id, pb.lot_code, pb.batch_number, pb.received_at, pb.expiry_date,
            pb.unit_cost_usd, pb.supplier_name,
-           COALESCE(bbs.qty, 0) AS total_qty
+           ${lotRemainingSql('pb', 'bbs.qty')} AS total_qty
     FROM product_batches pb
     LEFT JOIN (
       SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id

@@ -7,6 +7,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, getActionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
+import { lotRemainingSql } from '../lib/lotRemaining'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { loadSettingsMap, buildPortalConfig, summarizePoints, type SubmissionRow } from './portal'
 import {
@@ -1965,7 +1966,7 @@ app.get('/suppliers/:id/purchases', async (c) => {
     SELECT pb.id, pb.batch_number, pb.lot_code, pb.received_at, pb.received_quantity,
            pb.unit_cost_usd, pb.received_cost_usd, pb.payment_status, pb.credit_due_date, pb.is_active,
            p.id AS product_id, p.name AS product_name,
-           COALESCE(bbs.remaining_quantity, 0) AS remaining_quantity
+           ${lotRemainingSql('pb', 'bbs.remaining_quantity')} AS remaining_quantity
     FROM product_batches pb
     JOIN products p ON p.id = pb.variant_product_id
     LEFT JOIN (
@@ -1980,7 +1981,7 @@ app.get('/suppliers/:id/purchases', async (c) => {
     id: number; batch_number: number | null; lot_code: string | null; received_at: string | null
     received_quantity: number | null; unit_cost_usd: number | null; received_cost_usd: number | null; payment_status: string | null
     credit_due_date: string | null; is_active: number | null
-    product_id: number; product_name: string | null; remaining_quantity: number
+    product_id: number; product_name: string | null; remaining_quantity: number | null
   }>({ ...params, limit: pageSize, offset })
 
   const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100

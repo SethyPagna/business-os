@@ -56,7 +56,7 @@ type LotRow = {
   expiry_date: string | null
   supplier_id: number | null
   supplier_name: string | null
-  total_qty: number
+  total_qty: number | null
 }
 
 type SupplierRow = {
@@ -98,7 +98,7 @@ type LedgerRow = {
 // Drill-down rows: the individual sales in a period, and the lots one supplier
 // delivered for this product (fetched on demand when a summary row is opened).
 type SaleDetailRow = { id: number; receipt_number: string | null; created_at: string; customer_name: string | null; qty: number; revenue_usd: number }
-type PurchaseRow = { id: number; lot_code: string | null; batch_number: number | null; received_at: string | null; expiry_date: string | null; unit_cost_usd: number | null; supplier_name: string | null; total_qty: number }
+type PurchaseRow = { id: number; lot_code: string | null; batch_number: number | null; received_at: string | null; expiry_date: string | null; unit_cost_usd: number | null; supplier_name: string | null; total_qty: number | null }
 // Per-key drill cache: an array once loaded, or a loading/error sentinel.
 type DrillCache<T> = Record<string, T[] | 'loading' | 'error'>
 
@@ -492,7 +492,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                     <span className="detail-scroll-text min-w-0 flex-1 text-gray-500">{batchDisplayLabel({ id: lot.id, lot_code: lot.lot_code, received_at: lot.received_at }, tr('batch', 'Received date'))}</span>
                     {lot.supplier_name ? <EntityLink page="contacts" anchor="hub:contacts:suppliers" search={lot.supplier_name} navigate={navigateTo} className="detail-scroll-text max-w-[8rem] text-gray-400" title={tr('open_supplier', 'Open supplier')}>{lot.supplier_name}</EntityLink> : <span className="detail-scroll-text max-w-[8rem] text-gray-400">{supplierDisplay(lot.supplier_name, tr)}</span>}
                     <span className="shrink-0 whitespace-nowrap text-gray-400">{lot.received_at ? fmtDate(lot.received_at) : '--'}</span>
-                    <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{lot.total_qty}</span>
+                    <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">{lot.total_qty == null ? '--' : '×' + lot.total_qty}</span>
                     <span className="shrink-0 tabular-nums text-gray-500">{lot.unit_cost_usd != null ? fmtUSD(lot.unit_cost_usd) : '--'}</span>
                   </div>
                 ))}

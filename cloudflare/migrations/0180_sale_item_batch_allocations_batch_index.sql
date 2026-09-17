@@ -1,0 +1,39 @@
+-- 0180: index sale_item_batch_allocations by the LOT it consumed.
+--
+-- Owner (Sep 17, P10-17): "remaining column are only showing 0".
+--
+-- The Remaining column read `COALESCE(SUM(branch_batch_stock.quantity), 0)`,
+-- which reports 0 both for a lot that sold out and for a lot the lot ledger
+-- never held at all. Measured in production on Sep 17 2026:
+--
+--   lots with received_quantity > 0 and a lot-ledger total of 0 .... 20,054
+--     of those, with a sale allocation ................................ 89
+--     of those, with a stamped inventory movement .................... 140
+--     of those, with NO trace at lot level whatsoever ............. 19,914
+--
+-- and the untraced set stops at 2026-08 -- it is exactly the history imported
+-- from the old system, which populated `branch_stock` and never
+-- `branch_batch_stock`. Nothing Business OS itself received is in it.
+--
+-- `src/lib/lotRemaining.ts` now returns NULL (rendered `--`) for that case, so
+-- the column stops asserting "sold out" about lots the system never tracked.
+-- It probes both traces. The movement probe already had its index (0084); the
+-- allocation probe had only `(sale_item_id, released_at)`, so a per-lot EXISTS
+-- would have been a full scan of the allocation table on every page -- exactly
+-- the shape behind the open D1 CPU-limit issue. This index is the read path.
+--
+-- Schema only: no row is inserted, updated or deleted, and no existing index
+-- is dropped, so the migration is safe to re-run and has no undo beyond
+-- DROP INDEX.
+--
+-- PRE (expect 0 -- the index does not exist yet):
+--   SELECT COUNT(*) FROM sqlite_master
+--    WHERE type = 'index' AND name = 'idx_sale_item_batch_allocations_batch';
+--
+-- POST (expect 1, and the two counts unchanged: 20054 zero-ledger lots, of
+-- which 19914 have no trace):
+--   SELECT COUNT(*) FROM sqlite_master
+--    WHERE type = 'index' AND name = 'idx_sale_item_batch_allocations_batch';
+
+CREATE INDEX IF NOT EXISTS idx_sale_item_batch_allocations_batch
+  ON sale_item_batch_allocations (batch_id);
