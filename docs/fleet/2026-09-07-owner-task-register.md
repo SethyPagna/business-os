@@ -626,3 +626,96 @@ Received on the tip live in production (`f2c25510`, Worker 87e0608f, D1 tail 018
 | P11-16 View more does not actually show more | Not yet | "view more for all the cards except for the low stock items and out of stock did not actually view more. seems limited." Only the two stock cards open a real full list; the rest open a float holding the same truncated set. |
 
 Carried over and still open: the searchable-picker regression guard does not watch product-name/barcode bindings; `shouldDeferModulePreload` has no caller; P10-14 (872 blank-gender customers); the parked P10-18 patch; the lot-ledger backfill (19,914 untraced lots, needs a go); the debloat remainder (114 exported symbols with no production caller, listed in the session ledger) and the responsive/compact pass; P9-9; three Sentry issues; and the P10-20 public-surface question.
+
+## Program 11 — implemented, gates incomplete, UNSHIPPED — September 18
+
+**Nothing in this section is live.** Production still runs code commit **f2c25510** as Worker
+**87e0608f-f4cc-4e4c-b176-99b69068300d**, D1 chain tail **0180**. The program 11 work sits on
+`integrate/p10` at **3e6bdd68** and has not been built, deployed or migrated. Read every row
+below as "in the branch", never as "on the site".
+
+All sixteen items of owner message P are implemented, each as its own commit with its own test
+that goes red if the fix is reverted. Three lanes built them in isolated worktrees
+(`p11/storefront`, `p11/invoices`, `p11/dashboard`) from `0779110f`; all three merged without a
+conflict.
+
+### Certification status — the reason this is not shipped
+
+| Gate | On which tip | Result |
+| --- | --- | --- |
+| frontend typecheck / verify:i18n / test:utils / build | storefront merge only | **473 passed / 0 red of 473**, i18n OK, build 267 chunks zero cycles |
+| Worker `npx tsc --noEmit` | the full merge, 3e6bdd68 | **clean** |
+| Worker `scripts/test-*.cjs` full sweep | the full merge | **NOT RUN** |
+| frontend full gate | the full merge | **NOT RUN** |
+
+The two missing sweeps are not a formality. Migration 0182 adds an expression index on
+`sales.legacy_receipt_number`, and SQLite refuses to drop a column while an index still
+references it: the invoices lane found exactly one Worker test that rebuilds a pre-0107 `sales`
+shape and drops that column, and fixed it (`fd197142`). A full sweep is what proves there is no
+second test of the same shape. Until both sweeps run on 3e6bdd68, this tip is not certified.
+
+### Public storefront — implemented, not deployed
+
+| Item | State | Where |
+| --- | --- | --- |
+| P11-1 X button fills and stops covering Contact us | Implemented (dc0796e0) | the minimize control is a flex sibling of the FAB, not an absolutely-positioned overlay |
+| P11-2 add-to-cart contents centred on small screens | Implemented (1610fe55) | `justify-center` on the button, `shrink-0` on the icon |
+| P11-3 the duplicate "Products" heading | Implemented (a3a687fb) | the section title is dropped on the public view only |
+| P11-4 the search/filter row uses the full width | Implemented (8de075be) | column gutters trimmed at every breakpoint |
+| P11-5 description behind "click to view details" | Implemented (1f019278) | the card links into the detail sheet; both language packs |
+| P11-5b the admin toggle it orphaned | Implemented (2f10d697) | "Show short descriptions" governed nothing once the block was gone; the editor row, the draft/config plumbing, the settings writer and both pack keys are retired, and the test that pinned it now asserts the opposite, with the reason in the file |
+| P11-6 the second Clear beside Filters | Implemented (18989b19) | only the Clear inside the filter menu remains |
+| P11-7 the pager slimmed | Implemented (7cc2a4c3) | 40px → 36px controls, consistent across the row |
+| P11-8 dark-mode contrast | Implemented (b9bd46f5) | three real AA failures fixed, pinned with hand-computed contrast ratios |
+| P11-9 business name above the header buttons | Implemented (4ddb09e7) | name on row 1, icon rows on row 2 on phones |
+| P11-10 the search row actually sticky | Implemented (53a2f77b) | the wrapper that left it no room to stick is gone |
+
+### Imported invoice ledgers — implemented, migrations PREPARED AND NOT APPLIED
+
+Measured read-only against production on September 18, before any code was written:
+
+- **P11-11 root cause.** `customer_receivables.invoice_no` holds the bare legacy number
+  (`006416`); `sales.legacy_receipt_number` holds the retired `000001@2024-07-18` form. Joined
+  raw, **0 of 13,304** AR rows match a sale. Strip the `@date` suffix and **all 13,304** match.
+  The bare number repeats across years (33,033 pairs), so the key must be base number + date:
+  **13,282** match on base number, same calendar day and same total to the cent; **22** do not
+  and stay unmatched rather than forced. Nothing in the code computed this link at all.
+- **P11-12 root cause.** **Zero** rows are positively owed. **367 rows across 243 customers**
+  carry a NEGATIVE outstanding summing to **−$98,742.52**; every one has `status = 'Paid'` and
+  paid > total, and **355** have a paid amount that is an exact integer multiple of the total
+  (5370 paid as 10740; 780 as 4680 = 6×; 624 as 3744 = 6×). The old system's AR export lists one
+  row per invoice LINE and repeats the invoice-level payment on each line; the importer took it
+  at face value. Single source file: `account-receivable-report-2021-2026.xls`.
+
+| Item | State | Where |
+| --- | --- | --- |
+| P11-11 each receivable resolves to its sale | Implemented (b73ceefb, c8163adf) | `routes/contacts.ts` strips the suffix and keys on base number + day with an equal-total fallback; a first correct-but-scanning shape was rewritten into one indexed seek after `EXPLAIN QUERY PLAN` showed the scan, and the seek-vs-scan distinction is itself pinned (10 checks) |
+| P11-11 the matched sale shown on both ledgers | Implemented (1f5dae84) | customer AND supplier sections; the supplier side has no comparable legacy-number column to join through, which is stated rather than skipped |
+| P11-12 the importer guarded | Implemented (0969c33e) | `lib/receivablesPaidGuard.ts`, 25 checks |
+| P11-12 the 367 rows repaired | **PREPARED, NOT APPLIED** | migration **0181**: captures each row's pre-repair paid and outstanding values in a repair table first, sets paid = total and outstanding = 0, writes one audit row per repair, idempotent. PRE asserts 367 rows / −98742.52; POST asserts 0 negative rows, 367 repair rows, and the 4 supplier rows still Outstanding and untouched. Companion test runs the exact reversal (20 checks) |
+| P11-11 the seek index | **PREPARED, NOT APPLIED** | migration **0182**, an expression index on the base number. Purely additive |
+| P11-13 searchable customer/supplier filters | Implemented (1f5dae84) | the shared type-or-select input replaces the click-only dropdowns |
+| The 4 supplier rows marked Outstanding ($489) | **Open — needs an owner ruling** | ចែ USA $29 and $12, Dane japan $438, naomi $10, from `shop-account-payable-report-all.xls`. Not the multiplied-paid defect: the source report itself recorded them as unpaid, so 0181 deliberately leaves them alone and pins that as a control |
+
+### Dashboard — implemented, not deployed
+
+| Item | State | Where |
+| --- | --- | --- |
+| P11-14 the all-time scope timed out | Implemented (1da983cb) | not one slow query: the route asked for sales totals and the period series separately with identical filters, and each independently paged sales/sale_items/returns/return_items TWICE as a concurrent-write guard — four full reads of the same rows per request. Both now derive from one snapshot; the test pins the read SHAPE, not a wall-clock number |
+| P11-15 the cards kept their old content | Implemented (c4b373a5) | the equal-height row stretched, but the analytics chart had a hardcoded pixel height and never grew into it. The charts now measure their container and fill it; the P6-7 card-row test was re-run to prove no regression |
+| P11-16 View more did not show more | Implemented (4cde5947) | recent sales, expiring products, top products and top customers were replaying their own backend-truncated preview; a bounded insight-list endpoint (cap 300, same queries) now backs all four, with a truncation notice in both packs. Branch performance and best-hour were left alone because their queries were never truncated |
+
+### What the next session must do first
+
+1. Run both full gates on **3e6bdd68** — the Worker `test-*.cjs` sweep especially, for the 0182
+   drop-column shape described above — and name any red rather than assuming contention.
+2. Only then push, build the frontend, deploy from the committed tip, and apply 0181 and 0182
+   in that order with their PRE/POST assertions read either side and recorded.
+3. Get the owner's ruling on the four supplier rows before touching them.
+
+Carried over and still open: the searchable-picker regression guard does not watch
+product-name/barcode bindings; `shouldDeferModulePreload` has no caller; P10-14 (872
+blank-gender customers); the parked P10-18 patch; the lot-ledger backfill (19,914 untraced lots,
+needs a go); the debloat remainder (114 exported symbols with no production caller, listed in
+the session ledger) and the responsive/compact pass; P9-9; three Sentry issues; and the P10-20
+public-surface question.
