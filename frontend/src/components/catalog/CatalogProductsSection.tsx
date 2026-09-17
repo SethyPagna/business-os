@@ -1039,7 +1039,19 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       return (
                         <button
                           type="button"
-                          className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${added ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200'}`}
+                          // `justify-center` matches the wishlist heart button
+                          // right beside it (both `inline-flex shrink-0
+                          // items-center justify-center`) -- this one was
+                          // missing it, so on screens below `sm` (where the
+                          // "Add" label is `hidden` and the button is
+                          // icon-only) its Plus icon was laid out against the
+                          // main-axis start instead of centred in the pill
+                          // like its neighbour (owner, 2026-09-18: "the add
+                          // to cart in smaller screens are also not being
+                          // centered correctly in the button"). `shrink-0` on
+                          // the icon itself stops it from ever losing width to
+                          // the qty badge once an item is added.
+                          className={`inline-flex shrink-0 items-center justify-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${added ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200'}`}
                           onClick={(event) => {
                             event.stopPropagation()
                             onAddToBucket(product, previewConfig.showPrices ? pricePresentation?.primaryText : undefined)
@@ -1047,7 +1059,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                           aria-label={added ? replaceVars(copy('addToBucketQty', 'Add another ({qty} added)'), { qty }) : copy('addToBucket', 'Add to list')}
                           title={added ? replaceVars(copy('addToBucketQty', 'Add another ({qty} added)'), { qty }) : copy('addToBucket', 'Add to list')}
                         >
-                          <Plus className="h-3.5 w-3.5" />
+                          <Plus className="h-3.5 w-3.5 shrink-0" />
                           <span className="hidden sm:inline">{copy('addToBucket', 'Add')}</span>
                           {added ? (
                             <span className="ml-0.5 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-white/25 px-1 text-[10px] font-bold leading-4">
