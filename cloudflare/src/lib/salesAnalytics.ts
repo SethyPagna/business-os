@@ -137,7 +137,6 @@ import type { Env } from '../index'
 import {
   localDateExpr,
   localMonthExpr,
-  localWeekExpr,
   localDateRangeClause,
   localDateAtOrAfter,
   localDateAtOrBefore,
