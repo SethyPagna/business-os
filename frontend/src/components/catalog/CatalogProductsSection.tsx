@@ -564,8 +564,21 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           setPromoFacet={setPromoFacet}
         />
       ) : null}
-      <div className="mb-5 space-y-3">
-        <div className="sticky top-16 z-20 -mx-1 space-y-2 rounded-[22px] border border-slate-200 bg-white p-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:border-neutral-700 dark:bg-neutral-900 sm:top-20">
+      {/* This row used to be wrapped in its own `<div className="mb-5
+          space-y-3">` with no other sibling inside it -- a "sticky" element
+          can only stay pinned while scrolling through the height of its OWN
+          parent (the parent is what CSS bounds the stuck range against), and
+          a parent that is exactly as tall as the sticky child itself gives it
+          nowhere to stick: the moment the page scrolled a few pixels the
+          whole (barely taller) parent had already scrolled past, so the row
+          unstuck immediately and just scrolled away with the page (owner,
+          2026-09-18: "the search row is not sticky when scrolled down").
+          Now the sticky div is a direct child of the tall `min-w-0
+          ${railGutterClass}` column that also holds the promotions block,
+          the pager and the whole product grid below, so it has real room to
+          stay pinned for the length of that section. `mb-5` moves onto this
+          div so the spacing below is unchanged. */}
+      <div className="sticky top-16 z-20 -mx-1 mb-5 space-y-2 rounded-[22px] border border-slate-200 bg-white p-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:border-neutral-700 dark:bg-neutral-900 sm:top-20">
           <div className="flex items-center gap-2">
           {/* The wrapping <label> held only the magnifier icon, so it gave the
               field no accessible name at all: a reader announced a bare "edit
@@ -665,7 +678,6 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           </div>
         ) : null}
         </div>
-      </div>
 
       {previewConfig.showPromotions !== false && visiblePromotionItems.length ? (
         <div className="mb-5 space-y-3">
