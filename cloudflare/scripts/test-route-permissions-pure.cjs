@@ -332,8 +332,13 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
 {
   const compatSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
   const dashboardChecks = compatSrc.match(/denyUnless\(c, 'dashboard'\)/g) || []
-  assert.equal(dashboardChecks.length, 4, `expected exactly 4 denyUnless(c, 'dashboard') call sites (GET /dashboard, GET /dashboard/stock-alerts, GET /analytics, GET /dashboard/startup), found ${dashboardChecks.length}`)
+  assert.equal(dashboardChecks.length, 5, `expected exactly 5 denyUnless(c, 'dashboard') call sites (GET /dashboard, GET /dashboard/stock-alerts, GET /dashboard/insight-list, GET /analytics, GET /dashboard/startup), found ${dashboardChecks.length}`)
   assert.match(compatSrc, /app\.get\('\/dashboard\/stock-alerts', async \(c\) => \{\s*const denied = denyUnless\(c, 'dashboard'\)\s*if \(denied\) return denied/, 'paginated stock alerts must enforce the dashboard permission before querying stock')
+  // P11-16's untruncated insight lists read the same dashboard data the
+  // preview cards do, so they take the same gate -- pinned by shape, not
+  // just by the count above, so the check cannot be dropped while some
+  // other route quietly adds a fifth one and keeps the total at 5.
+  assert.match(compatSrc, /app\.get\('\/dashboard\/insight-list', async \(c\) => \{\s*const denied = denyUnless\(c, 'dashboard'\)\s*if \(denied\) return denied/, 'the untruncated insight lists must enforce the dashboard permission before querying')
   // Was asserting the literal `app.use('/dashboard*', requireAuth)` form.
   // That form is DEAD -- Hono does not treat a bare trailing `*` as a
   // wildcard, so all thirteen of compat.ts's guards matched nothing (proved
