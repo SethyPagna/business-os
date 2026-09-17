@@ -3,7 +3,12 @@ import type { ComponentType, ReactNode } from 'react'
 type StockStatus = 'out_of_stock' | 'low_stock' | 'in_stock' | string
 type SummaryTone = 'blue' | 'dark' | 'green' | 'amber'
 type SectionShellProps = {
-  title: ReactNode
+  /** Omit (or pass a falsy value) to render the section with no heading --
+   *  used where a chip/tab elsewhere already names the section, so a second
+   *  "Products" heading right above the subtitle was pure repetition (owner,
+   *  2026-09-18: "We already have products section so no need to say
+   *  Products again"). The subtitle still prints on its own either way. */
+  title?: ReactNode
   subtitle?: ReactNode
   action?: ReactNode
   children: ReactNode
@@ -37,7 +42,7 @@ export function SectionShell({ title, subtitle, action, children }: SectionShell
     <section className="py-5">
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-neutral-100">{title}</h2>
+          {title ? <h2 className="text-lg font-semibold text-slate-900 dark:text-neutral-100">{title}</h2> : null}
           {subtitle ? <p className="mt-1 text-sm text-slate-500 dark:text-neutral-400">{subtitle}</p> : null}
         </div>
         {action}

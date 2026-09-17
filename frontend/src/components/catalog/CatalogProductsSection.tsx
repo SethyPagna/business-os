@@ -515,7 +515,11 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
 
   return (
     <SectionShell
-      title={copy('products', 'Products')}
+      // publicView: the top nav already has a "Products" chip/tab naming this
+      // section (portalTabs, CatalogPreviewSurface), so a second "Products"
+      // heading right above the subtitle just repeated it. The admin editor
+      // preview has no such chip on this panel, so it keeps the heading.
+      title={publicView ? undefined : copy('products', 'Products')}
       subtitle={copy('liveCatalog', 'Browse our products and check availability.')}
     >
       {/* Desktop (lg+): an always-visible left rail replaces the floating
