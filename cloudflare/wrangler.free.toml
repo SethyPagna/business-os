@@ -91,6 +91,9 @@ binding = "STATIC_ASSETS"
 # 404s a whole page, and a handler there without a path here never runs.
 run_worker_first = [
   "/api/*", "/uploads/*", "/health", "/ws", "/robots.txt", "/sitemap.xml",
+  # A deleted build chunk must 404 instead of being answered with the SPA
+  # document (src/index.ts's /assets/* handler says why).
+  "/assets/*",
   "/", "/index.html", "/admin", "/admin/*",
   "/app", "/app/*", "/login", "/login/*",
   "/audit", "/audit/*", "/audit-log", "/audit-log/*",

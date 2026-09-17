@@ -701,6 +701,13 @@ async function appShellFallback(request, event) {
 async function cacheFirstStatic(request, event) {
   const cache = await caches.open(STATIC_CACHE)
   const cached = await cache.match(request)
+  // An entry that is not what its own path claims to be -- the SPA fallback's
+  // HTML stored under a .js key by an older worker -- is poison: serving it
+  // fails the module parse on every load, forever. Drop it and go to network.
+  if (cached && !isValidStaticResponse(request, cached)) {
+    await cache.delete(request).catch(() => {})
+    return fetchAndCacheStatic(request, event, cache)
+  }
   if (cached) {
     const refresh = fetch(request)
       .then(async (response) => {
@@ -713,11 +720,20 @@ async function cacheFirstStatic(request, event) {
     return cached
   }
 
+  return fetchAndCacheStatic(request, event, cache)
+}
+
+async function fetchAndCacheStatic(request, event, cache) {
   const response = await fetch(request)
   if (isValidStaticResponse(request, response)) {
     await cache.put(request, response.clone()).catch(() => {})
   } else if (isStaleBuildAsset(request, response)) {
     await recoverStaleShell(event)
+    // Hand the page an honest failure instead of HTML it will try to parse as
+    // a module. A network-shaped failure is what the recovery reload in
+    // utils/chunkReloadGuard.ts listens for; a MIME parse error is not, which
+    // is how a tab could sit blank across deploys.
+    return new Response('', { status: 404, statusText: 'Stale build asset' })
   }
   return response
 }
@@ -729,8 +745,19 @@ async function cacheFirstStatic(request, event) {
 // recovery reload (utils/chunkReloadGuard.ts) lands on the current build
 // instead of the same stale shell, and ask the browser for the new worker.
 function isStaleBuildAsset(request, response) {
-  if (!response || response.status !== 404) return false
-  return new URL(request.url, self.location.origin).pathname.startsWith('/assets/')
+  if (!response) return false
+  const pathname = new URL(request.url, self.location.origin).pathname
+  if (!pathname.startsWith('/assets/')) return false
+  if (response.status === 404) return true
+  // wrangler.toml sets not_found_handling = "single-page-application", so a
+  // chunk the deploy deleted is NOT answered with 404: the asset layer
+  // returns index.html with status 200. Recognising only the 404 is what let
+  // a worker keep serving a shell whose chunks no longer exist -- the page
+  // died on "Expected a JavaScript-or-Wasm module script" and the recovery
+  // above never ran. The content type is the honest signal here.
+  if (!response.ok) return false
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase()
+  return contentType.includes('text/html')
 }
 
 async function recoverStaleShell(event) {
@@ -741,6 +768,18 @@ async function recoverStaleShell(event) {
       await cache.put('/index.html', response.clone()).catch(() => {})
     }
     await self.registration.update().catch(() => {})
+    // A waiting worker normally stays parked until the user accepts Update
+    // (the install handler's comment above says why). That politeness is
+    // exactly wrong here: the shell this worker is serving cannot boot, so
+    // there is no app left to show an Update prompt in, and nothing would
+    // ever release the waiting build. Ask it to take over -- only on this
+    // path, only when the running build is already proven broken.
+    try {
+      self.registration.waiting?.postMessage({ type: 'BUSINESS_OS_SKIP_WAITING' })
+    } catch {
+      // no waiting worker, or messaging unavailable -- the shell refresh
+      // above is still the recovery.
+    }
     await broadcastSyncEvent('BUSINESS_OS_STALE_ASSET', { build: BUILD_HASH })
   })()
   event.waitUntil(refresh)
