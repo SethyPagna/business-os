@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import Modal from '../shared/Modal'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { fmtDateOnly } from '../../utils/formatters'
@@ -267,7 +268,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
               title: tr('details', 'Details'),
               facts: [
                 { key: 'product', label: tr('product', 'Product'), value: detailBatch.product_name || '--' },
-                { key: 'supplier', label: tr('supplier', 'Supplier'), value: supplierName || '--' },
+                { key: 'supplier', label: tr('supplier', 'Supplier'), value: supplierDisplay(supplierName, tr) },
                 { key: 'received_at', label: tr('received_date', 'Received date'), value: detailBatch.received_at ? fmtDateOnly(detailBatch.received_at) : '--' },
                 { key: 'received_quantity', label: tr('quantity_received', 'Qty received'), value: qty(detailBatch.received_quantity) },
                 { key: 'remaining', label: tr('remaining', 'Remaining'), value: qty(detailBatch.remaining_quantity) },

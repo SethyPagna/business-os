@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 // fmtDate, not fmtDateOnly: these are full UTC instants converted from the
@@ -287,7 +288,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
                     >
                       <td className="whitespace-nowrap px-3 py-2 text-gray-800 dark:text-gray-100"><time dateTime={row.invoice_date}>{fmtDate(row.invoice_date)}</time></td>
                       <td className="px-3 py-2 text-gray-500">{branchLabel(row.source_branch)}</td>
-                      <td className="px-3 py-2 text-gray-800 dark:text-gray-100">{row.supplier_name || '--'}</td>
+                      <td className="px-3 py-2 text-gray-800 dark:text-gray-100">{supplierDisplay(row.supplier_name, tr)}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-gray-500">
                         {row.invoice_no || '--'}
                         <span className="ml-1 text-[10px] text-gray-400">#{row.legacy_id}</span>
@@ -316,7 +317,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
                 >
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     <time dateTime={row.invoice_date} className="whitespace-nowrap text-xs leading-5 tabular-nums text-gray-500">{fmtDate(row.invoice_date)}</time>
-                    <span className="min-w-0 flex-1 truncate text-sm leading-6 text-gray-900 dark:text-white">{row.supplier_name || '--'}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm leading-6 text-gray-900 dark:text-white">{supplierDisplay(row.supplier_name, tr)}</span>
                     <span className="text-sm font-semibold leading-6 tabular-nums text-gray-900 dark:text-white">{money(row.total_amount_usd)}</span>
                   </div>
                   <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -350,7 +351,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
         <InvoiceDetailFloat
           t={t}
           onClose={() => setDetail(null)}
-          title={`${tr('invoice_details', 'Invoice details')} -- ${detail.supplier_name || tr('supplier', 'Supplier')}`}
+          title={`${tr('invoice_details', 'Invoice details')} -- ${supplierDisplay(detail.supplier_name, tr)}`}
           idLabel={tr('invoice_no', 'Invoice #')}
           idValue={invoiceLabel(detail)}
           badge={statusChip(detail)}
@@ -363,7 +364,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
                 { key: 'due_date', label: tr('due_date', 'Due date'), value: detail.due_date ? <time dateTime={detail.due_date}>{fmtDate(detail.due_date)}</time> : '--' },
                 { key: 'term_days', label: tr('term_days', 'Payment terms (days)'), value: detail.term_days == null ? '--' : String(detail.term_days) },
                 { key: 'branch', label: tr('branch', 'Branch'), value: branchLabel(detail.source_branch) },
-                { key: 'supplier', label: tr('supplier', 'Supplier'), value: detail.supplier_name || '--' },
+                { key: 'supplier', label: tr('supplier', 'Supplier'), value: supplierDisplay(detail.supplier_name, tr) },
                 { key: 'legacy_id', label: tr('legacy_record_id', 'Legacy record id'), value: `#${detail.legacy_id}` },
               ],
             },

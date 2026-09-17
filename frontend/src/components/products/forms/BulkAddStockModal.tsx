@@ -300,7 +300,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
       // operator confirms, not only in the field they typed it into.
       items.push({
         label: t('unit_cost_usd') || 'Unit cost $',
-        value: freeGoods ? (t('stock_receipt_free_goods') || 'Free goods') : `$${String(unitCost)}`,
+        value: freeGoods ? (t('stock_receipt_free_goods') || 'Free') : `$${String(unitCost)}`,
       })
     }
     return items
@@ -568,8 +568,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                 />
                 <span className="mt-1 flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400">
                   <input type="checkbox" className="h-3.5 w-3.5" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) setUnitCost('0') }} />
-                  {t('stock_receipt_free_goods') || 'Free goods'}
-                  <InfoHint label={t('stock_receipt_free_goods') || 'Free goods'} text={t('stock_receipt_free_goods_hint') || 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.'} />
+                  <span title={t('stock_receipt_free_goods_hint') || 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.'}>{t('stock_receipt_free_goods') || 'Free'}</span>
                 </span>
               </div>
               <div className="mt-3">

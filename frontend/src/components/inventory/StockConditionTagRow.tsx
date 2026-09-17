@@ -31,7 +31,10 @@ export type StockConditionTagRowProps = {
   id?: string
 }
 
-const SEGMENT_BASE = 'h-9 min-w-0 flex-1 truncate rounded-lg border-2 px-2 text-xs font-medium transition-colors'
+// The labels read in full on every screen: on a narrow one the segments keep
+// their natural width and the row scrolls sideways instead of truncating; from
+// sm up there is room, so they share the row as before.
+const SEGMENT_BASE = 'h-9 shrink-0 whitespace-nowrap rounded-lg border-2 px-2 text-xs font-medium transition-colors sm:min-w-0 sm:flex-1 sm:truncate'
 const SEGMENT_ON = 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
 const SEGMENT_OFF = 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'
 
@@ -50,7 +53,7 @@ export default function StockConditionTagRow({ mode, value, onChange, tr, disabl
   const tagOptions = useMemo(() => STOCK_CONDITION_TAGS.map((tag) => ({ value: tag, label: tag })), [])
 
   return (
-    <div className="flex w-full min-w-0 items-center gap-1.5" data-stock-condition-row={mode}>
+    <div className="flex w-full min-w-0 items-center gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5" data-stock-condition-row={mode}>
       <button
         type="button"
         disabled={disabled}

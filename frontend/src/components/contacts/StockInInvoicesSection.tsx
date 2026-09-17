@@ -244,8 +244,8 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   }
 
   const supplierLabel = (group: InvoiceGroup): string => {
-    if (group.supplier_key === 'none') return tr('no_supplier_recorded', 'No supplier recorded')
-    return String(group.supplier_name || '').trim() || tr('no_supplier_recorded', 'No supplier recorded')
+    if (group.supplier_key === 'none') return tr('no_supplier_recorded', 'No supplier')
+    return String(group.supplier_name || '').trim() || tr('no_supplier_recorded', 'No supplier')
   }
 
   const groupBranchNames = (group: InvoiceGroup): string => {
@@ -313,7 +313,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           className="min-w-[11rem]"
           options={[
             { value: 'all', label: tr('all_suppliers', 'All Suppliers') },
-            { value: 'none', label: tr('no_supplier_recorded', 'No supplier recorded') },
+            { value: 'none', label: tr('no_supplier_recorded', 'No supplier') },
             ...supplierOptions.map((option) => ({ value: option.key, label: String(option.name || option.key) })),
           ]}
         />

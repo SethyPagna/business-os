@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import { createPortal } from 'react-dom'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -804,7 +805,7 @@ export default function ProductDetailSheet({
         <div className="flex-1 overflow-auto p-4 space-y-2 text-sm">
           {([
             [t('label_category') || 'Category', product.category],
-            [t('label_supplier') || 'Supplier', product.supplier],
+            [t('label_supplier') || 'Supplier', supplierDisplay(product.supplier, (key, fallback) => t(key) || fallback)],
             [t('label_barcode') || 'Barcode', product.barcode],
             [t('label_description') || 'Description', product.description],
           ] as Array<[string, string | number | undefined]>).map(([label, val]) => val ? (

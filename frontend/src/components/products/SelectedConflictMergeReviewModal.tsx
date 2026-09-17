@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import Modal from '../shared/Modal.tsx'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
@@ -220,7 +221,7 @@ function GroupReviewCard({ group, choice, choicesFrozen, onChoice, t }: {
                   {lotRows.map((lot) => (
                     <div key={`${lot.batch_id}-${lot.branch_id}`} className="rounded bg-gray-100 p-1.5 dark:bg-zinc-800">
                       {tr('batch', 'Received date')} {batchDisplayLabel({ id: lot.batch_id, lot_code: lot.lot_code || lot.batch_key || null, received_at: lot.received_at || null }, tr('batch', 'Received date'))} · {lot.branch_id == null ? tr('unknown', 'Unknown') : (stockRows.find((row) => row.branch_id === lot.branch_id)?.branch_name || `#${lot.branch_id}`)} · {lot.quantity ?? tr('unknown', 'Unknown')}
-                      <br />{tr('supplier', 'Supplier')}: {lot.supplier_name || tr('unknown', 'Unknown')} · {tr('received_date', 'Received date')}: {lot.received_at || tr('unknown', 'Unknown')} · {tr('expiry_date', 'Expiry date')}: {lot.expiry_date || tr('unknown', 'Unknown')}
+                      <br />{tr('supplier', 'Supplier')}: {supplierDisplay(lot.supplier_name, tr)} · {tr('received_date', 'Received date')}: {lot.received_at || tr('unknown', 'Unknown')} · {tr('expiry_date', 'Expiry date')}: {lot.expiry_date || tr('unknown', 'Unknown')}
                       <br />{tr('selected_conflict_received_quantity', 'Received quantity')}: {lot.received_quantity ?? tr('unknown', 'Unknown')} · {tr('selected_conflict_received_cost', 'Received cost')}: {optionalMoney(lot.received_cost_usd ?? lot.unit_cost_usd, fmtUSD, tr('unknown', 'Unknown'))}
                       <br />{tr('selected_conflict_payment_status', 'Payment status')}: {lot.payment_status || tr('unknown', 'Unknown')} · {tr('due_date', 'Due date')}: {lot.credit_due_date || tr('unknown', 'Unknown')} · {lot.is_active ? tr('active', 'Active') : tr('inactive', 'Inactive')}
                     </div>
@@ -301,7 +302,7 @@ function RemovalReviewCard({ removal, t }: {
         <div className="rounded-lg bg-gray-50 p-2 dark:bg-zinc-900">
           <p className="font-semibold">{tr('selected_conflict_lots', 'Received dates')}</p>
           {removal.batches.length ? removal.batches.map((batch, index) => (
-            <p key={index}>{String(batch.lot_code || batch.batch_key || `#${batch.id || '?'}`)} · {String(batch.supplier_name || tr('unknown', 'Unknown'))} · {String(batch.received_at || tr('unknown', 'Unknown'))} · {String(batch.expiry_date || tr('unknown', 'Unknown'))}</p>
+            <p key={index}>{String(batch.lot_code || batch.batch_key || `#${batch.id || '?'}`)} · {supplierDisplay(batch.supplier_name, tr)} · {String(batch.received_at || tr('unknown', 'Unknown'))} · {String(batch.expiry_date || tr('unknown', 'Unknown'))}</p>
           )) : <p>{tr('selected_conflict_no_lots', 'No received dates')}</p>}
         </div>
       </div>
