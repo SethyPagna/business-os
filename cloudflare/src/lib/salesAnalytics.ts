@@ -1816,112 +1816,69 @@ export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTo
     readSalesReportSnapshot(env, f),
     removalLossesFor(env, f),
   ])
-  return withRemovalLosses(
-    exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot),
-    loss,
-  )
+  return withRemovalLosses(salesTotalsFromSnapshot(snapshot), loss)
+}
+
+function periodKeyFor(sale: ReportScalarRow, granularity: 'day' | 'week' | 'month'): string {
+  const raw = String(sale.created_at || '')
+  const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
+  const local = new Date(parsed.getTime() + 7 * 60 * 60 * 1000)
+  const day = local.toISOString().slice(0, 10)
+  if (granularity === 'month') return day.slice(0, 7)
+  if (granularity === 'week') {
+    const dow = local.getUTCDay(); const back = dow === 0 ? 6 : dow - 1
+    return new Date(local.getTime() - back * 86_400_000).toISOString().slice(0, 10)
+  }
+  return day
+}
+
+/** Reuse an already-read snapshot for the period-bucketed trend series (the
+ * Dashboard revenue/cost/profit line chart and count bar chart) instead of a
+ * second full keyset read -- see getSalesTotalsAndPeriodSeries below, the
+ * only caller that needs both views of the same window. */
+function salesPeriodRowsFromSnapshot(snapshot: SalesReportSnapshot, granularity: 'day' | 'week' | 'month'): SalesPeriodRow[] {
+  const bucketFor = (sale: ReportScalarRow) => periodKeyFor(sale, granularity)
+  return [...aggregateReportSnapshot(snapshot, bucketFor).entries()].map(([period, bucket]) => {
+    const totals = exactReportTotals(bucket, snapshot)
+    return { period, date: period, count: totals.tx_count, tx_count: totals.tx_count,
+      revenue_usd: totals.revenue_usd, gross_sales_usd: totals.gross_sales_usd, refund_usd: totals.refund_usd,
+      discount_usd: totals.discount_usd, item_discount_usd: totals.item_discount_usd,
+      total_discount_usd: totals.total_discount_usd, tax_usd: totals.tax_usd, delivery_usd: totals.delivery_usd,
+      cost_usd: totals.cost_usd, profit_usd: totals.profit_usd, cancelled_tx_count: totals.cancelled_tx_count }
+  }).sort((a, b) => a.period.localeCompare(b.period))
 }
 
 // Period-bucketed trend series (for the Dashboard revenue/cost/profit line
-// chart and count bar chart). Sale-level sums and item-level cost are
-// queried and grouped separately, then merged by period key in JS -- same
-// fan-out-avoidance reasoning as getSalesTotals above, just bucketed.
+// chart and count bar chart). Reads one snapshot and buckets it in JS -- same
+// fan-out-avoidance reasoning as getSalesTotals above.
 export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularity: 'day' | 'week' | 'month'): Promise<SalesPeriodRow[]> {
-  {
-    const snapshot = await readSalesReportSnapshot(env, f)
-    const bucketFor = (sale: ReportScalarRow): string => {
-      const raw = String(sale.created_at || '')
-      const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
-      const local = new Date(parsed.getTime() + 7 * 60 * 60 * 1000)
-      const day = local.toISOString().slice(0, 10)
-      if (granularity === 'month') return day.slice(0, 7)
-      if (granularity === 'week') {
-        const dow = local.getUTCDay(); const back = dow === 0 ? 6 : dow - 1
-        return new Date(local.getTime() - back * 86_400_000).toISOString().slice(0, 10)
-      }
-      return day
-    }
-    return [...aggregateReportSnapshot(snapshot, bucketFor).entries()].map(([period, bucket]) => {
-      const totals = exactReportTotals(bucket, snapshot)
-      return { period, date: period, count: totals.tx_count, tx_count: totals.tx_count,
-        revenue_usd: totals.revenue_usd, gross_sales_usd: totals.gross_sales_usd, refund_usd: totals.refund_usd,
-        discount_usd: totals.discount_usd, item_discount_usd: totals.item_discount_usd,
-        total_discount_usd: totals.total_discount_usd, tax_usd: totals.tax_usd, delivery_usd: totals.delivery_usd,
-        cost_usd: totals.cost_usd, profit_usd: totals.profit_usd, cancelled_tx_count: totals.cancelled_tx_count }
-    }).sort((a, b) => a.period.localeCompare(b.period))
-  }
-  const db = getDb(env)
-  // Buckets are the LOCAL (UTC+7) day/week/month, matching the date window.
-  const periodExprS = granularity === 'month' ? localMonthExpr('sales.created_at')
-    : granularity === 'week' ? localWeekExpr('sales.created_at')
-      : localDateExpr('sales.created_at')
-  const periodExprJoined = granularity === 'month' ? localMonthExpr('s.created_at')
-    : granularity === 'week' ? localWeekExpr('s.created_at')
-      : localDateExpr('s.created_at')
+  const snapshot = await readSalesReportSnapshot(env, f)
+  return salesPeriodRowsFromSnapshot(snapshot, granularity)
+}
 
-  const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
-  const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
-
-  const [levelRows, costRows, returnedByPeriod, cancelledByPeriod] = await Promise.all([
-    db.prepare(`
-      SELECT ${periodExprS} AS period, COUNT(*) AS tx_count,
-             COALESCE(SUM(subtotal_usd), 0) AS gross_sales_usd,
-             COALESCE(SUM(discount_usd), 0) AS store_discount_usd,
-             COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
-             COALESCE(SUM(tax_usd), 0) AS tax_usd,
-             COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
-             COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
-             -- Same canonical net-sales revenue basis as the headline, so the
-             -- per-period trend sums back to getSalesTotals' revenue_usd. Not a
-             -- copy of it: the same constant.
-             ${RECOGNIZED_LEVEL_COLUMNS}
-      FROM sales
-      ${CUSTOMER_REFUND_JOIN}sales.id
-      WHERE ${whereLevel}
-      GROUP BY ${periodExprS}
-    `).all<Record<string, number> & { period: string }>(paramsLevel),
-    db.prepare(`
-      SELECT ${periodExprJoined} AS period,
-             ${ITEM_COST_COLUMNS}
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      WHERE ${whereCost} AND ${ITEM_COST_STATUS_CLAUSE}
-      GROUP BY ${periodExprJoined}
-    `).all<ItemCostRow & { period: string }>(paramsCost),
-    returnedCostByBucket(env, f, periodExprJoined),
-    cancelledCountByBucket(env, f, periodExprS),
+// P11-14 (all-time dashboard timeout): the Dashboard's analytics card and its
+// trend chart used to call getSalesTotals() and getSalesPeriodSeries()
+// separately even though both take the SAME filters -- each one reads its
+// own full snapshot (readSalesReportSnapshot keyset-pages sales, sale_items,
+// returns and return_items TWICE per read, as a concurrent-write guard), so
+// the pair cost FOUR full paginated reads of the same rows. Over an all-time
+// window with years of imported sales this serialized enough D1 round trips
+// to blow past the Worker's request budget before it could finish, which is
+// what the owner saw as a hang rather than a fast, honest error. One shared
+// snapshot read (still double-checked once) now backs both figures.
+export async function getSalesTotalsAndPeriodSeries(
+  env: Env,
+  f: SalesFilters,
+  granularity: 'day' | 'week' | 'month',
+): Promise<{ totals: SalesTotals; periodSeries: SalesPeriodRow[] }> {
+  const [snapshot, loss] = await Promise.all([
+    readSalesReportSnapshot(env, f),
+    removalLossesFor(env, f),
   ])
-
-  const costByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.cost_usd)]))
-  const pendingCostByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_cost_usd)]))
-  const itemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.item_discount_usd)]))
-  const pendingItemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_item_discount_usd)]))
-  const unvaluedCostByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.unvalued_cost_usd)]))
-  const levelByPeriod = new Map((levelRows || []).map((r) => [r.period, r as Record<string, number>]))
-  const rows = unionBuckets(levelByPeriod.keys(), cancelledByPeriod).map((period) => {
-    const totals = deriveTotals(levelByPeriod.get(period) || VOID_ONLY_LEVEL, costByPeriod.get(period) || 0, returnedByPeriod.get(period) || 0, { costUsd: pendingCostByPeriod.get(period) || 0, itemDiscountUsd: itemDiscountByPeriod.get(period) || 0, pendingItemDiscountUsd: pendingItemDiscountByPeriod.get(period) || 0, cancelledTxCount: cancelledByPeriod.get(period) || 0, unvaluedCostUsd: unvaluedCostByPeriod.get(period) || 0 })
-    return {
-      period,
-      date: period,
-      count: totals.tx_count,
-      tx_count: totals.tx_count,
-      revenue_usd: totals.revenue_usd,
-      // The two series the Revenue Flow chart plots beside revenue. Straight
-      // off the same deriveTotals call, so the chart cannot describe a
-      // different period than the card above it.
-      gross_sales_usd: totals.gross_sales_usd,
-      refund_usd: totals.refund_usd,
-      discount_usd: totals.discount_usd,
-      item_discount_usd: totals.item_discount_usd,
-      total_discount_usd: totals.total_discount_usd,
-      tax_usd: totals.tax_usd,
-      delivery_usd: totals.delivery_usd,
-      cost_usd: totals.cost_usd,
-      profit_usd: totals.profit_usd,
-      cancelled_tx_count: totals.cancelled_tx_count,
-    }
-  })
-  return rows.sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0))
+  return {
+    totals: withRemovalLosses(salesTotalsFromSnapshot(snapshot), loss),
+    periodSeries: salesPeriodRowsFromSnapshot(snapshot, granularity),
+  }
 }
 
 // ---- Phase X (Part 395): daily report + per-contact delivery totals -------

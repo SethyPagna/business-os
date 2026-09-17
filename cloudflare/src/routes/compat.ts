@@ -12,7 +12,7 @@ import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { buildAuditLogFilters } from '../lib/auditLogQuery'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
-import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
+import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
 import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertState } from '../lib/familyStockStats'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
@@ -294,9 +294,8 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
     ELSE 0
   END`
   const [
-    totals,
+    { totals, periodSeries: periodData },
     prevTotals,
-    periodData,
     periodReturns,
     periodSupplierReturns,
     byPayment,
@@ -306,9 +305,16 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
     topCustomers,
     hourlyDist,
   ] = await Promise.all([
-    getSalesTotals(env, filters),
+    // P11-14: totals and periodData are the SAME window read twice through
+    // independent full snapshot fetches before this change -- readSalesReportSnapshot
+    // keyset-pages sales/sale_items/returns/return_items TWICE each as a
+    // concurrent-write guard, so the pair cost four full paginated reads of
+    // identical rows. Over an all-time window that serialized into enough D1
+    // round trips to exceed the request budget before finishing, which showed
+    // up as a hang rather than a fast, honest error. One shared snapshot read
+    // now backs both figures (see getSalesTotalsAndPeriodSeries).
+    getSalesTotalsAndPeriodSeries(env, filters, granularity as 'day' | 'week' | 'month'),
     range.allTime ? Promise.resolve({}) : getSalesTotals(env, previousPeriodFilters(filters)),
-    getSalesPeriodSeries(env, filters, granularity as 'day' | 'week' | 'month'),
     db.prepare(`
       WITH matching_returns AS (
         SELECT r.id, r.total_refund_usd
