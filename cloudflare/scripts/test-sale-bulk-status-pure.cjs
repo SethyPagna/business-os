@@ -128,7 +128,22 @@ async function run() {
   assert.deepEqual(legacy.sql.prepare('SELECT * FROM sales ORDER BY id').all(),domain)
   // ...and then every later migration, so the route below runs against the schema production actually has.
   for (const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && Number(f.slice(0,4)) > 120).sort()) legacy.sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
-  assert.equal(legacy.sql.prepare('SELECT COUNT(*) n FROM sale_write_revisions').get().n,0)
+  // Replaying the chain is not revision-neutral any more, and should not be:
+  // 0179 (the membership-points switch-off) runs a real `UPDATE sales SET
+  // loyalty_accrual = 0`, and 0120's triggers count that write like any
+  // other. This assertion used to read `=== 0` and started failing at 9 the
+  // moment that migration was written -- on the migration, not on anything
+  // this file is about.
+  //
+  // What the file actually tests is below: restore mode suppresses revision
+  // writes, and a normal write increments by exactly one. So the baseline is
+  // cleared HERE, under the same restore flag, and the clearing is itself an
+  // assertion -- if the flag did not suppress, deleting these rows would
+  // immediately write more.
+  legacy.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}') ON CONFLICT(key) DO UPDATE SET value='{"mode":"restore"}'; DELETE FROM sale_write_revisions;`)
+  legacy.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+  assert.equal(legacy.sql.prepare('SELECT COUNT(*) n FROM sale_write_revisions').get().n,0,
+    'restore mode must suppress the revision triggers, so clearing the baseline stays cleared')
   assert.equal((await legacy.call(sales,'/bulk-status',request(legacy))).status,200)
   const savedRevisions=legacy.sql.prepare('SELECT * FROM sale_write_revisions ORDER BY sale_id').all()
   legacy.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}'); DELETE FROM sale_write_revisions; DELETE FROM sale_items; DELETE FROM sales;`)
