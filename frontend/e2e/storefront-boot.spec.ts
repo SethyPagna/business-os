@@ -147,7 +147,7 @@ test.describe('leangbeauty storefront boot', () => {
       // The shell, from cache. Its brand text is rendered by index.html before
       // any script runs, so this proves a real document came back rather than
       // the browser's own network-error page.
-      await expect(page.locator('#root')).not.toBeEmpty()
+      await expect(page.locator('#root'), JSON.stringify(health)).not.toBeEmpty()
       await expect(page.locator('body')).toContainText('Leang Beauty')
     } finally {
       await context.setOffline(false)

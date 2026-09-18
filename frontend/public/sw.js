@@ -281,7 +281,10 @@ async function precacheAppShell() {
         ? precachePayload.deferred.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
         : [];
     const staticCache = await caches.open(STATIC_CACHE);
-    const requiredEntryAssets = [...new Set(htmlEntryAssets)];
+    const requiredStartupAssets = Array.isArray(precachePayload?.required)
+        ? precachePayload.required.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
+        : [];
+    const requiredEntryAssets = [...new Set([...htmlEntryAssets, ...requiredStartupAssets])];
     const entryResults = await mapWithConcurrency(requiredEntryAssets, PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url));
     if (entryResults.some((result) => result.status === 'rejected')) {
         throw new Error('Application entry assets could not be cached');

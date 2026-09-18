@@ -127,6 +127,23 @@ function emitBuildManifest(): Plugin {
       const eagerFromRoutes = new Set(
         toRoutePreloadFiles(bundle, eagerPrecacheChunkNames).map((fileName) => `/${fileName.replace(/\\/g, '/')}`),
       )
+      // A cached HTML document is not an offline shell until its lazy public
+      // root, transitive static imports and extracted CSS are available too.
+      const required = new Set<string>()
+      const visitStartup = (fileName: string) => {
+        const url = `/${fileName.replace(/\\/g, '/')}`
+        if (required.has(url)) return
+        required.add(url)
+        const chunk = bundle[fileName]
+        if (!isBundleChunk(chunk)) return
+        for (const dependency of chunk.imports) visitStartup(dependency)
+        const metadata = (chunk as OutputChunk & { viteMetadata?: { importedCss?: Set<string> } }).viteMetadata
+        for (const css of metadata?.importedCss ?? []) required.add(`/${css.replace(/\\/g, '/')}`)
+      }
+      for (const chunk of Object.values(bundle)) {
+        if (isBundleChunk(chunk) && (chunk.isEntry || chunk.name === 'PublicCatalogRoot')) visitStartup(chunk.fileName)
+      }
+      for (const url of required) eagerFromRoutes.add(url)
       // Entry chunks (the ones index.html itself references) are always
       // eager -- they are already a hard install gate via requiredEntryAssets
       // in service-worker.ts; this just keeps the manifest's own eager/
@@ -159,6 +176,7 @@ function emitBuildManifest(): Plugin {
           assets: offlineAssetUrls,
           eager: eagerAssetUrls,
           deferred: deferredAssetUrls,
+          required: [...required].sort(),
         }, null, 2),
       })
     },
