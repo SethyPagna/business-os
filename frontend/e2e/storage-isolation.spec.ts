@@ -82,7 +82,7 @@ async function dumpStorage(page: Page): Promise<StorageDump> {
 async function leaveTracesOfCashierA(page: Page): Promise<void> {
   await page.getByPlaceholder(POS_SEARCH_BOX).first().fill('aurelia-typed-by-cashier-A')
   await page.evaluate(({ legacy, filterPrefix, draftKey }) => {
-    window.sessionStorage.setItem(legacy[0], JSON.stringify([{ id: 1, label: 'Order 1', items: [{ name: 'A private cart line' }] }]))
+    window.sessionStorage.setItem(legacy[0], JSON.stringify([{ id: 1, label: 'Order 1', cart: [{ id: 1, product_id: 1, name: 'A private cart line', quantity: 1, price: 5 }] }]))
     window.sessionStorage.setItem(legacy[1], '1')
     window.sessionStorage.setItem(legacy[2], '7')
     window.localStorage.setItem(`${filterPrefix}11`, JSON.stringify({ preset: 'A-only' }))
@@ -188,8 +188,8 @@ test.describe('same-device account handover', () => {
     expectNoRuntimeErrors(health)
   })
 
-  test.fixme('B opens an empty till, not A\'s', async ({ page }) => {
-    // EXPECTED RED ON THIS SOURCE -- and this is the one to read first,
+  test('B opens an empty till, not A\'s', async ({ page }) => {
+    // Historical regression, reproduced before the explicit legacy cleanup:
     // because it is what the next cashier actually sees.
     //
     // A types a product name into the POS search box. POS.tsx:3411 writes every
@@ -228,8 +228,8 @@ test.describe('same-device account handover', () => {
     expectNoRuntimeErrors(health)
   })
 
-  test.fixme('the till is wiped of A\'s UNPREFIXED keys too', async ({ page }) => {
-    // EXPECTED RED ON THIS SOURCE.
+  test('the till is wiped of A\'s UNPREFIXED keys too', async ({ page }) => {
+    // Historical regression, now covered by explicit legacy-key cleanup.
     //
     // frontend/src/platform/runtime/clientRuntime.ts:46
     //     const BUSINESS_OS_STORAGE_PREFIXES = ['businessos_', 'business_os_']
@@ -254,9 +254,8 @@ test.describe('same-device account handover', () => {
     // POS.tsx:700 readPosDraft(), so on a till upgraded from an older build
     // cashier B inherits cashier A's cart outright.
     //
-    // THE FIX is one line at the source: add the unprefixed families to
-    // BUSINESS_OS_STORAGE_PREFIXES' sibling check, or give them the prefix.
-    // Delete this `.fixme` then -- the assertions below need no change.
+    // Cleanup must match exact legacy keys, not all pos_/bos_ keys; preserve
+    // device preferences and protected pending financial-operation evidence.
     await signIn(page, E2E_ACCOUNTS.cashierA)
     await gotoAdminPage(page, '/pos')
     await expect(page.getByText('E2E Product 001 Aurelia').first()).toBeVisible({ timeout: 30_000 })
