@@ -1791,7 +1791,8 @@ export function installActorSessionQuarantineDom(): () => void {
     if (blocked) {
       hideOldUi()
       const status = actorSessionQuarantineStatus()
-      message.textContent = status === 'authentication-pending' ? 'Sign-in is still in progress in another tab. Finish it there, then retry. / ការចូលគណនីនៅកំពុងដំណើរការក្នុងផ្ទាំងផ្សេង។ សូមបញ្ចប់នៅទីនោះ រួចព្យាយាមម្ដងទៀត។'
+      message.textContent = status === 'storage-unavailable' ? 'This site’s data is blocked or unavailable. Enable cookies and site data for this site in your browser, then retry. This screen stays locked until the session can be checked safely. / ទិន្នន័យគេហទំព័រនេះត្រូវបានរារាំង ឬមិនអាចប្រើបាន។ សូមអនុញ្ញាតខូឃី និងទិន្នន័យគេហទំព័រនេះនៅក្នុងកម្មវិធីរុករក រួចព្យាយាមម្ដងទៀត។ អេក្រង់នេះនៅតែចាក់សោ រហូតដល់អាចពិនិត្យវគ្គចូលគណនីដោយសុវត្ថិភាព។'
+        : status === 'authentication-pending' ? 'Sign-in is still in progress in another tab. Finish it there, then retry. / ការចូលគណនីនៅកំពុងដំណើរការក្នុងផ្ទាំងផ្សេង។ សូមបញ្ចប់នៅទីនោះ រួចព្យាយាមម្ដងទៀត។'
         : status === 'checking' ? 'Checking the current session… / កំពុងពិនិត្យវគ្គចូលគណនីបច្ចុប្បន្ន…'
           : status === 'different-account' ? 'Another account is signed in. Sign back into the original account in the other tab, then retry. Reload only when no unfinished editor work remains. / គណនីផ្សេងបានចូល។ សូមចូលគណនីដើមវិញក្នុងផ្ទាំងផ្សេង រួចព្យាយាមម្ដងទៀត។ ផ្ទុកឡើងវិញតែពេលគ្មានការកែប្រែមិនទាន់បញ្ចប់។'
             : 'This screen remains locked because the current session could not be safely restored. Retry, or reload when no unfinished editor work remains. / អេក្រង់នេះនៅតែចាក់សោ ព្រោះមិនអាចស្ដារវគ្គចូលគណនីដោយសុវត្ថិភាពបាន។ សូមព្យាយាមម្ដងទៀត ឬផ្ទុកឡើងវិញពេលគ្មានការកែប្រែមិនទាន់បញ្ចប់។'
