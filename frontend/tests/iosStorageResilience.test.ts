@@ -153,12 +153,6 @@ const KNOWN_UNGUARDED: Record<string, string[]> = {
   "app/publicErrorRecovery.ts": [
     "return typeof window !== 'undefined' ? window.sessionStorage : null",
   ],
-  "App.tsx": [
-    "const userJson = readStorageValue(window.sessionStorage, STORAGE_KEYS.USER)",
-    "|| readStorageValue(window.localStorage, STORAGE_KEYS.USER)",
-    "const expiry = readStorageValue(window.sessionStorage, STORAGE_KEYS.USER_EXPIRY)",
-    "|| readStorageValue(window.localStorage, STORAGE_KEYS.USER_EXPIRY)",
-  ],
   "components/sales/ReportsHub.tsx": [
     "const storage = typeof window !== 'undefined' ? window.localStorage : null",
   ],

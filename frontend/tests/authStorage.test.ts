@@ -7,11 +7,13 @@ const source = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url)
 const tree = ts.createSourceFile('AppContext.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 const names = ['safeStorageGet', 'safeStorageSet', 'safeStorageRemove', 'getStoredUserPayload', 'getStoredUserExpiry', 'clearPersistedAuthState', 'persistAuthState']
 const functions = tree.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && !!node.name && names.includes(node.name.text)).map(node => node.getText(tree)).join('\n')
+const shellTree = ts.createSourceFile('App.tsx', fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+const shellFunctions = shellTree.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && !!node.name && ['readStorageValue', 'hasUsableStoredAuthSession'].includes(node.name.text)).map(node => node.getText(shellTree)).join('\n')
 assert.equal(names.length, tree.statements.filter(node => ts.isFunctionDeclaration(node) && node.name && names.includes(node.name.text)).length)
 const STORAGE_KEYS = { USER: 'user', USER_EXPIRY: 'expiry', SERVER_START_TIME: 'server', OAUTH_LOGIN_PENDING: 'oauth-login', OAUTH_LINK_PENDING: 'oauth-link', OAUTH_CALLBACK_RESULT: 'oauth-result', SYNC_SERVER: 'sync' }
 function execute(expression: string, bindings: Record<string, unknown> = {}) {
   const scope = { getAuthStorage, STORAGE_KEYS, SESSION_ONLY_STORAGE_KEYS: ['user', 'expiry'], ...bindings }
-  const js = ts.transpileModule(`${functions}\nreturn (${expression});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  const js = ts.transpileModule(`${functions}\n${shellFunctions}\nreturn (${expression});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   return new Function(...Object.keys(scope), js)(...Object.values(scope))
 }
 function initializer(name: string): string {
@@ -44,6 +46,7 @@ try {
     install(browser)
     assert.equal(execute('getStoredUserPayload()'), '')
     assert.equal(execute('getStoredUserExpiry()'), '')
+    assert.equal(execute('hasUsableStoredAuthSession()'), false, 'the signed-out shell renders instead of throwing after provider boot')
     assert.doesNotThrow(() => execute('persistAuthState({ user: { id: 7 }, expiryTime: 123, sessionDuration: "session" })'))
     assert.doesNotThrow(() => execute('persistAuthState({ user: { id: 7 }, expiryTime: 123, sessionDuration: "30d" })'))
     assert.doesNotThrow(() => execute('clearPersistedAuthState()'))
@@ -59,6 +62,7 @@ try {
   execute('persistAuthState({ user: { id: 8 }, expiryTime: null, sessionDuration: "30d" })')
   assert.equal(session.getItem('user'), null)
   assert.equal(JSON.parse(execute('getStoredUserPayload()')).id, 8)
+  assert.equal(execute('hasUsableStoredAuthSession()'), true)
   assert.equal(execute('getStoredUserExpiry()'), '')
   execute('clearPersistedAuthState()')
   assert.equal(execute('getStoredUserPayload()'), '')
