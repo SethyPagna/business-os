@@ -1,3 +1,16 @@
+## Codex resume — four owner-confirmed supplier invoices settled LIVE — September 18
+
+Owner explicitly approved marking the four reviewed legacy invoices paid. Migration
+**0183** applied from commit **ae75fbad**, after full-chain local tests and independent
+review. IDs **315, 531, 612, 813** now Paid; outstanding **$489 → $0**. All **1,596**
+invoice rows and original total **$1,314,703.4626** preserved. Four audit before/after
+records support scoped recovery. No new expense, cash movement or Worker deployment.
+Live code remains **354f12d5957e**; production migration tail is **0183**.
+
+Evidence, recovery bookmark and remaining scope:
+`docs/fleet/2026-09-18-codex-resume.md`. Older “owner ruling required” paragraphs below
+are historical and superseded only for these four invoices. Other open items remain.
+
 ## Program 11 checkpoint K — all sixteen owner items DEPLOYED, migrations 0181/0182 applied — September 18
 
 **This is live.** Code commit **354f12d5** is live as Worker version

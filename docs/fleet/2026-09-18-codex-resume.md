@@ -29,7 +29,12 @@ before/after records provide scoped recovery; no stock/cash records are created.
 Local full-chain fixture passes: empty install, five stale-target refusals,
 unrelated table counts and invoice preservation, exact $489 reduction, four
 audits, idempotency and recovery. Migration registration guard passes.
-Production apply: **pending independent review**.
+Independent reviewer approved and reran the test at exit 0. Production migration
+0183 **APPLIED** from checkpoint `ae75fbad`; 10 commands / 25.01 ms.
+Fresh postflight: all four IDs Paid with zero outstanding; 1,596 invoices and
+total $1,314,703.4626 unchanged; paid now $1,314,703.4626; outstanding $0.
+Exactly four settlement audit rows; migration tail 0183; both helper tables absent.
+No Worker deployment needed or performed: live code remains `354f12d5957e`.
 
 Archival import caveat: `import-aug30-legacy-reports.mjs` upserts the original
 source balances. Do not rerun that historical import without preserving this
@@ -41,8 +46,13 @@ Independent review and focused local tests found the original sales-list lineage
 failure is handled (list 200, affected write 409). The generic “three Sentry
 issues open” note conflicts with that deployed fix; fresh events are needed.
 CPU-limit event has no recorded route/query attribution: no speculative fix.
-Payment-method rename search normalization is a possible remaining D1 expression
-depth path; native reproduction is the next bounded check, not yet a proven bug.
+Payment-method rename search normalization was tested in SQLite and native
+Miniflare/workerd D1 with exact source SQL (6,634 characters, 18 bindings,
+77 normalization replacements). Both fixtures passed identically, including
+accent handling and monetary strings. A 110-level positive control correctly
+failed at depth 100. This hypothesis is refuted; no speculative settings change.
+Reproduction: `C:/Users/mrkl6/AppData/Local/Temp/bos-payment-depth-triage-20260918.cjs`.
+Fresh event route/query/release is still needed for SQL-depth and CPU errors.
 
 Other open scope remains: 872 blank-gender customers (no guessing), lot-ledger
 backfill requiring a separately reviewed plan, parked supplier-payment patch,
