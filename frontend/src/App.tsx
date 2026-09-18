@@ -1,4 +1,5 @@
 import { useMobileSectionNavMode } from './utils/sectionNavPreference.ts'
+import { getAuthStorage } from './utils/authStorage.ts'
 import { getHubPageFromLocation } from './components/shared/hubNavigation.ts'
 import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ComponentType, ErrorInfo, ReactNode } from 'react'
@@ -264,8 +265,8 @@ function readStorageValue(storage: Storage | null | undefined, key: string): str
 
 function hasUsableStoredAuthSession(): boolean {
   if (typeof window === 'undefined') return false
-  const userJson = readStorageValue(window.sessionStorage, STORAGE_KEYS.USER)
-    || readStorageValue(window.localStorage, STORAGE_KEYS.USER)
+  const userJson = readStorageValue(getAuthStorage('session'), STORAGE_KEYS.USER)
+    || readStorageValue(getAuthStorage('local'), STORAGE_KEYS.USER)
   if (!userJson) return false
   try {
     const parsed = JSON.parse(userJson) as Record<string, unknown> | null
@@ -273,8 +274,8 @@ function hasUsableStoredAuthSession(): boolean {
   } catch {
     return false
   }
-  const expiry = readStorageValue(window.sessionStorage, STORAGE_KEYS.USER_EXPIRY)
-    || readStorageValue(window.localStorage, STORAGE_KEYS.USER_EXPIRY)
+  const expiry = readStorageValue(getAuthStorage('session'), STORAGE_KEYS.USER_EXPIRY)
+    || readStorageValue(getAuthStorage('local'), STORAGE_KEYS.USER_EXPIRY)
   if (!expiry) return true
   const expiresAt = Number.parseInt(expiry, 10)
   return Number.isFinite(expiresAt) && Date.now() <= expiresAt
