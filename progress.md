@@ -1,3 +1,14 @@
+## Codex budget checkpoint — September 18 (new code NOT deployed)
+
+Continue from `codex/supplier-settlement-20260918`, implementation `8bf80ae4`.
+Searchable picker, prospective stock-session payment, and preload-test fixes are
+integrated. Full frontend first pass 474/477; three failures corrected and focused
+5/5 rerun passed, but fresh full certification remains. Worker sweep still running
+with two native crashes requiring investigation. Confirmed blocked-storage login
+and account-switch search/legacy-storage gaps remain open. Owner has 3% weekly
+usage; scope expansion stopped. Exact evidence and resume steps:
+`docs/fleet/2026-09-18-codex-resume.md`. Do not deploy this checkpoint as certified.
+
 ## Codex resume — four owner-confirmed supplier invoices settled LIVE — September 18
 
 Owner explicitly approved marking the four reviewed legacy invoices paid. Migration

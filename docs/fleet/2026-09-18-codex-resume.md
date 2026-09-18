@@ -54,6 +54,65 @@ failed at depth 100. This hypothesis is refuted; no speculative settings change.
 Reproduction: `C:/Users/mrkl6/AppData/Local/Temp/bos-payment-depth-triage-20260918.cjs`.
 Fresh event route/query/release is still needed for SQL-depth and CPU errors.
 
-Other open scope remains: 872 blank-gender customers (no guessing), lot-ledger
-backfill requiring a separately reviewed plan, parked supplier-payment patch,
-responsive/performance and physical-printer verification. No blanket completion.
+## Budget checkpoint — September 18, 09:25 local
+
+Owner reports only 3% weekly usage remaining. Scope expansion stopped; no new
+runtime deployment. Continue from **8bf80ae4**, branch
+`codex/supplier-settlement-20260918`, worktree
+`C:/Users/mrkl6/Downloads/bos-supplier-settlement-20260918` (not the dirty shared tree).
+
+Integrated, NOT deployed:
+- Four searchable controls: stock-in invoice supplier, bulk category/unit, dated
+  reconciliation product candidate. Independent review passed; browser/touch
+  verification still required.
+- Prospective atomic stock-in payment capture. Older drafts remain unknown;
+  exact retries retain canonical payloads. Existing lots retain original terms,
+  with a visible bilingual caveat. Separate Products Review flow does not save
+  payment terms: ineffective controls are hidden and the limitation is explicit.
+- Removed unused preload policy and replaced misleading source-string assertions
+  with executable tests of the configured route-preload plugin. No active policy
+  change. Independent review passed.
+
+Verification: original frontend full run at f5301eb2: **474 passed / 3 red / 477**.
+One real Khmer terminology mismatch and two old-markup test assumptions were fixed
+in f7bdc71f and 8bf80ae4. Root reran all three failures plus payment and searchable
+picker tests: **5/5 passed**. This is NOT a fresh full-suite pass. Worker typecheck
+passed. Combined final build, browser gates, and fresh full frontend run remain.
+
+Worker sweep is running in exec session **47044**, logging each script under
+`outputs/open-task-gates-20260918/`; it writes `worker-summary.json` on completion.
+At checkpoint 286 scripts had started. Two native exits **-1073740791** were
+observed: `test-customer-return-cancel-sequence-native.cjs` and
+`test-product-conflict-action-apply-native.cjs`. Preserve first-pass evidence;
+compare baseline and candidate in isolation before any release decision. Do not
+assume these are harmless contention. The first crash preceded the frontend gate.
+Frontend i18n verification session **28082** was completing at checkpoint.
+
+Newly confirmed OPEN browser defects (not fixed):
+- AppContext storage globals are evaluated before safeStorageGet's catch;
+  authReady initialization can throw under blocked storage. RootErrorBoundary
+  likely changes blank screen to error panel, not successful login. Existing
+  admin-boot blocked-storage test is skipped. Clean prepared worktree
+  `C:/Users/mrkl6/Downloads/bos-blocked-storage-auth-20260918` at f5301eb2;
+  no implementation started, claim released. Guard acquisition and sibling auth
+  clear/persist/delayed writes while preserving cookie auth; add throwing-getter
+  tests and enable the browser case after proof.
+- POS unscoped `pos_search` survives account switching; legacy `cart` fallback
+  also needs explicit safe cleanup. Never blanket-remove pending financial data.
+- Logout and stale_read_scope classification still need controlled delayed-read
+  tests. Existing storage-isolation fixture seeds `items` instead of `cart`, and
+  a >=0 polling assertion does not wait for late failures. Repair these fixtures
+  before claiming the skipped account-switch scenarios pass.
+
+Gender: captured audited restoration was 4,162 matched customers, 862 held, zero
+mismatches, General unchanged. The later 872 ledger count has no fresh census in
+the inspected evidence. Held reasons: 252 duplicate-name identity, 394 name-only,
+88 unknown source gender, 11 uncorroborated, 110 unmatched source name, 1 conflict,
+4 protected General, 2 different known phones. No additional safe restoration
+established. Next step is fresh read-only identity census and comparison against
+the old quarantine; do not overwrite old audit files or infer gender from names.
+Source evidence is under `bos-account-cache-sale-flash-20260912/output/customer-gender-review-20260912`.
+
+Other open scope: reviewed-plan-dependent lot-ledger backfill, fresh Sentry event
+attribution, responsive/performance and physical-printer verification. No blanket
+completion; no deployment permitted until remaining release gates are resolved.
