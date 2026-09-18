@@ -8,6 +8,46 @@ ancestors of the current release.
 
 ## Owner-authorized supplier settlement
 
+## Latest status — authentication startup batch DEPLOYED
+
+Live **de8c72fa9514**, Worker **9d5b1644-9f8f-4826-b6f7-043ddd5cf6c2**,
+source hash **d07f77e3f25acbba**, built **2026-09-18T04:21:58.611Z**.
+This supersedes the offline release below while retaining that fix. Exact runtime
+postflight and health pass. Isolated live browser smoke renders BOTH login and
+storefront with zero captured page errors (previous signed-out rejection gone).
+
+Implemented guarded auth storage acquisition throughout provider/signed-out shell,
+persist/clear/deferred writes, and immediate observation of the early bootstrap
+promise without replacing its rejection for the eventual consumer. Account fences
+and pending work are unchanged. When ALL storage is blocked, cookie mutation must
+still fail closed: a visible bilingual enable-cookies/site-data recovery dialog
+now replaces misleading other-tab-pending text. This is NOT support for signing in
+without coordination storage. No storage deletion or production data migration.
+
+Important verification correction: initially enabling the old blocked-storage
+login test found a deliberate full quarantine (login hidden), not another crash.
+Investigation confirmed authCookieAdmission explicitly requires it. Test now
+requires accurate visible recovery, hidden login and reload control, while the
+existing safety tests still require dispatch/cookie-mutation denial. This is an
+intentional acceptance correction, not bypassing the security lock.
+
+Fresh checks: **36 browser pass /0 fail /9 existing skips**, across desktop,
+Android and iPhone; both former auth cases active. **11 focused auth/storage/safety
+tests pass**, including actual throwing-getter callbacks, pending-work preservation,
+rejection-before-consumer proof, admission/mutation/quarantine. Typecheck, i18n,
+build (267 chunks/0 cycles), stamped dry-run pass. This batch did not rerun all
+frontend/backend tests; earlier full-suite results and native exceptions remain
+recorded. Independent early-promise review accepted.
+
+Evidence in outputs/open-task-gates-20260918: auth-browsers.log (first failures),
+auth-final-browsers.log, auth-final-types.log, auth-final-build.log,
+auth-release-build.log, auth-release-dryrun.log, auth-release-deploy.log,
+auth-live-smoke.log. Code commits b73788b4, ae40b86e, 25e8e09f, de8c72fa.
+Next open: account-switch pos_search/legacy cart cleanup and stale-read handling;
+do not blanket-clear storage or delete pending financial operation evidence.
+Gender source ambiguities, lot provenance and physical printing remain open.
+Rollback code version: baeae504-2121-4b32-bfb6-5df4277069c3 (96cdcb6bbdfa).
+
 ## Latest status — offline startup fixed and checkpoint DEPLOYED
 
 Owner explicitly requested fix and deploy after the held release. Code commit

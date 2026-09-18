@@ -1,3 +1,14 @@
+## Authentication startup safety DEPLOYED — September 18
+
+Live de8c72fa9514, Worker9d5b1644-9f8f-4826-b6f7-043ddd5cf6c2. Auth storage
+getter crashes guarded, early unhandled signed-out rejection observed safely,
+blocked-storage full quarantine now gives accurate bilingual recovery guidance.
+No account fence weakened; no pending work cleared. Browser36 pass/0 fail/9 skips;
+focused11/11, types/i18n/build/dry-run pass. Live login AND storefront render with
+zero captured page errors; exact runtime/health verified. No data migration.
+Account-switch cache cleanup remains OPEN. Full evidence/acceptance correction:
+docs/fleet/2026-09-18-codex-resume.md. Older auth-open notes are superseded only here.
+
 ## Offline startup fix and checkpoint DEPLOYED — September 18
 
 Live commit96cdcb6bbdfa, Workerbaeae504-2121-4b32-bfb6-5df4277069c3.
