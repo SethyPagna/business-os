@@ -6657,5 +6657,7 @@
   "stock_tagged_load_failed": "Failed to load tagged stock",
   "stock_tagged_quantity_over": "More than the held quantity",
   "stock_tagged_dispose_done": "Removed from tagged stock",
-  "stock_tagged_restore_done": "Restored to sellable stock"
+  "stock_tagged_restore_done": "Restored to sellable stock",
+  "stock_session_payment_scope_hint": "Requested payment terms only. An existing lot keeps its recorded terms, including when receipts share the same received date.",
+  "stock_session_review_payment_hint": "Product creation submitted for review does not record payment terms here."
 }

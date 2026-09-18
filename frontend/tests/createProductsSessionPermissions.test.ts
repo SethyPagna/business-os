@@ -87,7 +87,9 @@ for (const quantity of [0, 4]) {
   const user = { role_permissions: { all: true }, permissions: { all: false, products: 'review', inventory: true } }
   const bindings = {
     effectivePermissions, user, saving: false, header: { branchId: '1', supplierName: 'Supplier' }, rows: [], freeGoods: false,
-    sessionPaymentDueInvalid, payment: { paymentStatus: 'paid', creditDueDate: '' },
+    // A restored header may retain credit selected in Existing mode. Review
+    // creation cannot persist that metadata and must not demand its due date.
+    sessionPaymentDueInvalid, payment: { paymentStatus: 'credit', creditDueDate: '' },
     tr: (_key: string, fallback: string) => fallback, findSessionProductDuplicate: () => false,
     stockReceiptGateCode: () => null, setSaving() {}, canCommitProductAdd: canCommit(user), canReceiveStock: true,
     onCreateProduct: async (payload: Record<string, unknown>) => { reviewedPayloads.push(payload); throw new Error('Pending review') },

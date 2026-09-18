@@ -583,7 +583,7 @@ export default function CreateProductsSessionModal({
     const receiptSupplier = String(payload.supplier ?? header.supplierName ?? '').trim()
     const receiptGate = stockReceiptGateCode({ isStockIn: quantity > 0, supplierName: receiptSupplier, unitCostUsd: costText, freeGoods })
     if (receiptGate) throw new Error(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]))
-    if (sessionPaymentDueInvalid(payment, quantity)) throw new Error(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'))
+    if (canCommitProductAdd && sessionPaymentDueInvalid(payment, quantity)) throw new Error(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'))
     if (findSessionProductDuplicate(rows, { name, barcode })) {
       throw new Error(tr('create_products_session_duplicate', 'Duplicate: You added this item already.'))
     }
@@ -605,7 +605,7 @@ export default function CreateProductsSessionModal({
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: null,
           supplierName: String(payload.supplier ?? header.supplierName ?? '').trim(), branchId: String(branchId), branchName: branchNameFor(String(branchId)),
           receivedDate: String(payload.received_date || receivedDate), expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: '', quantity: 0,
-          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, ...payment, reason: reason.trim(), status: 'saved', detail: tr('product_created', 'Product created'),
+          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, reason: reason.trim(), status: 'saved', detail: tr('product_created', 'Product created'),
         }
         setRows((prev) => [row, ...prev]); onDone()
       } else {
@@ -857,6 +857,27 @@ export default function CreateProductsSessionModal({
     </div>
   ) : null
 
+  const renderPaymentControls = () => mode === 'new' && !canCommitProductAdd ? (
+    <p className="text-xs text-gray-500 sm:col-span-2">{tr('stock_session_review_payment_hint', 'Product creation submitted for review does not record payment terms here.')}</p>
+  ) : (
+    <div className="sm:col-span-2">
+      <span className="mb-1 block text-xs text-gray-500">{tr('payment', 'Payment')} ({tr('requested', 'Requested')})</span>
+      <div className="flex gap-2">
+        {(['paid', 'credit'] as const).map((value) => <button key={value} type="button" aria-pressed={paymentStatus === value} className={paymentStatus === value ? 'btn-primary min-h-10 flex-1 text-xs' : 'btn-secondary min-h-10 flex-1 text-xs'} onClick={() => { setPaymentStatus(value); if (value === 'paid') setCreditDueDate('') }}>{value === 'paid' ? tr('paid', 'Paid') : tr('on_credit', 'Not Yet Paid')}</button>)}
+      </div>
+      {paymentStatus === 'credit' ? <div className="mt-2">
+        <label htmlFor="create-products-payment-due" className="mb-1 block text-xs text-gray-500">{tr('due_date', 'Due date')}</label>
+        <DateEntryInput id="create-products-payment-due" className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('due_date', 'Due date')} value={creditDueDate} onChange={setCreditDueDate} />
+        {creditDueMissing ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date')}</p> : null}
+      </div> : null}
+      <p className="mt-2 text-xs text-gray-500">{tr('stock_session_payment_scope_hint', 'Requested payment terms only. An existing lot keeps its recorded terms, including when receipts share the same received date.')}</p>
+    </div>
+  )
+
+  const renderLinePayment = (row: SessionLine) => row.quantity > 0 ? (
+    <span className="block text-[10px] text-gray-500 dark:text-gray-400">{tr('payment', 'Payment')} ({tr('requested', 'Requested')}): {row.paymentStatus === 'paid' ? tr('paid', 'Paid') : row.paymentStatus === 'credit' ? `${tr('on_credit', 'Not Yet Paid')} · ${row.creditDueDate || '—'}` : tr('unknown', 'Unknown')}</span>
+  ) : null
+
   return (
     <>
       <Modal
@@ -906,20 +927,10 @@ export default function CreateProductsSessionModal({
                   <label><span className="mb-1 block text-[11px] text-gray-500">{tr('branch', 'Branch')}</span><AppSelect value={header.branchId} onChange={(next) => setHeader((prev) => ({ ...prev, branchId: next }))} ariaLabel={tr('branch', 'Branch')} buttonClassName="h-9 w-full text-sm" options={branchSelectOptions} /></label>
                   <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('received_date', 'Received date')} value={receivedDate} onChange={setReceivedDate} /></label>
                   <label className="flex items-center gap-2 text-xs text-gray-600 sm:col-span-2 dark:text-gray-300"><input type="checkbox" className="h-4 w-4" checked={freeGoods} onChange={(event) => setFreeGoods(event.target.checked)} /><span title={tr('stock_receipt_free_goods_hint', 'Tick this only when the goods really arrived at no cost. It is the declaration that lets a $0.00 unit cost be recorded; without it a blank or zero cost is refused.')}>{tr('stock_receipt_free_goods', 'Free')}</span></label>
+                  {renderPaymentControls()}
                   {/* P3-L2: the same reason control the fast stock-in flow
                       and the adjust form render -- entered once here, frozen
                       onto every line this session queues. */}
-                  <div className="sm:col-span-2">
-                    <span className="mb-1 block text-xs text-gray-500">{tr('payment', 'Payment')}</span>
-                    <div className="flex gap-2">
-                      {(['paid', 'credit'] as const).map((value) => <button key={value} type="button" aria-pressed={paymentStatus === value} className={paymentStatus === value ? 'btn-primary min-h-10 flex-1 text-xs' : 'btn-secondary min-h-10 flex-1 text-xs'} onClick={() => { setPaymentStatus(value); if (value === 'paid') setCreditDueDate('') }}>{value === 'paid' ? tr('paid', 'Paid') : tr('on_credit', 'Not Yet Paid')}</button>)}
-                    </div>
-                    {paymentStatus === 'credit' ? <div className="mt-2">
-                      <label htmlFor="create-products-payment-due" className="mb-1 block text-xs text-gray-500">{tr('due_date', 'Due date')}</label>
-                      <DateEntryInput id="create-products-payment-due" className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('due_date', 'Due date')} value={creditDueDate} onChange={setCreditDueDate} />
-                      {creditDueMissing ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date')}</p> : null}
-                    </div> : null}
-                  </div>
                   <StockReasonField
                     id="create-products-reason"
                     className="sm:col-span-2"
@@ -942,7 +953,9 @@ export default function CreateProductsSessionModal({
               <div className="mb-3 grid grid-cols-2 gap-2">{allowNew ? <button type="button" disabled={submissionLocked} aria-pressed={mode === 'new'} className={mode === 'new' ? 'btn-primary min-h-11 text-sm' : 'btn-secondary min-h-11 text-sm'} onClick={() => setMode('new')}>{tr('add_product', 'New product')}</button> : null}{allowExisting ? <button type="button" disabled={submissionLocked} aria-pressed={mode === 'existing'} className={mode === 'existing' ? 'btn-primary min-h-11 text-sm' : 'btn-secondary min-h-11 text-sm'} onClick={() => setMode('existing')}>{tr('existing_product', 'Have Already')}</button> : null}</div>
               {mode === 'new' && allowNew ? <button type="button" className="btn-primary flex h-11 w-full items-center justify-center gap-1.5 text-sm" disabled={saving || submissionLocked} onClick={openItemForm}><PackagePlus className="h-4 w-4" />{tr('create_products_add_item', 'Add new product')}</button> : null}
               {mode === 'existing' && allowExisting ? <div><div className="flex gap-2"><label className="relative block min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-gray-400" /><input ref={searchInputRef} className="input w-full pl-9 text-sm" value={query} disabled={submissionLocked} placeholder={tr('fast_stockin_search', 'Type a product name or barcode…')} onChange={(event) => setQuery(event.target.value)} autoFocus /></label><ScanSearchButton onDetected={(value) => setQuery(String(value || '').trim())} t={t} title={tr('scan_product_for_stock_in', 'Scan product for this stock-in')} /></div>{searching ? <p className="mt-2 text-xs text-gray-400">{tr('loading', 'Loading...')}</p> : null}{searchFailed ? <p className="mt-2 text-xs text-red-600">{tr('load_failed', 'Failed to load products')}</p> : null}{groups.length ? <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">{groups.map((group) => <button key={group.key} type="button" disabled={submissionLocked} className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:border-gray-700" onClick={() => openExistingOptions(group)}><span className="min-w-0 font-medium"><ProductNameRail name={String((group.name) ?? '')} /></span><span className="shrink-0 text-[11px] text-gray-500">{group.sellableItems.length || group.items.length} {tr('options', 'options')} · {group.stockTotal}</span></button>)}</div> : null}</div> : null}
+              {mode === 'new' && !canCommitProductAdd ? <p className="mt-2 text-xs text-gray-500">{tr('stock_session_review_payment_hint', 'Product creation submitted for review does not record payment terms here.')}</p> : null}
               <div className="mt-4 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500"><span>{tr('create_products_created', 'Saved list')} ({summary.items})</span><span className="tabular-nums normal-case">{tr('total_units', 'Total units')}: {summary.units} · {usdSymbol}{summary.costUsd.toFixed(2)}</span></div>
+              {rows.some((row) => row.quantity > 0) ? <p className="mt-1 text-xs text-gray-500">{tr('stock_session_payment_scope_hint', 'Requested payment terms only. An existing lot keeps its recorded terms, including when receipts share the same received date.')}</p> : null}
               {rows.length ? <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">{rows.map((row) => (
                 <div key={row.lineId} className="flex items-start justify-between gap-2 rounded-lg bg-gray-50 px-2 py-2 text-sm dark:bg-gray-900/50">
                   <button type="button" disabled={row.status !== 'queued' || submissionLocked} className="min-w-0 flex-1 text-left disabled:cursor-default" aria-label={`${tr('edit', 'Edit')} ${row.name}`} onClick={() => openQueuedLine(row)}>
@@ -954,7 +967,7 @@ export default function CreateProductsSessionModal({
                     {/* Same as the fast flow's queue: the frozen reason is
                         shown on the line that carries it, wrapping rather
                         than truncating. */}
-                    {row.quantity > 0 ? <span className="block text-[10px] text-gray-500 dark:text-gray-400">{tr('payment', 'Payment')}: {row.paymentStatus === 'paid' ? tr('paid', 'Paid') : row.paymentStatus === 'credit' ? `${tr('on_credit', 'Not Yet Paid')} · ${row.creditDueDate || '—'}` : tr('unknown', 'Unknown')}</span> : null}
+                    {renderLinePayment(row)}
                     {row.reason ? <span className="block break-words text-[10px] text-gray-500 dark:text-gray-400">{row.reason}</span> : null}
                   </button>
                   <span className="flex shrink-0 items-center gap-1"><span className="text-[11px] tabular-nums">× {row.quantity} · {usdSymbol}{(row.quantity * row.unitCostUsd).toFixed(2)}</span>{row.status === 'queued' ? <button type="button" disabled={submissionLocked} aria-label={tr('remove', 'Remove')} className="rounded p-1 text-gray-400 hover:text-red-600 disabled:opacity-40" onClick={() => removeLine(row.lineId)}><Trash2 className="h-4 w-4" /></button> : null}</span>

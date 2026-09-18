@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
+import * as React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { sessionPaymentDueInvalid, sessionPaymentFields } from '../src/utils/createProductsSessionPayment.ts'
 
 const paid = { paymentStatus: 'paid' as const, creditDueDate: '2026-09-30' }
@@ -32,7 +34,7 @@ function handler(name: string, bindings: Record<string, unknown>) {
   }
   visit(ast)
   assert.ok(text)
-  const js = ts.transpileModule(`const run = ${text}`, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
+  const js = ts.transpileModule(`const run = ${text}`, { fileName: 'extracted.tsx', compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React } }).outputText
   return new Function(...Object.keys(bindings), `${js}; return run`)(...Object.values(bindings))
 }
 const tr = (_key: string, fallback: string) => fallback
@@ -79,4 +81,34 @@ for (const persisted of source.matchAll(/(?:scheduleWorkDraftWrite|writeWorkDraf
 }
 assert.match(source, /aria-pressed=\{paymentStatus === value\}/)
 assert.match(source, /row\.paymentStatus === 'paid'/)
+for (const language of ['en', 'km']) {
+  const pack = JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8'))
+  const translate = (key: string, fallback: string) => pack[key] || fallback
+  const renderBindings = {
+    React, tr: translate, paymentStatus: 'credit', creditDueDate: '2026-09-30', creditDueMissing: false,
+    setPaymentStatus() {}, setCreditDueDate() {}, packLookup: translate,
+    DateEntryInput: () => React.createElement('input', { 'aria-label': pack.due_date }),
+  }
+  for (const [mode, canCommitProductAdd] of [['new', true], ['existing', false]] as const) {
+    const render = handler('renderPaymentControls', { ...renderBindings, mode, canCommitProductAdd })
+    const html = renderToStaticMarkup(render())
+    assert.ok(html.includes(pack.stock_session_payment_scope_hint), `${language}: existing/date-coalesced lot limitation stays visible`)
+    assert.ok(html.includes(pack.requested))
+    assert.match(html, /<button/)
+  }
+  const review = handler('renderPaymentControls', { ...renderBindings, mode: 'new', canCommitProductAdd: false })
+  const reviewHtml = renderToStaticMarkup(review())
+  assert.ok(reviewHtml.includes(pack.stock_session_review_payment_hint))
+  assert.doesNotMatch(reviewHtml, /<button|<input/, 'Review path must not offer controls it cannot persist')
+  const renderRow = handler('renderLinePayment', { React, tr: translate })
+  // A request for credit can target an already-paid lot. The queued row must
+  // label its request, not claim that the existing lot became unpaid.
+  const rowHtml = renderToStaticMarkup(renderRow({ ...row, batchId: 10, paymentStatus: 'credit' }))
+  assert.ok(rowHtml.includes(pack.requested))
+  assert.ok(rowHtml.includes(pack.on_credit))
+  assert.equal(renderToStaticMarkup(renderRow({ ...row, quantity: 0 })), '')
+}
+assert.match(source, /\{renderPaymentControls\(\)\}/)
+assert.match(source, /\{renderLinePayment\(row\)\}/)
+assert.match(source, /rows\.some\(\(row\) => row\.quantity > 0\)[\s\S]*?stock_session_payment_scope_hint/)
 console.log('PASS session payment: capture, edit, legacy draft, reload, exact retry, due validation and catalog-only wiring')
