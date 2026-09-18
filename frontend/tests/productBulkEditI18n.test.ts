@@ -16,6 +16,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 
 let failed = 0
 type TestCallback = () => void | Promise<void>
@@ -134,8 +135,28 @@ await runTest('bulk-edit Info panel: heading, field labels and placeholders are 
   assert.match(infoPanel, /tr\('category', 'Category'\)/)
   assert.match(infoPanel, /tr\('unit', 'Unit'\)/)
   assert.match(infoPanel, /tr\('supplier', 'Supplier'\)/)
-  assert.match(infoPanel, /tr\('keep_current', 'Keep current'\)/g)
-  assert.equal((infoPanel.match(/tr\('keep_current', 'Keep current'\)/g) || []).length, 2, 'expected Category AND Unit to both offer the Keep-current option')
+  // Each searchable field now translates BOTH its empty-input placeholder
+  // and its selectable Keep-current row. Counting panel-wide calls used to
+  // expect two, and could also pass if one field supplied both translations
+  // while the other lost its label. Check each actual control/prop instead.
+  const tree = ts.createSourceFile('Products.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  for (const id of ['bulk-product-category', 'bulk-product-unit']) {
+    let control: ts.JsxSelfClosingElement | ts.JsxOpeningElement | undefined
+    function visit(node: ts.Node): void {
+      if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(tree) === 'SuggestionTextInput') {
+        const idAttribute = node.attributes.properties.find(attribute => ts.isJsxAttribute(attribute) && attribute.name.getText(tree) === 'id')
+        if (idAttribute && ts.isJsxAttribute(idAttribute) && idAttribute.initializer && ts.isStringLiteral(idAttribute.initializer) && idAttribute.initializer.text === id) control = node
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(tree)
+    assert.ok(control, `${id} must render the shared searchable control`)
+    const attributes = control.attributes.properties.filter(ts.isJsxAttribute)
+    const placeholder = attributes.find(attribute => attribute.name.getText(tree) === 'placeholder')
+    const options = attributes.find(attribute => attribute.name.getText(tree) === 'options')
+    assert.match(placeholder?.getText(tree) || '', /placeholder=\{tr\('keep_current', 'Keep current'\)\}/, `${id} must translate its empty-input placeholder`)
+    assert.match(options?.getText(tree) || '', /\{\s*value: tr\('keep_current', 'Keep current'\),\s*key: 'keep',\s*payload: ''\s*\}/, `${id} must offer a translated Keep-current row with an empty mutation payload`)
+  }
   assert.match(infoPanel, /tr\('leave_blank_to_keep', 'Leave blank to keep'\)/)
   assert.match(infoPanel, /tr\('low_stock_threshold', 'Low Stock Threshold'\)/)
   assert.match(infoPanel, /tr\('bulk_edit_apply_to_count', 'Apply to \{count\} products'\)\.replace\('\{count\}', String\(selectedVisibleCount\)\)/)
