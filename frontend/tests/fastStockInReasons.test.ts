@@ -144,8 +144,15 @@ runTest("the Add/Create Products session asks for a reason and its payload build
   assert.doesNotMatch(productsSession, /savedReasons\.map/, 'no second copy of the chip markup')
   // Frozen per line exactly like the free-goods declaration, so editing the
   // shared details later only changes lines queued after the edit.
-  assert.match(productsSession, /type SessionLine = \{[^]*?\n  reason: string\n[^]*?\n\}/)
-  assert.equal((productsSession.match(/freeGoods, reason: reason\.trim\(\)/g) || []).length, 3, 'every queued line freezes the reason')
+  // P10-18 adds the optional payment intersection and captures payment beside
+  // the frozen reason. Check each row constructor, not neighboring fields:
+  // otherwise adding payment fields looks like losing a movement reason.
+  assert.match(productsSession, /type SessionLine = SessionPayment & \{[^]*?\n  reason: string\n[^]*?\n\}/)
+  const rowConstructors = [...productsSession.matchAll(/const row: SessionLine = \{([^]*?)\n\s*\}/g)]
+  assert.equal(rowConstructors.length, 3, 'existing receipt, review create and atomic create each construct a row')
+  for (const constructor of rowConstructors) {
+    assert.match(constructor[1], /\breason: reason\.trim\(\)/, 'every row freezes its own typed reason')
+  }
   // The payload builder sends it, and only when there is one -- a session
   // without a reason must serialize exactly as before (idempotency).
   assert.match(productsSession, /\.\.\.\(line\.reason \? \{ reason: line\.reason \} : \{\}\),/)
