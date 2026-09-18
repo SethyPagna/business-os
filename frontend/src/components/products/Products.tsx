@@ -17,6 +17,7 @@ import FilterMenu from '../shared/FilterMenu'
 import InfoHint from '../shared/InfoHint'
 import PortalMenu from '../shared/PortalMenu'
 import AppSelect from '../shared/AppSelect'
+import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
@@ -4870,36 +4871,38 @@ function ProductsFullEditor() {
           })()}</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <div><label className="text-xs text-gray-500 block mb-1">{tr('category', 'Category')}</label>
-              <AppSelect
-                value={bulkEditForm.category || ''}
-                onChange={(nextValue) => setBulkEditForm(f => ({ ...f, category: nextValue }))}
+              <SuggestionTextInput
+                id="bulk-product-category"
+                value={String(bulkEditForm.categoryQuery ?? bulkEditForm.category ?? '')}
+                onChange={(nextValue, option) => setBulkEditForm(f => ({ ...f, categoryQuery: option?.payload === '' ? '' : nextValue, category: option ? String(option.payload) : '' }))}
                 ariaLabel={tr('category', 'Category')}
                 className="w-full"
-                buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
-                optionClassName="text-xs"
+                inputClassName="input min-h-8 w-full rounded-xl py-1 text-xs"
+                placeholder={tr('keep_current', 'Keep current')}
                 options={[
-                  { value: '', label: tr('keep_current', 'Keep current') },
+                  { value: tr('keep_current', 'Keep current'), key: 'keep', payload: '' },
                   ...categories
                     .map(c => String(c.name || '').trim())
                     .filter(Boolean)
-                    .map(name => ({ value: name, label: name })),
+                    .map(name => ({ value: name, key: `category:${name}`, payload: name })),
                 ]}
               />
             </div>
             <div><label className="text-xs text-gray-500 block mb-1">{tr('unit', 'Unit')}</label>
-              <AppSelect
-                value={bulkEditForm.unit || ''}
-                onChange={(nextValue) => setBulkEditForm(f => ({ ...f, unit: nextValue }))}
+              <SuggestionTextInput
+                id="bulk-product-unit"
+                value={String(bulkEditForm.unitQuery ?? bulkEditForm.unit ?? '')}
+                onChange={(nextValue, option) => setBulkEditForm(f => ({ ...f, unitQuery: option?.payload === '' ? '' : nextValue, unit: option ? String(option.payload) : '' }))}
                 ariaLabel={tr('unit', 'Unit')}
                 className="w-full"
-                buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
-                optionClassName="text-xs"
+                inputClassName="input min-h-8 w-full rounded-xl py-1 text-xs"
+                placeholder={tr('keep_current', 'Keep current')}
                 options={[
-                  { value: '', label: tr('keep_current', 'Keep current') },
+                  { value: tr('keep_current', 'Keep current'), key: 'keep', payload: '' },
                   ...units
                     .map(u => String(u.name || '').trim())
                     .filter(Boolean)
-                    .map(name => ({ value: name, label: name })),
+                    .map(name => ({ value: name, key: `unit:${name}`, payload: name })),
                 ]}
               />
             </div>

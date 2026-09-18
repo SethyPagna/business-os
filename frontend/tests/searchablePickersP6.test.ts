@@ -23,7 +23,7 @@
 //   3. a REGRESSION GUARD: no <AppSelect ... options={X}> anywhere outside
 //      the public catalog (owned by another lane) may bind X to an
 //      identifier that looks like an unbounded catalog list (category,
-//      brand, supplier, unit) -- that shape is exactly "click to show
+//      brand, supplier, unit, product/name, barcode) -- that shape is exactly "click to show
 //      everything" with no way to type-filter. A future PR that adds a new
 //      one must either reuse SuggestionTextInput or extend the allowlist
 //      below with a named reason.
@@ -33,6 +33,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
+import { buildSuggestionMatches, type SuggestionOption } from '../src/utils/suggestionMatching.ts'
+import { buildProductBulkInfoUpdates } from '../src/components/products/helpers/productWriteHelpers.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const srcRoot = path.join(here, '..', 'src')
@@ -165,19 +168,190 @@ const ALLOWLISTED_APPSELECT_OPTION_BINDINGS = new Set([
   'lineBranchId', // AppSelect *value*, not options -- kept for clarity if ever grepped together
 ])
 
-check('REGRESSION GUARD: no AppSelect outside the catalog lane binds options to a category/brand/supplier/unit list', () => {
+// Parse TSX rather than matching an opening tag with [^>]*: an onChange
+// arrow before options contains `>` and used to hide even categoryOptions.
+// This is a binding-name guard, not whole-program data-flow analysis. Traverse
+// the actual options expression so member access, parentheses and inline maps
+// cannot hide the catalog binding, and unrelated props/comments cannot trigger it.
+function catalogOptionBindings(source: string): string[] {
+  const tree = ts.createSourceFile('picker.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const offenders: string[] = []
+  const catalogBinding = /categor|brand|suppl(ier)?|^unit|unitOptions|unitSelect|product|barcode/i
+  function visit(node: ts.Node): void {
+    if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(tree) === 'AppSelect') {
+      for (const attribute of node.attributes.properties) {
+        if (!ts.isJsxAttribute(attribute) || attribute.name.getText(tree) !== 'options') continue
+        const initializer = attribute.initializer
+        if (!initializer || !ts.isJsxExpression(initializer) || !initializer.expression) continue
+        let expression = initializer.expression
+        while (ts.isParenthesizedExpression(expression)) expression = expression.expression
+        if (ALLOWLISTED_APPSELECT_OPTION_BINDINGS.has(expression.getText(tree))) continue
+        let isCatalog = false
+        function inspectBinding(child: ts.Node): void {
+          if (ts.isIdentifier(child) && catalogBinding.test(child.text)) isCatalog = true
+          ts.forEachChild(child, inspectBinding)
+        }
+        inspectBinding(expression)
+        if (isCatalog) offenders.push(expression.getText(tree))
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(tree)
+  return offenders
+}
+
+check('DISCRIMINATING: click-only product/name and barcode bindings are rejected alongside existing catalog families', () => {
+  for (const binding of ['categoryOptions', 'brandOptions', 'supplierOptions', 'unitOptions', 'productOptions', 'productNameOptions', 'productNames', 'barcodeOptions']) {
+    assert.deepEqual(catalogOptionBindings(`<AppSelect options={${binding}} />`), [binding], `${binding} must not escape the guard`)
+  }
+})
+
+check('DISCRIMINATING: JSX callbacks, member bindings, parentheses and mapped options cannot hide a catalog selector', () => {
+  assert.deepEqual(catalogOptionBindings('<AppSelect onChange={(value) => setValue(value)} options={categoryOptions} />'), ['categoryOptions'])
+  assert.deepEqual(catalogOptionBindings('<AppSelect\n onChange={(value) => setValue(value)}\n options={(lookups.productNames)} />'), ['lookups.productNames'])
+  assert.deepEqual(catalogOptionBindings('<AppSelect options={catalog.barcodes}></AppSelect>'), ['catalog.barcodes'])
+  assert.deepEqual(catalogOptionBindings('<AppSelect options={products.map(product => ({ value: product.id, label: product.name }))} />'), ['products.map(product => ({ value: product.id, label: product.name }))'])
+})
+
+check('the guard allows searchable controls and bounded lists, and ignores comments, strings and unrelated props', () => {
+  for (const binding of ALLOWLISTED_APPSELECT_OPTION_BINDINGS) {
+    assert.deepEqual(catalogOptionBindings(`<AppSelect options={(${binding})} />`), [], binding)
+  }
+  assert.deepEqual(catalogOptionBindings(`
+    // <AppSelect options={productOptions} />
+    const example = '<AppSelect options={barcodeOptions} />'
+    const picker = <>
+      <SuggestionTextInput options={productNameOptions} />
+      <AppSelect value={product.barcode} onChange={(value) => setProduct(value)} options={branchOptions} />
+      <AppSelect options={[{ value: 'product', label: 'Product' }, { value: 'service', label: 'Service' }]} />
+    </>
+  `), [])
+})
+
+// Exercise the actual host option builders and callbacks, not copies of their
+// intended behavior. TS erases annotations; the supplied bindings stand in for
+// React setters and the current render's data. No DOM or backend writes occur.
+function pickerProp<T>(file: string, idPrefix: string, prop: string, bindings: Record<string, unknown>): T {
+  const tree = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  let expression: string | undefined
+  function visit(node: ts.Node): void {
+    if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(tree) === 'SuggestionTextInput') {
+      const attributes = node.attributes.properties.filter(ts.isJsxAttribute)
+      const id = attributes.find(attribute => attribute.name.getText(tree) === 'id')
+      if (id?.initializer?.getText(tree).includes(idPrefix)) {
+        const attribute = attributes.find(item => item.name.getText(tree) === prop)
+        if (attribute?.initializer && ts.isJsxExpression(attribute.initializer)) expression = attribute.initializer.expression?.getText(tree)
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(tree)
+  assert.ok(expression, `${file}: ${idPrefix} must expose ${prop} on the shared searchable control`)
+  const javascript = ts.transpileModule(`const actual = ${expression};`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
+  return new Function(...Object.keys(bindings), `${javascript}\nreturn actual;`)(...Object.values(bindings)) as T
+}
+
+type Pick = (value: string, option?: SuggestionOption) => void
+const translate = (_key: string, fallback: string): string => fallback
+
+check('stock-in supplier filtering keeps duplicate-name keys distinct and supports none, all and clearing', () => {
+  const file = 'components/contacts/StockInInvoicesSection.tsx'
+  const id = 'stock-in-invoice-supplier'
+  let selected = 'all'
+  let query = ''
+  let page = 5
+  const options = pickerProp<SuggestionOption[]>(file, id, 'options', {
+    tr: translate, supplierKey: selected,
+    supplierOptions: [{ key: 'supplier:11', name: 'Same long supplier name' }, { key: 'supplier:22', name: 'Same long supplier name' }],
+  })
+  const matches = buildSuggestionMatches(options, 'long supplier')
+  assert.deepEqual(matches.map(option => option.payload), ['supplier:11', 'supplier:22'])
+  const pick = pickerProp<Pick>(file, id, 'onChange', {
+    changeFilter: (apply: () => void) => { apply(); page = 1 },
+    setSupplierQuery: (value: string) => { query = value },
+    setSupplierKey: (value: string) => { selected = value },
+  })
+  pick(matches[1].value, matches[1])
+  assert.equal(selected, 'supplier:22', 'the label must not replace the request key')
+  assert.equal(page, 1, 'choosing or clearing a supplier resets pagination')
+  pick('Same long supplier name')
+  assert.equal(selected, 'all', 'typing an exact duplicate label must not silently pick the first ID')
+  pick(options[1].value, options[1])
+  assert.equal(selected, 'none')
+  pick(options[0].value, options[0])
+  assert.equal(selected, 'all')
+  assert.equal(query, '')
+  pick(matches[0].value, matches[0])
+  pick('')
+  assert.equal(selected, 'all')
+  assert.equal(query, '')
+  assert.match(read(file), /setSupplierKey\('all'\); setSupplierQuery\(''\)/, 'the Clear button resets both key and visible query')
+})
+
+check('bulk category/unit search never commits arbitrary typed text, and clearing still means keep current', () => {
+  const file = 'components/products/Products.tsx'
+  for (const field of ['category', 'unit']) {
+    const id = `bulk-product-${field}`
+    let form: Record<string, string> = { brand: 'Existing brand' }
+    const options = pickerProp<SuggestionOption[]>(file, id, 'options', {
+      tr: translate, categories: [{ name: 'Skin care' }], units: [{ name: 'Bottle' }],
+    })
+    const pick = pickerProp<Pick>(file, id, 'onChange', {
+      setBulkEditForm: (update: (current: Record<string, string>) => Record<string, string>) => { form = update(form) },
+    })
+    pick(options[1].value, options[1])
+    assert.equal(form[field], options[1].payload)
+    assert.deepEqual(buildProductBulkInfoUpdates(form), { brand: 'Existing brand', [field]: options[1].payload })
+    pick('Unlisted typed value')
+    assert.equal(form[`${field}Query`], 'Unlisted typed value')
+    assert.deepEqual(buildProductBulkInfoUpdates(form), { brand: 'Existing brand' }, 'search text must never enter a bulk mutation payload')
+    pick(options[1].value, options[1])
+    pick('')
+    assert.deepEqual(buildProductBulkInfoUpdates(form), { brand: 'Existing brand' })
+    pick(options[1].value, options[1])
+    pick(options[0].value, options[0])
+    assert.deepEqual(buildProductBulkInfoUpdates(form), { brand: 'Existing brand' }, 'explicit Keep current preserves the same no-op semantics')
+    assert.equal(form[`${field}Query`], '', 'Keep current returns to an empty, searchable field')
+  }
+})
+
+check('dated import candidates retain numeric IDs behind duplicate names, filter by ID, and clear incomplete decisions', () => {
+  const file = 'components/products/import/DatedStockReconciliationModal.tsx'
+  const id = 'dated-count-candidate-'
+  const row = { rowNumber: 7 }
+  const candidates = [101, 202]
+  const options = pickerProp<SuggestionOption[]>(file, id, 'options', {
+    candidates, productNameById: new Map([[101, 'Same long product name'], [202, 'Same long product name']]), decision: {},
+  })
+  assert.equal(buildSuggestionMatches(options, 'long product').length, 2, 'duplicate labels remain two selectable products')
+  assert.deepEqual(buildSuggestionMatches(options, '#202').map(option => option.payload), [202])
+  let decision: { candidateProductId?: number } = {}
+  let queries: Record<number, string> = {}
+  const pick = pickerProp<Pick>(file, id, 'onChange', {
+    row, candidates,
+    setCandidateQueries: (update: (current: Record<number, string>) => Record<number, string>) => { queries = update(queries) },
+    updateDecision: (rowNumber: number, patch: { candidateProductId?: number }) => { assert.equal(rowNumber, 7); decision = patch },
+  })
+  pick(options[1].value, options[1])
+  assert.equal(decision.candidateProductId, 202)
+  pick(options[1].value)
+  assert.equal(decision.candidateProductId, undefined, 'typing an exact name does not choose a candidate')
+  pick(options[0].value, options[0])
+  pick('')
+  assert.equal(decision.candidateProductId, undefined)
+  assert.equal(queries[7], '')
+  pick('Unrelated', { value: 'Unrelated', payload: 999 })
+  assert.equal(decision.candidateProductId, undefined, 'a stale/noncandidate row cannot link')
+})
+
+check('REGRESSION GUARD: no AppSelect outside the catalog lane binds options to a category/brand/supplier/unit/product/name/barcode list', () => {
   const offenders: string[] = []
   for (const file of walk(srcRoot)) {
     const rel = path.relative(srcRoot, file).split(path.sep).join('/')
     const text = fs.readFileSync(file, 'utf8')
-    const re = /<AppSelect[^>]*?options=\{([a-zA-Z0-9_.]+)\}/g
-    let match: RegExpExecArray | null
-    while ((match = re.exec(text))) {
-      const binding = match[1]
-      if (ALLOWLISTED_APPSELECT_OPTION_BINDINGS.has(binding)) continue
-      if (/categor|brand|suppl(ier)?|^unit|unitOptions|unitSelect/i.test(binding)) {
-        offenders.push(`${rel}: options={${binding}}`)
-      }
+    for (const binding of catalogOptionBindings(text)) {
+      offenders.push(`${rel}: options={${binding}}`)
     }
   }
   assert.deepEqual(offenders, [], 'a new click-only AppSelect must not bind to an unbounded catalog list; reuse SuggestionTextInput instead')
