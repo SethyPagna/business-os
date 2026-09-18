@@ -56,6 +56,44 @@ Fresh event route/query/release is still needed for SQL-depth and CPU errors.
 
 ## Budget checkpoint — September 18, 09:25 local
 
+### Later owner-authorized checkpoint release attempt — HELD, not deployed
+
+Owner asked to deploy the checkpoint, conditional on working without blank pages.
+Fresh exact-candidate gates at **e516a02cadcc**: frontend **477/477 pass, no skips**;
+typecheck/preflight pass; i18n pass; production build pass (267 chunks, zero cycles,
+37-chunk public preload closure). Worker typecheck pass. Full Worker sweep ended
+**464 pass / 2 native crashes / 466**. The return-cancellation native test passed
+on standalone rerun. Product-conflict native crashes with -1073740791 on BOTH
+candidate and original baseline final-p9, so not established as this release's
+regression; SQLite conflict/Undo/Redo test passes. Do not label full sweep green.
+Clean stamped deployment dry run passed; no actual deploy was attempted.
+
+Real built-app Playwright result:
+- Desktop + Android Chromium: **17 passed, 11 skipped, 2 failed**.
+- iPhone WebKit: **11 passed, 4 skipped**.
+- Both failures: `storefront-boot.spec.ts:98`, offline reload returns an empty
+  `#root` (15-second assertion), despite online startup passing. This blocks the
+  owner's no-blank-page release condition. Root cause and baseline parity for
+  this browser failure have NOT been established; do not assume a test-only race.
+- Skipped blocked-storage admin / known runtime cases remain unverified.
+
+Evidence files under `outputs/open-task-gates-20260918/`: `worker-summary.json`,
+`frontend-utils-final.log`, `frontend-build-final.log`, `native-return-recheck.log`,
+`native-conflict-recheck.log`, `native-conflict-baseline.log`,
+`browser-chromium.log`, `browser-webkit.log`, `deploy-clean-dryrun.log`.
+The first browser attempts failed setup (missing local package/binaries), not app
+assertions; those logs remain. Installed the matching Playwright browsers, then
+reran. Candidate's existing frontend dependency junction now has an explicit
+`@playwright/test` junction to the existing 1.63.0 installation in the old precision
+worktree (dependency location ONLY; never use that stale source as release base).
+To rerun use that package's `cli.js` with candidate `playwright.config.ts`,
+E2E_PORT=4337, E2E_WORKERS=2. All fixtures use loopback, no production writes.
+
+Next: diagnose/fix offline public startup or prove an invalid test fixture with
+evidence; rerun failed browser cases plus affected gates. No source changes in
+this release attempt. Live remains **354f12d5957e**, migration0183 already applied.
+All verification commands above have completed; no test session remains running.
+
 Owner reports only 3% weekly usage remaining. Scope expansion stopped; no new
 runtime deployment. Continue from **8bf80ae4**, branch
 `codex/supplier-settlement-20260918`, worktree

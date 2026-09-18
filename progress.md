@@ -1,3 +1,13 @@
+## Checkpoint deployment HELD by blank-page browser gate — September 18
+
+Owner authorized checkpoint deployment subject to no blank pages. Candidate
+e516a02cadcc: frontend477/477, build/i18n/types/dry-run pass. Worker464/466 initial;
+return native rerun passes, conflict native crashes on candidate AND old baseline.
+Browser28 pass /15 skip /2 fail: desktop and Android offline storefront reload
+leaves #root empty. Online startup and iPhone selected checks pass. No actual
+deployment attempted; live354f12d5957e unchanged. Detailed evidence and next steps:
+`docs/fleet/2026-09-18-codex-resume.md`. All tests finished. Do not claim fully fixed.
+
 ## Codex budget checkpoint — September 18 (new code NOT deployed)
 
 Continue from `codex/supplier-settlement-20260918`, implementation `8bf80ae4`.
