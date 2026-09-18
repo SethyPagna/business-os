@@ -480,74 +480,6 @@ function deferRenderBlockingStylesheets(): Plugin {
   }
 }
 
-const deferredModulePreloadPrefixes = [
-  'assets/file-picker-modal-',
-  'assets/image-lightbox-',
-  'assets/media-upload-utils-',
-  'assets/notification-center-',
-  'assets/background-import-tracker-',
-  'assets/write-conflict-modal-',
-  'assets/browser-dialogs-',
-  'assets/product-detail-',
-  'assets/shared-portal-menu-',
-  'assets/auth-login-',
-  'assets/app-bootstrap-',
-  'assets/app-auth-',
-  'assets/app-api-methods-',
-  'assets/api-http-state-',
-  'assets/app-portal-',
-  'assets/app-shell-',
-  'assets/app-shell-icons-',
-  'assets/app-system-',
-  'assets/action-history-api-',
-  'assets/ai-api-',
-  'assets/audit-log-api-',
-  'assets/branch-api-',
-  'assets/contacts-api-',
-  'assets/csv-utils-',
-  'assets/dashboard-api-',
-  'assets/dashboard-charts-',
-  'assets/dashboard-export-',
-  'assets/drive-sync-api-',
-  'assets/file-api-',
-  'assets/inventory-api-',
-  'assets/inventory-export-',
-  'assets/inventory-write-api-',
-  'assets/import-jobs-api-',
-  'assets/multipart-headers-api-',
-  'assets/notification-api-',
-  'assets/pending-sync-api-',
-  'assets/product-export-',
-  'assets/product-image-upload-api-',
-  'assets/api-local-cache-',
-  'assets/lookup-api-',
-  'assets/product-read-api-',
-  'assets/product-write-api-',
-  'assets/rfid-api-',
-  'assets/returns-write-api-',
-  'assets/sale-write-api-',
-  'assets/sales-read-api-',
-  'assets/shared-icons-',
-  'assets/system-jobs-api-',
-  'assets/catalog-',
-  'assets/catalog-secondary-tabs-',
-  'assets/catalog-editor-',
-  'assets/portal-language-packs-',
-  'assets/portal-content-i18n-',
-  'assets/backup-reset-tools-',
-  'assets/settings-otp-modal-',
-  'assets/settings-api-',
-  'assets/Sidebar-',
-  'assets/user-profile-modal-',
-  'assets/user-detail-sheet-',
-  'assets/user-permission-editor-',
-  'assets/branch-transfer-modal-',
-  'assets/app-local-db-',
-  'assets/vendor-dexie-',
-  'assets/vendor-zxing-',
-  'assets/vendor-xlsx-',
-]
-
 const appShellIconNames = new Set([
   'arrow-down',
   'arrow-up',
@@ -658,10 +590,6 @@ const routeSharedIconNames = new Set([
   'warehouse',
   'x',
 ])
-
-function shouldDeferModulePreload(dep: string): boolean {
-  return deferredModulePreloadPrefixes.some((prefix) => dep.includes(prefix))
-}
 
 function manualChunks(id: string): string | undefined {
   // Keep the shared vendor graph stable while still letting route chunks stay
