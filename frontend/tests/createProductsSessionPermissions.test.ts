@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { effectivePermissions } from '../src/utils/permissions.ts'
 import { createProductsSessionPermissionRequirements } from '../src/utils/createProductsSession.ts'
+import { sessionPaymentDueInvalid } from '../src/utils/createProductsSessionPayment.ts'
 
 const create = { kind: 'create_receive' as const, status: 'queued' as const, quantity: 0 }
 const createWithStock = { kind: 'create_receive' as const, status: 'queued' as const, quantity: 2 }
@@ -86,6 +87,7 @@ for (const quantity of [0, 4]) {
   const user = { role_permissions: { all: true }, permissions: { all: false, products: 'review', inventory: true } }
   const bindings = {
     effectivePermissions, user, saving: false, header: { branchId: '1', supplierName: 'Supplier' }, rows: [], freeGoods: false,
+    sessionPaymentDueInvalid, payment: { paymentStatus: 'paid', creditDueDate: '' },
     tr: (_key: string, fallback: string) => fallback, findSessionProductDuplicate: () => false,
     stockReceiptGateCode: () => null, setSaving() {}, canCommitProductAdd: canCommit(user), canReceiveStock: true,
     onCreateProduct: async (payload: Record<string, unknown>) => { reviewedPayloads.push(payload); throw new Error('Pending review') },

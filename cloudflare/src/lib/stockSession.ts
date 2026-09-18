@@ -585,6 +585,12 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     return parseStoredReceipt(previous, true)
   }
 
+  // Validate new receipts only after exact stored retries have resolved. Older
+  // committed credit operations may lack a due date; replay must stay exact.
+  if (request.items.some((line) => line.quantity > 0 && line.payment_status === 'credit' && !line.credit_due_date)) {
+    fail('A Not Yet Paid purchase needs its due date.', 400, 'invalid_request')
+  }
+
   // Sep 16 2026 owner ruling / P10-5 writer 4: a create_receive line whose
   // name+barcode identifies as an EXISTING active product folds onto it
   // (real barcode wins, stored barcode loses a leading zero; cost recomputes

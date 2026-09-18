@@ -192,6 +192,56 @@ async function check(name, run) {
 async function main() {
   const { commitStockSession, replayStockSession, StockSessionError } = loadStockSession()
 
+  await check('new paid/credit receipt terms persist for existing and newly created products', async () => {
+    for (const kind of ['receive', 'create_receive']) {
+      for (const payment of ['paid', 'credit']) {
+        const f = fixture()
+        const request = kind === 'receive' ? receiveRequest() : zeroCreateRequest()
+        Object.assign(request.items[0], { quantity: 2, unit_cost_usd: 2, payment_status: payment, credit_due_date: '30/09/2026' })
+        if (request.items[0].product) request.items[0].product.stock_quantity = 2
+        const result = await commitStockSession(f.env, user, request)
+        assert.deepEqual(f.sql.prepare('SELECT payment_status,credit_due_date FROM product_batches WHERE id=?').get(result.items[0].batchId), {
+          payment_status: payment, credit_due_date: payment === 'credit' ? '2026-09-30' : null,
+        })
+        const state = receiptState(f.sql)
+        await commitStockSession(f.env, user, request)
+        assert.deepEqual(receiptState(f.sql), state, 'exact retry adds no stock or audit')
+      }
+    }
+  })
+
+  await check('credit without a valid due date is rejected before any receipt writes', async () => {
+    for (const kind of ['receive', 'create_receive']) {
+      for (const due of [undefined, null, '', '31/02/2026']) {
+        const f = fixture()
+        const before = receiptState(f.sql)
+        const request = kind === 'receive' ? receiveRequest() : zeroCreateRequest()
+        Object.assign(request.items[0], { quantity: 2, unit_cost_usd: 2, payment_status: 'credit', credit_due_date: due })
+        if (request.items[0].product) request.items[0].product.stock_quantity = 2
+        await assert.rejects(() => commitStockSession(f.env, user, request), (error) => error.code === 'invalid_request' && /due date|credit_due_date/.test(error.message))
+        assert.deepEqual(receiptState(f.sql), before)
+      }
+    }
+  })
+
+  await check('pre-fix credit operation without due date still resolves its exact stored retry', async () => {
+    const f = fixture()
+    const request = receiveRequest()
+    Object.assign(request.items[0], { payment_status: 'credit', credit_due_date: '2026-09-30' })
+    await commitStockSession(f.env, user, request)
+    // Model the canonical receipt written by the prior nullable-due parser.
+    const stored = f.sql.prepare('SELECT id,request_json FROM stock_session_operations').get()
+    const historical = JSON.parse(stored.request_json)
+    historical.items[0].credit_due_date = null
+    f.sql.prepare('UPDATE stock_session_operations SET request_json=? WHERE id=?').run(JSON.stringify(historical), stored.id)
+    f.sql.prepare('UPDATE product_batches SET credit_due_date=NULL').run()
+    request.items[0].credit_due_date = null
+    const before = receiptState(f.sql)
+    await commitStockSession(f.env, user, request)
+    assert.deepEqual(receiptState(f.sql), before)
+    assert.equal(f.sql.prepare('SELECT credit_due_date FROM product_batches').get().credit_due_date, null)
+  })
+
   await check('snapshot SQL stays below native workerd compound-select ceiling', async () => {
     const source = fs.readFileSync(path.join(root, 'src/lib/stockSession.ts'), 'utf8')
     assert.equal((source.match(/revision_sources\(groups_json\)/g) || []).length, 2,
