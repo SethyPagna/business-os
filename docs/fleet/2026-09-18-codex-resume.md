@@ -86,7 +86,8 @@ observed: `test-customer-return-cancel-sequence-native.cjs` and
 `test-product-conflict-action-apply-native.cjs`. Preserve first-pass evidence;
 compare baseline and candidate in isolation before any release decision. Do not
 assume these are harmless contention. The first crash preceded the frontend gate.
-Frontend i18n verification session **28082** was completing at checkpoint.
+Frontend i18n verification completed successfully: 5,887 keys, 637 source files,
+all referenced keys resolve in both packs (988 unreferenced candidates warned).
 
 Newly confirmed OPEN browser defects (not fixed):
 - AppContext storage globals are evaluated before safeStorageGet's catch;
