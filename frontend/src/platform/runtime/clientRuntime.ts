@@ -44,6 +44,15 @@ type RuntimeResetOptions = {
 type StorageEntry = [string, string | null]
 
 const BUSINESS_OS_STORAGE_PREFIXES = ['businessos_', 'business_os_']
+// Older POS builds wrote these account-owned values without our standard
+// prefix. Clear only their known names: other pos_/bos_ settings may belong
+// to the device or another surface and need their own persistence review.
+const LEGACY_ACCOUNT_STORAGE_KEYS = new Set([
+  'pos_search', 'pos_cat', 'pos_brand', 'pos_branch', 'pos_stock',
+  'pos_group', 'pos_supplier', 'pos_initial',
+  'bos_pos_orders', 'bos_pos_active', 'bos_pos_counter',
+])
+const LEGACY_DASHBOARD_FILTER_PREFIX = 'bos_dashboard_filters:'
 const RUNTIME_CLEANUP_CONCURRENCY = 2
 
 function canUseBrowserStorage(): boolean {
@@ -51,8 +60,13 @@ function canUseBrowserStorage(): boolean {
 }
 
 function isBusinessOsStorageKey(key: unknown): boolean {
-  const value = String(key || '').trim().toLowerCase()
+  const raw = String(key || '')
+  const value = raw.trim().toLowerCase()
   return BUSINESS_OS_STORAGE_PREFIXES.some((prefix) => value.startsWith(prefix))
+    || LEGACY_ACCOUNT_STORAGE_KEYS.has(raw)
+    // Dashboard's owner suffix is normally an id, with username/email
+    // fallbacks on older identities. The colon identifies this exact family.
+    || (raw.startsWith(LEGACY_DASHBOARD_FILTER_PREFIX) && raw.slice(LEGACY_DASHBOARD_FILTER_PREFIX.length).trim() !== '')
 }
 
 function sanitizeText(value: unknown): string {
