@@ -465,7 +465,7 @@ runTest('the session survives a reload, like the stock-in session draft does', (
   // inside finishSession used to list only receivedDate, so a reload after a
   // failed submit cleared the free-goods declaration (and would have cleared
   // the session reason) while the form still displayed it.
-  const sharedDetailWrites = modalSource.match(/receivedDate, freeGoods, reason, mode, query/g) || []
+  const sharedDetailWrites = modalSource.match(/receivedDate, freeGoods, paymentStatus, creditDueDate, reason, mode, query/g) || []
   assert.ok(sharedDetailWrites.length >= 5, `every draft write must carry the shared details, found ${sharedDetailWrites.length}`)
   assert.match(modalSource, /submittedItems: attemptItems/)
   // Written synchronously before the item form replaces this UI.
@@ -678,7 +678,7 @@ runTest('Existing-product search reuses the controlled scanner without auto-crea
 
 runTest('minimize writes the exact scoped draft before the host parks the session', () => {
   assert.match(modalSource, /const preserveAndMinimize = onMinimize \? \(\) => \{\s*writeDraft\(\)\s*onMinimize/)
-  assert.match(modalSource, /step, receivedDate, freeGoods, reason, mode, query, submittedItems/)
+  assert.match(modalSource, /step, receivedDate, freeGoods, paymentStatus, creditDueDate, reason, mode, query, submittedItems/)
   assert.match(modalSource, /onMinimize=\{preserveAndMinimize\}/)
 })
 

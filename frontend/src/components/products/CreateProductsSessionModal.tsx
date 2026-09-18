@@ -29,6 +29,7 @@ import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, writeWorkDraft, 
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import InfoHint from '../shared/InfoHint.tsx'
+import { sessionPaymentDueInvalid, sessionPaymentFields, type SessionPayment } from '../../utils/createProductsSessionPayment.ts'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import {
   canStartCreateProductsSession,
@@ -68,7 +69,7 @@ type ProductCandidate = ProductRecord & {
   branch_stock?: Array<{ branch_id?: number | string | null; branch_name?: string | null; quantity?: number | string | null }>
 }
 
-type SessionLine = {
+type SessionLine = SessionPayment & {
   lineId: string
   kind: 'receive' | 'create_receive' | 'created_zero'
   productId: number | null
@@ -99,7 +100,7 @@ type SessionLine = {
   detail: string
 }
 
-type UnifiedSessionDraft = Omit<CreateProductsSessionDraft, 'rows'> & {
+type UnifiedSessionDraft = Omit<CreateProductsSessionDraft, 'rows'> & SessionPayment & {
   rows?: CreateProductsSessionRow[]
   lines?: SessionLine[]
   mode?: AddProductsMode
@@ -267,6 +268,10 @@ export default function CreateProductsSessionModal({
   // once-entered shared details rather than being asked per line. Each queued
   // line still freezes its own copy.
   const [freeGoods, setFreeGoods] = useState(draft?.freeGoods === true)
+  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'credit'>(draft?.paymentStatus === 'credit' ? 'credit' : 'paid')
+  const [creditDueDate, setCreditDueDate] = useState(draft?.creditDueDate || '')
+  const payment = { paymentStatus, creditDueDate }
+  const creditDueMissing = sessionPaymentDueInvalid(payment, 1)
   // P3-L2: the reason every line of this session records on its stock
   // movement, entered once with the other shared details. Each queued line
   // freezes its own copy, so editing it later only changes later lines.
@@ -339,7 +344,7 @@ export default function CreateProductsSessionModal({
   const closeDirtyRef = useRef(false)
   const sessionCommittedRef = useRef(false)
   closeDirtyRef.current = !sessionCommittedRef.current
-    && (isCreateProductsHeaderDirty(header, resolvedDefaultBranchId) || rows.length > 0 || step === 'items')
+    && (isCreateProductsHeaderDirty(header, resolvedDefaultBranchId) || rows.length > 0 || step === 'items' || paymentStatus !== 'paid' || creditDueDate !== '')
 
   useEffect(() => registerDirtyWork({
     key: `create-products-session-${draftKey}`,
@@ -351,8 +356,8 @@ export default function CreateProductsSessionModal({
 
   useEffect(() => scheduleWorkDraftWrite<UnifiedSessionDraft>(draftKey, {
     sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header, rows: [], lines: rows,
-    step, receivedDate, freeGoods, reason, mode, query, submittedItems, submissionErrorCode,
-  }), [draftKey, header, rows, step, receivedDate, freeGoods, reason, mode, query, submittedItems, submissionErrorCode])
+    step, receivedDate, freeGoods, paymentStatus, creditDueDate, reason, mode, query, submittedItems, submissionErrorCode,
+  }), [draftKey, header, rows, step, receivedDate, freeGoods, paymentStatus, creditDueDate, reason, mode, query, submittedItems, submissionErrorCode])
 
   useEffect(() => {
     if (!resolvedDefaultBranchId) return
@@ -487,6 +492,11 @@ export default function CreateProductsSessionModal({
     if (receiptGate) {
       notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error'); return
     }
+    // Edits retain the line's captured terms, including unknown legacy terms.
+    const linePayment: SessionPayment = replaceLineId ? rows.find((line) => line.lineId === replaceLineId) || {} : payment
+    if (sessionPaymentDueInvalid(linePayment, quantity)) {
+      notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error'); return
+    }
     const row: SessionLine = {
       lineId: replaceLineId || `receive_${productId}_${Date.now()}_${rows.length}`, kind: 'receive', productId, product: null,
       name: String(selectedProduct.name || `#${productId}`), barcode: String(selectedProduct.barcode || ''), brand: String(selectedProduct.brand || ''),
@@ -497,7 +507,7 @@ export default function CreateProductsSessionModal({
       branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: lineReceivedDate || receivedDate,
       expiryDate: lineExpiryDate, batchId: chosenBatch ? Number(chosenBatch.id) : null,
       batchLabel: chosenBatch ? batchDisplayLabel(chosenBatch, tr('batch', 'Received date')) : tr('new_batch', '+ New received date'),
-      quantity, unitCostUsd, freeGoods, reason: reason.trim(),
+      quantity, unitCostUsd, freeGoods, paymentStatus: linePayment.paymentStatus, creditDueDate: linePayment.creditDueDate, reason: reason.trim(),
       status: 'queued', detail: tr('ready_to_receive', 'Ready'),
     }
     setRows((prev) => replaceLineId ? prev.map((entry) => entry.lineId === replaceLineId ? row : entry) : [row, ...prev])
@@ -507,7 +517,7 @@ export default function CreateProductsSessionModal({
 
   const writeDraft = () => writeWorkDraft<UnifiedSessionDraft>(draftKey, {
     sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header, rows: [], lines: rows,
-    step, receivedDate, freeGoods, reason, mode, query, submittedItems, submissionErrorCode,
+    step, receivedDate, freeGoods, paymentStatus, creditDueDate, reason, mode, query, submittedItems, submissionErrorCode,
   })
   const openItemForm = () => {
     if (submissionLocked) return
@@ -573,6 +583,7 @@ export default function CreateProductsSessionModal({
     const receiptSupplier = String(payload.supplier ?? header.supplierName ?? '').trim()
     const receiptGate = stockReceiptGateCode({ isStockIn: quantity > 0, supplierName: receiptSupplier, unitCostUsd: costText, freeGoods })
     if (receiptGate) throw new Error(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]))
+    if (sessionPaymentDueInvalid(payment, quantity)) throw new Error(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'))
     if (findSessionProductDuplicate(rows, { name, barcode })) {
       throw new Error(tr('create_products_session_duplicate', 'Duplicate: You added this item already.'))
     }
@@ -594,7 +605,7 @@ export default function CreateProductsSessionModal({
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: null,
           supplierName: String(payload.supplier ?? header.supplierName ?? '').trim(), branchId: String(branchId), branchName: branchNameFor(String(branchId)),
           receivedDate: String(payload.received_date || receivedDate), expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: '', quantity: 0,
-          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, reason: reason.trim(), status: 'saved', detail: tr('product_created', 'Product created'),
+          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, ...payment, reason: reason.trim(), status: 'saved', detail: tr('product_created', 'Product created'),
         }
         setRows((prev) => [row, ...prev]); onDone()
       } else {
@@ -610,7 +621,7 @@ export default function CreateProductsSessionModal({
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: sameSupplier ? header.supplierId : null,
           supplierName, branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: String(payload.received_date || receivedDate),
           expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: quantity > 0 ? tr('new_batch', '+ New received date') : '', quantity,
-          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, reason: reason.trim(), status: 'queued', detail: tr('ready_to_receive', 'Ready'),
+          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, ...payment, reason: reason.trim(), status: 'queued', detail: tr('ready_to_receive', 'Ready'),
         }
         setRows((prev) => [row, ...prev])
       }
@@ -645,6 +656,7 @@ export default function CreateProductsSessionModal({
       freeGoods,
     })
     if (editGate) throw new Error(tr(STOCK_RECEIPT_GATE_KEYS[editGate], STOCK_RECEIPT_GATE_FALLBACKS[editGate]))
+    if (sessionPaymentDueInvalid(current, quantity)) throw new Error(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'))
     if (findSessionProductDuplicate(rows, { name, barcode }, lineId)) {
       throw new Error(tr('create_products_session_duplicate', 'Duplicate: You added this item already.'))
     }
@@ -720,8 +732,7 @@ export default function CreateProductsSessionModal({
       ...(line.reason ? { reason: line.reason } : {}),
       unit_cost_usd: Number(line.unitCostUsd),
       free_goods: line.freeGoods === true,
-      payment_status: null,
-      credit_due_date: null,
+      ...sessionPaymentFields(line),
     }
     return line.kind === 'receive'
       ? { ...common, kind: 'receive', product_id: Number(line.productId) }
@@ -737,6 +748,9 @@ export default function CreateProductsSessionModal({
       clearWorkDraft(draftKey); if (rows.length) onDone(); onClose(); return
     }
     const attemptItems = submittedItems || pending.map(sessionLine)
+    if (!submittedItems && pending.some((line) => sessionPaymentDueInvalid(line, line.quantity))) {
+      notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error'); return
+    }
     if (attemptItems.some((item) => item.kind === 'create_receive') && !canCommitProductAdd) {
       const message = tr('no_permission', 'You do not have permission to make this change.')
       setCommitError(message); notify(message, 'error'); return
@@ -757,7 +771,7 @@ export default function CreateProductsSessionModal({
       setSubmittedItems(attemptItems)
       writeWorkDraft<UnifiedSessionDraft>(draftKey, {
         sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header,
-        rows: [], lines: rows, step: 'items', receivedDate, freeGoods, reason, mode, query, submittedItems: attemptItems, submissionErrorCode: '',
+        rows: [], lines: rows, step: 'items', receivedDate, freeGoods, paymentStatus, creditDueDate, reason, mode, query, submittedItems: attemptItems, submissionErrorCode: '',
       })
     }
     setSaving(true); setCommitError(''); setSubmissionErrorCode('')
@@ -778,13 +792,13 @@ export default function CreateProductsSessionModal({
         setSubmissionErrorCode('')
         writeWorkDraft<UnifiedSessionDraft>(draftKey, {
           sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header,
-          rows: [], lines: rows, step: 'items', receivedDate, freeGoods, reason, mode, query, submittedItems: null, submissionErrorCode: '',
+          rows: [], lines: rows, step: 'items', receivedDate, freeGoods, paymentStatus, creditDueDate, reason, mode, query, submittedItems: null, submissionErrorCode: '',
         })
       } else {
         setSubmissionErrorCode(errorCode)
         writeWorkDraft<UnifiedSessionDraft>(draftKey, {
           sessionId: sessionIdRef.current, clientRequestId: sessionRequestIdRef.current, header,
-          rows: [], lines: rows, step: 'items', receivedDate, freeGoods, reason, mode, query,
+          rows: [], lines: rows, step: 'items', receivedDate, freeGoods, paymentStatus, creditDueDate, reason, mode, query,
           submittedItems: attemptItems, submissionErrorCode: errorCode,
         })
       }
@@ -895,6 +909,17 @@ export default function CreateProductsSessionModal({
                   {/* P3-L2: the same reason control the fast stock-in flow
                       and the adjust form render -- entered once here, frozen
                       onto every line this session queues. */}
+                  <div className="sm:col-span-2">
+                    <span className="mb-1 block text-xs text-gray-500">{tr('payment', 'Payment')}</span>
+                    <div className="flex gap-2">
+                      {(['paid', 'credit'] as const).map((value) => <button key={value} type="button" aria-pressed={paymentStatus === value} className={paymentStatus === value ? 'btn-primary min-h-10 flex-1 text-xs' : 'btn-secondary min-h-10 flex-1 text-xs'} onClick={() => { setPaymentStatus(value); if (value === 'paid') setCreditDueDate('') }}>{value === 'paid' ? tr('paid', 'Paid') : tr('on_credit', 'Not Yet Paid')}</button>)}
+                    </div>
+                    {paymentStatus === 'credit' ? <div className="mt-2">
+                      <label htmlFor="create-products-payment-due" className="mb-1 block text-xs text-gray-500">{tr('due_date', 'Due date')}</label>
+                      <DateEntryInput id="create-products-payment-due" className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('due_date', 'Due date')} value={creditDueDate} onChange={setCreditDueDate} />
+                      {creditDueMissing ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date')}</p> : null}
+                    </div> : null}
+                  </div>
                   <StockReasonField
                     id="create-products-reason"
                     className="sm:col-span-2"
@@ -929,6 +954,7 @@ export default function CreateProductsSessionModal({
                     {/* Same as the fast flow's queue: the frozen reason is
                         shown on the line that carries it, wrapping rather
                         than truncating. */}
+                    {row.quantity > 0 ? <span className="block text-[10px] text-gray-500 dark:text-gray-400">{tr('payment', 'Payment')}: {row.paymentStatus === 'paid' ? tr('paid', 'Paid') : row.paymentStatus === 'credit' ? `${tr('on_credit', 'Not Yet Paid')} · ${row.creditDueDate || '—'}` : tr('unknown', 'Unknown')}</span> : null}
                     {row.reason ? <span className="block break-words text-[10px] text-gray-500 dark:text-gray-400">{row.reason}</span> : null}
                   </button>
                   <span className="flex shrink-0 items-center gap-1"><span className="text-[11px] tabular-nums">× {row.quantity} · {usdSymbol}{(row.quantity * row.unitCostUsd).toFixed(2)}</span>{row.status === 'queued' ? <button type="button" disabled={submissionLocked} aria-label={tr('remove', 'Remove')} className="rounded p-1 text-gray-400 hover:text-red-600 disabled:opacity-40" onClick={() => removeLine(row.lineId)}><Trash2 className="h-4 w-4" /></button> : null}</span>
