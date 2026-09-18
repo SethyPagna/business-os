@@ -89,6 +89,13 @@ export function isActorCookieMutationPending(): boolean {
   return !!pendingCookieOwner()
 }
 
+/** Presentation only: an unreadable fence is still pending for every safety check. */
+export function actorCookieMutationPendingStatus(): 'storage-unavailable' | 'authentication-pending' {
+  return pendingCookieOwner() === AUTH_PENDING_PREFIX + 'storage-unavailable'
+    ? 'storage-unavailable'
+    : 'authentication-pending'
+}
+
 function pendingCookieOwner(): string | null {
   if (typeof window === 'undefined') return null
   try {

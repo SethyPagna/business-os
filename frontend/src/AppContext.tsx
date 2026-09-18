@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, startTransition } fr
 import type { ReactNode } from 'react'
 import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
-import { ACTOR_SESSION_RETRY_EVENT, acknowledgeActorCookieUser, actorSessionReconciliationMarker, completeActorSessionReconciliation, isActorCookieMutationPending, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
+import { ACTOR_SESSION_RETRY_EVENT, acknowledgeActorCookieUser, actorCookieMutationPendingStatus, actorSessionReconciliationMarker, completeActorSessionReconciliation, isActorCookieMutationPending, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
 import { readActorSessionRecoveryBootstrap } from './api/http.ts'
 import {
   normalizeRuntimeDescriptor,
@@ -1003,7 +1003,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       disconnectWS()
       setAuthReady(false)
       if (isActorCookieMutationPending()) {
-        setActorSessionQuarantineStatus('authentication-pending')
+        setActorSessionQuarantineStatus(actorCookieMutationPendingStatus())
         return
       }
       setActorSessionQuarantineStatus('checking')
