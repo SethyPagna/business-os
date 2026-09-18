@@ -409,6 +409,9 @@ function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
       });
     });
   }
+  // Observe early failure immediately, without replacing the promise: the
+  // eventual bootstrap consumer must still receive its real rejection.
+  if (window.__businessOsAuthBootstrapPromise) window.__businessOsAuthBootstrapPromise.catch(function observeEarlyBootstrapFailure() {});
   var files = isPublicCatalogPath(pathname)
     ? preloads.public
     : (isLoginPath(pathname) ? preloads.login : [].concat(preloads.admin || [], preloads[routeKey] || []));

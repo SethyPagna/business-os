@@ -91,23 +91,6 @@ export function collectPageHealth(page: Page): PageHealth {
 }
 
 /**
- * The ONE known, reproduced unhandled rejection on a signed-out admin boot.
- *
- * frontend/vite.config.ts builds an early `/api/auth/bootstrap` prefetch into
- * index.html and stores it on window.__businessOsAuthBootstrapPromise WITHOUT
- * attaching a rejection handler at the creation site (the inner function is
- * literally named parseEarlyAuthBootstrapText, which is why the fingerprint can
- * be this precise). A signed-out visitor gets 401, the promise rejects before
- * the module graph has finished loading the consumer that would have caught it,
- * and the browser reports an unhandled rejection.
- *
- * This is quarantined, NOT accepted: admin-boot.spec.ts carries a test.fixme
- * that names it, and every spec still fails on any OTHER page error. Delete
- * this constant the moment the prefetch gets its `.catch()`.
- */
-export const KNOWN_SIGNED_OUT_BOOTSTRAP_REJECTION = 'parseEarlyAuthBootstrapText'
-
-/**
  * The ONE known, reproduced console.error on a slow admin boot.
  *
  * frontend/src/api/actorReadScope.ts authority() folds getSyncServerUrl() into
@@ -197,7 +180,7 @@ const FIXTURE_BLOCKED_FETCH_ARTIFACT = new RegExp(
 
 export function pageErrorsExcludingKnown(health: PageHealth): string[] {
   return health.pageErrors.filter((entry) => (
-    !entry.includes(KNOWN_SIGNED_OUT_BOOTSTRAP_REJECTION) && !FIXTURE_BLOCKED_FETCH_ARTIFACT.test(entry)
+    !FIXTURE_BLOCKED_FETCH_ARTIFACT.test(entry)
   ))
 }
 

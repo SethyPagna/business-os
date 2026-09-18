@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test'
 import {
   ADMIN_ORIGIN,
-  KNOWN_SIGNED_OUT_BOOTSTRAP_REJECTION,
   blockSiteData,
   collectPageHealth,
   expectNoRuntimeErrors,
@@ -65,8 +64,8 @@ test.describe('admin shell boot', () => {
     expect(health.failedApiResponses).toEqual(['401 /api/auth/bootstrap'])
   })
 
-  test.fixme('still renders the login form when site data is blocked', async ({ page, context }) => {
-    // KNOWN DEFECT -- FOUND BY THIS SPEC, 2026-09-14. The admin shell renders a
+  test('offers safe recovery when site data is blocked', async ({ page, context }) => {
+    // REGRESSION -- FIXED 2026-09-18. Previously the admin shell rendered a
     // COMPLETELY BLANK PAGE (#root innerHTML length 0) in Safari private mode
     // and under Chrome's "block all cookies". Reproduced on all three projects.
     //
@@ -89,7 +88,7 @@ test.describe('admin shell boot', () => {
     //       at renderWithHooks / performConcurrentWorkOnRoot
     //   getStoredUserExpiry (AppContext.tsx:429) has the identical shape.
     //
-    // This is the 1defc523 class, still open on the ADMIN root. The storefront's
+    // This was the 1defc523 class on the ADMIN root. The storefront's
     // readPortalCache (PublicCatalogPage.tsx:381) already fixed it the right way
     // and its own comment says why: "the store list has to be built INSIDE this
     // guard".
@@ -99,15 +98,17 @@ test.describe('admin shell boot', () => {
     //       try { return safeStorageGet(sessionStorage, ...) || safeStorageGet(localStorage, ...) }
     //       catch { return null }
     //     }
-    // then delete this `.fixme` -- the assertions below already pass on a
-    // correct implementation (the storefront twin of this test is green).
+    // Storage acquisition must not crash rendering. Complete storage denial
+    // now deliberately fences cookie mutation: verify accurate visible recovery,
+    // not an unsafe login bypass. Existing drafts must remain untouched.
     await blockSiteData(context)
     const health = collectPageHealth(page)
 
     await page.goto(`${ADMIN_ORIGIN}/`, { waitUntil: 'load' })
 
-    await expect(page.locator(USERNAME_FIELD)).toBeVisible()
-    await expect(page.locator(PASSWORD_FIELD)).toBeVisible()
+    await expect(page.getByRole('alertdialog')).toContainText('Enable cookies and site data')
+    await expect(page.locator(USERNAME_FIELD)).toBeHidden()
+    await expect(page.getByRole('button', { name: /Reload/ })).toBeVisible()
 
     const storageThrew = await page.evaluate(() => {
       try {
@@ -182,9 +183,8 @@ test.describe('admin shell boot', () => {
     expectNoRuntimeErrors(health)
   })
 
-  test.fixme('signed-out boot raises no unhandled rejection', async ({ page }) => {
-    // KNOWN DEFECT, quarantined here on purpose rather than allow-listed
-    // silently. frontend/vite.config.ts inlines an early auth prefetch into
+  test('signed-out boot raises no unhandled rejection', async ({ page }) => {
+    // Regression: frontend/vite.config.ts inlines an early auth prefetch into
     // index.html:
     //
     //     window.__businessOsAuthBootstrapPromise = window.fetch('/api/auth/bootstrap', ...)
@@ -192,20 +192,18 @@ test.describe('admin shell boot', () => {
     //         return response.text().then(function parseEarlyAuthBootstrapText(text) {
     //           ... if (!response.ok) throw error ...
     //
-    // No `.catch()` is attached at the creation site. A signed-out visitor gets
+    // Previously no `.catch()` was attached. A signed-out visitor gets
     // 401, so the promise rejects while the module graph is still loading the
     // consumer that would have handled it, and the browser reports an unhandled
     // rejection ("Error: Not authenticated" at parseEarlyAuthBootstrapText).
     //
-    // Fix is one line -- attach `.catch(() => {})` (or store the settled
-    // outcome) where the promise is created; the stored promise's real consumer
-    // already handles the error itself. Remove this fixme and
-    // KNOWN_SIGNED_OUT_BOOTSTRAP_REJECTION from support/harness.ts together.
+    // Observe rejection immediately without replacing the promise: the real
+    // consumer must still receive its rejected outcome. No harness exemption.
     const health = collectPageHealth(page)
     await page.goto(`${ADMIN_ORIGIN}/`, { waitUntil: 'load' })
     await expect(page.locator(USERNAME_FIELD)).toBeVisible()
     await page.waitForTimeout(1_000)
-    expect(health.pageErrors.filter((entry) => entry.includes(KNOWN_SIGNED_OUT_BOOTSTRAP_REJECTION))).toEqual([])
+    expect(health.pageErrors).toEqual([])
   })
 
   test('a stored Khmer device preference is honoured before first paint', async ({ page, context }) => {

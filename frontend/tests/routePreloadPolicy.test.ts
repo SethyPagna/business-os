@@ -66,7 +66,7 @@ const script = built.match(/<script data-business-os-route-preloads>([\s\S]*?)<\
 assert.ok(script, 'plugin must emit an executable route preload script')
 
 type Link = { rel?: string; href?: string; fetchPriority?: string; attributes: Record<string, string>; setAttribute: (name: string, value: string) => void }
-function run(pathname: string, options: { publicRoot?: boolean; embedded?: boolean; existingPromise?: boolean; existingLink?: string; source?: string } = {}) {
+function run(pathname: string, options: { publicRoot?: boolean; embedded?: boolean; existingPromise?: boolean; existingLink?: string; source?: string; rejectFetch?: boolean } = {}) {
   const links: Link[] = []
   const calls: Array<{ url: string; init: RequestInit }> = []
   const existingPromise = options.existingPromise ? Promise.resolve({ user: 'already-started' }) : undefined
@@ -75,6 +75,7 @@ function run(pathname: string, options: { publicRoot?: boolean; embedded?: boole
     __businessOsAuthBootstrapPromise: existingPromise,
     fetch: (url: string, init: RequestInit) => {
       calls.push({ url, init })
+      if (options.rejectFetch) return Promise.reject(new Error('expected bootstrap rejection'))
       return Promise.resolve({ ok: true, text: () => Promise.resolve('{"user":"fixture"}') })
     },
   }
@@ -133,3 +134,12 @@ const partialScript = transform(html, partialBundle).match(/<script data-busines
 assert.ok(partialScript)
 expectRoute('/shop', publicChunks.filter(name => name !== 'app-portal'), true, partialScript)
 console.log('PASS configured route preload plugin: public/admin/login/products/POS, exclusions, priority, deduplication and auth bootstrap')
+const unhandled: unknown[] = []
+const onUnhandled = (error: unknown) => unhandled.push(error)
+process.on('unhandledRejection', onUnhandled)
+try {
+  const rejected = run('/products', { rejectFetch: true })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  assert.deepEqual(unhandled, [], 'early rejection must be observed before modules load')
+  await assert.rejects(rejected.window.__businessOsAuthBootstrapPromise!, /expected bootstrap rejection/)
+} finally { process.off('unhandledRejection', onUnhandled) }
