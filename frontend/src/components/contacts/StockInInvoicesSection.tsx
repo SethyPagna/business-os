@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import AppSelect from '../shared/AppSelect.tsx'
+import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { fmtDateOnly } from '../../utils/formatters'
@@ -101,6 +102,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [branchId, setBranchId] = useState('all')
   const [supplierKey, setSupplierKey] = useState('all')
+  const [supplierQuery, setSupplierQuery] = useState('')
   const initialToday = todayStr()
   const [fromDate, setFromDate] = useState(initialToday)
   const [toDate, setToDate] = useState(initialToday)
@@ -236,7 +238,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
 
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
   const qty = (value: unknown): string => (value == null ? '--' : String(Number(value) || 0))
-  const anyFilter = branchId !== 'all' || supplierKey !== 'all' || fromDate !== '' || toDate !== ''
+  const anyFilter = branchId !== 'all' || supplierKey !== 'all' || supplierQuery !== '' || fromDate !== '' || toDate !== ''
 
   const changeFilter = (apply: () => void) => {
     apply()
@@ -306,22 +308,30 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
             ...branches.map((branch) => ({ value: String(branch.id), label: String(branch.name || `#${branch.id}`) })),
           ]}
         />
-        <AppSelect
+        <SuggestionTextInput
+          id="stock-in-invoice-supplier"
           ariaLabel={tr('supplier', 'Supplier')}
-          value={supplierKey}
-          onChange={(value) => changeFilter(() => setSupplierKey(value))}
+          value={supplierQuery}
+          onChange={(value, option) => changeFilter(() => {
+            // Names can repeat: only a picked row supplies the filter key.
+            // Typing/clearing releases the old filter while searching options.
+            setSupplierQuery(option?.payload === 'all' ? '' : value)
+            setSupplierKey(option ? String(option.payload) : 'all')
+          })}
           className="min-w-[11rem]"
+          inputClassName="input h-9 w-full text-xs"
+          placeholder={tr('all_suppliers', 'All Suppliers')}
           options={[
-            { value: 'all', label: tr('all_suppliers', 'All Suppliers') },
-            { value: 'none', label: tr('no_supplier_recorded', 'No supplier') },
-            ...supplierOptions.map((option) => ({ value: option.key, label: String(option.name || option.key) })),
+            { value: tr('all_suppliers', 'All Suppliers'), key: 'all', payload: 'all' },
+            { value: tr('no_supplier_recorded', 'No supplier'), key: 'none', payload: 'none' },
+            ...supplierOptions.map((option) => ({ value: String(option.name || option.key), key: option.key, payload: option.key, selected: supplierKey === option.key })),
           ]}
         />
         {anyFilter ? (
           <button
             type="button"
             className="btn-secondary py-1 text-xs"
-            onClick={() => changeFilter(() => { setBranchId('all'); setSupplierKey('all'); setFromDate(''); setToDate('') })}
+            onClick={() => changeFilter(() => { setBranchId('all'); setSupplierKey('all'); setSupplierQuery(''); setFromDate(''); setToDate('') })}
           >
             {tr('clear', 'Clear')}
           </button>

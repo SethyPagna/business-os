@@ -28,6 +28,7 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Modal from '../../shared/Modal'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
+import SuggestionTextInput from '../../shared/SuggestionTextInput.tsx'
 import { openCSVDialog } from '../../../api/browserDialogs.ts'
 import { parseCsvRows } from '../../../utils/csvImport.ts'
 import {
@@ -190,6 +191,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
 
   // ---- review decisions ----
   const [decisions, setDecisions] = useState<Record<number, RowDecisionState>>({})
+  const [candidateQueries, setCandidateQueries] = useState<Record<number, string>>({})
   const [priceDecisions, setPriceDecisions] = useState<Record<number, 'merge' | 'apply_new'>>({})
 
   // ---- apply-decisions + preview result ----
@@ -237,6 +239,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
     setUnresolved([])
     setBranchesCreated([])
     setDecisions({})
+    setCandidateQueries({})
     setPriceDecisions({})
     setCombinedResolved([])
     setApplyErrors([])
@@ -291,6 +294,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
         }
       }
       setDecisions(initialDecisions)
+      setCandidateQueries({})
       const initialPriceDecisions: Record<number, 'merge' | 'apply_new'> = {}
       for (const row of result.resolved || []) {
         if (row.priceConflict) initialPriceDecisions[row.rowNumber] = row.priceConflict.suggestedResolution
@@ -544,15 +548,21 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
                             ))}
                           </div>
                           {(decision.action === 'link_variant' || decision.action === 'create_child') && candidates.length > 0 ? (
-                            <AppSelect
+                            <SuggestionTextInput
+                              id={`dated-count-candidate-${row.rowNumber}`}
                               className="w-full"
-                              buttonClassName="input text-xs"
-                              value={decision.candidateProductId ?? ''}
-                              options={[
-                                { value: '', label: T('dated_count_choose_product', '-- choose a product --') },
-                                ...candidates.map((id): AppSelectOption => ({ value: id, label: productNameById.get(id) || `#${id}` })),
-                              ]}
-                              onChange={(value) => updateDecision(row.rowNumber, { candidateProductId: value ? Number(value) : undefined })}
+                              inputClassName="input text-xs"
+                              ariaLabel={T('dated_count_choose_product', '-- choose a product --')}
+                              placeholder={T('dated_count_choose_product', '-- choose a product --')}
+                              value={candidateQueries[row.rowNumber] ?? (decision.candidateProductId ? productNameById.get(decision.candidateProductId) || `#${decision.candidateProductId}` : '')}
+                              options={candidates.map((id) => ({ value: productNameById.get(id) || `#${id}`, key: String(id), meta: `#${id}`, payload: id, selected: decision.candidateProductId === id }))}
+                              onChange={(value, option) => {
+                                setCandidateQueries(current => ({ ...current, [row.rowNumber]: value }))
+                                // A typed label is not a decision; duplicate names
+                                // stay distinct and only a listed candidate may link.
+                                const id = option ? Number(option.payload) : undefined
+                                updateDecision(row.rowNumber, { candidateProductId: id !== undefined && candidates.includes(id) ? id : undefined })
+                              }}
                             />
                           ) : null}
                         </div>
