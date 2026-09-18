@@ -1033,7 +1033,7 @@ assert.match(
 )
 assert.match(
   appContext,
-  /const persistAutoSyncUrl = \(\) => \{[\s\S]*safeStorageSet\(localStorage, STORAGE_KEYS\.SYNC_SERVER, syncUrl\)[\s\S]*window\.requestIdleCallback\(persistAutoSyncUrl, \{ timeout: INITIAL_SYNC_URL_PERSIST_IDLE_TIMEOUT_MS \}\)/,
+  /const persistAutoSyncUrl = \(\) => \{[\s\S]*safeStorageSet\(getAuthStorage\('local'\), STORAGE_KEYS\.SYNC_SERVER, syncUrl\)[\s\S]*window\.requestIdleCallback\(persistAutoSyncUrl, \{ timeout: INITIAL_SYNC_URL_PERSIST_IDLE_TIMEOUT_MS \}\)/,
   'auto sync URL persistence should run through a deferred idle effect',
 )
 assert.doesNotMatch(
