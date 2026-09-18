@@ -8,6 +8,45 @@ ancestors of the current release.
 
 ## Owner-authorized supplier settlement
 
+## Latest status — offline startup fixed and checkpoint DEPLOYED
+
+Owner explicitly requested fix and deploy after the held release. Code commit
+**96cdcb6bbdfa** is live as Worker **baeae504-2121-4b32-bfb6-5df4277069c3**,
+source hash **00e752b884f0a2c1**, built **2026-09-18T02:38:01.762Z**.
+Fresh `/api/runtime/version` matched the clean commit; `/health` returned ok.
+No new migration or business-data write was performed in this deployment.
+
+Root cause confirmed by failed browser requests: PublicCatalogRoot and its
+transitive JS/CSS were deferred until after activation. An offline reload during
+that background work failed CSS/root imports and cleared #root. Build manifest
+now includes a cycle-safe required startup dependency closure (including extracted
+CSS); the service worker must cache it successfully before installation completes.
+Optional unopened dynamic routes remain deferred. Independent review accepted.
+
+Verification: prior full frontend477/477; after this fix frontend typecheck, build,
+13 focused offline/startup tests pass, including new executable build-plugin test.
+Real browser rerun **30 passed /0 failed /15 existing skips** across desktop,
+Android-sized Chromium and iPhone WebKit. The SAME desktop+Android offline reload
+cases failed before and pass after. Clean final build and deployment dry-run pass.
+Worker initial464/466 plus return-native successful rerun and baseline-reproduced
+conflict-native crash remain honestly recorded below, not converted to full green.
+
+Live read-only browser smoke: admin login field visible, title Business OS;
+storefront Products control visible, title Leang Beauty, no page errors. Admin
+still emits the known signed-out `Not authenticated` page error (existing skipped
+test); do not claim zero errors or all backlog resolved. Earlier blocked-storage
+auth, account-switch cache, gender/provenance and printer gaps remain open.
+
+Evidence: `offline-diagnosis.log`, `offline-expanded.log`,
+`offline-fixed-browsers.log`, `release-build.log`, `release-dryrun.log`,
+`release-deploy.log`, `live-smoke.log` in outputs/open-task-gates-20260918.
+In-app browser attachment failed; isolated Playwright smoke supplied the actual
+live rendering evidence without signing in or mutating business data.
+Rollback code version: c1496ffd-6382-458c-8fbf-5a74da7bddeb (354f12d5957e);
+already-applied supplier settlement0183 must remain intact.
+
+## Supplier settlement evidence
+
 Owner: “Four supplier invoices totaling $489 ... can do paid.”
 Scope is a legacy balance correction, not a new cash expense/payment.
 

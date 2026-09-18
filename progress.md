@@ -1,3 +1,13 @@
+## Offline startup fix and checkpoint DEPLOYED — September 18
+
+Live commit96cdcb6bbdfa, Workerbaeae504-2121-4b32-bfb6-5df4277069c3.
+Public lazy-root JS/CSS dependency closure is now required before SW activation.
+Previously failing desktop/Android offline reloads now pass. Browser30 pass/0 fail/
+15 existing skips; focused13/13, typecheck/build/dry-run pass; preceding full FE477/477.
+Live runtime exact-match and health ok; real login/storefront render verified.
+Known signed-out Not authenticated page error and other recorded backlog remain.
+No new data migration. Evidence: docs/fleet/2026-09-18-codex-resume.md.
+
 ## Checkpoint deployment HELD by blank-page browser gate — September 18
 
 Owner authorized checkpoint deployment subject to no blank pages. Candidate
