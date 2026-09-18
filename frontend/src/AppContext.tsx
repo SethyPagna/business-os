@@ -17,6 +17,7 @@ import { requestPersistentAppStorage } from './api/syncRuntime.ts'
 import { disconnectWS, isWSConnected, resumeWS } from './api/websocket.ts'
 import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
+import { getAuthStorage } from './utils/authStorage.ts'
 import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWork.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 import { effectivePermissions, type PermissionTier } from './utils/permissions.ts'
@@ -427,24 +428,24 @@ function safeStorageRemove(storage: Storage | null | undefined, key: string): vo
 }
 
 function getStoredUserPayload() {
-  return safeStorageGet(sessionStorage, STORAGE_KEYS.USER) || safeStorageGet(localStorage, STORAGE_KEYS.USER)
+  return safeStorageGet(getAuthStorage('session'), STORAGE_KEYS.USER) || safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.USER)
 }
 
 function getStoredUserExpiry() {
-  return safeStorageGet(sessionStorage, STORAGE_KEYS.USER_EXPIRY) || safeStorageGet(localStorage, STORAGE_KEYS.USER_EXPIRY)
+  return safeStorageGet(getAuthStorage('session'), STORAGE_KEYS.USER_EXPIRY) || safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.USER_EXPIRY)
 }
 
 function clearPersistedAuthState() {
   SESSION_ONLY_STORAGE_KEYS.forEach((key) => {
-    safeStorageRemove(localStorage, key)
-    safeStorageRemove(sessionStorage, key)
+    safeStorageRemove(getAuthStorage('local'), key)
+    safeStorageRemove(getAuthStorage('session'), key)
   })
-  safeStorageRemove(localStorage, 'businessos_auth_token')
-  safeStorageRemove(sessionStorage, 'businessos_auth_token')
-  safeStorageRemove(localStorage, STORAGE_KEYS.SERVER_START_TIME)
-  safeStorageRemove(localStorage, STORAGE_KEYS.OAUTH_LOGIN_PENDING)
-  safeStorageRemove(localStorage, STORAGE_KEYS.OAUTH_LINK_PENDING)
-  safeStorageRemove(localStorage, STORAGE_KEYS.OAUTH_CALLBACK_RESULT)
+  safeStorageRemove(getAuthStorage('local'), 'businessos_auth_token')
+  safeStorageRemove(getAuthStorage('session'), 'businessos_auth_token')
+  safeStorageRemove(getAuthStorage('local'), STORAGE_KEYS.SERVER_START_TIME)
+  safeStorageRemove(getAuthStorage('local'), STORAGE_KEYS.OAUTH_LOGIN_PENDING)
+  safeStorageRemove(getAuthStorage('local'), STORAGE_KEYS.OAUTH_LINK_PENDING)
+  safeStorageRemove(getAuthStorage('local'), STORAGE_KEYS.OAUTH_CALLBACK_RESULT)
 }
 
 function persistAuthState({
@@ -457,8 +458,8 @@ function persistAuthState({
   sessionDuration?: unknown
 }): void {
   const mode = String(sessionDuration || 'session').trim().toLowerCase() || 'session'
-  const primaryStorage = mode === 'session' ? sessionStorage : localStorage
-  const secondaryStorage = mode === 'session' ? localStorage : sessionStorage
+  const primaryStorage = mode === 'session' ? getAuthStorage('session') : getAuthStorage('local')
+  const secondaryStorage = mode === 'session' ? getAuthStorage('local') : getAuthStorage('session')
 
   SESSION_ONLY_STORAGE_KEYS.forEach((key) => safeStorageRemove(secondaryStorage, key))
 
@@ -732,7 +733,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
     let idleId: number | null = null
     const persistAutoSyncUrl = () => {
-      safeStorageSet(localStorage, STORAGE_KEYS.SYNC_SERVER, syncUrl)
+      safeStorageSet(getAuthStorage('local'), STORAGE_KEYS.SYNC_SERVER, syncUrl)
     }
     const timerId = window.setTimeout(() => {
       if (typeof window.requestIdleCallback === 'function') {
@@ -924,7 +925,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       // intentionally gated on that marker on the protected admin host.
       const sessionDuration = String(
         mergedSettings.login_session_duration
-        || safeStorageGet(localStorage, STORAGE_KEYS.SESSION_DURATION)
+        || safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.SESSION_DURATION)
         || 'session',
       )
       const storedExpiry = Number(getStoredUserExpiry())
@@ -943,7 +944,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     const organization = safePayload?.organization
     const group = safePayload?.group
     if (organization?.slug || organization?.public_id || organization?.name) {
-      safeStorageSet(localStorage, STORAGE_KEYS.ORGANIZATION, JSON.stringify({
+      safeStorageSet(getAuthStorage('local'), STORAGE_KEYS.ORGANIZATION, JSON.stringify({
         id: organization.id || null,
         name: organization.name || '',
         slug: organization.slug || '',
@@ -955,11 +956,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     }
 
     if (safePayload?.system?.serverStartTime) {
-      safeStorageSet(localStorage, STORAGE_KEYS.SERVER_START_TIME, String(safePayload.system.serverStartTime))
+      safeStorageSet(getAuthStorage('local'), STORAGE_KEYS.SERVER_START_TIME, String(safePayload.system.serverStartTime))
     }
     if (safePayload?.system?.publicAssetBaseUrl) {
       const publicAssetBaseUrl = String(safePayload.system.publicAssetBaseUrl || '').replace(/\/$/, '')
-      safeStorageSet(localStorage, STORAGE_KEYS.PUBLIC_ASSET_BASE_URL, publicAssetBaseUrl)
+      safeStorageSet(getAuthStorage('local'), STORAGE_KEYS.PUBLIC_ASSET_BASE_URL, publicAssetBaseUrl)
       getAppApi().setPublicAssetBaseUrl?.(publicAssetBaseUrl)
     }
 
@@ -1381,7 +1382,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       try {
         persistAuthState({ user: safeUser, expiryTime, sessionDuration })
         if (safeUser?.organization_slug || safeUser?.organization_public_id || safeUser?.organization_name) {
-          safeStorageSet(localStorage, STORAGE_KEYS.ORGANIZATION, JSON.stringify({
+          safeStorageSet(getAuthStorage('local'), STORAGE_KEYS.ORGANIZATION, JSON.stringify({
             id: safeUser.organization_id || null,
             name: safeUser.organization_name || '',
             slug: safeUser.organization_slug || '',
@@ -1425,7 +1426,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         const merged = { ...prev, ...nextUser }
         const expiry = getStoredUserExpiry()
         const expiryTime = expiry ? Number(expiry) : null
-        const currentMode = safeStorageGet(localStorage, STORAGE_KEYS.SESSION_DURATION) || '30d'
+        const currentMode = safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.SESSION_DURATION) || '30d'
         persistAuthState({
           user: merged,
           expiryTime: Number.isFinite(expiryTime) ? expiryTime : null,
@@ -1756,7 +1757,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     try {
       persistAuthState({ user: nextUser, expiryTime, sessionDuration })
       if (nextUser?.organization_slug || nextUser?.organization_public_id || nextUser?.organization_name) {
-        safeStorageSet(localStorage, STORAGE_KEYS.ORGANIZATION, JSON.stringify({
+        safeStorageSet(getAuthStorage('local'), STORAGE_KEYS.ORGANIZATION, JSON.stringify({
           id: nextUser.organization_id || null,
           name: nextUser.organization_name || '',
           slug: nextUser.organization_slug || '',
@@ -1766,9 +1767,9 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           group_slug: nextUser.organization_group_slug || '',
         }))
       }
-      const knownServerStartTime = safeStorageGet(localStorage, STORAGE_KEYS.SERVER_START_TIME)
+      const knownServerStartTime = safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.SERVER_START_TIME)
       if (knownServerStartTime) {
-        safeStorageSet(localStorage, STORAGE_KEYS.SERVER_START_TIME, knownServerStartTime)
+        safeStorageSet(getAuthStorage('local'), STORAGE_KEYS.SERVER_START_TIME, knownServerStartTime)
       }
     } catch (_) {}
 
