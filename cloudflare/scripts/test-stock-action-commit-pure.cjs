@@ -31,6 +31,7 @@ const saleCreationSnapshot = compile('saleCreationSnapshot.ts', {
 })
 const productDetailRule = compile('productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const subject = compile('stockActionCommit.ts', {
+  './productBatches': compile('productBatches.ts', { './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': compile('sqlBinding.ts') }),
   './moneyPrecision': moneyPrecision,
   './db': {},
   './batchCode': batchCode,
@@ -103,8 +104,8 @@ const input = {
 // The lot this input's date+label resolves to, for seeding an EXISTING lot.
 const LOT_KEY = 'lot a'
 function seedLot(sqlite, { supplierName = null, supplierId = null } = {}) {
-  sqlite.prepare(`INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, supplier_id, supplier_name)
-                  VALUES (10, @batchKey, 'LOT A', '2026-08-27', 1, 1, @supplierId, @supplierName)`)
+  sqlite.prepare(`INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, supplier_id, supplier_name, unit_cost_usd)
+                  VALUES (10, @batchKey, 'LOT A', '2026-08-27', 1, 1, @supplierId, @supplierName, 5)`)
     .run({ batchKey: LOT_KEY, supplierId, supplierName })
 }
 
@@ -114,6 +115,33 @@ function seedLot(sqlite, { supplierName = null, supplierId = null } = {}) {
   const retry = await subject.applyUnifiedStockAdd(db, input)
   assert.strictEqual(first.alreadyApplied, false)
   assert.strictEqual(retry.alreadyApplied, true)
+  const concurrent = setup()
+  await Promise.all([subject.applyUnifiedStockAdd(concurrent.db, input),
+    subject.applyUnifiedStockAdd(concurrent.db, { ...input, rowNumber: 3, costPriceUsd: 7 })])
+  assert.equal(concurrent.sqlite.prepare('SELECT COUNT(*) n FROM product_batches').get().n, 2, 'concurrent differently priced receipts cannot lose a lot to a stale batch number')
+  assert.equal(concurrent.sqlite.prepare('SELECT SUM(quantity) n FROM branch_batch_stock').get().n, 4)
+  const redeliveryRace = setup()
+  await Promise.all([subject.applyUnifiedStockAdd(redeliveryRace.db, input), subject.applyUnifiedStockAdd(redeliveryRace.db, input)])
+  assert.equal(redeliveryRace.sqlite.prepare('SELECT stock_quantity FROM products WHERE id=10').get().stock_quantity, 2, 'concurrent delivery of one journal key is still exactly once')
+  const distinct = setup()
+  for (const [index, cost] of [3, 5, 7, 5, 0].entries()) {
+    await subject.applyUnifiedStockAdd(distinct.db, { ...input, rowNumber: index + 1, costPriceUsd: cost, freeGoods: cost === 0 })
+  }
+  assert.equal(distinct.sqlite.prepare('SELECT cost_price_usd FROM products WHERE id=10').get().cost_price_usd, 5)
+  assert.equal(distinct.sqlite.prepare('SELECT COUNT(*) n FROM product_batches').get().n, 4, 'different costs keep separate lot identities on one date')
+  assert.equal(distinct.sqlite.prepare('SELECT received_quantity FROM product_batches WHERE unit_cost_usd=5').get().received_quantity, 4)
+  assert.deepEqual(distinct.sqlite.prepare('SELECT unit_cost_usd FROM inventory_movements ORDER BY id').all().map(row => row.unit_cost_usd), [3, 5, 7, 5, 0])
+  const baseline = distinct.sqlite.prepare('SELECT MAX(id) id FROM product_batches').get().id
+  distinct.sqlite.prepare(`INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,9,'manual',@baseline)`).run({ baseline })
+  await subject.applyUnifiedStockAdd(distinct.db, { ...input, rowNumber: 20, costPriceUsd: 5 })
+  assert.equal(distinct.sqlite.prepare('SELECT cost_price_usd FROM products WHERE id=10').get().cost_price_usd, 7, 'new receipt averages with manual baseline only')
+  assert.equal(distinct.sqlite.prepare('SELECT COUNT(*) n FROM product_batches WHERE unit_cost_usd=5').get().n, 2)
+  const atomicCatalog = setup()
+  atomicCatalog.sqlite.exec(`CREATE TRIGGER reject_catalog BEFORE UPDATE OF cost_price_usd ON products BEGIN SELECT RAISE(ABORT,'catalog rejected'); END`)
+  await assert.rejects(() => subject.applyUnifiedStockAdd(atomicCatalog.db, input), /catalog rejected/)
+  for (const table of ['product_batches', 'branch_stock', 'inventory_movements', 'import_stock_action_commits']) {
+    assert.equal(atomicCatalog.sqlite.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 0, `${table} rolls back if recomputation fails`)
+  }
   // P10-4 (owner ruling 2026-09-16): products.cost_price_usd is now
   // RE-DERIVED from the product's own active lots after every applied add --
   // this row's only active lot is the one this import just created at 5, so
@@ -281,7 +309,7 @@ function seedLot(sqlite, { supplierName = null, supplierId = null } = {}) {
   assert.strictEqual(attributedLot.sqlite.prepare(`SELECT quantity FROM branch_stock`).get().quantity, 2)
   // ...but an attributed lot excuses only the supplier half.
   await assert.rejects(
-    () => subject.applyUnifiedStockAdd(attributedLot.db, { ...input, rowNumber: 9, supplierName: '', costPriceUsd: null }),
+    () => subject.applyUnifiedStockAdd(attributedLot.db, { ...input, rowNumber: 9, supplierName: 'Srey Now', costPriceUsd: null }),
     /must carry its unit cost/,
     "the lot's supplier does not excuse this receipt's own cost",
   )
