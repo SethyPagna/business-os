@@ -16,6 +16,7 @@ import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import type { Env } from '../index'
 import { roundMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
+import { planManualCostEntry, catalogCostRecomputeStatement } from './catalogCostRecompute'
 
 export const PRODUCT_MONEY_VERSION = 'product_money_policy_version'
 export const PRODUCT_MONEY_PLAN = '_product_money_write_plan'
@@ -275,7 +276,7 @@ export async function insertRow(env: Env, table: string, body: Record<string, un
   return result.meta?.last_row_id
 }
 
-export async function updateRow(env: Env, table: string, id: string | number, body: Record<string, unknown>) {
+export async function updateRow(env: Env, table: string, id: string | number, body: Record<string, unknown>, costOverrideActor?: { id: number | null; name: string | null }) {
   const moneyPlan = readProductMoneyPlan(body)
   if (moneyPlan && (table !== 'products' || moneyPlan.kind !== 'update' || moneyPlan.product_id !== Number(id))) invalidMoneyPlan()
   const columns = await tableColumns(env, table)
@@ -287,8 +288,14 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   const assignments = keys.map((key) => `"${key}" = ?`).join(', ')
   const beforeKeys = moneyPlan ? [...moneyFields(moneyPlan.version), 'updated_at', 'name'] as const : []
   const guard = moneyPlan ? beforeKeys.map(field => ` AND "${field}" IS ?`).join('') : ''
-  const statement = env.DB.prepare(`UPDATE "${table}" SET ${assignments} WHERE id = ?${guard}`)
-    .bind(...keys.map((key) => payload[key]), id, ...(moneyPlan ? beforeKeys.map(field => moneyPlan.before![field]) : []))
+  const updateSql = `UPDATE "${table}" SET ${assignments} WHERE id = ?${guard}`
+  const updateParams = [...keys.map((key) => payload[key]), id, ...(moneyPlan ? beforeKeys.map(field => moneyPlan.before![field]) : [])]
+  const statement = env.DB.prepare(updateSql).bind(...updateParams)
+  // This option is server-owned, never body metadata. Preserve the existing
+  // full money preimage guard before recording an override or its baseline.
+  if (costOverrideActor && (!moneyPlan || table !== 'products')) invalidMoneyPlan()
+  const costBefore = moneyPlan?.before as { cost_price_usd: number | null; cost_price_khr: number | null } | null
+  const manualEntry = costOverrideActor && costBefore ? planManualCostEntry(Number(id), costBefore, body, costOverrideActor) : null
   let result
   if (moneyPlan?.group_rename) {
     // No rename or audit happens before target admission. A failed target CAS
@@ -315,6 +322,27 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
       result = results[2]
     } catch (error) {
       if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed before the group rename. Submit a new edit.')
+      throw error
+    }
+  } else if (manualEntry && costOverrideActor && costBefore) {
+    try {
+      const results = await getDb(env).batch([
+        { sql: updateSql, params: updateParams },
+        { sql: `SELECT CASE WHEN changes()>0 THEN 1 ELSE json('product_money_state_conflict') END` },
+        manualEntry,
+        { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,old_value,new_value,details)
+            SELECT @actorId,@actorName,'cost_override','product',@entityId,@oldValue,
+              (SELECT json_object('cost_price_usd',cost_price_usd,'cost_price_khr',cost_price_khr) FROM products WHERE id=@productId),
+              json_object('cost_entry_id',id,'baseline_batch_id',baseline_batch_id,
+                'cost_price_usd',cost_usd,'cost_price_khr',cost_khr)
+            FROM product_cost_entries WHERE product_id=@productId ORDER BY id DESC LIMIT 1`,
+          params: { actorId: costOverrideActor.id, actorName: costOverrideActor.name, productId: Number(id), entityId: String(id),
+            oldValue: JSON.stringify({ cost_price_usd: costBefore.cost_price_usd, cost_price_khr: costBefore.cost_price_khr }) } },
+        catalogCostRecomputeStatement(Number(id)),
+      ])
+      result = results[0]
+    } catch (error) {
+      if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the price plan was prepared. Submit a new edit.')
       throw error
     }
   } else result = await statement.run()

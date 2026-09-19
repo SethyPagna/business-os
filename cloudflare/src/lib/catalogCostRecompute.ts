@@ -411,13 +411,12 @@ export async function getCatalogCostBreakdown(db: D1Compat, productId: number): 
  * {@link recomputeCatalogCost} so the new manual figure immediately joins
  * the formula, same as a fresh lot would.
  */
-export async function recordManualCostEntry(
-  db: D1Compat,
+export function planManualCostEntry(
   productId: number,
   before: { cost_price_usd: number | null; cost_price_khr: number | null },
   body: Record<string, unknown>,
   actor: { id: number | null; name: string | null },
-): Promise<number | null> {
+): { sql: string; params: Record<string, unknown> } | null {
   const hasUsd = Object.prototype.hasOwnProperty.call(body, 'cost_price_usd')
   const hasKhr = Object.prototype.hasOwnProperty.call(body, 'cost_price_khr')
   if (!hasUsd && !hasKhr) return null
@@ -429,15 +428,23 @@ export async function recordManualCostEntry(
   const changed = (hasUsd && afterUsd !== beforeUsd) || (hasKhr && afterKhr !== beforeKhr)
   if (!changed) return null
 
-  const maxLot = await db.prepare(
-    'SELECT COALESCE(MAX(id), 0) AS maxId FROM product_batches WHERE variant_product_id = @productId',
-  ).get<{ maxId: number }>({ productId })
-  const baselineBatchId = Number(maxLot?.maxId) || 0
-
-  const result = await db.prepare(`
+  return { sql: `
     INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, source, user_id, user_name, baseline_batch_id)
-    VALUES (@productId, @costUsd, @costKhr, 'manual', @userId, @userName, @baselineBatchId)
-  `).run({ productId, costUsd: afterUsd, costKhr: hasKhr ? afterKhr : null, userId: actor.id, userName: actor.name, baselineBatchId })
+    VALUES (@productId, @costUsd, @costKhr, 'manual', @userId, @userName,
+      (SELECT COALESCE(MAX(id),0) FROM product_batches WHERE variant_product_id=@productId))
+  `, params: { productId, costUsd: afterUsd, costKhr: hasKhr ? afterKhr : null, userId: actor.id, userName: actor.name } }
+}
+
+export async function recordManualCostEntry(
+  db: D1Compat,
+  productId: number,
+  before: { cost_price_usd: number | null; cost_price_khr: number | null },
+  body: Record<string, unknown>,
+  actor: { id: number | null; name: string | null },
+): Promise<number | null> {
+  const plan = planManualCostEntry(productId, before, body, actor)
+  if (!plan) return null
+  const result = await db.prepare(plan.sql).run(plan.params)
 
   const insertedId = Number(result?.lastInsertRowid ?? NaN)
   return Number.isFinite(insertedId) && insertedId > 0 ? insertedId : null
