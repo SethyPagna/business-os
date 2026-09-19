@@ -1,3 +1,5 @@
+import { useApp } from '../../AppContext'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -62,6 +64,8 @@ type ApInvoicesSectionProps = {
 }
 
 export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
+  const { user } = useApp() as { user: any }
+  const canViewCosts = canViewAcquisitionCosts(user)
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [branch, setBranch] = useState('all')
   const [supplier, setSupplier] = useState('all')
@@ -172,6 +176,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
   const invoiceLabel = (row: ApInvoice): string => String(row.invoice_no || '').trim() || `#${row.legacy_id}`
 
   const statusChip = (row: ApInvoice) => {
+    if (!canViewCosts) return <span className="text-xs text-gray-500">{row.status || tr('not_recorded', 'Not recorded')}</span>
     if (Number(row.outstanding_balance_usd) > 0) {
       return (
         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
@@ -279,10 +284,10 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
             ariaLabel={tr('ap_invoices', 'Supplier AP Invoices')}
             items={[
               { key: 'invoices', label: tr('stock_in_invoices_count', 'Invoices'), value: String(totals.invoices ?? 0) },
-              { key: 'paid', label: tr('paid', 'Paid'), value: money(totals.paid_usd) },
-              { key: 'outstanding', label: `${tr('ap_outstanding', 'Outstanding')} (${totals.outstanding_count ?? 0})`, value: money(totals.outstanding_usd) },
+              ...(canViewCosts ? [{ key: 'paid', label: tr('paid', 'Paid'), value: money(totals.paid_usd) }] : []),
+              ...(canViewCosts ? [{ key: 'outstanding', label: `${tr('ap_outstanding', 'Outstanding')} (${totals.outstanding_count ?? 0})`, value: money(totals.outstanding_usd) }] : []),
             ]}
-            total={{ key: 'total', label: tr('ap_total_billed', 'Total billed'), value: money(totals.total_usd) }}
+            total={canViewCosts ? { key: 'total', label: tr('ap_total_billed', 'Total billed'), value: money(totals.total_usd) } : undefined}
           />
 
           {invoices.length === 0 ? (
@@ -302,11 +307,11 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
                     <th className="px-3 py-2">{tr('supplier', 'Supplier')}</th>
                     <th className="px-3 py-2">{tr('invoice_no', 'Invoice #')}</th>
                     <th className="px-3 py-2">{tr('due_date', 'Due date')}</th>
-                    <th className="px-3 py-2 text-right">{tr('ap_taxable', 'Taxable')}</th>
-                    <th className="px-3 py-2 text-right">{tr('ap_vat', 'VAT')}</th>
-                    <th className="px-3 py-2 text-right">{tr('total', 'Total')}</th>
-                    <th className="px-3 py-2 text-right">{tr('paid', 'Paid')}</th>
-                    <th className="px-3 py-2 text-right">{tr('ap_outstanding', 'Outstanding')}</th>
+                    {canViewCosts ? <th className="px-3 py-2 text-right">{tr('ap_taxable', 'Taxable')}</th> : null}
+                    {canViewCosts ? <th className="px-3 py-2 text-right">{tr('ap_vat', 'VAT')}</th> : null}
+                    {canViewCosts ? <th className="px-3 py-2 text-right">{tr('total', 'Total')}</th> : null}
+                    {canViewCosts ? <th className="px-3 py-2 text-right">{tr('paid', 'Paid')}</th> : null}
+                    {canViewCosts ? <th className="px-3 py-2 text-right">{tr('ap_outstanding', 'Outstanding')}</th> : null}
                     <th className="px-3 py-2">{tr('status', 'Status')}</th>
                   </tr>
                 </thead>
@@ -325,11 +330,11 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
                         <span className="ml-1 text-[10px] text-gray-400">#{row.legacy_id}</span>
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-gray-500">{row.due_date ? <time dateTime={row.due_date}>{fmtDate(row.due_date)}</time> : '--'}</td>
-                      <td className="px-3 py-2 text-right text-gray-500">{money(row.taxable_amount_usd)}</td>
-                      <td className="px-3 py-2 text-right text-gray-500">{money(row.vat_amount_usd)}</td>
-                      <td className="px-3 py-2 text-right font-medium text-gray-800 dark:text-gray-100">{money(row.total_amount_usd)}</td>
-                      <td className="px-3 py-2 text-right text-gray-800 dark:text-gray-100">{money(row.amount_paid_usd)}</td>
-                      <td className={`px-3 py-2 text-right font-medium ${Number(row.outstanding_balance_usd) > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500'}`}>{money(row.outstanding_balance_usd)}</td>
+                      {canViewCosts ? <td className="px-3 py-2 text-right text-gray-500">{money(row.taxable_amount_usd)}</td> : null}
+                      {canViewCosts ? <td className="px-3 py-2 text-right text-gray-500">{money(row.vat_amount_usd)}</td> : null}
+                      {canViewCosts ? <td className="px-3 py-2 text-right font-medium text-gray-800 dark:text-gray-100">{money(row.total_amount_usd)}</td> : null}
+                      {canViewCosts ? <td className="px-3 py-2 text-right text-gray-800 dark:text-gray-100">{money(row.amount_paid_usd)}</td> : null}
+                      {canViewCosts ? <td className={`px-3 py-2 text-right font-medium ${Number(row.outstanding_balance_usd) > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500'}`}>{money(row.outstanding_balance_usd)}</td> : null}
                       <td className="px-3 py-2">{statusChip(row)}</td>
                     </tr>
                   ))}
@@ -349,7 +354,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     <time dateTime={row.invoice_date} className="whitespace-nowrap text-xs leading-5 tabular-nums text-gray-500">{fmtDate(row.invoice_date)}</time>
                     <span className="min-w-0 flex-1 truncate text-sm leading-6 text-gray-900 dark:text-white">{supplierDisplay(row.supplier_name, tr)}</span>
-                    <span className="text-sm font-semibold leading-6 tabular-nums text-gray-900 dark:text-white">{money(row.total_amount_usd)}</span>
+                    {canViewCosts ? <span className="text-sm font-semibold leading-6 tabular-nums text-gray-900 dark:text-white">{money(row.total_amount_usd)}</span> : null}
                   </div>
                   <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     {/* The invoice id wraps to a second line rather than being
@@ -361,7 +366,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
                       valueClassName="text-xs leading-5 text-gray-500"
                     />
                     <span className="text-xs leading-5 text-gray-400">{branchLabel(row.source_branch)}</span>
-                    {Number(row.outstanding_balance_usd) > 0 ? (
+                    {canViewCosts && Number(row.outstanding_balance_usd) > 0 ? (
                       <span className="text-xs leading-5 tabular-nums text-amber-700 dark:text-amber-300">{tr('ap_outstanding', 'Outstanding')}: {money(row.outstanding_balance_usd)}</span>
                     ) : null}
                     <span className="ml-auto">{statusChip(row)}</span>
@@ -399,7 +404,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
                 { key: 'legacy_id', label: tr('legacy_record_id', 'Legacy record id'), value: `#${detail.legacy_id}` },
               ],
             },
-            {
+            ...(canViewCosts ? [{
               key: 'amounts',
               title: tr('invoice_amounts', 'Amounts'),
               facts: [
@@ -409,7 +414,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
                 { key: 'paid', label: tr('paid', 'Paid'), value: money(detail.amount_paid_usd) },
                 { key: 'outstanding', label: tr('ap_outstanding', 'Outstanding'), value: money(detail.outstanding_balance_usd) },
               ],
-            },
+            }] : []),
             {
               key: 'lines',
               title: tr('invoice_lines', 'Lines'),
