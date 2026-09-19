@@ -178,7 +178,7 @@ await runTest('normalizeCostBreakdown returns null for a malformed/empty payload
 // Render the actual float with loaded server state. Neither the component nor
 // its formatting helpers may calculate a merge-policy replacement locally.
 const require = createRequire(import.meta.url)
-function renderBreakdown(payload: unknown): string {
+function renderBreakdown(payload: unknown, canViewCosts = true): string {
   const source = fs.readFileSync(path.join(srcRoot, 'components/shared/CostCalculationFloat.tsx'), 'utf8')
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
   const module = { exports: {} as any }
@@ -188,7 +188,7 @@ function renderBreakdown(payload: unknown): string {
     if (id === 'react') return { ...React, useState: () => [states[stateIndex++], () => {}], useEffect: () => {}, useRef: () => ({ current: true }) }
     if (id === 'react/jsx-runtime') return require(id)
     if (id.includes('AppContext')) return { useApp: () => ({ user: { role: 'admin' } }) }
-    if (id.includes('acquisitionCostAccess')) return { canViewAcquisitionCosts: () => true }
+    if (id.includes('acquisitionCostAccess')) return { canViewAcquisitionCosts: () => canViewCosts }
     if (id.includes('costBreakdownFormat')) return { formatCostFormula, costExclusionLabelKey, costRowPrimaryText, costRowMeta, normalizeCostBreakdown }
     if (id.includes('formatters')) return { fmtDate: (value: string) => value }
     if (id.includes('productReadTransport')) return { getProductCostBreakdown: () => { throw new Error('render must not fetch') } }
@@ -202,6 +202,35 @@ function renderBreakdown(payload: unknown): string {
     fmtUSD: (value: number) => `$${value.toFixed(2)}`, fmtKHR: (value: number) => `${value} KHR`,
   }))
 }
+
+await runTest('manual cost history preserves exact previous values and renders compact old-to-new without inventing zero', () => {
+  const payload = {
+    product_id: 42,
+    inputs: [
+      { source: 'manual', label: 'Manual', previous_cost_usd: 1.2345, cost_usd: 2.3456, recorded_at: '2026-09-20', user_name: 'Dara' },
+      { source: 'manual', label: 'Manual', previous_cost_usd: 0, cost_usd: 3 },
+      { source: 'manual', label: 'Manual', previous_cost_usd: null, cost_usd: 4 },
+      { source: 'manual', label: 'Legacy', cost_usd: 5 },
+      { source: 'lot', label: 'Receipt', previous_cost_usd: 999, cost_usd: 6 },
+    ],
+  }
+  const normalized = normalizeCostBreakdown(payload)!
+  assert.equal(normalized.inputs[0].previous_cost_usd, 1.2345, 'normalization never rounds stored precision')
+  assert.equal(normalized.inputs[0].cost_usd, 2.3456)
+  assert.equal(normalized.inputs[1].previous_cost_usd, 0, 'real historical zero remains zero')
+  assert.equal(normalized.inputs[2].previous_cost_usd, null)
+  assert.equal(normalized.inputs[3].previous_cost_usd, null, 'legacy absence means unknown')
+  for (const bad of ['', '0', false, NaN, Infinity]) {
+    assert.equal(normalizeCostBreakdown({ inputs: [{ source: 'manual', previous_cost_usd: bad }] })!.inputs[0].previous_cost_usd, null, 'invalid history never becomes fake zero')
+  }
+  const html = renderBreakdown(payload)
+  for (const text of ['$1.23 → $2.35', '$0.00 → $3.00', '— → $4.00', '— → $5.00', '2026-09-20', 'Dara']) assert.ok(html.includes(text), text)
+  assert.doesNotMatch(html, /\$999\.00 →/, 'receipt rows do not acquire manual history formatting')
+  assert.match(html, />\$6\.00</, 'normal receipt cost remains unchanged')
+  assert.match(html, /min-w-0 max-w-\[65%\]/, 'manual amount column can shrink within a narrow row')
+  assert.match(html, /title="\$1\.23 → \$2\.35"/, 'full cost transition remains available when truncated')
+  assert.equal(renderBreakdown(payload, false), '', 'cost view denial suppresses both historical and current cost')
+})
 
 await runTest('catalog float renders distinct-positive means and never the legacy highest-cost warning', () => {
   for (const fixture of [
