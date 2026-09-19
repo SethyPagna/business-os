@@ -19,6 +19,7 @@ import {
   type InventoryStockSessionProduct,
 } from '../../api/inventoryWriteTransport.ts'
 import { searchProducts } from '../../api/methods.ts'
+import { getProductsByIds } from '../../api/productReadTransport.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
@@ -315,6 +316,9 @@ export default function CreateProductsSessionModal({
   const [blindLineUnitCost, setBlindLineUnitCost] = useState('')
   const lineCostEditedRef = useRef(false)
   const blindLineCostEditedRef = useRef(false)
+  const costRefreshKey = JSON.stringify([user?.id ?? '', selectedProduct?.id ?? '', canViewCosts, canEditCosts])
+  const costRefreshScope = useRef({ key: costRefreshKey })
+  if (costRefreshScope.current.key !== costRefreshKey) costRefreshScope.current = { key: costRefreshKey }
   const previousCostAccess = useRef({ canViewCosts, canEditCosts })
   useEffect(() => {
     const previous = previousCostAccess.current
@@ -330,9 +334,27 @@ export default function CreateProductsSessionModal({
       } else {
         setLineUnitCost((current) => lineCostEditedRef.current || current.trim() !== ''
           ? current : currentCost(selectedProduct))
+        // A selection made without view permission can be server-redacted.
+        // Fetch that exact product; never synthesize a zero from missing cost.
+        if (selectedProduct && !lineCostEditedRef.current && currentCost(selectedProduct) === '') {
+          const scope = costRefreshScope.current
+          const productId = selectedProduct.id
+          let cancelled = false
+          getProductsByIds([productId], { surface: 'inventory' }).then((raw) => {
+            if (cancelled || costRefreshScope.current !== scope || !costAccessRef.current.canViewCosts || !costAccessRef.current.canEditCosts) return
+            const rows = Array.isArray(raw) ? raw : (raw as { items?: ProductCandidate[] })?.items || []
+            const fresh = rows.find((row: ProductCandidate) => String(row.id) === String(productId)) as ProductCandidate | undefined
+            if (!fresh) return
+            setSelectedProduct((current) => current && String(current.id) === String(productId) ? { ...current, ...fresh } : current)
+            setLineUnitCost((current) => lineCostEditedRef.current || current.trim() !== '' ? current : currentCost(fresh))
+          }).catch(() => {
+            if (!cancelled && costRefreshScope.current === scope) notify(tr('load_failed', 'Could not load the product. Select it again to refresh.'), 'error')
+          })
+          return () => { cancelled = true }
+        }
       }
     }
-  }, [canViewCosts, canEditCosts])
+  }, [canViewCosts, canEditCosts, selectedProduct?.id, user?.id])
   const [lineExpiryDate, setLineExpiryDate] = useState('')
   const [batchChoice, setBatchChoice] = useState<'new' | number>('new')
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])

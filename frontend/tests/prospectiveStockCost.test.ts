@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
+import React, { act } from 'react'
+import { createRoot } from 'react-dom/client'
+import { useProtectedCostEntry } from '../src/utils/useProtectedCostEntry.ts'
 
 const read = (path: string) => readFileSync(new URL(`../src/components/${path}`, import.meta.url), 'utf8')
 function extract(path: string, name: string): string {
@@ -119,4 +122,73 @@ assert.equal(transition({ canViewCosts: true, canEditCosts: false }, both, '', '
 assert.deepEqual(transition(both, editOnly, '6.75', '9.25', true, true), { readable: '6.75', blind: '' }, 'view revocation hides known cost immediately without destroying protected draft')
 assert.match(sessionSource, /value=\{canViewCosts \? lineUnitCost : blindLineUnitCost\}/)
 assert.match(read('inventory/InventoryStockModals.tsx'), /<fieldset disabled=\{!canEditCosts\}/, 'view-only receipt controls are read-only')
+
+// Reuse the existing lifecycle suite's small DOM fixture, without executing
+// that suite. This mounts the production hook with the installed React runtime.
+const lifecycle = readFileSync(new URL('./productDraftLifecycle.test.ts', import.meta.url), 'utf8')
+const fixtureEnd = lifecycle.search(/const \{\r?\n  clearWorkDraft/)
+assert.ok(fixtureEnd > 0)
+const fixture = lifecycle.slice(lifecycle.indexOf('class MemoryStorage'), fixtureEnd)
+const fixtureJs = ts.transpileModule(`${fixture}\nreturn memoryDocument;`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+const doc = new Function(fixtureJs)()
+const container = doc.createElement('div')
+const mounted = createRoot(container as Element)
+let entry: ReturnType<typeof useProtectedCostEntry>
+const protectedDraft = { unitCost: '876.5432', freeGoods: true }
+function Probe({ actor, view, edit, entity = 7 }: { actor: number; view: boolean; edit: boolean; entity?: number }) {
+  entry = useProtectedCostEntry(actor, entity, view, edit)
+  return React.createElement('span', null, JSON.stringify({ cost: entry.value('unitCost', protectedDraft.unitCost, ''), free: entry.value('freeGoods', protectedDraft.freeGoods, false) }))
+}
+const render = async (actor: number, view: boolean, edit: boolean, entity = 7) => {
+  await act(async () => mounted.render(React.createElement(Probe, { actor, view, edit, entity })))
+  return JSON.parse(container.textContent)
+}
+assert.deepEqual(await render(1, true, true), { cost: '876.5432', free: true })
+assert.deepEqual(await render(1, false, true), { cost: '', free: false }, 'same mounted actor loses saved values immediately; no cleanup effect exists')
+await act(async () => entry.write('unitCost', '2.3456'))
+assert.deepEqual(JSON.parse(container.textContent), { cost: '2.3456', free: false }, 'blind editor sees only newly entered cost')
+assert.deepEqual(await render(1, false, false), { cost: '', free: false }, 'capability downgrade clears display ownership, not draft')
+assert.deepEqual(await render(1, false, true), { cost: '', free: false }, 'old blind capability generation cannot reappear')
+assert.deepEqual(await render(1, true, false), { cost: '876.5432', free: true }, 'view-only can read protected draft again')
+assert.deepEqual(await render(2, true, true), { cost: '', free: false }, 'a different actor cannot inherit the mounted draft')
+assert.deepEqual(protectedDraft, { unitCost: '876.5432', freeGoods: true }, 'all transitions preserve protected source draft')
+await act(async () => mounted.unmount())
+const manualSource = read('inventory/InventoryStockModals.tsx')
+assert.match(manualSource, /useProtectedCostEntry\(user\?\.id, adjustForm\.product_id, canViewCosts, canEditCosts\)/)
+assert.match(manualSource, /value=\{displayedFreeGoods \? 0 : displayedUnitCost\}/)
+assert.match(manualSource, /value=\{displayedCostUsd\}/)
+assert.match(manualSource, /value=\{displayedCostKhr\}/)
+assert.match(manualSource, /free_goods: displayedFreeGoods/, 'new blind input cannot inherit a hidden free-goods declaration')
+const fastSource = read(fast)
+assert.match(fastSource, /useProtectedCostEntry\(user\?\.id, picked\?\.id, canViewCosts, canEditCosts\)/)
+assert.match(fastSource, /const unitCost = String\(costEntry\.value\('unitCost', protectedUnitCost, ''\)\)/)
+assert.match(fastSource, /unitCost: protectedUnitCost, freeGoods: protectedFreeGoods/, 'persisted draft keeps protected values when only rendering rights change')
+assert.match(fastSource, /setFreeGoods\(canViewCosts && line\.freeGoods\)/, 'reopening a saved blind line cannot infer free cost')
+
+for (const change of ['none', 'revoke', 'actor', 'entity', 'typed', 'cleanup']) {
+  let resolve: (result: unknown) => void = () => {}
+  const response = new Promise((done) => { resolve = done })
+  let readable = ''
+  let selected: any = { id: 7 }
+  const scope = { current: { key: 'actor1:product7:viewedit' } }
+  const access = { current: both }
+  const edited = { current: false }
+  const cleanup = evaluate(permissionEffect, {
+    ...both, previousCostAccess: { current: editOnly }, lineCostEditedRef: edited, blindLineCostEditedRef: { current: false },
+    blindLineUnitCost: '', selectedProduct: selected, currentCost: (p: any) => p?.cost_price_usd == null ? '' : String(p.cost_price_usd),
+    costRefreshScope: scope, costAccessRef: access,
+    getProductsByIds: (ids: unknown[], params: unknown) => { assert.deepEqual(ids, [7]); assert.deepEqual(params, { surface: 'inventory' }); return response },
+    setSelectedProduct: (updater: (p: any) => any) => { selected = updater(selected) },
+    setLineUnitCost: (value: string | ((current: string) => string)) => { readable = typeof value === 'function' ? value(readable) : value },
+    notify: () => {}, tr: (_key: string, fallback: string) => fallback,
+  })()
+  if (change === 'revoke') access.current = editOnly
+  if (change === 'actor' || change === 'entity') scope.current = { key: change }
+  if (change === 'typed') { edited.current = true; readable = '9.75' }
+  if (change === 'cleanup') cleanup()
+  resolve({ items: [{ id: 8, cost_price_usd: 999 }, { id: 7, cost_price_usd: 1.2345 }] })
+  await response
+  await Promise.resolve()
+  assert.equal(readable, change === 'none' ? '1.2345' : change === 'typed' ? '9.75' : '', `redacted selection refresh respects ${change} race fence`)
+}
 console.log('PASS prospective receipt defaults, same-product queued payloads, explicit free zero, and session permission transitions')
