@@ -1,0 +1,8 @@
+Deployment: sale-item currency snapshots
+Commit: 46b49b6ebb186db527f53458e551d48e6f7ba514
+Branch: codex/sale-create-trigger-release-20260909
+Worker version: 7297259f-2bde-4e89-b526-a80f8fd0129f
+Deployment time: 2026-09-09T14:50:22Z build; deploy completed shortly after
+Traffic: 100%
+No migration; no production data writes.
+Verification: frontend test:utils 346/346; frontend typecheck; verify:i18n; frontend production build; Worker typecheck; sale-create atomic; payment-fx; sale-add-items; sale-amendments; sales-import-commit; stats-non-negative; financial-precision.

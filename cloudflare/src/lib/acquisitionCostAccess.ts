@@ -23,6 +23,9 @@ export function isAcquisitionCostKey(key: string): boolean {
   if (['actual_cost_usd', 'actual_cost_khr', 'actual_cost_count', 'actual_cost_before', 'actual_cost_after'].includes(normalized)) return false
   return /(^|_)(cost|costs|cogs|profit|margin|purchase_price|stock_value|removal_loss)(_|$)/.test(normalized)
     || normalized === 'revenue_after_losses_usd' || normalized === 'credit_open_usd'
+    // Supplier loss + compensation reconstructs acquisition cost. These
+    // aliases also occur in aggregate/audit envelopes without return_scope.
+    || /^(supplier_)?(compensation|loss)_(usd|khr)$/.test(normalized)
 }
 
 const CATALOG_COST_FIELDS = new Set(['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'])
@@ -48,7 +51,8 @@ const MAX_DEPTH = 32
 const SUPPLIER_MONEY_FIELDS = new Set(['line_total_usd', 'total_usd', 'paid_usd', 'outstanding_usd',
   'taxable_amount_usd', 'vat_amount_usd', 'total_amount_usd', 'amount_paid_usd', 'outstanding_balance_usd',
   'total_khr', 'total_refund_usd', 'total_refund_khr', 'applied_price_usd', 'applied_price_khr',
-  'supplier_compensation_usd', 'supplier_compensation_khr', 'supplier_loss_usd', 'supplier_loss_khr'])
+  'supplier_compensation_usd', 'supplier_compensation_khr', 'supplier_loss_usd', 'supplier_loss_khr',
+  'refund_usd', 'refund_khr'])
 
 /** Response-only projection: never mutate DB snapshots or actor-neutral caches. */
 export function projectAcquisitionCosts(value: unknown, user: PermissionUser, supplierMoney = false): unknown {
@@ -58,7 +62,7 @@ export function projectAcquisitionCosts(value: unknown, user: PermissionUser, su
     if (Array.isArray(input)) return input.map(item => project(item, depth + 1, supplier))
     if (!input || typeof input !== 'object') return input
     const source = input as Record<string, unknown>
-    supplier = supplier || source.return_scope === 'supplier'
+    supplier = supplier || source.return_scope === 'supplier' || source.scope === 'supplier'
     // Audit/merge diffs may name the column rather than use it as a key.
     if (typeof source.field === 'string' && isAcquisitionCostKey(source.field)) return { field: source.field, redacted: true }
     const result: Record<string, unknown> = {}
@@ -77,7 +81,7 @@ export function projectAcquisitionCosts(value: unknown, user: PermissionUser, su
         }
         catch { result[key] = null }
       } else {
-        result[key] = project(child, depth + 1, supplier)
+        result[key] = project(child, depth + 1, supplier || key === 'periodSupplierReturns')
       }
     }
     return result

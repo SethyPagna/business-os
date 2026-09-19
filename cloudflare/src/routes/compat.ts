@@ -26,6 +26,7 @@ const DASHBOARD_STOCK_ALERT_MAX_PAGE_SIZE = 50
 app.use('/system/audit-logs', acquisitionCostResponses)
 app.use('/dashboard', acquisitionCostResponses)
 app.use('/dashboard/*', acquisitionCostResponses)
+app.use('/analytics', acquisitionCostResponses)
 
 // Shared gate matching backend's requirePermission/requireAnyPermission for
 // the system/backup/audit endpoints below -- previously these only checked

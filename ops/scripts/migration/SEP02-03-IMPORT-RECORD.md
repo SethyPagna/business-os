@@ -377,6 +377,46 @@ shadows it with a value derived from `return_items`, so the stored column is nev
 the API. The real return is recorded where it belongs: sale 16671 has one of the database's
 two `returns` rows. The status is backed by a genuine return record, not set by hand.
 
+
+## The flip is worth $9,746 of revenue, not $9,798.60
+
+Both figures are correct; they measure different things, and only one of them appears on
+the Dashboard. Found by checking the pending flip against `business-os-v1-c4`'s S4R3-2
+finding, which established that canonical revenue is
+`subtotal_usd - discount_usd - membership_discount_usd` and **never reads `total_usd`**.
+
+| Measure | Value | What it is |
+|---|---|---|
+| `SUM(total_usd)` | **$9,798.60** | what the customer owed; what the receivables settle |
+| `SUM(subtotal_usd)` | **$9,746.00** | what lands in recognized revenue (discounts are 0 on all 82) |
+| `SUM(delivery_fee_usd)` | $52.60 | the entire difference; `tax_usd` is 0 |
+
+So the AR side settles $9,798.60 and the Dashboard moves $9,746.00. Quoting the first
+number for the second purpose would have sent the owner to a screen where it did not
+appear.
+
+**The 82 are NOT affected by the S4R3-2 defect** — checked rather than assumed, because
+they are the same era of legacy backfill:
+
+- `subtotal_usd = SUM(sale_items.total_usd)` on **82 of 82** — the house convention holds
+  exactly. Zero-subtotal rows: **0**.
+- `total_usd = SUM(sale_items.total_usd)` on only 52 of 82, and the 30 exceptions are
+  precisely the rows carrying a delivery fee, where `total = subtotal + delivery`.
+  Correctly written, not defective.
+- c4's affected set (ids 16842-16863, 22 rows) has **zero overlap** with these 82. The
+  repairs cannot collide.
+
+The two sales this script rewrites carry `delivery_fee_usd = 0`, `tax_usd = 0` and both
+discounts 0, with `subtotal = total = SUM(lines)` today — so setting **both** columns to 79
+and 131 preserves the convention rather than breaking it. That is why section 2 writes
+`subtotal_usd` alongside `total_usd`; writing only the total would have left these two rows
+with exactly the S4R3-2 defect.
+
+**And the flip is c4's Cause 2 at scale.** It converts 82 `awaiting_payment` sales to
+`completed`, which is the same exclusion measured as branch 2 recognized $4,469 versus
+all-status $7,672 over seven days. Applying it closes part of that gap by construction, so
+any figure quoting that comparison has this pending change underneath it.
+
 ## Sources
 
 Archived under explicit dated names in `Migration from old system/` (untracked):

@@ -253,7 +253,11 @@ await runTest('product form image upload and save keep synchronous guards', () =
   // opening the picker or posting bytes. The ref closes the same-tick gap
   // before imageUploading has rendered.
   assert.match(source, /if \(saving \|\| saveInFlightRef\.current \|\| imageUploading \|\| imageUploadInFlightRef\.current\) return/)
-  assert.match(source, /saveInFlightRef\.current = true[\s\S]*const payload(?:: ProductSavePayload)? = \{/)
+  // Payload construction now passes through the independent cost-edit gate.
+  // Keep requiring the synchronous lock before construction, and require the
+  // sanitizer rather than accepting any arbitrary replacement expression.
+  assert.match(source, /saveInFlightRef\.current = true[\s\S]*const payload: ProductSavePayload = omitUnauthorizedCatalogCosts<ProductSavePayload>\(\{/)
+  assert.match(source, /image_path: canonicalizePersistedMediaPath\(savableImageList\[0\]\),\s*\}, user\)/)
   assert.match(source, /finally \{[\s\S]*saveInFlightRef\.current = false[\s\S]*setSaving\(false\)/)
   assert.match(source, /const PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS = 30000/)
   assert.match(source, /withLoaderTimeout\(\s*async \(\) => \(await loadProductImageUploadTransportModule\(\)\)\.uploadProductImage\(\{[\s\S]*productId: currentProductId \|\| undefined,[\s\S]*file,[\s\S]*fileName: file\.name \|\| 'product\.jpg',[\s\S]*\}\)[\s\S]*'Upload product form image',\s*PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/)
