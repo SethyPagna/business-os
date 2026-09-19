@@ -58,7 +58,7 @@ async function migrate(db) {
   }
 }
 
-async function main() {
+async function main(grants = {}) {
   const [kernel, bundle] = await Promise.all([pricingKernel(), workerBundle()])
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'],
     compatibilityDate: '2026-08-01', log: new Log(LogLevel.ERROR) })
@@ -87,7 +87,7 @@ async function main() {
         total_usd,total_khr,base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
         product_discount_usd,product_discount_khr,product_discount_type,product_discount_label,
         manual_discount_usd,manual_discount_khr,manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json)
-        VALUES(1,1,1,'Native Widget',1,1,500,NULL,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+        VALUES(1,1,1,'Native Widget',1,1,500,7,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
           pricing.total_usd, pricing.total_khr, pricing.base_price_usd, pricing.base_price_khr,
           pricing.applied_price_usd, pricing.applied_price_khr, pricing.product_discount_usd, pricing.product_discount_khr,
           pricing.product_discount_type, pricing.product_discount_label, pricing.manual_discount_usd, pricing.manual_discount_khr,
@@ -95,7 +95,7 @@ async function main() {
       db.prepare("INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity) VALUES(1,500,1,1,0)"),
     ])
 
-    const headers = { 'content-type': 'application/json', 'x-test-permissions': JSON.stringify({ returns: true }) }
+    const headers = { 'content-type': 'application/json', 'x-test-permissions': JSON.stringify({ returns: true, ...grants }) }
     const fetchJson = async (pathName, body) => {
       const response = await mf.dispatchFetch(`http://local/api/returns${pathName}`, { method: 'POST', headers, body: JSON.stringify(body) })
       const text = await response.text()
@@ -108,8 +108,13 @@ async function main() {
     const { customer_return_create_version: _create, customer_return_edit_version: _edit, ...expectedQuote } = quoteResult.body
     const request = { client_request_id: 'native-v1-return', money_precision_version: 1, sale_id: 1,
       reason: 'Native D1 exact return', expected_quote: expectedQuote,
-      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', branch_id: 1,
-        cost_price_usd: 999, cost_price_khr: 3996000 }] }
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', branch_id: 1 }] }
+    if (!grants.product_cost_edit && !grants.all) {
+      const forbiddenOverride = await fetchJson('', { ...request, items: [{ ...request.items[0], cost_price_usd: 999, cost_price_khr: 3996000 }] })
+      assert.equal(forbiddenOverride.response.status, 403)
+      assert.equal(forbiddenOverride.body.code, 'product_cost_edit_required')
+      assert.equal((await db.prepare('SELECT COUNT(*) n FROM returns').first()).n, 0)
+    }
 
     await db.prepare(`CREATE TRIGGER fail_native_return_movement BEFORE INSERT ON inventory_movements
       WHEN NEW.movement_type='return' BEGIN SELECT RAISE(ABORT,'native return movement failure'); END`).run()
@@ -130,6 +135,7 @@ async function main() {
     assert.equal(lostAcknowledgement.status, 200)
     const retried = await fetchJson('', request)
     assert.equal(retried.response.status, 200, JSON.stringify(retried.body))
+    if (!grants.all) assert.equal(JSON.stringify(retried.body).includes('cost_price_usd'), false)
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM returns').first()).n, 1)
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM return_create_receipts').first()).n, 1)
     assert.equal((await db.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE movement_type='return'").first()).n, 1)
@@ -138,7 +144,7 @@ async function main() {
     const item = await db.prepare('SELECT total_usd,total_khr,cost_price_usd,cost_price_khr,refund_snapshot_json FROM return_items').first()
     assert.deepEqual({ total_usd: item.total_usd, total_khr: item.total_khr,
       cost_price_usd: item.cost_price_usd, cost_price_khr: item.cost_price_khr },
-    { total_usd: 9.5, total_khr: 38000, cost_price_usd: null, cost_price_khr: null })
+    { total_usd: 9.5, total_khr: 38000, cost_price_usd: 7, cost_price_khr: null })
     assert.equal(JSON.parse(item.refund_snapshot_json).net_entitlement_usd, 9.5)
     console.log('PASS native workerd/D1 customer-return v1: 0158/0159/0160 schema, atomic failure rollback, exact snapshot, lost-ack retry and no double stock')
   } finally {
@@ -146,4 +152,9 @@ async function main() {
   }
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1 })
+;(async () => {
+  await Promise.all([{}, { product_cost_edit: true }, { all: true }].map(async grants => {
+    await main(grants)
+    console.log('PASS ordinary omitted costs with grants:', JSON.stringify(grants))
+  }))
+})().catch(error => { console.error(error); process.exitCode = 1 })

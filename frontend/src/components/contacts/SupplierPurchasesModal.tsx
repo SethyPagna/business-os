@@ -1,3 +1,5 @@
+import { useApp } from '../../AppContext'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { useEffect, useRef, useState } from 'react'
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import Modal from '../shared/Modal'
@@ -56,6 +58,8 @@ type SupplierPurchasesModalProps = {
 // the supplier detail modal, so it inherits the contacts_suppliers gate
 // front and back.
 export default function SupplierPurchasesModal({ supplierId, supplierName, fetchPurchases, onClose, t }: SupplierPurchasesModalProps) {
+  const { user } = useApp() as { user: any }
+  const canViewCosts = canViewAcquisitionCosts(user)
   const [data, setData] = useState<PurchasesPayload | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -157,8 +161,8 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
               {[
                 [`${tr('purchase_batches', 'Received dates')} / ${tr('products', 'Products')}`, `${totals.batches ?? 0} / ${totals.products ?? 0}`],
                 [tr('units_received', 'Units received'), qty(totals.units_received)],
-                [tr('purchase_cost', 'Purchase cost'), money(totals.cost_usd)],
-                [tr('credit_open', 'Not Yet Paid'), `${money(totals.credit_open_usd)} (${totals.credit_batches ?? 0})`],
+                ...(canViewCosts ? [[tr('purchase_cost', 'Purchase cost'), money(totals.cost_usd)]] : []),
+                ...(canViewCosts ? [[tr('credit_open', 'Not Yet Paid'), `${money(totals.credit_open_usd)} (${totals.credit_batches ?? 0})`]] : []),
               ].map(([label, value]) => (
                 <div key={label} className="rounded-xl border border-gray-200 px-3 py-1.5 dark:border-gray-700">
                   <div className="text-[11px] text-gray-400">{label}</div>
@@ -166,7 +170,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                 </div>
               ))}
             </div>
-            {Number(totals.batches_without_cost) > 0 ? (
+            {canViewCosts && Number(totals.batches_without_cost) > 0 ? (
               <div className="shrink-0 text-[11px] text-gray-400">
                 {tr('purchase_cost_partial_hint', 'Some received dates have no recorded quantity/cost yet (received before tracking, or cost unknown) -- the totals above only count received dates where both are known:')} {totals.batches_without_cost}
               </div>
@@ -187,7 +191,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                       <th className="px-3 py-2">{tr('batch', 'Received date')}</th>
                       <th className="px-3 py-2">{tr('received_date', 'Received')}</th>
                       <th className="px-3 py-2 text-right">{tr('quantity_received', 'Qty received')}</th>
-                      <th className="px-3 py-2 text-right">{tr('unit_cost_usd', 'Unit cost (USD)')}</th>
+                      {canViewCosts ? <th className="px-3 py-2 text-right">{tr('unit_cost_usd', 'Unit cost (USD)')}</th> : null}
                       <th className="px-3 py-2 text-right">{tr('remaining', 'Remaining')}</th>
                       <th className="px-3 py-2">{tr('payment_to_supplier', 'Payment')}</th>
                     </tr>
@@ -203,7 +207,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                         <td className="px-3 py-2 leading-6 text-gray-500">{batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code, received_at: batch.received_at, batch_number: batch.batch_number }, tr('batch', 'Received date'))}</td>
                         <td className="px-3 py-2 leading-6 text-gray-500">{batch.received_at ? fmtDateOnly(batch.received_at) : '--'}</td>
                         <td className="px-3 py-2 text-right leading-6 text-gray-800 dark:text-gray-100">{qty(batch.received_quantity)}</td>
-                        <td className="px-3 py-2 text-right leading-6 text-gray-800 dark:text-gray-100">{batch.unit_cost_usd == null ? '--' : money(batch.unit_cost_usd)}</td>
+                        {canViewCosts ? <td className="px-3 py-2 text-right leading-6 text-gray-800 dark:text-gray-100">{batch.unit_cost_usd == null ? '--' : money(batch.unit_cost_usd)}</td> : null}
                         <td className="px-3 py-2 text-right leading-6 text-gray-500">{qty(batch.remaining_quantity)}</td>
                         <td className="px-3 py-2">{paymentChip(batch)}</td>
                       </tr>
@@ -223,7 +227,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                   >
                     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="min-w-0 flex-1 truncate text-sm leading-6 text-gray-900 dark:text-white">{batch.product_name || '--'}</span>
-                      <span className="text-sm font-semibold leading-6 tabular-nums text-gray-900 dark:text-white">{batch.unit_cost_usd == null ? '--' : money(batch.unit_cost_usd)}</span>
+                      {canViewCosts ? <span className="text-sm font-semibold leading-6 tabular-nums text-gray-900 dark:text-white">{batch.unit_cost_usd == null ? '--' : money(batch.unit_cost_usd)}</span> : null}
                     </div>
                     <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <CopyableId
@@ -289,11 +293,11 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
               key: 'money',
               title: tr('invoice_amounts', 'Amounts'),
               facts: [
-                { key: 'unit_cost', label: tr('unit_cost_usd', 'Unit cost (USD)'), value: detailBatch.unit_cost_usd == null ? '--' : money(detailBatch.unit_cost_usd) },
+                ...(canViewCosts ? [{ key: 'unit_cost', label: tr('unit_cost_usd', 'Unit cost (USD)'), value: detailBatch.unit_cost_usd == null ? '--' : money(detailBatch.unit_cost_usd) }] : []),
                 // The report stores cost per unit; the line total is that cost
                 // times what arrived, and stays '--' when either is unknown
                 // rather than being silently reported as $0.00.
-                { key: 'line_total', label: tr('total', 'Total'), value: detailBatch.unit_cost_usd == null || detailBatch.received_quantity == null ? '--' : money(Number(detailBatch.unit_cost_usd) * Number(detailBatch.received_quantity)) },
+                ...(canViewCosts ? [{ key: 'line_total', label: tr('total', 'Total'), value: detailBatch.unit_cost_usd == null || detailBatch.received_quantity == null ? '--' : money(Number(detailBatch.unit_cost_usd) * Number(detailBatch.received_quantity)) }] : []),
                 { key: 'payment', label: tr('payment_to_supplier', 'Payment'), value: paymentChip(detailBatch) },
                 { key: 'credit_due', label: tr('due_date', 'Due date'), value: detailBatch.credit_due_date ? fmtDateOnly(detailBatch.credit_due_date) : '--' },
               ],

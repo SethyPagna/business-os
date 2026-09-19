@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import { useApp } from '../../AppContext'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { getStockLedger } from '../../api/productReadTransport.ts'
 import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
 
@@ -228,6 +229,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     user?: { id?: string | number; username?: string } | null
   }
   const canAdjust = app.can('inventory', 'adjust')
+  const canViewCosts = canViewAcquisitionCosts(app.user)
   const [view, setView] = useState<LedgerView>('all')
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
@@ -481,15 +483,15 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       brand: row.brand || '',
       tag: row.tag_label || '',
       user: historyExportField(row.user_name),
-      unit_cost_usd: row.unit_cost_usd ?? row.batch_unit_cost_usd ?? '',
+      ...(canViewCosts ? { unit_cost_usd: row.unit_cost_usd ?? row.batch_unit_cost_usd ?? '',
       unit_cost_khr: row.unit_cost_khr ?? '',
       total_cost_usd: row.total_cost_usd ?? row.batch_received_cost_usd ?? '',
-      total_cost_khr: row.total_cost_khr ?? '',
+      total_cost_khr: row.total_cost_khr ?? '' } : {}),
       batch_expiry: row.batch_expiry_date || '',
       payment_status: row.batch_payment_status || '',
       credit_due_date: row.batch_credit_due_date || '',
     })))
-  }, [app, branchId, debouncedSearch, referenceText, supplierId, t, view])
+  }, [app, branchId, canViewCosts, debouncedSearch, referenceText, supplierId, t, view])
 
   // Revert: post the compensating counter-movement, then refresh the list (the
   // reverted row stays -- the ledger is append-only -- and the new counter-
@@ -1156,7 +1158,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             {/* These are costs recorded on THIS movement. A zero is real; a
                 missing snapshot is said plainly. Never substitute today's
                 product price or the lot's mutable aggregate valuation. */}
-            <dl className="grid grid-cols-2 gap-2 rounded-xl bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800/60">
+            {canViewCosts ? <dl className="grid grid-cols-2 gap-2 rounded-xl bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800/60">
               <div className="min-w-0">
                 <dt className="uppercase tracking-wide text-gray-400">{tr(t, 'cost_price', 'Cost price')}</dt>
                 <dd className="mt-0.5 break-words font-medium text-gray-700 dark:text-gray-200">
@@ -1169,7 +1171,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                   {recordedCostLabel(detailCosts?.totalUsd ?? null, detailCosts?.totalKhr ?? null, tr(t, 'not_recorded', 'Not recorded'))}
                 </dd>
               </div>
-            </dl>
+            </dl> : null}
             <dl className="grid grid-cols-2 gap-2 rounded-xl bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800/60">
               {([
                 [tr(t, 'category', 'Category'), detail.category],

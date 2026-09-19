@@ -48,6 +48,19 @@ const cached = {
   note: 'Customer requested this product',
 }
 const original = JSON.stringify(cached)
+const supplierAggregates = {
+  scope: 'supplier', totals: { count: 3, refund_usd: 100, compensation_usd: 70, loss_usd: 30 },
+  days: [{ date: '2026-09-20', refund_khr: 400000, compensation_khr: 280000, loss_khr: 120000 }],
+}
+assert.deepEqual(projectAcquisitionCosts(supplierAggregates, manager), {
+  scope: 'supplier', totals: { count: 3 }, days: [{ date: '2026-09-20' }],
+})
+assert.deepEqual(projectAcquisitionCosts({ periodSupplierReturns: { count: 2, total_refund_usd: 100, supplier_compensation_usd: 70, loss_usd: 30 }, details: '{"supplierLossUsd":30,"supplierCompensationUsd":70}' }, manager), {
+  periodSupplierReturns: { count: 2 }, details: '{}',
+})
+assert.equal(projectAcquisitionCosts({ scope: 'customer', totals: { refund_usd: 100 } }, manager).totals.refund_usd, 100)
+assert.equal(projectAcquisitionCosts(supplierAggregates, viewer), supplierAggregates)
+checks += 4
 for (const actor of staff) {
   const redacted = projectAcquisitionCosts(cached, actor)
   assert.equal(JSON.stringify(cached), original)

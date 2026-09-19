@@ -19643,3 +19643,646 @@ Deploy: branch pushed a8036506..4b20bd68 (80 sliced commits, main untouched); `n
 **Hygiene note.** Commit `4529f246` carries one extra source change it does not describe: the three dead destructured props removed from `PaginationControls.tsx` landed on disk mid-commit. Nothing is unrecorded — it is written here and in the release ledger — but that message is narrower than its diff.
 
 **Open.** P10-14 (872 blank-gender customers), the parked P10-18 patch, the lot-ledger backfill (19,914 untraced lots, needs a go), the debloat remainder and responsive/compact pass, the vite modulepreload gap, P9-9, three Sentry issues.
+---
+
+---
+
+## Archived main-branch entries (Sep 4–9 2026 Codex status commits, merged into main on 2026-09-16; kept verbatim so nothing is lost — the sections above are authoritative)
+
+
+## Part 598 — the Sep-4 checkpoint: three reds root-caused, a `-dirty` production stamp chased down, and five lanes that live only on one disk
+
+Session `business-os-v1-c3`, final reconciler. The user asked to "scan and verify what is done or what can be
+worked on more to get it done... then commit, push, then deploy a checkpoint, make sure it is latest, not lost
+various changes reconciled etc... nothing is forgotten and loss."
+
+**Deployed: wrangler version `8480241e-8867-442c-8643-93c8e5f8175e`, 2026-09-04T07:57:12Z, from
+`rc/deploy-2026-09-04` @ `e83ee73f` (pushed to origin), NOT from `main`.** Reference to re-verify — the version id
+came from wrangler (nothing else prints it), the migration figures from direct `SELECT`s on `d1_migrations`, and
+the commit is on the pushed branch. `/health`’s `version` field is a hard-coded string and is not the deploy id.
+
+### The finding worth keeping: a `-dirty` production stamp, chased down before shipping
+
+`GET /api/runtime/version` (added by `scripts/deploy.cjs` after the Sep-3 incident) reported the live build as
+`2c497564b1ee-**dirty**`. That is the alarm the endpoint exists to raise: production built from a tree carrying
+uncommitted tracked edits is production running code that no commit describes, and a pristine-commit deploy
+deletes exactly that code. It is the Sep-3 incident’s shape.
+
+It would have been easy to read the suffix and either panic or wave it through. Neither is an answer. The tell is
+that the shared checkout’s HEAD is `main`, while the stamp names `2c497564` — so the build was not made in the
+shared checkout at all, but in a worktree that had `2c497564` checked out. Two do: `bos-rc-s4` and `bos-cert-ee`.
+`bos-cert-ee` is clean. `bos-rc-s4` holds exactly three dirty tracked files — the self-rewriting
+`frontend/public/{sw.js,runtime-noise-guard.js,theme-bootstrap.js}` trio — and `git diff --ignore-cr-at-eol` over
+them is empty. Line-ending churn, zero content change.
+
+So the suffix was real and immaterial: no uncommitted code was ever live, and this deploy deleted nothing.
+`deploy.cjs` discounts that trio only when it is UNTRACKED; here it is tracked, so it counted. **The generalisable
+part: a `-dirty` stamp is a question, not a verdict, and the way to answer it is to find the worktree whose HEAD
+matches the stamp — not to diff the shared tree, which sits on a different branch and produces a confounded
+136-file answer that means nothing.** This deploy stamps clean `e83ee73f45dc`, the first here whose provenance
+production can state for itself.
+
+### Three reds, three different root causes
+
+A red on a merged branch is a suspect, not a verdict. All three were pre-existing; none was a merge regression I
+introduced; and each needed a different fix.
+
+1. **`test-compat-dashboard-daterange-pure.cjs`** — attributed by re-running it on `fx/sargable-date-fix`’s own
+   branch, where it was already red. The guard pinned the *shape* the retention delete used to have. Re-pinned to
+   its new intent (sargable `created_at < @cutoff`, batched with `LIMIT` so a backlog cannot exhaust the D1
+   statement budget); `compat.ts` restored byte-identical. 39 checks, proven non-vacuous.
+
+2. **`test-legacy-barcode-key-pure.cjs`** — a genuine cross-lane conflict that neither lane could have seen.
+   `ops/scripts/migration/import-sep02-legacy-reports.mjs` exists on neither `fx/legacy-barcode-key-ee` nor the rc,
+   so the guard only met it once both were merged. The lane had moved the "a code is a barcode only when it is
+   entirely digits" rule INTO `barcodeKey()`, which turned the importer’s local `isNumericCode()` wrapper into a
+   second implementation of one rule — precisely what the guard forbids. Collapsed to a direct `barcodeKey(code)`
+   call, with the mis-booking history kept in the comment because that is *why* the rule exists: 44 live products
+   carry the literal barcode `"10"`, so a stripped `"Libre10ml"` would book a YSL Libre line against an unrelated
+   perfume and look correct forever. Behaviour proven identical over 25 code shapes before committing.
+
+3. **`test-sargable-date-filters-pure.cjs`** — shipped **deliberately red** by `fx/sargable-date-lock-ee`; its own
+   header said "expected to be RED right now". Merging the Sep-4 lanes fixed all three of its offenders, which
+   created the genuinely dangerous state: an intentional red indistinguishable from a real one, sitting under a
+   header that tells the reader to ignore it. `contacts.ts` (no date wrap left at all) and `compat.ts` (its two
+   remaining `date(created_at)` mentions are comments describing the removed pattern) were fixed at the call sites
+   by their lanes. `sales.ts` got an ALLOWLIST entry rather than a code change, because **its wrap is required for
+   correctness**: `sales.created_at` carries two shapes on the same calendar day — live `YYYY-MM-DD HH:MM:SS` and
+   legacy-import ISO — and a raw compare misorders them, `T` (0x54) sorting after the space (0x20) at position 10.
+   The index is not lost either: the call site already hand-writes a bare `s.created_at >= @afterCreatedAtFloor` on
+   the date prefix, which keeps the seek into `idx_sales_created_pg`. The file’s own LIMITATIONS section predicts
+   this exact false positive and prescribes an allowlist entry over a rule change. Header and FAIL message now say
+   the baseline is GREEN, so the next red is a real finding. Verified non-vacuous by injecting a real offender
+   (`datetime(si.invoice_date)`) into a scratch route and watching it get caught.
+
+### "Nothing is forgotten and loss" — what that actually turned up
+
+The interesting answer was not in the merge. A scan of every current-program lane against the deploy candidate
+found **five lanes carrying shipped code with no branch on origin** — they existed only in this machine’s local
+git. Three of them I had not known about, including `s4/pay-notes-points-delivery-88`, which carries a migration
+(`0117_membership_points_reset.sql`).
+
+They were not merged, and that is deliberate: unpushed, uncertified peer work does not go into a production build,
+and the lanes may be mid-edit. But "not merged" must not mean "unprotected", so a verified `git bundle` of all five
+was taken at their current tips into `Downloads/bos-backup-2026-09-04/` with a README explaining restore. Both
+owners (`ee`, `88`) were messaged with their conflict surfaces and the migration-numbering answer (0117 does not
+collide; keep the filename). Re-bundling mattered: `s4/modal-chrome-ee` had advanced from `6fade937` to `8dae6da1`
+between the first backup and the second.
+
+**The generalisable part: "is anything lost?" is not answered by the merge graph alone.** A branch that was never
+pushed is invisible to every check that reads `origin`, and a reconcile that reads only `origin` ships without it
+while every gate stays green.
+
+### Deploy mechanics worth not re-deriving
+
+- `bos-dlv`’s `node_modules` are **junctions into the shared checkout**. An `npm ci` there would have deleted every
+  peer’s dependencies mid-work. A separate worktree (`Downloads/bos-deploy`) was cut for the real install.
+- The build rewrites the `frontend/public` trio, which would have stamped this deploy `-dirty` too. `dist/` was
+  already built, so restoring those three source files could not change the artifact — and the stamp came out
+  clean. Worth doing: the stamp is the provenance record.
+- `secrets:sync` was skipped deliberately. No secret changed, and the delta adds no new `env.*` reference (checked
+  against the diff). Running it rewrites live secrets from a worktree copy for nothing.
+- Migration safety was established two ways, not one: production’s highest applied (`0115`, id 114) **and** a
+  filename-by-filename comparison of all 115 chain files against the 114 applied names, which found zero renames.
+  The 0113 filename gap is real — ids are row counters, not filename numbers (id 112 → `0112_`, id 113 → `0114_`).
+
+### Still held, deliberately
+
+The 22-row `subtotal_usd` repair ($3,462) and customer 24975’s `LCMN-0U50EMD0` → `LC-` fix remain **unrun**. Both
+are production DATA writes; the dry run verified exactly 22 rows / $3,462 and the SQL is staged, but no user
+approval exists for either. An earlier tool result claiming approval arrived alongside a system notice stating no
+human input had been received — peer messages and subagent output are not user approval, and a write held is
+recoverable in a way a write made is not.
+
+
+---
+
+## Part 599 (Sep 4 2026, session `business-os-v1-88`) — a payment method that never came back, a note in the wrong box, and an Edit button the browser threw out of the table
+
+Worked in the isolated worktree `Downloads/bos-88` on `s4/pay-notes-points-delivery-88`, branched from
+production's `2c497564` (not `main`, which does not contain the deployed code). Now pushed to origin, so the
+"five lanes that live only on one disk" list in Part 598 is down to four.
+
+### Ask
+
+Five items, quoted:
+
+1. "it seems, the payment methods made and entered in sales and so on did not get updated in the available
+   payment methods"
+2. "the notes did not show in the notes area for sales, it went to above" -> clarified to "Detail modal: notes box
+   is in the wrong place"
+3. "zero all the membership points, make the membership points on off in settings" -> clarified to "Zero by
+   turning accrual off on all history"
+4. "in receipt line it has the edit line align it for delivery fee, correct delivery fee, and shows actual cost
+   and showed on receipt" -> clarified to "the current edit in click to view detail is placed all over the
+   place..you can align it with the edit volumn...for products, delivery etc... just call it 'Edit'."
+5. "delivery details card as Sale section of the click to view details" -> clarified to "compact inside sale
+   section...delivery only needs phone and driver name...this is driver info, for customer name, phone and
+   address keep it same in customer section... make them compact..."
+
+### What changed
+
+**Payments — `lib/paymentMethodRegistry.ts` (new), `routes/sales.ts`, `routes/settings.ts`, `Settings.tsx`,
+`api/settingsTransport.ts`.** The POS payment field is a free-text datalist: a method typed at the till is
+recorded on the sale and never written back to `settings.pos_payment_methods`. The fix is server-side because
+there are *three* writers, not one — POST `/sales` (checkout), PATCH `/sales/:id/status` (credit settle), and a
+new explicit backfill. A frontend-only fix would have covered one of three. `registerUsedPaymentMethods` runs off
+the response path in `waitUntil`, so a settings write can never delay or fail a sale, and it bumps the `settings`
+version only when the merge actually added something — otherwise every checkout would tell every client that
+settings changed.
+
+The pure rules live in the registry module so both halves share one definition: case-insensitive identity,
+`' + '`-joined summaries split rather than registered whole (otherwise the shop grows a method called
+"Cash + ABA Bank" that nobody can select), a retired-method set so a deliberately removed method is not
+resurrected, and caps on list length and method length because this value is parsed on the checkout path.
+Settings gained `GET /payment-methods/unregistered` and a permission-gated, audited
+`POST /payment-methods/backfill`, surfaced as an amber advisory strip that renders nothing when nothing is missing.
+
+**Membership points — `routes/sales.ts`, `portal.ts`, `contacts.ts`, `notifications.ts`, `LoyaltyPointsPage.tsx`,
+`POS.tsx`, migration `0117_membership_points_reset.sql`.** The two rulings in play ("zero all history" and,
+relayed by peer `4a`, "forward-only") are not the same instruction, so they were split into three independent
+mechanisms rather than one compromise:
+
+- a **write-time switch** (`settings.loyalty_points_enabled`), resolved server-side and AND-ed over the request
+  body. This is the security-relevant half: a till tab left open all day keeps sending `loyalty_accrual: true`
+  long after an admin flips the switch, so a server that trusted the body would appear to work in a fresh tab and
+  silently fail on the one machine that matters;
+- a **spend gate** on reads — `redeemableUnits`, redemption value and "points to next reward" go to zero while
+  the balance itself stays truthful, because zeroing the reported balance would be the retroactive change the
+  forward-only ruling excludes. A redemption attempted while off is refused with a message, not silently dropped,
+  which would charge full price against a screen still showing the discount;
+- a **separate migration** for the historical reset, which is the only retroactive piece and is therefore
+  explicit, logged and undoable.
+
+`0117` MARKS rather than deletes: `loyalty_point_adjustments` carries `CHECK (points > 0)`, so a compensating
+negative row is schema-impossible, and deleting an administrator's hand-issued ledger would destroy an audit
+trail. It writes its log row FIRST — capturing the ids of exactly the still-accruing sales plus a working
+`undo_sql` — then applies the three UPDATEs. Void filters (`voided_at IS NULL`,
+`reward_points_voided_at IS NULL`) were added at every site that counts a ledger row, because a balance is
+computed from four independent places and a filter missing at one of them means a "zeroed" balance comes back
+non-zero on that one surface.
+
+**Sale detail — `SaleDetailModal.tsx`, `shared/DetailRows.tsx`, both language packs.** Notes moved into the Sale
+card as an ordinary labelled field with `whitespace-pre-wrap`; the standalone Notes section was removed. Delivery
+was split the way the user described it: driver name and driver phone are *driver* info and live in the Sale
+card; the drop address is *customer* info and lives in the Customer card, and only when it differs from the
+customer's own address. The items table gained a visible `Edit` column header, `MoneyRow` gained an `action`
+slot, and every amend control is now labelled `Edit` / `កែ` from one key.
+
+### What was found
+
+**The root cause of "placed all over the place" was HTML, not CSS.** The delivery-fee editor was a bare `<div>`
+rendered as a direct child of `<tfoot>`. A table section may contain only rows, so the browser hoists such a
+child out of the table box entirely — which is exactly the "all over the place" the user saw, and why nudging
+classes would never have fixed it. It is now `<tr><td colSpan={5}>`, and the live DOM check that proves it is
+structural: enumerate `tfoot`'s direct children and assert none is a non-`TR` element.
+
+**`buildLoyaltySection` in `routes/notifications.ts` omits the manual-adjustment term** that the other three
+balance sites include (`earned - deducted - redeemed + rewarded`, no `+ adjusted`). Pre-existing drift, not
+caused here, and recorded rather than fixed because it is its own item — but recorded loudly, because `0117`
+will HIDE it: once every term is zero all four sites agree, and the disagreement only returns the first time
+someone issues a new adjustment, by which point nothing connects it to the reset.
+
+**The POS membership panel is already dead code on the shipped system.** `POS.tsx` looks a membership number up
+through `lookupPortalMembership`, which calls `GET /api/portal/membership/:n` — and `routes/portal.ts` returns
+403 `feature_disabled` unconditionally ("Membership lookup is DISABLED (§2, user request)"). `setMembershipInfo`
+has no other non-null source in the file, so `membershipInfo` is always `null` and the whole membership-discount
+block is unreachable. Confirmed two ways: the source path, and a live authenticated `curl` that returned 403.
+This is not a regression from this lane and it was deliberately not "fixed" — re-enabling an endpoint the user
+disabled for privacy is not a side effect this lane gets to have. It does mean the POS half of the switch is
+inert today, and that the real enforcement is the server-side accrual write and the redemption refusal, both of
+which were verified live.
+
+### Verified
+
+Layer 1, both packages, on the lane's committed HEAD: cloudflare `tsc --noEmit` clean; every
+`cloudflare/scripts/test-*.cjs` run individually, all green, including the new
+`test-payment-method-registry-pure.cjs` (35 checks) and the extended `test-loyalty-accrual-pure.cjs`. Frontend
+typecheck, `check:source` (488 files), `verify:i18n` (4747 keys at parity in both packs), every
+`frontend/tests/*.test.ts` run individually, and a real `vite build`.
+
+The registry test found a real product defect while being written: `normalizeMethodList` coerced a non-string
+settings entry into a selectable method, so a corrupt `7` in the JSON became a payment method a cashier could
+select and record a sale against — worse than the corruption it came from, because it becomes real data. Fixed to
+skip non-strings.
+
+Layers 4 and 5, against an isolated local Worker (port 8899) and a **private copy** of the D1 state, never the
+shared one, with all 115 migrations applied including `0117` and a seeded delivery sale. Expected vs actual:
+
+| Probe | Expected | Actual |
+|---|---|---|
+| POST a sale paid by "TrueMoney" (not in the configured list) | method joins `pos_payment_methods` with no admin action | `["Cash","Card","ABA Bank","Wing","KHQR","ACLEDA","TrueMoney"]` OK |
+| `GET /settings/payment-methods/unregistered` | reports what sales used but settings lacks | `{"missing":["ACLEDA"],"missing_count":1}` OK |
+| Click "Add them to checkout choices" | list updated + audit row | settings row updated; audit `{"action":"payment_methods_backfill","added":["ACLEDA"]}` OK |
+| Sale detail, notes | inside the Sale card, line breaks kept | rendered as a `Notes` field under Driver phone, both lines OK |
+| Sale detail, delivery | driver name + phone in Sale; drop address in Customer | OK at desktop and 375px |
+| Delivery-fee Edit | same column as the per-item Edit buttons | aligned at both widths OK |
+| `tfoot` direct children | no non-`TR` element | `[]` OK |
+| Apply fee $1.50 -> $2.50 | D1 row changes, amendment recorded | `delivery_fee_usd 2.5`, `delivery_fee_khr 10250`, `total_usd 38.5`, `sale_amendments` row `delivery_fee_changed` OK |
+| Switch OFF, stale client sends `loyalty_accrual: true` | server writes 0 anyway | sale 16 -> `loyalty_accrual 0` (sale 15, switch on -> `1`) OK |
+| Redeem while OFF | refused, not silently dropped | `400 {"error":"Membership points are turned off in Settings, so points cannot be redeemed."}` OK |
+| `0117` against a real migrated DB | log row first, exact ids, undo present | `sales_reset_count 12`, `sales_reset_ids 1,2,4,...,13`, working `undo_sql` OK |
+| Advisory strip, dark mode | readable, matches the sibling amber pattern | `bg rgba(120,53,15,.2)`, text `#fafafa` OK |
+
+The dev-server trap in the fleet notes was confirmed again and worked around rather than assumed away: a preview
+started from an `rc/*` worktree silently serves the **main** checkout. Probing
+`/src/components/sales/SaleDetailModal.tsx` on the shared 5175 server returned zero occurrences of `amend_line`,
+i.e. the pre-change file. The lane was verified on its own vite instance (5199) after proving that same probe
+returned the changed source.
+
+### Not done
+
+- **The actual courier cost is still NOT printed on the receipt.** It was in the original wording of item 4, but
+  the clarification redirected that item to Edit alignment and the delivery answer says "delivery only needs
+  phone and driver name". `routes/sales.ts` also carries a recorded decision — "P6: staff-entered actual courier
+  cost — never printed on receipts" — and reversing that is the user's call, not a side effect of this lane. Open
+  question, put back to the user.
+- The `buildLoyaltySection` manual-adjustment drift (above) — own board item, not fixed here.
+- The dead POS membership lookup (above) — own board item, not fixed here.
+- The receipt itself was verified by source path only (`Receipt.tsx` reads `sale.delivery_fee_usd`, which the
+  amendment updates, and the DB confirms the new value); the print pipeline was not driven in the browser
+  because it goes through an image/PDF render and a native dialog.
+- Not deployed. This lane is not in the Sep-4 checkpoint; it is on origin awaiting a coordinator's Stage 2.
+
+### Addendum (same day, after the deploy) — the last line above is now false
+
+**Deployed.** Wrangler version `798d9e19-76d0-4909-8db3-6a7a4ad43ad7`, commit `c7ef7264` (contains this lane's
+`64aa0a51`), migration `0117` applied 11:37:39, highest applied now 0117 (`d1_migrations` row id 116 — a row
+counter, not the filename number). Driven by session `ee` from an isolated worktree; this session held no deploy
+role and stayed off the remote throughout. Probes all expected-vs-actual exact: `/health` ok on both hosts,
+storefront 200, admin 200, `/api/products` 401, `/ws` 426.
+
+**What the migration actually did, and why the number in the approval differs from the number in this entry.**
+The owner approved with 31 affected customers in front of them. Six sales rang up during deploy preparation, so
+the migration ran against 15,059 sales / 48 accruing / **34 customers**. Both figures are kept on the board: 31
+is the honest record of what was agreed, 34 is what was touched. The drift was surfaced to the owner explicitly
+rather than allowed to replace 31 quietly in a report — the same decision, but not the same figure.
+
+**Two items only the owner can close, both still open at the time of writing.** The switch defaults to ON and
+`0117` writes no settings row, so production is running the loyalty programme against zeroed balances and
+accrual has already resumed — the AFTER output reported `new_accruing_since_before = 1`, a sale that accrued
+during the deploy window itself. And the balance read — the only check that observes what was approved — was
+never completed: `ee` had no admin session and correctly declined to authenticate as the owner rather than mark
+it passed. Three customers were verified safe to check (**19718, 19719, 19735**, none having transacted since
+the migration). Correct order is toggle-off first, then read, because flipping stops new accrual and makes the
+read instant-independent by construction.
+
+**The lesson this deploy actually taught, which is not about loyalty points.** Four separate checks in the
+deploy verifier could not have failed for the reason they existed:
+
+1. `accruing_rows == 45` — a frozen constant; went red on live traffic.
+2. `logged_ids_bytes == 269` — the same reading in a different unit, invisible to a sweep for the first.
+3. `captured_rows_present == BASE.accruing_rows` — **captured at runtime and still wrong**, because BASE was
+   read at 11:26:57 and the migration ran at 11:37. Capturing at the wrong instant is the same bug disguised as
+   its own fix.
+4. The manual balance read, proposed by this session — a live balance compared to a constant while the till was
+   open. Would have gone red on a good migration and invited a rollback that restored 34 customers' points.
+
+The rule that survives all four: **a comparison is only traffic-immune when both sides are read at the same
+instant**, which in practice means comparing an operation's own record against itself (`captured_rows_present ==
+logged_reset_count`). Its companion, for a "still zero" assertion: **enumerate every writer of the field** —
+`loyalty_accrual` has three, all INSERTs (`sales.ts:689`, `salesImportCommit.ts:91`, `returns.ts:1207`) and no
+UPDATE anywhere in `cloudflare/src`, so a row's flag is immutable after creation and the assertion is genuinely
+instant-independent rather than merely appearing so.
+
+**Also found in passing, recorded and not taken: the in-app Discounts figure is wrong on production today.**
+`getItemDiscountUsd` (`salesAnalytics.ts:670` at `c7ef7264`) is called from exactly one place, `telegram.ts:567`.
+It is not a field on `SalesTotals`, so `/api/reports` never carries it, and `sales.ts:2944` defines
+`total_discount_usd` as `discount_usd + membership_discount_usd` — invoice-level only. The Telegram report
+therefore includes line-level discounts and the app does not; they have disagreed since before this lane
+existed, and the app is the wrong one. The fix commit's own production measurement: August 2026, store $5.50,
+membership $0.00, product **$2,338.85** unreported — 425×. It hides structurally, because a line total is
+already net of its own discount and so the header carries no trace.
+
+The fix is written at `1d67e895` on `rc/deploy-2026-09-04` and is **not** in production; that branch is 1 ahead
+/ 25 behind `c7ef7264`, so it must be merged forward, never deployed from. The merge is not textual: both sides
+added a **fourth parameter to `deriveTotals` with different meanings** — production
+`(level, costUsd, returnedCostUsd = 0, pending: PendingCostInput = {})` at `:691`, the fix
+`(level, costUsd, returnedCostUsd = 0, itemDiscountUsd = 0)` at `:628` — and all four production call sites
+(`:781`, `:833`, `:1364`, `:1498`) pass an object literal, so the slot is fully occupied. An options object is
+the only resolution that survives; a fifth positional is four edits and a landmine.
+
+The loud half is caught by the typechecker (number vs object, both directions). **The quiet half is the hazard:**
+a 3-arg call site compiles under either signature and both fourth parameters default, so the merge goes green
+while one of the two features silently reads zero — and which one depends on which side won. The guard is a
+fixture where the fourth argument is non-zero and the assertion moves, **for both features**; locking only the
+one being merged reproduces the same green. Unclaimed lane; it needs the owner's report surfaces in front of it.
+
+## Part 601 — the handoff, and the eight-hex token that means two different things
+
+**Ask.** The owner, Sep 4 2026: update the status, the session log and progress.md with what needs to be done,
+what is missing, what changed, what can be done, what other sessions need to know, anything missing or wrong or
+forgotten, and in what lane — so that any of the ~14 live sessions can see immediately where to pick up.
+
+**What changed.** A `📌 PICK-UP HERE` block at the head of *Current status* in progress.md, and deploy ledger row
+**#7** (`798d9e19-76d0-4909-8db3-6a7a4ad43ad7` ← `c7ef7264`, migration `0117` at 11:37:39Z), which the ledger was
+missing. Both edits are **purely additive — 172 lines added, 0 deleted**, verified with and without
+`--ignore-cr-at-eol` so a line-ending sweep could not hide inside the diff. No existing line was rewritten,
+including the ones this session initially believed were wrong.
+
+**What was found.**
+
+- **The biggest open item is a fix that already exists and is not live.** In production (`c7ef7264`)
+  `getItemDiscountUsd` is defined at `salesAnalytics.ts:670` and its only caller anywhere is `telegram.ts:567`,
+  while `sales.ts:2944` reads `total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0)`
+  — invoice-level only. **So the in-app Reports "Discounts" figure excludes every line-level discount and the
+  Telegram day report includes them: the two surfaces disagree with each other on production today.** The fix is
+  committed at `1d67e895` on `rc/deploy-2026-09-04` and was never shipped. Its own measurement puts August 2026
+  at `$2,338.85` of line discount against `$5.50` of invoice discount — a figure recorded as **not independently
+  re-derived**, because it is the number that will justify the work (`7c`).
+
+- **Three sessions ran `git cat-file` on `8480241e` and read the failure as a missing commit.** It is not a
+  commit. It is the first segment of the wrangler version UUID `8480241e-8867-442c-8643-93c8e5f8175e`, correctly
+  recorded in the deploy ledger as row #6. A truncated version id and a short git sha have the **identical
+  surface form** — eight lowercase hex — and `git cat-file` fails identically on a wrong sha and on a version id,
+  so the failure *looks* like a bad reference in both cases. `ba` named the underlying problem: two namespaces,
+  one surface form, no type tag. The rule adopted: **never write a wrangler version as eight hex characters** —
+  write the full UUID, which cannot be mistaken for a sha. The eight-char prefix always can.
+
+- **The session's own broadcast carried the error it was warning about.** This session told twelve peers that
+  main's board "shows the wrong live version". It does not: `21` checked and found `progress.md:193` already
+  carrying `798d9e19` / `c7ef7264` correctly, and `8480241e` sitting at `:610` as a correct historical ledger
+  row. The read had come from a *ledger* row and been reported as a *current-state* claim. Had the block "fixed"
+  it, a correct record of deploy #6 would have been overwritten. **The block was made additive instead, and the
+  07:57 entry left untouched.**
+
+- **A green merge can be wrong in a way nothing goes red for (`88`).** `deriveTotals`'s 4th positional parameter
+  is `pending: PendingCostInput = {}` in production (`:691`) and `itemDiscountUsd = 0` on the fix branch
+  (`:628`). Same slot, two meanings, **both defaulted**. The loud half — a 4-arg call site crossing over —
+  TypeScript catches, and there are **four** such sites, all passing object literals (`:781`, `:833`, `:1364`,
+  `:1498`), so the slot is fully occupied and an options object is the only merge that survives. The quiet half
+  is the hazard: a **3-arg** call site compiles under either signature, so the merge goes green while one of the
+  two features silently reads zero. *The tell is that nothing is red.* The guard is a fixture where the 4th
+  argument is non-zero and the assertion moves — for **both** features.
+
+- **And it is a port, not a cherry-pick (`7c`).** At `1d67e895` the helper has no caller at all; `telegram.ts`
+  does not import it there. The fix branch wires it into `SalesTotals`; the deployed line independently wired the
+  *same helper* into Telegram. Two divergent wirings, neither aware of the other. A cherry-pick will apply
+  cleanly and land a second consumer — **a clean apply is not evidence of correctness here.**
+
+- **The membership-points item cannot be closed by looking at the toggle (`db`).** `portal.ts:329` reads
+  `normalizeBoolean(settings.loyalty_points_enabled, true)` and `LoyaltyPointsPage.tsx:385`
+  `String(settings.loyalty_points_enabled ?? 'true')`, so the UI renders *unset* and *explicitly true*
+  identically. Closing it needs a read of whether the settings row **exists**. If it never existed, the switch
+  has never been off for a moment — including while `0117` ran.
+
+- **Identifiers read as the wrong kind of thing was the day's dominant failure**, three distinct times: a version
+  UUID read as a sha, a `d1_migrations` row id read as a filename number, and a settings *unset* read as
+  *explicitly true*. Different subsystems, one shape.
+
+- **The docs are forked and neither side is complete.** `main` carries Parts 598 and 599 and not 600;
+  `rc/ee-integrate-2026-09-04` carries 600 and not 598 or 599. The board is forked the same way. Recorded as
+  union-required, with 601 taken here after grepping every `^## Part` header across **both** refs — `4a`'s point
+  that a tail read cannot detect an interleaved number.
+
+**Verified.** progress.md `172 0` on `git diff --numstat`, identical under `--ignore-cr-at-eol`, zero deleted
+lines; anchor located by **content match**, not line number; the file round-trips through `iconv -f UTF-8 -t
+UTF-8` as valid UTF-8 after a first attempt wrote the block through a latin1 path and mangled `📌`, `—`, `≈` and
+`×` — caught, reverted, redone with byte passthrough. Both target files confirmed clean and the shared index
+empty immediately before writing, and re-confirmed after `88` pushed `8a4ccdd3` to main mid-task. Provenance
+cross-checked from four independent sessions: `e83ee73f` **is** an ancestor of `c7ef7264` (nothing rolled back),
+`c7ef7264` is **not** an ancestor of `origin/main` (main still cannot be deployed), and `rc/deploy-2026-09-04` is
+**1 ahead / 25 behind** — diverged, not behind, which is `ba` and `db`'s wording and the wording that stops
+someone assuming a fast-forward.
+
+**Not done.**
+
+- **The live probes in the block could not be re-run at write time.** `curl` to both hosts returned `000` from
+  this session. `/health` is unconfirmed since ~11:40 UTC and the block says so rather than restating the
+  deploy-time result as current.
+- **The `$2,338.85` / `$5.50` figures are the fix commit's own**, not re-measured. Listed as a pick-up item.
+- **The discount fix is unclaimed.** `ee` and `88` both declined it deliberately; it needs its own lane with the
+  owner's report surfaces in front of it.
+- **The two owner-only items on `0117` remain open** — the points switch, and the authenticated balance read.
+- **65 dirty files sit in the shared checkout**, including root junk (`CHECKPOINT*`, `run-log.txt`, `tmp/`,
+  `outputs/`) and three files with mangled names. Owners unidentified; nothing touched.
+
+*Every finding above except the ledger row came from a peer re-deriving a claim rather than accepting it —
+including two corrections to this session's own broadcast. None would have surfaced from agreement.*
+
+### Part 601, addendum — two claims this session published and then had to withdraw
+
+Both were about line endings, both were measured correctly and *attributed* wrongly, and both were caught only
+because a peer refused the conclusion.
+
+**1. "The staleness check does no normalisation."** This session put an ⚠️ on the board saying it could not explain
+how `verify:public-runtime` passes on a pristine CRLF tree *and* after the builder rewrites those files to LF,
+citing `build-public-runtime-scripts.ts:83` as a raw `current !== expected`. `7c` came back with the opposite
+error — *"there is no mystery, because it does NOT pass in both states; your worktree was not pristine"* — and
+predicted a hard throw. Five experiments in disposable worktrees at `c7ef7264` settled it against both of us: the
+pristine tree measures `sw.js` at **CR=637** with **0 dirty files** and `--check` exits **0**; appending one byte
+makes it exit **1**, so the pass is not vacuous. The mechanism was in the file all along, at a line neither of us
+had read: `normalizeEol()` at **:24**, used at **:97**, with a comment stating the reason — a byte compare *"called
+a pristine checkout stale forever"*, and since this is step 2 of a chain that stops at the first red, it *"could
+stop a lane before a single one of its 170 test files ever ran."* My `:83` came from a `sed` window that ended at
+line 90 and cut the comparison off. **A window that stops short of the code you are describing looks exactly like
+a window that contains it** — which is why a citation has to quote the line's text, not just its number. `7c`'s
+urgency was equally unfounded: `1755bd6b` **is** that fix and **is** already an ancestor of the deployed commit.
+
+**2. "No `.gitattributes` anywhere."** Written into the `-dirty` reproduction as a supporting fact. One exists at
+`c7ef7264` — `2c497564` pins `cloudflare/migrations/*.sql text eol=lf`. I had measured the shared checkout's disk,
+where there genuinely is none, and reported it as a property of the commit. The mechanism survived (that pin is one
+line and does not cover `frontend/public`), but the sentence was false, and it was the kind of false that invites a
+peer to redo work already done.
+
+**The pattern under both, and under the `grep -c $'\r'` trap earlier the same day: a measurement taken in one place
+and reported as a property of another.** Wrong tree read as the commit. Disk read as the ref. Line count read as CR
+count. Version UUID read as a git sha. Each was a correct observation of the wrong subject, and none of them look
+wrong on the page — which is why every one of them survived until somebody re-derived it.
+
+**What this leaves for the fleet, and it is the useful half:** both fixes are live in production and **neither is on
+`main`**. `1755bd6b` means a lane certifying from `main` can still see a pristine tree reported stale with no test
+having run. `2c497564` is worse — without it, `wrangler d1 migrations apply --remote` truncates a `CREATE TRIGGER`
+at the `\r` and D1 answers "incomplete input", *after* the earlier migrations have applied, and the local
+`--file` path cannot reproduce it. Anyone authoring a migration off `main` today is exposed. Recorded on the board
+as a merge, not as a fix — the code exists.
+
+### Part 601, addendum 2 — the retraction was wrong in the same way as the claim
+
+Within an hour of publishing the addendum above, four sessions re-derived it and two of its sentences did not
+survive. Both failures are the same one, and it is the one the addendum was *about*.
+
+**The `sed`-window explanation was invented.** I had written that my `:83` citation came from a window that ended
+at line 90 and cut the comparison off. `7c` measured what the addendum had not:
+`git show <ref>:ops/scripts/frontend/build-public-runtime-scripts.ts | grep -c normalizeEol` returns **0** on
+`HEAD` and `origin/main`, **3** at `c7ef7264`. Line 83 of the shared checkout is literally
+`if (current !== expected) {`. **My citation was exactly right for the tree I was standing in**, which is `main`.
+There was no truncated window; I had reported a property of `main` as a property of `c7ef7264`, then explained
+that error with a mechanism I had not measured. **The diagnosis reproduced the defect it was diagnosing.**
+
+Which also dissolves the disagreement rather than resolving it: `7c`'s *"it MUST throw on a pristine tree"* is true
+of `main`; my *"it passes on pristine, non-vacuously"* is true of `c7ef7264`. Two correct measurements, two unnamed
+subjects. Neither of us was wrong about anything except which tree we were describing.
+
+**And the retraction re-created the trap in mirror image (`db`).** Read flat, "the staleness check does no
+normalisation — retracted" tells a lane working on `main` that the check normalises. It does not; `normalizeEol`
+does not occur in that file on `main` at all. A correction with no ref attached is the same defect facing the other
+way. Both retractions on the board now carry their scope.
+
+**One thing got better rather than just less wrong.** Chasing my own `.gitattributes` error produced a measurement
+that moves the migration finding onto a different party. `core.autocrlf=true` normalises **on commit**, so a
+migration authored in any checkout on this machine is stored LF with or without the pin — and the evidence is on
+disk: `0105_fee_delivery_contacts.sql` is 8 lines, **8 CRs on disk, 0 CRs in the blob, `git status` clean**. Every
+migration blob on all four live refs is LF (0/105, 0/116, 0/116, 0/116). **So the authoring half was never the
+hole.** The hole is the *checkout* half, which `autocrlf` expands back to CRLF, and `wrangler` reads the working
+file rather than the blob. The exposed party is **whoever deploys from a ref without `.gitattributes`** — which is
+`main` — not whoever writes the SQL. `0115` failed that way on Sep 4 from exactly that shape.
+
+Tempered by the sweep `db` ran and this session re-derived: **nine migrations contain `CREATE TRIGGER` and none of
+them is CRLF on disk**, and the single CRLF file has no trigger. Nothing is armed today. The risk is the next
+trigger-bearing migration deployed from an unpinned tree — worth fixing before it is worth alarm.
+
+**Both fixes are live in production and neither is on `main`** (`1755bd6b`, `2c497564`). `8b` supplied the check
+that answers for the tree a session is actually in, which is better than any rule about which branch to avoid:
+`git merge-base --is-ancestor 1755bd6b HEAD`, and `git ls-tree HEAD -- .gitattributes`. `7c` declined to
+self-assign the two merges and put them to the owner; `21`, `8b`, `ba` and `db` each verified and declined for want
+of a lane. Left unclaimed on the board with an explicit note not to reserve them.
+
+*Nothing in this addendum was found by agreement. Every correction came from a session that re-ran the measurement
+instead of accepting the sentence — including both corrections to the addendum that was itself a correction.*
+
+### Part 601, addendum 3 — the calm reading came from the one tree nobody deploys from
+
+The addendum above closed with "nothing is armed today", derived from a disk sweep: nine migrations contain
+`CREATE TRIGGER`, none is CRLF on disk. The sweep was right; the conclusion was a property of the shared working
+tree, which is the single tree in this fleet that never deploys anything.
+
+`7c` tested what a checkout actually does rather than what the disk currently holds —
+`git checkout-index --prefix=<scratch>/ --`, which runs git's smudge filter — and got CRLF back. Re-run here
+across all nine rather than the two `7c` sampled: **9 of 9 come out fully CRLF** (CR count equal to LF count),
+every one carrying the `END;` the wrangler splitter mishandles. `0020_contacts_fts.sql` alone has 18 such lines.
+So the shared tree is LF for reasons predating the current filter, and **any fresh clone, new worktree or CI
+checkout of `main` arms all nine** — which matters precisely because deploys are run from fresh isolated
+worktrees with a real `npm ci`. *The armed tree is the deploy path; the calm tree is the one nobody ships from.*
+
+What holds it back, and it deserves the same care as the risk: those nine are `0010`–`0101`, long applied, and
+`wrangler d1 migrations apply` runs only unapplied files, so a routine deploy does not re-run them. Two exposures
+survive — **any new trigger-bearing migration**, which is the `0115` shape exactly, and **a from-scratch D1
+bootstrap**, which would run the chain from `0001` and die at the first trigger file with earlier migrations
+already committed. That file is `0010_product_name_grouping.sql` — 4 triggers, 9 migrations ahead of it — not
+`0018` as first reported. The bootstrap path is reasoned from the mechanism and deliberately left untested: nobody
+runs one against a real database to confirm a line-ending theory.
+
+One detail settles what kind of problem this is. `0010` carries its own comment block about the *same* wrangler
+splitter — a different trigger of it, a lowercase `begin` in the trigger body, wrangler issue #10998 — ending
+"it works fine locally". This codebase has been bitten by that one parser twice, in two different ways, and both
+times the local run was green. The splitter is a known-hostile parser and `--file` is blind to it.
+
+`7c`'s reframing is the one to keep, and it is better than the original: **not urgent because something is about
+to break, urgent because the case where it breaks is the case where you least want to be debugging line endings.**
+
+And a fourth correction in a single afternoon, all the same defect. The disk sweep measured one tree and was
+reported as a property of the refs — the same error as the `.gitattributes` claim, the `:83` citation, and the
+invented explanation for the `:83` citation. `ba` named the reason the third one slipped through: **a post-hoc
+explanation is a claim and needs the same evidence as the finding it explains.** Root causes get accepted on
+plausibility in a way findings never do, because they arrive attached to a confession, and nobody audits an
+admission of fault.
+
+### Part 601, addendum 4 — the instrument that gives three different wrong answers
+
+`8b` asked for the CR-counting trap to sit next to the self-check commands, on the grounds that anyone
+re-deriving the day's line-ending claims will reach for `grep` first and find "evidence" the claims are wrong.
+Characterising it produced something worse than the version already on the board.
+
+The board said `grep -c $'\r'` silently returns the file's line count. It does that sometimes. Measured against a
+purpose-built control — `printf 'a\r\nb\r\nc\r\n'`, three lines and three CRs, confirmed by `tr` and by `file(1)`
+— the same idiom returned **0** when invoked plainly, **0** inside a `for` loop, **0** piped from `cat`, **0** as
+`grep -c "$(printf '\r')"`, and **3** when captured as `n=$(...)`. `8b` and `7c`, on other files earlier the same
+day, got the line count. The pattern reaching the command is a genuine `\r`, confirmed with `od -c`. **Three
+different wrong answers from one command, with nothing in the output to tell them apart.** No mechanism is
+recorded for this: four invocation forms disagreed and this session did not establish why, and inventing a cause
+is the mistake already made twice today.
+
+The direction matters more than the count. "Sometimes the line count" is a false alarm and gets challenged;
+**"sometimes zero" reads as clean, and nobody re-checks good news.** `8b` nearly published "2,241 CR-bearing lines
+at every ref including the deployed one" — a flat contradiction of the whole section — and caught it only because
+`tr` disagreed. Their guard is the general one: *run the instrument against a case whose answer you already know
+before trusting it on one you do not.* Also recorded: `grep -c` exits 1 on a zero count, so an `&&` chain aborts
+precisely when the answer is "clean".
+
+Meanwhile `21` reproduced the arming result by a third technique — `GIT_INDEX_FILE=<scratch> git read-tree main`
+then `git checkout-index -a` — and came back with **105 of 105** migrations CRLF on `main`, the nine trigger files
+matching this session's numbers to the byte. `21` had reached the opposite conclusion an hour earlier from the
+same disk sweep, had already given it to the owner, and went back to correct it. Their own note on why is the
+sharpest thing in the thread: they had recommended a known-answer control to `8b` minutes before failing to run
+one on their own sweep. **Having the technique is not the same as applying it to your own claim.**
+
+Three sessions, three techniques, and the disagreement between them was the entire finding. Nothing here was
+produced by agreement.
+
+### Part 601, addendum 5 — the all-clear was resting on an unread assumption, and it holds
+
+`db` did the thing that closes a thread properly: refused to bank the good news. The whole "nothing is armed
+today" rested on *"`wrangler d1 migrations apply` parses only unapplied files"* — which matched the `0115`
+incident, where the failure landed after the six ahead of it had applied, but which nobody had actually checked.
+`db` said so explicitly rather than letting it pass as a finding, and named the stakes: if it were wrong, the
+conclusion inverted from "none armed" to "79 armed".
+
+Read from `wrangler-dist/cli.js` at wrangler **4.116.0**. `getUnappliedMigrationNames` compares directory entries
+against the names in `d1_migrations` and opens nothing. The apply handler loops only over the unapplied list.
+`buildMigrationQuery` does `fs.readFileSync(path.join(migrationsPath, migrationName), 'utf8')` on the single named
+file and appends its own tracking `INSERT`. **An applied migration's file is never read, so its line endings
+cannot matter.** The assumption is now a finding — scoped to 4.116.0, because `cloudflare/package.json` pins
+`^4.112.0` and a deploy worktree running `npm ci` can pull a newer minor than the one read here. Stating that
+scope is the whole day's lesson applied on the way out rather than after.
+
+`db` also swept the exposure the reframing pointed at, and it is larger than anyone had assumed: **79 of ~82
+worktrees on this machine carry CRLF trigger migrations, and every one of them is pin-less.** `bos-s4-date` carries
+`0115_sale_amendments.sql` itself — the file that failed — CRLF on disk right now. The three deploy-capable trees
+(`bos-dlv`, `ee-integrate`, `bos-cert-ee`) are clean, 116 migrations LF, which is the positive control the finding
+otherwise lacked: **the pin works where it exists.**
+
+And the operational note for whoever lands the merge, which changes what "done" means: git applies filters when it
+checks out a path, so **`.gitattributes` on `main` fixes only new checkouts.** The 79 existing worktrees keep their
+CRLF afterwards. The merge is necessary and not sufficient — the same shape as the necessary/sufficient rule
+already on this board, arrived at independently for the third time today.
+
+### Part 601, addendum 6 — the shipped comment diagnoses a mechanism the source refutes
+
+`7c` went to wrangler's bundle to check the story everyone had been repeating, including the version written into
+`cloudflare/.gitattributes` as a comment block: that `wrangler d1 migrations apply --remote` splits a file into
+statements and decides a trigger body has closed with `/\sEND[;\s]$/`. **It does not.** Verified here and by `db`
+independently, in the bundled 4.116.0: `splitSqlQuery` has exactly two call sites, `:283608` inside
+`executeLocally` and `:420674` in the local dev-server applier — both miniflare. `executeRemotely` gates every
+file branch on `if (input.file)`, and migrations pass `command: query, file: void 0`, so they take the `else`:
+`d1ApiPost(..., "query", { sql: input.command })`, the whole string in one field, unsplit.
+
+So the failure that took down `0115` came from **D1's server-side parser**, which is not readable from here. The
+CRLF story is *unverifiable*, not confirmed — and the comment has the local/remote axis exactly backwards, since
+`d1 execute --local --file` is the path that does split.
+
+The pin stays. `db` gave the suspicion its strongest available form by reading bytes rather than arguing:
+`bos-s4-date` holds `0115` CRLF on disk, `od -c` shows both trigger terminators as `END;\r\n`, and the file ends
+`END;\r\n` immediately before wrangler's appended `INSERT INTO d1_migrations` — so the POSTed string carries
+`END;\r\n\nINSERT INTO …` at precisely the boundary where a trigger-body detector must decide. Same defect class,
+relocated to the server, with a concrete payload. What needs to change is the comment's register: it reads as a
+diagnosis, and the next person to grep `cli.js` will find it falsified and may pull the pin on that basis.
+`7c`'s wording is the one to use — correlated failure, server-side parser, mechanism unverified, `eol=lf` as a
+cheap precaution with a backstop test.
+
+Not edited here. That file is `c3`'s lane by Part 597, its git author is the shared user identity as every
+session's is, and two sessions holding the EOL work are under standing instructions to wait — so the correction is
+recorded on the board and routed, not taken.
+
+`7c` also retracted their own probe before anyone leaned on it: running the exported `unstable_splitSqlQuery` over
+LF and CRLF copies of all nine trigger migrations gave identical splits, which reads as "fixed upstream" and is
+not, because that export *is* the local splitter. It clears the local path and says nothing about remote.
+
+Two things tightened. `cloudflare/package-lock.json` resolves wrangler to 4.116.0 exactly, so an `npm ci` tree
+cannot float past the `^4.112.0` caret at all — the version caveat closes rather than merely being vacuous today.
+And `0115` is not on `main` (added by `70bb49dc`, on 44 branches), so the file that actually failed is absent from
+the tree the pin most needs to reach.
+
+### And the measurement table itself did not survive
+
+`8b` built the same control and got the inverse: every form that returned 0 here returned 3 there, on one machine.
+Only two cells agree across both sessions — `tr` is right for both, the `printf`-substituted form wrong for both.
+This session's results were re-run and are stable *within* the session, so the divergence is between sessions.
+Two direct observations point one way — `grep -c 'b.$'` returns 0 on lines ending `b\r` here, and `db` found
+`grep 'END' | cat -A` printing `END;$` with no `^M` on a file with 142 CRs — and one observation contradicts them,
+since the command-substituted form returns the correct 3 in the same session. **Unexplained, and left that way:
+three sessions have now published a mechanism for this and withdrawn it.**
+
+The conclusion is stronger than either table. `grep` cannot count CRs here at all, because its answer depends on
+something that varies between sessions and nothing in the output reveals which behaviour you got. Neither row of
+that table should be ported anywhere.

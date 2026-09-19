@@ -26,6 +26,7 @@ Module._load = function(request, parent, isMain) {
     isAdminControlUser: (user) => user.role === 'admin',
   }
   if (request === '../lib/db') return { getDb: () => ({}) }
+  if (request === '../lib/acquisitionCostAccess') return { canViewAcquisitionCosts: (user) => user.role === 'admin' }
   if (request === '../lib/salesAnalytics') return new Proxy({
     SALES_GROUP_KEYS: ['branch'], reportMoneyDiagnostic: () => null,
     getSalesTotals: async () => ({ ...totals }), previousPeriodFilters: () => ({}),
@@ -193,7 +194,7 @@ assert.match(source, /out\.sales = \{[\s\S]*totals: gateTotals\(totals[\s\S]*pre
 assert.match(source, /periodRows\.map\(\(r\) => gateTotals/)
 assert.match(source, /getSalesGroupedTotals[\s\S]*\.map\(\(r\) => gateTotals/)
 assert.match(source, /getDeliveryContactTotals[\s\S]*\.map\(\(row\) => gateCourierRow/)
-assert.match(source, /const adminColumns = isAdmin \? `, \$\{costCol\} AS cost_usd/,
-  'business-summary sales rows select cost and derived profit only for admins')
+assert.match(source, /const adminColumns = canViewAcquisitionCosts\(user\) \? `, \$\{costCol\} AS cost_usd/,
+  'business-summary sales rows select cost and derived profit only with cost-view authority')
 
 console.log('PASS report totals/day/group/export gates hide actual and derived delivery costs for employees and retain them for admins')

@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
+import { acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
@@ -26,6 +26,7 @@ const DASHBOARD_STOCK_ALERT_MAX_PAGE_SIZE = 50
 app.use('/system/audit-logs', acquisitionCostResponses)
 app.use('/dashboard', acquisitionCostResponses)
 app.use('/dashboard/*', acquisitionCostResponses)
+app.use('/analytics', acquisitionCostResponses)
 
 // Shared gate matching backend's requirePermission/requireAnyPermission for
 // the system/backup/audit endpoints below -- previously these only checked
@@ -272,7 +273,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
   }
 }
 
-async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdmin: boolean) {
+async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdmin: boolean, canViewCosts = isAdmin) {
   const db = getDb(env)
   const range = dateRange(query)
   const { startDate, endDate, granularity } = range
@@ -427,8 +428,8 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
     // 2026: this endpoint previously ran its own five-key strip and left
     // cost_usd / profit_usd ungated, so a non-admin dashboard permission
     // still saw COGS and profit).
-    totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin),
-    prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin),
+    totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts),
+    prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts),
     periodReturns: periodReturns || {},
     periodSupplierReturns: periodSupplierReturns || {},
     periodData: periodData || [],
@@ -569,7 +570,7 @@ app.get('/dashboard/stock-alerts', async (c) => {
 app.get('/analytics', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
-  return c.json(await dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user'))))
+  return c.json(await dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))))
 })
 app.get('/dashboard/insight-list', async (c) => {
   const denied = denyUnless(c, 'dashboard')
@@ -586,7 +587,7 @@ app.get('/dashboard/startup', async (c) => {
   if (denied) return denied
   const [summary, analytics] = await Promise.all([
     dashboardSummary(c.env, c.req.query()),
-    dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user'))),
+    dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))),
   ])
   return c.json({ summary, analytics })
 })
@@ -1107,6 +1108,7 @@ app.post('/system/drive-sync/forget-credentials', requireAuth, async (c) => {
   return c.json(await driveSyncStatus(c.env))
 })
 app.post('/system/drive-sync/jobs', requireAuth, async (c) => {
+  if (!canViewAcquisitionCosts(c.get('user'))) return c.json({ error: 'Cost-view permission is required to export database backups.', code: 'product_cost_view_required' }, 403)
   const denied = denyUnless(c, 'backup', 'settings')
   if (denied) return denied
   try {
@@ -1122,6 +1124,7 @@ app.post('/system/drive-sync/jobs', requireAuth, async (c) => {
 // returned backupKey can then be reviewed through the existing backup flow.
 app.post('/system/drive-sync/restore-stage/jobs', requireAuth, async (c) => {
   const user = c.get('user')
+  if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Cost-entry permission is required to prepare a database restore.', code: 'product_cost_edit_required' }, 403)
   if (!hasPermission(user, 'backup_restore')) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }

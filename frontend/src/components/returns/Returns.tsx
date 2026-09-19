@@ -1,6 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { customerDisplayName } from '../../utils/customerIdentity.ts'
 import { toggleMultiValue, isMultiActive, matchesMulti } from '../../utils/multiSelect'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
@@ -164,8 +165,6 @@ interface ReturnHistoryPayload extends Record<string, unknown> {
     quantity: number | string
     applied_price_usd: number | string
     applied_price_khr: number | string
-    cost_price_usd: number | string
-    cost_price_khr: number | string
     return_to_stock: boolean
     branch_id: number | string | null
   }>
@@ -342,6 +341,7 @@ function ReturnPlusIcon({ className = '' }: { className?: string }) {
 
 export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const { can, t, fmtUSD, fmtKHR, notify, user } = useApp()
+  const canPriceSupplierReturn = canViewAcquisitionCosts(user) && canEditAcquisitionCosts(user)
   // Editing a return reverses and re-applies batch restocking against live
   // stock, so routes/returns.ts blocks it outright for the Review Required
   // tier (PATCH /:id) rather than queueing it -- see utils/permissionActions.ts.
@@ -889,8 +889,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         quantity: item.quantity || 0,
         applied_price_usd: item.applied_price_usd || 0,
         applied_price_khr: item.applied_price_khr || 0,
-        cost_price_usd: item.cost_price_usd || 0,
-        cost_price_khr: item.cost_price_khr || 0,
+        // Undo/replay must not convert a permission-redacted snapshot to zero.
         return_to_stock: item.return_to_stock !== false,
         branch_id: item.branch_id || snapshot.branch_id || null,
       })),
@@ -1510,7 +1509,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             ) : null}
             <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} align="right" className="h-8 w-8 shrink-0" dense />
             {scope === SUPPLIER_SCOPE ? (
-              <button onClick={() => setShowSupplierForm(true)} className="btn-primary inline-flex h-10 min-h-10 w-10 shrink-0 items-center justify-center gap-1 px-0 text-xs sm:w-auto sm:px-2" aria-label={tr('add_supplier_return', 'Add Supplier Return')} title={tr('add_supplier_return', 'Add Supplier Return')}>
+              <button disabled={!canPriceSupplierReturn} onClick={() => setShowSupplierForm(true)} className="btn-primary inline-flex h-10 min-h-10 w-10 shrink-0 items-center justify-center gap-1 px-0 text-xs sm:w-auto sm:px-2" aria-label={tr('add_supplier_return', 'Add Supplier Return')} title={tr('add_supplier_return', 'Add Supplier Return')}>
                 <ReturnPlusIcon className="h-4 w-4 shrink-0" />
                 <span className="hidden sm:inline">{tr('supplier_return', 'Supplier Return').replace(/^ការ/u, '')}</span>
               </button>
@@ -1683,7 +1682,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         </Suspense>
       ) : null}
 
-      {showSupplierForm ? (
+      {showSupplierForm && canPriceSupplierReturn ? (
         <Suspense fallback={null}>
           <NewSupplierReturnModal
             onClose={() => setShowSupplierForm(false)}
