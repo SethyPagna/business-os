@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { helpPopoverGeometry } from '../src/components/shared/helpPopoverGeometry.ts'
+import { helpPopoverGeometry } from '../src/utils/helpPopoverGeometry.ts'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { createServer, transformWithEsbuild } from 'vite'

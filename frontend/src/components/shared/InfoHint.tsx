@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom'
 import Info from 'lucide-react/dist/esm/icons/info.js'
 import type { ReactNode } from 'react'
-import { helpPopoverGeometry } from './helpPopoverGeometry.ts'
+import { helpPopoverGeometry } from '../../utils/helpPopoverGeometry.ts'
 
 type InfoHintProps = {
   /** The detail text to reveal. */
