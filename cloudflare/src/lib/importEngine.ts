@@ -27,7 +27,9 @@ import { canEditAcquisitionCosts, isAcquisitionCostImport } from './acquisitionC
 import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing, barcodeIdentityMatches, clusterRowsByBarcodeIdentity, rankBarcodeIdentityWinner, isRealBarcode } from './productDetailRule'
 import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
-import { planReconcileBranchSnapshot } from './productBatches'
+import { planReconcileBranchSnapshot, resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
+import { catalogCostRecomputeStatement } from './catalogCostRecompute'
+import { multiplyMoney4 } from './moneyPrecision'
 // per-row mode system now, just via a different channel than
 // decisionsByRowNumber/policy_json -- BulkImportModal.tsx's review step
 // bakes the reviewer's per-row choice (IMPORT_DECISION_OPTIONS) directly
@@ -1645,6 +1647,7 @@ export async function classifyProducts(
       // for a blank money cell, but batch/movement history must distinguish
       // "no recorded receipt cost" from an actual zero-cost receipt.
       __costPriceUsdProvided: str(rawCostUsd) !== '' ? 1 : 0,
+      __receiptCostUsd: str(rawCostUsd) !== '' ? normalizeImportCost4(rawCostUsd) : null,
       __costPriceKhrProvided: str(rawCostKhr) !== '' ? 1 : 0,
       stock_quantity: parseImportNumericValue(row.stock_quantity ?? row.quantity, 0, { allowNegative: false, field: 'stock_quantity' }),
       low_stock_threshold: parseImportNumericValue(row.low_stock_threshold, 10),
@@ -5363,7 +5366,9 @@ async function applyStockActionsContinuation(
   const pendingLotKeys = new Set<string>()
   const addLotKey = (resolved: UnifiedStockResolvedRow): string => {
     try {
-      return `${resolved.productId}:${batchIdentity(resolved.date, resolved.batchLabel).batchKey}`
+      batchIdentity(resolved.date, resolved.batchLabel)
+      // Price-aware lot reservations and next batch numbers are product-scoped.
+      return `${resolved.productId}`
     } catch {
       // An unparsable date/label fails inside applyUnifiedStockAdd itself
       // (caught by runSingle below); give it a key nothing else can share so
@@ -5918,34 +5923,35 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         const maxBatchIdRow = await db.prepare(`SELECT COALESCE(MAX(id), 0) AS maxId FROM product_batches`).get<{ maxId: number }>()
         nextBatchId = maxBatchIdRow?.maxId || 0
       }
-      // Lot-code matching for restocks of EXISTING products, mirroring
-      // lib/productBatches.ts's receiveBatchStock "same product + same
-      // normalized lot code tops up the same row" rule. Previously the
-      // merge_stock/override_add branch below always inserted a brand-new
-      // product_batches row keyed by a generated `import:<id>:<ts>:<row>`
-      // batch_key -- lot_code was carried on the row and stored, but never
-      // used to look anything up, so re-importing the same named batch
-      // (e.g. "Batch 12") for a product that already has it created a
-      // second, duplicate batch instead of topping up the existing one and
-      // preserving its received date, unlike every other batch-receiving
-      // path in the app (the manual Receive Stock modal, the mandatory
-      // add-stock picker). Inactive lots MUST participate in this lookup:
-      // the unique key covers (variant_product_id, batch_key) regardless of
-      // is_active, so filtering an emptied/deactivated lot out made the
-      // later INSERT fail with a UNIQUE violation. An explicit additive
-      // receipt is allowed to reactivate that exact lot, and the matched
-      // branch below does so in the same atomic row group before adding
-      // positive branch_batch_stock. Exact batch_key wins over the legacy
-      // normalized lot-code match so a retry cannot drift to a different
-      // row when old data contains two display-equivalent lot codes.
-      const lotMatchCandidates = updateRowsNeedingBatch.filter((r) => str((r.data as Record<string, unknown>).lot_code))
-      let restockBatchIndex: ImportRestockBatchIndex = { byExactKey: new Map(), byNormalizedLot: new Map() }
-      if (lotMatchCandidates.length) {
-        const existingBatches = await db
-          .prepare(`SELECT id, variant_product_id, batch_key, lot_code, received_at, is_active FROM product_batches`)
-          .all<ImportRestockBatch>()
-        restockBatchIndex = indexImportRestockBatches(existingBatches)
+      // Receipt identity is product/date/entered price/override baseline,
+      // shared with interactive receiving. Include inactive candidates so a
+      // same-price receipt can reactivate its lot. Reserve new IDs in memory
+      // across this chunk; no per-row database reads or unguarded late writes.
+      const receiptProductIds = [...new Set(updateRowsNeedingBatch.map(row => Number(row.existingId)))]
+      const receiptLots = new Map<number, ReceiptLotCandidate[]>()
+      const receiptBaselines = new Map<number, number>()
+      for (const ids of chunkForBinding(receiptProductIds)) {
+        const clause = buildInClause('receiptProduct', ids)
+        const lots = await db.prepare(`SELECT id, variant_product_id, batch_key, received_at, unit_cost_usd
+          FROM product_batches WHERE variant_product_id IN (${clause.sql})`)
+          .all<ReceiptLotCandidate & { variant_product_id: number }>(clause.params)
+        for (const lot of lots) {
+          const list = receiptLots.get(lot.variant_product_id) || []
+          list.push(lot)
+          receiptLots.set(lot.variant_product_id, list)
+        }
+        const baselines = await db.prepare(`SELECT product_id, baseline_batch_id FROM product_cost_entries
+          WHERE id IN (SELECT MAX(id) FROM product_cost_entries WHERE product_id IN (${clause.sql}) GROUP BY product_id)`)
+          .all<{ product_id: number; baseline_batch_id: number | null }>(clause.params)
+        for (const baseline of baselines) receiptBaselines.set(baseline.product_id, Number(baseline.baseline_batch_id) || 0)
       }
+      // Identity folding may merge catalog fields below; receipt evidence must
+      // retain the sheet's own entered cost, not the merged product scalar.
+      const receiptCosts = new Map(actionable.map(row => {
+        const data = row.data as Record<string, unknown>
+        return [row.rowNumber, Number(data.__costPriceUsdProvided) === 1
+          ? (data.__receiptCostUsd ?? data.cost_price_usd) as number : null] as const
+      }))
       // seedCost* is the FIRST row's cost as the file wrote it, kept apart
       // from `data` because resolveMergedCost below rewrites data's cost to
       // the running mean -- a third receipt has to be compared against the
@@ -6026,7 +6032,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       }
       for (const r of actionable) {
         const d = r.data as Record<string, unknown> & { branch_id: number | null; branch_id_explicit: number }
-        const receiptUnitCostUsd = Number(d.__costPriceUsdProvided) === 1 ? d.cost_price_usd : null
+        const receiptUnitCostUsd = receiptCosts.get(r.rowNumber) ?? null
         let rowWriteGroup: Array<{ sql: string; params: Record<string, unknown> }> = []
         let rowWriteGroupFinished = false
         const finishProductRowWriteGroup = () => {
@@ -6142,6 +6148,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // image_gallery (a separate side table synced through
           // syncProductImageGallery -- CSV import still only ever sets the
           // single image_path).
+          // An additive replay must not restore the sheet's old catalog
+          // scalar after its receipt already derived the current mean.
+          if ((mode === 'merge_stock' || mode === 'override_add') && appliedRowGuards.has(`row:${r.rowNumber}`)) continue
           if (mode !== 'merge_stock') {
             rowWriteGroup.push({
               sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
@@ -6182,8 +6191,20 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id) WHERE id = @id`,
                 params: { id: r.existingId },
               })
-              const importLotCode = str(d.lot_code)
-              const matchedBatch = findImportRestockBatch(restockBatchIndex, Number(r.existingId), importLotCode)
+              const receiptTotalCostUsd = receiptUnitCostUsd == null ? null : multiplyMoney4(receiptUnitCostUsd, Number(d.stock_quantity))
+              const productId = Number(r.existingId)
+              const plannedLots = receiptLots.get(productId) || []
+              const target = resolveReceiptLotTarget(plannedLots, String(d.received_date), receiptUnitCostUsd, receiptBaselines.get(productId) || 0)
+              const matchedBatch = plannedLots.find(lot => lot.id === target.existingBatchId)
+              group.push({
+                sql: `SELECT CASE WHEN
+                  COALESCE((SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@productId ORDER BY id DESC LIMIT 1),0)=@baseline
+                  AND ((@existingId IS NULL AND NOT EXISTS (SELECT 1 FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey))
+                  OR EXISTS (SELECT 1 FROM product_batches WHERE id=@existingId AND variant_product_id=@productId
+                    AND batch_key=@batchKey AND id>@baseline AND unit_cost_usd IS @unitCostUsd))
+                  THEN 1 ELSE json('IMPORT_RECEIPT_TARGET_CHANGED') END`,
+                params: { productId, baseline: target.baselineBatchId, existingId: target.existingBatchId, batchKey: target.batchKey, unitCostUsd: receiptUnitCostUsd },
+              })
               if (matchedBatch) {
                 // Same batch key / lot code already exists on this product,
                 // including an inactive emptied lot. Reactivate it before
@@ -6195,12 +6216,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                   sql: `UPDATE product_batches SET received_at = COALESCE(NULLIF(received_at,''), @receivedAt), is_active = 1,
                           unit_cost_usd = COALESCE(unit_cost_usd, @unitCostUsd),
                           received_quantity = COALESCE(received_quantity, 0) + @qty,
-                          received_cost_usd = COALESCE(received_cost_usd, 0) + (@qty * COALESCE(@unitCostUsd, 0)),
+                          received_cost_usd = ROUND(COALESCE(received_cost_usd, 0) + COALESCE(@receiptTotalCostUsd, 0), 4),
                           received_branch_id = COALESCE(received_branch_id, @branchId),
                           updated_at = @updatedAt WHERE id = @id`,
                   params: {
                     id: matchedBatch.id, receivedAt: d.received_date, updatedAt: nowIso,
-                    unitCostUsd: receiptUnitCostUsd, qty: d.stock_quantity, branchId: d.branch_id,
+                    unitCostUsd: receiptUnitCostUsd, receiptTotalCostUsd, qty: d.stock_quantity, branchId: d.branch_id,
                   },
                 })
                 group.push({
@@ -6211,24 +6232,19 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
               } else {
                 nextBatchId += 1
                 const batchId = nextBatchId
-                // batch_key mirrors receiveBatchStock's own rule: the lot
-                // code itself when one was given (so the NEXT import or a
-                // manual receive naming the same lot matches this row too,
-                // not just this map's own in-memory lookup), otherwise a
-                // generated key that can never collide with a real lot
-                // code -- unnamed restocks each stay their own batch, same
-                // as a lot-code-less manual receive always creating a new
-                // one.
+                // Keep the imported label for display, but use the shared
+                // price/baseline identity for receipt matching.
                 group.push({
                   sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, unit_cost_usd, received_quantity, received_cost_usd, received_branch_id, created_at, updated_at)
-                        VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId), @unitCostUsd, @qty, (@qty * COALESCE(@unitCostUsd, 0)), @branchId, @createdAt, @createdAt)`,
+                        VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId), @unitCostUsd, @qty, COALESCE(@receiptTotalCostUsd, 0), @branchId, @createdAt, @createdAt)`,
                   params: {
                     batchId,
                     productId: r.existingId,
-                    batchKey: importLotCode || `import:${r.existingId}:${nowIso}:${r.rowNumber}`,
+                    batchKey: target.batchKey,
                     lotCode: d.lot_code,
                     receivedAt: d.received_date,
                     unitCostUsd: receiptUnitCostUsd,
+                    receiptTotalCostUsd,
                     qty: d.stock_quantity,
                     branchId: d.branch_id,
                     notes: mode === 'merge_stock' ? 'Stock merged via product import' : 'Stock added via product import (override)',
@@ -6248,17 +6264,15 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 // (A redelivered chunk reloads the map from the DB at
                 // chunk start, so a guarded-skipped row's lot still
                 // matches for its later siblings.)
-                if (importLotCode) {
-                  const createdBatch: ImportRestockBatch = {
+                {
+                  const createdBatch: ReceiptLotCandidate = {
                     id: batchId,
-                    variant_product_id: Number(r.existingId),
-                    batch_key: importLotCode,
-                    lot_code: importLotCode,
+                    batch_key: target.batchKey,
                     received_at: d.received_date as string,
-                    is_active: 1,
+                    unit_cost_usd: receiptUnitCostUsd,
                   }
-                  restockBatchIndex.byExactKey.set(`${r.existingId}\u0001${importLotCode}`, createdBatch)
-                  restockBatchIndex.byNormalizedLot.set(`${r.existingId}\u0001${lower(importLotCode)}`, createdBatch)
+                  plannedLots.push(createdBatch)
+                  receiptLots.set(productId, plannedLots)
                 }
               }
               // One movement per receipt row keeps its own cost even when
@@ -6270,16 +6284,18 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                       VALUES (@productId, @productName, @branchId,
                         (SELECT name FROM branches WHERE id = @branchId), 'add', @qty,
                         @unitCostUsd,
-                        CASE WHEN @unitCostUsd IS NULL THEN NULL ELSE ROUND(@qty * @unitCostUsd, 4) END,
+                        @receiptTotalCostUsd,
                         @reason, @receivedAt, @batchId)`,
                 params: {
                   productId: r.existingId, productName: d.name, branchId: d.branch_id,
                   qty: d.stock_quantity, unitCostUsd: receiptUnitCostUsd,
+                  receiptTotalCostUsd,
                   reason: `Product import ${jobId}, row ${r.rowNumber}`,
                   receivedAt: d.received_date,
                   batchId: matchedBatch?.id ?? nextBatchId,
                 },
               })
+              group.push(catalogCostRecomputeStatement(productId))
             }
           } else {
             // Legacy/default: no plannedMode was set (every non-products
@@ -6379,7 +6395,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             const batchId = nextBatchId
             rowWriteGroup.push({
                 sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, unit_cost_usd, received_quantity, received_cost_usd, received_branch_id, created_at, updated_at)
-                      VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, 1, @unitCostUsd, @qty, (@qty * COALESCE(@unitCostUsd, 0)), @branchId, @createdAt, @createdAt)`,
+                      VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, 1, @unitCostUsd, @qty, COALESCE(@receiptTotalCostUsd, 0), @branchId, @createdAt, @createdAt)`,
                 params: {
                   batchId,
                   productId: newId,
@@ -6388,6 +6404,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                   receivedAt: d.received_date,
                   notes: 'Received via product import',
                   unitCostUsd: receiptUnitCostUsd,
+                  receiptTotalCostUsd: receiptUnitCostUsd == null ? null : multiplyMoney4(receiptUnitCostUsd, Number(d.stock_quantity)),
                   qty: d.stock_quantity,
                   branchId: d.branch_id,
                   createdAt: nowIso,
@@ -6397,18 +6414,16 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @qty)`,
                 params: { batchId, branchId: d.branch_id, qty: d.stock_quantity },
             })
-            if (str(d.lot_code)) {
-              const createdBatch: ImportRestockBatch = {
+            {
+              const createdBatch: ReceiptLotCandidate = {
                 id: batchId,
-                variant_product_id: newId,
-                batch_key: str(d.lot_code),
-                lot_code: str(d.lot_code),
+                batch_key: str(d.lot_code) || `import:${newId}:${nowIso}`,
                 received_at: d.received_date as string,
-                is_active: 1,
+                unit_cost_usd: receiptUnitCostUsd,
               }
-              restockBatchIndex.byExactKey.set(`${newId}\u0001${str(d.lot_code)}`, createdBatch)
-              restockBatchIndex.byNormalizedLot.set(`${newId}\u0001${lower(d.lot_code)}`, createdBatch)
+              receiptLots.set(newId, [createdBatch])
             }
+            rowWriteGroup.push(catalogCostRecomputeStatement(newId))
             // Seed every OTHER unambiguous active canonical branch at 0
             // (tracked, not absent) -- see productSeedBranchIds above.
             // Runs
