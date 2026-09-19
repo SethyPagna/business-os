@@ -102,6 +102,28 @@ async function main() {
   assert.equal((await batches.receiveBatchStock(getDb(legacy.env),{...input,batchId:a.batchId,historicalReceiptReplay:true,preserveHistoricalUnitCost:true})).batchId,a.batchId)
   console.log('PASS shared manual/batch helper uses same guarded price identity')
 
+  const reserved = fixture()
+  const reservedInput = {productId:1,branchId:1,quantity:1,receivedDate:'2026-09-05',unitCostUsd:3,
+    receiptCostPreimage:{batchExists:false,receivedCostUsd:null}}
+  const reservedTarget = batches.resolveReceiptLotTarget([],'2026-09-05',3,0)
+  const reservedPlan = batches.planReceiveBatchStock({...reservedInput,receiptLotTarget:reservedTarget,reservedBatchId:100})
+  const repeatedPlan = batches.planReceiveBatchStock({...reservedInput,
+    receiptLotTarget:{...reservedTarget,existingBatchId:100},receiptCostPreimage:{batchExists:true,receivedCostUsd:3}})
+  await getDb(reserved.env).batch([...reservedPlan.statements,...repeatedPlan.statements,{sql:'DELETE FROM stock_session_guards'}])
+  assert.equal(lotRows(reserved)[0].id,100)
+  assert.equal(lotRows(reserved)[0].received_quantity,2)
+  assert.equal(lotRows(reserved)[0].received_cost_usd,6)
+  const reservedBefore = JSON.stringify({lots:lotRows(reserved),stock:reserved.sql.prepare('SELECT * FROM branch_stock').all()})
+  const otherTarget = batches.resolveReceiptLotTarget(lotRows(reserved),'2026-09-05',5,0)
+  const collision = batches.planReceiveBatchStock({...reservedInput,unitCostUsd:5,receiptLotTarget:otherTarget,reservedBatchId:100})
+  await assert.rejects(getDb(reserved.env).batch([...collision.statements,{sql:'DELETE FROM stock_session_guards'}]))
+  assert.equal(JSON.stringify({lots:lotRows(reserved),stock:reserved.sql.prepare('SELECT * FROM branch_stock').all()}),reservedBefore)
+  for (const extra of [{reservedBatchId:0},{reservedBatchId:1.5},{reservedBatchId:101,receiptLotTarget:{...reservedTarget,existingBatchId:100}},
+    {reservedBatchId:101,receiptLotTarget:{...reservedTarget,baselineBatchId:101}}, {reservedBatchId:101,batchId:100}]) {
+    assert.throws(()=>batches.planReceiveBatchStock({...reservedInput,receiptLotTarget:reservedTarget,...extra}),/reservation/)
+  }
+  console.log('PASS internal reserved lot IDs support repeated chunk receipts and fail closed on identity collisions')
+
   const raced = fixture()
   const emptyHistory = snapshots(raced)
   raced.beforeCommit(sql => sql.exec("INSERT INTO product_cost_entries(product_id,cost_usd,baseline_batch_id,source) VALUES(1,7,99,'manual')"))
