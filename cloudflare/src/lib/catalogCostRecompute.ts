@@ -211,6 +211,7 @@ export type CostBreakdownLotInput = {
 /** One manual cost-price edit (product_cost_entries row) -- see recordManualCostEntry. */
 export type CostBreakdownManualInput = {
   id: number
+  previous_cost_usd?: number | null
   cost_usd: number | null
   cost_khr: number | null
   user_name: string | null
@@ -221,6 +222,7 @@ export type CostBreakdownManualInput = {
 
 export type CostBreakdownInputRow = {
   source: 'lot' | 'manual' | 'catalog'
+  previous_cost_usd?: number | null
   /** Kept for older clients: the existing "<batch> · <branch>" text (or "Manual · <user>" for a manual entry). */
   label: string
   lot_code: string | null
@@ -326,6 +328,7 @@ export function buildCatalogCostBreakdown(
     const cost = entry.cost_usd != null && Number.isFinite(Number(entry.cost_usd)) ? Number(entry.cost_usd) : null
     const base = {
       source: 'manual' as const, label, cost_usd: cost, cost_khr: entry.cost_khr ?? null,
+      previous_cost_usd: entry.previous_cost_usd ?? null,
       lot_code: null, batch_number: null, received_at: null, branch_name: null,
       user_name: entry.user_name ?? null, recorded_at: entry.created_at ?? null,
     }
@@ -369,7 +372,7 @@ export async function getCatalogCostBreakdown(db: D1Compat, productId: number): 
   `).all<CostBreakdownLotInput>({ id: productId })
 
   const manualEntries = await db.prepare(`
-    SELECT id, cost_usd, cost_khr, user_name, created_at, baseline_batch_id
+    SELECT id, cost_usd, cost_khr, previous_cost_usd, user_name, created_at, baseline_batch_id
     FROM product_cost_entries
     WHERE product_id = @id
     ORDER BY id ASC
@@ -429,10 +432,11 @@ export function planManualCostEntry(
   if (!changed) return null
 
   return { sql: `
-    INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, source, user_id, user_name, baseline_batch_id)
-    VALUES (@productId, @costUsd, @costKhr, 'manual', @userId, @userName,
+    INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
+    VALUES (@productId, @costUsd, @costKhr, @previousCostUsd, 'manual', @userId, @userName,
       (SELECT COALESCE(MAX(id),0) FROM product_batches WHERE variant_product_id=@productId))
-  `, params: { productId, costUsd: afterUsd, costKhr: hasKhr ? afterKhr : null, userId: actor.id, userName: actor.name } }
+  `, params: { productId, costUsd: afterUsd, costKhr: hasKhr ? afterKhr : null,
+    previousCostUsd: before.cost_price_usd, userId: actor.id, userName: actor.name } }
 }
 
 export async function recordManualCostEntry(
