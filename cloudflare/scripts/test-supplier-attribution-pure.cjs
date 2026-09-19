@@ -92,6 +92,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
 const analyticsPrecision = { './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
+const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRoles = loadReal('lib/branchRoles.ts')
 const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
   './db': loadReal('lib/db.ts'),
@@ -112,7 +113,7 @@ const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnaly
 // against scripts/ and the whole test file dies at load time.
 const conflictControl = loadReal('lib/conflictControl.ts')
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 
 // Sep 6 2026: the owner's low-stock alert setting reaches this module through
 // lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
@@ -189,6 +190,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/audit': { audit: async () => {} },
   '../lib/telegram': { sendTelegramEvent: async () => false },
   '../lib/permissions': permissions,
+  '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
@@ -234,6 +236,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
 const app = inventoryRoute.default
 
 const batchesRoute = loadReal('routes/batches.ts', {
+  '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/moneyPrecision': moneyPrecision,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
