@@ -1,4 +1,7 @@
 import ProductNameRail from '../shared/ProductNameRail'
+import { useApp } from '../../AppContext'
+import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
+import type { PermissionUser } from '../../utils/permissions.ts'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
@@ -134,6 +137,7 @@ function ClusterCard({
   onEdit: (product: ClusterProduct) => void
 }) {
   const [key, fallback] = SEVERITY_LABEL_KEY[cluster.severity]
+  const canViewCosts = canViewAcquisitionCosts((useApp() as { user: PermissionUser }).user)
   // Decide-all-then-apply (user, Aug 30: "only allow changes after all in
   // one conflict is fully decided, remove, keep, resolve"): every product
   // in the group takes an explicit Keep/Remove decision; Apply arms only
@@ -215,7 +219,7 @@ function ClusterCard({
                   <div className="min-w-0 font-medium text-gray-900 dark:text-white"><ProductNameRail name={String((product.name || `#${product.id}`) ?? '')} /></div>
                   <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-gray-500 dark:text-gray-400">
                     {cluster.type !== 'barcode' && product.barcode ? <span>{product.barcode}</span> : null}
-                    <span>{t('cost_price') || 'Cost price'}: {money(product.cost_price_usd)}</span>
+                    {canViewCosts ? <span>{t('cost_price') || 'Cost price'}: {money(product.cost_price_usd)}</span> : null}
                     <span>{t('selling_price') || 'Selling price'}: {money(product.selling_price_usd)}</span>
                     <span>{Number(product.stock_quantity) || 0} {t('pcs') || 'pcs'}</span>
                     {(product.branch_stock || []).map((line) => (
@@ -311,6 +315,9 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
   onReviewProductIdsConsumed?: () => void
 }) {
   const [clusters, setClusters] = useState<Cluster[]>([])
+  const { user } = useApp() as { user: PermissionUser }
+  const canViewCosts = canViewAcquisitionCosts(user)
+  const canEditCosts = canEditAcquisitionCosts(user)
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [search, setSearch] = useState('')
@@ -444,12 +451,14 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
   // baselined on row A reads as dirty without anyone typing.
   const { dirty: editFormDirty } = useFormDirty(editTarget ? editForm : null, editTarget?.id ?? null)
   const [editSaving, setEditSaving] = useState(false)
+  const [costEdited, setCostEdited] = useState(false)
   const openEdit = (product: ClusterProduct) => {
+    setCostEdited(false)
     setEditTarget(product)
     setEditForm({
       name: String(product.name || ''),
       barcode: String(product.barcode || ''),
-      cost: String(Number(product.cost_price_usd) || 0),
+      cost: canViewCosts && product.cost_price_usd != null ? String(product.cost_price_usd) : '',
       price: String(Number(product.selling_price_usd) || 0),
     })
   }
@@ -460,7 +469,7 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
       await updateProduct(editTarget.id, {
         name: editForm.name.trim(),
         barcode: editForm.barcode.trim(),
-        cost_price_usd: Number(editForm.cost) || 0,
+        ...omitUnauthorizedCatalogCosts((canViewCosts || costEdited) && editForm.cost.trim() ? { cost_price_usd: Number(editForm.cost) || 0 } : {}, user),
         selling_price_usd: Number(editForm.price) || 0,
       })
       notify(t('product_updated') || 'Product updated')
@@ -930,14 +939,15 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
               ['barcode', t('barcode') || 'Barcode', 'text'],
               ['cost', t('cost_price') || 'Cost (USD)', 'number'],
               ['price', t('selling_price') || 'Selling price (USD)', 'number'],
-            ] as const).map(([field, label, type]) => (
+            ] as const).filter(([field]) => field !== 'cost' || canViewCosts || canEditCosts).map(([field, label, type]) => (
               <label key={field} className="block">
                 <span className="mb-0.5 block text-[11px] font-medium text-gray-500 dark:text-gray-400">{label}</span>
                 <input
                   type={type}
                   className="input w-full text-sm"
-                  value={editForm[field]}
-                  onChange={(event) => setEditForm((current) => ({ ...current, [field]: event.target.value }))}
+                  value={field === 'cost' && !canViewCosts && !costEdited ? '' : editForm[field]}
+                  disabled={field === 'cost' && !canEditCosts}
+                  onChange={(event) => { if (field === 'cost') setCostEdited(true); setEditForm((current) => ({ ...current, [field]: event.target.value })) }}
                 />
               </label>
             ))}

@@ -8,6 +8,8 @@ import { ModalCloseContext } from '../shared/modalCloseContext.ts'
 import { ProductImg } from './shared/primitives.tsx'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import type { PermissionUser } from '../../utils/permissions.ts'
 import type {
   SelectedConflictGroupReviewGroup,
   SelectedConflictGroupReviewResult,
@@ -23,6 +25,7 @@ import {
 
 type Translate = (key: string) => string | undefined
 const useApp = useAppHook as unknown as () => {
+  user: PermissionUser
   fmtUSD: (value: unknown) => string
   fmtKHR: (value: unknown) => string
 }
@@ -54,7 +57,8 @@ function optionalMoney(value: unknown, format: (value: unknown) => string, unkno
 }
 
 function GroupMoneyRows({ group, t }: { group: SelectedConflictGroupReviewGroup; t: Translate }) {
-  const { fmtUSD, fmtKHR } = useApp()
+  const { fmtUSD, fmtKHR, user } = useApp()
+  const canViewCosts = canViewAcquisitionCosts(user)
   const tr = (key: string, fallback: string) => {
     const translated = t(key)
     return translated && translated !== key ? translated : fallback
@@ -62,7 +66,7 @@ function GroupMoneyRows({ group, t }: { group: SelectedConflictGroupReviewGroup;
   const merged = group.economics.merged
   return (
     <div className="space-y-1 text-xs">
-      <div className="flex justify-between gap-2"><span>{tr('cost_price', 'Cost')}</span><span>{optionalMoney(merged.cost_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(merged.cost_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</span></div>
+      {canViewCosts ? <div className="flex justify-between gap-2"><span>{tr('cost_price', 'Cost')}</span><span>{optionalMoney(merged.cost_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(merged.cost_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</span></div> : null}
       <div className="flex justify-between gap-2"><span>{tr('selling_price', 'Selling price')}</span><span>{optionalMoney(merged.selling_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(merged.selling_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</span></div>
       <div className="flex justify-between gap-2"><span>{tr('wholesale_price', 'Wholesale price')}</span><span>{optionalMoney(merged.wholesale_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(merged.wholesale_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</span></div>
       <p className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -177,7 +181,8 @@ function GroupReviewCard({ group, choice, choicesFrozen, onChoice, t }: {
   onChoice: (patch: Partial<SelectedConflictGroupResolutionChoice>) => void
   t: Translate
 }) {
-  const { fmtUSD, fmtKHR } = useApp()
+  const { fmtUSD, fmtKHR, user } = useApp()
+  const canViewCosts = canViewAcquisitionCosts(user)
   const tr = (key: string, fallback: string) => {
     const translated = t(key)
     return translated && translated !== key ? translated : fallback
@@ -211,7 +216,7 @@ function GroupReviewCard({ group, choice, choicesFrozen, onChoice, t }: {
                     <p className="font-semibold text-gray-900 dark:text-white">#{member.id} · {member.name || tr('unknown', 'Unknown')}</p>
                     <p className="break-all text-[11px] text-gray-500 dark:text-gray-400">{tr('barcode', 'Barcode')}: {member.barcode == null || member.barcode === '' ? tr('selected_conflict_blank', 'Blank') : member.barcode}</p>
                     <p className="text-[11px] text-gray-500 dark:text-gray-400">{member.category || tr('selected_conflict_blank', 'Blank')} · {member.brand || tr('selected_conflict_blank', 'Blank')} · {member.unit || tr('selected_conflict_blank', 'Blank')}</p>
-                    <p className="text-[11px] text-gray-500 dark:text-gray-400">{tr('cost_price', 'Cost')}: {optionalMoney(member.cost_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(member.cost_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</p>
+                    {canViewCosts ? <p className="text-[11px] text-gray-500 dark:text-gray-400">{tr('cost_price', 'Cost')}: {optionalMoney(member.cost_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(member.cost_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</p> : null}
                     <p className="text-[11px] text-gray-500 dark:text-gray-400">{tr('selling_price', 'Selling price')}: {optionalMoney(member.selling_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(member.selling_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</p>
                     <p className="text-[11px] text-gray-500 dark:text-gray-400">{tr('wholesale_price', 'Wholesale price')}: {optionalMoney(member.wholesale_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(member.wholesale_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</p>
                   </div>
@@ -222,7 +227,7 @@ function GroupReviewCard({ group, choice, choicesFrozen, onChoice, t }: {
                     <div key={`${lot.batch_id}-${lot.branch_id}`} className="rounded bg-gray-100 p-1.5 dark:bg-zinc-800">
                       {tr('batch', 'Received date')} {batchDisplayLabel({ id: lot.batch_id, lot_code: lot.lot_code || lot.batch_key || null, received_at: lot.received_at || null }, tr('batch', 'Received date'))} · {lot.branch_id == null ? tr('unknown', 'Unknown') : (stockRows.find((row) => row.branch_id === lot.branch_id)?.branch_name || `#${lot.branch_id}`)} · {lot.quantity ?? tr('unknown', 'Unknown')}
                       <br />{tr('supplier', 'Supplier')}: {supplierDisplay(lot.supplier_name, tr)} · {tr('received_date', 'Received date')}: {lot.received_at || tr('unknown', 'Unknown')} · {tr('expiry_date', 'Expiry date')}: {lot.expiry_date || tr('unknown', 'Unknown')}
-                      <br />{tr('selected_conflict_received_quantity', 'Received quantity')}: {lot.received_quantity ?? tr('unknown', 'Unknown')} · {tr('selected_conflict_received_cost', 'Received cost')}: {optionalMoney(lot.received_cost_usd ?? lot.unit_cost_usd, fmtUSD, tr('unknown', 'Unknown'))}
+                      <br />{tr('selected_conflict_received_quantity', 'Received quantity')}: {lot.received_quantity ?? tr('unknown', 'Unknown')}{canViewCosts ? <> · {tr('selected_conflict_received_cost', 'Received cost')}: {optionalMoney(lot.received_cost_usd ?? lot.unit_cost_usd, fmtUSD, tr('unknown', 'Unknown'))}</> : null}
                       <br />{tr('selected_conflict_payment_status', 'Payment status')}: {lot.payment_status || tr('unknown', 'Unknown')} · {tr('due_date', 'Due date')}: {lot.credit_due_date || tr('unknown', 'Unknown')} · {lot.is_active ? tr('active', 'Active') : tr('inactive', 'Inactive')}
                     </div>
                   ))}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useApp } from '../../../AppContext'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
@@ -54,7 +55,13 @@ function decisionFor(choice: string): { action: string; field_overrides?: Record
   return { action: 'apply' }
 }
 
-export default function ProductServerImportReviewScreen({ jobId, jobRevision, t, notify, onApproved, onReviewLater, onCancel, onJob, autoApprove = false, rowCount = 0 }: {
+export default function ProductServerImportReviewScreen(props: Parameters<typeof ProductServerImportReviewBody>[0]) {
+  const { hasPermission } = useApp() as { hasPermission: (key: string) => boolean }
+  if (!hasPermission('product_cost_view')) return <p role="status">{props.t('product_cost_import_view_required') || 'Cost view permission is required to review financial import data.'}</p>
+  return <>{!hasPermission('product_cost_edit') ? <p role="status">{props.t('product_cost_import_required') || 'Cost edit permission is required for this import format.'}</p> : null}<ProductServerImportReviewBody {...props} autoApprove={props.autoApprove && hasPermission('product_cost_edit')} /></>
+}
+
+function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApproved, onReviewLater, onCancel, onJob, autoApprove = false, rowCount = 0 }: {
   jobId: string | number
   jobRevision?: unknown
   t: TranslateFn
@@ -76,6 +83,7 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
   // breakdown replaces it as soon as analysis lands.
   rowCount?: number
 }) {
+  const canEditCosts = (useApp() as { hasPermission: (key: string) => boolean }).hasPermission('product_cost_edit')
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
     return value && value !== key ? value : fallback
@@ -154,6 +162,7 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
   useEffect(() => { if (status === 'awaiting_review' && (!autoApprove || autoFellBack)) void loadRows() }, [filter, page, query, sort, status, autoApprove, autoFellBack]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveDecision = async (row: ReviewRow, choice: string) => {
+    if (!canEditCosts) return
     if (savingRow !== null) return
     setSavingRow(row.rowNumber)
     try {
@@ -167,6 +176,7 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
   }
 
   const confirm = async ({ auto = false }: { auto?: boolean } = {}) => {
+    if (!canEditCosts) return
     // Manual confirm keeps its client guard; auto-approve lets the server be the
     // authority (it 409s on unresolved conflicts), so it need not wait for the
     // review rows to have loaded first.
@@ -230,7 +240,7 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
       {!terminal ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-blue-500" /> : <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />}
       <p className="text-sm font-semibold">{terminal ? tr('import_analysis_stopped', 'Import analysis stopped') : tr('import_applying_now', 'Importing…')}</p>
       <p className="text-xs text-slate-500 dark:text-slate-400">{jobError || (terminal ? status : (progressDetail || tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.')))}</p>
-      <div className="flex justify-center gap-2"><button type="button" className="btn-secondary text-sm" onClick={() => void onCancel()}>{tr('cancel_import', 'Cancel import')}</button><button type="button" className="btn-secondary text-sm" onClick={() => void onReviewLater()}>{tr('continue_in_background', 'Continue in background')}</button></div>
+      <div className="flex justify-center gap-2"><button type="button" className="btn-secondary text-sm" disabled={!canEditCosts} onClick={() => void onCancel()}>{tr('cancel_import', 'Cancel import')}</button><button type="button" className="btn-secondary text-sm" onClick={() => void onReviewLater()}>{tr('continue_in_background', 'Continue in background')}</button></div>
     </div>
   }
 
@@ -240,7 +250,7 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
       {!terminal ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-blue-500" /> : <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />}
       <p className="text-sm font-semibold">{terminal ? tr('import_analysis_stopped', 'Import analysis stopped') : tr('import_analyzing', 'Analyzing on the server…')}</p>
       <p className="text-xs text-slate-500 dark:text-slate-400">{jobError || (terminal ? status : tr('import_analyzing_hint', 'The persisted review will open here when analysis finishes.'))}</p>
-      <div className="flex justify-center gap-2"><button type="button" className="btn-secondary text-sm" onClick={() => void onCancel()}>{tr('cancel_import', 'Cancel import')}</button><button type="button" className="btn-secondary text-sm" onClick={() => void onReviewLater()}>{tr('continue_in_background', 'Continue in background')}</button></div>
+      <div className="flex justify-center gap-2"><button type="button" className="btn-secondary text-sm" disabled={!canEditCosts} onClick={() => void onCancel()}>{tr('cancel_import', 'Cancel import')}</button><button type="button" className="btn-secondary text-sm" onClick={() => void onReviewLater()}>{tr('continue_in_background', 'Continue in background')}</button></div>
     </div>
   }
 
@@ -263,12 +273,12 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
           { value: 'skip', label: 'Skip row' },
         ]
         if (row.action === 'update') options.splice(1, 0, { value: 'merge_stock', label: 'Stock only' }, { value: 'override_add', label: 'Update + add stock' }, { value: 'override_replace', label: 'Update details; keep stock' })
-        return <tr key={row.rowNumber} className="border-t border-slate-100 align-top dark:border-slate-800"><td className="px-3 py-2">{row.rowNumber}</td><td className="px-3 py-2 font-medium">{row.identifier || String(row.data?.name || '—')}<div className="mt-0.5 font-normal text-slate-400">{String(row.data?.barcode || row.data?.sku || '')}</div></td><td className="px-3 py-2">{row.action}</td><td className="max-w-sm px-3 py-2 text-slate-500 dark:text-slate-400">{row.message || (row.warnings || []).map((warning) => warning.message).filter(Boolean).join(' · ') || '—'}</td><td className="w-52 px-3 py-2"><AppSelect value={choiceFor(row)} onChange={(value) => void saveDecision(row, value)} ariaLabel={`Decision for row ${row.rowNumber}`} buttonClassName="w-full px-2 py-1.5 text-xs" options={options} disabled={savingRow !== null} /></td></tr>
+        return <tr key={row.rowNumber} className="border-t border-slate-100 align-top dark:border-slate-800"><td className="px-3 py-2">{row.rowNumber}</td><td className="px-3 py-2 font-medium">{row.identifier || String(row.data?.name || '—')}<div className="mt-0.5 font-normal text-slate-400">{String(row.data?.barcode || row.data?.sku || '')}</div></td><td className="px-3 py-2">{row.action}</td><td className="max-w-sm px-3 py-2 text-slate-500 dark:text-slate-400">{row.message || (row.warnings || []).map((warning) => warning.message).filter(Boolean).join(' · ') || '—'}</td><td className="w-52 px-3 py-2"><AppSelect value={choiceFor(row)} onChange={(value) => void saveDecision(row, value)} ariaLabel={`Decision for row ${row.rowNumber}`} buttonClassName="w-full px-2 py-1.5 text-xs" options={options} disabled={!canEditCosts || savingRow !== null} /></td></tr>
       })}</tbody></table> : <div className="p-8 text-center text-sm text-slate-500">No matching rows.</div>}
     </div>
     <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={PAGE_SIZE} totalItems={total} label="records" onPageChange={setPage} /></div>
     {jobError ? <p className="text-xs text-red-600 dark:text-red-400">{jobError}</p> : null}
-    <div className="sticky bottom-0 -mx-5 -mb-5 flex justify-end gap-2 border-t border-slate-100 bg-white px-5 pb-5 pt-3 dark:border-slate-800 dark:bg-slate-900"><button type="button" className="btn-secondary" disabled={approving} onClick={() => void onReviewLater()}>Review later</button><button type="button" className="btn-primary" disabled={approving || loadingRows || unresolved > 0} onClick={() => void confirm()}>{approving ? 'Approving…' : 'Confirm & import'}</button></div>
+    <div className="sticky bottom-0 -mx-5 -mb-5 flex justify-end gap-2 border-t border-slate-100 bg-white px-5 pb-5 pt-3 dark:border-slate-800 dark:bg-slate-900"><button type="button" className="btn-secondary" disabled={approving} onClick={() => void onReviewLater()}>Review later</button><button type="button" className="btn-primary" disabled={!canEditCosts || approving || loadingRows || unresolved > 0} onClick={() => void confirm()}>{approving ? 'Approving…' : 'Confirm & import'}</button></div>
   </div>
 }
 
