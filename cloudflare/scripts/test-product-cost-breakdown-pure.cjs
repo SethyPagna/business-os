@@ -4,8 +4,7 @@
 // /api/products/:id/cost-breakdown (buildCatalogCostBreakdown in
 // lib/catalogCostRecompute.ts) with discriminating fixtures: duplicates and a
 // zero must be excluded from the mean the same way recomputeCatalogCost's own
-// formula excludes them, and a genuine outlier must still be REPORTED, not
-// silently averaged.
+// formula excludes them, and widely separated recorded prices still average.
 //
 // It loads the REAL lib/catalogCostRecompute.ts, lib/productDetailRule.ts and
 // lib/moneyPrecision.ts (transpiled, no D1), so what is asserted is
@@ -83,17 +82,16 @@ check('3, 5, 5(dup), 0(zero) -> distinct [3,5], mean 4.00, result 4.00', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Outlier guard: reported, not silently averaged -- same COST_OUTLIER_RATIO
-// (2x) as resolveMergedCostDetail/recomputeCatalogCost.
+// Catalog observations do not use the unrelated product-merge outlier rule.
 // ---------------------------------------------------------------------------
-check('2 and 200 (>2x apart) -> outlier fires, highest kept as result, mean still shown for the reading', () => {
+check('widely separated real receipt costs are averaged without a merge outlier heuristic', () => {
   const lots = [lot(1, 2), lot(2, 200)]
   const result = buildCatalogCostBreakdown(102, { cost_price_usd: 0, cost_price_khr: 0 }, lots)
   assert.deepEqual(result.distinct_usd, [2, 200])
   assert.equal(result.mean_usd, 101, 'the raw mean is still surfaced for the arithmetic reading')
-  assert.equal(result.outlier_guard.fired, true)
-  assert.equal(result.outlier_guard.kept, 200)
-  assert.equal(result.result_usd, 200, 'the actual catalog figure is the guarded result, not the raw mean')
+  assert.equal(result.outlier_guard.fired, false)
+  assert.equal(result.outlier_guard.kept, null)
+  assert.equal(result.result_usd, 101)
 })
 
 check('a hair over the 2x threshold still averages -- guard is > ratio, not >=', () => {
@@ -241,7 +239,7 @@ check('...then add-stock lot 6 (after the second override baseline) -> (4+6)/2 =
   assert.equal(result.result_usd, 5)
 })
 
-check('an override more than 2x the still-eligible lots is an outlier -- reported, kept as the highest', () => {
+check('an override and later eligible lots use the same distinct mean regardless of ratio', () => {
   const lots = [lot(1, 3, { received_at: '2026-09-01' })]
   const entries = [manual(9, 9, 0, { created_at: '2026-09-02T00:00:00Z' })]
   // baseline=0 -> the lot (id 1) is still eligible (1 > 0), so it and the
@@ -249,9 +247,9 @@ check('an override more than 2x the still-eligible lots is an outlier -- reporte
   // unless the baseline is at/after that lot's id.
   const result = buildCatalogCostBreakdown(202, { cost_price_usd: 0, cost_price_khr: 0 }, lots, entries)
   assert.deepEqual(result.distinct_usd, [3, 9])
-  assert.equal(result.outlier_guard.fired, true)
-  assert.equal(result.outlier_guard.kept, 9)
-  assert.equal(result.result_usd, 9)
+  assert.equal(result.outlier_guard.fired, false)
+  assert.equal(result.outlier_guard.kept, null)
+  assert.equal(result.result_usd, 6)
 })
 
 console.log(`${checks} checks passed`)

@@ -272,6 +272,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     try {
       const received = await receiveBatchStock(db, {
         productId, branchId, quantity: magnitude, batchId, unitCostUsd: m.unit_cost_usd ?? null,
+        historicalReceiptReplay: true, preserveHistoricalUnitCost: true,
         supplierId: priorAttribution?.supplier_id ?? null,
         supplierName: priorAttribution?.supplier_name ?? null,
         paymentStatus: priorAttribution?.payment_status === 'paid' || priorAttribution?.payment_status === 'credit' ? priorAttribution.payment_status : null,

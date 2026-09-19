@@ -258,7 +258,7 @@ async function main() {
       'native workerd permits only five compound SELECT terms; stock-session SQL must not depend on that ceiling')
   })
 
-  await check('reused neutral lot receipt rolls back attribution on failure and applies once on lost acknowledgement', async () => {
+  await check('new-priced receipt does not reclaim a neutral historical lot; rollback and lost acknowledgement remain atomic', async () => {
     for (const explicit of [false, true]) {
       const f = fixture()
       f.sql.exec("INSERT INTO suppliers(id,name) VALUES(1,'Supplier A'),(2,'Supplier B')")
@@ -273,13 +273,18 @@ async function main() {
       const neutral = allState()
       const next = receiveRequest(`next-attribution-${explicit}`, 5)
       Object.assign(next.items[0], { supplier_id: 2, supplier_name: 'Supplier B', unit_cost_usd: 3, payment_status: 'paid', ...(explicit ? { batch_id: a.items[0].batchId } : {}) })
+      if (explicit) {
+        await assert.rejects(commitStockSession(f.env, user, next), error => error.code === 'batch_cost_mismatch')
+        assert.deepEqual(allState(), neutral, 'an explicit mismatched historical lot fails before writes')
+        continue
+      }
       f.failReceiptAfterMetadata()
       await assert.rejects(commitStockSession(f.env, user, next), /injected failure/)
       assert.deepEqual(allState(), neutral, 'failed reuse rolls back metadata, stock and all replay ledgers')
       f.loseNextCommitAcknowledgement()
       const b = await commitStockSession(f.env, user, next)
       assert.equal(b.replayed, true)
-      assert.equal(b.items[0].batchId, a.items[0].batchId)
+      assert.notEqual(b.items[0].batchId, a.items[0].batchId)
       assert.deepEqual(f.sql.prepare('SELECT supplier_id,supplier_name,unit_cost_usd,payment_status,credit_due_date,received_quantity,received_cost_usd FROM product_batches WHERE id=?').get(b.items[0].batchId), {
         supplier_id: 2, supplier_name: 'Supplier B', unit_cost_usd: 3, payment_status: 'paid', credit_due_date: null, received_quantity: 5, received_cost_usd: 15,
       })
@@ -650,7 +655,7 @@ async function main() {
     assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 5)
   })
 
-  await check('later receipts accumulate money and quantity without replacing first attribution', async () => {
+  await check('later differently priced receipts retain separate lots and purchase attribution', async () => {
     const f = fixture()
     const first = receiveRequest('stock-request-first', 5)
     first.items[0].supplier_name = 'Supplier A'
@@ -663,10 +668,13 @@ async function main() {
     second.items[0].credit_due_date = '2026-09-30'
     await commitStockSession(f.env, user, second)
     assert.deepEqual(f.sql.prepare(`SELECT supplier_name,unit_cost_usd,payment_status,credit_due_date,received_quantity,received_cost_usd
-      FROM product_batches`).get(), {
+      FROM product_batches ORDER BY id`).all(), [{
       supplier_name: 'Supplier A', unit_cost_usd: 2, payment_status: 'paid', credit_due_date: null,
-      received_quantity: 10, received_cost_usd: 25,
-    })
+      received_quantity: 5, received_cost_usd: 10,
+    }, {
+      supplier_name: 'Supplier B', unit_cost_usd: 3, payment_status: 'credit', credit_due_date: '2026-09-30',
+      received_quantity: 5, received_cost_usd: 15,
+    }])
   })
 
   await check('revision guard rejects an ABA stock race with the same visible quantity', async () => {

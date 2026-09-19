@@ -6,11 +6,19 @@ const path = require('node:path')
 const ts = require('typescript')
 const SQLite = require('better-sqlite3')
 const raw = new SQLite(':memory:')
-raw.exec('CREATE TABLE product_batches(id INTEGER PRIMARY KEY, updated_at TEXT, unit_cost_usd REAL); INSERT INTO product_batches VALUES(1,NULL,1.2345)')
+raw.exec(`CREATE TABLE products(id INTEGER PRIMARY KEY,cost_price_usd REAL,purchase_price_usd REAL);
+  CREATE TABLE product_cost_entries(id INTEGER PRIMARY KEY,product_id INTEGER,cost_usd REAL,baseline_batch_id INTEGER);
+  CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,is_active INTEGER,updated_at TEXT,unit_cost_usd REAL);
+  INSERT INTO products VALUES(1,1.2345,1.2345); INSERT INTO product_batches VALUES(1,1,1,NULL,1.2345)`)
 const db = { prepare(sql) {
   const statement = raw.prepare(sql)
   const args = (p) => Array.isArray(p) ? p : p == null ? [] : [p]
   return { get: async p => statement.get(...args(p)), all: async p => statement.all(...args(p)), run: async p => statement.run(...args(p)) }
+}, async batch(statements) {
+  return raw.transaction(() => statements.map(({sql,params}) => {
+    const result=raw.prepare(sql).run(params || {})
+    return {meta:{changes:result.changes,last_row_id:Number(result.lastInsertRowid)}}
+  }))()
 } }
 let receives = 0, audits = 0
 const overrides = {
@@ -66,11 +74,19 @@ async function request(method, cost, extra = {}) {
   // so a future regression that awaited audit() before responding (turning
   // its rejection into a 500) would be caught here.
   const raw2 = new SQLite(':memory:')
-  raw2.exec('CREATE TABLE product_batches(id INTEGER PRIMARY KEY, updated_at TEXT, unit_cost_usd REAL); INSERT INTO product_batches VALUES(1,NULL,1.2345)')
+  raw2.exec(`CREATE TABLE products(id INTEGER PRIMARY KEY,cost_price_usd REAL,purchase_price_usd REAL);
+    CREATE TABLE product_cost_entries(id INTEGER PRIMARY KEY,product_id INTEGER,cost_usd REAL,baseline_batch_id INTEGER);
+    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,is_active INTEGER,updated_at TEXT,unit_cost_usd REAL);
+    INSERT INTO products VALUES(1,1.2345,1.2345); INSERT INTO product_batches VALUES(1,1,1,NULL,1.2345)`)
   const db2 = { prepare(sql) {
     const statement = raw2.prepare(sql)
     const args = (p) => Array.isArray(p) ? p : p == null ? [] : [p]
     return { get: async p => statement.get(...args(p)), all: async p => statement.all(...args(p)), run: async p => statement.run(...args(p)) }
+  }, async batch(statements) {
+    return raw2.transaction(() => statements.map(({sql,params}) => {
+      const result=raw2.prepare(sql).run(params || {})
+      return {meta:{changes:result.changes,last_row_id:Number(result.lastInsertRowid)}}
+    }))()
   } }
   let deferredRejected = false
   const throwingOverrides = {

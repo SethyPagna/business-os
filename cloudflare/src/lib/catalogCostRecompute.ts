@@ -1,6 +1,17 @@
 import type { D1Compat } from './db'
-import { resolveMergedCostDetail, type MergedCostOutlier } from './productDetailRule'
+import type { MergedCostOutlier } from './productDetailRule'
 import { meanMoney4, roundMoney4 } from './moneyPrecision'
+
+// Catalog receipts are observed purchase prices, not an identity-merge
+// heuristic. Every distinct positive recorded price contributes equally,
+// even when prices differ by more than twofold. Do not change merge policy.
+function catalogCostMean(rows: Array<{ cost_price_usd: number | null }>): number | null {
+  const values = [...new Set(rows.flatMap(row => {
+    const value = row.cost_price_usd
+    return value != null && Number.isFinite(Number(value)) && Number(value) > 0 ? [Number(value)] : []
+  }))]
+  return values.length ? meanMoney4(values) : null
+}
 
 // Shared by catalogCostRecomputeStatement (SQL) and getCatalogCostBreakdown
 // (JS, via a plain SELECT): "the latest manual cost entry for this product,
@@ -34,8 +45,8 @@ export type CatalogCostRecomputeResult = {
  * twin -- see mirrorCostFields in routes/inventory.ts) as the mean of the
  * DISTINCT non-zero costs across the product row's own ACTIVE lots
  * (`product_batches.is_active = 1`, `unit_cost_usd` column) -- see
- * resolveMergedCostDetail in productDetailRule.ts for the averaging/outlier
- * rule itself (owner ruling, 2026-09-04 and 2026-09-16: distinct non-zero
+ * catalogCostMean above for the catalog-only averaging
+ * rule (owner ruling, 2026-09-04 and 2026-09-16: distinct non-zero
  * costs add together and divide by the count of DIFFERENT costs).
  *
  * KHR is never touched: product_batches carries unit_cost_usd only -- no lot
@@ -109,13 +120,11 @@ export async function recomputeCatalogCost(db: D1Compat, productId: number): Pro
   const before = { usd: Number(product.cost_price_usd) || 0, khr: Number(product.cost_price_khr) || 0 }
   const candidates = lots.map((lot) => ({ cost_price_usd: lot.unit_cost_usd }))
   if (latestManualEntry) candidates.push({ cost_price_usd: latestManualEntry.cost_usd })
-  const { merged, outliers } = resolveMergedCostDetail(candidates)
+  const derivedUsd = catalogCostMean(candidates)
+  const outliers: MergedCostOutlier[] = []
 
-  // merged.cost_price_usd is 0 both when no lot carried a cost at all and
-  // when every lot's cost was explicitly 0 (free goods) -- resolveMergedCostDetail
-  // treats a 0 as "not recorded" either way. Either way, that is not real
-  // data this function should act on: keep the existing figure.
-  const derivedUsd = merged.cost_price_usd
+  // No positive recorded input: keep the existing figure rather than
+  // treating an absent or free-goods cost as an override.
   const after = { usd: derivedUsd && derivedUsd > 0 ? derivedUsd : before.usd, khr: before.khr }
   const changed = after.usd !== before.usd
 
@@ -146,7 +155,7 @@ export async function recomputeCatalogCost(db: D1Compat, productId: number): Pro
  * So for this one caller the recompute has to be a statement inside the
  * batch, ahead of the postimage capture, not a follow-up async call.
  *
- * Same averaging/outlier rule as resolveMergedCostDetail (distinct non-zero
+ * Same catalog-only averaging rule as catalogCostMean (distinct non-zero
  * `product_batches.unit_cost_usd` values for this product's active lots
  * received AFTER the latest manual entry's baseline (see
  * LATEST_MANUAL_COST_ENTRY_BASELINE_SQL -- a lot before that baseline no
@@ -154,8 +163,7 @@ export async function recomputeCatalogCost(db: D1Compat, productId: number): Pro
  * with the latest `product_cost_entries` row for this product (a manual
  * cost-price edit, see recordManualCostEntry) if it carries a real cost --
  * older manual entries never rejoin the set, same JS/SQL selection as
- * recomputeCatalogCost above; >COST_OUTLIER_RATIO apart keeps the dearest;
- * otherwise the mean rounded to 4 decimals), and the same "no real lot cost
+ * recomputeCatalogCost above; mean rounded to 4 decimals), and the same "no real lot cost
  * yet" guard: if every active lot (and the latest manual entry) is 0/NULL,
  * the CASE falls through to the column's own current value, i.e. no
  * zeroing. Mirrors purchase_price_usd exactly like the JS twin.
@@ -163,16 +171,15 @@ export async function recomputeCatalogCost(db: D1Compat, productId: number): Pro
 export function catalogCostRecomputeStatement(productId: number): { sql: string; params: Record<string, unknown> } {
   const derive = `(SELECT CASE
       WHEN COUNT(*) = 0 THEN NULL
-      WHEN MAX(cost) > 2 * MIN(cost) THEN MAX(cost)
       ELSE ROUND(SUM(cost) * 1.0 / COUNT(*), 4)
     END FROM (SELECT DISTINCT unit_cost_usd AS cost FROM product_batches
       WHERE variant_product_id = @productId AND is_active = 1
-        AND unit_cost_usd IS NOT NULL AND unit_cost_usd <> 0
+        AND unit_cost_usd IS NOT NULL AND unit_cost_usd > 0
         AND (id > ${LATEST_MANUAL_COST_ENTRY_BASELINE_SQL} OR ${LATEST_MANUAL_COST_ENTRY_BASELINE_SQL} IS NULL)
       UNION
       SELECT cost_usd AS cost FROM product_cost_entries
       WHERE id = ${LATEST_MANUAL_COST_ENTRY_ID_SQL}
-        AND cost_usd IS NOT NULL AND cost_usd <> 0))`
+        AND cost_usd IS NOT NULL AND cost_usd > 0))`
   return {
     sql: `UPDATE products SET
         cost_price_usd = COALESCE(${derive}, cost_price_usd),
@@ -284,7 +291,7 @@ export function buildCatalogCostBreakdown(
     .filter((lot) => baseline === null || lot.id > baseline)
     .map((lot) => ({ cost_price_usd: lot.unit_cost_usd }))
   if (latestManualEntry) candidates.push({ cost_price_usd: latestManualEntry.cost_usd })
-  const { merged, outliers } = resolveMergedCostDetail(candidates)
+  const derivedUsd = catalogCostMean(candidates)
 
   // Lots and manual entries interleaved chronologically (manual entries,
   // newest last -- same as a lot list already ordered by received date).
@@ -331,8 +338,8 @@ export function buildCatalogCostBreakdown(
 
   const distinctUsd = [...seenDistinct].sort((a, b) => a - b)
   const meanUsd = distinctUsd.length ? meanMoney4(distinctUsd) : 0
-  const outlierFired = outliers.some((outlier) => outlier.field === 'cost_price_usd')
-  const resultUsd = merged.cost_price_usd && merged.cost_price_usd > 0 ? merged.cost_price_usd : (Number(product.cost_price_usd) || 0)
+  const outlierFired = false
+  const resultUsd = derivedUsd != null ? derivedUsd : (Number(product.cost_price_usd) || 0)
 
   return {
     product_id: productId,
@@ -404,13 +411,12 @@ export async function getCatalogCostBreakdown(db: D1Compat, productId: number): 
  * {@link recomputeCatalogCost} so the new manual figure immediately joins
  * the formula, same as a fresh lot would.
  */
-export async function recordManualCostEntry(
-  db: D1Compat,
+export function planManualCostEntry(
   productId: number,
   before: { cost_price_usd: number | null; cost_price_khr: number | null },
   body: Record<string, unknown>,
   actor: { id: number | null; name: string | null },
-): Promise<number | null> {
+): { sql: string; params: Record<string, unknown> } | null {
   const hasUsd = Object.prototype.hasOwnProperty.call(body, 'cost_price_usd')
   const hasKhr = Object.prototype.hasOwnProperty.call(body, 'cost_price_khr')
   if (!hasUsd && !hasKhr) return null
@@ -422,15 +428,23 @@ export async function recordManualCostEntry(
   const changed = (hasUsd && afterUsd !== beforeUsd) || (hasKhr && afterKhr !== beforeKhr)
   if (!changed) return null
 
-  const maxLot = await db.prepare(
-    'SELECT COALESCE(MAX(id), 0) AS maxId FROM product_batches WHERE variant_product_id = @productId',
-  ).get<{ maxId: number }>({ productId })
-  const baselineBatchId = Number(maxLot?.maxId) || 0
-
-  const result = await db.prepare(`
+  return { sql: `
     INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, source, user_id, user_name, baseline_batch_id)
-    VALUES (@productId, @costUsd, @costKhr, 'manual', @userId, @userName, @baselineBatchId)
-  `).run({ productId, costUsd: afterUsd, costKhr: hasKhr ? afterKhr : null, userId: actor.id, userName: actor.name, baselineBatchId })
+    VALUES (@productId, @costUsd, @costKhr, 'manual', @userId, @userName,
+      (SELECT COALESCE(MAX(id),0) FROM product_batches WHERE variant_product_id=@productId))
+  `, params: { productId, costUsd: afterUsd, costKhr: hasKhr ? afterKhr : null, userId: actor.id, userName: actor.name } }
+}
+
+export async function recordManualCostEntry(
+  db: D1Compat,
+  productId: number,
+  before: { cost_price_usd: number | null; cost_price_khr: number | null },
+  body: Record<string, unknown>,
+  actor: { id: number | null; name: string | null },
+): Promise<number | null> {
+  const plan = planManualCostEntry(productId, before, body, actor)
+  if (!plan) return null
+  const result = await db.prepare(plan.sql).run(plan.params)
 
   const insertedId = Number(result?.lastInsertRowid ?? NaN)
   return Number.isFinite(insertedId) && insertedId > 0 ? insertedId : null
