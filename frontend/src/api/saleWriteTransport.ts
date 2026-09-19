@@ -10,6 +10,8 @@ import {
   route,
 } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
+import { captureActorReadScope, isActorReadScopeCurrent } from './actorReadScope.ts'
+import { captureOfflineSaleOwner, normalizeOfflineSaleOwner, offlineSaleOwnersMatch, OFFLINE_OWNER_REVIEW_MESSAGE, sameQueuedSaleRevision, stampOfflineSaleOwner } from './offlineQueueOwnership.ts'
 import {
   OFFLINE_SALE_SYNC_UPDATE_CHANNELS,
   dispatchSyncUpdates,
@@ -70,12 +72,12 @@ function isRetryableOfflineSaleError(error: unknown): boolean {
   return message.includes('timed out') || message.includes('server is offline') || message.includes('server unavailable')
 }
 
-async function findQueuedSale(clientRequestId: unknown): Promise<LocalRow | null> {
+async function findQueuedSale(clientRequestId: unknown, owner: unknown): Promise<LocalRow | null> {
   const clean = asText(clientRequestId).trim()
   if (!clean) return null
   const db = await getLocalDb()
   const rows = await localTable(db, 'sync_queue').where('channel').equals(OFFLINE_SALE_QUEUE_CHANNEL).toArray().catch(() => [])
-  return (rows as LocalRow[]).find((row) => asText((row.payload as SalePayload | undefined)?.client_request_id) === clean) || null
+  return (rows as LocalRow[]).find((row) => asText((row.payload as SalePayload | undefined)?.client_request_id) === clean && offlineSaleOwnersMatch((row.payload as SalePayload)?.offline_owner, owner)) || null
 }
 
 function buildOfflineSaleMirror(payload: SalePayload, receiptNumber: string, offlineId: number, now: string): LocalRow {
@@ -83,6 +85,7 @@ function buildOfflineSaleMirror(payload: SalePayload, receiptNumber: string, off
     id: offlineId,
     receipt_number: receiptNumber,
     client_request_id: payload.client_request_id,
+    offline_owner: payload.offline_owner,
     cashier_id: payload.cashier_id || null,
     cashier_name: payload.cashier_name || '',
     customer_name: payload.customer_name || '',
@@ -102,7 +105,8 @@ function buildOfflineSaleMirror(payload: SalePayload, receiptNumber: string, off
 
 async function queueOfflineSale(payload: SalePayload, reason = 'server_offline'): Promise<Record<string, unknown>> {
   const salePayload = ensureSaleClientRequestId({ ...(payload || {}) }, 'sale')
-  const existing = await findQueuedSale(salePayload.client_request_id)
+  if (!normalizeOfflineSaleOwner(salePayload.offline_owner)) throw new Error(OFFLINE_OWNER_REVIEW_MESSAGE)
+  const existing = await findQueuedSale(salePayload.client_request_id, salePayload.offline_owner)
   if (existing) {
     return {
       success: true,
@@ -128,7 +132,7 @@ async function queueOfflineSale(payload: SalePayload, reason = 'server_offline')
   // sanitizeClientCreatedAt puts the sale on the day it happened instead of
   // the day it synced (online checkouts send no created_at).
   salePayload.created_at = asText(salePayload.created_at) || now
-  const localId = -Math.abs(Date.now())
+  let localId = -Math.abs(Date.now())
   const row = {
     id: salePayload.client_request_id,
     channel: OFFLINE_SALE_QUEUE_CHANNEL,
@@ -154,6 +158,10 @@ async function queueOfflineSale(payload: SalePayload, reason = 'server_offline')
   // A WebKit process kill between two separate writes must never leave a sale
   // that appears recorded locally but can no longer reach the server.
   await db.transaction('rw', salesTable, queueTable, async () => {
+    // Millisecond ids can collide across tabs. Never overwrite another local
+    // sale while admitting this queue entry, even before replay begins.
+    while (await salesTable.get(localId)) localId -= 1
+    row.entity_id = localId
     await salesTable.put(buildOfflineSaleMirror(salePayload, receiptNumber, localId, now))
     await queueTable.put(row)
   })
@@ -187,30 +195,37 @@ function queuedSaleBackoffMs(retryCount = 0): number {
   return Math.min(5 * 60_000, OFFLINE_SALE_RETRY_DELAY_MS * Math.max(1, attempts + 1))
 }
 
-async function updateQueuedRow(row: LocalRow, updates: Record<string, unknown> = {}): Promise<void> {
-  if (!row?._seq) return
+async function updateQueuedRow(row: LocalRow, updates: Record<string, unknown> = {}): Promise<LocalRow | null> {
+  if (row?._seq == null) return null
   const db = await getLocalDb()
-  await localTable(db, 'sync_queue').put({
-    ...row,
-    ...updates,
-    updated_at: new Date().toISOString(),
-  }).catch(() => {})
+  const queue = localTable(db, 'sync_queue')
+  return db.transaction('rw', queue, async () => {
+    const current = await queue.get(row._seq!)
+    if (!sameQueuedSaleRevision(current, row)) return null
+    const next = { ...current, ...updates, updated_at: new Date().toISOString() }
+    await queue.put(next)
+    return next
+  })
 }
 
-async function completeQueuedSale(row: LocalRow, result: Record<string, unknown>): Promise<void> {
-  if (row._seq == null) return
+async function completeQueuedSale(row: LocalRow, result: Record<string, unknown>): Promise<boolean> {
+  if (row._seq == null) return false
   const queueSeq = row._seq
   const db = await getLocalDb()
   const syncQueue = localTable(db, 'sync_queue')
   const sales = localTable(db, 'sales')
   const localSaleId = Number(row.entity_id || 0)
-  await db.transaction('rw', syncQueue, sales, async () => {
+  const completed = await db.transaction('rw', syncQueue, sales, async () => {
+    if (!sameQueuedSaleRevision(await syncQueue.get(queueSeq), row)) return false
     await syncQueue.delete(queueSeq)
-    if (Number.isFinite(localSaleId) && localSaleId < 0) await sales.delete(localSaleId)
-  }).catch(async () => {
-    await syncQueue.delete(queueSeq).catch(() => {})
-    if (Number.isFinite(localSaleId) && localSaleId < 0) await sales.delete(localSaleId).catch(() => {})
+    if (Number.isFinite(localSaleId) && localSaleId < 0) {
+      const mirror = await sales.get(localSaleId)
+      const payload = row.payload as SalePayload
+      if (mirror && mirror.client_request_id === payload.client_request_id && offlineSaleOwnersMatch(mirror.offline_owner, payload.offline_owner)) await sales.delete(localSaleId)
+    }
+    return true
   })
+  if (!completed) return false
   emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, synced: 1 })
   if (typeof window !== 'undefined') {
     dispatchSyncUpdates(OFFLINE_SALE_SYNC_UPDATE_CHANNELS, 'offline-sale-synced')
@@ -224,6 +239,7 @@ async function completeQueuedSale(row: LocalRow, result: Record<string, unknown>
       },
     }))
   }
+  return true
 }
 
 async function failQueuedSale(row: LocalRow, error: unknown, { retryable = false } = {}): Promise<void> {
@@ -294,7 +310,7 @@ async function runPendingSalesQueueSync({ force = false }: QueueSyncOptions = {}
   for (const row of rows) {
     if (!row?.payload) continue
     const status = asText(row.status || 'pending')
-    if (!['pending', 'failed', 'retry', 'syncing'].includes(status)) continue
+    if (!['pending', 'failed', 'retry', 'syncing', 'quarantined'].includes(status)) continue
     if (status === 'syncing') {
       const claimedAt = Date.parse(asText(row.updated_at || row.created_at))
       if (Number.isFinite(claimedAt) && now - claimedAt < OFFLINE_SALE_SYNC_LEASE_MS) continue
@@ -309,21 +325,45 @@ async function runPendingSalesQueueSync({ force = false }: QueueSyncOptions = {}
 
   const result = { success: true, attempted: 0, synced: 0, failed: 0, pending: rows.length }
   for (const row of eligible) {
+    const scope = captureActorReadScope()
+    const queuedOwner = (row.payload as SalePayload).offline_owner
+    const quarantine = (target: LocalRow) => updateQueuedRow(target, { status: 'quarantined', retry_at: null, reason: 'offline_owner_review', error: OFFLINE_OWNER_REVIEW_MESSAGE })
+    let currentOwner
+    try { currentOwner = captureOfflineSaleOwner() } catch { await quarantine(row); continue }
+    if (!offlineSaleOwnersMatch(queuedOwner, currentOwner)) { await quarantine(row); continue }
+    // Authenticated no-store endpoint verifies the cookie, not cached UI user
+    // state. Repeat after dispatch before acknowledging/deleting local work.
+    let serverOwner: Record<string, unknown>
+    try { serverOwner = await apiFetch('GET', '/api/sync/owner') as Record<string, unknown> } catch { await quarantine(row); continue }
+    if (!isActorReadScopeCurrent(scope, false) || !offlineSaleOwnersMatch(queuedOwner, serverOwner.owner)) { await quarantine(row); continue }
+    const claimed = await updateQueuedRow(row, { status: 'syncing', error: null, sync_lease: createSaleClientRequestId('lease') })
+    if (!claimed) continue
     result.attempted += 1
-    await updateQueuedRow(row, { status: 'syncing', error: null })
     try {
+      if (!isActorReadScopeCurrent(scope, false)) { await quarantine(claimed); continue }
       const payload = ensureSaleClientRequestId({ ...((row.payload as SalePayload) || {}) }, 'sale')
       const response = await createSaleWithoutWriteDedupe(payload) as Record<string, unknown>
-      await completeQueuedSale(row, response)
-      result.synced += 1
+      const after = await apiFetch('GET', '/api/sync/owner') as Record<string, unknown>
+      if (!isActorReadScopeCurrent(scope, false) || !offlineSaleOwnersMatch(queuedOwner, after.owner)
+        || !offlineSaleOwnersMatch(queuedOwner, response.offline_owner) || response.client_request_id !== payload.client_request_id) {
+        await quarantine(claimed)
+        continue
+      }
+      if (await completeQueuedSale(claimed, response)) result.synced += 1
     } catch (error) {
+      const failure = error as { status?: number; code?: string }
+      if (!isActorReadScopeCurrent(scope, false) || failure.status === 401 || failure.status === 403 || String(failure.code || '').startsWith('offline_owner_')) {
+        await quarantine(claimed)
+        result.failed += 1
+        continue
+      }
       if (isWriteConflictError(error)) {
-        await markQueuedSaleConflict(row, error)
+        await markQueuedSaleConflict(claimed, error)
         result.failed += 1
         continue
       }
       const retryable = isRetryableOfflineSaleError(error)
-      await failQueuedSale(row, error, { retryable })
+      await failQueuedSale(claimed, error, { retryable })
       result.failed += 1
       if (!retryable && !force) break
     }
@@ -342,13 +382,16 @@ export function syncPendingSalesQueue(options: QueueSyncOptions = {}): Promise<R
 }
 
 export async function createSale(payload: SalePayload = {}): Promise<unknown> {
-  const salePayload = ensureSaleClientRequestId({ ...getClientDeviceInfo(), ...payload }, 'sale')
+  const scope = captureActorReadScope()
+  const salePayload = ensureSaleClientRequestId(stampOfflineSaleOwner({ ...getClientDeviceInfo(), ...payload }), 'sale')
   try {
     return await createSaleRequest(salePayload)
   } catch (error) {
     if (isRetryableOfflineSaleError(error)) {
       const err = error as { reason?: string } | null
-      return queueOfflineSale(salePayload, err?.reason || 'server_offline')
+      const queued = await queueOfflineSale(salePayload, err?.reason || 'server_offline')
+      if (!isActorReadScopeCurrent(scope, false)) throw new Error(OFFLINE_OWNER_REVIEW_MESSAGE)
+      return queued
     }
     throw error
   }

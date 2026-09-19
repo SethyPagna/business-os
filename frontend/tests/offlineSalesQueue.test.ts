@@ -28,7 +28,8 @@ const serverPageSource = fs.readFileSync(new URL('../src/components/server/Serve
 await runTest('createSale queues retryable offline writes with an idempotency key', () => {
   assert.match(methodsSource, /export async function createSale/)
   assert.match(methodsSource, /loadSaleWriteTransport\(\)/)
-  assert.match(saleWriteTransportSource, /ensureSaleClientRequestId\(\{ \.\.\.getClientDeviceInfo\(\), \.\.\.payload \}, 'sale'\)/)
+  assert.match(saleWriteTransportSource, /ensureSaleClientRequestId\(stampOfflineSaleOwner\(\{ \.\.\.getClientDeviceInfo\(\), \.\.\.payload \}\), 'sale'\)/)
+  assert.match(saleWriteTransportSource, /const scope = captureActorReadScope\(\)[\s\S]*stampOfflineSaleOwner[\s\S]*await createSaleRequest/)
   assert.match(saleWriteTransportSource, /catch\s*\(error\)/)
   assert.match(saleWriteTransportSource, /isRetryableOfflineSaleError\(error\)/)
   assert.match(saleWriteTransportSource, /queueOfflineSale\(salePayload/)

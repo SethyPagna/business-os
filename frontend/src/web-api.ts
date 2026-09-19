@@ -598,6 +598,22 @@ async function syncUnlockedOfflineOutbox(options: OfflineSyncOptions = {}): Prom
 
   const operations = []
   for (const row of rows) {
+    // POS sales use the dedicated owner-scoped queue. Legacy generic sales
+    // must not reach the generic replay/acknowledgement path or be reassigned.
+    // Retain the original encrypted/plaintext payload for explicit review.
+    if (row.operation_id === 'sales.create') {
+      await offlineDb.transaction('rw', offlineDb.sync_outbox, async () => {
+        const key = getSyncOutboxKey(row)
+        const current = await offlineDb.sync_outbox.get(key)
+        if (!current || JSON.stringify(current) !== JSON.stringify(row)) return
+        await offlineDb.sync_outbox.update(key, {
+          status: 'quarantined', retry_at: null, reason: 'offline_owner_review',
+          error: 'Keep this pending sale. Its original account and server must review it in the current app; do not recreate or discard it.',
+          updated_at: new Date().toISOString(),
+        })
+      })
+      continue
+    }
     try {
       const payload = await decryptOfflineVaultValue(row.encrypted_payload ? row : { encrypted_payload: row.encrypted_payload, iv: row.iv })
       operations.push({
