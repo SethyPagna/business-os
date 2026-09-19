@@ -689,11 +689,11 @@ export default function InventoryStockModals({
                   section, the Stock-changes ledger or the Inventory page
                   landed there blank. Same fields, same defaults and same
                   credit rule as FastStockInModal, so the two receipt surfaces
-                  record the same facts. Deliberately NOT prefilled from the
-                  product's stored cost: an unentered cost is reported as
-                  unentered rather than guessed. */}
-              {isStockIn && canEditCosts ? (
-                <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+                  record the same facts. Authorized viewers start from the
+                  current catalog mean; editors may enter this delivery's price
+                  without unlocking product-identity pricing. */}
+              {isStockIn && (canViewCosts || canEditCosts) ? (
+                <fieldset disabled={!canEditCosts} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label htmlFor="inventory-adjust-unit-cost" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
@@ -707,7 +707,7 @@ export default function InventoryStockModals({
                         step="any"
                         min="0"
                         required
-                        disabled={adjustForm.free_goods}
+                        disabled={!canEditCosts || adjustForm.free_goods}
                         value={adjustForm.free_goods ? 0 : adjustForm.unit_cost_usd}
                         onChange={e => setAdjustForm(f => ({ ...f, unit_cost_usd: e.target.value }))}
                       />
@@ -760,7 +760,7 @@ export default function InventoryStockModals({
                       ) : null}
                     </div>
                   ) : null}
-                </div>
+                </fieldset>
               ) : null}
               {branchCount > 1 ? (
                 <div>

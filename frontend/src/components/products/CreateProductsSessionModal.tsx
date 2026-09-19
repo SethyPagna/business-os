@@ -310,10 +310,29 @@ export default function CreateProductsSessionModal({
   const [lineReceivedDate, setLineReceivedDate] = useState(receivedDate)
   const [lineQuantity, setLineQuantity] = useState('1')
   const [lineUnitCost, setLineUnitCost] = useState('')
-  // Separate new input from saved/drafted values. The render gate below also
-  // hides a revoked value immediately, before this cleanup effect runs.
+  // Separate blind entry from readable values; revocation changes the render
+  // immediately without destroying the operator's saved/typed readable draft.
   const [blindLineUnitCost, setBlindLineUnitCost] = useState('')
-  useEffect(() => { setLineUnitCost(''); setBlindLineUnitCost('') }, [canViewCosts, canEditCosts])
+  const lineCostEditedRef = useRef(false)
+  const blindLineCostEditedRef = useRef(false)
+  const previousCostAccess = useRef({ canViewCosts, canEditCosts })
+  useEffect(() => {
+    const previous = previousCostAccess.current
+    previousCostAccess.current = { canViewCosts, canEditCosts }
+    if (previous.canViewCosts && !canViewCosts) {
+      setBlindLineUnitCost('')
+      blindLineCostEditedRef.current = false
+    }
+    if (canViewCosts && canEditCosts && (!previous.canViewCosts || !previous.canEditCosts)) {
+      if (!previous.canViewCosts && blindLineCostEditedRef.current) {
+        setLineUnitCost(blindLineUnitCost)
+        lineCostEditedRef.current = true
+      } else {
+        setLineUnitCost((current) => lineCostEditedRef.current || current.trim() !== ''
+          ? current : currentCost(selectedProduct))
+      }
+    }
+  }, [canViewCosts, canEditCosts])
   const [lineExpiryDate, setLineExpiryDate] = useState('')
   const [batchChoice, setBatchChoice] = useState<'new' | number>('new')
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
@@ -453,6 +472,8 @@ export default function CreateProductsSessionModal({
   }, [selectedProduct?.id, lineBranchId])
 
   const resetExistingCandidate = () => {
+    lineCostEditedRef.current = false
+    blindLineCostEditedRef.current = false
     batchChoiceSeedRef.current = null
     setSelectedProduct(null); setLineBranchId(header.branchId || resolvedDefaultBranchId)
     setLineSupplier({ supplierId: header.supplierId, supplierName: header.supplierName })
@@ -475,6 +496,8 @@ export default function CreateProductsSessionModal({
       openQueuedLine(duplicate.row)
       return
     }
+    lineCostEditedRef.current = false
+    blindLineCostEditedRef.current = false
     setSelectedProduct(product); setLineUnitCost(canViewCosts ? currentCost(product) : ''); setBlindLineUnitCost(''); setLineExpiryDate(String(product.expiry_date || ''))
   }
 
@@ -580,6 +603,8 @@ export default function CreateProductsSessionModal({
     setLineSupplier({ supplierId: line.supplierId, supplierName: line.supplierName })
     setLineReceivedDate(line.receivedDate)
     setLineQuantity(String(line.quantity))
+    lineCostEditedRef.current = false
+    blindLineCostEditedRef.current = false
     setLineUnitCost(canViewCosts && line.unitCostUsd != null ? String(line.unitCostUsd) : '')
     setBlindLineUnitCost('')
     setLineExpiryDate(line.expiryDate)
@@ -886,7 +911,7 @@ export default function CreateProductsSessionModal({
         <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('received_date', 'Received date')} value={lineReceivedDate} onChange={setLineReceivedDate} /></label>
         <label><span className="mb-1 block text-[11px] text-gray-500">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={lineExpiryDate} onChange={setLineExpiryDate} /></label>
         <label><span className="mb-1 block text-[11px] text-gray-500">{tr('quantity', 'Quantity')}</span><input className="input h-9 w-full text-sm" type="number" min="1" step="1" value={lineQuantity} onChange={(event) => setLineQuantity(event.target.value)} /></label>
-        {canViewCosts || canEditCosts ? <label><span className="mb-1 block text-[11px] text-gray-500">{tr('unit_cost_usd', 'Unit cost (USD)')}</span><input className="input h-9 w-full text-sm" type="number" min="0" step="0.0001" disabled={!canEditCosts} value={canViewCosts ? lineUnitCost : blindLineUnitCost} onChange={(event) => canViewCosts ? setLineUnitCost(event.target.value) : setBlindLineUnitCost(event.target.value)} /></label> : null}
+        {canViewCosts || canEditCosts ? <label><span className="mb-1 block text-[11px] text-gray-500">{tr('unit_cost_usd', 'Unit cost (USD)')}</span><input className="input h-9 w-full text-sm" type="number" min="0" step="0.0001" disabled={!canEditCosts} value={canViewCosts ? lineUnitCost : blindLineUnitCost} onChange={(event) => { if (canViewCosts) { lineCostEditedRef.current = true; setLineUnitCost(event.target.value) } else { blindLineCostEditedRef.current = true; setBlindLineUnitCost(event.target.value) } }} /></label> : null}
       </div>
       <div className="mt-3">
         <span className="mb-1 block text-[11px] text-gray-500">{tr('batch', 'Received date')}</span>
