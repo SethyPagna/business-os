@@ -277,6 +277,22 @@ async function main() {
     assert.equal(audit.user_name,'sethy')
     assert.ok(audit.created_at)
     assert.equal(JSON.parse(audit.details).baseline_batch_id,costEntries(id)[0].baseline_batch_id)
+    assert.equal(costEntries(id)[0].previous_cost_usd,7)
+    const breakdown = await load('lib/catalogCostRecompute.ts').getCatalogCostBreakdown(makeDb(),id)
+    assert.equal(breakdown.inputs.find(input=>input.source==='manual').previous_cost_usd,7)
+    const access = load('lib/acquisitionCostAccess.ts')
+    const employee = {id:10,role_name:'employee',permissions:JSON.stringify({product_cost_edit:true,product_cost_view:false})}
+    assert.equal(access.isAcquisitionCostKey('previous_cost_usd'),true)
+    assert.equal(access.isAcquisitionCostKey('previousCostUsd'),true)
+    assert.equal(JSON.stringify(access.projectAcquisitionCosts(breakdown,employee)).includes('previous_cost_usd'),false)
+    assert.equal(access.projectAcquisitionCosts(breakdown,admin).inputs.find(input=>input.source==='manual').previous_cost_usd,7)
+    const costRoute = load('routes/productCost.ts').default
+    const denied = await costRoute.request(`/${id}/cost-breakdown`,{}, {...env,TEST_USER:employee},context)
+    assert.equal(denied.status,403,'edit-only user cannot read previous or current costs')
+    const viewer = {...employee,permissions:JSON.stringify({product_cost_view:true,product_cost_edit:false})}
+    const allowed = await costRoute.request(`/${id}/cost-breakdown`,{}, {...env,TEST_USER:viewer},context)
+    assert.equal(allowed.status,200)
+    assert.equal((await allowed.json()).inputs.find(input=>input.source==='manual').previous_cost_usd,7)
   })
   await check('receipt committed before override is captured by SQL baseline; later receipt joins override', async () => {
     const id = seedProduct('OrderedOverride')
@@ -296,6 +312,14 @@ async function main() {
     assert.equal((await request('PUT',`/${id}`,{cost_price_usd:6})).status,409,'changed money rejects stale override entirely')
     assert.deepEqual(costEntries(id),entriesBefore)
     assert.equal(row(id).cost_price_usd,14)
+  })
+  await check('previous cost preserves unknown NULL and exact historical precision, without inferred backfill', async () => {
+    for (const previous of [null,3.123456]) {
+      const id = seedProduct(`Previous-${previous}`)
+      raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(previous,id)
+      assert.equal((await request('PUT',`/${id}`,{cost_price_usd:8})).status,200)
+      assert.equal(costEntries(id)[0].previous_cost_usd,previous)
+    }
   })
   console.log(`\n${checks} checks passed`)
 }
