@@ -30,9 +30,11 @@ assert.doesNotMatch(discardBody, /onMinimize/, 'Discard must not park a minimize
 
 assert.match(modal, /freeGoods\?: boolean/)
 assert.match(modal, /batchChoice\?: 'new' \| number/)
-assert.match(modal, /setFreeGoods\]\s*=\s*useState\(Boolean\(draft\?\.freeGoods\)\)/, 'free-goods choice must restore')
+assert.match(modal, /setProtectedFreeGoods\]\s*=\s*useState\(Boolean\(draft\?\.freeGoods\)\)/, 'free-goods choice restores into protected draft state')
+assert.match(modal, /setProtectedUnitCost\]\s*=\s*useState\(draft\?\.unitCost \|\| ''\)/, 'receipt cost restores into protected draft state')
+assert.match(modal, /const freeGoods = Boolean\(costEntry\.value\('freeGoods', protectedFreeGoods, false\)\)/, 'restored declaration displays only through the permission-scoped entry')
 assert.match(modal, /pendingBatchRestoreRef = useRef<'new' \| number \| null>\(draft\?\.batchChoice \?\? null\)/, 'a parked lot choice must be revalidated by the existing options effect')
-assert.match(modal, /unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received/, 'both debounced and synchronous drafts preserve in-progress receipt values')
+assert.equal((modal.match(/unitCost: protectedUnitCost, freeGoods: protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received/g) || []).length, 2, 'both debounced and synchronous drafts preserve protected receipt values, not the blank revoked display')
 
 const createStart = modal.indexOf('  const createProductForScannedBarcode = async')
 const createEnd = modal.indexOf('  const addLine', createStart)
