@@ -1,3 +1,15 @@
+## Approved private archive started — September 19
+
+Owner approved recommended local archival; prior pending-choice blocker resolved.
+Archive C:/Users/mrkl6/BusinessOS-Recovery/2026-09-19, user+SYSTEM only, no upload.
+Git48,068 files/1.11GB hash-verified; fsck passes;363 indexes/9,016 staged blobs
+recoverable from copied object store; zero alternate streams in Git copy.
+10 dirty snapshots copied,31,579 files/8.21GB byte-verified. One independent restore
+drill passes HEAD/staged/unstaged/untracked/conflict-stage parity. Copy-only: broader
+ADS/attributes, links/nested, DB/WAL and fresh pre-delete checks remain. No further
+deletion (233 removed/363 registered remain), no runtime fix/deploy. See newest
+council-cleanup report and private recovery metadata; do not overwrite snapshots.
+
 ## Non-archival cleanup complete; recovery choice required — September 19
 
 233 registered checkouts removed total,363 remain; plus one empty unregistered

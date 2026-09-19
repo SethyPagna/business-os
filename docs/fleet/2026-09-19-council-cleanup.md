@@ -2,6 +2,49 @@
 
 ## Newest execution checkpoint
 
+### Owner approved private archival — newest
+
+Owner answered "do the recommended": verified private local recovery archive,
+then redundant-checkout removal. This supersedes the pending-choice blocker.
+No new removals yet; registered counts remain233 removed /363 retained.
+
+Private recovery directory: C:/Users/mrkl6/BusinessOS-Recovery/2026-09-19.
+Inheritance disabled; allow principals restricted to current Windows user and
+SYSTEM. Representative copied-file/metadata ACL checks pass. No data uploaded;
+archive contents and sensitive manifests remain outside Git.
+
+Common Git storage copied in full with Robocopy COPY:DAT/DCOPY:DAT (48,068 files,
+1,112,816,596 bytes). SHA256 of every regular file matched source; path/size/mtime
+inventory stable during verification. Alternate-stream scan checked all48,068
+files, found0 non-default streams on either side. Archived-store fsck --full exit0
+(dangling objects preserved, not pruned). Copied indexes:363, entries594,998,
+unique staged blobs9,016; all readable from copied storage after sanitizing GIT_*
+environment variables. No submodule entries. Common Git copy includes staged-only
+objects, reflogs, indexes and worktree administrative directories, not just refs.
+
+First10 dirty-worktree snapshots copied.31,579 regular files /8,211,507,180 bytes
+match source SHA256; source path/size/mtime inventory stable over verification.
+Links and excluded nested roots recorded in private verification reports. Two
+snapshots each contain68 database-related files; these are not yet deletion-safe.
+ADS/attributes and database-consistency checks on these worktree snapshots remain.
+
+One disposable restore drill (snapshot e4b91e86f286dc90, no DB/link entries) passed
+archived HEAD plus staged diff, unstaged diff, untracked-name and conflict-stage
+parity against original. Restored working files had no original .git pointer;
+explicit copied Git storage/index used. This is one real-case drill, not proof
+of all conflict/staged-delete/WAL adversarial cases. No deletion approval inferred.
+
+Read-only reviewer assessed scripts and required: complete snapshot ADS/attribute
+and link/nested-tree recovery; broader independent restore drills; coherent SQLite
+DB/WAL restore integrity; fresh byte/admin-state revalidation before removal.
+Strengthened ACL-principal checks and sanitized Git environment per review.
+Relevant scripts committed under outputs/checkout-cleanup-20260919. Private reports
+are git-file-verification.json, index-verification.json,
+first-batch-regular-verification.json and restore-drill-result.json in recovery root.
+Do not rerun snapshot-local-batch blindly: it refuses existing destinations. Next
+pass must resume from the private metadata, finish gates, then retire verified copies.
+No runtime source changes/deployment. Previous blocked-choice notes are historical.
+
 ### Final non-archival batch / owner decision needed
 
 Removed3 nested clean worktrees and11 external/nested dependency-link-only
