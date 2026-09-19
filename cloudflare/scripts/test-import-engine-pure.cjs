@@ -269,6 +269,7 @@ const planTierModule = loadPureSibling('planTier')
 // be undefined and every chunk tail would throw a TypeError.
 const queueDispatchModule = loadPureSibling('queueDispatch')
 const permissionsModule = loadPureSibling('permissions')
+const acquisitionCostAccessModule = loadPureSibling('acquisitionCostAccess', name => name === './permissions' ? permissionsModule : require(name))
 const mediaModule = loadPureSibling('media')
 const productImagePermissionModule = loadPureSibling('productImagePermission', (request) => {
   if (request === './media') return mediaModule
@@ -386,6 +387,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './planTier') return planTierModule
   if (request === './queueDispatch') return queueDispatchModule
   if (request === './permissions') return permissionsModule
+  if (request === './acquisitionCostAccess') return acquisitionCostAccessModule
   if (request === './media') return mediaModule
   if (request === './productImagePermission') return productImagePermissionModule
   if (request === './salesImportCommit') {

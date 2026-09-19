@@ -61,7 +61,7 @@ function loadRoute() {
 
 const actor = {
   id: 9, username: 'batch-user', name: 'Batch User', organization_id: null,
-  role_id: null, permissions: JSON.stringify({ inventory: true, products: true }), is_active: 1,
+  role_id: null, permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }), is_active: 1,
 }
 
 function fixture() {

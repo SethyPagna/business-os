@@ -1,5 +1,19 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import ts from 'typescript'
+import { renderToStaticMarkup } from 'react-dom/server'
+
+const require = createRequire(import.meta.url)
+function renderSessionCost(source: string, canViewCosts: boolean, costUsd: number | null): string {
+  const code = ts.transpileModule(`module.exports = (<tr>${source}</tr>)`, {
+    compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS },
+    fileName: 'session-cost.tsx',
+  }).outputText
+  const module = { exports: {} as any }
+  new Function('require', 'module', 'exports', 'canViewCosts', 'session', code)(require, module, module.exports, canViewCosts, { costUsd })
+  return renderToStaticMarkup(module.exports)
+}
 
 // N29 (2026-09-06): "i see that the create products did not show in stock in".
 //
@@ -62,7 +76,7 @@ runTest('a receipt line may have no movement id, and only lines with one are eve
   assert.match(sectionSource, /row\.id == null \? <InfoHint label=\{tr\('quantity', 'Quantity'\)\} text=\{tr\('stock_session_zero_line'/)
 })
 
-runTest('an all-zero session shows $0 and its item count, and says why Edit/Remove are absent', () => {
+runTest('an all-zero session shows authorized $0 and its item count, and says why Edit/Remove are absent', () => {
   // $0 is a KNOWN total when no line is missing a cost; '—' remains for
   // legacy lines that never recorded one
   assert.match(sectionSource, /costUsd: Number\(row\.movement_cost_usd\) > 0 \? Number\(row\.movement_cost_usd\) : \(Number\(row\.lines_without_movement_cost\) \|\| 0\) === 0 \? 0 : null/)
@@ -71,7 +85,18 @@ runTest('an all-zero session shows $0 and its item count, and says why Edit/Remo
   assert.match(sectionSource, /lineCount: Number\(row\.line_count\) \|\| 0/)
   assert.match(sectionSource, /<th className="text-right">\{tr\('items', 'Items'\)\}<\/th>/)
   assert.match(sectionSource, /<td className="text-right tabular-nums text-gray-500">\{session\.lineCount\}<\/td>/)
-  assert.match(sectionSource, /colSpan=\{9\}/)
+  const span = sectionSource.match(/colSpan=\{([^}]+)\}/)?.[1]
+  assert.ok(span, 'session day-header colspan located')
+  const columnCount = new Function('canViewCosts', `return (${span})`)
+  assert.equal(columnCount(true), 9)
+  assert.equal(columnCount(false), 8, 'day header spans only visible columns')
+  const costCell = sectionSource.match(/\{canViewCosts \? <td[^>]*>\{session\.costUsd[^\n]*?<\/td> : null\}/)?.[0]
+  assert.ok(costCell, 'session cost cell located')
+  assert.match(renderSessionCost(costCell, true, 0), /\$0\.00/, 'known zero is shown when authorized')
+  assert.match(renderSessionCost(costCell, true, null), /—/, 'unknown cost is not invented as zero')
+  for (const cost of [0, null, 123.45]) {
+    assert.equal(renderSessionCost(costCell, false, cost), '<tr></tr>', 'revocation omits zero, unknown, and retained nonzero costs entirely')
+  }
   // a primary control that cannot proceed says why next to it
   assert.match(sectionSource, /\{editableLots \? <button[^]*?\{tr\('edit', 'Edit'\)\}<\/button> : null\}/)
   assert.match(sectionSource, /\{revertibleRows\.length \? <button[^]*?\{tr\('remove_session', 'Remove'\)\}<\/button> : <span[^>]*>\{tr\('stock_session_no_lot_to_edit'/)

@@ -15,7 +15,7 @@ const db = { prepare(sql) {
 let receives = 0, audits = 0
 const overrides = {
   '../lib/db': { getDb: () => db },
-  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 1, username: 'test', role: 'admin' }); await next() } },
+  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 1, username: 'test', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }); await next() } },
   '../lib/permissions': { hasPermission: () => true, getActionTier: () => 'full', getPermissionTier: () => 'full', isActionBlocked: () => false },
   '../lib/audit': { audit: async () => { audits++ } },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
@@ -75,7 +75,7 @@ async function request(method, cost, extra = {}) {
   let deferredRejected = false
   const throwingOverrides = {
     '../lib/db': { getDb: () => db2 },
-    '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 1, username: 'test', role: 'admin' }); await next() } },
+    '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 1, username: 'test', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }); await next() } },
     '../lib/permissions': { hasPermission: () => true, getActionTier: () => 'full', getPermissionTier: () => 'full', isActionBlocked: () => false },
     '../lib/audit': { audit: async () => { throw new Error('audit sink is down') } },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },

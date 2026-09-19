@@ -109,6 +109,7 @@ const productBatches = loadReal('lib/productBatches.ts', {
   './moneyPrecision': moneyPrecision,
 })
 const permissions = loadReal('lib/permissions.ts')
+const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRoles = loadReal('lib/branchRoles.ts')
 const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
   './db': loadReal('lib/db.ts'),
@@ -136,7 +137,7 @@ const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': sche
 // ledger (audit sibling:F14); the REAL module, so the route builds real SQL.
 const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnalytics': salesAnalytics })
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 
 // Sep 6 2026: the owner's low-stock alert setting reaches this module through
 // lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
@@ -171,6 +172,7 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   './sqlBinding': sqlBinding,
 })
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/stockCondition': stockCondition,
   '../lib/damagedLotActions': damagedLotActions,
   '../lib/moneyPrecision': moneyPrecision,

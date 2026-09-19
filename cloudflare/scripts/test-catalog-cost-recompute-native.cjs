@@ -19,7 +19,7 @@ const Database = require('better-sqlite3')
 
 let sqlite
 let waits = []
-let user = { id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true }) }
+let user = { id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 const modules = new Map()
 
 function wrapDb() {
@@ -71,7 +71,7 @@ function fresh() {
   sqlite.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1)")
   sqlite.exec("INSERT INTO products(id,name,stock_quantity,cost_price_usd,cost_price_khr) VALUES(1,'Widget',0,0,0)")
   waits = []
-  user = { id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true }) }
+  user = { id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 }
 
 async function request(body) {

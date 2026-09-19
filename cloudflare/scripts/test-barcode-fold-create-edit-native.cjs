@@ -126,7 +126,7 @@ const inertSearch = {
   tokenizeSearchWords: () => [],
 }
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ products: true }) }
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ products: true, product_cost_edit: true, product_cost_view: true }) }
 
 const productsRoute = loadReal('routes/products.ts', {
   '../lib/actorSnapshot': actorSnapshotKernel,
