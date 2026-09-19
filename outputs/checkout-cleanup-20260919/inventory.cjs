@@ -3,6 +3,8 @@ const { execFile } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '../..');
+const outputName = process.argv[2] || 'manifest.json';
+if (!/^[a-z0-9-]+\.json$/.test(outputName)) throw Error('Invalid output filename');
 const git = (args, cwd = root) => new Promise((resolve) => {
   execFile('git', args, { cwd, windowsHide: true, timeout: 90000, maxBuffer: 16 * 1024 * 1024 },
     (error, stdout) => resolve({ ok: !error, text: stdout || '', error: error ? String(error.code) : null }));
@@ -47,6 +49,6 @@ const git = (args, cwd = root) => new Promise((resolve) => {
     caveats: ['Remote-tracking refs refreshed before this run; not a backup of dirty or ignored data.',
       'No entry is approved for deletion; ignored data, junctions, active processes and nested worktrees require review.',
       'Status records are not exact file counts when renames occur.'], counts, results };
-  fs.writeFileSync(path.join(__dirname, 'manifest.json'), JSON.stringify(report, null, 2));
+  fs.writeFileSync(path.join(__dirname, outputName), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ total: results.length, counts }, null, 2));
 })().catch(error => { console.error(error); process.exitCode = 1; });

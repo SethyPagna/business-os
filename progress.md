@@ -1,3 +1,15 @@
+## Remaining checkout/data inventory — September 19
+
+377 registered refreshed:160 local-work/unbacked,212 ignored-data,3 nested clean,
+2 required.13 unregistered matching roots inspected by metadata only. bos-rc-workers
+is a parent of registered worktrees and contains~9GB/695 database-related files;
+do not remove it wholesale. Separate stock-session state folders also hold DBs.
+Malformed/incomplete business-os-vExecutor-v1/.git needs preservation review.
+See newest docs/fleet/2026-09-19-council-cleanup.md; generated remaining and
+unregistered manifests under outputs/checkout-cleanup-20260919. No new deletion.
+Owner local recovery archival preference still pending. Goal active; app findings
+remain OPEN and no deploy occurred.
+
 ## Checkout cleanup dependency-link batch — September 19
 
 219 redundant checkouts removed total; 377 registered remain. Latest160 removals

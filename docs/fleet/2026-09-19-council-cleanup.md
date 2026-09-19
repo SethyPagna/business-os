@@ -2,6 +2,40 @@
 
 ## Newest execution checkpoint
 
+### Remaining-state inventory — newest
+
+Refreshed all377 current registered worktrees:160 local-work/unbacked-HEAD,
+212 ignored-data review,3 clean candidates outside the direct-child Downloads
+scope,2 required. No removals in this pass. Evidence:
+`outputs/checkout-cleanup-20260919/remaining-manifest.json`.
+
+Metadata-only inspection of13 unregistered matching Downloads roots is recorded
+in `unregistered-manifest.json`. Important: unregistered does NOT mean unused or
+not a parent of registered worktrees. `bos-rc-workers` contains nested worktrees,
+109,244 files /9,076MiB counted excluding node_modules,.git and links, including
+695 database-related filenames. Never delete that parent as a single old version.
+Two stock-session state folders contain7 and6 database-related files respectively.
+`business-os-vExecutor-v1` contains a .git directory but does not resolve as a valid
+repository; preserve for recovery inspection. `bos-audit-si-claude` contains two
+dependency links and no ordinary files; inspect targets before any removal.
+Other source snapshots/backups remain unverified; no content/credentials were read.
+
+The original160 preserved worktrees included124 with tracked status records,
+51 with untracked entries,13 without a containing remote-tracking ref (overlap).
+Primary and active workspaces are classified separately. Origin was fetched before
+the initial audit; subsequent added checkpoints are still local until pushed.
+Do not upload ignored credentials/databases or imply GitHub contains dirty work.
+
+Next: obtain owner's pending local archival preference, then prepare a private
+recovery manifest preserving unique commits and non-rebuildable files; verify
+hashes/restorability before retiring those checkouts. Separately inspect dependency
+and build directories and the three nested clean candidates. Required retained
+Git storage cannot be removed until a verified Git relocation is explicitly planned.
+Git count-objects reported temporary garbage files; do not run gc/prune while
+recovery/reference preservation is unresolved. No runtime fix/deploy in this pass.
+
+### Earlier execution checkpoints
+
 ### Dependency-link batch — newest
 
 Removed 160 more verified clean, remotely backed direct-child Downloads worktrees:
