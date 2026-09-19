@@ -2421,6 +2421,9 @@ app.post('/variant', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  if (hasCatalogCostWrite(body, user)) {
+    return c.json({ error: 'Administrator access is required to set catalog costs.', code: 'catalog_cost_admin_required' }, 403)
+  }
   try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
