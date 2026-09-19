@@ -1,5 +1,19 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import ts from 'typescript'
+import { renderToStaticMarkup } from 'react-dom/server'
+
+const require = createRequire(import.meta.url)
+function renderColumns(source: string, canViewCosts: boolean): string {
+  const code = ts.transpileModule(`module.exports = (${source})`, {
+    compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS },
+    fileName: 'session-columns.tsx',
+  }).outputText
+  const module = { exports: {} as any }
+  new Function('require', 'module', 'exports', 'canViewCosts', code)(require, module, module.exports, canViewCosts)
+  return renderToStaticMarkup(module.exports)
+}
 
 // N26 (2026-09-06): "stock in sessions when clicked on did not show the
 // products full name, got cut by elipses."
@@ -49,7 +63,14 @@ runTest('the receipt shows the full product name, wrapped, with the barcode unde
   // ...and therefore no separate Barcode column stealing width from the name
   assert.doesNotMatch(receipt, /<th>\{tr\('barcode', 'Barcode'\)\}<\/th>/)
   // the Product column is the flexible one; fixed widths go to the numbers
-  assert.match(receipt, /<colgroup><col \/><col className="w-\[7rem\]" \/><col className="w-\[22%\]" \/><col className="w-\[6rem\]" \/><col className="w-\[7rem\]" \/><col className="w-10" \/><\/colgroup>/)
+  const colgroup = receipt.match(/<colgroup>[\s\S]*?<\/colgroup>/)?.[0]
+  assert.ok(colgroup, 'receipt column sizing located')
+  const granted = renderColumns(colgroup, true)
+  const denied = renderColumns(colgroup, false)
+  assert.equal(granted, '<colgroup><col/><col class="w-[7rem]"/><col class="w-[22%]"/><col class="w-[6rem]"/><col class="w-[7rem]"/><col class="w-10"/></colgroup>')
+  assert.equal(denied, '<colgroup><col/><col class="w-[7rem]"/><col class="w-[22%]"/><col class="w-[6rem]"/><col class="w-10"/></colgroup>', 'no-view omits only the cost column; product remains flexible')
+  assert.match(receipt, /\{canViewCosts \? <th[^>]*>\{tr\('cost_price', 'Cost price'\)\}<\/th> : null\}/)
+  assert.match(receipt, /\{canViewCosts \? <td[^>]*>\{unitCost == null[^]*?<\/td> : null\}/)
 })
 
 runTest('the Add-products saved list wraps the name and puts the barcode under it', () => {
