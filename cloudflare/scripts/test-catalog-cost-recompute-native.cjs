@@ -154,14 +154,13 @@ async function main() {
     assert.deepEqual(catalogCost(), { usd: 3, khr: 0 })
   })
 
-  await check('a receipt more than 2x the cheapest distinct cost is an outlier -- the writer stores the HIGHEST, not a $6 mean nobody paid', async () => {
+  await check('widely separated recorded receipt prices still use the distinct positive mean', async () => {
     fresh()
     await request(addBody({ unitCostUsd: 3, receivedDate: '01/09/2026' }))
     assert.deepEqual(catalogCost(), { usd: 3, khr: 0 })
     const second = await request(addBody({ unitCostUsd: 9, receivedDate: '02/09/2026' }))
     assert.equal(second.status, 200, JSON.stringify(second))
-    // 9 > 3 * COST_OUTLIER_RATIO(2) -- refused as a mean; highest kept instead.
-    assert.deepEqual(catalogCost(), { usd: 9, khr: 0 })
+    assert.deepEqual(catalogCost(), { usd: 6, khr: 0 })
   })
 
   console.log(`\n${checks} checks passed`)
