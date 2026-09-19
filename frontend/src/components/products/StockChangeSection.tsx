@@ -18,7 +18,8 @@ import type { StockMode } from '../inventory/FastStockInModal'
 // exports").
 const ExportRangeDialog = lazy(() => import('../shared/ExportRangeDialog'))
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import type { DateTimeRange } from '../shared/DateTimeRangePicker'
+import StatsRangeRow from '../shared/StatsRangeRow'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
 import Modal from '../shared/Modal'
 import PaginationControls from '../shared/PaginationControls'
@@ -243,6 +244,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const initialToday = todayStr()
   const [startDate, setStartDate] = useState(initialToday)
   const [endDate, setEndDate] = useState(initialToday)
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
   const [rows, setRows] = useState<LedgerRow[]>([])
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<LedgerSummary>(EMPTY_SUMMARY)
@@ -261,7 +264,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [fastStockInOpen, setFastStockInOpen] = useState(false)
   const [fastStockInMode, setFastStockInMode] = useState<StockMode>('add')
   const restoringFastStockInRef = useRef<MinimizedWorkEntry | null>(null)
-  const [exportRange, setExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
+  const [exportRange, setExportRange] = useState<DateTimeRange | null>(null)
   // Unsaved failed adjustments (user, Sep 3: "also show the failed in the
   // stock change as well"). These never reached the server -- inventory_
   // movements only records movements that committed, and no stock-action table
@@ -335,6 +338,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         branchId: branchId || undefined,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
+        startTime: startTime || (endTime ? '00:00' : undefined),
+        endTime: endTime || (startTime ? '23:59' : undefined),
         supplierId: supplierId || undefined,
       }) as LedgerResponse
       if (requestRef.current !== requestId) return
@@ -348,10 +353,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     } finally {
       if (requestRef.current === requestId) setLoading(false)
     }
-  }, [view, page, debouncedSearch, branchId, startDate, endDate, supplierId])
+  }, [view, page, debouncedSearch, branchId, startDate, endDate, startTime, endTime, supplierId])
 
   useEffect(() => { void load() }, [load])
-  useEffect(() => { setPage(1) }, [view, debouncedSearch, branchId, startDate, endDate, supplierId])
+  useEffect(() => { setPage(1) }, [view, debouncedSearch, branchId, startDate, endDate, startTime, endTime, supplierId])
 
   // Keep the unsaved-failure list in step with whatever modal recorded it.
   useEffect(() => {
@@ -426,7 +431,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // Ranged CSV export of the ledger, honoring the section's current search/
   // branch/supplier/view filters. Walks /stock-ledger pages (1000/page,
   // 10-page cap) and says so honestly if the range holds more.
-  const runLedgerExport = useCallback(async (range: { startDate: string; endDate: string }) => {
+  const runLedgerExport = useCallback(async (range: { startDate: string; endDate: string; startTime?: string; endTime?: string }) => {
     const pageSize = 1000
     const maxPages = 10
     const rows: LedgerRow[] = []
@@ -440,6 +445,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         branchId: branchId || undefined,
         startDate: range.startDate || undefined,
         endDate: range.endDate || undefined,
+        startTime: range.startTime || (range.endTime ? '00:00' : undefined),
+        endTime: range.endTime || (range.startTime ? '23:59' : undefined),
         supplierId: supplierId || undefined,
       }) as LedgerResponse
       const items = Array.isArray(response?.items) ? response.items : []
@@ -529,8 +536,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // current Start -> End range, so it reads the latest range from a ref rather
   // than closing over a stale value (which would let the export dialog seed
   // itself with whatever the range was when the section first mounted).
-  const rangeRef = useRef({ startDate, endDate })
-  useEffect(() => { rangeRef.current = { startDate, endDate } }, [startDate, endDate])
+  const rangeRef = useRef({ startDate, endDate, startTime, endTime })
+  useEffect(() => { rangeRef.current = { startDate, endDate, startTime, endTime } }, [startDate, endDate, startTime, endTime])
   const openExport = useCallback(() => setExportRange({ ...rangeRef.current }), [])
   useEffect(() => {
     if (!onRegisterActions) return
@@ -898,15 +905,17 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
           Products.tsx / HeaderActions' primaryActionSlot), so this row leads
           straight with the date range. */}
       <div className="flex flex-wrap items-center gap-2">
-        <DateTimeRangePicker
-          value={{ startDate, endDate, startTime: '', endTime: '' }}
-          onChange={(next) => {
+        <StatsRangeRow
+          range={{ startDate, endDate, startTime, endTime }}
+          onRangeChange={(next) => {
             setStartDate(next.startDate || '')
             setEndDate(next.endDate || '')
+            setStartTime(next.startTime || '')
+            setEndTime(next.endTime || '')
           }}
           t={t}
-          showTime={false}
-          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
+          showTime
+          className="w-full"
         />
         <div className="min-w-48 flex-1 sm:max-w-96">
           <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} disabled={stockWorkflowOpen} />
@@ -1293,6 +1302,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         <Suspense fallback={null}>
           <ExportRangeDialog
             initial={exportRange}
+            showTime
             title={`${tr(t, 'export', 'Export')} — ${tr(t, 'stock_change_ledger', 'Stock Changes')}`}
             t={t}
             onClose={() => setExportRange(null)}

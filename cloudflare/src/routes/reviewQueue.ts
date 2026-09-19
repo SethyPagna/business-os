@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { hasProductMoneyPolicy, ProductMoneyWriteError } from '../lib/productWrites'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getActionTier, getPermissionTier } from '../lib/permissions'
@@ -49,6 +50,7 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+app.use('*', acquisitionCostResponses)
 
 // --- submitter's own view (NO `review` permission required) ---------------
 //
@@ -86,6 +88,9 @@ app.post('/:id/resubmit', async (c) => {
   let summary: string | null = null
   try {
     const body = await c.req.json<{ payload?: unknown; summary?: string }>()
+    if (hasAcquisitionCostInput(body.payload, user)) {
+      return c.json({ error: 'Cost-entry permission is required to submit cost changes.', code: 'product_cost_edit_required' }, 403)
+    }
     // An edited payload is optional: resubmitting unchanged ("please look
     // again") is legitimate, e.g. when the rejection was a misunderstanding.
     if (body && Object.prototype.hasOwnProperty.call(body, 'payload') && body.payload !== undefined) {
