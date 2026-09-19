@@ -1,5 +1,38 @@
 # Council protocol and laptop cleanup checkpoint
 
+## Newest execution checkpoint
+
+Goal active. Owner confirmed Claude processes are idle. Fresh origin fetch
+succeeded; current pre-cleanup HEAD fe4d035f has 22 commits not reachable from
+origin refs. Full read-only scan completed for all 596 registered worktrees:
+2 required, 160 local-work/unbacked-HEAD, 372 ignored-data review, 62 clean
+remote-contained candidates. No missing registered paths. Local generated
+manifest: outputs/checkout-cleanup-20260919/manifest.json.
+
+Removed exactly three redundant checkouts using `git worktree remove` WITHOUT
+force, after fresh clean/ignored/HEAD/path/nesting/process/claim checks and live
+`ls-remote` verification of the archive branches:
+
+- C:/Users/mrkl6/Downloads/bos-active-data-completeness-20260908
+  — e4d9e0b71a0b13afbbe0fa5a2a0f1059405d1972
+- C:/Users/mrkl6/Downloads/bos-backend-gate-merge-harness-20260908
+  — 804bc0ef05899206a14f6d3f1673958b8a6827c6
+- C:/Users/mrkl6/Downloads/bos-canonical-branch-i18n-20260908
+  — 146a365a7678295d88dbb2849eb0d3330ab088f6
+
+No branches or commits removed. Recovery: `git worktree add <original-path>
+<retained-branch>` or a detached checkout at the recorded commit. Exact branches
+and remote evidence are in outputs/checkout-cleanup-20260919/removed.json.
+No reparse points inside these candidates; no inbound link found at registered
+root/frontend/cloudflare/node_modules dependency locations. This was not a scan
+of every arbitrary filesystem reference on the laptop.
+
+Postcheck: 593 registered worktrees; active HEAD unchanged fe4d035f; shared Git
+directory still resolves; tracked active files unchanged by removal. No runtime
+changes or deploy. Remaining 59 clean candidates need final checks, then ignored
+and local-only material must be preserved/reviewed. Earlier no-deletion statements
+below are historical and superseded by this execution checkpoint only.
+
 ## Delivered
 
 Personal Codex skill: `C:/Users/mrkl6/.codex/skills/ai-council-review/SKILL.md`.

@@ -1,3 +1,14 @@
+## Checkout cleanup first verified removal — September 19
+
+Goal active, not complete. All 596 worktrees inventoried; owner confirms Claude
+processes idle. Removed exactly three clean remotely archived worktrees with
+non-force Git removal; no branches/commits removed, active HEAD and common Git
+storage intact, 593 remain. Recovery hashes and exact paths are recorded in
+docs/fleet/2026-09-19-council-cleanup.md. Manifest/scripts/results under
+outputs/checkout-cleanup-20260919. Current branch has 22 commits not reachable
+from fresh origin refs before this checkpoint. Preserve all local-only work.
+Application findings remain OPEN; no runtime fixes, downgrade or deploy.
+
 ## Council protocol, deeper audit and cleanup safety — September 19
 
 Added docs/AI_COUNCIL_REVIEW.md and AGENTS.md routing; personal Codex skill is
