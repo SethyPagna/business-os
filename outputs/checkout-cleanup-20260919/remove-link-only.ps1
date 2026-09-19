@@ -1,7 +1,15 @@
-param([switch]$Apply)
+param([switch]$Apply, [switch]$ExternalOnly)
 $ErrorActionPreference = 'Stop'
 $taskRoot = 'C:\Users\mrkl6\Downloads\bos-supplier-settlement-20260918'
 $downloadsRoot = 'C:\Users\mrkl6\Downloads'
+$logPrefix = if ($ExternalOnly) { 'link-external' } else { 'link' }
+$externalPaths = @(
+    'C:\Users\mrkl6\.codex\worktrees\private-read-integrated-tests',
+    'C:\Users\mrkl6\.codex\worktrees\storage-fixture-tests'
+)
+foreach ($name in @('ee-barcode','ee-holds','ee-sargable','ee-shift-credit','ee-tg-actor','fix-i18n','head-cert-base','s4-adj','sec-11','sec-9-hygiene')) {
+    $externalPaths += Join-Path 'C:\Users\mrkl6\Downloads\bos-rc-workers' $name
+}
 $inventory = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') -Raw | ConvertFrom-Json
 $ignoredInventory = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ignored-manifest.json') -Raw | ConvertFrom-Json
 $registered = @(& git -C $taskRoot worktree list --porcelain)
@@ -29,7 +37,8 @@ foreach ($root in $allPaths) {
 }
 function Check-Candidate($row) {
     $candidate = [IO.Path]::GetFullPath($row.path).TrimEnd('\')
-    if ([IO.Path]::GetDirectoryName($candidate) -ne $downloadsRoot -or $candidate -eq $taskRoot -or $candidate -eq (Join-Path $downloadsRoot 'business-os-v1')) { throw 'Outside approved boundary or retained workspace' }
+    $inBoundary = if ($ExternalOnly) { $candidate -in $externalPaths } else { [IO.Path]::GetDirectoryName($candidate) -eq $downloadsRoot }
+    if (-not $inBoundary -or $candidate -eq $taskRoot -or $candidate -eq (Join-Path $downloadsRoot 'business-os-v1')) { throw 'Outside approved boundary or retained workspace' }
     if ($candidate -notin $allPaths) { throw 'Not currently registered' }
     $rootItem = Get-Item -LiteralPath $candidate -Force
     if ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Root is a link' }
@@ -69,10 +78,14 @@ function Check-Candidate($row) {
 }
 $results = @(); $skipped = @()
 if ($Apply) {
-    $rows = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'link-preflight.json') -Raw | ConvertFrom-Json
-    if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'link-removed.json')) { throw 'Existing execution log: inspect rather than overwrite' }
+    $rows = Get-Content -LiteralPath (Join-Path $PSScriptRoot ($logPrefix+'-preflight.json')) -Raw | ConvertFrom-Json
+    if (Test-Path -LiteralPath (Join-Path $PSScriptRoot ($logPrefix+'-removed.json'))) { throw 'Existing execution log: inspect rather than overwrite' }
 } else {
-    $rows = @($ignoredInventory.results | Where-Object { $_.classification -eq 'dependency-links-only-review' -and [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($_.path)) -eq $downloadsRoot })
+    $rows = @($ignoredInventory.results | Where-Object {
+        $_.classification -eq 'dependency-links-only-review' -and
+        (($ExternalOnly -and [IO.Path]::GetFullPath($_.path).TrimEnd('\') -in $externalPaths) -or
+         (-not $ExternalOnly -and [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($_.path)) -eq $downloadsRoot))
+    })
 }
 foreach ($row in $rows) {
     try { $checked = Check-Candidate $row }
@@ -82,7 +95,7 @@ foreach ($row in $rows) {
     }
     if ($Apply) {
         # Save recovery/link metadata before any mutation; never recurse into a junction.
-        $checked | ConvertTo-Json -Depth 6 | Out-File -LiteralPath (Join-Path $PSScriptRoot 'link-current-operation.json') -Encoding utf8
+        $checked | ConvertTo-Json -Depth 6 | Out-File -LiteralPath (Join-Path $PSScriptRoot ($logPrefix+'-current-operation.json')) -Encoding utf8
         foreach ($link in $checked.links) {
             [IO.Directory]::Delete($link.path, $false)
             if ((Test-Path -LiteralPath $link.path) -or -not (Test-Path -LiteralPath $link.target)) { throw 'Junction removal verification failed' }
@@ -96,9 +109,9 @@ foreach ($row in $rows) {
         $checked.removed = $true
     }
     $results += $checked
-    $filename = if ($Apply) { 'link-removed.json' } else { 'link-preflight.json' }
+    $filename = if ($Apply) { $logPrefix+'-removed.json' } else { $logPrefix+'-preflight.json' }
     ConvertTo-Json -InputObject @($results) -Depth 6 | Out-File -LiteralPath (Join-Path $PSScriptRoot $filename) -Encoding utf8
     if ($results.Count % 20 -eq 0) { Write-Output "Processed $($results.Count) candidates; Apply=$Apply" }
 }
-if (-not $Apply) { ConvertTo-Json -InputObject @($skipped) -Depth 4 | Out-File -LiteralPath (Join-Path $PSScriptRoot 'link-skipped.json') -Encoding utf8 }
+if (-not $Apply) { ConvertTo-Json -InputObject @($skipped) -Depth 4 | Out-File -LiteralPath (Join-Path $PSScriptRoot ($logPrefix+'-skipped.json')) -Encoding utf8 }
 Write-Output "Completed: $($results.Count); skipped: $($skipped.Count); Apply=$Apply"

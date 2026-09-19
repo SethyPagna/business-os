@@ -1,4 +1,5 @@
-param([switch]$Apply, [switch]$BatchTwo)
+param([switch]$Apply, [switch]$BatchTwo, [switch]$NestedThree)
+if ($BatchTwo -and $NestedThree) { throw 'Choose one batch' }
 $ErrorActionPreference = 'Stop'
 $taskRoot = 'C:\Users\mrkl6\Downloads\bos-supplier-settlement-20260918'
 $downloadsRoot = 'C:\Users\mrkl6\Downloads'
@@ -11,6 +12,12 @@ $activeClaims = @($team.claims | Where-Object { -not $_.stale })
 $outcomes = @()
 # Only these three independently checked, remotely archived clean worktrees.
 $approvedNames = @('bos-active-data-completeness-20260908', 'bos-backend-gate-merge-harness-20260908', 'bos-canonical-branch-i18n-20260908')
+$nestedParents = @{
+    'main-merge' = 'C:\Users\mrkl6\AppData\Local\Temp\claude\C--Users-mrkl6-Downloads-business-os-v1\f12ec59a-da6e-4816-a547-f254bd666709\scratchpad\final-p5'
+    's4-cm' = 'C:\Users\mrkl6\Downloads\bos-rc-workers'
+    's4f-bulk-spec' = 'C:\Users\mrkl6\Downloads\bos-rc-workers'
+}
+if ($NestedThree) { $approvedNames = @('main-merge','s4-cm','s4f-bulk-spec') }
 if ($BatchTwo) {
     if ($Apply) {
         $preflight = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'preflight-batch-two.json') -Raw | ConvertFrom-Json
@@ -40,8 +47,10 @@ $remoteLines = @(& git -C $taskRoot ls-remote --heads origin)
 if ($LASTEXITCODE -ne 0) { throw 'Cannot verify current remote branches' }
 foreach ($line in $remoteLines) { $parts = $line -split '\s+'; $remoteHeads[$parts[1]] = $parts[0] }
 foreach ($name in $approvedNames) {
-    $candidate = [IO.Path]::GetFullPath((Join-Path $downloadsRoot $name)).TrimEnd('\')
-    if ([IO.Path]::GetDirectoryName($candidate) -ne $downloadsRoot -or $candidate -eq $taskRoot) { throw 'Invalid cleanup boundary' }
+    $allowedParent = if ($NestedThree) { $nestedParents[$name] } else { $downloadsRoot }
+    if (-not $allowedParent) { throw 'Missing exact allowed parent' }
+    $candidate = [IO.Path]::GetFullPath((Join-Path $allowedParent $name)).TrimEnd('\')
+    if ([IO.Path]::GetDirectoryName($candidate) -ne $allowedParent -or $candidate -eq $taskRoot) { throw 'Invalid cleanup boundary' }
     $entry = @($manifest.results | Where-Object { [IO.Path]::GetFullPath($_.path).TrimEnd('\') -eq $candidate })
     if ($entry.Count -ne 1 -or $entry[0].disposition -ne 'review-active-use-before-removal') { throw "Unapproved inventory state: $name" }
     if (-not (Test-Path -LiteralPath $candidate)) { throw "Missing candidate: $name" }
@@ -77,6 +86,7 @@ foreach ($name in $approvedNames) {
     $outcomes += [pscustomobject]$outcome
     $suffix = if ($Apply) { 'removed' } else { 'preflight' }
     if ($BatchTwo) { $suffix += '-batch-two' }
+    if ($NestedThree) { $suffix += '-nested' }
     $outcomes | ConvertTo-Json -Depth 5 | Out-File -LiteralPath (Join-Path $PSScriptRoot ($suffix + '.json')) -Encoding utf8
     Write-Output "$suffix : $name"
 }

@@ -1,0 +1,29 @@
+﻿[
+    {
+        "path":  "C:\\Users\\mrkl6\\AppData\\Local\\Temp\\claude\\C--Users-mrkl6-Downloads-business-os-v1\\f12ec59a-da6e-4816-a547-f254bd666709\\scratchpad\\final-p5\\main-merge",
+        "head":  "e6f0869ef2deaae70fa6e83497edc687ac6996fd",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/integrate/main-20260916",
+        "remoteSha":  "97e6e27367a7ea5843208182457d46e20c266bdf",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\s4-cm",
+        "head":  "a6f8c71d7e636f17b4797068fb4656ba06532e10",
+        "branch":  "refs/heads/s4/cost-merge-survey",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-additems-2026-09-06",
+        "remoteSha":  "957fd6e09421c75659eee030f33023b84fd7caad",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\s4f-bulk-spec",
+        "head":  "ebde8430875eac720670517e3e3ccdad1b3c417b",
+        "branch":  "refs/heads/docs/bulk-actions-spec-4f",
+        "remote":  "refs/heads/archive/local-20260916/docs/bulk-actions-spec-4f",
+        "remoteSha":  "ebde8430875eac720670517e3e3ccdad1b3c417b",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    }
+]

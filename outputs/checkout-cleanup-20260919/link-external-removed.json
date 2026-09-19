@@ -1,0 +1,188 @@
+﻿[
+    {
+        "path":  "C:\\Users\\mrkl6\\.codex\\worktrees\\private-read-integrated-tests",
+        "head":  "8f3dc1584f82fa44d5efcb01c3e06a1cb04c522e",
+        "branch":  "refs/heads/codex/private-read-integrated-tests",
+        "remote":  "refs/heads/archive/local-20260916/codex/private-read-integrated-tests",
+        "remoteSha":  "8f3dc1584f82fa44d5efcb01c3e06a1cb04c522e",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\.codex\\worktrees\\private-read-integrated-tests\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\.codex\\worktrees\\storage-fixture-tests",
+        "head":  "19cd6bdf2e1398f22c7c02599b74829800ddf14c",
+        "branch":  "refs/heads/codex/storage-fixture-tests",
+        "remote":  "refs/heads/archive/local-20260916/codex/storage-fixture-tests",
+        "remoteSha":  "19cd6bdf2e1398f22c7c02599b74829800ddf14c",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\.codex\\worktrees\\storage-fixture-tests\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-barcode",
+        "head":  "2b342aa146ef37c44fa995ef25b6da6ad1eeb431",
+        "branch":  "refs/heads/fx/legacy-barcode-key-ee",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-additems-2026-09-06",
+        "remoteSha":  "957fd6e09421c75659eee030f33023b84fd7caad",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-barcode\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-barcode\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-holds",
+        "head":  "c2f133963bab8a52c45068fdbf986d1824f02fca",
+        "branch":  "refs/heads/s4/awaiting-payment-hold-ee",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-additems-2026-09-06",
+        "remoteSha":  "957fd6e09421c75659eee030f33023b84fd7caad",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-holds\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-holds\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-sargable",
+        "head":  "a43809229c0a22056ab1a63fcb09740d6cce29ea",
+        "branch":  "refs/heads/fx/sargable-date-lock-ee",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-additems-2026-09-06",
+        "remoteSha":  "957fd6e09421c75659eee030f33023b84fd7caad",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-sargable\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-tg-actor",
+        "head":  "52b37daa678c4b447e071de1d302900849bbb2dd",
+        "branch":  "refs/heads/s4/telegram-actor-ee",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-additems-2026-09-06",
+        "remoteSha":  "957fd6e09421c75659eee030f33023b84fd7caad",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-tg-actor\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-shift-credit\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-tg-actor\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\ee-shift-credit\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\fix-i18n",
+        "head":  "6b2472f909778b9f07b2faa358f10bf1f3f92fbc",
+        "branch":  "refs/heads/rc/fix-i18n-missing-keys",
+        "remote":  "refs/heads/archive/local-20260916/rc/coordinated-2026-09-02",
+        "remoteSha":  "539567e22bea29b736bcca3f6ed44c7665bcea5a",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\fix-i18n\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\fix-i18n\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\head-cert-base",
+        "head":  "57d8f1a2559e5cc332757e9a5cd28a7afbd0efe0",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-additems-2026-09-06",
+        "remoteSha":  "957fd6e09421c75659eee030f33023b84fd7caad",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\head-cert-base\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\head-cert-base\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\s4-adj",
+        "head":  "8e8ca52424d56ed74c8365ea458db304b78d3afe",
+        "branch":  "refs/heads/s4/adj-prefix",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-additems-2026-09-06",
+        "remoteSha":  "957fd6e09421c75659eee030f33023b84fd7caad",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\s4-adj\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\s4-adj\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\sec-11",
+        "head":  "539567e22bea29b736bcca3f6ed44c7665bcea5a",
+        "branch":  "refs/heads/rc/sec-11-ios-pwa",
+        "remote":  "refs/heads/archive/local-20260916/rc/coordinated-2026-09-02",
+        "remoteSha":  "539567e22bea29b736bcca3f6ed44c7665bcea5a",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\sec-11\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\sec-11\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\sec-9-hygiene",
+        "head":  "11ceb58b7994d6e9f30b545885a126963389d22e",
+        "branch":  "refs/heads/rc/sec-9-hygiene",
+        "remote":  "refs/heads/archive/local-20260916/rc/coordinated-2026-09-02",
+        "remoteSha":  "539567e22bea29b736bcca3f6ed44c7665bcea5a",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\sec-9-hygiene\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rc-workers\\sec-9-hygiene\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    }
+]

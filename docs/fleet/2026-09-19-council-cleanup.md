@@ -2,6 +2,35 @@
 
 ## Newest execution checkpoint
 
+### Final non-archival batch / owner decision needed
+
+Removed3 nested clean worktrees and11 external/nested dependency-link-only
+worktrees, all with fresh remote/ref/status/reference checks. Total registered
+checkouts removed:233; remaining363. Exact recovery ledgers:
+`removed-nested.json` and `link-external-removed.json` under the cleanup output
+directory. All14 paths absent, commits resolvable and dependency targets present.
+Retained ee-shift-credit and stock-lot-backend because inbound links depend on them.
+
+Also removed the unregistered empty shell
+C:/Users/mrkl6/Downloads/bos-audit-si-claude after verifying it contained only
+frontend/node_modules and cloudflare/node_modules junctions. Unlinked those two
+nonrecursively and removed the now-empty parent directories nonrecursively.
+Their targets under C:/Users/mrkl6/Downloads/bos-a2 remain intact. Recovery, if
+needed, is recreation of these empty directories and junctions; no files lost.
+A first shell check rejected a string/array Target representation before any
+mutation; explicit target normalization corrected it before the verified removal.
+
+Both retained FE and Worker npm run typecheck pass again. Common Git resolves;
+no runtime code changed, no deploy or production mutation.
+
+The local recovery archival question has remained unanswered across several goal
+turns. Non-archival safe batches are now exhausted within the verified scopes.
+Remaining candidates contain dirty/untracked work, local databases/configuration,
+real dependency/build outputs requiring preservation decisions, or dependencies
+on retained workspaces. Do not infer consent to lose any of this. Goal requires
+owner decision: verified private local archive before retiring those checkouts,
+or retain them. All app audit defects remain findings, not completed fixes.
+
 ### Remaining-state inventory — newest
 
 Refreshed all377 current registered worktrees:160 local-work/unbacked-HEAD,

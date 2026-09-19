@@ -1,3 +1,14 @@
+## Non-archival cleanup complete; recovery choice required — September 19
+
+233 registered checkouts removed total,363 remain; plus one empty unregistered
+two-junction shell removed without deleting targets. Final14 recovery ledgers:
+outputs/checkout-cleanup-20260919/removed-nested.json and link-external-removed.json.
+All paths/commits/targets verified; both package typechecks pass. Required common
+Git and all local-only/data-bearing work preserved. Owner's verified private local
+archive choice remains unanswered across multiple goal turns; further consolidation
+needs that decision. Goal not achieved. No runtime changes or deploy; audit issues
+remain OPEN. Details in newest council-cleanup report section.
+
 ## Remaining checkout/data inventory — September 19
 
 377 registered refreshed:160 local-work/unbacked,212 ignored-data,3 nested clean,
