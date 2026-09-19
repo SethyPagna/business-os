@@ -8,6 +8,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp } from '../../AppContext'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { useProtectedCostEntry } from '../../utils/useProtectedCostEntry.ts'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -243,8 +244,13 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const [selectedGroup, setSelectedGroup] = useState<ProductGroup | null>(null)
   const [picked, setPicked] = useState<ProductCandidate | null>(draft?.picked || null)
   const [quantity, setQuantity] = useState(draft?.quantity || '1')
-  const [unitCost, setUnitCost] = useState(canViewCosts ? draft?.unitCost || '' : '')
-  const [freeGoods, setFreeGoods] = useState(Boolean(draft?.freeGoods))
+  const [protectedUnitCost, setProtectedUnitCost] = useState(draft?.unitCost || '')
+  const [protectedFreeGoods, setProtectedFreeGoods] = useState(Boolean(draft?.freeGoods))
+  const costEntry = useProtectedCostEntry(user?.id, picked?.id, canViewCosts, canEditCosts)
+  const unitCost = String(costEntry.value('unitCost', protectedUnitCost, ''))
+  const freeGoods = Boolean(costEntry.value('freeGoods', protectedFreeGoods, false))
+  const setUnitCost = (next: string) => { costEntry.write('unitCost', next); setProtectedUnitCost(next) }
+  const setFreeGoods = (next: boolean) => { costEntry.write('freeGoods', next); setProtectedFreeGoods(next) }
   // Retain the persisted field for draft compatibility, but receipt prices
   // never request a separate product, including old price-variant drafts.
   const [createPriceVariant, setCreatePriceVariant] = useState(false)
@@ -320,9 +326,9 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     return scheduleWorkDraftWrite<FastStockInDraft>(fastStockInDraftKey, {
       sessionId: sessionIdRef.current, mode, conditionTag, createdProductIds,
       branchId, receivedDate, supplier, paymentStatus, creditDueDate,
-      query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received, scannedBarcode,
+      query, picked, quantity, unitCost: protectedUnitCost, freeGoods: protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received, scannedBarcode,
     })
-  }, [branchId, receivedDate, supplier, paymentStatus, creditDueDate, query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice, received, scannedBarcode, mode, conditionTag, createdProductIds])
+  }, [branchId, receivedDate, supplier, paymentStatus, creditDueDate, query, picked, quantity, protectedUnitCost, protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice, received, scannedBarcode, mode, conditionTag, createdProductIds])
 
   useEffect(() => {
     const text = query.trim()
@@ -482,7 +488,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     writeWorkDraft<FastStockInDraft>(fastStockInDraftKey, {
       sessionId: sessionIdRef.current,
       mode, conditionTag, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
-      query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received, scannedBarcode,
+      query, picked, quantity, unitCost: protectedUnitCost, freeGoods: protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received, scannedBarcode,
     })
   }
 
@@ -609,7 +615,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     setQuery(line.productName)
     setQuantity(String(line.quantity))
     setUnitCost(canViewCosts ? line.unitCost : '')
-    setFreeGoods(line.freeGoods)
+    setFreeGoods(canViewCosts && line.freeGoods)
     setCreatePriceVariant(false)
     setExpiryDate(line.expiryDate)
     setReason(line.reason)
@@ -837,7 +843,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   ), 0)
   const closeState: FastStockInCloseState = {
     mode, conditionTag, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
-    query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, reason, batchChoice,
+    query, picked, quantity, unitCost: protectedUnitCost, freeGoods: protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice,
     lines: received, scannedBarcode,
   }
   const closeDirty = fastStockInHasUnsavedWork(closeState, pristineCloseStateRef.current)
@@ -1018,13 +1024,14 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                 <label className="block"><span className="mb-1 block whitespace-nowrap text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('cost_price_usd', 'Cost price $')} <span className="text-red-500" aria-hidden="true">*</span></span><input type="number" min="0" step="0.0001" className="input text-sm" required disabled={!canEditCosts || freeGoods} value={freeGoods ? 0 : unitCost} onChange={(event) => {
                   const next = event.target.value
                   setUnitCost(next)
+                  setFreeGoods(freeGoods)
                   // A new receipt price belongs to a new lot of this product.
                   // A separate product requires an explicit independent choice.
                   setCreatePriceVariant(false)
                 }} /></label>
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={expiryDate} onChange={(iso) => setExpiryDate(iso)} /></label>
                 <div className="flex min-w-0 items-end gap-1.5">
-                  <span className="mb-2 whitespace-nowrap text-[10px] tabular-nums text-gray-500 sm:text-[11px]">{tr('total_cost', 'Total cost')}: ${(Math.max(0, Number(quantity) || 0) * Math.max(0, Number(unitCost) || 0)).toFixed(2)}</span>
+                  {unitCost.trim() !== '' ? <span className="mb-2 whitespace-nowrap text-[10px] tabular-nums text-gray-500 sm:text-[11px]">{tr('total_cost', 'Total cost')}: ${(Math.max(0, Number(quantity) || 0) * Math.max(0, Number(unitCost) || 0)).toFixed(2)}</span> : null}
                 </div>
                 {/* N14-D: $0.00 is a claim the operator makes, never a default.
                     Its own row under the inputs: inside the cost cell it made that
