@@ -4,6 +4,12 @@ Read `progress.md` before planning or editing. It is the live coordination and d
 
 ## Specialized delegation
 
+For owner-submitted ideas/decisions and maintainability reviews, follow
+`docs/AI_COUNCIL_REVIEW.md`: five independent perspectives, anonymized
+cross-critique, then a Chairman verdict. Disclose simulated rather than independent
+reviews. Codex can also load the personal `ai-council-review` skill. This process
+does not authorize runtime edits, deletion, data mutations or deployment.
+
 For complex work, delegate independent read-heavy tasks first and consolidate their evidence before edits. Canonical roles live in `agent-team/agents.json` and generate adapters for Codex, Claude Code, and Copilot:
 
 - `feature_planner` for feature scope and acceptance criteria.

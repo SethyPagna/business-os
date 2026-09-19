@@ -1,3 +1,17 @@
+## Council protocol, deeper audit and cleanup safety — September 19
+
+Added docs/AI_COUNCIL_REVIEW.md and AGENTS.md routing; personal Codex skill is
+at C:/Users/mrkl6/.codex/skills/ai-council-review/SKILL.md. Skill standard validator
+blocked by missing PyYAML; structural check is separate, not behavioral proof.
+See docs/fleet/2026-09-19-council-cleanup.md. NO directories deleted: primary owns
+shared Git storage and has dirty/local-only evidence; older copies need a manifest.
+
+Deep read-only findings: docs/fleet/2026-09-19-device-tier-audit.md. Open: ownerless
+offline sale replay across accounts, unresolved logout, reproduced concurrent
+inline queue dispatch loss, transfer query budgets and Free-tier capacity/feature
+differences. Both dry-run bundles pass, 43 tier checks and 59 transfer checks pass;
+these do not certify safe downgrade. No runtime fixes/deployment in this audit.
+
 ## Read-only maintainability review and handoff — September 19
 
 Reviewed continuation source `45a0831b`; no runtime edits, deletion, migration or
