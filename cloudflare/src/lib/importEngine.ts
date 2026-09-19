@@ -23,6 +23,7 @@
 // UPDATE (this session, correcting the paragraph above -- it had gone
 // stale and was actively misleading, having sent a full trace down a path
 // that turned out to already be built): products import DOES have a real
+import { canEditAcquisitionCosts, isAcquisitionCostImport } from './acquisitionCostAccess'
 import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing, barcodeIdentityMatches, clusterRowsByBarcodeIdentity, rankBarcodeIdentityWinner, isRealBarcode } from './productDetailRule'
 import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
@@ -352,6 +353,9 @@ export async function assertCurrentImportApplyAuthority(
     throw new ImportApplyAuthorizationError('import', 'The user who authorized this import is no longer active. Retry it with a currently authorized user.')
   }
   const missingPermission = permissionsForImportType(job.type).find((permission) => !hasPermission(actor, permission))
+  if (isAcquisitionCostImport(job.type) && !canEditAcquisitionCosts(actor)) {
+    throw new ImportApplyAuthorizationError('product_cost_edit', 'The user who authorized this import no longer has cost-entry permission.')
+  }
   if (missingPermission) {
     throw new ImportApplyAuthorizationError(missingPermission, `The user who authorized this import no longer has ${missingPermission} permission.`)
   }

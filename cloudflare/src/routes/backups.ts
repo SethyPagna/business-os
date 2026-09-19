@@ -3,6 +3,7 @@ import type { Env } from '../index'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
+import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import {
   CLOUDFLARE_BACKUP_KEEP,
   createCloudflareBackup,
@@ -102,6 +103,7 @@ app.post('/', async (c) => {
   const type = String(body.type || '').trim()
   try {
     if (type === 'export-folder' || type === 'export-cloudflare' || !type) {
+      if (!canViewAcquisitionCosts(user)) return c.json({ error: 'Cost-view permission is required to export an unredacted database backup.', code: 'product_cost_view_required' }, 403)
       const backup = await createCloudflareBackup(c.env, 'manual')
       const retention = await pruneCloudflareBackups(c.env, CLOUDFLARE_BACKUP_KEEP)
       const jobId = crypto.randomUUID()
@@ -143,6 +145,7 @@ app.post('/', async (c) => {
     }
 
     if (type === 'import-folder') {
+      if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Cost-entry permission is required to restore database costs.', code: 'product_cost_edit_required' }, 403)
       if (!hasPermission(user, 'backup_restore')) {
         return c.json({ error: 'You do not have permission to perform this action' }, 403)
       }

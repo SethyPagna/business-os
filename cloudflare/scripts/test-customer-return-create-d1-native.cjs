@@ -108,8 +108,11 @@ async function main() {
     const { customer_return_create_version: _create, customer_return_edit_version: _edit, ...expectedQuote } = quoteResult.body
     const request = { client_request_id: 'native-v1-return', money_precision_version: 1, sale_id: 1,
       reason: 'Native D1 exact return', expected_quote: expectedQuote,
-      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', branch_id: 1,
-        cost_price_usd: 999, cost_price_khr: 3996000 }] }
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', branch_id: 1 }] }
+    const forbiddenOverride = await fetchJson('', { ...request, items: [{ ...request.items[0], cost_price_usd: 999, cost_price_khr: 3996000 }] })
+    assert.equal(forbiddenOverride.response.status, 403)
+    assert.equal(forbiddenOverride.body.code, 'product_cost_edit_required')
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM returns').first()).n, 0)
 
     await db.prepare(`CREATE TRIGGER fail_native_return_movement BEFORE INSERT ON inventory_movements
       WHEN NEW.movement_type='return' BEGIN SELECT RAISE(ABORT,'native return movement failure'); END`).run()
@@ -130,6 +133,7 @@ async function main() {
     assert.equal(lostAcknowledgement.status, 200)
     const retried = await fetchJson('', request)
     assert.equal(retried.response.status, 200, JSON.stringify(retried.body))
+    assert.equal(JSON.stringify(retried.body).includes('cost_price_usd'), false)
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM returns').first()).n, 1)
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM return_create_receipts').first()).n, 1)
     assert.equal((await db.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE movement_type='return'").first()).n, 1)
