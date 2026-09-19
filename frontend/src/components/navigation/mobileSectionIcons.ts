@@ -17,7 +17,6 @@ import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
 import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
 import RadioTower from 'lucide-react/dist/esm/icons/radio-tower.js'
 import ReceiptText from 'lucide-react/dist/esm/icons/receipt-text.js'
-import ScanSearch from 'lucide-react/dist/esm/icons/scan-search.js'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
@@ -37,7 +36,7 @@ const ICONS_BY_SECTION: Record<string, LucideIcon> = {
   'contacts:customers': UserRound,
   'contacts:suppliers': Factory,
   'contacts:delivery': Bike,
-  'contacts:duplicates': ScanSearch,
+  'contacts:duplicates': Copy,
   'promotions:rules': ListChecks,
   'promotions:discounts': BadgePercent,
   'promotions:loyalty': Gift,
