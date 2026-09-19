@@ -117,6 +117,25 @@ async function main() {
   const receivedBefore = wide.sql.prepare('SELECT id,received_quantity,received_cost_usd FROM product_batches ORDER BY id').all()
   const route = loadStockSession('routes/batches.ts') .default
   const deferred = []
+  const dateFixture = fixture()
+  for (const cost of [3,5]) await api.commitStockSession(dateFixture.env,user,request(`date-edit-${cost}`,cost))
+  const originalDateLots = lotRows(dateFixture)
+  const originalDateHistory = snapshots(dateFixture)
+  for (const date of [originalDateLots[0].received_at.slice(0,10), '2026-09-08']) {
+    for (const lot of originalDateLots) {
+      const response = await route.request(`/${lot.id}`, {method:'PATCH',headers:{'content-type':'application/json'},
+        body:JSON.stringify({received_at:date,unit_cost_usd:lot.unit_cost_usd})},dateFixture.env,{waitUntil(p){deferred.push(p)}})
+      assert.equal(response.status,200,await response.text())
+    }
+    assert.deepEqual(lotRows(dateFixture).map(row=>row.batch_key),originalDateLots.map(row=>row.batch_key))
+    assert.deepEqual(lotRows(dateFixture).map(row=>row.received_at),[date,date])
+    assert.equal(productCost(dateFixture),4)
+    assert.equal(snapshots(dateFixture),originalDateHistory)
+  }
+  const movedReceipt = request('moved-date-same-price',3,{received_date:'2026-09-08'})
+  const movedResult = await api.commitStockSession(dateFixture.env,user,movedReceipt)
+  assert.equal(movedResult.items[0].batchId,originalDateLots[0].id,'corrected display date still resolves same-priced lot by date and price')
+  console.log('PASS both same-date priced lots accept unchanged/changed date PATCH without changing durable keys or history')
   const preCorrection = lotRows(wide)
   wide.failWhenSqlMatches(/UPDATE products SET/)
   const failedPatch = await route.request('/2', {method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({unit_cost_usd:6})}, wide.env, {waitUntil(p){deferred.push(p)}})

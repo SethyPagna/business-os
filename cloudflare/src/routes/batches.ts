@@ -400,15 +400,9 @@ app.patch('/:id', async (c) => {
   if (body.notes !== undefined) { updates.push('notes = @notes'); params.notes = body.notes || null }
   const deactivating = body.is_active !== undefined && !body.is_active
   if (body.is_active !== undefined) { updates.push('is_active = @is_active'); params.is_active = body.is_active ? 1 : 0 }
-  // received_at (the "batch date" -- when this lot actually came in) is
-  // the ONLY thing that determines this batch's code now -- editing it
-  // recomputes both batch_key and lot_code from the corrected date (see
-  // lib/batchCode.ts's dateToBatchCode), instead of accepting a
-  // separately-typed lot_code that could drift out of sync with the date
-  // shown right next to it. If the corrected date now matches another
-  // active batch on this product, that collides on the unique index --
-  // surfaced as a normal 409/error rather than silently merging two
-  // distinct batch rows into one.
+  // The displayed lot code follows its received date, but batch_key is a
+  // durable receipt identity. Multiple prices can share a date; changing
+  // display metadata must neither collapse those lots nor change replay keys.
   if (body.received_at !== undefined) {
     // This value comes from the operator-facing editor, whose display/input
     // convention is day-first. Ambiguous 03/09/2026 must therefore remain
@@ -417,9 +411,8 @@ app.patch('/:id', async (c) => {
     if (body.received_at && !iso) return c.json({ error: 'received_at is not a valid date (use dd/mm/yyyy)' }, 400)
     const resolvedIso = iso || new Date().toISOString().slice(0, 10)
     const code = dateToBatchCode(resolvedIso) as string
-    updates.push('received_at = @received_at', 'batch_key = @batch_key', 'lot_code = @lot_code')
+    updates.push('received_at = @received_at', 'lot_code = @lot_code')
     params.received_at = resolvedIso
-    params.batch_key = code
     params.lot_code = code
   }
   // Supplier credit lifecycle (0065): the admin can flip credit -> paid
