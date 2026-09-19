@@ -149,7 +149,20 @@ runTest('the live surface carries the ported set-raise receipt rule (behaviour 2
   assert.equal(supplierVisible(true, true), true, 'authorized raising sets still collect a supplier')
   assert.equal(supplierVisible(true, false), false, 'no-edit users cannot enter receipt fields')
   assert.equal(supplierVisible(false, true), false, 'removal/correction does not request receipt fields')
-  assert.match(modals, /disabled=\{adjustSaving \|\| \(isStockIn && !canEditCosts\)\}/, 'unauthorized receipts cannot be submitted')
+  const disabledExpression = modals.match(/onClick=\{onAdjust\}[^\n]*?disabled=\{([^}]+)\}/)?.[1]
+  assert.ok(disabledExpression, 'the actual adjustment submit button must retain its guard')
+  const disabled = new Function('adjustSaving', 'isStockIn', 'canEditCosts', 'costEntry', 'displayedUnitCost', 'adjustForm', 'displayedCostUsd', 'displayedCostKhr', `return (${disabledExpression})`)
+  for (const readable of [false, true]) {
+    for (const cost of ['', '2.3456']) {
+      assert.equal(disabled(false, true, false, { readable }, cost, { pricingLocked: true }, '', ''), true, 'no edit grant always denies adds/raising sets')
+    }
+  }
+  assert.equal(disabled(true, false, true, { readable: true }, '2', { pricingLocked: true }, '', ''), true, 'saving remains locked')
+  assert.equal(disabled(false, false, false, { readable: false }, '', { pricingLocked: true }, '', ''), false, 'a removal/set-down needs no cost grant')
+  assert.equal(disabled(false, true, true, { readable: false }, '', { pricingLocked: true }, '', ''), true, 'a revoked hidden cost cannot silently supply a receipt')
+  assert.equal(disabled(false, true, true, { readable: false }, '2', { pricingLocked: true }, '', ''), false, 'a blind editor may submit newly entered receipt cost')
+  assert.equal(disabled(false, true, true, { readable: false }, '2', { pricingLocked: false }, '', ''), true, 'unlocked blind pricing cannot reuse hidden catalog costs')
+  assert.equal(disabled(false, true, true, { readable: false }, '2', { pricingLocked: false }, '2', '8000'), false, 'explicit blind catalog costs permit the unlocked path')
   assert.ok(!modals.includes("adjustForm.type === 'add' && adjustForm.batch_id !== ''") , 'the supplier field must not be re-narrowed to adds only')
 })
 
