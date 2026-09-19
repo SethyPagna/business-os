@@ -90,8 +90,6 @@ interface ReturnUpdatePayload extends Record<string, unknown> {
     quantity: number
     applied_price_usd: number
     applied_price_khr: number
-    cost_price_usd: number
-    cost_price_khr: number
     return_to_stock: boolean
     stock_action: ReturnStockAction
     branch_id: number | string | null
@@ -251,8 +249,8 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           quantity:          it.returnQty,
           applied_price_usd: toNumber(it.applied_price_usd),
           applied_price_khr: toNumber(it.applied_price_khr),
-          cost_price_usd:    toNumber(it.cost_price_usd),
-          cost_price_khr:    toNumber(it.cost_price_khr),
+          // Preserve the recorded return cost at the server; this form does
+          // not edit acquisition costs and may never have received them.
           return_to_stock:   it.return_to_stock !== false,
           stock_action:      it.stock_action || 'restock',
           branch_id:         it.branch_id || ret.branch_id || null,

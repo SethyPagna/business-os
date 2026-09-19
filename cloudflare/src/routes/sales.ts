@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
 import { hasColumn, tableColumnSet } from '../lib/schemaProbe'
@@ -169,6 +170,7 @@ async function saleAllowsPaymentCorrection(db: ReturnType<typeof getDb>, saleId:
   return latest?.action === 'update' || latest?.action === 'sale_payment_correction_opened'
 }
 app.use('*', requireAuth)
+app.use('*', acquisitionCostResponses)
 
 const SALES_READ_CACHE_TTL_SECONDS = 20
 
@@ -5519,6 +5521,7 @@ export function projectOperationalSaleCosts(row:Record<string,unknown>,user:Sess
   }
   return {...publicRow,items:Array.isArray(items)?items.map(item=>{
     if(!item||typeof item!=='object'||Array.isArray(item))return item
+    if(canViewAcquisitionCosts(user))return item
     const {cost_price_usd,cost_price_khr,...publicItem}=item as Record<string,unknown>
     return publicItem
   }):items}
@@ -5630,8 +5633,12 @@ app.get('/stats', async (c) => {
 // match".
 // Match reports.ts' authority boundary without importing a route module. Apply
 // after shared cache reads: private cost fields must never depend on cache owner.
-export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean):Record<string,unknown> {
+export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean,canViewCosts=isAdmin):Record<string,unknown> {
   if(isAdmin)return row
+  if(canViewCosts){
+    const {delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,...costView}=row
+    return costView
+  }
   const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,unvalued_cost_usd,returned_cost_usd,
     cost,gross_profit,delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,
     returned_cost_shortfall_usd,cost_missing_snapshot_lines,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,
@@ -5764,7 +5771,7 @@ app.get('/stats-strip', async (c) => {
       returns: { count: before.returns.length, refund_usd: refund.toNumber() },
     }
   })
-  return c.json({...payload,totals:gateSalesReportMoney(payload.totals as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))})
+  return c.json({...payload,totals:gateSalesReportMoney(payload.totals as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')),canViewAcquisitionCosts(c.get('user')))})
 })
 
 // ---- Phase X (Part 395): the daily report ---------------------------------
@@ -5792,7 +5799,7 @@ app.get('/daily-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   }, 'day')
-  return c.json({ startDate, endDate, days:days.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))) })
+  return c.json({ startDate, endDate, days:days.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')),canViewAcquisitionCosts(c.get('user')))) })
 })
 
 // GET /api/sales/day-report?date&branchId -- the click-a-day drill: the
@@ -5818,8 +5825,8 @@ app.get('/day-report', async (c) => {
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
   const isAdmin=isAdminControlUser(c.get('user'))
-  return c.json({...report,totals:gateSalesReportMoney(report.totals as unknown as Record<string,unknown>,isAdmin),
-    sales:report.sales.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,isAdmin)),
+  return c.json({...report,totals:gateSalesReportMoney(report.totals as unknown as Record<string,unknown>,isAdmin,canViewAcquisitionCosts(c.get('user'))),
+    sales:report.sales.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,isAdmin,canViewAcquisitionCosts(c.get('user')))),
     delivery_contacts:report.delivery_contacts.map(row=>gateSalesCourierMoney(row as unknown as Record<string,unknown>,isAdmin))})
 })
 
@@ -5919,7 +5926,7 @@ app.get('/customer-report', async (c) => {
   const totalRows = Number(countRow?.total) || 0
   return c.json({
     startDate, endDate, customerId,
-    totals: gateSalesReportMoney(totals as unknown as Record<string, unknown>, isAdminControlUser(c.get('user'))),
+    totals: gateSalesReportMoney(totals as unknown as Record<string, unknown>, isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))),
     sales: saleRows || [],
     page, page_size: pageSize, total_sales: totalRows, total_pages: Math.max(1, Math.ceil(totalRows / pageSize)),
   })

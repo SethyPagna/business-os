@@ -16,6 +16,7 @@
 // operator chose; per-row conflicts stay recorded on the rows and appear in
 // the finished job's report from the tracker.
 import { useEffect, useRef, useState } from 'react'
+import { useApp } from '../../../AppContext'
 import UploadIcon from 'lucide-react/dist/esm/icons/upload.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Scale from 'lucide-react/dist/esm/icons/scale.js'
@@ -66,6 +67,8 @@ function triggerDownload(name: string, text: string): void {
 }
 
 export default function StockActionImportModal({ onClose, onDone, t, notify, topMode = 'stock_actions', onTopModeChange }: StockActionImportModalProps) {
+  const canEditCosts = (useApp() as { hasPermission: (key: string) => boolean }).hasPermission('product_cost_edit')
+  const canViewCosts = (useApp() as { hasPermission: (key: string) => boolean }).hasPermission('product_cost_view')
   const tr = (key: string, en: string, km = en): string => {
     const value = typeof t === 'function' ? t(key, en, km) : en
     return value && value !== key ? value : en
@@ -160,6 +163,7 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   // The one dispatch: create + upload + start, then hand off to the shared
   // direct-apply screen -- the operator already reviewed the rows above.
   const handleImport = async () => {
+    if (!canEditCosts) { setError(tr('product_cost_import_required', 'Cost edit permission is required for this import format.')); return }
     if (busy || !csvText.trim()) return
     setBusy(true)
     setError('')
@@ -179,6 +183,8 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
       if (aliveRef.current) setBusy(false)
     }
   }
+
+  if (reviewJob && !canViewCosts) return <Modal title={tr('stock_import_title', 'Import Stock Actions')} onClose={onClose} unsavedChanges="read-only"><p role="status">{tr('product_cost_import_view_required', 'Cost view permission is required to review financial import data.')}</p></Modal>
 
   return (
     <Modal title={tr('stock_import_title', 'Import Stock Actions', 'នាំចូលសកម្មភាពស្តុក')} onClose={onClose} draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
@@ -304,10 +310,11 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
           ) : null}
 
           {error ? <div className="text-sm text-red-600 dark:text-red-400">{error}</div> : null}
+          {!canEditCosts ? <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{tr('product_cost_import_required', 'Cost edit permission is required for this import format.')}</p> : null}
 
           <div className="flex gap-2">
             <button type="button" className="btn-secondary flex-1" onClick={onClose} disabled={busy}>{tr('cancel', 'Cancel', 'បោះបង់')}</button>
-            <button type="button" className="btn-primary inline-flex flex-1 items-center justify-center gap-1.5" disabled={busy || !csvText.trim() || rowCount === 0} onClick={handleImport}>
+            <button type="button" className="btn-primary inline-flex flex-1 items-center justify-center gap-1.5" disabled={!canEditCosts || busy || !csvText.trim() || rowCount === 0} onClick={handleImport}>
               <UploadIcon className="h-4 w-4" />
               {busy ? tr('stock_import_starting', 'Starting…', 'កំពុងចាប់ផ្តើម…') : tr('stock_import_start', 'Import', 'នាំចូល')}
             </button>

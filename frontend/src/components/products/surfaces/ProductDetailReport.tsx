@@ -18,6 +18,8 @@ import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
 // to a person and is not the receipt they would search for.
 import { formatHistoryReference, historyReference } from '../../../utils/historyRowModel.ts'
 import { useApp } from '../../../AppContext'
+import { canViewAcquisitionCosts } from '../../../utils/acquisitionCostAccess.ts'
+import type { PermissionUser } from '../../../utils/permissions.ts'
 import AttributeSupplierModal from './AttributeSupplierModal.tsx'
 import EntityLink from '../../shared/EntityLink.tsx'
 
@@ -138,7 +140,8 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
   fmtUSD: (value: unknown) => string
 }) {
   // Supplier attribution (item 3) is a product edit; notify surfaces the result.
-  const { can, notify, navigateTo } = useApp() as { can: (section: string, action: string) => boolean; notify: (message: unknown, type?: string) => void; navigateTo?: (page: string, anchor?: string) => void }
+  const { can, notify, navigateTo, user } = useApp() as { user: PermissionUser; can: (section: string, action: string) => boolean; notify: (message: unknown, type?: string) => void; navigateTo?: (page: string, anchor?: string) => void }
+  const canViewCosts = canViewAcquisitionCosts(user)
   const canAttributeSupplier = can('products', 'edit')
   const [attributeOpen, setAttributeOpen] = useState(false)
   // Bumped after a backfill to re-pull the detail report so the Suppliers/
@@ -476,7 +479,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
               </div>
               <button type="button" onClick={() => toggleSupplierRow(supplier.supplier_key)} className="mt-0.5 flex w-full items-center justify-between text-left text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
                 <span>{supplier.first_received_at ? fmtDate(supplier.first_received_at) : '--'} → {supplier.last_received_at ? fmtDate(supplier.last_received_at) : '--'}</span>
-                {supplier.lots_without_cost > 0 ? <span>{supplier.lots_without_cost} {tr('lots_without_cost', 'without cost')}</span> : null}
+                {canViewCosts && supplier.lots_without_cost > 0 ? <span>{supplier.lots_without_cost} {tr('lots_without_cost', 'without cost')}</span> : null}
               </button>
             </div>
             {open ? (
@@ -493,7 +496,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                     {lot.supplier_name ? <EntityLink page="contacts" anchor="hub:contacts:suppliers" search={lot.supplier_name} navigate={navigateTo} className="detail-scroll-text max-w-[8rem] text-gray-400" title={tr('open_supplier', 'Open supplier')}>{lot.supplier_name}</EntityLink> : <span className="detail-scroll-text max-w-[8rem] text-gray-400">{supplierDisplay(lot.supplier_name, tr)}</span>}
                     <span className="shrink-0 whitespace-nowrap text-gray-400">{lot.received_at ? fmtDate(lot.received_at) : '--'}</span>
                     <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">{lot.total_qty == null ? '--' : '×' + lot.total_qty}</span>
-                    <span className="shrink-0 tabular-nums text-gray-500">{lot.unit_cost_usd != null ? fmtUSD(lot.unit_cost_usd) : '--'}</span>
+                    {canViewCosts ? <span className="shrink-0 tabular-nums text-gray-500">{lot.unit_cost_usd != null ? fmtUSD(lot.unit_cost_usd) : '--'}</span> : null}
                   </div>
                 ))}
               </div>

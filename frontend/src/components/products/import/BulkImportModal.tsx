@@ -1116,6 +1116,8 @@ function getBrowserImageEntries(imageFiles: ImageFileMap = {}): BrowserImageEntr
 
 export default function BulkImportModal({ onClose, onDone, t, topMode = 'general', onTopModeChange, products = [] }: BulkImportModalProps) {
   const { notify, hasPermission, can } = useApp()
+  const canEditCosts = hasPermission('product_cost_edit')
+  const canViewCosts = hasPermission('product_cost_view')
   // Server-side gate lives in routes/importJobs.ts (requires the
   // 'destructive_delete' permission, not just ordinary products-import
   // access, for BOTH destructive modes -- replace_all and replace_columns
@@ -1344,6 +1346,10 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   const isCancelledStartError = (error: unknown): boolean => /import was cancelled|retry before starting/i.test(getErrorMessage(error, String(error || '')))
 
   const beginImportAction = (action: ImportActionName, options: { setLoading?: boolean } = {}): boolean => {
+    if (action !== 'pick-csv' && !canEditCosts) {
+      notify(T('product_cost_import_required', 'Cost edit permission is required for this import format.'), 'error')
+      return false
+    }
     if (!beginNamedAction(actionInFlightRef, action, { blocked: loading })) return false
     if (options.setLoading !== false) setLoading(true)
     return true
@@ -1571,6 +1577,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   }
 
   const handleCancelCurrentJob = async () => {
+    if (!canEditCosts) { notify(T('product_cost_import_required', 'Cost edit permission is required for this import format.'), 'error'); return }
     if (!currentJob?.id) return
     if (loading && typeof window !== 'undefined' && typeof window.confirm === 'function') {
       const confirmed = window.confirm(T('confirm_cancel_import', 'Cancel this import? The upload/start sequence will stop immediately.'))
@@ -1597,6 +1604,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   // pressed the job behaves exactly like a CSV with no images at all,
   // which is a safe state to sit in rather than a half-applied one.
   const handleWireImportJobImages = async () => {
+    if (!canEditCosts) { notify(T('product_cost_import_required', 'Cost edit permission is required for this import format.'), 'error'); return }
     const jobId = currentJob?.id || result?.job?.id || result?.jobId
     if (!jobId || wireImagesState === 'working') return
     const wire = getProductImportApi().wireImportJobImages
@@ -2909,10 +2917,11 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
             type="button"
             className="btn-primary order-7 w-full"
             onClick={handleImport}
-            disabled={loading || !csvData?.content || blockingIssueCount > 0 || (importMode === 'replace_columns' && !selectedReplaceColumns.length)}
+            disabled={!canEditCosts || loading || !csvData?.content || blockingIssueCount > 0 || (importMode === 'replace_columns' && !selectedReplaceColumns.length)}
           >
             {loading ? T('uploading_import', 'Uploading…') : T('upload_and_import', 'Upload & import')}
           </button>
+          {!canEditCosts ? <p role="status" className="order-7 text-xs text-amber-700 dark:text-amber-300">{T('product_cost_import_required', 'Cost edit permission is required for this import format.')}</p> : null}
 
         </div>
       ) : null}
@@ -2966,9 +2975,10 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               {T('zip_drop_hint', 'or drag a .zip of images anywhere in this box')}
             </p>
           </div>
-          <button type="button" className="btn-primary w-full" onClick={handleImageOnlyImport} disabled={loading || (!Object.keys(imageFiles).length && !zipFile)}>
+          <button type="button" className="btn-primary w-full" onClick={handleImageOnlyImport} disabled={!canEditCosts || loading || (!Object.keys(imageFiles).length && !zipFile)}>
             {loading ? T('importing_images', 'Importing...') : T('match_import_images', 'Match and import {n} images').replace('{n}', String(Object.keys(imageFiles).length))}
           </button>
+          {!canEditCosts ? <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{T('product_cost_import_required', 'Cost edit permission is required for this import format.')}</p> : null}
         </div>
       ) : null}
 
@@ -3011,7 +3021,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
             {(result.images_matched || 0) > 0 ? <p className="text-sm">{T('n_images_matched', '{n} images matched').replace('{n}', String(result.images_matched || 0))}</p> : null}
             {!result.queued && result.imported === 0 && result.updated === 0 && (result.images_matched || 0) === 0 ? <p className="text-sm">No changes applied.</p> : null}
           </div>
-          {Array.isArray(result.errors) && result.errors.length ? (
+          {canViewCosts && Array.isArray(result.errors) && result.errors.length ? (
             <div>
               <p className="mb-1 text-sm font-medium text-red-600">{T('errors_count', 'Errors ({n})').replace('{n}', String(result.errors.length))}</p>
               <div className="max-h-40 space-y-1 overflow-auto rounded-lg bg-red-50 p-3 text-xs text-red-600 dark:bg-red-900/20">

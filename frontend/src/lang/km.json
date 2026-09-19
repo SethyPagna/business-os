@@ -2,6 +2,8 @@
   "perm_product_cost_view": "មើលថ្លៃដើមទំនិញ",
   "perm_product_cost_edit": "កែប្រែថ្លៃដើមទំនិញ",
   "product_cost_edit_required": "ត្រូវការសិទ្ធិកែប្រែថ្លៃដើម ដើម្បីទទួលទំនិញចូលស្តុក។",
+  "product_cost_import_required": "ត្រូវការសិទ្ធិកែប្រែថ្លៃដើម សម្រាប់ទម្រង់នាំចូលនេះ។",
+  "product_cost_import_view_required": "ត្រូវការសិទ្ធិមើលថ្លៃដើម ដើម្បីពិនិត្យទិន្នន័យហិរញ្ញវត្ថុនៃការនាំចូល។",
   "customer_gender_restore_session_refreshed": "វគ្គសុវត្ថិភាពបានផ្ទុកឡើងវិញ",
   "customer_gender_restore_session_refreshed_help": "ឯកសារដែលបានជ្រើសត្រូវបានសម្អាត ហើយគ្មានសំណើថ្មីត្រូវបានផ្ញើទេ។ សូមបិទ ហើយបើកឧបករណ៍នេះឡើងវិញ ពិនិត្យស្ថានភាពដែលបានរក្សាទុក រួចជ្រើសឯកសារដែលបានអនុម័តម្តងទៀត ដើម្បីបន្ត។",
   "customer_gender_restore": "ស្ដារភេទអតិថិជន",

@@ -2,6 +2,9 @@ import { useState } from 'react'
 import ConfirmDialog from '../shared/ConfirmDialog'
 import InfoHint from '../shared/InfoHint'
 import { costAverageRows } from './mergeConfirmationRule'
+import { useApp } from '../../AppContext'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import type { PermissionUser } from '../../utils/permissions.ts'
 
 // "What happens when I save one and the other row also has stock?"
 //
@@ -136,6 +139,7 @@ export default function MergeStockChoiceDialog({
   // dangerous case (a distracted Enter) pick a disposition nobody chose, which
   // is the exact failure this dialog exists to remove.
   const [choice, setChoice] = useState<MergeStockChoice | null>(null)
+  const canViewCosts = canViewAcquisitionCosts((useApp() as { user: PermissionUser }).user)
   const T = (key: string, fallback: string): string => {
     const value = t(key)
     return value && value !== key ? value : fallback
@@ -143,12 +147,12 @@ export default function MergeStockChoiceDialog({
 
   const pcs = T('pcs', 'pcs')
   const lotWord = T('batches', 'received dates')
-  const priceChanges = pricing?.changes ?? []
+  const priceChanges = (pricing?.changes ?? []).filter(change => canViewCosts || !/cost|purchase/i.test(change.field))
   const identityDiffers = Boolean(identity && !identity.same && identity.differs.length)
   // The kept row has no cost of its own and takes the removed row's. Not a
   // difference and not a warning -- but it changes what the kept product cost,
   // so it is said out loud rather than done quietly.
-  const costFill = identity?.costFill ?? []
+  const costFill = canViewCosts ? identity?.costFill ?? [] : []
   // BOTH rows carry a cost and the two differ, so the merge stores the mean
   // of the distinct costs (owner ruling, 2026-09-04). The kept row ends up
   // costing a figure neither row recorded, which is exactly the kind of
@@ -234,7 +238,7 @@ export default function MergeStockChoiceDialog({
             />
           </div>
           <dl className="space-y-0.5 text-xs">
-            {(identity?.differs ?? []).map((diff) => {
+            {(identity?.differs ?? []).filter(diff => canViewCosts || !/cost|purchase/i.test(diff.field)).map((diff) => {
               const [labelKey, labelFallback] = IDENTITY_FIELD_LABEL[diff.field] || [diff.field, diff.field]
               return (
                 <div key={diff.field} className="flex items-start justify-between gap-3">
@@ -251,7 +255,7 @@ export default function MergeStockChoiceDialog({
         </div>
       ) : null}
 
-      {costAverages.length ? (
+      {canViewCosts && costAverages.length ? (
         <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 dark:border-sky-900/40 dark:bg-sky-950/30">
           <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-sky-800 dark:text-sky-300">
             <span>{T('merge_cost_average_title', 'The kept product\u2019s cost becomes the average')}</span>

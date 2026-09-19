@@ -187,8 +187,6 @@ interface ReturnCreatePayload extends Record<string, unknown> {
     quantity: number
     applied_price_usd: number
     applied_price_khr: number
-    cost_price_usd: number
-    cost_price_khr: number
     return_to_stock: boolean
     stock_action: ReturnStockAction
     // P4-3: only sent when stock_action is 'damaged'.
@@ -826,8 +824,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             quantity:          it.returnQty,
             applied_price_usd: toNumber(it.applied_price_usd),
             applied_price_khr: toNumber(it.applied_price_khr),
-            cost_price_usd:    toNumber(it.cost_price_usd),
-            cost_price_khr:    toNumber(it.cost_price_khr || it.purchase_price_khr),
+            // Acquisition costs come from the server's recorded sale/lot, not
+            // a possibly redacted or stale product snapshot in this browser.
             return_to_stock:   it.return_to_stock !== false,
             stock_action:      it.stock_action,
             // The tag always rides along, even under "Remove entirely" --

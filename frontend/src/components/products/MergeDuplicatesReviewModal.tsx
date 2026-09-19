@@ -8,6 +8,9 @@ import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Modal from '../shared/Modal'
 import { costMoveRows } from './mergeConfirmationRule'
+import { useApp } from '../../AppContext'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import type { PermissionUser } from '../../utils/permissions.ts'
 import { createMergeDuplicatesPreviewRequestCoordinator } from './mergeDuplicatesPreviewRequest'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 
@@ -97,6 +100,7 @@ interface MergeDuplicatesReviewModalProps {
 // acting on it. Each confirmed fold rechecks identity and source revisions in
 // its transaction; a changed case is refused and remains available to resume.
 export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLoadPreview, recoveryNotice, working, scope = null }: MergeDuplicatesReviewModalProps) {
+  const canViewCosts = canViewAcquisitionCosts((useApp() as { user: PermissionUser }).user)
   // t() returns the raw key itself (never undefined/empty) on a miss, so
   // `t(key) || fallback` never actually falls back -- same fix as
   // ProductDetailModal.tsx/ProductHistoryPreviewModal.tsx's T().
@@ -392,7 +396,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                         </li>
                       ))}
                     </ul>
-                    {costMoves(group).map((move) => (
+                    {(canViewCosts ? costMoves(group) : []).map((move) => (
                       <div key={move.field} className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
                         <span className="text-gray-500 dark:text-gray-400">
                           {T(COST_FIELD_LABEL[move.field]?.[0] || move.field, COST_FIELD_LABEL[move.field]?.[1] || move.field)}
