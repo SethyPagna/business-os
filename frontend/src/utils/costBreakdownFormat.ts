@@ -2,8 +2,8 @@
 // testable without React or a fetch. The float's own arithmetic is never
 // re-derived here: the numbers it renders (distinct_usd, mean_usd,
 // result_usd, outlier_guard) all come straight from GET
-// /api/products/:id/cost-breakdown, which is itself built from the same
-// resolveMergedCostDetail the catalog cost recompute uses -- this module
+// /api/products/:id/cost-breakdown, which shares the catalog's distinct
+// positive-cost mean (not the separate product-merge outlier policy). This module
 // only turns those numbers into the "(3.00 + 5.00) / 2 = 4.00" reading.
 //
 // P10-11 (owner ruling, 2026-09-17): manual cost-price edits are now their
@@ -42,6 +42,7 @@ export type CostBreakdown = {
   distinct_khr: number[]
   mean_usd: number
   mean_khr: number
+  /** Legacy wire metadata, retained for compatibility; not a catalog calculation rule. */
   outlier_guard: { fired: boolean; kept: number | null }
   result_usd: number
   result_khr: number

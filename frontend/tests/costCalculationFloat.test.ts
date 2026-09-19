@@ -1,14 +1,18 @@
 // P10-6: the cost-calculation float's own formatting and exclusion-labelling
-// rules -- the shared arithmetic (resolveMergedCostDetail) is pinned server-
-// side by cloudflare/scripts/test-product-cost-breakdown-pure.cjs and
-// frontend/tests/mergedCostRule.test.ts; this file pins the READING the float
-// builds from a breakdown payload (a fixture with a duplicate, a zero and an
-// outlier), and that every clickable cost price display site actually opens
+// rules -- catalog arithmetic is pinned server-side by
+// cloudflare/scripts/test-product-cost-breakdown-pure.cjs, independently of
+// product-merge policy. This file pins the READING the float builds from a
+// server payload (including duplicate, zero and widely separated costs),
+// and that every clickable cost price display site actually opens
 // the float rather than a bespoke one-off.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import ts from 'typescript'
 import {
   formatCostFormula,
   costExclusionLabelKey,
@@ -48,10 +52,7 @@ await runTest('formatCostFormula is empty when there is nothing to divide', () =
   assert.equal(formatCostFormula([], 0), '')
 })
 
-await runTest('formatCostFormula reads an outlier set\'s raw mean, not the guarded result', () => {
-  // The float shows the arithmetic reading (2.00 + 200.00) / 2 = 101.00 next
-  // to an explicit outlier note -- the CATALOG figure used is the guarded
-  // 200, surfaced separately as result_usd, never silently substituted here.
+await runTest('formatCostFormula reads the catalog mean even for widely separated costs', () => {
   assert.equal(formatCostFormula([2, 200], 101), '(2.00 + 200.00) / 2 = 101.00')
 })
 
@@ -101,7 +102,7 @@ await runTest('costRowMeta shows date + username for a manual row', () => {
 
 // ---------------------------------------------------------------------------
 // normalizeCostBreakdown -- a discriminating fixture: a duplicate, a zero,
-// and an outlier-fired product all present in one payload shape.
+// and positive costs all present in one payload shape.
 // ---------------------------------------------------------------------------
 await runTest('normalizeCostBreakdown reads a real server payload end to end', () => {
   const payload = {
@@ -172,6 +173,61 @@ await runTest('normalizeCostBreakdown returns null for a malformed/empty payload
   assert.equal(normalizeCostBreakdown(null), null)
   assert.equal(normalizeCostBreakdown(undefined), null)
   assert.equal(normalizeCostBreakdown('nope'), null)
+})
+
+// Render the actual float with loaded server state. Neither the component nor
+// its formatting helpers may calculate a merge-policy replacement locally.
+const require = createRequire(import.meta.url)
+function renderBreakdown(payload: unknown): string {
+  const source = fs.readFileSync(path.join(srcRoot, 'components/shared/CostCalculationFloat.tsx'), 'utf8')
+  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
+  const module = { exports: {} as any }
+  const states = [normalizeCostBreakdown(payload), '', false]
+  let stateIndex = 0
+  const mockedRequire = (id: string): any => {
+    if (id === 'react') return { ...React, useState: () => [states[stateIndex++], () => {}], useEffect: () => {}, useRef: () => ({ current: true }) }
+    if (id === 'react/jsx-runtime') return require(id)
+    if (id.includes('AppContext')) return { useApp: () => ({ user: { role: 'admin' } }) }
+    if (id.includes('acquisitionCostAccess')) return { canViewAcquisitionCosts: () => true }
+    if (id.includes('costBreakdownFormat')) return { formatCostFormula, costExclusionLabelKey, costRowPrimaryText, costRowMeta, normalizeCostBreakdown }
+    if (id.includes('formatters')) return { fmtDate: (value: string) => value }
+    if (id.includes('productReadTransport')) return { getProductCostBreakdown: () => { throw new Error('render must not fetch') } }
+    if (id.includes('TruncatedText')) return { default: ({ text }: { text: string }) => React.createElement('span', null, text) }
+    if (id.includes('Modal')) return { default: ({ children }: { children: React.ReactNode }) => React.createElement('section', null, children) }
+    throw new Error(`Unexpected dependency: ${id}`)
+  }
+  new Function('require', 'module', 'exports', code)(mockedRequire, module, module.exports)
+  return renderToStaticMarkup(React.createElement(module.exports.default, {
+    productId: 42, onClose: () => {}, t: (_key: string, fallback: string) => fallback,
+    fmtUSD: (value: number) => `$${value.toFixed(2)}`, fmtKHR: (value: number) => `${value} KHR`,
+  }))
+}
+
+await runTest('catalog float renders distinct-positive means and never the legacy highest-cost warning', () => {
+  for (const fixture of [
+    { costs: [3, 5, 7, 5, 0], distinct: [3, 5, 7], mean: 5, formula: '(3.00 + 5.00 + 7.00) / 3 = 5.00' },
+    { costs: [2, 200], distinct: [2, 200], mean: 101, formula: '(2.00 + 200.00) / 2 = 101.00' },
+  ]) {
+    const payload = {
+      product_id: 42,
+      inputs: fixture.costs.map((cost, index) => ({ source: 'lot', label: `Lot ${index}`, cost_usd: cost, excluded: cost === 0 ? 'zero' : fixture.costs.indexOf(cost) < index ? 'duplicate' : null })),
+      distinct_usd: fixture.distinct, mean_usd: fixture.mean, result_usd: fixture.mean,
+      // Older metadata remains parseable but cannot restore the old policy UI.
+      outlier_guard: { fired: true, kept: 999 }, result_khr: 16000,
+    }
+    const normalized = normalizeCostBreakdown(payload)!
+    assert.deepEqual(normalized.outlier_guard, payload.outlier_guard)
+    const html = renderBreakdown(payload)
+    assert.ok(html.includes(fixture.formula))
+    assert.ok(html.includes(`>$${fixture.mean.toFixed(2)}<`))
+    assert.ok(html.includes('16000 KHR'))
+    assert.doesNotMatch(html, /highest recorded cost|more than double|999/)
+    if (fixture.costs.includes(0)) {
+      assert.ok(html.includes('cost_breakdown_excluded_zero'))
+      assert.ok(html.includes('cost_breakdown_excluded_duplicate'))
+    }
+    assert.ok(renderBreakdown({ ...payload, result_usd: 17 }).includes('>$17.00<'), 'result remains server-authoritative, not locally recomputed')
+  }
 })
 
 // ---------------------------------------------------------------------------

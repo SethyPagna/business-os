@@ -125,12 +125,6 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
               </div>
             ) : null}
 
-            {breakdown.outlier_guard.fired ? (
-              <p className="rounded-lg bg-amber-50 p-2.5 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
-                {tr('cost_breakdown_outlier_note', 'One recorded cost was far outside the others (more than double), so the highest recorded cost is used instead of the average.')}
-              </p>
-            ) : null}
-
             <div className="rounded-lg border border-gray-200 p-2.5 dark:border-gray-700">
               <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{tr('cost_breakdown_result_label', 'Catalog cost price')}</div>
               <div className="text-base font-semibold tabular-nums text-gray-900 dark:text-white">{fmtUSD(breakdown.result_usd)}</div>
