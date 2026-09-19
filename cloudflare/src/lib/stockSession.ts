@@ -549,6 +549,7 @@ function parseStoredReceipt(row: Row, replayed: boolean): StockSessionReceipt {
 }
 
 export async function commitStockSession(env: Env, user: SessionUser, raw: unknown): Promise<StockSessionReceipt> {
+  if (!isAdminControlUser(user)) fail('Administrator access is required to enter receipt costs and commit stock sessions.', 403, 'catalog_cost_admin_required')
   let request = parseRequest(raw, isAdminControlUser(user) ? ADMIN_MAX_IMAGES_PER_PRODUCT : MAX_IMAGES_PER_PRODUCT)
   const requiresInventoryAdjust = request.items.some((line) => line.quantity > 0)
   const requiresProductImage = stockSessionChangesProductImages(request)

@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb, type D1Compat } from '../lib/db'
 
 /** Fail closed until the complete additive release schema is available. */
@@ -20,7 +21,7 @@ import { getFamilyStockStats } from '../lib/familyStockStats'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { getPermissionTier, getActionTier } from '../lib/permissions'
+import { getPermissionTier, getActionTier, isAdminControlUser } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -93,6 +94,7 @@ import { addMoney4, roundMoney4 } from '../lib/moneyPrecision'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+app.use('*', acquisitionCostResponses)
 
 // Shared with lib/stockInCommit.ts (batched fast stock-in) and this file's
 // own runTaggedLotAction below: one context type for every handler that was
@@ -1420,6 +1422,9 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
 // other caller; nothing else should import it (use POST /adjust).
 export async function runAdjustAction(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
   const user = c.get('user')
+  if (hasAcquisitionCostInput(body, user) || (body.type === 'add' && !isAdminControlUser(user))) {
+    return c.json({ error: 'Administrator access is required to enter receipt costs and receive stock.', code: 'catalog_cost_admin_required' }, 403)
+  }
   // Part 152: not yet wired into the Review Required queue (see the
   // comment above /reasons for why -- live batch/stock state at apply
   // time makes "queue now, replay later" unsafe without its own design
@@ -1573,6 +1578,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   // like the mandatory-reason check above, so no path can record goods with an
   // invented supplier or an invented cost.
   const isReceipt = type === 'add'
+  if (isReceipt && !isAdminControlUser(user)) return c.json({ error: 'Administrator access is required to receive additional stock.', code: 'catalog_cost_admin_required' }, 403)
   // A top-up of an EXISTING lot inherits that lot's supplier -- first
   // attribution sticks server-side, so the pickers send no supplier for an
   // attributed lot and show the locked name instead. Read it rather than

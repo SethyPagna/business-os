@@ -1,4 +1,5 @@
 import { Hono, type Context, type Next } from 'hono'
+import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, customerGenderRestorationStatus, notifyCustomerGenderRestoration, canRestoreCustomerGender, GENDER_RESTORATION_MAX_BYTES } from '../lib/customerGenderRestoration'
 import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
@@ -264,6 +265,8 @@ const requireSupplierAccess = async (c: Context<{ Bindings: Env; Variables: { us
 }
 app.use('/suppliers', requireSupplierAccess)
 app.use('/suppliers/*', requireSupplierAccess)
+app.use('/suppliers', acquisitionCostResponses)
+app.use('/suppliers/*', acquisitionCostResponses)
 
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ''), 10)

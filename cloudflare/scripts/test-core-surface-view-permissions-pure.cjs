@@ -122,11 +122,12 @@ async function main() {
     assert.equal(response.status, 400, `${section}: view denial must not revoke independently authorized transfer`)
     assert.equal(opens, 0)
   }
-  // Action-specific reads and product-only session entry must not inherit view denial.
+  // Action-specific reads remain independent of view denial. Stock sessions
+  // now require administrator authority because every session can enter costs.
   await reachesData('/products/merge-duplicates/preview', staff({ products: true }, revoked))
   await denied('/products/merge-duplicates/preview', staff({ products: true }, { 'products:merge_duplicates': false }))
   const sessionResponse = await request('/inventory/sessions', staff({ products: true }, revoked), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-  assert.equal(sessionResponse.status, 400)
+  assert.equal(sessionResponse.status, 403)
   assert.equal(opens, 0)
   await denied('/inventory/sessions', staff({ products: true }, { 'products:add': false }), 'POST')
   await denied('/inventory/summary', staff({ products: true }))
@@ -177,6 +178,15 @@ async function main() {
     const pos = await request('/products?surface=pos', staff({ pos: true, products_image_only: true, products: true }, revoked), {}, fixture)
     assert.equal(pos.status, 200)
     assert.equal((await pos.json())[0].selling_price_usd, 20)
+    for (const url of ['/products', '/products/search', '/products/bootstrap?metadata=skip', '/inventory/products/search', '/inventory/summary', '/branches/1/stock']) {
+      const response = await request(url, { ...staff({ products: true, inventory: true, branches: true }), role_code: 'manager' }, {}, fixture)
+      assert.equal(response.status, 200, url)
+      const payload = await response.json()
+      const rows = Array.isArray(payload) ? payload : payload.items
+      assert.ok(rows.length > 0, url)
+      for (const key of ['cost_price_usd', 'purchase_price_usd', 'stock_value_usd', 'cogs_usd']) assert.equal(key in rows[0], false, `${url}: manager must not see ${key}`)
+      assert.equal(rows[0].selling_price_usd, 20, `${url}: sale price retained`)
+    }
     const before = sqlite.prepare('SELECT total_changes() n').get().n
     for (const url of [...productReads, ...inventoryReads, ...branchReads]) {
       const response = await request(url, staff({ products: true, inventory: true, branches: true }, revoked), {}, fixture)

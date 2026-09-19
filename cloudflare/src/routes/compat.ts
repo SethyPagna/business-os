@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
@@ -22,6 +23,9 @@ import { gateTotals } from './reports'
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 const DASHBOARD_STOCK_ALERT_PAGE_SIZE = 10
 const DASHBOARD_STOCK_ALERT_MAX_PAGE_SIZE = 50
+app.use('/system/audit-logs', acquisitionCostResponses)
+app.use('/dashboard', acquisitionCostResponses)
+app.use('/dashboard/*', acquisitionCostResponses)
 
 // Shared gate matching backend's requirePermission/requireAnyPermission for
 // the system/backup/audit endpoints below -- previously these only checked
