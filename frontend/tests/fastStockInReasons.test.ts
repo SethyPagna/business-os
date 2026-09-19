@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 import { stockLineReason } from '../src/utils/stockLineReason.ts'
 
 // P3-L2 (2026-09-14): "the add stock, remove, and set stock doesn't have
@@ -65,8 +66,32 @@ runTest('every queued line freezes its reason and every adjust write sends it', 
   assert.match(modal, /interface ReceivedLine \{[^]*?\n  reason: string\n[^]*?\n\}/)
   assert.match(modal, /const next: ReceivedLine = \{[^]*?\n\s+reason: reason\.trim\(\),\n[^]*?\}/)
   assert.match(modal, /function editLine\(line: ReceivedLine\) \{[^]*?setReason\(line\.reason\)/, 'reopening a queued line restores its reason')
-  // remove, set, the unlocked-pricing add and the tagged restock (P3-L6) all resolve through the one helper
-  assert.equal((modal.match(/reason: stockLineReason\(line, tr\), branchId: Number\(branchId\),/g) || []).length, 4)
+  // Remove, set and tagged restock use adjust; cost-only variants no longer
+  // fork another product. Execute every current request branch instead of
+  // counting the obsolete fourth branch's source text.
+  const ast = ts.createSourceFile('FastStockInModal.tsx', modal, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  let expression = ''
+  function visit(node: ts.Node): void {
+    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === 'buildLineRequest') expression = node.initializer!.getText(ast)
+    ts.forEachChild(node, visit)
+  }
+  visit(ast)
+  assert.ok(expression)
+  const code = ts.transpileModule(`const build = ${expression}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  const context = { stockLineReason, tr, canEditCosts: true, branchId: '1', receivedDate: '2026-09-20', supplier: { supplierId: 2, supplierName: 'Supplier' }, paymentStatus: 'paid', creditDueDate: '', sessionIdRef: { current: 'session' } }
+  const build = new Function(...Object.keys(context), `${code}; return build`)(...Object.values(context))
+  for (const mode of ['remove', 'set', 'add'] as const) {
+    for (const conditionTag of ['', 'damaged']) {
+      for (const reason of ['  Line-specific reason  ', '']) {
+        const line = { key: 'line', product: { id: 7 }, mode, conditionTag, quantity: 2, unitCost: '1.2345', expiryDate: '', batchChoice: 'new', freeGoods: false, reason, createPriceVariant: true }
+        const request = build(line)
+        const isPlainReceipt = mode === 'add' && !conditionTag
+        assert.equal(request.wire, isPlainReceipt ? 'receive' : 'adjust')
+        assert.equal(request.body.reason, isPlainReceipt ? reason.trim() || null : stockLineReason(line, tr))
+        assert.equal(request.body.productId, 7, 'a stale cost-variant flag cannot fork product identity')
+      }
+    }
+  }
   assert.doesNotMatch(modal, /reason: tr\('stock_change_session_reason'/, 'no hardcoded reason is left on a write')
   assert.doesNotMatch(modal, /reason: tr\('stock_in_session_reason'/, 'no hardcoded reason is left on a write')
   // the plain add sends the text or null so the Worker keeps its lot label.
