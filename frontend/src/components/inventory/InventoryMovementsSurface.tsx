@@ -6,7 +6,7 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
 import ExportMenu from '../shared/ExportMenu'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import StatsRangeRow from '../shared/StatsRangeRow'
 import type { PaginationControlsProps } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { fmtClock24 } from '../../utils/formatters'
@@ -379,15 +379,16 @@ export default function InventoryMovementsSurface({
                   {tr('select', 'Select')}
                 </button>
 
-                <DateTimeRangePicker
-                  value={{ startDate: movementStartDate, endDate: movementEndDate, startTime: '', endTime: '' }}
-                  onChange={(range) => {
+                <StatsRangeRow
+                  range={{ startDate: movementStartDate, endDate: movementEndDate, startTime: '', endTime: '' }}
+                  onRangeChange={(range) => {
                     setMovementStartDate(range.startDate || '')
                     setMovementEndDate(range.endDate || '')
                   }}
                   t={t}
                   showTime={false}
-                  triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
+                  showPresets
+                  className="w-full min-w-0"
                 />
                 {(movementStartDate || movementEndDate) ? (
                   <button
