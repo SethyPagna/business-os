@@ -18,6 +18,8 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 const src = path.resolve(__dirname, '../src')
 const database = openDb(loadAll(path.resolve(__dirname, '../migrations')))
 const raw = database.db
+let failSql = null
+let beforeBatch = null
 
 const DB = {
   prepare(sql) {
@@ -27,6 +29,7 @@ const DB = {
       async all() { return { results: raw.prepare(sql).all(...values) } },
       async first() { return raw.prepare(sql).get(...values) ?? null },
       async run() {
+        if (failSql?.test(sql)) throw new Error('injected cost transaction failure')
         const result = raw.prepare(sql).run(...values)
         return { success: true, meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } }
       },
@@ -34,6 +37,7 @@ const DB = {
     return statement
   },
   async batch(statements) {
+    if (beforeBatch) { const callback = beforeBatch; beforeBatch = null; callback() }
     raw.exec('BEGIN IMMEDIATE')
     try { const results = []; for (const statement of statements) results.push(await statement.run()); raw.exec('COMMIT'); return results }
     catch (error) { raw.exec('ROLLBACK'); throw error }
@@ -87,7 +91,8 @@ const admin = { id: 9, username: 'sethy', name: 'Sethy Owner', tier: 'full', per
 
 async function request(method, url, body) {
   const response = await products.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { ...env, TEST_USER: admin }, context)
-  return { status: response.status, body: await response.json() }
+  const text = await response.text()
+  return { status: response.status, body: response.headers.get('content-type')?.includes('application/json') ? JSON.parse(text) : text }
 }
 const row = (id) => raw.prepare('SELECT * FROM products WHERE id=?').get(id)
 const costEntries = (id) => raw.prepare('SELECT * FROM product_cost_entries WHERE product_id=? ORDER BY id').all(id)
@@ -241,6 +246,108 @@ async function main() {
     assert.equal(row(id).cost_price_usd, 5, '(4+6)/2 = 5')
   })
 
+  await check('override product, entry, audit and recompute roll back together at each failure point', async () => {
+    const id = seedProduct('AtomicOverride')
+    seedLot(id, 3)
+    const saleId = Number(raw.prepare('INSERT INTO sales DEFAULT VALUES').run().lastInsertRowid)
+    raw.prepare('INSERT INTO sale_items(sale_id,product_id,quantity,cost_price_usd,cost_price_khr) VALUES(?,?,1,3,0)').run(saleId,id)
+    const historical = () => JSON.stringify({
+      lots:raw.prepare('SELECT * FROM product_batches WHERE variant_product_id=?').all(id),
+      sales:raw.prepare('SELECT * FROM sale_items WHERE product_id=?').all(id),
+    })
+    const historicalBefore = historical()
+    const state = () => JSON.stringify({product:row(id),entries:costEntries(id),
+      lots:raw.prepare('SELECT * FROM product_batches WHERE variant_product_id=?').all(id),
+      audit:raw.prepare("SELECT * FROM audit_logs WHERE entity='product' AND entity_id=?").all(String(id))})
+    const before = state()
+    for (const pattern of [/INSERT INTO product_cost_entries/, /INSERT INTO audit_logs/, /UPDATE products SET/]) {
+      failSql = pattern
+      const response = await request('PUT',`/${id}`,{cost_price_usd:10})
+      failSql = null
+      assert.equal(response.status,500)
+      assert.equal(state(),before,'no product, lot, entry or audit mutation survives a failed atomic override')
+    }
+    const result = await request('PUT',`/${id}`,{cost_price_usd:10})
+    assert.equal(result.status,200)
+    assert.equal(historical(),historicalBefore,'successful override preserves original lot and sold-cost snapshots')
+    const audit = raw.prepare("SELECT * FROM audit_logs WHERE entity_id=? AND action='cost_override'").get(String(id))
+    assert.deepEqual(JSON.parse(audit.old_value),{cost_price_usd:7,cost_price_khr:0})
+    assert.deepEqual(JSON.parse(audit.new_value),{cost_price_usd:10,cost_price_khr:0})
+    assert.equal(audit.user_id,9)
+    assert.equal(audit.user_name,'sethy')
+    assert.ok(audit.created_at)
+    assert.equal(JSON.parse(audit.details).baseline_batch_id,costEntries(id)[0].baseline_batch_id)
+    assert.equal(costEntries(id)[0].previous_cost_usd,7)
+    const breakdown = await load('lib/catalogCostRecompute.ts').getCatalogCostBreakdown(makeDb(),id)
+    assert.equal(breakdown.inputs.find(input=>input.source==='manual').previous_cost_usd,7)
+    const access = load('lib/acquisitionCostAccess.ts')
+    const employee = {id:10,role_name:'employee',permissions:JSON.stringify({product_cost_edit:true,product_cost_view:false})}
+    assert.equal(access.isAcquisitionCostKey('previous_cost_usd'),true)
+    assert.equal(access.isAcquisitionCostKey('previousCostUsd'),true)
+    assert.equal(JSON.stringify(access.projectAcquisitionCosts(breakdown,employee)).includes('previous_cost_usd'),false)
+    assert.equal(access.projectAcquisitionCosts(breakdown,admin).inputs.find(input=>input.source==='manual').previous_cost_usd,7)
+    const costRoute = load('routes/productCost.ts').default
+    const denied = await costRoute.request(`/${id}/cost-breakdown`,{}, {...env,TEST_USER:employee},context)
+    assert.equal(denied.status,403,'edit-only user cannot read previous or current costs')
+    const viewer = {...employee,permissions:JSON.stringify({product_cost_view:true,product_cost_edit:false})}
+    const allowed = await costRoute.request(`/${id}/cost-breakdown`,{}, {...env,TEST_USER:viewer},context)
+    assert.equal(allowed.status,200)
+    assert.equal((await allowed.json()).inputs.find(input=>input.source==='manual').previous_cost_usd,7)
+  })
+  await check('receipt committed before override is captured by SQL baseline; later receipt joins override', async () => {
+    const id = seedProduct('OrderedOverride')
+    seedLot(id,7)
+    let concurrentId
+    // Same-price receipt does not alter guarded money; it still must be in
+    // the baseline even though it arrived after the route prepared its plan.
+    beforeBatch = () => { concurrentId = seedLot(id,7) }
+    assert.equal((await request('PUT',`/${id}`,{cost_price_usd:10})).status,200)
+    assert.equal(costEntries(id)[0].baseline_batch_id,concurrentId)
+    assert.equal(row(id).cost_price_usd,10)
+    seedLot(id,12)
+    await load('lib/catalogCostRecompute.ts').recomputeCatalogCost(makeDb(),id)
+    assert.equal(row(id).cost_price_usd,11)
+    const entriesBefore = costEntries(id)
+    beforeBatch = () => { seedLot(id,20); raw.prepare('UPDATE products SET cost_price_usd=14 WHERE id=?').run(id) }
+    assert.equal((await request('PUT',`/${id}`,{cost_price_usd:6})).status,409,'changed money rejects stale override entirely')
+    assert.deepEqual(costEntries(id),entriesBefore)
+    assert.equal(row(id).cost_price_usd,14)
+  })
+  await check('previous cost preserves unknown NULL and exact historical precision, without inferred backfill', async () => {
+    for (const previous of [null,3.123456]) {
+      const id = seedProduct(`Previous-${previous}`)
+      raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(previous,id)
+      assert.equal((await request('PUT',`/${id}`,{cost_price_usd:8})).status,200)
+      assert.equal(costEntries(id)[0].previous_cost_usd,previous)
+    }
+  })
+  await check('actual NULL-to-zero and legacy precision changes record override; exact resaves do not', async () => {
+    for (const [previous,next] of [[null,0],[3.123456,3.1235]]) {
+      const id = seedProduct(`ExactTransition-${previous}`)
+      raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(previous,id)
+      const baseline = seedLot(id,7)
+      assert.equal((await request('PUT',`/${id}`,{cost_price_usd:next})).status,200)
+      assert.equal(row(id).cost_price_usd,next)
+      assert.equal(costEntries(id).length,1)
+      assert.equal(costEntries(id)[0].previous_cost_usd,previous)
+      assert.equal(costEntries(id)[0].cost_usd,next)
+      assert.equal(costEntries(id)[0].baseline_batch_id,baseline)
+      const audit = raw.prepare("SELECT * FROM audit_logs WHERE action='cost_override' AND entity_id=?").all(String(id))
+      assert.equal(audit.length,1)
+      assert.equal(JSON.parse(audit[0].old_value).cost_price_usd,previous)
+      assert.equal(JSON.parse(audit[0].new_value).cost_price_usd,next)
+      assert.equal((await request('PUT',`/${id}`,{cost_price_usd:next})).status,200)
+      assert.equal(costEntries(id).length,1)
+    }
+    for (const same of [null,0,3.123456]) {
+      const id = seedProduct(`ExactNoOp-${same}`)
+      raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(same,id)
+      assert.equal((await request('PUT',`/${id}`,{cost_price_usd:same})).status,200)
+      assert.equal(row(id).cost_price_usd,same)
+      assert.equal(costEntries(id).length,0)
+      assert.equal(raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='cost_override' AND entity_id=?").get(String(id)).n,0)
+    }
+  })
   console.log(`\n${checks} checks passed`)
 }
 

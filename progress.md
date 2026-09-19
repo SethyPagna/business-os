@@ -1,3 +1,13 @@
+## Deployed checkpoint and new cost semantics — September 20
+
+Checkpoint fdcee3fe685d deployed as Worker07362be0-f996-4c89-a5e3-1e551c25b8c6;
+GitHub main/working branch pushed. Live admin dashboard and public storefront render.
+No migrations/backfill. See docs/fleet/2026-09-20-checkpoint-release.md for exact tests,
+native-test instability qualification and runtime endpoint403 limitation.
+New clarified costing work is a SEPARATE undeployed candidate: Edit overrides with
+history; Add Stock contributes to distinct-positive mean (3,5,7=>5), never overrides.
+Do not mark old public/date/offline/cleanup backlog complete. Active ledger retains it.
+
 ## Active permission and responsive UI checkpoint — September 20
 
 Read docs/fleet/2026-09-20-active-request-ledger.md first for current requests,

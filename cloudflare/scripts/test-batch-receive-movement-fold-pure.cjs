@@ -31,6 +31,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const cloudflareRoot = path.join(__dirname, '..')
 const MIGRATION_SQLS = loadAll()
+const RECEIPT_COST = 5.1234
 
 let passed = 0
 function check(name, fn) {
@@ -136,7 +137,7 @@ function movementStatement({ batchKey, resolvedBatchIdSql }, { productId, branch
     `,
     params: {
       productId, productName: 'Test Product', branchId, branchName: 'Main', quantity,
-      unitCostUsd: 5, totalCostUsd: 5 * quantity, reason, referenceId: null,
+      unitCostUsd: RECEIPT_COST, totalCostUsd: Number((RECEIPT_COST * quantity).toFixed(4)), reason, referenceId: null,
       userId: 1, userName: 'tester', batchId, batchKey,
     },
   }
@@ -155,6 +156,7 @@ async function main() {
 
     const received = await productBatches.receiveBatchStock(counter.db, {
       productId: 1, branchId: 1, quantity: 8, receivedDate: '2026-03-09',
+      unitCostUsd: RECEIPT_COST,
       buildBatchStatements: (ctx) => [movementStatement(ctx, {
         productId: 1, branchId: 1, quantity: 8, reason: 'test receipt', batchId: null,
       })],
@@ -165,9 +167,21 @@ async function main() {
       assert.equal(Number(movement.batch_id), received.batchId)
       assert.equal(Number(movement.quantity), 8)
       assert.equal(movement.reason, 'test receipt')
+      const money = rawDb.prepare('SELECT unit_cost_usd,total_cost_usd FROM inventory_movements ORDER BY id DESC LIMIT 1').get({})
+      assert.equal(money.unit_cost_usd,5.1234)
+      assert.equal(money.total_cost_usd,40.9872)
     })
-    check('new lot: folded round trips = 3 (before-select, batch, final-select)', () => {
-      assert.equal(counter.stats().statements, 3, `expected 3, got ${counter.stats().statements}`)
+    check('new lot: folded calls = 5 (lot candidates, override baseline, cost preimage, batch, final-select)', () => {
+      assert.equal(counter.stats().statements, 5, `expected 5, got ${counter.stats().statements}`)
+    })
+    const oldMovement = rawDb.prepare('SELECT * FROM inventory_movements ORDER BY id LIMIT 1').get({})
+    const next = await productBatches.receiveBatchStock(counter.db, {
+      productId:1,branchId:1,quantity:1,receivedDate:'2026-03-09',unitCostUsd:6.1234,
+    })
+    check('new price creates another lot without rewriting the prior four-decimal movement', () => {
+      assert.notEqual(next.batchId,received.batchId)
+      assert.deepEqual(rawDb.prepare('SELECT * FROM inventory_movements ORDER BY id LIMIT 1').get({}),oldMovement)
+      assert.equal(rawDb.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=@id').get({id:received.batchId}).unit_cost_usd,5.1234)
     })
   }
 
@@ -181,10 +195,12 @@ async function main() {
 
     const first = await productBatches.receiveBatchStock(counter.db, {
       productId: 2, branchId: 1, quantity: 5, receivedDate: '2026-01-01',
+      unitCostUsd: RECEIPT_COST,
     })
     const topUpCounter = countingDb(rawDb)
     const second = await productBatches.receiveBatchStock(topUpCounter.db, {
       productId: 2, branchId: 1, quantity: 3, receivedDate: '2026-03-09', batchId: first.batchId,
+      unitCostUsd: RECEIPT_COST,
       buildBatchStatements: (ctx) => [movementStatement(ctx, {
         productId: 2, branchId: 1, quantity: 3, reason: 'top-up receipt', batchId: first.batchId,
       })],
@@ -208,6 +224,7 @@ async function main() {
     // batches.ts did before this fix.
     const oldReceived = await productBatches.receiveBatchStock(oldCounter.db, {
       productId: 3, branchId: 1, quantity: 4, receivedDate: '2026-03-09',
+      unitCostUsd: RECEIPT_COST,
     })
     await oldCounter.db.prepare(`
       INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, batch_id, created_at)
@@ -220,6 +237,7 @@ async function main() {
     const newCounter = countingDb(rawDbNew)
     await productBatches.receiveBatchStock(newCounter.db, {
       productId: 4, branchId: 1, quantity: 4, receivedDate: '2026-03-09',
+      unitCostUsd: RECEIPT_COST,
       buildBatchStatements: (ctx) => [movementStatement(ctx, {
         productId: 4, branchId: 1, quantity: 4, reason: null, batchId: null,
       })],
@@ -227,8 +245,8 @@ async function main() {
     const newStats = newCounter.stats()
 
     check('folding the movement insert costs one fewer round trip than the old separate INSERT', () => {
-      assert.equal(oldStats.statements, 4, `expected the old orchestration to cost 4, got ${oldStats.statements}`)
-      assert.equal(newStats.statements, 3, `expected the new orchestration to cost 3, got ${newStats.statements}`)
+      assert.equal(oldStats.statements, 6, `expected the old orchestration to cost 6, got ${oldStats.statements}`)
+      assert.equal(newStats.statements, 5, `expected the new orchestration to cost 5, got ${newStats.statements}`)
       assert.equal(oldStats.statements - newStats.statements, 1)
     })
   }

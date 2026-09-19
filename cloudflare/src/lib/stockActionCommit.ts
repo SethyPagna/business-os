@@ -6,7 +6,8 @@ import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stock
 import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 import type { ActorLike } from './actorSnapshot'
 import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
-import { recomputeCatalogCost } from './catalogCostRecompute'
+import { catalogCostRecomputeStatement } from './catalogCostRecompute'
+import { resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
 
 /**
  * The FOURTH receipt wire (N14-D).
@@ -246,25 +247,27 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   if (!branchName) throw new Error('Branch name is required')
 
   const actionKey = `row:${rowNumber}:add:branch:${branchId}`
-  const { batchKey, lotCode, receivedAt } = batchIdentity(input.date, input.batchLabel)
-  // One round-trip instead of two: the redelivery fast-path status and the
-  // next batch_number are independent scalars, so read them together. Across
-  // a 20k+ row migration this saves a full D1 latency per unit (collapses the
-  // separate existing-check and MAX(batch_number) reads into one).
-  // lot_supplier_name rides along for the gate below: this add may top up a
-  // lot that is ALREADY attributed, and first attribution sticks (the UPDATE
-  // further down only COALESCE-fills a blank). Demanding the sheet retype a
-  // supplier the writer cannot change would refuse a complete receipt.
+  const { lotCode, receivedAt } = batchIdentity(input.date, input.batchLabel)
+  // Read the override baseline with the journal. The next read resolves the
+  // price-compatible lot and its supplier, never a date-only pooled receipt.
   const pre = await db.prepare(`
     SELECT
       (SELECT status FROM import_stock_action_commits WHERE job_id = @jobId AND action_key = @actionKey) AS status,
-      (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId) AS next_batch,
-      (SELECT supplier_name FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey) AS lot_supplier_name
-  `).get<{ status: string | null; next_batch: number; lot_supplier_name: string | null }>({ jobId, actionKey, productId, batchKey })
+      (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = @productId ORDER BY id DESC LIMIT 1) AS baseline
+  `).get<{ status: string | null; baseline: number | null }>({ jobId, actionKey, productId })
   // A redelivery of a row that already landed stays idempotent: the gate runs
   // on receipts this call would WRITE, never on one the ledger already holds.
   if (pre?.status === 'applied') return { actionKey, applied: true, alreadyApplied: true }
-  const batchNumber = Math.max(1, Number(pre?.next_batch || 1))
+  const sheetCostPriceUsd = 'sheetCostPriceUsd' in input ? input.sheetCostPriceUsd : input.costPriceUsd
+  // Leave malformed prices for the receipt gate's established error order.
+  const costPriceUsd = Number.isFinite(Number(input.costPriceUsd)) && Number(input.costPriceUsd) >= 0
+    ? optionalMoney(input.costPriceUsd) : null
+  const lots = await db.prepare(`SELECT id, batch_key, received_at, unit_cost_usd, supplier_name
+    FROM product_batches WHERE variant_product_id = @productId`)
+    .all<ReceiptLotCandidate & { supplier_name: string | null }>({ productId })
+  const target = resolveReceiptLotTarget(lots, receivedAt, costPriceUsd, Number(pre?.baseline) || 0)
+  const { batchKey } = target
+  const lotSupplierName = lots.find(lot => lot.id === target.existingBatchId)?.supplier_name ?? null
   const guard = pendingGuard()
   const supplierName = String(input.supplierName || '').trim().replace(/\s{2,}/g, ' ').slice(0, 120) || null
   const supplierId = Number.isSafeInteger(Number(input.supplierId)) && Number(input.supplierId) > 0 ? Number(input.supplierId) : null
@@ -280,10 +283,9 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   // manufacture a receipt cost the operator never typed (sibling:F13
   // verifier round 2). A caller with no sheet/catalog distinction (no
   // sheetCostPriceUsd key at all) keeps today's behavior unchanged.
-  const sheetCostPriceUsd = 'sheetCostPriceUsd' in input ? input.sheetCostPriceUsd : input.costPriceUsd
   const refusal = unifiedStockReceiptRefusal({
     supplierName,
-    lotSupplierName: pre?.lot_supplier_name ?? null,
+    lotSupplierName,
     unitCostUsd: sheetCostPriceUsd,
     freeGoods,
   })
@@ -292,20 +294,22 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   // needs the operator's free-goods declaration, just like an explicit zero.
   const roundedRefusal = unifiedStockReceiptRefusal({
     supplierName,
-    lotSupplierName: pre?.lot_supplier_name ?? null,
+    lotSupplierName,
     unitCostUsd: optionalMoney(sheetCostPriceUsd),
     freeGoods,
   })
   if (roundedRefusal) throw new Error(roundedRefusal)
-  const costPriceUsd = optionalMoney(input.costPriceUsd)
+  optionalMoney(input.costPriceUsd)
   const totalCostUsd = costPriceUsd == null ? null : multiplyMoney4(costPriceUsd, quantity)
   const params = {
     jobId, actionKey, rowNumber, productId, productName, branchId, branchName,
-    quantity, batchKey, lotCode, receivedAt, batchNumber, supplierName, supplierId,
+    quantity, batchKey, lotCode, receivedAt, supplierName, supplierId,
     sellingPriceUsd: optionalMoney(input.sellingPriceUsd, true),
     wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd, true),
     costPriceUsd,
     totalCostUsd,
+    receiptBaseline: target.baselineBatchId,
+    receiptExistingBatchId: target.existingBatchId,
     // The declaration is stamped into the words, not just the zero -- the
     // same appendReceiptNotes routes/batches.ts:218 uses for the interactive
     // wire, so a $0.00 accepted receipt reads as free goods on this wire too.
@@ -320,9 +324,24 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       params,
     },
     {
+      // Stale planning must roll back the journal and every receipt write.
+      // A concurrent redelivery already sealed by another call is a no-op.
+      sql: `SELECT CASE WHEN NOT (${guard}) OR (
+        COALESCE((SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@productId ORDER BY id DESC LIMIT 1),0)=@receiptBaseline
+        AND ((@receiptExistingBatchId IS NULL AND NOT EXISTS (
+          SELECT 1 FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey))
+        OR EXISTS (SELECT 1 FROM product_batches WHERE id=@receiptExistingBatchId
+          AND variant_product_id=@productId AND batch_key=@batchKey
+          AND id>@receiptBaseline AND unit_cost_usd IS @costPriceUsd)))
+        THEN 1 ELSE json('IMPORT_RECEIPT_TARGET_CHANGED') END`,
+      params,
+    },
+    {
       sql: `INSERT OR IGNORE INTO product_batches
               (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, received_branch_id)
-            SELECT @productId, @batchKey, @lotCode, @receivedAt, 1, @reason, @batchNumber, @supplierId, @supplierName, @costPriceUsd, @branchId
+            SELECT @productId, @batchKey, @lotCode, @receivedAt, 1, @reason,
+              (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id=@productId),
+              @supplierId, @supplierName, @costPriceUsd, @branchId
             WHERE ${guard}`,
       params,
     },
@@ -359,7 +378,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // source row recorded no price; COALESCE makes that contribute 0
       // instead of borrowing a sibling receipt's price.
       sql: `UPDATE product_batches SET received_quantity = COALESCE(received_quantity, 0) + @quantity,
-              received_cost_usd = COALESCE(received_cost_usd, 0) + COALESCE(@totalCostUsd, 0),
+              received_cost_usd = ROUND(COALESCE(received_cost_usd, 0) + COALESCE(@totalCostUsd, 0), 4),
               received_branch_id = CASE WHEN received_quantity = 0 THEN @branchId ELSE COALESCE(received_branch_id, @branchId) END
             WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}`,
       params,
@@ -406,6 +425,11 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       params,
     },
     {
+      ...catalogCostRecomputeStatement(productId),
+      sql: `${catalogCostRecomputeStatement(productId).sql} AND ${guard}`,
+      params,
+    },
+    {
       sql: `UPDATE import_stock_action_commits SET status = 'applied', applied_at = CURRENT_TIMESTAMP
             WHERE job_id = @jobId AND action_key = @actionKey AND status = 'pending'`,
       params,
@@ -417,11 +441,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   // returns early for an already-applied row -- a verify would only confirm
   // what the atomic batch guarantees. Dropped to save a round-trip per unit.
 
-  // P10-4 (owner ruling 2026-09-16): the batch above just wrote/topped a lot
-  // cost onto product_batches -- re-derive products.cost_price_* from the
-  // DISTINCT non-zero active-lot costs, same as the interactive receipt
-  // wire (routes/inventory.ts POST /adjust). See catalogCostRecompute.ts.
-  await recomputeCatalogCost(db, productId)
+  // Catalog recomputation precedes the applied seal in that same batch.
 
   return { actionKey, applied: true, alreadyApplied: false }
 }

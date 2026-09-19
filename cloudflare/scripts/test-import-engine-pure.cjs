@@ -338,10 +338,24 @@ searchMatchWrapper(searchMatchModuleObj.exports, require, searchMatchModuleObj, 
 // satisfy `require()` for those other imports with harmless stubs purely
 // so the module can load; none of their exports are exercised by this test.
 const Module = require('module')
+const stockReceiptGateModule = { exports: {} }
+new Function('exports', 'require', 'module', ts.transpileModule(
+  fs.readFileSync(path.join(__dirname, '../src/lib/stockReceiptGate.ts'), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
+).outputText)(stockReceiptGateModule.exports, require, stockReceiptGateModule)
+const catalogCostRecomputeModule = { exports: {} }
+new Function('exports', 'require', 'module', ts.transpileModule(
+  fs.readFileSync(path.join(__dirname, '../src/lib/catalogCostRecompute.ts'), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
+).outputText)(catalogCostRecomputeModule.exports,
+  request => request === './moneyPrecision' ? moneyPrecisionModule.exports : require(request), catalogCostRecomputeModule)
 const originalResolve = Module._resolveFilename
 const stubbable = new Set(['../index', './db', './importCsv', './cache', './stockActionCatalog', './stockActionSeal', './stockActionCommit', './stockActionResolver', './stockActionImport', '../durable-objects/broadcastHub'])
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === './stockReceiptGate') return stockReceiptGateModule.exports
+  if (request === './catalogCostRecompute') return catalogCostRecomputeModule.exports
+  if (request === './moneyPrecision') return moneyPrecisionModule.exports
   if (request === './importImageMatch') {
     return imageMatchModuleObj.exports // real module -- resolveRowImagePath actually calls into it
   }
@@ -803,18 +817,19 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   const branchEnd = source.indexOf('// Legacy/default:', branchStart)
   const block = source.slice(branchStart, branchEnd)
 
-  assert.ok(/indexImportRestockBatches\(existingBatches\)/.test(source), 'runImportApply should index exact batch keys and normalized lot codes for restock rows')
-  assert.ok(/SELECT id, variant_product_id, batch_key, lot_code, received_at, is_active FROM product_batches`/.test(source), 'the lot lookup must include inactive rows because they still own their unique batch key')
-  assert.ok(!/SELECT id, variant_product_id, batch_key, lot_code, received_at, is_active FROM product_batches WHERE is_active = 1/.test(source), 'an inactive same-key lot must be found and reactivated instead of falling through to a duplicate INSERT')
+  assert.ok(/FROM product_batches WHERE variant_product_id IN/.test(source), 'receipt candidates load by bounded product IDs including inactive lots')
+  assert.ok(/chunkForBinding\(receiptProductIds\)/.test(source), 'candidate reads stay inside the D1 bind budget')
+  assert.ok(/__receiptCostUsd: str\(rawCostUsd\)/.test(source), 'sheet receipt evidence is captured before catalog identity pricing merges')
 
-  assert.ok(/const matchedBatch = findImportRestockBatch\(restockBatchIndex, Number\(r\.existingId\), importLotCode\)/.test(block), 'the restock branch should resolve the exact key before deciding whether to top up or create')
+  assert.ok(/resolveReceiptLotTarget\(plannedLots, String\(d\.received_date\), receiptUnitCostUsd, receiptBaselines\.get\(productId\)/.test(block), 'restocks use the shared date/price/override identity, not a display-label-only match')
   assert.ok(/UPDATE product_batches SET received_at = COALESCE\(NULLIF\(received_at,''\), @receivedAt\), is_active = 1,[\s\S]*updated_at = @updatedAt WHERE id = @id/.test(block), 'exact-lot top-ups retain first received date, filling only a missing value')
-  assert.ok(/received_cost_usd = COALESCE\(received_cost_usd, 0\) \+ \(@qty \* COALESCE\(@unitCostUsd, 0\)\)/.test(block), 'same-batch top-ups must accumulate each receipt cost instead of overwriting catalog cost')
+  assert.ok(/received_cost_usd = ROUND\(COALESCE\(received_cost_usd, 0\) \+ COALESCE\(@receiptTotalCostUsd, 0\), 4\)/.test(block), 'top-ups accumulate each rounded receipt cost')
   assert.ok(/INSERT INTO inventory_movements[\s\S]*unit_cost_usd, total_cost_usd/.test(block), 'each receipt row must retain its own historical cost movement')
   assert.ok(/ON CONFLICT\(batch_id, branch_id\) DO UPDATE SET quantity = quantity \+ excluded\.quantity/.test(block), 'a matched lot code must ADD to its existing branch_batch_stock row, not insert a second row for the same batch+branch')
 
-  assert.ok(/batchKey: importLotCode \|\| `import:\$\{r\.existingId\}:\$\{nowIso\}:\$\{r\.rowNumber\}`/.test(block), 'a genuinely NEW batch created from a restock row should key itself by the lot code when one was given (so a later import or manual receive naming the same lot can match it too), falling back to the old unique generated key only when no lot code was supplied')
-  assert.ok(/restockBatchIndex\.byExactKey\.set\(`\$\{r\.existingId\}\\u0001/.test(block), 'a newly-created batch within this branch should be recorded in the exact-key lookup so a second row in the SAME chunk naming the same product+lot tops it up too, instead of also creating a duplicate')
+  assert.ok(/batchKey: target\.batchKey/.test(block), 'new lot identity comes from the shared receipt resolver')
+  assert.ok(/plannedLots\.push\(createdBatch\)/.test(block), 'newly planned lots are reserved for later same-chunk rows')
+  assert.ok(/group\.push\(catalogCostRecomputeStatement\(productId\)\)/.test(block), 'catalog recomputation remains in the atomic receipt group')
 
   console.log('PASS restock imports (merge_stock/override_add) reuse active or inactive exact lots, reactivate before adding lot stock, preserve first received_at, and index new lots for same-chunk reuse')
 }
@@ -1211,6 +1226,13 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(results[0].existingId, null)
   }
 
+  {
+    const db = makeFakeProductsDb([existingMatch])
+    const [receipt] = await classifyProducts(db, [row({ name: 'Existing Widget', sku: 'SKU-1', cost_price_usd: '3', selling_price_usd: '10', _action: 'merge_stock' }, 1)], 'job-own-receipt-cost', null, noImages)
+    assert.equal(receipt.data.__receiptCostUsd, 3, 'receipt retains raw entered price even when product identity fields are merged')
+    const [blank] = await classifyProducts(db, [row({ name: 'Existing Widget', sku: 'SKU-1', cost_price_usd: '', _action: 'merge_stock' }, 1)], 'job-blank-receipt-cost', null, noImages)
+    assert.equal(blank.data.__receiptCostUsd, null, 'blank receipt never borrows existing catalog price')
+  }
   console.log('PASS classifyProducts plannedMode: merge_stock/override_add/override_replace honored only on a matched row, unrecognized `_action` values fall through safely, and skip_row (fixed this session) genuinely skips instead of silently applying')
 }
 
@@ -1407,7 +1429,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const makeDb = (branches) => ({
     prepare: (sql) => ({ all: async () => String(sql).includes('FROM products') ? [product] : String(sql).includes('FROM branches') ? branches : [] }),
   })
-  const input = (branch) => [{ _rowNumber: 1, sku: 'INV-1', quantity: 2, ...(branch === undefined ? {} : { branch }) }]
+  const input = (branch) => [{ _rowNumber: 1, sku: 'INV-1', quantity: 2, unit_cost_usd: '1', ...(branch === undefined ? {} : { branch }) }]
 
   const unknown = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input('New Branch'), 'add')
   assert.strictEqual(unknown[0].action, 'error')
@@ -1421,18 +1443,36 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const blank = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input(undefined), 'add')
   assert.strictEqual(blank[0].action, 'create')
   assert.strictEqual(blank[0].data.branch_id, 1)
-  assert.strictEqual(blank[0].data.unit_cost_usd, 1, 'blank cost snapshots the product fallback during classification')
+  assert.strictEqual(blank[0].data.unit_cost_usd, 1, 'new receipt uses the explicit price, not catalog fallback')
   assert.strictEqual(blank[0].data.total_cost_usd, 2)
-  assert.strictEqual(blank[0].data.unit_cost_khr, 0, 'an existing zero fallback remains a recorded zero')
+  assert.strictEqual(blank[0].data.unit_cost_khr, null)
+  for (const [cost, expected] of [['', /must carry its unit cost/], ['0', /goods received free/], ['-1', /cannot be negative/], ['invalid', /unit cost/]]) {
+    const [invalid] = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), [{ ...input(undefined)[0], unit_cost_usd: cost }], 'add')
+    assert.equal(invalid.action, 'error')
+    assert.match(invalid.message, expected)
+  }
 
   const explicitZero = await classifyInventory(
     makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]),
-    [{ ...input(undefined)[0], unit_cost_usd: '0', unit_cost_khr: '0' }],
+    [{ ...input(undefined)[0], unit_cost_usd: '0', unit_cost_khr: '0', free_goods: 'true' }],
     'add',
   )
   assert.strictEqual(explicitZero[0].data.unit_cost_usd, 0, 'explicit zero must not fall through to the product cost')
   assert.strictEqual(explicitZero[0].data.total_cost_usd, 0)
-  assert.strictEqual(explicitZero[0].data.cost_price_usd, 0, 'explicit zero retains the existing add-row product update semantics')
+  assert.strictEqual(explicitZero[0].data.cost_price_usd, undefined, 'receipts do not encode a manual catalog override')
+  assert.equal(explicitZero[0].data.inventory_receipt_plan_version, 1)
+  assert.match(explicitZero[0].data.reason, /Free goods \(no cost\)/)
+  const [preciseReceipt] = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]),
+    [{ ...input(undefined)[0], unit_cost_usd: '3.1234', date: '2026-09-20' }], 'add')
+  assert.equal(preciseReceipt.data.unit_cost_usd, 3.1234)
+  assert.equal(preciseReceipt.data.total_cost_usd, 6.2468)
+  assert.deepEqual(applyAnalyzedInventoryCostSnapshots([preciseReceipt], new Map([[1, preciseReceipt]])), [preciseReceipt])
+  const oldPlan = { ...preciseReceipt, data: { ...preciseReceipt.data } }
+  delete oldPlan.data.inventory_receipt_plan_version
+  assert.throws(() => applyAnalyzedInventoryCostSnapshots([preciseReceipt], new Map([[1, oldPlan]])), /older or changed receipt plan/)
+  for (const changed of [{ unit_cost_usd: 3.13 }, { total_cost_usd: 99 }, { created_at: '2026-09-21T00:00:00.000Z' }]) {
+    assert.throws(() => applyAnalyzedInventoryCostSnapshots([{ ...preciseReceipt, data: { ...preciseReceipt.data, ...changed } }], new Map([[1, preciseReceipt]])), /changed receipt cost or date/)
+  }
 
   const frozen = inventoryMovementCostSnapshot({ fallbackUsd: 3.25, fallbackKhr: 13000, quantity: 4 })
   product.cost_price_usd = 99
@@ -1445,8 +1485,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   assert.strictEqual(remove[0].data.unit_cost_usd, 99, 'non-receipt actions still snapshot their plan-time product cost')
   assert.strictEqual(remove[0].data.total_cost_usd, 198)
 
-  const reviewed = { ...blank[0], data: { ...blank[0].data, unit_cost_usd: 1, unit_cost_khr: 0, total_cost_usd: 2, total_cost_khr: 0 } }
-  const reclassifiedAtApply = { ...blank[0], data: { ...blank[0].data, unit_cost_usd: 99, unit_cost_khr: 400000, total_cost_usd: 198, total_cost_khr: 800000 } }
+  const reviewed = { ...remove[0], data: { ...remove[0].data, unit_cost_usd: 1, unit_cost_khr: 0, total_cost_usd: 2, total_cost_khr: 0 } }
+  const reclassifiedAtApply = { ...remove[0], data: { ...remove[0].data, unit_cost_usd: 99, unit_cost_khr: 400000, total_cost_usd: 198, total_cost_khr: 800000 } }
   const applied = applyAnalyzedInventoryCostSnapshots([reclassifiedAtApply], new Map([[1, reviewed]]))
   assert.deepStrictEqual(
     {
