@@ -138,12 +138,13 @@ const batchCode = loadReal('lib/batchCode.ts')
 // Real, pure -- no stubbing needed.
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': loadReal('lib/sqlBinding.ts'), './moneyPrecision': loadReal('lib/moneyPrecision.ts') })
 const permissions = loadReal('lib/permissions.ts')
+const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 // P4-3: real, pure -- used by the new damaged-return-disposition tests below
 // to confirm a "remove entirely" write_off is actually counted as a loss
 // through the SAME kernel the stats surfaces use, not a parallel check.
 const removalLosses = loadReal('lib/removalLosses.ts')
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ returns: true }) }
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ returns: true, product_cost_edit: true, product_cost_view: true }) }
 // Swapped for one request at a time by reqAs() so a permission-shaped probe
 // runs through the REAL lib/permissions tier resolution, not a stub of it.
 let activeUser = FAKE_USER
@@ -191,6 +192,8 @@ const saleBulkStatusKernel = {
   }),
 }
 const returnsRoute = loadReal('routes/returns.ts', {
+  '../lib/acquisitionCostAccess': acquisitionCostAccess,
+  '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),
   '../lib/branchRoles': branchRolesKernel,
   '../lib/actorSnapshot': actorSnapshotKernel,
@@ -1396,7 +1399,15 @@ async function main() {
     assert.strictEqual(denied.status, 403, JSON.stringify(denied.json))
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 0)
 
-    const allowed = await req('POST', '/', {
+    const returnsOnly = { ...FAKE_USER, permissions: JSON.stringify({ returns: true }) }
+    const forbiddenCost = await reqAs(returnsOnly, 'POST', '/', {
+      sale_id: 1,
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', cost_price_usd: 0 }],
+      reason: 'Cost permission probe',
+    })
+    assert.strictEqual(forbiddenCost.status, 403)
+    assert.strictEqual(forbiddenCost.json.code, 'product_cost_edit_required')
+    const allowed = await reqAs(returnsOnly, 'POST', '/', {
       sale_id: 1,
       items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 12 }],
       reason: 'Permission probe',

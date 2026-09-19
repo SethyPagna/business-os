@@ -95,6 +95,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
 const productMergeLineage = loadReal('lib/productMergeLineage.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
+const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRolesKernel = loadReal('lib/branchRoles.ts')
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ returns: true }) }
@@ -111,6 +112,8 @@ const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', {
   './customerReturnEntitlement': customerReturnEntitlement,
 })
 const returnsRoute = loadReal('routes/returns.ts', {
+  '../lib/acquisitionCostAccess': acquisitionCostAccess,
+  '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoles': branchRolesKernel,
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),
   '../lib/actorSnapshot': actorSnapshotKernel,
