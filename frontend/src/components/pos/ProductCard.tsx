@@ -55,6 +55,8 @@ export type ProductCardGroupMeta = {
 }
 
 export interface ProductCardProps {
+  /** Compact USD-only presentation for the POS catalog. */
+  posPresentation?: boolean
   product: ProductCardProduct
   /** The group's sellable rows -- empty for a flat product. */
   variants: readonly ProductCardProduct[]
@@ -83,6 +85,13 @@ function asNumber(value: unknown): number {
 }
 
 const CARD_IMAGE_FRAME = 'relative w-full aspect-square rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-2 overflow-hidden'
+
+function promotionText(product: ProductCardProduct, promotionRules: readonly PromotionRule[], exchangeRate: number, fmtUSD: (value: number) => string, label: string): string {
+  const badge = promotionBadgeForProduct(product, promotionRules)
+  return badge.kind === 'quantity_hint'
+    ? ((badge.show_title && badge.title) || `${label} ${badge.min_quantity}+`)
+    : `${(badge.show_title && badge.title) || String(product.discount_label || '') || label} ${fmtUSD(evaluatePromotionPricing(product, 1, promotionRules, exchangeRate).unit_price_usd || 0)}`
+}
 
 function ProductDiscountBadge({
   product,
@@ -113,6 +122,7 @@ function ProductDiscountBadge({
 }
 
 function ProductCardComponent({
+  posPresentation = false,
   product,
   variants,
   groupMeta,
@@ -139,18 +149,21 @@ function ProductCardComponent({
   const variantInStock = variants.some((variant) => getStock(variant) > asNumber(variant.out_of_stock_threshold))
   const inStock = groupProduct ? variantInStock : stock > asNumber(product.out_of_stock_threshold)
   const promoBadge = promotionBadgeForProduct(product, promotionRules)
+  const compactPromotionTitle = posPresentation && promoBadge.active
+    ? promotionText(product, promotionRules, exchangeRate, fmtUSD, copy('Discounts', 'ការបញ្ចុះតម្លៃ'))
+    : ''
   const expiryInfo = !groupProduct ? computeExpiryStatus(product.expiry_date as string | null | undefined, product.expiry_alert_days) : null
   const imageContent = (
     <>
       {primaryImage ? <ProductImage src={primaryImage} alt={displayName} className="w-full h-full object-cover" /> : <ImageOff className="h-5 w-5 text-gray-400" />}
-      <ProductDiscountBadge product={product} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={copy('Discounts', 'ការបញ្ចុះតម្លៃ')} promotionRules={promotionRules} />
+      {!posPresentation ? <ProductDiscountBadge product={product} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={copy('Discounts', 'ការបញ្ចុះតម្លៃ')} promotionRules={promotionRules} /> : null}
     </>
   )
   return (
     <div
       role="button"
       tabIndex={0}
-      className={`card relative cursor-pointer p-3 text-left transition-all ${inStock ? 'hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600' : 'opacity-60'}`}
+      className={`card relative min-w-0 cursor-pointer ${posPresentation ? 'p-2 sm:p-2.5' : 'p-3'} text-left transition-all ${inStock ? 'hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600' : 'opacity-60'}`}
       onClick={() => onOpen({ groupProduct, inStock })}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -191,8 +204,8 @@ function ProductCardComponent({
           {fmtUSD(groupProduct ? (groupMeta?.maxSellingPriceUsd || asNumber(product.selling_price_usd)) : asNumber(product.selling_price_usd))}
         </span>
       </div>
-      {asNumber(product.selling_price_khr) > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(asNumber(product.selling_price_khr))}</p> : null}
-      {promoBadge.active ? (
+      {!posPresentation && asNumber(product.selling_price_khr) > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(asNumber(product.selling_price_khr))}</p> : null}
+      {!posPresentation && promoBadge.active ? (
         <p className="text-[11px] font-semibold" style={{ color: promoBadge.badge_color || '#e11d48' }}>
           {promoBadge.kind === 'quantity_hint'
             ? ((promoBadge.show_title && promoBadge.title) || `${copy('Buy', 'ទិញ')} ${promoBadge.min_quantity}+`)
@@ -212,7 +225,8 @@ function ProductCardComponent({
           stock in the same red/amber/emerald convention a flat
           product's "qty unit" uses, judged against the group's
           total. A flat product keeps its coloured "qty unit". */}
-      <p {...getKhmerTextProps(groupProduct ? choiceLabel : unit, `text-xs mt-0.5 font-medium ${groupProduct ? 'text-gray-400 font-normal' : !inStock ? 'text-red-500' : stock <= effectiveLowStockThreshold(lowStockConfig, product.low_stock_threshold) ? 'text-yellow-500' : 'text-emerald-500'}`)}>
+      <div className="mt-0.5 flex min-w-0 items-center gap-1">
+      <p {...getKhmerTextProps(groupProduct ? choiceLabel : unit, `min-w-0 flex-1 ${posPresentation ? 'truncate text-[11px]' : 'text-xs'} font-medium ${groupProduct ? 'text-gray-400 font-normal' : !inStock ? 'text-red-500' : stock <= effectiveLowStockThreshold(lowStockConfig, product.low_stock_threshold) ? 'text-yellow-500' : 'text-emerald-500'}`)} title={groupProduct ? `${choiceLabel}: ${variants.length}${groupMeta?.stockTotal != null ? ` | ${copy('Total', 'សរុប')}: ${groupMeta.stockTotal}` : ''}` : `${stock} ${unit}`}>
         {groupProduct ? (
           <>
             {choiceLabel}: <span className="font-semibold text-primary-600 dark:text-primary-400">{variants.length}</span>
@@ -224,6 +238,12 @@ function ProductCardComponent({
           </>
         ) : `${stock} ${unit}`}
       </p>
+      {posPresentation && promoBadge.active ? (
+        <span className="max-w-[45%] shrink-0 truncate rounded px-1.5 py-0.5 text-[10px] font-bold text-white" style={{ backgroundColor: promoBadge.badge_color || '#e11d48' }} title={compactPromotionTitle} aria-label={compactPromotionTitle}>
+          {copy('Deal', 'ប្រូម៉ូសិន')}
+        </span>
+      ) : null}
+      </div>
       {expiryInfo && expiryInfo.status !== 'ok' ? (
         <p className={`text-[11px] font-semibold ${expiryInfo.status === 'expired' ? 'text-red-600' : 'text-yellow-600'}`}>
           {expiryInfo.status === 'expired' ? (t('expired') || 'Expired') : (t('expiring_soon') || 'Expiring soon')}
