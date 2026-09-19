@@ -1,3 +1,17 @@
+## Read-only maintainability review and handoff — September 19
+
+Reviewed continuation source `45a0831b`; no runtime edits, deletion, migration or
+deployment in this review. Fresh unused-declaration probes: frontend 39, Worker 4.
+Findings, confidence, impacts, deletion risks and cleanup sequence are in
+`docs/fleet/2026-09-19-maintainability-audit.md`. Counts are declarations, not
+removable features. Historical 114-helper count is not a fresh deletion allowlist.
+
+Account-key cleanup `0e1b7407` and regressions `45a0831b` are committed and locally
+verified (12 browser passes / 6 skips; types/i18n/build pass), but deployment is
+NOT confirmed. Logout/stale-read error cases remain open. Last recorded live
+release remains the authentication release below; fresh runtime read was blocked
+by Cloudflare challenge. Do not repeat completed supplier settlement migration0183.
+
 ## Authentication startup safety DEPLOYED — September 18
 
 Live de8c72fa9514, Worker9d5b1644-9f8f-4826-b6f7-043ddd5cf6c2. Auth storage
