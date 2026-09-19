@@ -36,6 +36,7 @@ import {
   getAllFeesForExport,
   getFees as getFeesRequest,
   getFeesReport,
+  feeRangeParams,
   updateFee as updateFeeRequest,
   type FeeListResult,
   type FeePayload,
@@ -247,8 +248,8 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   // ONE date scope for the whole page (user, Aug 31: "drive list + stats
   // together"): the Start→End range row above the search bar drives BOTH the
   // stats strip AND the expenses list — there is no separate Filters-menu date
-  // range that could disagree with it. Starts all-time; presets are inside
-  // the shared date/time picker. (Strip data state is declared further down.)
+  // range that could disagree with it. Presets live in the shared external
+  // scroll row; times remain inside the picker. Strip data is declared below.
   const [stripRange, setStripRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [branchFilter, setBranchFilter] = useState('')
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
@@ -280,8 +281,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         () => getFeesRequest({
           search: search.trim() || undefined,
           fee_type: typeFilter !== 'all' ? typeFilter : undefined,
-          from: stripRange.startDate || undefined,
-          to: stripRange.endDate || undefined,
+          ...feeRangeParams(stripRange),
           branch_id: branchFilter || undefined,
           limit: pageSize,
           offset: (page - 1) * pageSize,
@@ -309,7 +309,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         setHasLoadedOnce(true)
       }
     }
-  }, [search, typeFilter, stripRange.startDate, stripRange.endDate, branchFilter, page, pageSize])
+  }, [search, typeFilter, stripRange.startDate, stripRange.endDate, stripRange.startTime, stripRange.endTime, branchFilter, page, pageSize])
 
   useEffect(() => {
     if (!isActive) return
@@ -321,7 +321,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   // page.
   useEffect(() => {
     setPage(1)
-  }, [search, typeFilter, stripRange.startDate, stripRange.endDate, branchFilter])
+  }, [search, typeFilter, stripRange.startDate, stripRange.endDate, stripRange.startTime, stripRange.endTime, branchFilter])
 
   // Branch list for the filter dropdown -- loaded once, independent of
   // isActive/load() so the filter menu has options even before the fees
@@ -362,8 +362,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     setStripLoading(true)
     try {
       const result = await getFeesReport({
-        ...(stripRange.startDate ? { startDate: stripRange.startDate } : {}),
-        ...(stripRange.endDate ? { endDate: stripRange.endDate } : {}),
+        ...feeRangeParams(stripRange),
         ...(branchFilter ? { branchId: branchFilter } : {}),
       })
       if (stripRequestRef.current !== requestId) return
@@ -374,7 +373,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     } finally {
       if (stripRequestRef.current === requestId) setStripLoading(false)
     }
-  }, [branchFilter, isActive, stripRange.endDate, stripRange.startDate])
+  }, [branchFilter, isActive, stripRange.endDate, stripRange.startDate, stripRange.startTime, stripRange.endTime])
   useEffect(() => { void loadStatsStrip() }, [loadStatsStrip])
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
@@ -454,8 +453,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         : await getAllFeesForExport(scope === 'filtered' ? {
           search: search.trim() || undefined,
           fee_type: typeFilter !== 'all' ? typeFilter : undefined,
-          from: stripRange.startDate || undefined,
-          to: stripRange.endDate || undefined,
+          ...feeRangeParams(stripRange),
           branch_id: branchFilter || undefined,
         } : {})
       // A fetch begun while allowed must not open an export result after the
@@ -474,7 +472,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     } finally {
       exportInFlightRef.current = false
     }
-  }, [branchFilter, feeTypeLabel, fees, notify, search, stripRange.endDate, stripRange.startDate, tr, typeFilter])
+  }, [branchFilter, feeTypeLabel, fees, notify, search, stripRange.endDate, stripRange.startDate, stripRange.startTime, stripRange.endTime, tr, typeFilter])
 
   const exportItems = useMemo(() => ([
     { label: tr('export_visible', 'Export visible page'), onClick: () => { void openFeeExport('visible') } },
@@ -702,6 +700,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           </button>
         ) : null}
         range={stripRange}
+        showTime
         onRangeChange={setStripRange}
       />
 
