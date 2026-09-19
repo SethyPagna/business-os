@@ -84,9 +84,12 @@ function seedLot(fixture, { active = 1, quantity = 0 } = {}) {
 let routeFixture
 const batchCode = loadReal('lib/batchCode.ts')
 const conflictControl = loadReal('lib/conflictControl.ts')
+const costPermissions = loadReal('lib/permissions.ts')
+const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': costPermissions })
 const batchRoute = loadReal('routes/batches.ts', {
+  '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/db': { getDb: () => routeFixture.db },
-  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 1, name: 'Tester' }); return next() } },
+  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 1, name: 'Tester', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }); return next() } },
   '../lib/audit': { audit: async () => {} },
   '../lib/permissions': { hasPermission: () => true, getActionTier: () => 'full', isActionBlocked: () => false },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
