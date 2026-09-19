@@ -1,4 +1,6 @@
 import { Hono } from 'hono'
+import { acquisitionCostResponses, canEditAcquisitionCosts, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
+import { recordedReturnCosts } from '../lib/returnCostAccess'
 import { getDb } from '../lib/db'
 import { selectInChunks } from '../lib/sqlBinding'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
@@ -49,6 +51,7 @@ import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+app.use('*', acquisitionCostResponses)
 // Gates every returns endpoint (reads and writes alike) behind its own
 // 'returns' permission, matching the frontend's own
 // PAGE_PERMISSIONS.returns = 'returns' gate (see AppContext.tsx/
@@ -1266,6 +1269,7 @@ app.post('/', async (c) => {
     expected_quote?: unknown
   }>()
 
+  if (hasAcquisitionCostInput(body.items, user)) return c.json({ error: 'Cost-entry permission is required to submit return cost overrides. Omit cost fields to use recorded costs.', code: 'product_cost_edit_required' }, 403)
   const rawRequestId = String(body.client_request_id ?? '').trim()
   const clientRequestId = rawRequestId || null
   if (!clientRequestId || new TextEncoder().encode(clientRequestId).byteLength > 120) {
@@ -1384,8 +1388,8 @@ app.post('/', async (c) => {
         product_id: sold.product_id ?? item.product_id,
         product_name: sold.product_name ?? item.product_name,
         branch_id: sold.branch_id ?? item.branch_id,
-        cost_price_usd: isMoneyV1 ? sold.cost_price_usd : sold.cost_price_usd ?? item.cost_price_usd,
-        cost_price_khr: isMoneyV1 ? sold.cost_price_khr : sold.cost_price_khr ?? item.cost_price_khr,
+        cost_price_usd: isMoneyV1 || !canEditAcquisitionCosts(user) ? sold.cost_price_usd : sold.cost_price_usd ?? item.cost_price_usd,
+        cost_price_khr: isMoneyV1 || !canEditAcquisitionCosts(user) ? sold.cost_price_khr : sold.cost_price_khr ?? item.cost_price_khr,
       } : item
     })
     committedReturnLines = await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
@@ -1451,6 +1455,13 @@ app.post('/', async (c) => {
     const rows = await selectInChunks(productIds, 0, (chunk) => db.prepare(`SELECT id,name,cost_price_usd,cost_price_khr,
       selling_price_usd,selling_price_khr,updated_at,is_active FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<ProductMeta>(chunk))
     for (const row of rows) productMap.set(Number(row.id), row)
+  }
+  if (!canEditAcquisitionCosts(user)) {
+    try {
+      returnItems = returnItems.map(item => ({ ...item, ...recordedReturnCosts(item, requestedSaleId ? soldLines : [...productMap.values()], requestedSaleId ? 'sale' : 'catalog') }))
+    } catch (error) {
+      return c.json({ error: (error as Error).message, code: 'return_cost_source_review_required' }, 409)
+    }
   }
   if (replacementInputs.some((input) => Number(productMap.get(Number(input.product_id))?.is_active || 0) !== 1)) {
     return c.json({ error: 'Each replacement line needs an active catalog product' }, 400)
@@ -1869,10 +1880,10 @@ app.post('/', async (c) => {
     const itemBranchId = Number(item.branch_id || branchId) || null
     const productName = item.product_name?.trim() || (productId ? productMap.get(productId)?.name : null) || null
     const stockAction = normalizeStockAction(item)
-    const unitCostUsd = isMoneyV1
+    const unitCostUsd = isMoneyV1 || !canEditAcquisitionCosts(user)
       ? item.cost_price_usd == null ? null : Number(item.cost_price_usd)
       : toNumber(item.cost_price_usd ?? item.unit_cost_usd)
-    const unitCostKhr = isMoneyV1
+    const unitCostKhr = isMoneyV1 || !canEditAcquisitionCosts(user)
       ? item.cost_price_khr == null ? null : Number(item.cost_price_khr)
       : toNumber(item.cost_price_khr ?? item.unit_cost_khr)
     const plan = returnLotPlans[index] || { splits: [], plainQuantity: 0 }
@@ -2192,8 +2203,9 @@ app.post('/', async (c) => {
 // how the supplier is settling it (refund / credit / replacement / writeoff),
 // tracking any shortfall as supplier_loss_usd/khr.
 app.post('/supplier', async (c) => {
-  const db = getDb(c.env)
   const user = c.get('user')
+  if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Cost-entry permission is required to record supplier return costs and settlement.', code: 'product_cost_edit_required' }, 403)
+  const db = getDb(c.env)
   // Per-action override (Part 546): supplier returns are the same 'add'
   // action as customer returns -- one switch covers both create routes.
   if (getActionTier(user, 'returns', 'add') === 'none') {
@@ -2514,6 +2526,7 @@ app.patch('/:id', async (c) => {
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
 
+  if (hasAcquisitionCostInput(body.items, user)) return c.json({ error: 'Cost-entry permission is required to submit return cost overrides.', code: 'product_cost_edit_required' }, 403)
   const returnId = Number(id)
   if (!Number.isSafeInteger(returnId) || returnId <= 0) return c.json({ error: 'Return not found' }, 404)
   const requestId = normalizeClientRequestId(body.client_request_id)
@@ -2577,7 +2590,21 @@ app.patch('/:id', async (c) => {
     return_to_stock: number; stock_action: string | null; branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
     batch_id: number | null
   }>([id])
-  const newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : existingItems
+  let newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : existingItems
+  if (!canEditAcquisitionCosts(user) && Array.isArray(body.items)) {
+    const sourceRows = existing.sale_id
+      ? await db.prepare('SELECT id,product_id,branch_id,cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=?').all<Record<string, unknown>>([existing.sale_id])
+      : await selectInChunks([...new Set(newItems.map(item => Number(item.product_id)).filter(id => id > 0))], 0, chunk => db.prepare(`SELECT id,cost_price_usd,cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<Record<string, unknown>>(chunk))
+    try {
+      newItems = newItems.map(item => {
+        const previous = existingItems.filter(row => Number(row.product_id) === Number(item.product_id) && (item.branch_id == null || row.branch_id === item.branch_id))
+        const costs = previous.length ? recordedReturnCosts(item, previous, 'return') : recordedReturnCosts(item, sourceRows, existing.sale_id ? 'sale' : 'catalog')
+        return { ...item, ...costs }
+      })
+    } catch (error) {
+      return c.json({ error: (error as Error).message, code: 'return_cost_source_review_required' }, 409)
+    }
+  }
   if (existingItems.length > 50 || newItems.length > 50) {
     return c.json({ error: 'Edit at most 50 return items at a time.', code: 'return_edit_too_large' }, 400)
   }
@@ -2805,8 +2832,8 @@ app.patch('/:id', async (c) => {
         product_name: item.product_name,
         branch_id: branchIdForItem,
         quantity: -(Number(item.quantity) || 0),
-        unit_cost_usd: item.cost_price_usd || 0,
-        unit_cost_khr: item.cost_price_khr || 0,
+        unit_cost_usd: item.cost_price_usd ?? null,
+        unit_cost_khr: item.cost_price_khr ?? null,
         reason: `Return #${existing.return_number} updated - reversing previous restock`,
         reference_id: id,
         user_id: user?.id ?? null,
@@ -2895,8 +2922,8 @@ app.patch('/:id', async (c) => {
         quantity,
         applied_price_usd: refundUnitUsd,
         applied_price_khr: refundUnitKhr,
-        cost_price_usd: item.cost_price_usd || 0,
-        cost_price_khr: item.cost_price_khr || 0,
+        cost_price_usd: item.cost_price_usd ?? null,
+        cost_price_khr: item.cost_price_khr ?? null,
         total_usd: totalUsd,
         total_khr: totalKhr,
         return_to_stock: returnToStock ? 1 : 0,
@@ -2938,8 +2965,8 @@ app.patch('/:id', async (c) => {
           product_name: item.product_name || null,
           branch_id: itemBranchId,
           quantity,
-          unit_cost_usd: item.cost_price_usd || 0,
-          unit_cost_khr: item.cost_price_khr || 0,
+          unit_cost_usd: item.cost_price_usd ?? null,
+          unit_cost_khr: item.cost_price_khr ?? null,
           reason: `Return #${existing.return_number} updated: ${body.reason || existing.reason}`,
           reference_id: id,
           user_id: user?.id ?? null,

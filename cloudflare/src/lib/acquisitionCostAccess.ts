@@ -10,10 +10,17 @@ export function canEditAcquisitionCosts(user: PermissionUser): boolean {
   return isAdminControlUser(user) || getMergedPermissions(user).product_cost_edit === true
 }
 
+// These import formats materialize acquisition costs, including normalized
+// defaults and saved staging snapshots. Contact-only imports do not.
+export function isAcquisitionCostImport(type: unknown): boolean {
+  return ['products', 'inventory', 'sales', 'stock_actions'].includes(String(type || '').trim().toLowerCase())
+}
+
 // Courier/delivery expenses retain their separate amendment policy.
 export function isAcquisitionCostKey(key: string): boolean {
   const normalized = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
   if (/(^|_)(delivery|courier)(_|$)/.test(normalized)) return false
+  if (['actual_cost_usd', 'actual_cost_khr', 'actual_cost_count', 'actual_cost_before', 'actual_cost_after'].includes(normalized)) return false
   return /(^|_)(cost|costs|cogs|profit|margin|purchase_price|stock_value|removal_loss)(_|$)/.test(normalized)
     || normalized === 'revenue_after_losses_usd' || normalized === 'credit_open_usd'
 }
@@ -39,21 +46,24 @@ const SERIALIZED_FIELDS = new Set(['details', 'old_value', 'new_value', 'undo_pa
 const MAX_SERIALIZED_CHARS = 2_000_000
 const MAX_DEPTH = 32
 const SUPPLIER_MONEY_FIELDS = new Set(['line_total_usd', 'total_usd', 'paid_usd', 'outstanding_usd',
-  'taxable_amount_usd', 'vat_amount_usd', 'total_amount_usd', 'amount_paid_usd', 'outstanding_balance_usd'])
+  'taxable_amount_usd', 'vat_amount_usd', 'total_amount_usd', 'amount_paid_usd', 'outstanding_balance_usd',
+  'total_khr', 'total_refund_usd', 'total_refund_khr', 'applied_price_usd', 'applied_price_khr',
+  'supplier_compensation_usd', 'supplier_compensation_khr', 'supplier_loss_usd', 'supplier_loss_khr'])
 
 /** Response-only projection: never mutate DB snapshots or actor-neutral caches. */
 export function projectAcquisitionCosts(value: unknown, user: PermissionUser, supplierMoney = false): unknown {
   if (canViewAcquisitionCosts(user)) return value
-  function project(input: unknown, depth: number): unknown {
+  function project(input: unknown, depth: number, supplier = supplierMoney): unknown {
     if (depth > MAX_DEPTH) return null
-    if (Array.isArray(input)) return input.map(item => project(item, depth + 1))
+    if (Array.isArray(input)) return input.map(item => project(item, depth + 1, supplier))
     if (!input || typeof input !== 'object') return input
     const source = input as Record<string, unknown>
+    supplier = supplier || source.return_scope === 'supplier'
     // Audit/merge diffs may name the column rather than use it as a key.
     if (typeof source.field === 'string' && isAcquisitionCostKey(source.field)) return { field: source.field, redacted: true }
     const result: Record<string, unknown> = {}
     for (const [key, child] of Object.entries(source)) {
-      if (isAcquisitionCostKey(key) || (supplierMoney && SUPPLIER_MONEY_FIELDS.has(key))) continue
+      if (isAcquisitionCostKey(key) || (supplier && SUPPLIER_MONEY_FIELDS.has(key))) continue
       if (typeof child === 'string' && (SERIALIZED_FIELDS.has(key) || key.endsWith('_json'))) {
         // Only serialized envelopes are parsed, never arbitrary names/notes.
         // Oversized or malformed envelopes fail closed.
@@ -63,11 +73,11 @@ export function projectAcquisitionCosts(value: unknown, user: PermissionUser, su
           const parsed: unknown = JSON.parse(child)
           // A bare historical scalar has no column identity; do not expose
           // an old/new unit cost merely because its wrapper lost the key.
-          result[key] = parsed && typeof parsed === 'object' ? JSON.stringify(project(parsed, depth + 1)) : null
+          result[key] = parsed && typeof parsed === 'object' ? JSON.stringify(project(parsed, depth + 1, supplier)) : null
         }
         catch { result[key] = null }
       } else {
-        result[key] = project(child, depth + 1)
+        result[key] = project(child, depth + 1, supplier)
       }
     }
     return result

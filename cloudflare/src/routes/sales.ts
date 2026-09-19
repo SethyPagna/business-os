@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
 import { hasColumn, tableColumnSet } from '../lib/schemaProbe'
@@ -169,6 +170,7 @@ async function saleAllowsPaymentCorrection(db: ReturnType<typeof getDb>, saleId:
   return latest?.action === 'update' || latest?.action === 'sale_payment_correction_opened'
 }
 app.use('*', requireAuth)
+app.use('*', acquisitionCostResponses)
 
 const SALES_READ_CACHE_TTL_SECONDS = 20
 
@@ -5519,6 +5521,7 @@ export function projectOperationalSaleCosts(row:Record<string,unknown>,user:Sess
   }
   return {...publicRow,items:Array.isArray(items)?items.map(item=>{
     if(!item||typeof item!=='object'||Array.isArray(item))return item
+    if(canViewAcquisitionCosts(user))return item
     const {cost_price_usd,cost_price_khr,...publicItem}=item as Record<string,unknown>
     return publicItem
   }):items}

@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts, isAcquisitionCostImport } from '../lib/acquisitionCostAccess'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -21,6 +22,7 @@ import { dispatchImportWork } from '../lib/queueDispatch'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+app.use('*', acquisitionCostResponses)
 
 const ALLOWED_TYPES = new Set(['products', 'customers', 'suppliers', 'delivery_contacts', 'inventory', 'sales', 'stock_actions'])
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
@@ -58,7 +60,8 @@ function permissionsForType(type: string): string[] {
 }
 
 function permittedTypes(user: SessionUser): string[] {
-  return [...ALLOWED_TYPES].filter((type) => permissionsForType(type).every((permission) => hasPermission(user, permission)))
+  return [...ALLOWED_TYPES].filter((type) => permissionsForType(type).every((permission) => hasPermission(user, permission))
+    && (!isAcquisitionCostImport(type) || canViewAcquisitionCosts(user)))
 }
 
 async function getJob(env: Env, id: string) {
@@ -79,6 +82,11 @@ function importActionSection(type: string): string | null {
 async function requireImportPermission(c: any, job: Record<string, unknown> | undefined, bodyType?: string) {
   const user = c.get('user')
   const type = (job?.type as string) || bodyType || 'products'
+  if (isAcquisitionCostImport(type)) {
+    const isRead = c.req.method === 'GET' || c.req.method === 'HEAD'
+    const allowed = isRead ? canViewAcquisitionCosts(user) : canEditAcquisitionCosts(user)
+    if (!allowed) return c.json({ success: false, error: isRead ? 'Cost-view permission is required to read financial import data.' : 'Cost-entry permission is required for this import format.', code: isRead ? 'product_cost_view_required' : 'product_cost_edit_required' }, 403)
+  }
   const missingPermission = permissionsForType(type).find((permission) => !hasPermission(user, permission))
   if (missingPermission) {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: missingPermission }, 403)

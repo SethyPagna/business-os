@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
+import { acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
@@ -1107,6 +1107,7 @@ app.post('/system/drive-sync/forget-credentials', requireAuth, async (c) => {
   return c.json(await driveSyncStatus(c.env))
 })
 app.post('/system/drive-sync/jobs', requireAuth, async (c) => {
+  if (!canViewAcquisitionCosts(c.get('user'))) return c.json({ error: 'Cost-view permission is required to export database backups.', code: 'product_cost_view_required' }, 403)
   const denied = denyUnless(c, 'backup', 'settings')
   if (denied) return denied
   try {
@@ -1122,6 +1123,7 @@ app.post('/system/drive-sync/jobs', requireAuth, async (c) => {
 // returned backupKey can then be reviewed through the existing backup flow.
 app.post('/system/drive-sync/restore-stage/jobs', requireAuth, async (c) => {
   const user = c.get('user')
+  if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Cost-entry permission is required to prepare a database restore.', code: 'product_cost_edit_required' }, 403)
   if (!hasPermission(user, 'backup_restore')) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
