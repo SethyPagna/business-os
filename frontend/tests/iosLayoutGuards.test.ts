@@ -363,7 +363,6 @@ function everyTsxFile(): string[] {
 const RAW_VH_ALLOWLIST = new Set([
   'components/shared/AvailabilityFilterOptions.tsx',
   'components/shared/BackgroundImportTracker.tsx',
-  'components/shared/ButtonGuidePopover.tsx',
   'components/shared/FilterMenu.tsx',
   'components/shared/ImageGalleryLightbox.tsx',
   'components/shared/NotesWidget.tsx',
