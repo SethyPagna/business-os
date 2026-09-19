@@ -1444,10 +1444,10 @@ function CatalogEditorSurfaceContent() {
                       title={copy('contactChannelsGuideTitle', 'Contact us channels')}
                       triggerLabel={copy('contactChannelsGuideTitle', 'Contact us channels')}
                       entries={[
-                        { icon: <MessengerIcon className="h-4 w-4" />, label: copy('messenger', 'Messenger'), description: copy('contactGuideMessenger', 'Type a bare username (mystore) or @username -- a full m.me or facebook.com link also works. Falls back to your Facebook link above if left blank.') },
-                        { icon: <Send className="h-4 w-4" />, label: copy('telegram', 'Telegram'), description: copy('contactGuideTelegram', 'Type a bare username (mystore) or @username -- a full t.me link (including group/channel invite links) also works. Falls back to your Telegram link above if left blank.') },
-                        { icon: <Instagram className="h-4 w-4" />, label: copy('instagram', 'Instagram'), description: copy('contactGuideInstagram', 'Type a bare username (mystore) or @username -- a full instagram.com or ig.me link also works. Opens a direct message, not the profile. Falls back to your Instagram link above if left blank.') },
-                        { icon: <PhoneCall className="h-4 w-4" />, label: copy('call', 'Call'), description: copy('contactGuideCall', 'Type the phone number customers should call. Opens the device dialer -- defaults to your business phone number if left blank.') },
+                        { icon: <MessengerIcon className="h-4 w-4" />, label: copy('messenger', 'Messenger'), description: copy('contactGuideMessenger', 'Username, @username, or full m.me / facebook.com link. Blank uses the Facebook link above.') },
+                        { icon: <Send className="h-4 w-4" />, label: copy('telegram', 'Telegram'), description: copy('contactGuideTelegram', 'Username, @username, or full t.me link, including group/channel invites. Blank uses the Telegram link above.') },
+                        { icon: <Instagram className="h-4 w-4" />, label: copy('instagram', 'Instagram'), description: copy('contactGuideInstagram', 'Username, @username, or full instagram.com / ig.me link. Opens a direct message, not the profile. Blank uses the Instagram link above.') },
+                        { icon: <PhoneCall className="h-4 w-4" />, label: copy('call', 'Call'), description: copy('contactGuideCall', 'Phone number to dial. Blank uses your business phone.') },
                       ]}
                     />
                   </div>

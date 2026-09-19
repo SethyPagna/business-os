@@ -48,7 +48,7 @@ export default function ImportModeWizard({ onClose, onDone, t, products }: Impor
         headerExtra={(
           <InfoHint
             label={t('import_hub_how', 'How importing works')}
-            text={t('import_hub_sub', 'Drop one combined sheet or separate files (catalog, stock-in, sales, contacts) — several at once or over sessions. Each file is recognized by its columns and imports automatically; conflicts pause for review in the import tracker.')}
+            text={t('import_hub_sub', '• Combined or separate files: catalog, stock-in, sales, contacts.\n• Upload together or over sessions; columns identify each file automatically.\n• Imports run automatically. Conflicts pause for review in the import tracker.')}
           />
         )}
         onClose={() => { onDone(); onClose() }}
