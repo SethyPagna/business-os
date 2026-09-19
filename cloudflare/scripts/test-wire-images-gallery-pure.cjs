@@ -92,6 +92,7 @@ function loadReal(relPath, requireOverrides = {}) {
 // Real, pure modules -- the matcher and the naming rule ARE what is being
 // tested, so stubbing either would test the stub.
 const importImageMatch = loadReal('lib/importImageMatch.ts')
+const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': loadReal('lib/permissions.ts') })
 const media = loadReal('lib/media.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const productImagePermission = loadReal('lib/productImagePermission.ts', {
@@ -147,6 +148,7 @@ const productDelete = loadReal('lib/productDelete.ts', {
 })
 const requestBodyGuard = loadReal('lib/requestBodyGuard.ts')
 const productsRoute = loadReal('routes/products.ts', {
+  '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/promotionRules': promotionRules,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => dbShim },
