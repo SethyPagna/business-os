@@ -142,10 +142,21 @@ function request(clientRequestId) {
 }
 
 async function postSale(db, body) {
+  // Positive-path fixture admission: every new sale request now names its
+  // authenticated owner, even when online. Preserve explicit malformed/null
+  // ownership. The owner regression suite calls the route directly to test
+  // omitted metadata; it must not pass through this convenience helper.
+  const admittedBody = Object.hasOwn(body, 'offline_owner') ? body : {
+    ...body,
+    offline_owner: {
+      version: 1, actor_id: currentUser.id, organization_id: currentUser.organization_id ?? null,
+      authority: 'http://localhost', runtime: 'cloudflare-workers',
+    },
+  }
   const response = await app.request('/', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(admittedBody),
   }, { DB: db }, executionCtx)
   return { status: response.status, body: await response.json() }
 }
@@ -299,8 +310,8 @@ async function assertNativeD1TriggerMetadata() {
 
   {
     const f = fixture()
-    f.raw.prepare(`INSERT INTO sales(receipt_number,client_request_id,branch_id,branch_name,cashier_name,payment_method,total_usd,sale_status)
-                   VALUES('ORPHAN','orphan-replay',1,'Shop','Sale Cashier','Cash',9.5,'completed')`).run()
+    f.raw.prepare(`INSERT INTO sales(receipt_number,client_request_id,branch_id,branch_name,cashier_name,payment_method,total_usd,sale_status,cashier_id)
+                   VALUES('ORPHAN','orphan-replay',1,'Shop','Sale Cashier','Cash',9.5,'completed',@cashier_id)`).run({ cashier_id: USER.id })
     const replay = await postSale(f.route, request('orphan-replay'))
     assert.equal(replay.status, 409, JSON.stringify(replay.body))
     assert.equal(replay.body.code, 'sale_incomplete')

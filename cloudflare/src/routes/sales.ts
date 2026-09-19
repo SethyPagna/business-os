@@ -9,6 +9,7 @@ import { normalizePromotionRule } from '../lib/promotionRules'
 import { resolveProductMergeLineage, ProductMergeLineageError, findSaleItemsRequiringIdentityReview } from '../lib/productMergeLineage'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
+import { canonicalOfflineSaleOwner, offlineSaleOwnerError, offlineSaleOwnerMismatch } from '../lib/offlineSaleOwnership'
 import { audit } from '../lib/audit'
 import { hasAnyPermission, getPermissionTier, getActionTier, isAdminControlUser } from '../lib/permissions'
 
@@ -433,6 +434,7 @@ app.post('/', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<{
+    offline_owner?: unknown
     money_precision_version?: unknown
     items: SaleItemInput[]
     // Offline replays only: the sale's queue-time moment, honored with
@@ -491,6 +493,14 @@ app.post('/', async (c) => {
     delivery_actual_cost_khr?: number | string | null
   }>()
 
+  // Every create requires the captured owner, including online requests and
+  // legacy retries without created_at. A fresh preflight cannot close a cookie
+  // switch between requests, and a duplicate must not disclose another actor's
+  // receipt before this boundary is checked.
+  const offlineOwner = canonicalOfflineSaleOwner(user, c.req.url)
+  const ownerError = offlineSaleOwnerError(body.offline_owner, offlineOwner)
+  if (ownerError) return c.json(ownerError, 409)
+
   try {
   const clientRequestId = normalizeClientRequestId(body.client_request_id)
   if (clientRequestId) {
@@ -499,11 +509,12 @@ app.post('/', async (c) => {
       // `client_request_id <> ''` from the equality binding, so omitting it
       // turns this idempotency lookup into a full sales-table scan even though
       // idx_sales_client_request_unique_pg already exists.
-      .prepare(`SELECT id, receipt_number,
+      .prepare(`SELECT id, receipt_number, cashier_id,
         (SELECT COUNT(*) FROM sale_items WHERE sale_id = sales.id) AS item_count
         FROM sales WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1`)
-      .get<{ id: number; receipt_number: string; item_count: number }>([clientRequestId])
+      .get<{ id: number; receipt_number: string; cashier_id: number | null; item_count: number }>([clientRequestId])
     if (existingSale) {
+      if (existingSale.cashier_id !== offlineOwner.actor_id) return c.json(offlineSaleOwnerMismatch(), 409)
       // A prior interrupted checkout can have a durable header but no lines.
       // Treating that row as a completed idempotent replay clears the client's
       // offline payload and makes the incomplete sale impossible to retry.
@@ -513,7 +524,7 @@ app.post('/', async (c) => {
           code: 'sale_incomplete',
         }, 409)
       }
-      return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true, sale: await authoritativeSaleSnapshot(db, existingSale.id) })
+      return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true, offline_owner: offlineOwner, client_request_id: clientRequestId, sale: await authoritativeSaleSnapshot(db, existingSale.id) })
     }
   }
   if (body.money_precision_version !== 1) return c.json({ error: 'Keep the original pending sale and review it with the current app before recording it.', code: 'money_precision_review_needed' }, 409)
@@ -1569,10 +1580,11 @@ app.post('/', async (c) => {
     // If D1 committed the batch but its response was lost, its retry can hit
     // the unique write key. Reconcile only a sale with durable lines; an old
     // header-only row is never promoted to a successful replay.
-    const committedSale = await db.prepare(`SELECT id,receipt_number,
+    const committedSale = await db.prepare(`SELECT id,receipt_number,cashier_id,
       (SELECT COUNT(*) FROM sale_items WHERE sale_id=sales.id) AS item_count
       FROM sales WHERE client_request_id=@sale_write_key AND client_request_id<>'' LIMIT 1`)
-      .get<{ id: number; receipt_number: string; item_count: number }>({ sale_write_key: saleWriteKey })
+      .get<{ id: number; receipt_number: string; cashier_id: number | null; item_count: number }>({ sale_write_key: saleWriteKey })
+    if (committedSale && committedSale.cashier_id !== offlineOwner.actor_id) return c.json(offlineSaleOwnerMismatch(), 409)
     if (committedSale && Number(committedSale.item_count) > 0) {
       saleId = Number(committedSale.id)
       resolvedReceiptNumber = committedSale.receipt_number
@@ -1625,7 +1637,7 @@ app.post('/', async (c) => {
     bumpVersion(c.env, 'sales'),
   ]))
   if (recoveredCommittedCreate) {
-    return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true, sale: await authoritativeSaleSnapshot(db,saleId) })
+    return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true, offline_owner: offlineOwner, client_request_id: clientRequestId, sale: await authoritativeSaleSnapshot(db,saleId) })
   }
   // A method typed at the till joins the configured list (user, Sep 4 2026).
   // Off the response path: the sale is already recorded and must not be held
@@ -1670,6 +1682,8 @@ app.post('/', async (c) => {
   return c.json({
     id: saleId,
     receiptNumber,
+    offline_owner: offlineOwner,
+    client_request_id: clientRequestId,
     sale: await authoritativeSaleSnapshot(db, saleId),
     moneyPrecisionVersion: 1,
     calculatedTotalUsd,

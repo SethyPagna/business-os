@@ -1,6 +1,7 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import type { Env } from '../index'
 import { requireAuth, type SessionUser } from '../lib/auth'
+import { canonicalOfflineSaleOwner } from '../lib/offlineSaleOwnership'
 import { audit } from '../lib/audit'
 import { hasFullLibraryAccess, canWireProductImages } from './files'
 
@@ -143,6 +144,8 @@ async function replayOperation(
   app: Hono<{ Bindings: Env }>,
   env: Env,
   cookieHeader: string | null,
+  authority: string,
+  executionCtx: Context['executionCtx'],
   operation: OutboxOperation,
   route: { method: string; path: string | ((op: OutboxOperation) => string); onlineOnly?: boolean },
 ): Promise<ReplayResult> {
@@ -164,7 +167,9 @@ async function replayOperation(
   }
   if (cookieHeader) headers.cookie = cookieHeader
 
-  const response = await app.request(routePath, {
+  // Relative Hono requests use a synthetic localhost origin. Preserve only
+  // the trusted outer request origin, never a client-provided bypass header.
+  const response = await app.request(new URL(routePath, authority).href, {
     method: route.method,
     headers,
     body: route.method === 'GET' || route.method === 'DELETE' ? undefined : JSON.stringify({
@@ -172,10 +177,13 @@ async function replayOperation(
       client_request_id: operation.client_request_id,
       base_updated_at: operation.base_updated_at,
     }),
-  }, env)
+  }, env, executionCtx)
 
   const body = await response.json().catch(() => ({} as Record<string, unknown>)) as Record<string, unknown>
   if (response.status === 409) {
+    if (body.code === 'offline_owner_required' || body.code === 'offline_owner_mismatch') {
+      return { status: 'rejected', code: body.code, error: String(body.error || 'Keep the pending sale for ownership review.') }
+    }
     return { status: 'conflict', code: 'write_conflict', error: String(body?.error || 'Server data changed.') }
   }
   if (!response.ok) {
@@ -192,6 +200,11 @@ async function replayOperation(
 export function createSyncRoute(mainApp: Hono<{ Bindings: Env }>) {
   const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
   app.use('*', requireAuth)
+
+  app.get('/owner', (c) => {
+    c.header('Cache-Control', 'private, no-store')
+    return c.json({ owner: canonicalOfflineSaleOwner(c.get('user'), c.req.url) })
+  })
 
   // Audit coverage note: the outbox itself deliberately writes no audit rows.
   // Every applied operation is replayed through the REAL route handler below
@@ -228,7 +241,7 @@ export function createSyncRoute(mainApp: Hono<{ Bindings: Env }>) {
         continue
       }
       try {
-        const result = await replayOperation(mainApp, c.env, cookieHeader, operation, route)
+        const result = await replayOperation(mainApp, c.env, cookieHeader, new URL(c.req.url).origin, c.executionCtx, operation, route)
         results.push({ client_request_id: operation.client_request_id, operation_id: operation.operation_id, ...result })
       } catch (error) {
         results.push({
