@@ -27,9 +27,10 @@ import { canEditAcquisitionCosts, isAcquisitionCostImport } from './acquisitionC
 import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing, barcodeIdentityMatches, clusterRowsByBarcodeIdentity, rankBarcodeIdentityWinner, isRealBarcode } from './productDetailRule'
 import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
-import { planReconcileBranchSnapshot, resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
+import { planReconcileBranchSnapshot, planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
 import { catalogCostRecomputeStatement } from './catalogCostRecompute'
 import { multiplyMoney4 } from './moneyPrecision'
+import { stockReceiptGateCode, stockReceiptGateMessage, appendReceiptNotes, FREE_GOODS_REASON_NOTE } from './stockReceiptGate'
 // per-row mode system now, just via a different channel than
 // decisionsByRowNumber/policy_json -- BulkImportModal.tsx's review step
 // bakes the reviewer's per-row choice (IMPORT_DECISION_OPTIONS) directly
@@ -2658,6 +2659,25 @@ const INVENTORY_MOVEMENT_COST_FIELDS = [
   'unit_cost_usd', 'unit_cost_khr', 'total_cost_usd', 'total_cost_khr',
 ] as const
 
+export const INVENTORY_RECEIPT_PLAN_VERSION = 1
+
+function inventoryReceiptCostRefusal(cost: unknown, freeGoods: boolean): string | null {
+  // The legacy inventory CSV has no supplier selector. This is only the cost
+  // half of the shared gate; do not invent supplier attribution for imports.
+  return stockReceiptGateMessage(stockReceiptGateCode({ isStockIn: true, lotAttributionDeferred: true,
+    unitCostUsd: cost as number | null, freeGoods }))
+}
+
+export function inventoryReceiptCostSnapshot(input: { explicitUsd?: number; explicitKhr?: number; quantity: number }): InventoryMovementCostSnapshot {
+  const unitCostUsd = input.explicitUsd ?? null
+  const unitCostKhr = input.explicitKhr ?? null
+  return {
+    unitCostUsd, unitCostKhr,
+    totalCostUsd: unitCostUsd === null ? null : multiplyMoney4(unitCostUsd, input.quantity),
+    totalCostKhr: unitCostKhr === null ? null : multiplyMoney4(unitCostKhr, input.quantity),
+  }
+}
+
 export function applyAnalyzedInventoryCostSnapshots(
   results: ImportRowResult[],
   analyzedByRow: Map<number, ImportRowResult>,
@@ -2670,6 +2690,21 @@ export function applyAnalyzedInventoryCostSnapshots(
     }
     const plannedData = analyzed.data as Record<string, unknown>
     const currentData = result.data as Record<string, unknown>
+    const isReceipt = currentData.inventory_receipt_plan_version === INVENTORY_RECEIPT_PLAN_VERSION
+    const wasReceipt = plannedData.inventory_receipt_plan_version === INVENTORY_RECEIPT_PLAN_VERSION
+    if (isReceipt !== wasReceipt) {
+      throw new Error(`Inventory import row ${result.rowNumber} uses an older or changed receipt plan. Analyze the import again before applying.`)
+    }
+    if (isReceipt) {
+      // Add receipts are prospective, versioned plans. Never silently upgrade
+      // a reviewed legacy scalar-cost adjustment into a receipt, or accept a
+      // changed sheet cost/date after the operator reviewed it.
+      const costChanged = INVENTORY_MOVEMENT_COST_FIELDS.some(field => plannedData[field] !== currentData[field])
+        || plannedData.free_goods !== currentData.free_goods
+      const dateChanged = plannedData.receipt_date_explicit !== currentData.receipt_date_explicit
+        || (plannedData.receipt_date_explicit === true && plannedData.created_at !== currentData.created_at)
+      if (costChanged || dateChanged) throw new Error(`Inventory import row ${result.rowNumber} changed receipt cost or date after review. Analyze the import again before applying.`)
+    }
     const numericPlanFields = ['product_id', 'branch_id', 'quantity', 'signedQuantity'] as const
     const staleNumericField = numericPlanFields.find((field) => Number(plannedData[field]) !== Number(currentData[field]))
     const staleMovementType = String(plannedData.movement_type ?? '') !== String(currentData.movement_type ?? '')
@@ -2680,7 +2715,7 @@ export function applyAnalyzedInventoryCostSnapshots(
     if (missingCostField) {
       throw new Error(`Inventory import row ${result.rowNumber} has no reviewed cost snapshot. Analyze the import again before applying.`)
     }
-    const plannedCosts = inventoryMovementCostSnapshot({
+    const plannedCosts = (isReceipt ? inventoryReceiptCostSnapshot : inventoryMovementCostSnapshot)({
       explicitUsd: plannedData.unit_cost_usd === null ? undefined : Number(plannedData.unit_cost_usd),
       explicitKhr: plannedData.unit_cost_khr === null ? undefined : Number(plannedData.unit_cost_khr),
       fallbackUsd: null,
@@ -2694,6 +2729,7 @@ export function applyAnalyzedInventoryCostSnapshots(
     for (const field of INVENTORY_MOVEMENT_COST_FIELDS) {
       nextData[field] = plannedData[field]
     }
+    if (isReceipt) nextData.created_at = plannedData.created_at
     return { ...result, data: nextData }
   })
 }
@@ -2715,6 +2751,73 @@ async function preserveAnalyzedInventoryCostSnapshots(
     for (const row of rows) analyzedByRow.set(Number(row.row_number), parsePolicyObject(row.result_json) as ImportRowResult)
   }
   return applyAnalyzedInventoryCostSnapshots(results, analyzedByRow)
+}
+
+/** Plans reviewed add receipts without writes. The caller commits each entire
+ * group with its import-row claim; replay, lot stock, branch stock, movement and
+ * derived catalog cost can never be split across transactions. */
+export async function planInventoryImportReceiptGroups(
+  db: D1Compat,
+  results: ImportRowResult[],
+  rowGuardStatement: (rowNumber: number) => { sql: string; params: Record<string, unknown> },
+): Promise<Array<Array<{ sql: string; params: Record<string, unknown> }>>> {
+  if (!results.length) return []
+  type Lot = ReceiptLotCandidate & { received_cost_usd: number | null }
+  const productIds = [...new Set(results.map(row => Number((row.data as Record<string, unknown>).product_id)))]
+  const lotsByProduct = new Map<number, Lot[]>()
+  const baselines = new Map<number, number>()
+  let nextId = Number((await db.prepare('SELECT COALESCE(MAX(id),0) AS maxId FROM product_batches').get<{ maxId: number }>())?.maxId) || 0
+  for (const ids of chunkForBinding(productIds)) {
+    const clause = buildInClause('receiptProduct', ids)
+    const lots = await db.prepare(`SELECT id, variant_product_id, batch_key, received_at, unit_cost_usd, received_cost_usd
+      FROM product_batches WHERE variant_product_id IN (${clause.sql})`).all<Lot & { variant_product_id: number }>(clause.params)
+    for (const lot of lots) {
+      const list = lotsByProduct.get(lot.variant_product_id) || []
+      list.push(lot)
+      lotsByProduct.set(lot.variant_product_id, list)
+    }
+    const entries = await db.prepare(`SELECT product_id, baseline_batch_id FROM product_cost_entries
+      WHERE id IN (SELECT MAX(id) FROM product_cost_entries WHERE product_id IN (${clause.sql}) GROUP BY product_id)`)
+      .all<{ product_id: number; baseline_batch_id: number | null }>(clause.params)
+    for (const entry of entries) {
+      const baseline = Number(entry.baseline_batch_id) || 0
+      baselines.set(entry.product_id, baseline)
+      nextId = Math.max(nextId, baseline)
+    }
+  }
+  return results.map(row => {
+    const data = row.data as Record<string, unknown>
+    if (data.inventory_receipt_plan_version !== INVENTORY_RECEIPT_PLAN_VERSION) throw new Error('Analyze this inventory receipt again before applying.')
+    const productId = Number(data.product_id)
+    const lots = lotsByProduct.get(productId) || []
+    const receivedDate = String(data.created_at).slice(0, 10)
+    const cost = data.unit_cost_usd == null ? null : Number(data.unit_cost_usd)
+    const refusal = inventoryReceiptCostRefusal(cost, data.free_goods === true)
+    if (refusal) throw new Error(refusal)
+    const target = resolveReceiptLotTarget(lots, receivedDate, cost, baselines.get(productId) || 0)
+    const existing = lots.find(lot => lot.id === target.existingBatchId)
+    const reservedBatchId = existing ? undefined : ++nextId
+    const plan = planReceiveBatchStock({
+      productId, branchId: Number(data.branch_id), quantity: Number(data.quantity),
+      receivedDate, notes: String(data.reason || 'import'), unitCostUsd: cost,
+      receiptLotTarget: target, reservedBatchId,
+      receiptCostPreimage: { batchExists: !!existing, receivedCostUsd: existing?.received_cost_usd ?? null },
+    })
+    const group = [rowGuardStatement(row.rowNumber), { sql: 'DELETE FROM stock_session_guards', params: {} },
+      ...plan.statements.map(statement => ({ sql: statement.sql, params: (statement.params || {}) as Record<string, unknown> })),
+      {
+        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,
+          unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,created_at,batch_id)
+          VALUES(@product_id,@product_name,@branch_id,@branch_name,@movement_type,@quantity,
+          @unit_cost_usd,@unit_cost_khr,@total_cost_usd,@total_cost_khr,@reason,@created_at,${plan.batchIdSql})`,
+        params: { ...data, ...plan.params },
+      }, catalogCostRecomputeStatement(productId), { sql: 'DELETE FROM stock_session_guards', params: {} }]
+    if (existing) existing.received_cost_usd = plan.params.receivedCostAfter as number | null
+    else lots.push({ id: reservedBatchId!, batch_key: target.batchKey, received_at: receivedDate,
+      unit_cost_usd: cost, received_cost_usd: plan.params.receivedCostAfter as number | null })
+    lotsByProduct.set(productId, lots)
+    return group
+  })
 }
 
 // Picks the ONE product a wildcard-collapsed same-name cluster (see
@@ -2852,6 +2955,10 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     let movementType: string
     let signedQuantity: number
     if (inventoryAction === 'add') {
+      if (quantity === 0) {
+        results.push({ rowNumber: row._rowNumber, action: 'skip', identifier: sku || barcode, existingId: product.id, message: 'Zero quantity: no receipt needed.', changes: {}, data: row })
+        continue
+      }
       movementType = 'in'
       signedQuantity = quantity
     } else if (inventoryAction === 'remove') {
@@ -2919,14 +3026,26 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       created_at: movementDate,
     }
     const normalizedExplicitCost = (value: unknown): number => {
-      const parsed = normalizeImportMoney(value)
+      const parsed = normalizeImportCost4(parseImportNumericValue(value, 0, { strict: true, field: 'unit cost' }))
       return Object.is(parsed, -0) ? 0 : parsed
     }
-    const explicitCostUsd = inventoryAction === 'add' && row.unit_cost_usd != null && str(row.unit_cost_usd) !== ''
-      ? normalizedExplicitCost(row.unit_cost_usd) : undefined
-    const explicitCostKhr = inventoryAction === 'add' && row.unit_cost_khr != null && str(row.unit_cost_khr) !== ''
-      ? normalizedExplicitCost(row.unit_cost_khr) : undefined
-    const movementCosts = inventoryMovementCostSnapshot({
+    let explicitCostUsd: number | undefined
+    let explicitCostKhr: number | undefined
+    const freeGoods = ['true', '1', 'yes'].includes(lower(row.free_goods))
+    if (inventoryAction === 'add') {
+      try {
+        explicitCostUsd = row.unit_cost_usd != null && str(row.unit_cost_usd) !== '' ? normalizedExplicitCost(row.unit_cost_usd) : undefined
+        explicitCostKhr = row.unit_cost_khr != null && str(row.unit_cost_khr) !== '' ? normalizedExplicitCost(row.unit_cost_khr) : undefined
+        if (explicitCostKhr !== undefined && explicitCostKhr < 0) throw new Error('Unit cost cannot be negative')
+        const refusal = inventoryReceiptCostRefusal(explicitCostUsd, freeGoods)
+        if (refusal) throw new Error(refusal)
+      } catch (error) {
+        results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode, existingId: product.id,
+          message: `${error instanceof Error ? error.message : 'Invalid receipt cost'}. Correct the row and analyze again.`, changes: {}, data: row })
+        continue
+      }
+    }
+    const movementCosts = (inventoryAction === 'add' ? inventoryReceiptCostSnapshot : inventoryMovementCostSnapshot)({
       explicitUsd: explicitCostUsd,
       explicitKhr: explicitCostKhr,
       fallbackUsd: product.cost_price_usd,
@@ -2937,15 +3056,14 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     data.unit_cost_khr = movementCosts.unitCostKhr
     data.total_cost_usd = movementCosts.totalCostUsd
     data.total_cost_khr = movementCosts.totalCostKhr
-    // 'add' only: an optional unit cost on the row updates the product's
-    // cost price, same as receiving stock at a manual product edit
-    // would -- blank cells leave the existing price untouched. 'remove'/
-    // 'set' templates don't carry a cost column at all (removing or
-    // recounting stock doesn't change what it's worth), so this never
-    // fires for them regardless of what a raw API caller might send.
+    // New add plans are receipts, never manual catalog overrides. Missing
+    // receipt costs are refused; remove/set/null-action keep their snapshots.
     if (inventoryAction === 'add') {
-      if (explicitCostUsd !== undefined) data.cost_price_usd = explicitCostUsd
-      if (explicitCostKhr !== undefined) data.cost_price_khr = explicitCostKhr
+      data.inventory_receipt_plan_version = INVENTORY_RECEIPT_PLAN_VERSION
+      data.receipt_date_explicit = movementDate !== null
+      data.created_at = movementDate || new Date().toISOString()
+      data.free_goods = freeGoods
+      data.reason = appendReceiptNotes(String(data.reason), freeGoods ? [FREE_GOODS_REASON_NOTE] : [])
     }
     results.push({
       rowNumber: row._rowNumber,
@@ -6494,8 +6612,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         guardedGroups.push(group)
       }
     } else if (job.type === 'inventory') {
+      const receiptRows = actionable.filter(row => (row.data as Record<string, unknown>).inventory_receipt_plan_version === INVENTORY_RECEIPT_PLAN_VERSION
+        && !appliedRowGuards.has(`row:${row.rowNumber}`))
+      guardedGroups.push(...await planInventoryImportReceiptGroups(db, receiptRows, rowGuardStatement))
       for (const r of actionable) {
         const d = r.data as Record<string, unknown> & { cost_price_usd?: number; cost_price_khr?: number }
+        if (d.inventory_receipt_plan_version === INVENTORY_RECEIPT_PLAN_VERSION) continue
         // Redelivery-guarded, same as the products additive branch above
         // (Part-77): the movement INSERT duplicates and the stock delta
         // double-applies on a retried chunk, so each row's writes travel

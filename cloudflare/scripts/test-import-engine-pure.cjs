@@ -338,6 +338,11 @@ searchMatchWrapper(searchMatchModuleObj.exports, require, searchMatchModuleObj, 
 // satisfy `require()` for those other imports with harmless stubs purely
 // so the module can load; none of their exports are exercised by this test.
 const Module = require('module')
+const stockReceiptGateModule = { exports: {} }
+new Function('exports', 'require', 'module', ts.transpileModule(
+  fs.readFileSync(path.join(__dirname, '../src/lib/stockReceiptGate.ts'), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
+).outputText)(stockReceiptGateModule.exports, require, stockReceiptGateModule)
 const catalogCostRecomputeModule = { exports: {} }
 new Function('exports', 'require', 'module', ts.transpileModule(
   fs.readFileSync(path.join(__dirname, '../src/lib/catalogCostRecompute.ts'), 'utf8'),
@@ -348,6 +353,7 @@ const originalResolve = Module._resolveFilename
 const stubbable = new Set(['../index', './db', './importCsv', './cache', './stockActionCatalog', './stockActionSeal', './stockActionCommit', './stockActionResolver', './stockActionImport', '../durable-objects/broadcastHub'])
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === './stockReceiptGate') return stockReceiptGateModule.exports
   if (request === './catalogCostRecompute') return catalogCostRecomputeModule.exports
   if (request === './moneyPrecision') return moneyPrecisionModule.exports
   if (request === './importImageMatch') {
@@ -1423,7 +1429,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const makeDb = (branches) => ({
     prepare: (sql) => ({ all: async () => String(sql).includes('FROM products') ? [product] : String(sql).includes('FROM branches') ? branches : [] }),
   })
-  const input = (branch) => [{ _rowNumber: 1, sku: 'INV-1', quantity: 2, ...(branch === undefined ? {} : { branch }) }]
+  const input = (branch) => [{ _rowNumber: 1, sku: 'INV-1', quantity: 2, unit_cost_usd: '1', ...(branch === undefined ? {} : { branch }) }]
 
   const unknown = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input('New Branch'), 'add')
   assert.strictEqual(unknown[0].action, 'error')
@@ -1437,18 +1443,36 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const blank = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input(undefined), 'add')
   assert.strictEqual(blank[0].action, 'create')
   assert.strictEqual(blank[0].data.branch_id, 1)
-  assert.strictEqual(blank[0].data.unit_cost_usd, 1, 'blank cost snapshots the product fallback during classification')
+  assert.strictEqual(blank[0].data.unit_cost_usd, 1, 'new receipt uses the explicit price, not catalog fallback')
   assert.strictEqual(blank[0].data.total_cost_usd, 2)
-  assert.strictEqual(blank[0].data.unit_cost_khr, 0, 'an existing zero fallback remains a recorded zero')
+  assert.strictEqual(blank[0].data.unit_cost_khr, null)
+  for (const [cost, expected] of [['', /must carry its unit cost/], ['0', /goods received free/], ['-1', /cannot be negative/], ['invalid', /unit cost/]]) {
+    const [invalid] = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), [{ ...input(undefined)[0], unit_cost_usd: cost }], 'add')
+    assert.equal(invalid.action, 'error')
+    assert.match(invalid.message, expected)
+  }
 
   const explicitZero = await classifyInventory(
     makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]),
-    [{ ...input(undefined)[0], unit_cost_usd: '0', unit_cost_khr: '0' }],
+    [{ ...input(undefined)[0], unit_cost_usd: '0', unit_cost_khr: '0', free_goods: 'true' }],
     'add',
   )
   assert.strictEqual(explicitZero[0].data.unit_cost_usd, 0, 'explicit zero must not fall through to the product cost')
   assert.strictEqual(explicitZero[0].data.total_cost_usd, 0)
-  assert.strictEqual(explicitZero[0].data.cost_price_usd, 0, 'explicit zero retains the existing add-row product update semantics')
+  assert.strictEqual(explicitZero[0].data.cost_price_usd, undefined, 'receipts do not encode a manual catalog override')
+  assert.equal(explicitZero[0].data.inventory_receipt_plan_version, 1)
+  assert.match(explicitZero[0].data.reason, /Free goods \(no cost\)/)
+  const [preciseReceipt] = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]),
+    [{ ...input(undefined)[0], unit_cost_usd: '3.1234', date: '2026-09-20' }], 'add')
+  assert.equal(preciseReceipt.data.unit_cost_usd, 3.1234)
+  assert.equal(preciseReceipt.data.total_cost_usd, 6.2468)
+  assert.deepEqual(applyAnalyzedInventoryCostSnapshots([preciseReceipt], new Map([[1, preciseReceipt]])), [preciseReceipt])
+  const oldPlan = { ...preciseReceipt, data: { ...preciseReceipt.data } }
+  delete oldPlan.data.inventory_receipt_plan_version
+  assert.throws(() => applyAnalyzedInventoryCostSnapshots([preciseReceipt], new Map([[1, oldPlan]])), /older or changed receipt plan/)
+  for (const changed of [{ unit_cost_usd: 3.13 }, { total_cost_usd: 99 }, { created_at: '2026-09-21T00:00:00.000Z' }]) {
+    assert.throws(() => applyAnalyzedInventoryCostSnapshots([{ ...preciseReceipt, data: { ...preciseReceipt.data, ...changed } }], new Map([[1, preciseReceipt]])), /changed receipt cost or date/)
+  }
 
   const frozen = inventoryMovementCostSnapshot({ fallbackUsd: 3.25, fallbackKhr: 13000, quantity: 4 })
   product.cost_price_usd = 99
@@ -1461,8 +1485,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   assert.strictEqual(remove[0].data.unit_cost_usd, 99, 'non-receipt actions still snapshot their plan-time product cost')
   assert.strictEqual(remove[0].data.total_cost_usd, 198)
 
-  const reviewed = { ...blank[0], data: { ...blank[0].data, unit_cost_usd: 1, unit_cost_khr: 0, total_cost_usd: 2, total_cost_khr: 0 } }
-  const reclassifiedAtApply = { ...blank[0], data: { ...blank[0].data, unit_cost_usd: 99, unit_cost_khr: 400000, total_cost_usd: 198, total_cost_khr: 800000 } }
+  const reviewed = { ...remove[0], data: { ...remove[0].data, unit_cost_usd: 1, unit_cost_khr: 0, total_cost_usd: 2, total_cost_khr: 0 } }
+  const reclassifiedAtApply = { ...remove[0], data: { ...remove[0].data, unit_cost_usd: 99, unit_cost_khr: 400000, total_cost_usd: 198, total_cost_khr: 800000 } }
   const applied = applyAnalyzedInventoryCostSnapshots([reclassifiedAtApply], new Map([[1, reviewed]]))
   assert.deepStrictEqual(
     {
