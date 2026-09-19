@@ -53,6 +53,9 @@ const distDir = path.join(frontendDir, 'dist')
 const fixturesDir = path.join(frontendDir, 'e2e', 'fixtures')
 
 const PORT = Number(process.env.E2E_PORT || 4318)
+// Keep both loopback hostnames available to the existing browser suite; a
+// manual preview can opt into a single loopback-only listener.
+const HOST = process.env.E2E_HOST || '0.0.0.0'
 
 function readFixture(name) {
   return JSON.parse(readFileSync(path.join(fixturesDir, name), 'utf8'))
@@ -478,16 +481,22 @@ function handleApi(pathname, query, req, res, body) {
   // a real zero-state rather than an error card -- an error card would change
   // the layout the iOS specs measure and would put noise in the console the
   // hygiene spec has to stay strict about.
-  if (pathname === '/api/dashboard/startup') {
+  if (['/api/dashboard/startup', '/api/dashboard', '/api/analytics', '/api/promotions/rules/active'].includes(pathname)) {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed' }, { Allow: 'GET' })
     if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
-    // compat.ts emptySummary() / emptyAnalytics(), field for field.
-    return sendJson(res, 200, {
+    // promotions.ts GET /rules/active: no active rules in the synthetic store.
+    if (pathname === '/api/promotions/rules/active') return sendJson(res, 200, { rules: [], now: new Date().toISOString() })
+    // compat.ts uses dashboardSummary/dashboardAnalytics for both the split
+    // endpoints and startup. Keep their synthetic responses identical too.
+    const startup = {
       summary: {
         today_count: 0, today_total: 0, today_total_khr: 0, today_return_count: 0, today_return_usd: 0,
         all_total: 0, all_total_khr: 0, cost_in: 0, cost_out: 0, cost_in_khr: 0, cost_out_khr: 0,
         product_count: PORTAL_PRODUCTS.length, in_stock_count: PORTAL_PRODUCTS.length,
         low_stock_count: 0, out_of_stock_count: 0, stock_value_usd: 0, stock_value_khr: 0,
         low_stock: [], out_of_stock: [], expiring_products: [], expiring_count: 0, recent_sales: [],
+        low_stock_preview_limit: 10, out_of_stock_preview_limit: 10,
+        low_stock_preview_truncated: false, out_of_stock_preview_truncated: false,
       },
       analytics: {
         // NOT compat.ts emptyAnalytics(). That helper returns `totals: {}`,
@@ -501,11 +510,14 @@ function handleApi(pathname, query, req, res, body) {
         // lib/salesAnalytics.ts emptySalesTotals() -- copied below.
         totals: EMPTY_SALES_TOTALS,
         prevTotals: EMPTY_SALES_TOTALS,
-        periodReturns: {}, periodSupplierReturns: {},
+        periodReturns: { return_count: 0, refund_usd: 0, items_returned: 0 },
+        periodSupplierReturns: { return_count: 0, supplier_compensation_usd: 0, loss_usd: 0 },
         periodData: [], byPayment: [], byBranch: [], topProducts: [], topProductsQty: [],
         topCustomers: [], hourlyDist: [],
       },
-    })
+    }
+    return sendJson(res, 200, pathname === '/api/dashboard' ? startup.summary
+      : pathname === '/api/analytics' ? startup.analytics : startup)
   }
   // --- the admin catalogue (POS and Products) ---
   // Same paging envelope as routes/products.ts searchProductsPayload():
@@ -841,6 +853,7 @@ if (!existsSync(path.join(distDir, 'index.html'))) {
   process.exit(1)
 }
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[e2e] fixture server on http://127.0.0.1:${PORT} (admin) and http://127.0.0.2:${PORT} (storefront)`)
+server.listen(PORT, HOST, () => {
+  const port = server.address().port
+  console.log(`[e2e] fixture server listening on ${HOST}:${port}; admin http://127.0.0.1:${port}${HOST === '0.0.0.0' ? `; storefront http://127.0.0.2:${port}` : ''}`)
 })
