@@ -1,3 +1,4 @@
+// Dependency-free geometry lives outside the shared-component chunk bucket.
 export function helpPopoverGeometry(
   trigger: { left: number; right: number; top: number; bottom: number },
   viewport: { left: number; top: number; width: number; height: number },
