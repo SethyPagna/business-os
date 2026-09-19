@@ -4,6 +4,7 @@ import ts from 'typescript'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { sessionPaymentDueInvalid, sessionPaymentFields } from '../src/utils/createProductsSessionPayment.ts'
+import { canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../src/utils/acquisitionCostAccess.ts'
 
 const paid = { paymentStatus: 'paid' as const, creditDueDate: '2026-09-30' }
 const credit = { paymentStatus: 'credit' as const, creditDueDate: '30/09/2026' }
@@ -48,7 +49,10 @@ assert.equal('payment_status' in serializeLine({ ...row, quantity: 0 }), false)
 assert.equal('credit_due_date' in serializeLine({ ...row, quantity: 0 }), false)
 for (const original of [row, { ...row, paymentStatus: undefined, creditDueDate: undefined }]) {
   let updatedRows = [original]
+  const user = { permissions: { product_cost_edit: true } }
   const editLine = handler('saveEditedNewLine', {
+    user, omitUnauthorizedCatalogCosts, costAccessRef: { current: { canEditCosts: canEditAcquisitionCosts(user) } },
+    costEditMessage: 'Cost edit permission is required to receive stock.',
     saving: false, submissionLocked: false, canCommitProductAdd: true, canReceiveStock: true,
     rows: updatedRows, header: { supplierName: 'Supplier', supplierId: 1 }, freeGoods: false,
     // Header deliberately differs and is invalid: the queued line is authoritative.

@@ -4,6 +4,7 @@ import ts from 'typescript'
 import { effectivePermissions } from '../src/utils/permissions.ts'
 import { createProductsSessionPermissionRequirements } from '../src/utils/createProductsSession.ts'
 import { sessionPaymentDueInvalid } from '../src/utils/createProductsSessionPayment.ts'
+import { canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../src/utils/acquisitionCostAccess.ts'
 
 const create = { kind: 'create_receive' as const, status: 'queued' as const, quantity: 0 }
 const createWithStock = { kind: 'create_receive' as const, status: 'queued' as const, quantity: 2 }
@@ -84,8 +85,10 @@ const handlerJs = ts.transpileModule(`const handler = ${saveNewItemSource}`, { c
 for (const quantity of [0, 4]) {
   const reviewedPayloads: Record<string, unknown>[] = []
   let prepared = false
-  const user = { role_permissions: { all: true }, permissions: { all: false, products: 'review', inventory: true } }
+  const user = { role_permissions: { all: true }, permissions: { all: false, products: 'review', inventory: true, product_cost_edit: true } }
   const bindings = {
+    omitUnauthorizedCatalogCosts, costAccessRef: { current: { canEditCosts: canEditAcquisitionCosts(user) } },
+    costEditMessage: 'Cost edit permission is required to receive stock.',
     effectivePermissions, user, saving: false, header: { branchId: '1', supplierName: 'Supplier' }, rows: [], freeGoods: false,
     // A restored header may retain credit selected in Existing mode. Review
     // creation cannot persist that metadata and must not demand its due date.
@@ -100,6 +103,19 @@ for (const quantity of [0, 4]) {
   assert.equal(reviewedPayloads.length, 1)
   assert.equal(reviewedPayloads[0].stock_quantity, quantity, 'zero/positive opening stock intent goes through registered review')
   assert.equal(prepared, false, 'Inventory Full cannot select atomic product create for Products Review')
+  // Product/Inventory tiers still cannot imply receipt-cost authority. Keep the
+  // action checks above, then independently remove the boolean cost grant.
+  const deniedUser = { permissions: { products: 'review', inventory: true } }
+  const deniedBindings = { ...bindings, user: deniedUser, costAccessRef: { current: { canEditCosts: canEditAcquisitionCosts(deniedUser) } } }
+  const deniedHandler = new Function(...Object.keys(deniedBindings), `${handlerJs}; return handler`)(...Object.values(deniedBindings))
+  if (quantity > 0) {
+    await assert.rejects(deniedHandler({ name: 'New item', stock_quantity: quantity, cost_price_usd: 5 }), /Cost edit permission/)
+    assert.equal(reviewedPayloads.length, 1, 'default-denied receipt never reaches review or atomic preparation')
+  } else {
+    await assert.rejects(deniedHandler({ name: 'New item', stock_quantity: 0, cost_price_usd: 5 }), /Pending review/)
+    assert.equal(reviewedPayloads.length, 2, 'catalog-only creation still follows review without cost-edit authority')
+    assert.equal('cost_price_usd' in reviewedPayloads[1], false, 'catalog-only review omits denied costs instead of replacing them with zero')
+  }
 }
 const applierSource = readFileSync(new URL('../../cloudflare/src/lib/reviewApply.ts', import.meta.url), 'utf8')
 assert.match(applierSource, /registerApplier\('products', 'create', 'product'[\s\S]*?body\.stock_quantity[\s\S]*?seedBranchStockForNewProduct[\s\S]*?seedInitialBatchForNewProduct/)
