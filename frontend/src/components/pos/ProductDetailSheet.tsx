@@ -20,6 +20,7 @@ import { buildVariantOptionLabels, computeExpiryStatus, sortBatchesForPicker } f
 import { branchStockQuantity, deriveProductSheetState, type SheetIntent, type SheetProductLike } from './productSheetState.ts'
 import ProductImage from './ProductImage'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 
 type ProductGroupMeta = {
   groupKind?: string
@@ -288,8 +289,8 @@ export default function ProductDetailSheet({
   // Settings > Stock Alerts -- the same number the POS grid behind this sheet
   // colours by, so the sheet and the card can never disagree about a product.
   const lowStockConfig = useLowStockConfig()
-  const { user, authReady, getPermissionTier } = useApp() as {
-    user: { id?: string | number } | null
+  const { user, authReady } = useApp() as {
+    user: { id?: string | number; username?: unknown; role_code?: unknown; permissions?: unknown; role_permissions?: unknown } | null
     authReady: boolean
     getPermissionTier: (key: string) => string
   }
@@ -300,12 +301,9 @@ export default function ProductDetailSheet({
     actorGeneration.current = { user, epoch: actorGeneration.current.epoch + 1 }
   }
   const actorScope = `${authReady}:${user?.id ?? 'anonymous'}:${actorGeneration.current.epoch}`
-  // The cost price is only ever shown to a user who can read products or
-  // inventory -- the same OR gate GET /api/products/:id/cost-breakdown
-  // enforces server-side (productCost.ts's canReadCost), so a cashier with
-  // neither grant never sees it even though this sheet itself is reachable
-  // by every POS role.
-  const canReadCost = !posPresentation && (getPermissionTier('products') !== 'none' || getPermissionTier('inventory') !== 'none')
+  // Cost access is independent from product/inventory access. POS suppresses
+  // costs even for an administrator; other callers require the explicit grant.
+  const canReadCost = !posPresentation && canViewAcquisitionCosts(user)
   const [costFloatTarget, setCostFloatTarget] = useState<{ id: number | string; name: string } | null>(null)
   const variants = getVariantChoices(product)
   const groupProduct = hasVariantChoices(product)

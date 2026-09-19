@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { buildSync } from 'esbuild'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { canViewAcquisitionCosts } from '../src/utils/acquisitionCostAccess.ts'
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const pos = read('../src/components/pos/POS.tsx')
@@ -19,14 +20,16 @@ assert.doesNotMatch(adapter, /posPresentation/)
 // in POS, while inventory/product pickers keep the existing permission gate.
 const gate = sheet.match(/const canReadCost = ([^\r\n]+)/)?.[1]
 assert.ok(gate)
-const canReadCost = new Function('posPresentation', 'getPermissionTier', `return ${gate}`)
+const canReadCost = new Function('posPresentation', 'canViewAcquisitionCosts', 'user', `return ${gate}`)
 for (const products of ['none', 'read', 'edit']) {
   for (const inventory of ['none', 'read', 'edit']) {
-    const permission = (key: string) => key === 'products' ? products : inventory
-    assert.equal(canReadCost(true, permission), false)
-    assert.equal(canReadCost(false, permission), products !== 'none' || inventory !== 'none')
+    const user = { permissions: { products, inventory } }
+    assert.equal(canReadCost(true, canViewAcquisitionCosts, user), false)
+    assert.equal(canReadCost(false, canViewAcquisitionCosts, user), false)
   }
 }
+assert.equal(canReadCost(true, canViewAcquisitionCosts, { username: 'admin' }), false)
+assert.equal(canReadCost(false, canViewAcquisitionCosts, { permissions: { product_cost_view: true } }), true)
 assert.equal((sheet.match(/\{canReadCost \? \(/g) || []).length, 2, 'both flat and grouped cost rows use the gate')
 assert.match(sheet, /\{canReadCost && costFloatTarget \? \(/)
 for (const amount of ['asNumber(product.selling_price_khr)', 'asNumber(product.wholesale_price_khr || 0)', '(promotion.applied_price_khr || 0)']) {
