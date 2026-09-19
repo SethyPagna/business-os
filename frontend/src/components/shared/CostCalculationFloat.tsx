@@ -93,6 +93,10 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
                   : (input.received_at ? fmtDate(input.received_at) : null)
                 const primaryText = isManual ? tr('cost_breakdown_manual_tag', 'Override') : costRowPrimaryText(input, formattedDate)
                 const meta = costRowMeta(input, formattedDate)
+                const currentCostText = input.cost_usd == null ? '—' : fmtUSD(input.cost_usd)
+                const costText = isManual
+                  ? `${input.previous_cost_usd == null ? '—' : fmtUSD(input.previous_cost_usd)} → ${currentCostText}`
+                  : currentCostText
                 return (
                   // ONE compact row per entry (P10-11 ruling): the lot
                   // code/date or the "Manual" tag on the left with its
@@ -108,9 +112,9 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
                         className={`block truncate text-sm ${isManual ? 'font-medium text-indigo-600 dark:text-indigo-400' : 'text-gray-800 dark:text-gray-200'}`}
                       />
                     </span>
-                    <span className="shrink-0 text-right tabular-nums">
-                      <span className="block font-medium">{input.cost_usd == null ? '—' : fmtUSD(input.cost_usd)}</span>
-                      {excludedLabel ? <span className="block text-[11px] text-gray-400">{excludedLabel}</span> : null}
+                    <span className={`${isManual ? 'min-w-0 max-w-[65%]' : 'shrink-0'} text-right tabular-nums`}>
+                      <span className={`block font-medium ${isManual ? 'truncate' : ''}`} title={isManual ? costText : undefined}>{costText}</span>
+                      {excludedLabel ? <span className={`block text-[11px] text-gray-400 ${isManual ? 'truncate' : ''}`}>{excludedLabel}</span> : null}
                     </span>
                   </li>
                 )

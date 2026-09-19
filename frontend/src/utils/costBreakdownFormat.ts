@@ -30,6 +30,7 @@ export type CostBreakdownInput = {
   branch_name?: string | null
   user_name?: string | null
   recorded_at?: string | null
+  previous_cost_usd?: number | null
   cost_usd: number | null
   cost_khr: number | null
   excluded: CostBreakdownExclusionReason
@@ -121,6 +122,7 @@ export function normalizeCostBreakdown(value: unknown): CostBreakdown | null {
     branch_name: entry.branch_name == null ? null : String(entry.branch_name),
     user_name: entry.user_name == null ? null : String(entry.user_name),
     recorded_at: entry.recorded_at == null ? null : String(entry.recorded_at),
+    previous_cost_usd: typeof entry.previous_cost_usd === 'number' && Number.isFinite(entry.previous_cost_usd) ? entry.previous_cost_usd : null,
     cost_usd: entry.cost_usd == null ? null : Number(entry.cost_usd),
     cost_khr: entry.cost_khr == null ? null : Number(entry.cost_khr),
     excluded: (entry.excluded === 'zero' || entry.excluded === 'duplicate' || entry.excluded === 'inactive' || entry.excluded === 'superseded' || entry.excluded === 'overridden') ? entry.excluded : null,

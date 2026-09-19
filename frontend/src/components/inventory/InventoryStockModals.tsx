@@ -1,6 +1,7 @@
 import ProductNameRail from '../shared/ProductNameRail'
 import StockConditionTagRow from './StockConditionTagRow'
 import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { useProtectedCostEntry } from '../../utils/useProtectedCostEntry.ts'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
@@ -229,6 +230,11 @@ export default function InventoryStockModals({
   const { user } = useApp() as { user: any }
   const canViewCosts = canViewAcquisitionCosts(user)
   const canEditCosts = canEditAcquisitionCosts(user)
+  const costEntry = useProtectedCostEntry(user?.id, adjustForm.product_id, canViewCosts, canEditCosts)
+  const displayedUnitCost = String(costEntry.value('unitCost', String(adjustForm.unit_cost_usd ?? ''), ''))
+  const displayedFreeGoods = Boolean(costEntry.value('freeGoods', adjustForm.free_goods, false))
+  const displayedCostUsd = String(costEntry.value('costUsd', String(adjustForm.cost_usd ?? ''), ''))
+  const displayedCostKhr = String(costEntry.value('costKhr', String(adjustForm.cost_khr ?? ''), ''))
   useEffect(() => { if (transferModal) markRestoreHandled('inventory_transfer') }, [transferModal?.id])
   // P10-6: the calculated-cost float, opened from the "Catalog cost" line below.
   const [costFloatOpen, setCostFloatOpen] = useState(false)
@@ -554,11 +560,11 @@ export default function InventoryStockModals({
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('cost_price_usd_full', 'Cost')} ({usdSymbol})</label>
-                          <input className="input text-sm" type="number" step="any" min="0" value={adjustForm.cost_usd} onChange={e => setAdjustForm(f=>({...f, cost_usd:e.target.value}))} />
+                          <input className="input text-sm" type="number" step="any" min="0" value={displayedCostUsd} onChange={e => { costEntry.write('costUsd', e.target.value); setAdjustForm(f=>({...f, cost_usd:e.target.value})) }} />
                         </div>
                         <div>
                           <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('cost_price_khr_full', 'Cost')} (KHR)</label>
-                          <input className="input text-sm" type="number" step="any" min="0" value={adjustForm.cost_khr} onChange={e => setAdjustForm(f=>({...f, cost_khr:e.target.value}))} />
+                          <input className="input text-sm" type="number" step="any" min="0" value={displayedCostKhr} onChange={e => { costEntry.write('costKhr', e.target.value); setAdjustForm(f=>({...f, cost_khr:e.target.value})) }} />
                         </div>
                         <div>
                           <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('selling_price_usd_full', 'Selling price')} ({usdSymbol})</label>
@@ -689,11 +695,11 @@ export default function InventoryStockModals({
                   section, the Stock-changes ledger or the Inventory page
                   landed there blank. Same fields, same defaults and same
                   credit rule as FastStockInModal, so the two receipt surfaces
-                  record the same facts. Deliberately NOT prefilled from the
-                  product's stored cost: an unentered cost is reported as
-                  unentered rather than guessed. */}
-              {isStockIn && canEditCosts ? (
-                <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+                  record the same facts. Authorized viewers start from the
+                  current catalog mean; editors may enter this delivery's price
+                  without unlocking product-identity pricing. */}
+              {isStockIn && (canViewCosts || canEditCosts) ? (
+                <fieldset disabled={!canEditCosts} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label htmlFor="inventory-adjust-unit-cost" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
@@ -707,9 +713,9 @@ export default function InventoryStockModals({
                         step="any"
                         min="0"
                         required
-                        disabled={adjustForm.free_goods}
-                        value={adjustForm.free_goods ? 0 : adjustForm.unit_cost_usd}
-                        onChange={e => setAdjustForm(f => ({ ...f, unit_cost_usd: e.target.value }))}
+                        disabled={!canEditCosts || displayedFreeGoods}
+                        value={displayedFreeGoods ? 0 : displayedUnitCost}
+                        onChange={e => { costEntry.write('unitCost', e.target.value); setAdjustForm(f => ({ ...f, unit_cost_usd: e.target.value, free_goods: displayedFreeGoods })) }}
                       />
                       {/* N14-D: $0.00 is a claim, not a default. Ticking this is the
                           only way a zero cost is accepted, here and on the server,
@@ -718,8 +724,8 @@ export default function InventoryStockModals({
                         <input
                           type="checkbox"
                           className="h-3.5 w-3.5"
-                          checked={adjustForm.free_goods}
-                          onChange={e => setAdjustForm(f => ({ ...f, free_goods: e.target.checked, unit_cost_usd: e.target.checked ? 0 : f.unit_cost_usd }))}
+                          checked={displayedFreeGoods}
+                          onChange={e => { costEntry.write('freeGoods', e.target.checked); if (e.target.checked) costEntry.write('unitCost', '0'); setAdjustForm(f => ({ ...f, free_goods: e.target.checked, unit_cost_usd: e.target.checked ? 0 : f.unit_cost_usd })) }}
                         />
                         <span title={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')}>{tr('stock_receipt_free_goods', 'Free')}</span>
                       </label>
@@ -760,7 +766,7 @@ export default function InventoryStockModals({
                       ) : null}
                     </div>
                   ) : null}
-                </div>
+                </fieldset>
               ) : null}
               {branchCount > 1 ? (
                 <div>
@@ -802,7 +808,7 @@ export default function InventoryStockModals({
                 second Save beside the ✕ any more. */}
             <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
               {isStockIn && !canEditCosts ? <p role="status" className="text-xs text-amber-700">{tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.')}</p> : null}
-              <button type="button" onClick={onAdjust} className={`btn-primary ${TOOLBAR_BUTTON_BASE} flex-1`} disabled={adjustSaving || (isStockIn && !canEditCosts)}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
+              <button type="button" onClick={onAdjust} className={`btn-primary ${TOOLBAR_BUTTON_BASE} flex-1`} disabled={adjustSaving || (isStockIn && (!canEditCosts || (!costEntry.readable && (displayedUnitCost.trim() === '' || (!adjustForm.pricingLocked && (displayedCostUsd.trim() === '' || displayedCostKhr.trim() === ''))))))}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
               <button type="button" onClick={requestCloseAdjust} className={`btn-secondary ${TOOLBAR_BUTTON_BASE}`} disabled={adjustSaving}>{t('cancel')}</button>
             </div>
           </div>

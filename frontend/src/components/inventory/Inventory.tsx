@@ -1615,8 +1615,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       discount_type: p.discount_type || 'percent',
       discount_percent: p.discount_percent || 0,
       discount_amount_usd: p.discount_amount_usd || 0,
-      cost_usd: canViewCosts ? p.cost_price_usd || p.purchase_price_usd || 0 : '',
-      cost_khr: canViewCosts ? p.cost_price_khr || p.purchase_price_khr || 0 : '',
+      cost_usd: canViewCosts ? p.cost_price_usd ?? p.purchase_price_usd ?? '' : '',
+      cost_khr: canViewCosts ? p.cost_price_khr ?? p.purchase_price_khr ?? '' : '',
       barcode: p.barcode || '',
       batch_id: '',
       // Reset to today on every open -- a historical date from the last
@@ -1628,7 +1628,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       // for the same reason: a cost or a credit due date from the previous
       // receipt must never ride along into this one.
       supplier_id: '', supplier_name: '',
-      unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',
+      unit_cost_usd: canViewCosts ? p.cost_price_usd ?? p.purchase_price_usd ?? '' : '', free_goods: false, payment_status: 'paid', credit_due_date: '',
       // P3-L6: the condition tag resets with every other stale receipt
       // field -- the last removal's "broken" must never silently tag the
       // next one.
