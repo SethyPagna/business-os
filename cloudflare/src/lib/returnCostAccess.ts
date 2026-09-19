@@ -1,4 +1,16 @@
-type CostIdentity = { id?: unknown; sale_item_id?: unknown; product_id?: unknown; branch_id?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown }
+type CostIdentity = { id?: unknown; sale_item_id?: unknown; product_id?: unknown; branch_id?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown; unit_cost_usd?: unknown; unit_cost_khr?: unknown }
+
+/** Authorization is enforced by the route. Omission means retain recorded
+ * economics for every role; explicit null/zero remain explicit overrides. */
+export function fillOmittedReturnCosts(item: CostIdentity, rows: CostIdentity[], source: 'sale' | 'return' | 'catalog') {
+  const usd = item.cost_price_usd !== undefined ? item.cost_price_usd : item.unit_cost_usd
+  const khr = item.cost_price_khr !== undefined ? item.cost_price_khr : item.unit_cost_khr
+  const recorded = usd === undefined || khr === undefined ? recordedReturnCosts(item, rows, source) : null
+  return {
+    cost_price_usd: usd === undefined ? recorded!.cost_price_usd : usd == null ? null : Number(usd),
+    cost_price_khr: khr === undefined ? recorded!.cost_price_khr : khr == null ? null : Number(khr),
+  }
+}
 
 /** Pick recorded costs, never client defaults. Ambiguous historical lines must
  * be selected explicitly; a missing/unknown cost remains null, never zero. */
