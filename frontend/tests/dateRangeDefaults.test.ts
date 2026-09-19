@@ -368,8 +368,8 @@ for (const [file, fromSetter, toSetter, attribute] of [
   ['contacts/ArInvoicesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
   ['contacts/ApInvoicesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
   ['contacts/StockInInvoicesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
-  ['utils-settings/AuditLog.tsx', 'setRangeStart', 'setRangeEnd', 'onChange'],
-  ['review/LegacyDeletedSalesSection.tsx', 'setFromDate', 'setToDate', 'onChange'],
+  ['utils-settings/AuditLog.tsx', 'setRangeStart', 'setRangeEnd', 'onRangeChange'],
+  ['review/LegacyDeletedSalesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
 ] as const) {
   const source = read(file)
   let from = day1

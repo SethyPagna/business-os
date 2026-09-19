@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
-import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getDeliveryContactReport } from '../../api/salesTransport.ts'
 
 // X3 (Part 395): "delivery can also check expenses of delivery by contact" --
@@ -99,11 +100,13 @@ export default function DeliveryContactReportModal({ contactId, contactName, t, 
   return (
     <Modal title={`${tr(t, 'delivery_report', 'Deliveries')} -- ${contactName}`} onClose={onClose} unsavedChanges="read-only">
       <div className="space-y-3">
-        <DateTimeRangePicker
-          value={range}
-          onChange={setRange}
+        <StatsRangeRow
+          range={range}
+          onRangeChange={setRange}
           t={t}
-          triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2"
+          showTime
+          showPresets
+          className="w-full min-w-0"
         />
 
         {error ? (
