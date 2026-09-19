@@ -93,7 +93,18 @@ await runTest('serious product warnings require a visible durable choice and app
   const screen = fs.readFileSync(new URL('../src/components/products/import/ProductServerImportReviewScreen.tsx', import.meta.url), 'utf8')
   assert.match(screen, /\['negative_stock', 'barcode_collision', 'sku_collision'\]/)
   assert.match(screen, /if \(needsDecision && !row\.decision\) return 'needs_decision'/)
-  assert.match(screen, /disabled=\{approving \|\| loadingRows \|\| unresolved > 0\}/)
+  // Cost-edit authority is additive: all three existing fail-closed blockers
+  // still apply, and a denied edit grant must block even a fully loaded review.
+  const disabledExpression = screen.match(/disabled=\{(!canEditCosts \|\| approving \|\| loadingRows \|\| unresolved > 0)\}/)?.[1]
+  assert.ok(disabledExpression, 'approval retains permission, in-flight, loading and unresolved-row guards')
+  const disabled = new Function('canEditCosts', 'approving', 'loadingRows', 'unresolved', `return ${disabledExpression}`)
+  for (const canEditCosts of [false, true]) for (const approving of [false, true]) {
+    for (const loadingRows of [false, true]) for (const unresolved of [0, 1]) {
+      assert.equal(disabled(canEditCosts, approving, loadingRows, unresolved), !canEditCosts || approving || loadingRows || unresolved > 0)
+    }
+  }
+  assert.match(screen, /const confirm = async[^]*?if \(!canEditCosts\) return/,
+    'direct invocation also checks cost-edit authority, independently of the disabled button')
   assert.match(screen, /onCancel/)
 })
 
