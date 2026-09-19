@@ -33,7 +33,7 @@ const root = path.join(__dirname, '..')
 
 const user = {
   id: 7, username: 'stock-user', name: 'Stock User', organization_id: null,
-  role_id: null, permissions: JSON.stringify({ inventory: true, products: true }), is_active: 1,
+  role_id: null, permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }), is_active: 1,
 }
 
 function loadModule(entry) {

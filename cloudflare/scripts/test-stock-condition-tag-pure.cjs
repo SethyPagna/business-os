@@ -115,6 +115,7 @@ const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding })
 const productDetailRule = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
+const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRoles = loadReal('lib/branchRoles.ts')
 const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
   './db': loadReal('lib/db.ts'),
@@ -154,7 +155,7 @@ const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnaly
 const conflictControl = loadReal('lib/conflictControl.ts')
 const movementCostSnapshot = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision })
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 
 // Only the /adjust path is driven here -- the list/search/dated-count
 // endpoints' dependencies are stubbed inert (never called by these checks).
@@ -260,6 +261,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/audit': { audit: async (_env, userId, userName, action, entity, entityId, details) => { audits.push({ userId, userName, action, entity, entityId, details }) } },
   '../lib/telegram': { sendTelegramEvent: async () => false, formatStockChangeTelegramLines: () => [], formatTransferTelegramLines: () => [] },
   '../lib/permissions': permissions,
+  '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },

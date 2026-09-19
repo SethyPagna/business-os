@@ -34,7 +34,7 @@ function loadMoneyDependency(name) {
   const loaded = { exports: {} }
   const dependency = request => {
     if (request === './importImageMatch') return { MAX_IMAGES_PER_PRODUCT: 3 }
-    const allowed = new Set(['./moneyPrecision', './db', './media', './batchCode', './searchMatch', './schemaProbe'])
+    const allowed = new Set(['./permissions', './moneyPrecision', './db', './media', './batchCode', './searchMatch', './schemaProbe'])
     if (allowed.has(request)) return loadMoneyDependency(request.slice(2))
     throw new Error(`Unmapped money-policy dependency: ${request}`)
   }
@@ -47,6 +47,7 @@ function loadRoute(state) {
   const filePath = path.join(srcRoot, 'routes', 'reviewQueue.ts')
   const requireAuth = async (c, next) => { c.set('user', c.env.TEST_USER); await next() }
   const stubs = {
+    '../lib/acquisitionCostAccess': loadMoneyDependency('acquisitionCostAccess'),
     '../lib/productWrites': productWrites,
     hono: { Hono },
     '../lib/auth': { requireAuth },

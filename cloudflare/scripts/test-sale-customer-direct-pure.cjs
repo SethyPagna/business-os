@@ -10,6 +10,7 @@ const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
 const actual = new Set([
+  'acquisitionCostAccess',
   'saleCustomerAssignmentGuard',
   'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate',
   'saleRecordEvents', 'saleTransitions', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus',

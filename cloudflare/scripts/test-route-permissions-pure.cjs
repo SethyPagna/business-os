@@ -312,8 +312,8 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   const backupsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'backups.ts'), 'utf8')
   // `user` is hoisted to the top of the handler since the I1 audit pass
   // (audit() needs it before this branch), so the pin only requires the
-  // permission check to be the FIRST statement inside the branch.
-  assert.match(backupsSrc, /if \(type === 'import-folder'\) \{\s*if \(!hasPermission\(user, 'backup_restore'\)\)/, "the import-folder (restore) branch must check hasPermission(user, 'backup_restore') specifically, not rely on the router-wide 'backup' gate alone")
+  // both independent permission checks to precede any restore work.
+  assert.match(backupsSrc, /if \(type === 'import-folder'\) \{\s*if \(!canEditAcquisitionCosts\(user\)\) return c\.json\([^\n]+\)\s*if \(!hasPermission\(user, 'backup_restore'\)\)/, "the restore branch must enforce both cost-entry and backup_restore before side effects")
   console.log('PASS routes/backups.ts requires backup_restore specifically on the destructive restore branch, not just the router-wide backup gate')
 }
 {

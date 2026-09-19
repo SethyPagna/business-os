@@ -24,7 +24,7 @@ function loadStockSession(entry = 'lib/stockSession.ts', actor = user) {
       if (['routes/inventory.ts', 'routes/actionHistory.ts', 'routes/batches.ts'].includes(normalized) && name === '../lib/auth') return {
         requireAuth: async (c, next) => { c.set('user', actor); await next() },
       }
-      if (normalized === 'routes/inventory.ts' && name.startsWith('../') && !['../lib/stockSession', '../lib/permissions', '../lib/stockReason', '../lib/stockCondition'].includes(name)) return {}
+      if (normalized === 'routes/inventory.ts' && name.startsWith('../') && !['../lib/acquisitionCostAccess', '../lib/stockSession', '../lib/permissions', '../lib/stockReason', '../lib/stockCondition'].includes(name)) return {}
       if (name === './cache' || name === '../lib/cache') return { bumpVersion: async () => {} }
       if (name === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
       if (name.startsWith('./')) return load(`lib/${name.slice(2)}.ts`)
@@ -125,7 +125,7 @@ function fixture() {
 
 const user = {
   id: 7, username: 'stock-user', name: 'Stock User', organization_id: null,
-  role_id: null, permissions: JSON.stringify({ inventory: true, products: true }), is_active: 1,
+  role_id: null, permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }), is_active: 1,
 }
 
 function receiveRequest(requestId = 'stock-request-001', quantity = 5) {
@@ -191,6 +191,14 @@ async function check(name, run) {
 
 async function main() {
   const { commitStockSession, replayStockSession, StockSessionError } = loadStockSession()
+  await check('cost entry defaults denied independently of inventory and products grants', async () => {
+    const f = fixture()
+    const before = f.sql.serialize()
+    const noCost = { ...user, permissions: JSON.stringify({ inventory: true, products: true }) }
+    await assert.rejects(() => commitStockSession(f.env, noCost, receiveRequest('no-cost-grant')),
+      error => error instanceof StockSessionError && error.statusCode === 403 && error.code === 'product_cost_edit_required')
+    assert.deepEqual(f.sql.serialize(), before)
+  })
 
   await check('new paid/credit receipt terms persist for existing and newly created products', async () => {
     for (const kind of ['receive', 'create_receive']) {
@@ -352,7 +360,7 @@ async function main() {
   })
 
   await check('actual POST accepts zero create as catalog-only without inventory-adjust or review bypass', async () => {
-    const noAdjust = { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true }) }
+    const noAdjust = { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true, product_cost_edit: true, product_cost_view: true }) }
     const f = fixture()
     const app = loadStockSession('routes/inventory.ts', noAdjust).default
     const response = await app.request('/sessions', {
@@ -375,8 +383,8 @@ async function main() {
     })
 
     for (const [label, actor] of [
-      ['review', { ...user, permissions: JSON.stringify({ inventory: true, products: 'review' }) }],
-      ['blocked add', { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:add': false }) }],
+      ['review', { ...user, permissions: JSON.stringify({ inventory: true, products: 'review', product_cost_edit: true }) }],
+      ['blocked add', { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:add': false, product_cost_edit: true }) }],
     ]) {
       const denied = fixture()
       const deniedApp = loadStockSession('routes/inventory.ts', actor).default
@@ -391,7 +399,7 @@ async function main() {
   })
 
   await check('actual POST requires product-image authority only when create_receive changes images', async () => {
-    const blockedImage = { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
+    const blockedImage = { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false, product_cost_edit: true }) }
     const denied = fixture()
     const deniedApp = loadStockSession('routes/inventory.ts', blockedImage).default
     const imageRequest = zeroCreateRequest('zero-image-denied', 'Image denied cream')
@@ -417,7 +425,7 @@ async function main() {
 
   await check('product-only permission admits only zero session POST in standalone and mounted routes', async () => {
     const { Hono } = require('hono')
-    const productOnly = { ...user, permissions: JSON.stringify({ inventory: false, products: true }) }
+    const productOnly = { ...user, permissions: JSON.stringify({ inventory: false, products: true, product_cost_edit: true }) }
     for (const prefix of ['', '/api/inventory']) {
       const route = loadStockSession('routes/inventory.ts', productOnly).default
       const app = prefix ? new Hono().route(prefix, route) : route
@@ -478,8 +486,8 @@ async function main() {
       items: [zeroCreateRequest().items[0], { line_id: 'positive-receive', kind: 'receive', product_id: 1, quantity: 2, unit_cost_usd: 2 }],
     }
     for (const actor of [
-      { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true }) },
-      { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:add': false }) },
+      { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true, product_cost_edit: true }) },
+      { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:add': false, product_cost_edit: true }) },
     ]) {
       const denied = fixture()
       await assert.rejects(() => commitStockSession(denied.env, actor, mixed), (error) => error instanceof StockSessionError && error.statusCode === 403)

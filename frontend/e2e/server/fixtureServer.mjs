@@ -519,6 +519,24 @@ function handleApi(pathname, query, req, res, body) {
     return sendJson(res, 200, pathname === '/api/dashboard' ? startup.summary
       : pathname === '/api/analytics' ? startup.analytics : startup)
   }
+  // Products reads held stock even while its stock-in sessions tab is open.
+  // inventory.ts GET /tagged-lots and products.ts GET /stock-in-sessions:
+  // this synthetic store has no held lots or receiving history.
+  if (pathname === '/api/inventory/tagged-lots' || pathname === '/api/products/stock-in-sessions') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed' }, { Allow: 'GET' })
+    if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
+    if (pathname === '/api/inventory/tagged-lots') return sendJson(res, 200, { items: [] })
+    const clampPageValue = (value, fallback, max) => {
+      const parsed = Number.parseInt(String(value || ''), 10)
+      return Number.isFinite(parsed) ? Math.min(max, Math.max(1, parsed)) : fallback
+    }
+    return sendJson(res, 200, {
+      sessions: [], total: 0,
+      page: clampPageValue(query.get('page'), 1, 100000),
+      pageSize: clampPageValue(query.get('pageSize'), 30, 100),
+      totalPages: 1,
+    })
+  }
   // --- the admin catalogue (POS and Products) ---
   // Same paging envelope as routes/products.ts searchProductsPayload():
   // { items, total, page, pageSize, totalPages, promotion_rules }.

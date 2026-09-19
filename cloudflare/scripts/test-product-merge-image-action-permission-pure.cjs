@@ -37,6 +37,7 @@ function loadTs(relativePath, stubs = {}) {
 }
 
 const permissions = loadTs('lib/permissions.ts')
+const acquisitionCostAccess = loadTs('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 
 function permissiveModule() {
   return new Proxy({}, {
@@ -120,6 +121,7 @@ function loadProductsRoute(state) {
     '../lib/auth': { requireAuth },
     '../lib/db': { getDb: () => db },
     '../lib/permissions': permissions,
+    '../lib/acquisitionCostAccess': acquisitionCostAccess,
     '../lib/productIdentity': identity,
     '../lib/productDetailRule': {
       normalizeProductGroupName: (value) => String(value || '').trim().toLowerCase(),

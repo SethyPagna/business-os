@@ -39,6 +39,8 @@ function executeCommonJs(filePath, output, stubs) {
 
 const permissionsPath = path.join(srcRoot, 'lib', 'permissions.ts')
 const permissions = executeCommonJs(permissionsPath, compileTs(permissionsPath), {})
+const costPath = path.join(srcRoot, 'lib', 'acquisitionCostAccess.ts')
+const acquisitionCostAccess = executeCommonJs(costPath, compileTs(costPath), { './permissions': permissions })
 const productMergePath = path.join(srcRoot, 'lib', 'productMerge.ts')
 const moneyPrecisionPath = path.join(srcRoot, 'lib', 'moneyPrecision.ts')
 const moneyPrecision = executeCommonJs(moneyPrecisionPath, compileTs(moneyPrecisionPath), {})
@@ -79,6 +81,7 @@ function loadProductsRoute(state) {
     hono: { Hono },
     '../lib/auth': { requireAuth },
     '../lib/permissions': permissions,
+    '../lib/acquisitionCostAccess': acquisitionCostAccess,
     '../lib/db': { getDb: () => db },
     '../lib/productMerge': productMerge,
     '../lib/rateLimit': {
