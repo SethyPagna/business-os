@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { getActionTier, isAdminControlUser } from '../lib/permissions'
+import { canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { round2 } from '../lib/saleTotals'
 import {
   getBusinessSummaryDayRows,
@@ -38,16 +39,9 @@ import type { Env } from '../index'
 // this can never disagree with the Sales-page header or the Dashboard for
 // the same range (single-source rule -- see that file's header comment).
 //
-// Cost/profit fields (COGS & Gross profit) are ADMIN-ONLY: the key is simply
-// absent from the JSON for a non-admin caller, not blanked or hidden client-
-// side -- see buildSaleReportRow/buildDaySummaryRow below, which never even
-// read the cost figure into the response object unless `isAdmin` is true.
-// Admin is the same isAdminControlUser() check every other admin-gated route
-// in this codebase uses (reserved `admin` username, `admin` role code, or an
-// explicit `permissions.all` grant) -- NOT a new permission key, matching the
-// brief's "don't model a new key unless the permission editor needs one for
-// a visible control" (there's no control here -- the server just omits the
-// fields).
+// Cost/profit fields require product_cost_view (administrators retain it).
+// Unauthorized keys are absent rather than zeroed. This capability does not
+// grant report action access or change the separate delivery-expense gates.
 //
 // Data flows through the SAME snapshot/cursor keyset-pagination contract
 // routes/sales.ts's GET /export already uses (see that file's own header
@@ -200,7 +194,13 @@ function filterError(error: unknown): string {
  * from "hidden", so absence is the contract -- same rule as
  * buildDaySummaryRow / buildSaleReportRow above).
  */
-export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: boolean): Record<string, unknown> {
+export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: boolean, canViewCosts = isAdmin): Record<string, unknown> {
+  if (!isAdmin && canViewCosts) {
+    // Cost grants do not confer the separate administrator-only delivery gate.
+    const { delivery_actual_cost_usd, delivery_actual_cost_count, delivery_margin_usd, delivery_net_usd,
+      recognized_delivery_cost_usd, pending_delivery_cost_usd, ...costView } = gateTotals(row, true)
+    return costView
+  }
   const diagnostic = reportMoneyDiagnostic(row)
   // pending_cost_usd / pending_profit_usd (S4R3-6) are the awaiting-payment
   // cohort's COGS and profit -- the same class of admin-only money as
@@ -400,8 +400,8 @@ app.get('/overview', async (c) => {
       getDeliveryContactTotals(c.env, f),
     ])
     out.sales = {
-      totals: gateTotals(totals as unknown as Record<string, unknown>, isAdmin),
-      previous: previous ? gateTotals(previous as unknown as Record<string, unknown>, isAdmin) : null,
+      totals: gateTotals(totals as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)),
+      previous: previous ? gateTotals(previous as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)) : null,
       payment_methods: paymentMethods.map((r) => ({
         key: r.key,
         payment_method: r.label || r.key,
@@ -475,7 +475,7 @@ app.get('/periods', async (c) => {
   const granularity = parseGranularity(query.granularity)
   const isAdmin = isAdminControlUser(user)
   const periodRows = await getBusinessSummaryPeriodRows(c.env, f, granularity)
-  const rows = periodRows.map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin))
+  const rows = periodRows.map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)))
   return c.json({ granularity, is_admin: isAdmin, filters: f, rows })
 })
 
@@ -494,11 +494,11 @@ app.get('/grouped', async (c) => {
   const isAdmin = isAdminControlUser(user)
   let rows: unknown[]
   if (by === 'product') {
-    rows = (await getProductSalesRanking(c.env, f, limit)).map((r) => gateProductRow(r as unknown as Record<string, unknown>, isAdmin))
+    rows = (await getProductSalesRanking(c.env, f, limit)).map((r) => gateProductRow(r as unknown as Record<string, unknown>, canViewAcquisitionCosts(user)))
   } else if (by === 'courier') {
     rows = (await getDeliveryContactTotals(c.env, f)).map((row) => gateCourierRow(row as unknown as Record<string, unknown>, isAdmin))
   } else if ((SALES_GROUP_KEYS as readonly string[]).includes(by)) {
-    rows = (await getSalesGroupedTotals(c.env, f, by as SalesGroupKey, limit)).map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin))
+    rows = (await getSalesGroupedTotals(c.env, f, by as SalesGroupKey, limit)).map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)))
   } else {
     return c.json({ error: 'by must be one of customer, cashier, payment_method, hour, weekday, branch, product, courier' }, 400)
   }
@@ -548,7 +548,7 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
           : stamp(row) > afterStamp || (stamp(row) === afterStamp && num(row.id) > afterId))
       }
       const hasMore = rows.length > pageSize
-      const page = rows.slice(0, pageSize).map((row) => gateBusinessSummarySaleRow(row, isAdmin))
+      const page = rows.slice(0, pageSize).map((row) => gateBusinessSummarySaleRow(row, canViewAcquisitionCosts(user)))
       const last = page[page.length - 1]
       return c.json({ rows: page, snapshot_max_id: snapshot, has_more: hasMore,
         next_cursor: hasMore && last ? { created_at: last.cursor_at || '', id: last.id } : null, is_admin: isAdmin })
@@ -608,7 +608,7 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
       // Carry the un-floored value so that rollup can re-floor once.
       const cost = `MAX(0, ${rawCost})`
       const costCol = `CASE WHEN ${recognizedValued} THEN ${cost} ELSE 0 END`
-      const adminColumns = isAdmin ? `, ${costCol} AS cost_usd,
+      const adminColumns = canViewAcquisitionCosts(user) ? `, ${costCol} AS cost_usd,
         CASE WHEN ${recognizedValued} THEN ${rawCost} ELSE 0 END AS cost_before_floor_usd,
         CASE WHEN ${recognizedValued} THEN (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id=s.id AND si.cost_price_usd IS NULL) ELSE 0 END AS cost_missing_snapshot_lines,
         CASE WHEN ${recognized} THEN ${net}-${refund}+${customerDeliveryFeeExpr('s.')}-${deliveryActualCostExpr('s.')} ELSE 0 END - ${costCol} AS gross_profit_usd` : ''

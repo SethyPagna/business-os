@@ -272,7 +272,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
   }
 }
 
-async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdmin: boolean) {
+async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdmin: boolean, canViewCosts = isAdmin) {
   const db = getDb(env)
   const range = dateRange(query)
   const { startDate, endDate, granularity } = range
@@ -427,8 +427,8 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
     // 2026: this endpoint previously ran its own five-key strip and left
     // cost_usd / profit_usd ungated, so a non-admin dashboard permission
     // still saw COGS and profit).
-    totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin),
-    prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin),
+    totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts),
+    prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts),
     periodReturns: periodReturns || {},
     periodSupplierReturns: periodSupplierReturns || {},
     periodData: periodData || [],
@@ -569,7 +569,7 @@ app.get('/dashboard/stock-alerts', async (c) => {
 app.get('/analytics', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
-  return c.json(await dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user'))))
+  return c.json(await dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))))
 })
 app.get('/dashboard/insight-list', async (c) => {
   const denied = denyUnless(c, 'dashboard')
@@ -586,7 +586,7 @@ app.get('/dashboard/startup', async (c) => {
   if (denied) return denied
   const [summary, analytics] = await Promise.all([
     dashboardSummary(c.env, c.req.query()),
-    dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user'))),
+    dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))),
   ])
   return c.json({ summary, analytics })
 })
