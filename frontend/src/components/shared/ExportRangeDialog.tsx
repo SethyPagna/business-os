@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Modal from './Modal'
-import DateTimeRangePicker from './DateTimeRangePicker'
+import StatsRangeRow from './StatsRangeRow'
 
 // The shared range step in front of an export (user, Aug 31: "do the date
 // range for all the exports... if the page with export also has start/end
@@ -54,12 +54,13 @@ export default function ExportRangeDialog({
           <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
             {tr('date', 'Date')}
           </label>
-          <DateTimeRangePicker
-            value={{ startDate: range.startDate, endDate: range.endDate, startTime: range.startTime || '', endTime: range.endTime || '' }}
-            onChange={(next) => setRange({ startDate: next.startDate || '', endDate: next.endDate || '', ...(showTime ? { startTime: next.startTime || '', endTime: next.endTime || '' } : {}) })}
+          <StatsRangeRow
+            range={{ startDate: range.startDate, endDate: range.endDate, startTime: range.startTime || '', endTime: range.endTime || '' }}
+            onRangeChange={(next) => setRange({ startDate: next.startDate || '', endDate: next.endDate || '', ...(showTime ? { startTime: next.startTime || '', endTime: next.endTime || '' } : {}) })}
             t={t}
             showTime={showTime}
-            triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2"
+            showPresets
+            className="w-full min-w-0"
           />
           <p className="mt-1 text-xs text-gray-400">
             {tr('export_range_hint', 'Starts from the range shown on the page — change it to export a different window. Empty = everything.')}

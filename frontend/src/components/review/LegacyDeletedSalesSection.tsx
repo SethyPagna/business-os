@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import AppSelect from '../shared/AppSelect.tsx'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import StatsRangeRow from '../shared/StatsRangeRow'
 import SearchInput from '../shared/SearchInput'
 import { fmtDateTime24 } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers.ts'
@@ -157,15 +157,16 @@ export default function LegacyDeletedSalesSection() {
             ...cashierOptions.map((option) => ({ value: option.key, label: String(option.name || option.key) })),
           ]}
         />
-        <DateTimeRangePicker
-          value={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
-          onChange={(range) => changeFilter(() => {
+        <StatsRangeRow
+          range={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
+          onRangeChange={(range) => changeFilter(() => {
             setFromDate(range.startDate || '')
             setToDate(range.endDate || '')
           })}
           t={(key: string) => t(key)}
           showTime={false}
-          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
+          showPresets
+          className="w-full min-w-0"
         />
         {anyFilter ? (
           <button

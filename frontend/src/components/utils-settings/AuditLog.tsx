@@ -16,7 +16,7 @@ import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import StatsRangeRow from '../shared/StatsRangeRow'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import {
@@ -988,15 +988,16 @@ export default function AuditLog() {
             uses (Dashboard, Fees, Inventory movements, Stock-in invoices) --
             cross-surface consistency. ISO in/out is unchanged; the pill's
             own panel handles clearing. */}
-        <DateTimeRangePicker
-          value={{ startDate: rangeStart, endDate: rangeEnd, startTime: '', endTime: '' }}
-          onChange={(next) => {
+        <StatsRangeRow
+          range={{ startDate: rangeStart, endDate: rangeEnd, startTime: '', endTime: '' }}
+          onRangeChange={(next) => {
             setRangeStart(next.startDate || '')
             setRangeEnd(next.endDate || '')
           }}
           t={t}
           showTime={false}
-          triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-1.5"
+          showPresets
+          className="w-full min-w-0"
         />
 
         {selectedLogs.length > 0 ? (

@@ -33,6 +33,8 @@ function intent(key,base,quantity=1,fixed=0,rate=4000) {
 const originalRequest=h.request
 h.request=id=>({...originalRequest(id),items:[intent(id+'-line',9.5)]})
 async function run() {
+  const financialUser = {...h.USER, permissions:JSON.stringify({...JSON.parse(h.USER.permissions), product_cost_view:true})}
+  h.setUser(financialUser)
   const f = h.fixture()
   f.raw.prepare('UPDATE products SET cost_price_usd=1.2345 WHERE id=10').run()
   const body = { ...h.request('precision-new'), money_precision_version:1, discount_usd:.0001,
@@ -50,6 +52,16 @@ async function run() {
   const retry = await h.postSale(f.route,{client_request_id:body.client_request_id})
   assert.equal(retry.status,200); assert.equal(retry.body.duplicate,true)
   assert.deepEqual(h.creationState(f.raw),before)
+  h.setUser({...financialUser, permissions:JSON.stringify({...JSON.parse(financialUser.permissions), product_cost_view:false})})
+  const hiddenRetry = await h.postSale(f.route,{client_request_id:body.client_request_id})
+  assert.equal(hiddenRetry.status,200)
+  assert.equal(hiddenRetry.body.duplicate,true)
+  assert.equal(Object.hasOwn(hiddenRetry.body.sale.items[0],'cost_price_usd'),false)
+  assert.equal(hiddenRetry.body.sale.items[0].total_usd,1.2345)
+  assert.deepEqual(h.creationState(f.raw),before,'response projection must not alter stored exact-four-place economics')
+  h.setUser(financialUser)
+  const visibleRetry = await h.postSale(f.route,{client_request_id:body.client_request_id})
+  assert.equal(visibleRetry.body.sale.items[0].cost_price_usd,1.2345,'a denied response must not redact the shared receipt')
   // The shared harness request() now carries money_precision_version:1, so the
   // legacy-client case must send the request without it.
   const legacyBody = h.request('unreceipted-legacy'); delete legacyBody.money_precision_version
@@ -69,7 +81,7 @@ async function run() {
   const admin = await recovery(); assert.equal(admin.body.committed,true); assert.equal(admin.cache,'private, no-store')
   h.setUser(h.USER)
   console.log('PASS actual create v1, exact line/cost/header, legacy compatibility refusal, receipt recovery/current authority')
-  h.setUser({...h.USER,permissions:'{"all":true}'})
+  h.setUser({...h.USER,permissions:'{"all":true,"product_cost_view":true}'})
   f.raw.prepare("INSERT INTO settings(key,value) VALUES('exchange_rate','5000') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
   const add = async payload => {
     const response = await h.app.request(`/${sale.id}/items`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)},{DB:f.route},h.executionCtx)
