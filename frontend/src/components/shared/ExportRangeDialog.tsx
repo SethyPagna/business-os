@@ -11,7 +11,7 @@ import DateTimeRangePicker from './DateTimeRangePicker'
 
 type Translate = (key: string) => string | undefined
 
-export type ExportRange = { startDate: string; endDate: string }
+export type ExportRange = { startDate: string; endDate: string; startTime?: string; endTime?: string }
 
 export default function ExportRangeDialog({
   initial,
@@ -19,6 +19,7 @@ export default function ExportRangeDialog({
   onExport,
   t,
   title,
+  showTime = false,
 }: {
   initial: ExportRange
   onClose: () => void
@@ -26,12 +27,13 @@ export default function ExportRangeDialog({
   onExport: (range: ExportRange) => Promise<void> | void
   t: Translate
   title?: string
+  showTime?: boolean
 }) {
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
     return value && value !== key ? value : fallback
   }
-  const [range, setRange] = useState<ExportRange>(() => ({ startDate: initial.startDate || '', endDate: initial.endDate || '' }))
+  const [range, setRange] = useState<ExportRange>(() => ({ startDate: initial.startDate || '', endDate: initial.endDate || '', ...(showTime ? { startTime: initial.startTime || '', endTime: initial.endTime || '' } : {}) }))
   const [busy, setBusy] = useState(false)
 
   const run = async () => {
@@ -53,10 +55,10 @@ export default function ExportRangeDialog({
             {tr('date', 'Date')}
           </label>
           <DateTimeRangePicker
-            value={{ startDate: range.startDate, endDate: range.endDate, startTime: '', endTime: '' }}
-            onChange={(next) => setRange({ startDate: next.startDate || '', endDate: next.endDate || '' })}
+            value={{ startDate: range.startDate, endDate: range.endDate, startTime: range.startTime || '', endTime: range.endTime || '' }}
+            onChange={(next) => setRange({ startDate: next.startDate || '', endDate: next.endDate || '', ...(showTime ? { startTime: next.startTime || '', endTime: next.endTime || '' } : {}) })}
             t={t}
-            showTime={false}
+            showTime={showTime}
             triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2"
           />
           <p className="mt-1 text-xs text-gray-400">
