@@ -215,16 +215,52 @@ function normalizeDate(value: unknown): string {
   return businessToday()
 }
 
+/** Full days use the booked business date. Exact moments use entry time,
+ * matching Reports' expense cohort, with an exclusive UTC upper bound. */
+export function feeRangePredicate(query: Record<string, string>): { sql: string; params: Record<string, unknown> } {
+  const startDate = String(query.from || query.startDate || '').trim()
+  const endDate = String(query.to || query.endDate || '').trim()
+  const validDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && Number.isFinite(Date.parse(`${value}T00:00:00Z`))
+    && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
+  if ((startDate && !validDate(startDate)) || (endDate && !validDate(endDate))) throw new RangeError('Expense dates must use valid YYYY-MM-DD dates')
+  if (startDate && endDate && startDate > endDate) throw new RangeError('Expense end date must not precede the start date')
+  if (query.startTime || query.endTime) throw new RangeError('Use createdFrom and createdTo together for an exact expense time range')
+  const from = String(query.createdFrom || '').trim()
+  const to = String(query.createdTo || '').trim()
+  if (!!from !== !!to) throw new RangeError('createdFrom and createdTo must be provided together')
+  if (from && to) {
+    const bound = (value: string): string => {
+      const match = /^(\d{4}-\d{2}-\d{2})[T ](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?([zZ]|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/.exec(value)
+      if (!match || !validDate(match[1])) throw new RangeError('createdFrom and createdTo must be valid timestamps')
+      const parsed = new Date(match[2] ? value.replace(' ', 'T') : `${value.replace(' ', 'T')}Z`)
+      if (!Number.isFinite(parsed.getTime())) throw new RangeError('createdFrom and createdTo must be valid timestamps')
+      return parsed.toISOString().slice(0, 19).replace('T', ' ')
+    }
+    const createdFrom = bound(from), createdTo = bound(to)
+    if (createdFrom >= createdTo) throw new RangeError('createdTo must be after createdFrom')
+    return { sql: 'datetime(f.created_at) >= @createdFrom AND datetime(f.created_at) < @createdTo', params: { createdFrom, createdTo } }
+  }
+  const clauses: string[] = []
+  const params: Record<string, unknown> = {}
+  if (startDate) { clauses.push('f.fee_date >= @startDate'); params.startDate = startDate }
+  if (endDate) { clauses.push('f.fee_date <= @endDate'); params.endDate = endDate }
+  return { sql: clauses.length ? clauses.join(' AND ') : '1=1', params }
+}
+
 // GET /api/fees -- list, newest fee_date first, with optional filters.
 // Search matches label/notes/fee_type, same "one field, several columns"
 // pattern sales.ts's list endpoint already uses rather than a bespoke
 // per-page search implementation.
 app.get('/', async (c) => {
   const db = getDb(c.env)
-  const { search, fee_type: feeType, from, to, sale_id: saleId, branch_id: branchId, delivery_contact_id: deliveryContactId, limit: limitParam, offset: offsetParam } = c.req.query()
+  const query = c.req.query()
+  const { search, fee_type: feeType, sale_id: saleId, branch_id: branchId, delivery_contact_id: deliveryContactId, limit: limitParam, offset: offsetParam } = query
 
-  const conditions: string[] = []
-  const params: Record<string, unknown> = {}
+  let range: ReturnType<typeof feeRangePredicate>
+  try { range = feeRangePredicate(query) } catch (error) { return c.json({ error: (error as Error).message }, 400) }
+  const conditions: string[] = [range.sql]
+  const params: Record<string, unknown> = { ...range.params }
 
   if (search && search.trim()) {
     conditions.push('(f.label LIKE @search OR f.notes LIKE @search OR f.fee_type LIKE @search)')
@@ -233,14 +269,6 @@ app.get('/', async (c) => {
   if (feeType && feeType.trim() && feeType !== 'all') {
     conditions.push('f.fee_type = @feeType')
     params.feeType = normalizeFeeType(feeType)
-  }
-  if (from && from.trim()) {
-    conditions.push('f.fee_date >= @from')
-    params.from = from.trim()
-  }
-  if (to && to.trim()) {
-    conditions.push('f.fee_date <= @to')
-    params.to = to.trim()
   }
   if (saleId && saleId.trim()) {
     conditions.push('f.sale_id = @saleId')
@@ -302,16 +330,10 @@ app.get('/', async (c) => {
 app.get('/report', async (c) => {
   const db = getDb(c.env)
   const query = c.req.query()
-  const startDate = String(query.startDate || '').slice(0, 10)
-  const endDate = String(query.endDate || '').slice(0, 10)
-  const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)
-  if ((startDate && !validDate(startDate)) || (endDate && !validDate(endDate))) {
-    return c.json({ error: 'startDate/endDate must use YYYY-MM-DD' }, 400)
-  }
-  const clauses: string[] = []
-  const params: Record<string, unknown> = {}
-  if (startDate) { clauses.push('f.fee_date >= @startDate'); params.startDate = startDate }
-  if (endDate) { clauses.push('f.fee_date <= @endDate'); params.endDate = endDate }
+  let range: ReturnType<typeof feeRangePredicate>
+  try { range = feeRangePredicate(query) } catch (error) { return c.json({ error: (error as Error).message }, 400) }
+  const clauses: string[] = [range.sql]
+  const params: Record<string, unknown> = { ...range.params }
   if (query.branchId) { clauses.push('f.branch_id = @branchId'); params.branchId = query.branchId }
   const where = clauses.length ? clauses.join(' AND ') : '1=1'
   // Sum BOTH currencies. Fees are recorded in EITHER USD or KHR (never both
@@ -337,8 +359,8 @@ app.get('/report', async (c) => {
     `).all<Record<string, unknown>>(params),
   ])
   return c.json({
-    startDate,
-    endDate,
+    startDate: String(query.from || query.startDate || '').trim(),
+    endDate: String(query.to || query.endDate || '').trim(),
     totals: { count: Number(totals?.count || 0), amount_usd: Number(totals?.amount_usd || 0), amount_khr: Number(totals?.amount_khr || 0) },
     days: (days || []).map((d) => ({ date: String(d.date || ''), count: Number(d.count || 0), amount_usd: Number(d.amount_usd || 0), amount_khr: Number(d.amount_khr || 0) })),
     by_type: (byType || []).map((r) => ({ fee_type: String(r.fee_type || ''), count: Number(r.count || 0), amount_usd: Number(r.amount_usd || 0), amount_khr: Number(r.amount_khr || 0) })),
