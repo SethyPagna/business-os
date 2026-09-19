@@ -219,6 +219,8 @@ export type ReceiveBatchPlanInput = {
   receiptCostPreimage?: ReceiptCostPreimage
   /** Server-resolved target; never read directly from an operator payload. */
   receiptLotTarget?: ReceiptLotTarget
+  /** Internal chunk-planner reservation for a NEW lot; never operator input. */
+  reservedBatchId?: number
   /** Internal provenance key, e.g. a return event; never an operator lot code. */
   provenanceKey?: string
 }
@@ -262,6 +264,13 @@ const LOT_ATTRIBUTION_SET_SQL = `
 // their one operation batch; the legacy helper below uses the same plan so
 // metadata can no longer commit ahead of stock even on older endpoints.
 export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatchStatementPlan {
+  const reservedBatchId = input.reservedBatchId
+  if (reservedBatchId !== undefined && (!Number.isSafeInteger(reservedBatchId) || reservedBatchId <= 0
+    || !input.receiptLotTarget || input.receiptLotTarget.existingBatchId != null || input.batchId != null
+    || input.provenanceKey || input.receiptCostPreimage?.batchExists
+    || reservedBatchId <= input.receiptLotTarget.baselineBatchId)) {
+    throw new Error('A receipt ID reservation requires a new eligible server-resolved lot')
+  }
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be a positive number')
   const productId = Number(input.productId)
@@ -310,6 +319,7 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
     receivedCostBatchExists: input.receiptCostPreimage?.batchExists ? 1 : 0,
     receiptBaseline: input.receiptLotTarget?.baselineBatchId ?? 0,
     receiptExistingBatchId: input.receiptLotTarget?.existingBatchId ?? null,
+    reservedBatchId: reservedBatchId ?? null,
   }
   const productIdSql = productClientRequestId
     ? `(SELECT id FROM products WHERE client_request_id = @productClientRequestId AND client_request_id <> '')`
@@ -331,10 +341,12 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
       }
     : {
         sql: `INSERT INTO product_batches (
+          ${reservedBatchId !== undefined ? 'id,' : ''}
           variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes,
           batch_number, supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date,
           received_quantity, received_branch_id, received_cost_usd
         ) VALUES (
+          ${reservedBatchId !== undefined ? '@reservedBatchId,' : ''}
           ${productIdSql}, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes,
           (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = ${productIdSql}),
           @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @creditDueDate,
@@ -361,6 +373,10 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
     receivedAt,
     params,
     statements: [
+      ...(reservedBatchId !== undefined ? [{
+        sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN NOT EXISTS(
+          SELECT 1 FROM product_batches WHERE id=@reservedBatchId) THEN 1 ELSE 0 END`, params,
+      }] : []),
       ...(input.receiptLotTarget ? [{
         sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN
           COALESCE((SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=${productIdSql} ORDER BY id DESC LIMIT 1),0)=@receiptBaseline
