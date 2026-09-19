@@ -29,7 +29,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
-import { planReceiveBatchStock, prepareReceiptLotTarget, receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, type ReceiptCostPreimage, type ReceiptLotTarget } from '../lib/productBatches'
+import { planReceiveBatchStock, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, type ReceiptCostPreimage, type ReceiptLotTarget } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -1583,6 +1583,15 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   // attributed lot and show the locked name instead. Read it rather than
   // refusing a receipt that is already attributed.
   const explicitBatchId = Number.isSafeInteger(Number(body.batchId)) && Number(body.batchId) > 0 ? Number(body.batchId) : null
+  const isSelectedLotCorrection = isReceipt && attribution === 'correction' && explicitBatchId != null
+  if (isSelectedLotCorrection && (unlockPricing || Object.prototype.hasOwnProperty.call(body, 'unitCostUsd') || body.pricing != null)) {
+    return c.json({ error: 'A quantity-only correction cannot enter or change receipt prices.', code: 'correction_cost_input' }, 400)
+  }
+  const correctionLot = isSelectedLotCorrection
+    ? await db.prepare('SELECT id,variant_product_id,unit_cost_usd,batch_number,lot_code FROM product_batches WHERE id=@id AND variant_product_id=@productId')
+      .get<{ id: number; variant_product_id: number; unit_cost_usd: number | null; batch_number: number | null; lot_code: string | null }>({ id: explicitBatchId, productId })
+    : undefined
+  if (isSelectedLotCorrection && !correctionLot) return c.json({ error: 'Selected batch does not belong to this product.', code: 'batch_mismatch' }, 409)
   const lotSupplierName = isReceipt && explicitBatchId
     ? (await db.prepare('SELECT supplier_name FROM product_batches WHERE id = @id').get<{ supplier_name: string | null }>({ id: explicitBatchId }))?.supplier_name ?? null
     : null
@@ -1696,7 +1705,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   const productCostSnapshot = await db.prepare(`
     SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id
   `).get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id: targetProductId })
-  const receiptUnitCostUsd = unitCostUsd ?? productCostSnapshot?.cost_price_usd ?? null
+  const receiptUnitCostUsd = correctionLot ? correctionLot.unit_cost_usd : unitCostUsd ?? productCostSnapshot?.cost_price_usd ?? null
 
   // Mandatory batch selection (InventoryStockModals.tsx, add/remove on flat
   // rows) rides on this same endpoint rather than a separate one, so undo/
@@ -1749,7 +1758,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   // type is always 'add' or 'remove' by this point -- 'set' was already
   // converted (or short-circuited as a no-op) above.
   let delta = 0
-  const movementType = type
+  const movementType = isSelectedLotCorrection ? 'adjustment' : type
   let batchNumber: number | null = null
   let resolvedBatchId: number | null = batchIdRequested
   let lotCode: string | null = null
@@ -1810,8 +1819,8 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     addMovementCost = resolveMovementCostSnapshot({
       quantity,
       components: [{ quantity, unitCostUsd: receiptUnitCostUsd, unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : null }],
-      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
-      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+      fallbackUnitCostUsd: correctionLot ? null : productCostSnapshot?.cost_price_usd ?? null,
+      fallbackUnitCostKhr: correctionLot ? null : productCostSnapshot?.cost_price_khr ?? null,
     })
   }
   } catch (error) {
@@ -1819,7 +1828,35 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     throw error
   }
 
-  if (useBatchLedger && type === 'add') {
+  if (correctionLot && addMovementCost) {
+    // A physical count correction is not a new purchase. Preserve lot price,
+    // supplier/payment, cumulative received money and the catalog override.
+    // Both stock ledgers and the non-purchase movement share the lot guard.
+    await db.batch([
+      { sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN EXISTS(
+          SELECT 1 FROM product_batches WHERE id=@batchId AND variant_product_id=@productId
+            AND unit_cost_usd IS @unitCostUsd) THEN 1 ELSE 0 END`,
+        params: { batchId: correctionLot.id, productId: targetProductId, unitCostUsd: correctionLot.unit_cost_usd } },
+      ...restoreBatchStockStatements(correctionLot.id, branchId, quantity),
+      { sql: `INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@productId,@branchId,@quantity)
+          ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=quantity+excluded.quantity`,
+        params: { productId: targetProductId, branchId, quantity } },
+      { sql: 'UPDATE products SET stock_quantity=COALESCE(stock_quantity,0)+@quantity,updated_at=CURRENT_TIMESTAMP WHERE id=@productId',
+        params: { productId: targetProductId, quantity } },
+      { sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,
+          unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+          VALUES(@productId,@productName,@branchId,@branchName,'adjustment',@quantity,
+          @unitCostUsd,@unitCostKhr,@totalCostUsd,@totalCostKhr,@reason,@referenceId,@userId,@userName,@batchId)`,
+        params: { productId: targetProductId, productName: targetProductName, branchId, branchName: branch?.name || null,
+          quantity, ...addMovementCost, reason: setToNote ? `${reason} (${setToNote})` : reason,
+          referenceId: sessionId, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: correctionLot.id } },
+      { sql: 'DELETE FROM stock_session_guards', params: {} },
+    ])
+    resolvedBatchId = correctionLot.id
+    batchNumber = correctionLot.batch_number
+    lotCode = correctionLot.lot_code
+    movementWrittenAtomically = true
+  } else if (useBatchLedger && type === 'add') {
     try {
       if (unlockPricing && !createdSibling && mergedPricingStatement && addMovementCost) {
         const plan = planReceiveBatchStock({

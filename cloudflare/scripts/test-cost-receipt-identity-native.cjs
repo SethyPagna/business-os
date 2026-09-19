@@ -80,6 +80,15 @@ async function main() {
   assert.equal(breakdown.outlier_guard.fired, false)
   console.log('PASS SQL writer/JS breakdown agree2/10->6 without altering merge policy')
 
+  const distinct = fixture()
+  for (const [index, cost] of [3, 5, 7, 3].entries()) {
+    await api.commitStockSession(distinct.env, user, request(`distinct-mean-${index}`, cost))
+  }
+  assert.equal(productCost(distinct), 5, '3/5 then7 averages all distinct receipt costs, never the previous mean')
+  assert.equal((await costs.getCatalogCostBreakdown(getDb(distinct.env), 1)).result_usd, 5)
+  assert.equal(lotRows(distinct).length, 3, 'repeated3 reuses its lot and cannot reweight the mean')
+  console.log('PASS distinct3/5/7->5 and repeated3 retains5; not mean-of-means5.5')
+
   const legacy = fixture()
   const input = {productId:1,branchId:1,quantity:1,receivedDate:'2026-09-05',unitCostUsd:3,supplierName:'Fixture'}
   const a = await batches.receiveBatchStock(getDb(legacy.env), input)

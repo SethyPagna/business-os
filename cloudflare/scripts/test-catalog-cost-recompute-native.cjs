@@ -163,6 +163,48 @@ async function main() {
     assert.deepEqual(catalogCost(), { usd: 6, khr: 0 })
   })
 
+  await check('selected-lot quantity correction uses its stored price without cost grants, new purchase, or override reset', async () => {
+    fresh()
+    await request(addBody({unitCostUsd:3,receivedDate:'2026-09-05'}))
+    await request(addBody({unitCostUsd:5,receivedDate:'2026-09-05'}))
+    assert.equal(catalogCost().usd,4)
+    const lot = sqlite.prepare('SELECT * FROM product_batches WHERE unit_cost_usd=3').get()
+    const oldMovements = sqlite.prepare('SELECT * FROM inventory_movements ORDER BY id').all()
+    const lotsBefore = sqlite.prepare('SELECT * FROM product_batches ORDER BY id').all()
+    const correction = {productId:1,type:'add',quantity:1,reason:'Count correction',branchId:1,batchId:lot.id,attribution:'correction'}
+    user = {...user,permissions:JSON.stringify({inventory:true})}
+    const applied = await request(correction)
+    assert.equal(applied.status,200,JSON.stringify(applied))
+    assert.equal(applied.body.movementType,'adjustment')
+    assert.equal(catalogCost().usd,4)
+    assert.deepEqual(sqlite.prepare('SELECT * FROM product_batches ORDER BY id').all(),lotsBefore)
+    assert.deepEqual(sqlite.prepare('SELECT * FROM inventory_movements ORDER BY id LIMIT ?').all(oldMovements.length),oldMovements)
+    assert.deepEqual(sqlite.prepare('SELECT movement_type,unit_cost_usd,total_cost_usd FROM inventory_movements ORDER BY id DESC LIMIT 1').get(),
+      {movement_type:'adjustment',unit_cost_usd:3,total_cost_usd:3})
+    assert.equal(sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=?').get(lot.id).quantity,2)
+    assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').get().quantity,3)
+    assert.equal(sqlite.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity,3)
+    sqlite.exec("INSERT INTO product_cost_entries(product_id,cost_usd,baseline_batch_id,source) SELECT 1,10,MAX(id),'manual' FROM product_batches; UPDATE products SET cost_price_usd=10,purchase_price_usd=10 WHERE id=1")
+    const overrideBefore=sqlite.prepare('SELECT * FROM product_cost_entries').all()
+    assert.equal((await request(correction)).status,200)
+    assert.equal(catalogCost().usd,10,'a correction to a pre-override lot cannot reset the manual catalog decision')
+    assert.deepEqual(sqlite.prepare('SELECT * FROM product_cost_entries').all(),overrideBefore)
+    assert.deepEqual(sqlite.prepare('SELECT * FROM product_batches ORDER BY id').all(),lotsBefore)
+    const state = () => JSON.stringify(['products','product_batches','branch_stock','branch_batch_stock','inventory_movements','product_cost_entries']
+      .map(table=>sqlite.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()))
+    const beforeDenied=state()
+    assert.equal((await request({...correction,unitCostUsd:8})).status,403)
+    assert.equal(state(),beforeDenied)
+    user = {...user,permissions:JSON.stringify({inventory:true,product_cost_edit:true})}
+    assert.equal((await request({...correction,unitCostUsd:8})).body.code,'correction_cost_input')
+    assert.equal((await request({...correction,batchId:999})).body.code,'batch_mismatch')
+    assert.equal((await request({...correction,attribution:'receipt',supplierName:'Acme'})).body.code,'cost_required')
+    assert.equal(state(),beforeDenied)
+    sqlite.exec("CREATE TRIGGER correction_failure BEFORE INSERT ON inventory_movements WHEN NEW.movement_type='adjustment' BEGIN SELECT RAISE(ABORT,'injected correction movement failure'); END")
+    assert.equal((await request(correction)).status,500)
+    assert.equal(state(),beforeDenied,'movement failure rolls back both stock ledgers and product quantity')
+  })
+
   console.log(`\n${checks} checks passed`)
 }
 
