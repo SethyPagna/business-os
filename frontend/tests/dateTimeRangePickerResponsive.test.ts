@@ -49,6 +49,7 @@ const fixtureSource = String.raw`
           actions={<button type="button" style={{ width: 40, height: 40, flex: '0 0 40px' }}>M</button>}
         />
       </div>
+      <output hidden data-range-state>{JSON.stringify(range)}</output>
       <div data-direct-fixture style={{ marginTop: 8 }}>
         <DateTimeRangePicker value={range} onChange={setRange} t={t} showTime={false}
           triggerClassName="flex w-full min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-2" />
@@ -60,6 +61,7 @@ const fixtureSource = String.raw`
           without pulling in the whole hub (permissions, API calls, view
           model). */}
       <section className="reports-mobile-controls" style={{ marginTop: 8 }} data-reports-fixture>
+        <div className="reports-mobile-presets">{['Today', 'Yesterday', 'Last seven days', 'Last thirty days', 'This month', 'All time'].map((label) => <button className="reports-mobile-preset" key={label}>{label}</button>)}</div>
         <div className="reports-mobile-primary">
           <DateTimeRangePicker value={range} onChange={setRange} t={t} showTime continuous showQuickRanges={false}
             triggerClassName="reports-mobile-range flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-2" />
@@ -192,7 +194,7 @@ try {
     throw new Error(`${error instanceof Error ? error.message : String(error)}; browser=${JSON.stringify(browserDiagnostics)}; page=${diagnostics}`)
   }
 
-  for (const width of [320, 360, 390]) {
+  for (const width of [320, 360, 390, 768, 1280]) {
     await setViewport(width, 480)
     const geometry = await evaluate<{ viewport: number; body: number; buttonClient: number; buttonScroll: number; values: string }>(`(() => {
       const button = document.querySelector('[data-stats-fixture] [aria-label="ជួរកាលបរិច្ឆេទ និងម៉ោង"]')
@@ -200,7 +202,8 @@ try {
     })()`)
     assert.equal(geometry.body, geometry.viewport, `${width}px page has no horizontal overflow`)
     assert.ok(geometry.buttonScroll <= geometry.buttonClient + 1, `${width}px action-heavy range trigger keeps all content inside its box`)
-    for (const value of ['01/02/2028', '00:00', '29/02/2028', '23:59']) assert.ok(geometry.values.includes(value), `${width}px trigger keeps ${value} visible`)
+    for (const value of ['01/02/2028', '29/02/2028']) assert.ok(geometry.values.includes(value), `${width}px trigger keeps ${value} visible`)
+    assert.doesNotMatch(geometry.values, /\d{2}:\d{2}/, 'times stay inside the picker')
 
     // P9 follow-up (Sep 16 2026): the Reports compact control row (real
     // reports-surface.css rules applied, not just the shared component) must
@@ -219,7 +222,8 @@ try {
     })()`)
     assert.equal(reportsGeometry.body, reportsGeometry.viewport, `${width}px reports control row has no horizontal overflow`)
     assert.ok(reportsGeometry.buttonScroll <= reportsGeometry.buttonClient + 1, `${width}px reports range trigger keeps all content inside its box`)
-    for (const value of ['01/02/2028', '00:00', '29/02/2028', '23:59']) assert.ok(reportsGeometry.values.includes(value), `${width}px reports trigger keeps ${value} visible, never broken mid-string`)
+    for (const value of ['01/02/2028', '29/02/2028']) assert.ok(reportsGeometry.values.includes(value), `${width}px reports trigger keeps ${value} visible, never broken mid-string`)
+    assert.doesNotMatch(reportsGeometry.values, /\d{2}:\d{2}/, 'Reports keeps times inside the picker')
     // Below 400px the CSS stacks Start above End (two distinct row tops);
     // at/above it they stay side by side (same row top).
     if (width < 400) assert.ok(reportsGeometry.endTop > reportsGeometry.startTop, `${width}px reports trigger stacks Start above End`)
@@ -227,6 +231,19 @@ try {
   }
 
   await setViewport(320, 480)
+  for (const selector of ['.stats-date-presets', '.reports-mobile-presets']) {
+    const rail = await evaluate<any>(`(() => {
+      const rail = document.querySelector('${selector}')
+      rail.scrollLeft = rail.scrollWidth
+      return { scrollbar: getComputedStyle(rail).scrollbarWidth, webkit: getComputedStyle(rail, '::-webkit-scrollbar').display, overflow: getComputedStyle(rail).overflowX, wrap: getComputedStyle(rail).flexWrap, offset: rail.scrollLeft, tops: Array.from(rail.children, child => child.getBoundingClientRect().top) }
+    })()`)
+    assert.equal(rail.scrollbar, 'none', `${selector} hides Firefox/modern scrollbar`)
+    assert.equal(rail.webkit, 'none', `${selector} hides WebKit scrollbar including arrows`)
+    assert.equal(rail.overflow, 'auto')
+    assert.equal(rail.wrap, 'nowrap')
+    assert.ok(rail.offset > 0, `${selector} remains horizontally scrollable`)
+    assert.equal(new Set(rail.tops).size, 1, `${selector} remains a single row`)
+  }
   await evaluate(`document.querySelector('[data-stats-fixture] [aria-label="ជួរកាលបរិច្ឆេទ និងម៉ោង"]').click()`)
   const panel = await waitFor(async () => await evaluate<any>(`(() => {
     const panel = document.querySelector('[data-date-time-range-panel]')
@@ -239,6 +256,16 @@ try {
   assert.equal(panel.overflowY, 'auto')
   assert.ok(panel.scrollHeight > panel.clientHeight, 'expanded time and calendar controls become an internal scroll surface on a short viewport')
   assert.equal(panel.presetRail, false, 'StatsRangeRow external presets suppress the duplicate picker rail')
+  assert.deepEqual(await evaluate<string[]>(`Array.from(document.querySelectorAll('[data-date-time-range-panel] input[placeholder="HH:MM"]'), input => input.value)`), ['00:00', '23:59'], 'hidden trigger times remain in the editable panel')
+  await evaluate(`(() => {
+    const input = document.querySelector('[data-date-time-range-panel] input[placeholder="HH:MM"]')
+    input.focus()
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '09:30')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.blur()
+  })()`)
+  await waitFor(async () => await evaluate<boolean>(`JSON.parse(document.querySelector('[data-range-state]').textContent).startTime === '09:30'`) ? true : null)
+  assert.doesNotMatch(await evaluate<string>(`document.querySelector('[data-stats-fixture] [data-date-range-trigger-values]').textContent`), /09:30/, 'time edits update the range without returning to the outside button')
 
   const navLabels = await evaluate<string[]>(`Array.from(document.querySelectorAll('[data-date-range-nav]'), (node) => node.getAttribute('aria-label'))`)
   assert.deepEqual(navLabels, ['មុន ឆ្នាំ', 'មុន ខែ', 'បន្ទាប់ ខែ', 'បន្ទាប់ ឆ្នាំ'])

@@ -26,7 +26,7 @@ import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './stat
 // The trigger pill never spells out the words "Start Date"/"End Date"
 // (user, Aug 31): it always reads DD/MM/YYYY → DD/MM/YYYY -- the literal
 // display format as a placeholder when empty, the real dates once picked --
-// and appends each endpoint's own 24-hour HH:MM once a time is set.
+// while times remain editable inside the panel, never on the trigger.
 //
 // Times are entered and shown in 24-hour HH:MM on purpose. The native
 // <input type="time"> was dropped because it renders 12-hour AM/PM under the
@@ -370,18 +370,11 @@ export default function DateTimeRangePicker({
 
   // Trigger labels: always the literal DD/MM/YYYY format -- as a placeholder
   // when a side is empty, as the real date once picked -- never the words
-  // "Start Date"/"End Date" (user, Aug 31). Each side carries its own 24-hour
-  // HH:MM once any time is set (the unset side defaults to the day's edges,
-  // matching the panel's old suffix).
-  const showTimes = showTime && Boolean(value.startTime || value.endTime)
+  // "Start Date"/"End Date" (user, Aug 31). Times stay inside the picker;
+  // hiding them here must not clear or change the caller's time filters.
   const startTriggerDate = displayDate(value.startDate) || 'DD/MM/YYYY'
   const endTriggerDate = displayDate(value.endDate) || 'DD/MM/YYYY'
-  // Both endpoints stay on ONE line each -- date and time inline, never
-  // stacked (user, Sep 15: "i want them same compact one row"). Was a
-  // `grid` with the time in a second span underneath, which turned the
-  // whole trigger into two lines whenever a time was set. The clamp floor
-  // drops slightly when a time is shown so `dd/mm/yyyy HH:MM` still fits
-  // at the narrowest (375px) width without wrapping.
+  // Both date endpoints stay on one line each, without a time suffix.
   //
   // P9 (Sep 16 2026), owner verbatim: "the date start and date end are not
   // responsive in the button row. too small and out of bounds." The floor
@@ -392,10 +385,9 @@ export default function DateTimeRangePicker({
   // Floor is now 11px everywhere (never below, per the rule), and
   // `overflow-hidden` below is the hard guard: text can never paint outside
   // the row even if a future host still under-sizes the box.
-  const triggerEndpoint = (date: string, time: string) => (
-    <span className={`inline-flex min-w-0 items-baseline justify-center gap-1 whitespace-nowrap tabular-nums leading-none overflow-hidden ${compactTriggerLabels ? 'text-[clamp(11px,2.75vw,12px)]' : (showTimes ? 'text-[clamp(11px,2.6vw,14px)]' : 'text-[clamp(11px,3vw,14px)]')}`}>
+  const triggerEndpoint = (date: string) => (
+    <span className={`inline-flex min-w-0 items-baseline justify-center gap-1 whitespace-nowrap tabular-nums leading-none overflow-hidden ${compactTriggerLabels ? 'text-[clamp(11px,2.75vw,12px)]' : 'text-[clamp(11px,3vw,14px)]'}`}>
       <span>{date}</span>
-      {showTimes ? <span className="font-medium opacity-80">{time}</span> : null}
     </span>
   )
 
@@ -477,9 +469,9 @@ export default function DateTimeRangePicker({
       >
         {showCalendarIcon && <CalendarDays className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" />}
         <span className={`grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 overflow-hidden ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`} data-date-range-trigger-values>
-          {triggerEndpoint(startTriggerDate, value.startTime || '00:00')}
+          {triggerEndpoint(startTriggerDate)}
           <ArrowRight className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} aria-hidden="true" />
-          {triggerEndpoint(endTriggerDate, value.endTime || '23:59')}
+          {triggerEndpoint(endTriggerDate)}
         </span>
       </button>
 
