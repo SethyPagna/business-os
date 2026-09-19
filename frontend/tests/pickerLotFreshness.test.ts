@@ -31,7 +31,7 @@ assert.ok(actorStart >= 0 && actorEnd > actorStart, 'execute the real authentica
 const actorCode = source.slice(actorStart, actorEnd)
 let actorRef: any
 const actorUser = { id: 7 }
-const actorKey = (user: { id: number } | null, authReady = true) => compile(actorCode, {
+const actorKey = (user: { id: number; permissions?: Record<string, boolean> } | null, authReady = true) => compile(actorCode, {
   useApp: () => ({ user, authReady }),
   useRef: (initial: unknown) => (actorRef ||= { current: initial }),
 }, 'actorScope')
