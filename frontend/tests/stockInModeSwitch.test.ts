@@ -122,9 +122,17 @@ runTest('the write honours the mode through the one adjust kernel; add keeps its
   assert.equal((modalSource.match(/await receiveBatchStock\(/g) || []).length, 1)
   // the gate guards adds as the line is queued -- and only adds; a remove
   // has no supplier or cost to gate, a set's direction is decided server-side
-  assert.match(modalSource, /if \(mode === 'add'\) \{\s*const receiptGate = stockReceiptGateCode\(\{/)
+  assert.match(modalSource, /if \(mode === 'add'\) \{\s*if \(!canEditCosts\) \{[^\n]*return \}\s*const receiptGate = stockReceiptGateCode\(\{/)
   // a remove never asks for a cost
-  assert.match(modalSource, /if \(mode !== 'remove' && paymentStatus === 'credit' && !creditDueDate\.trim\(\)\)/)
+  const creditCondition = modalSource.match(/if \((canEditCosts && mode !== 'remove' && paymentStatus === 'credit' && !creditDueDate\.trim\(\))\)/)?.[1]
+  assert.ok(creditCondition, 'credit validation is limited to editable receipt fields')
+  const requiresDueDate = new Function('canEditCosts', 'mode', 'paymentStatus', 'creditDueDate', `return (${creditCondition})`)
+  for (const mode of ['add', 'remove', 'set']) {
+    assert.equal(requiresDueDate(true, mode, 'credit', ''), mode !== 'remove', `${mode}: authorized receipt credit requires a due date`)
+    assert.equal(requiresDueDate(false, mode, 'credit', ''), false, `${mode}: hidden receipt inputs cannot block no-edit corrections`)
+    assert.equal(requiresDueDate(true, mode, 'paid', ''), false, `${mode}: paid stock does not need a due date`)
+    assert.equal(requiresDueDate(true, mode, 'credit', '2026-09-20'), false, `${mode}: an entered due date is accepted`)
+  }
 })
 
 runTest('the queue tags each line New / Existing from what this session created', () => {

@@ -142,7 +142,14 @@ runTest('the live surface carries the ported set-raise receipt rule (behaviour 2
   // the receipt gate applies -- not on a narrower "row.type === 'add'" copy
   // that would re-open the dead end a raising `set` used to hit.
   assert.match(modals, /const isStockIn = isStockInSubmission\(adjustForm\.type, adjustForm\.quantity, adjustCurrentQuantity\)/)
-  assert.match(modals, /\{isStockIn \? \(\s*\n\s*<SupplierPickerField/, 'the supplier field must render on isStockIn, which covers a raising set')
+  assert.match(modals, /\{isStockIn && canEditCosts \? \(\s*\n\s*<SupplierPickerField/, 'authorized receipt inputs must cover both adds and raising sets')
+  const supplierCondition = modals.match(/\{([^{}\n]+) \? \(\s*\n\s*<SupplierPickerField/)?.[1]
+  assert.ok(supplierCondition, 'supplier visibility condition located')
+  const supplierVisible = new Function('isStockIn', 'canEditCosts', `return (${supplierCondition})`)
+  assert.equal(supplierVisible(true, true), true, 'authorized raising sets still collect a supplier')
+  assert.equal(supplierVisible(true, false), false, 'no-edit users cannot enter receipt fields')
+  assert.equal(supplierVisible(false, true), false, 'removal/correction does not request receipt fields')
+  assert.match(modals, /disabled=\{adjustSaving \|\| \(isStockIn && !canEditCosts\)\}/, 'unauthorized receipts cannot be submitted')
   assert.ok(!modals.includes("adjustForm.type === 'add' && adjustForm.batch_id !== ''") , 'the supplier field must not be re-narrowed to adds only')
 })
 
