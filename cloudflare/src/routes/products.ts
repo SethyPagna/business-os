@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
@@ -134,6 +135,7 @@ async function syncLinkedProductNameSnapshots(env: Env, productIds: number[], pr
 // version of this port left it fully public. GET /api/portal/catalog/
 // products/search is the actually-public equivalent, in routes/portal.ts.
 app.use('*', requireAuth)
+app.use('*', acquisitionCostResponses)
 
 // Fallback for GET /zero-quantity-candidates when no
 // `product_zero_qty_delete_threshold_days` setting has ever been saved
@@ -1583,6 +1585,9 @@ app.post('/bulk-price-adjust', async (c) => {
   const amount = Number(body.amount)
   if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'Amount must be a positive number' }, 400)
   const fields = Array.isArray(body.fields) ? body.fields.filter((f) => BULK_PRICE_FIELDS.has(String(f))) : []
+  if (!canEditAcquisitionCosts(user) && fields.some(field => field.startsWith('cost_price_'))) {
+    return c.json({ error: 'Cost-entry permission is required to change catalog costs.', code: 'product_cost_edit_required' }, 403)
+  }
   if (!fields.length) return c.json({ error: 'Pick at least one price field to adjust' }, 400)
   const skipZero = Boolean(body.skip_zero)
   const delta = direction === 'decrease' ? -amount : amount
@@ -1736,6 +1741,9 @@ app.post('/', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  if (hasCatalogCostWrite(body, user)) {
+    return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
+  }
   try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
@@ -1922,6 +1930,9 @@ app.post('/rename-brand', async (c) => {
 app.put('/:id', async (c) => {
   const user = c.get('user')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  if (hasCatalogCostWrite(body, user)) {
+    return c.json({ error: 'Cost-entry permission is required to change catalog costs. Omit cost fields when editing other product details.', code: 'product_cost_edit_required' }, 403)
+  }
   const id = c.req.param('id')
   // Image-only restricted role: normally blocked by the tier==='none' check
   // below (they have no real `products` grant), but let through here ONLY
@@ -2410,6 +2421,9 @@ app.post('/variant', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  if (hasCatalogCostWrite(body, user)) {
+    return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
+  }
   try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error

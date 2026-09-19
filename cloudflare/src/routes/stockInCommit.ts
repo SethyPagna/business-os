@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, isActionBlocked } from '../lib/permissions'
 import type { Env } from '../index'
@@ -42,6 +43,7 @@ import { runReceiveBatchAction, type ReceiveBody } from './batches'
 // free-plan budget.
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+app.use('*', acquisitionCostResponses)
 
 export type StockInCommitLine =
   | { key?: string; wire: 'adjust'; body: Record<string, unknown> }

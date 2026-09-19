@@ -3446,7 +3446,7 @@ export default function POS() {
   const catalogControlsDisabled = catalogRefreshing
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden [&_.input]:min-h-9 [&_.input]:py-1.5 [&_.btn-primary]:min-h-9 [&_.btn-primary]:px-2 [&_.btn-primary]:py-1.5 [&_.btn-secondary]:min-h-9 [&_.btn-secondary]:px-2 [&_.btn-secondary]:py-1.5">
 
       {/* Mobile tab bar */}
       <div className="md:hidden flex flex-shrink-0 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
@@ -3475,7 +3475,7 @@ export default function POS() {
             <div className="flex items-center gap-1.5">
               <input
                 ref={searchRef}
-                className="input min-w-0 flex-1"
+                className="input min-w-0 flex-1 h-9 px-2 py-1.5 text-base md:text-sm"
                 placeholder={`${t('search') || 'Search'} ${t('products') || 'products'}...`}
                 title={searchMode === 'AND'
                   ? (t('search_mode_and_hint') || 'Matching ALL terms - change in Filters to match ANY term instead')
@@ -3598,6 +3598,7 @@ export default function POS() {
                 const handlers = getProductCardHandlers(p)
                 return (
                   <ProductCard
+                    posPresentation
                     key={p.id}
                     product={p}
                     variants={getVariantChoices(p)}
@@ -4384,6 +4385,7 @@ export default function POS() {
       {detailProduct ? (
         <Suspense fallback={null}>
           <ProductDetailSheet
+            posPresentation
             product={detailProduct}
             promotionRules={promotionRules}
             exchangeRate={exchangeRate}

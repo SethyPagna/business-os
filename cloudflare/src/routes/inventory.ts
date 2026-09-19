@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb, type D1Compat } from '../lib/db'
 
 /** Fail closed until the complete additive release schema is available. */
@@ -93,6 +94,7 @@ import { addMoney4, roundMoney4 } from '../lib/moneyPrecision'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+app.use('*', acquisitionCostResponses)
 
 // Shared with lib/stockInCommit.ts (batched fast stock-in) and this file's
 // own runTaggedLotAction below: one context type for every handler that was
@@ -1420,6 +1422,9 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
 // other caller; nothing else should import it (use POST /adjust).
 export async function runAdjustAction(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
   const user = c.get('user')
+  if (hasAcquisitionCostInput(body, user)) {
+    return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
+  }
   // Part 152: not yet wired into the Review Required queue (see the
   // comment above /reasons for why -- live batch/stock state at apply
   // time makes "queue now, replay later" unsafe without its own design

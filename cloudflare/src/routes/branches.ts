@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 
 /** Fail closed until the complete additive release schema is available. */
@@ -109,6 +110,7 @@ async function readStockIntegrityIssues(db: D1Compat): Promise<StockIntegrityIss
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+app.use('*', acquisitionCostResponses)
 
 type BranchInput = {
   name?: string

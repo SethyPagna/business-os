@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { getActionTier } from '../lib/permissions'
+import { canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getCatalogCostBreakdown } from '../lib/catalogCostRecompute'
 import type { Env } from '../index'
 
@@ -13,10 +13,9 @@ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
 app.use('*', requireAuth)
 
-// Same read gate as GET /:id/detail-report in products.ts: a products OR
-// inventory view grant. Read-only, product-scoped.
+// The explicit cost-view capability governs the complete calculation too.
 function canReadCost(user: SessionUser): boolean {
-  return getActionTier(user, 'products', 'view') !== 'none' || getActionTier(user, 'inventory', 'view') !== 'none'
+  return canViewAcquisitionCosts(user)
 }
 
 app.get('/:id/cost-breakdown', async (c) => {
