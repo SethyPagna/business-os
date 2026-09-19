@@ -12,8 +12,8 @@ Recorded means tracked; implemented does not mean verified or deployed.
 | POS USD-only products; compact stock/deal and controls | Implemented locally. | Updated visual/browser certification. |
 | Preview fixture errors | Dashboard/promotions plus tagged stock/stock-in session synthetic GET routes added. | Restart preview and verify visible pages. This is not production data. |
 | Products and Contacts Conflicts menu icons consistent | Both map to Copy; focused mapping test passes. | Rebuild and responsive EN/KM browser verification. Content hubs intentionally unchanged. |
-| Range trigger displays dates only; times inside picker | Shared presentation implementation in progress. | Preserve internal time values and filtering; no outside HH:MM labels. |
-| Every range has one external preset row with invisible horizontal scrollbar | Shared styling implementation in progress; direct hosts inventoried. | Convert direct hosts; remove duplicate internal presets; keyboard/touch and narrow-screen checks. |
+| Range trigger displays dates only; times inside picker | Shared presentation integrated in 1cb0f59b. Six focused suites and five-width browser checks passed in isolated implementation. | Final integrated verification; existing time-aware filtering preserved. |
+| Every range has one external preset row with invisible horizontal scrollbar | Shared and Reports preset scrollbar styling integrated in 1cb0f59b; direct hosts inventoried. | Convert remaining direct hosts; remove duplicate internal presets; integrated keyboard/touch and narrow-screen checks. |
 | Time filtering works for all ranges | NOT complete: many consumers currently discard or omit times. | Trace backend, state, persistence, request/cache keys, pagination, totals and export parity per host before enabling controls. |
 | Keep complete task history and Claude handoff | This ledger linked at top of progress and handoff. | Append outcomes and deployment provenance, never replace open status with unsupported completion claims. |
 
