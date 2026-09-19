@@ -25,6 +25,7 @@ import { todayStr } from '../../utils/dateHelpers.ts'
 import { buildProductGroups, type ProductGroup, type ProductRecord } from '../../utils/productGrouping.ts'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { effectivePermissions } from '../../utils/permissions.ts'
+import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
@@ -87,7 +88,7 @@ type SessionLine = SessionPayment & {
   batchId: number | null
   batchLabel: string
   quantity: number
-  unitCostUsd: number
+  unitCostUsd: number | null
   // Frozen at queue time, per line: the session-level declaration can be
   // toggled again for later lines, and each queued line must keep the answer
   // that was true when it was added.
@@ -169,9 +170,11 @@ function stockSessionProduct(payload: Record<string, unknown>): InventoryStockSe
   return product
 }
 
-function currentCost(product: ProductCandidate | null): number {
-  const parsed = Number(product?.cost_price_usd ?? product?.purchase_price_usd ?? 0)
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+function currentCost(product: ProductCandidate | null): string {
+  const value = product?.cost_price_usd ?? product?.purchase_price_usd
+  if (value == null || String(value).trim() === '') return ''
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : ''
 }
 
 function isDefinitiveNoWriteStockSessionError(error: unknown): boolean {
@@ -259,6 +262,12 @@ export default function CreateProductsSessionModal({
   const batchLoadKeyRef = useRef('')
   const batchChoiceSeedRef = useRef<number | null>(null)
   const canCommitProductAdd = canCommitProductCreateInStockSession(user)
+  const canViewCosts = canViewAcquisitionCosts(user)
+  const canEditCosts = canEditAcquisitionCosts(user)
+  const costAccessRef = useRef({ canViewCosts, canEditCosts })
+  costAccessRef.current = { canViewCosts, canEditCosts }
+  const costEditMessage = tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.')
+  const canReceiveWithCosts = canReceiveStock && canEditCosts
 
   const [header, setHeader] = useState<CreateProductsHeader>(() => draft?.header
     ? { ...draft.header, branchId: draft.header.branchId || resolvedDefaultBranchId }
@@ -301,6 +310,10 @@ export default function CreateProductsSessionModal({
   const [lineReceivedDate, setLineReceivedDate] = useState(receivedDate)
   const [lineQuantity, setLineQuantity] = useState('1')
   const [lineUnitCost, setLineUnitCost] = useState('')
+  // Separate new input from saved/drafted values. The render gate below also
+  // hides a revoked value immediately, before this cleanup effect runs.
+  const [blindLineUnitCost, setBlindLineUnitCost] = useState('')
+  useEffect(() => { setLineUnitCost(''); setBlindLineUnitCost('') }, [canViewCosts, canEditCosts])
   const [lineExpiryDate, setLineExpiryDate] = useState('')
   const [batchChoice, setBatchChoice] = useState<'new' | number>('new')
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
@@ -327,7 +340,7 @@ export default function CreateProductsSessionModal({
   const summaryRows = useMemo<CreateProductsSessionRow[]>(() => rows.map((row) => ({
     key: row.lineId, productId: row.productId || row.lineId, name: row.name, barcode: row.barcode,
     brand: row.brand, supplierName: row.supplierName, branchId: row.branchId, branchName: row.branchName,
-    quantity: row.quantity, unitCostUsd: row.unitCostUsd, lotCode: row.batchLabel,
+    quantity: row.quantity, unitCostUsd: row.unitCostUsd ?? 0, lotCode: row.batchLabel,
     status: 'created', detail: row.detail,
   })), [rows])
   const summary = useMemo(() => {
@@ -340,6 +353,11 @@ export default function CreateProductsSessionModal({
     return rows.length ? baseSummary : { ...baseSummary, branch: branchNameFor(header.branchId) || baseSummary.branch }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summaryRows, rows.length, header, branchSelectOptions, t])
+  const hasKnownSummaryCost = rows.every((row) => row.unitCostUsd != null)
+  const costWritePending = (submittedItems || []).some((item) => Number(item.quantity) > 0 || 'unit_cost_usd' in item ||
+    ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'].some((key) => key in (item.product || {}))) ||
+    rows.some((row) => row.status === 'queued' && (row.quantity > 0 ||
+      ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'].some((key) => key in (row.product || {}))))
 
   const closeDirtyRef = useRef(false)
   const sessionCommittedRef = useRef(false)
@@ -438,10 +456,13 @@ export default function CreateProductsSessionModal({
     batchChoiceSeedRef.current = null
     setSelectedProduct(null); setLineBranchId(header.branchId || resolvedDefaultBranchId)
     setLineSupplier({ supplierId: header.supplierId, supplierName: header.supplierName })
-    setLineReceivedDate(receivedDate); setLineQuantity('1'); setLineUnitCost(''); setLineExpiryDate('')
+    setLineReceivedDate(receivedDate); setLineQuantity('1'); setLineUnitCost(''); setBlindLineUnitCost(''); setLineExpiryDate('')
     setBatchOptions([]); setBatchChoice('new'); setBatchFailed(false); setExactBatchLoadKey('')
   }
-  const openExistingOptions = (group: ProductGroup) => { resetExistingCandidate(); setSelectedGroup(group) }
+  const openExistingOptions = (group: ProductGroup) => {
+    if (!canReceiveWithCosts) { notify(costEditMessage, 'error'); return }
+    resetExistingCandidate(); setSelectedGroup(group)
+  }
   function closeExistingOptions() {
     setSelectedGroup(null); resetExistingCandidate()
     window.setTimeout(() => searchInputRef.current?.focus(), 0)
@@ -454,11 +475,12 @@ export default function CreateProductsSessionModal({
       openQueuedLine(duplicate.row)
       return
     }
-    setSelectedProduct(product); setLineUnitCost(String(currentCost(product))); setLineExpiryDate(String(product.expiry_date || ''))
+    setSelectedProduct(product); setLineUnitCost(canViewCosts ? currentCost(product) : ''); setBlindLineUnitCost(''); setLineExpiryDate(String(product.expiry_date || ''))
   }
 
   const queueExistingLine = (replaceLineId?: string) => {
     if (submissionLocked) return
+    if (!costAccessRef.current.canEditCosts || !canReceiveStock) { notify(costEditMessage, 'error'); return }
     if (!replaceLineId && rows.filter((row) => row.status === 'queued').length >= STOCK_SESSION_MAX_LINES) {
       notify(`${tr('limit', 'Limit')}: ${STOCK_SESSION_MAX_LINES}`, 'error'); return
     }
@@ -466,7 +488,7 @@ export default function CreateProductsSessionModal({
     const productId = Number(selectedProduct.id)
     const branchId = Number(lineBranchId)
     const quantity = Number(lineQuantity)
-    const unitCostText = lineUnitCost.trim()
+    const unitCostText = (canViewCosts ? lineUnitCost : blindLineUnitCost).trim()
     const unitCostUsd = Number(unitCostText)
     const expectedLoadKey = `${productId}:${branchId}`
     if (!productId || !branchId || !Number.isSafeInteger(quantity) || quantity <= 0) {
@@ -539,6 +561,7 @@ export default function CreateProductsSessionModal({
     // immutable until the same request resolves or a definitive no-write
     // response unlocks it; never offer an editor that can diverge from it.
     if (submissionLocked || saving || line.status !== 'queued') return
+    if (line.quantity > 0 && !canReceiveWithCosts) { notify(costEditMessage, 'error'); return }
     setCommitError(''); setSubmissionErrorCode(''); setEditingLineId(line.lineId)
     if (line.kind === 'create_receive') {
       writeDraft(); setItemFormOpen(true); return
@@ -550,22 +573,25 @@ export default function CreateProductsSessionModal({
       name: line.name,
       barcode: line.barcode,
       brand: line.brand,
-      cost_price_usd: line.unitCostUsd,
+      ...(canViewCosts ? { cost_price_usd: line.unitCostUsd } : {}),
       expiry_date: line.expiryDate,
     })
     setLineBranchId(line.branchId)
     setLineSupplier({ supplierId: line.supplierId, supplierName: line.supplierName })
     setLineReceivedDate(line.receivedDate)
     setLineQuantity(String(line.quantity))
-    setLineUnitCost(String(line.unitCostUsd))
+    setLineUnitCost(canViewCosts && line.unitCostUsd != null ? String(line.unitCostUsd) : '')
+    setBlindLineUnitCost('')
     setLineExpiryDate(line.expiryDate)
   }
 
   const saveNewItem = async (payload: Record<string, unknown>) => {
     if (saving) throw new Error(tr('saving_label', 'Saving…'))
+    payload = omitUnauthorizedCatalogCosts(payload, user)
     const quantityValue = payload.stock_quantity == null || payload.stock_quantity === '' ? 0 : Number(payload.stock_quantity)
     if (!Number.isSafeInteger(quantityValue) || quantityValue < 0) throw new Error(tr('invalid_quantity', 'Invalid quantity'))
     const quantity = quantityValue
+    if (quantity > 0 && !costAccessRef.current.canEditCosts) throw new Error(costEditMessage)
     const branchId = Number(payload.branch_id ?? header.branchId)
     const name = String(payload.name || '').trim()
     const barcode = String(payload.barcode || '').trim()
@@ -575,8 +601,8 @@ export default function CreateProductsSessionModal({
     // gone; a receipt states its cost or it is refused, here and on the wire.
     const costText = payload.cost_price_usd == null ? '' : String(payload.cost_price_usd).trim()
     const costValue = Number(costText)
-    if (costText === '' || !Number.isFinite(costValue) || costValue < 0) throw new Error(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`)
-    const cost = costValue
+    if ((quantity > 0 || costText !== '') && (costText === '' || !Number.isFinite(costValue) || costValue < 0)) throw new Error(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`)
+    const cost = costText === '' ? null : costValue
     if (!name || !branchId) throw new Error(tr('create_products_branch_required', 'Choose the branch this delivery goes to.'))
     // The same supplier the session writer now requires on every line that
     // moves stock. A zero-quantity create is catalogue work and carries none.
@@ -605,7 +631,7 @@ export default function CreateProductsSessionModal({
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: null,
           supplierName: String(payload.supplier ?? header.supplierName ?? '').trim(), branchId: String(branchId), branchName: branchNameFor(String(branchId)),
           receivedDate: String(payload.received_date || receivedDate), expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: '', quantity: 0,
-          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, reason: reason.trim(), status: 'saved', detail: tr('product_created', 'Product created'),
+          unitCostUsd: cost, freeGoods, reason: reason.trim(), status: 'saved', detail: tr('product_created', 'Product created'),
         }
         setRows((prev) => [row, ...prev]); onDone()
       } else {
@@ -614,6 +640,7 @@ export default function CreateProductsSessionModal({
           throw new Error(`${tr('limit', 'Limit')}: ${STOCK_SESSION_MAX_LINES}`)
         }
         const prepared = await onPrepareProduct(payload)
+        if (!costAccessRef.current.canEditCosts && (quantity > 0 || costText !== '')) throw new Error(costEditMessage)
         const supplierName = String(payload.supplier ?? header.supplierName ?? '').trim()
         const sameSupplier = supplierName.toLowerCase() === header.supplierName.trim().toLowerCase()
         const row: SessionLine = {
@@ -621,7 +648,7 @@ export default function CreateProductsSessionModal({
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: sameSupplier ? header.supplierId : null,
           supplierName, branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: String(payload.received_date || receivedDate),
           expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: quantity > 0 ? tr('new_batch', '+ New received date') : '', quantity,
-          unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, ...payment, reason: reason.trim(), status: 'queued', detail: tr('ready_to_receive', 'Ready'),
+          unitCostUsd: cost, freeGoods, ...payment, reason: reason.trim(), status: 'queued', detail: tr('ready_to_receive', 'Ready'),
         }
         setRows((prev) => [row, ...prev])
       }
@@ -636,6 +663,8 @@ export default function CreateProductsSessionModal({
     if (!canCommitProductAdd) throw new Error(tr('no_permission', 'You do not have permission to make this change.'))
     const current = rows.find((row) => row.lineId === lineId && row.kind === 'create_receive' && row.status === 'queued')
     if (!current) throw new Error(tr('failed', 'Failed'))
+    if (!costAccessRef.current.canEditCosts && (current.quantity > 0 || current.unitCostUsd != null)) throw new Error(costEditMessage)
+    payload = omitUnauthorizedCatalogCosts(payload, user)
     const quantity = Number(payload.stock_quantity)
     const branchId = Number(payload.branch_id)
     const name = String(payload.name || '').trim()
@@ -645,10 +674,11 @@ export default function CreateProductsSessionModal({
     // the way back through the editor.
     const costText = payload.cost_price_usd == null ? '' : String(payload.cost_price_usd).trim()
     const cost = Number(costText)
+    if (quantity > 0 && !costAccessRef.current.canEditCosts) throw new Error(costEditMessage)
     if (!Number.isSafeInteger(quantity) || quantity < 0) throw new Error(tr('invalid_quantity', 'Invalid quantity'))
     if (quantity > 0 && !canReceiveStock) throw new Error(tr('no_permission', 'You do not have permission to receive stock.'))
     if (!branchId || !name) throw new Error(tr('create_products_branch_required', 'Choose the branch this delivery goes to.'))
-    if (costText === '' || !Number.isFinite(cost) || cost < 0) throw new Error(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`)
+    if ((quantity > 0 || costText !== '') && (costText === '' || !Number.isFinite(cost) || cost < 0)) throw new Error(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`)
     const editGate = stockReceiptGateCode({
       isStockIn: quantity > 0,
       supplierName: String(payload.supplier ?? current.supplierName ?? header.supplierName ?? '').trim(),
@@ -663,6 +693,7 @@ export default function CreateProductsSessionModal({
     setSaving(true)
     try {
       const prepared = await onPrepareProduct(payload)
+      if (!costAccessRef.current.canEditCosts && (quantity > 0 || costText !== '')) throw new Error(costEditMessage)
       const supplierName = String(payload.supplier ?? current.supplierName ?? header.supplierName ?? '').trim()
       const sameSupplier = supplierName.toLowerCase() === header.supplierName.trim().toLowerCase()
       const updated: SessionLine = {
@@ -683,7 +714,7 @@ export default function CreateProductsSessionModal({
         batchId: null,
         batchLabel: quantity > 0 ? tr('new_batch', '+ New received date') : '',
         quantity,
-        unitCostUsd: cost,
+        unitCostUsd: costText === '' ? null : cost,
       }
       setRows((prev) => prev.map((row) => row.lineId === lineId ? updated : row))
       setCommitError(''); setSubmissionErrorCode('')
@@ -741,11 +772,19 @@ export default function CreateProductsSessionModal({
 
   const finishSession = async () => {
     if (saving || idempotencyConflict) return
+    if (costWritePending && !costAccessRef.current.canEditCosts) {
+      setCommitError(costEditMessage); notify(costEditMessage, 'error'); return
+    }
     const pending = rows.filter((row) => row.status === 'queued')
     if (!pending.length && !submittedItems) {
       sessionCommittedRef.current = true
       closeDirtyRef.current = false
       clearWorkDraft(draftKey); if (rows.length) onDone(); onClose(); return
+    }
+    if (!submittedItems && pending.some((line) => line.quantity > 0 &&
+      (line.unitCostUsd == null || !Number.isFinite(line.unitCostUsd) || line.unitCostUsd < 0))) {
+      const message = `${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`
+      setCommitError(message); notify(message, 'error'); return
     }
     const attemptItems = submittedItems || pending.map(sessionLine)
     if (!submittedItems && pending.some((line) => sessionPaymentDueInvalid(line, line.quantity))) {
@@ -817,7 +856,7 @@ export default function CreateProductsSessionModal({
   } : undefined
 
   const editingNewProduct: ProductFormState | null = editingNewLine ? {
-    ...(editingNewLine.product || {}),
+    ...(canViewCosts ? editingNewLine.product || {} : Object.fromEntries(Object.entries(editingNewLine.product || {}).filter(([key]) => !['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'].includes(key)))),
     name: editingNewLine.name,
     barcode: editingNewLine.barcode,
     brand: editingNewLine.brand,
@@ -826,7 +865,7 @@ export default function CreateProductsSessionModal({
     stock_quantity: editingNewLine.quantity,
     received_date: editingNewLine.receivedDate,
     expiry_date: editingNewLine.expiryDate,
-    cost_price_usd: editingNewLine.unitCostUsd,
+    ...(canViewCosts ? { cost_price_usd: editingNewLine.unitCostUsd ?? '' } : {}),
   } : null
   const editingExistingDirty = Boolean(editingExistingLine && !batchLoading && (
     lineBranchId !== editingExistingLine.branchId
@@ -834,7 +873,7 @@ export default function CreateProductsSessionModal({
     || lineSupplier.supplierName !== editingExistingLine.supplierName
     || lineReceivedDate !== editingExistingLine.receivedDate
     || lineQuantity !== String(editingExistingLine.quantity)
-    || lineUnitCost !== String(editingExistingLine.unitCostUsd)
+    || (canViewCosts ? lineUnitCost !== String(editingExistingLine.unitCostUsd ?? '') : blindLineUnitCost !== '')
     || lineExpiryDate !== editingExistingLine.expiryDate
     || batchChoice !== (editingExistingLine.batchId ?? 'new')
   ))
@@ -847,13 +886,14 @@ export default function CreateProductsSessionModal({
         <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('received_date', 'Received date')} value={lineReceivedDate} onChange={setLineReceivedDate} /></label>
         <label><span className="mb-1 block text-[11px] text-gray-500">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={lineExpiryDate} onChange={setLineExpiryDate} /></label>
         <label><span className="mb-1 block text-[11px] text-gray-500">{tr('quantity', 'Quantity')}</span><input className="input h-9 w-full text-sm" type="number" min="1" step="1" value={lineQuantity} onChange={(event) => setLineQuantity(event.target.value)} /></label>
-        <label><span className="mb-1 block text-[11px] text-gray-500">{tr('unit_cost_usd', 'Unit cost (USD)')}</span><input className="input h-9 w-full text-sm" type="number" min="0" step="0.01" value={lineUnitCost} onChange={(event) => setLineUnitCost(event.target.value)} /></label>
+        {canViewCosts || canEditCosts ? <label><span className="mb-1 block text-[11px] text-gray-500">{tr('unit_cost_usd', 'Unit cost (USD)')}</span><input className="input h-9 w-full text-sm" type="number" min="0" step="0.0001" disabled={!canEditCosts} value={canViewCosts ? lineUnitCost : blindLineUnitCost} onChange={(event) => canViewCosts ? setLineUnitCost(event.target.value) : setBlindLineUnitCost(event.target.value)} /></label> : null}
       </div>
       <div className="mt-3">
         <span className="mb-1 block text-[11px] text-gray-500">{tr('batch', 'Received date')}</span>
         {batchLoading ? <p className="text-xs text-gray-400">{tr('loading', 'Loading...')}</p> : batchFailed ? <p className="text-xs text-red-600">{tr('load_failed', 'Could not load stock received dates.')}</p> : <div className="flex flex-wrap gap-1.5"><button type="button" className={batchChoice === 'new' ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice('new')}>{tr('new_batch', '+ New received date')}</button>{batchOptions.map((batch) => <button key={batch.id} type="button" className={batchChoice === Number(batch.id) ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice(Number(batch.id))}>{batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})</button>)}</div>}
       </div>
-      <button type="button" className="btn-primary mt-4 h-11 w-full text-sm disabled:opacity-50" disabled={batchLoading || batchFailed || exactBatchLoadKey !== `${Number(selectedProduct.id)}:${Number(lineBranchId)}`} onClick={onContinue}>{editingExistingLine ? tr('save_changes', 'Save changes') : tr('continue', 'Continue')}</button>
+      {!canReceiveWithCosts ? <p role="status" className="mt-2 text-xs text-amber-700 dark:text-amber-300">{costEditMessage}</p> : null}
+      <button type="button" className="btn-primary mt-4 h-11 w-full text-sm disabled:opacity-50" disabled={!canReceiveWithCosts || batchLoading || batchFailed || exactBatchLoadKey !== `${Number(selectedProduct.id)}:${Number(lineBranchId)}`} onClick={onContinue}>{editingExistingLine ? tr('save_changes', 'Save changes') : tr('continue', 'Continue')}</button>
     </div>
   ) : null
 
@@ -954,7 +994,8 @@ export default function CreateProductsSessionModal({
               {mode === 'new' && allowNew ? <button type="button" className="btn-primary flex h-11 w-full items-center justify-center gap-1.5 text-sm" disabled={saving || submissionLocked} onClick={openItemForm}><PackagePlus className="h-4 w-4" />{tr('create_products_add_item', 'Add new product')}</button> : null}
               {mode === 'existing' && allowExisting ? <div><div className="flex gap-2"><label className="relative block min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-gray-400" /><input ref={searchInputRef} className="input w-full pl-9 text-sm" value={query} disabled={submissionLocked} placeholder={tr('fast_stockin_search', 'Type a product name or barcode…')} onChange={(event) => setQuery(event.target.value)} autoFocus /></label><ScanSearchButton onDetected={(value) => setQuery(String(value || '').trim())} t={t} title={tr('scan_product_for_stock_in', 'Scan product for this stock-in')} /></div>{searching ? <p className="mt-2 text-xs text-gray-400">{tr('loading', 'Loading...')}</p> : null}{searchFailed ? <p className="mt-2 text-xs text-red-600">{tr('load_failed', 'Failed to load products')}</p> : null}{groups.length ? <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">{groups.map((group) => <button key={group.key} type="button" disabled={submissionLocked} className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:border-gray-700" onClick={() => openExistingOptions(group)}><span className="min-w-0 font-medium"><ProductNameRail name={String((group.name) ?? '')} /></span><span className="shrink-0 text-[11px] text-gray-500">{group.sellableItems.length || group.items.length} {tr('options', 'options')} · {group.stockTotal}</span></button>)}</div> : null}</div> : null}
               {mode === 'new' && !canCommitProductAdd ? <p className="mt-2 text-xs text-gray-500">{tr('stock_session_review_payment_hint', 'Product creation submitted for review does not record payment terms here.')}</p> : null}
-              <div className="mt-4 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500"><span>{tr('create_products_created', 'Saved list')} ({summary.items})</span><span className="tabular-nums normal-case">{tr('total_units', 'Total units')}: {summary.units} · {usdSymbol}{summary.costUsd.toFixed(2)}</span></div>
+              {!canEditCosts ? <p role="status" className="mt-2 text-xs text-amber-700 dark:text-amber-300">{costEditMessage}</p> : null}
+              <div className="mt-4 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500"><span>{tr('create_products_created', 'Saved list')} ({summary.items})</span><span className="tabular-nums normal-case">{tr('total_units', 'Total units')}: {summary.units}{canViewCosts && hasKnownSummaryCost ? <> · {usdSymbol}{summary.costUsd.toFixed(2)}</> : null}</span></div>
               {rows.some((row) => row.quantity > 0) ? <p className="mt-1 text-xs text-gray-500">{tr('stock_session_payment_scope_hint', 'Requested payment terms only. An existing lot keeps its recorded terms, including when receipts share the same received date.')}</p> : null}
               {rows.length ? <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">{rows.map((row) => (
                 <div key={row.lineId} className="flex items-start justify-between gap-2 rounded-lg bg-gray-50 px-2 py-2 text-sm dark:bg-gray-900/50">
@@ -970,7 +1011,7 @@ export default function CreateProductsSessionModal({
                     {renderLinePayment(row)}
                     {row.reason ? <span className="block break-words text-[10px] text-gray-500 dark:text-gray-400">{row.reason}</span> : null}
                   </button>
-                  <span className="flex shrink-0 items-center gap-1"><span className="text-[11px] tabular-nums">× {row.quantity} · {usdSymbol}{(row.quantity * row.unitCostUsd).toFixed(2)}</span>{row.status === 'queued' ? <button type="button" disabled={submissionLocked} aria-label={tr('remove', 'Remove')} className="rounded p-1 text-gray-400 hover:text-red-600 disabled:opacity-40" onClick={() => removeLine(row.lineId)}><Trash2 className="h-4 w-4" /></button> : null}</span>
+                  <span className="flex shrink-0 items-center gap-1"><span className="text-[11px] tabular-nums">× {row.quantity}{canViewCosts && row.unitCostUsd != null ? <> · {usdSymbol}{(row.quantity * row.unitCostUsd).toFixed(2)}</> : null}</span>{row.status === 'queued' ? <button type="button" disabled={submissionLocked} aria-label={tr('remove', 'Remove')} className="rounded p-1 text-gray-400 hover:text-red-600 disabled:opacity-40" onClick={() => removeLine(row.lineId)}><Trash2 className="h-4 w-4" /></button> : null}</span>
                 </div>
               ))}</div> : <p className="mt-2 rounded-lg bg-gray-50 px-3 py-4 text-center text-xs text-gray-500 dark:bg-gray-900/50">{tr('create_products_none_yet', 'No products added yet.')}</p>}
               {idempotencyConflict ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{commitError ? `${commitError} · ` : ''}idempotency_conflict · {tr('resolve', 'Resolve')}</p> : commitError ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{commitError}{submissionLocked ? ` · ${tr('retry', 'Retry')}` : ''}</p> : null}
@@ -979,7 +1020,7 @@ export default function CreateProductsSessionModal({
           {/* One close affordance only -- the Modal header X. The footer keeps
               the primary action alone (and disappears entirely on the header
               step, where "Add items" is the primary action). */}
-          {step === 'items' ? <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 pt-3 dark:border-gray-700"><button type="button" className="btn-primary h-10 px-4 text-sm disabled:opacity-50" disabled={saving || idempotencyConflict || (rows.length === 0 && !submittedItems)} onClick={() => void finishSession()}>{saving ? tr('saving_label', 'Saving…') : idempotencyConflict ? tr('failed', 'Failed') : submissionLocked ? tr('retry', 'Retry') : `✓ ${tr('create_products_finish', 'Complete session')}`}</button></div> : null}
+          {step === 'items' ? <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 pt-3 dark:border-gray-700"><button type="button" className="btn-primary h-10 px-4 text-sm disabled:opacity-50" disabled={(costWritePending && !canEditCosts) || saving || idempotencyConflict || (rows.length === 0 && !submittedItems)} onClick={() => void finishSession()}>{saving ? tr('saving_label', 'Saving…') : idempotencyConflict ? tr('failed', 'Failed') : submissionLocked ? tr('retry', 'Retry') : `✓ ${tr('create_products_finish', 'Complete session')}`}</button></div> : null}
         </div>
       </Modal>
 
