@@ -39,7 +39,7 @@ const pickerSource = readFrontend('src/components/shared/DateTimeRangePicker.tsx
 const rowSource = readFrontend('src/components/shared/StatsRangeRow.tsx')
 const reportsCss = readFrontend('src/components/sales/reports/reports-surface.css')
 
-const start = pickerSource.indexOf('const triggerEndpoint = (date: string, time: string) => (')
+const start = pickerSource.indexOf('const triggerEndpoint = (date: string) => (')
 assert.notEqual(start, -1, 'triggerEndpoint helper must exist')
 const end = pickerSource.indexOf('\n  )', start)
 const triggerEndpointBody = pickerSource.slice(start, end)

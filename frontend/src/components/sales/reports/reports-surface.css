@@ -510,8 +510,10 @@
   max-width: 100%;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.reports-mobile-presets::-webkit-scrollbar { display: none; }
 
 .reports-mobile-preset {
   min-height: 36px;
