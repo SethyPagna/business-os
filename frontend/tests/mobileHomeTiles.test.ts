@@ -127,7 +127,11 @@ runTest('every permission-visible subpage has its own semantic icon', () => {
     assert.ok(icon, `${ownerId}:${sectionId} has an icon`)
     return icon
   })
-  assert.equal(new Set(icons).size, pairs.length, 'each subpage has a distinct visual cue')
+  assert.equal(getMobileSectionIcon('contacts', 'duplicates'), getMobileSectionIcon('products', 'duplicates'),
+    'Conflicts uses the same visual cue in Contacts and Products')
+  const otherIcons = icons.filter((_, index) => pairs[index][1] !== 'duplicates')
+  assert.equal(new Set(otherIcons).size, otherIcons.length, 'all other subpages retain distinct visual cues')
+  assert.equal(new Set(icons).size, pairs.length - 1, 'only the shared Conflicts destinations reuse an icon')
   assert.equal(getMobileSectionIcon('sales', 'not-permitted'), null, 'unknown or withheld sections do not invent an icon')
 })
 
