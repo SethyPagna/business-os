@@ -670,9 +670,11 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   .stats-date-presets {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-inline: contain;
-    scrollbar-width: thin;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     touch-action: pan-x;
   }
+  .stats-date-presets::-webkit-scrollbar { display: none; }
   @media (max-width: 767px) {
     .page-scroll {
       /* On mobile, add extra bottom padding inside the scroll area so the last row

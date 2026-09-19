@@ -101,6 +101,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
 const analyticsPrecision = { './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
+const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRoles = loadReal('lib/branchRoles.ts')
 const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
   './db': loadReal('lib/db.ts'),
@@ -172,6 +173,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/audit': { audit: async () => {} },
   '../lib/telegram': { sendTelegramEvent: async () => false, formatStockChangeTelegramLines: () => [] },
   '../lib/permissions': permissions,
+  '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
@@ -275,8 +277,14 @@ async function main() {
 
   await check('add 0 is still refused', async () => {
     seed(5)
-    const { status } = await req({ productId: 1, type: 'add', quantity: 0, reason: 'Receive', branchId: 1, batchId: 'new', unitCostUsd: 2, supplierName: 'Acme' })
-    assert.strictEqual(status, 400, 'a zero add is a receipt of nothing')
+    const permissionsBefore = FAKE_USER.permissions
+    FAKE_USER.permissions = JSON.stringify({ inventory: true, product_cost_edit: true })
+    try {
+      const { status } = await req({ productId: 1, type: 'add', quantity: 0, reason: 'Receive', branchId: 1, batchId: 'new', unitCostUsd: 2, supplierName: 'Acme' })
+      assert.strictEqual(status, 400, 'a zero add is a receipt of nothing even when the actor can enter its cost')
+    } finally {
+      FAKE_USER.permissions = permissionsBefore
+    }
     assert.strictEqual(branchQty(), 5)
   })
 

@@ -35,7 +35,7 @@ const DB = {
   },
 }
 const env = { DB }
-const real = new Set(['productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe'])
+const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe'])
 const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
 class ProductImageAssetError extends Error {}
 const services = {
@@ -60,6 +60,7 @@ function load(relative) {
   const localRequire = request => {
     if (request === 'hono') return { Hono }
     const name = request.split('/').pop()
+    if (relative === 'lib/acquisitionCostAccess.ts' && name === 'permissions') return load('lib/permissions.ts')
     if (services[name]) return services[name]
     if (real.has(name)) return load(`lib/${name}.ts`)
     if (request.startsWith('.')) return noop
@@ -88,7 +89,7 @@ const writer = load('lib/productWrites.ts')
 const frontendWriter = loadFrontend('components/products/helpers/productWriteHelpers.ts')
 const context = { waitUntil: () => {}, passThroughOnException: () => {} }
 const admin = { id: 1, username: 'admin', name: 'Admin', tier: 'full' }
-const requester = { id: 2, username: 'requester', name: 'Requester', tier: 'review' }
+const requester = { id: 2, username: 'requester', name: 'Requester', tier: 'review', permissions: JSON.stringify({ product_cost_edit: true, product_cost_view: true }) }
 async function request(app, method, url, body, user = admin) {
   const response = await app.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { ...env, TEST_USER: user }, context)
   return { status: response.status, body: await response.json() }

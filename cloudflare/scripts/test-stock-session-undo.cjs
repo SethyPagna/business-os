@@ -25,7 +25,7 @@ async function main() {
   const replay = (f, receipt, direction, generation, actor = user) =>
     api.replayStockSession(f.env, actor, direction, receipt.actionHistoryId, generation, payload(f, receipt))
   {
-    const noAdjust = { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true }) }
+    const noAdjust = { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true, product_cost_edit: true, product_cost_view: true }) }
     const noProductAdd = { ...user, permissions: JSON.stringify({ inventory: true, products: 'review' }) }
     const noProductImage = { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
     assert.equal(api.canReplayStockSessionPayload(noAdjust, { requires_product_add: 1, requires_product_image: 0, requires_inventory_adjust: 0 }), true)
@@ -53,7 +53,7 @@ async function main() {
     assert.deepEqual(f.sql.prepare('SELECT * FROM products WHERE id=?').get(r.items[0].productId), original)
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
     assert.equal(f.sql.prepare('SELECT generation FROM stock_session_operations').get().generation, 2)
-    console.log('PASS zero catalog reload undo/redo needs product-add only, is lost-ack idempotent and writes no movements')
+    console.log('PASS cost-authorized zero catalog reload undo/redo needs no inventory-adjust, is lost-ack idempotent and writes no movements')
   }
   {
     const noProductImage = { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }

@@ -36,7 +36,7 @@ test('fixture preview supplies dashboard and POS boot reads without hiding missi
         if (match) resolve(`http://127.0.0.1:${match[1]}`)
       })
     })
-    const routes = ['/api/dashboard', '/api/analytics', '/api/dashboard/startup', '/api/promotions/rules/active']
+    const routes = ['/api/dashboard', '/api/analytics', '/api/dashboard/startup', '/api/promotions/rules/active', '/api/inventory/tagged-lots', '/api/products/stock-in-sessions']
     for (const route of routes) {
       const response = await fetch(origin + route)
       assert.equal(response.status, 401, `${route} must require a session`)
@@ -73,6 +73,20 @@ test('fixture preview supplies dashboard and POS boot reads without hiding missi
     const promotions = await get('/api/promotions/rules/active')
     assert.deepEqual(promotions.rules, [])
     assert.ok(Number.isFinite(Date.parse(promotions.now)))
+    assert.deepEqual(await get('/api/inventory/tagged-lots?productIds=1,2,3'), { items: [] })
+    assert.deepEqual(await get('/api/inventory/tagged-lots'), { items: [] })
+    assert.deepEqual(await get('/api/products/stock-in-sessions'), {
+      sessions: [], total: 0, page: 1, pageSize: 30, totalPages: 1,
+    })
+    assert.deepEqual(await get('/api/products/stock-in-sessions?search=synthetic&page=2&pageSize=50'), {
+      sessions: [], total: 0, page: 2, pageSize: 50, totalPages: 1,
+    })
+    assert.deepEqual(await get('/api/products/stock-in-sessions?page=-2&pageSize=999'), {
+      sessions: [], total: 0, page: 1, pageSize: 100, totalPages: 1,
+    })
+    assert.deepEqual(await get('/api/products/stock-in-sessions?page=999999&pageSize=invalid'), {
+      sessions: [], total: 0, page: 100000, pageSize: 30, totalPages: 1,
+    })
     for (const route of routes) {
       for (const method of ['POST', 'PUT', 'DELETE']) {
         const response = await fetch(origin + route, { method, headers })
@@ -83,6 +97,11 @@ test('fixture preview supplies dashboard and POS boot reads without hiding missi
     for (const method of ['GET', 'POST']) {
       const response = await fetch(origin + '/api/not-a-fixture', { method, headers })
       assert.equal(response.status, 404)
+      assert.equal((await response.json()).code, 'e2e_unmocked')
+    }
+    for (const route of ['/api/inventory/tagged-lots/dispose', '/api/inventory/tagged-lots/restore']) {
+      const response = await fetch(origin + route, { method: 'POST', headers })
+      assert.equal(response.status, 404, 'Unimplemented stock mutations must stay visible')
       assert.equal((await response.json()).code, 'e2e_unmocked')
     }
   } finally {

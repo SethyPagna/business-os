@@ -139,6 +139,7 @@ const broadcastStub = {
 
 // Real, pure -- loaded first since everything else depends on it.
 const permissions = loadReal('lib/permissions.ts')
+const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const media = loadReal('lib/media.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const productImagePermission = loadReal('lib/productImagePermission.ts', {
@@ -254,6 +255,7 @@ const feesRoute = loadReal('routes/fees.ts', {
 })
 
 const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
+  '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/productWrites': productWrites,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', CURRENT_USER); return next() } },

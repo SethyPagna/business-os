@@ -41,6 +41,7 @@ const media = loadTs('lib/media.ts')
 const sqlBinding = loadTs('lib/sqlBinding.ts')
 const imagePermission = loadTs('lib/productImagePermission.ts', { './media': media, './sqlBinding': sqlBinding })
 const permissions = loadTs('lib/permissions.ts')
+const acquisitionCostAccess = loadTs('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const moneyPrecision = loadTs('lib/moneyPrecision.ts')
 const productMerge = loadTs('lib/productMerge.ts', { './moneyPrecision': moneyPrecision })
 const loadProductWrites = db => loadTs('lib/productWrites.ts', {
@@ -152,6 +153,7 @@ function loadProductsRoute(state) {
     hono: { Hono },
     '../lib/auth': { requireAuth },
     '../lib/permissions': permissions,
+    '../lib/acquisitionCostAccess': acquisitionCostAccess,
     '../lib/db': { getDb: () => db },
     '../lib/media': media,
     '../lib/productImagePermission': imagePermission,

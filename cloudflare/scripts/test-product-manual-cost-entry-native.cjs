@@ -42,6 +42,7 @@ const DB = {
 const env = { DB }
 
 const real = new Set([
+  'acquisitionCostAccess',
   'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
   'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate',
   'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute',
@@ -70,6 +71,7 @@ function load(relative) {
   const localRequire = request => {
     if (request === 'hono') return { Hono }
     const name = request.split('/').pop()
+    if (relative === 'lib/acquisitionCostAccess.ts' && name === 'permissions') return load('lib/permissions.ts')
     if (services[name]) return services[name]
     if (real.has(name)) return load(`lib/${name}.ts`)
     if (request.startsWith('.')) return noop
@@ -81,7 +83,7 @@ function load(relative) {
 
 const products = load('routes/products.ts').default
 const context = { waitUntil: () => {}, passThroughOnException: () => {} }
-const admin = { id: 9, username: 'sethy', name: 'Sethy Owner', tier: 'full' }
+const admin = { id: 9, username: 'sethy', name: 'Sethy Owner', tier: 'full', permissions: JSON.stringify({ product_cost_view: true, product_cost_edit: true }) }
 
 async function request(method, url, body) {
   const response = await products.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { ...env, TEST_USER: admin }, context)

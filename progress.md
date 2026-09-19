@@ -1,3 +1,14 @@
+## Active permission and responsive UI checkpoint — September 20
+
+Read docs/fleet/2026-09-20-active-request-ledger.md first for current requests,
+verification evidence, date-range coverage gaps and retained earlier open tasks.
+Cost-view/edit permissions are implemented, default off for nonadmins; POS never
+shows costs. Conflicts page-menu icons now match. All-range date/time/preset work
+is in progress, not complete. Initial broad suites exposed stale test fixtures;
+focused repairs are passing but final integrated certification remains pending.
+Local main reconciliation e80624c5 is done; no new push or deployment claimed.
+Working tree: bos-supplier-settlement-20260918. Preserve primary dirty work.
+
 ## Approved private archive started — September 19
 
 Owner approved recommended local archival; prior pending-choice blocker resolved.
