@@ -18,7 +18,7 @@ function load(file) {
   }, mod, mod.exports)
   return mod.exports
 }
-const { recordedReturnCosts } = load(path.join(root, 'lib/returnCostAccess.ts'))
+const { recordedReturnCosts, fillOmittedReturnCosts } = load(path.join(root, 'lib/returnCostAccess.ts'))
 const { projectAcquisitionCosts } = load(path.join(root, 'lib/acquisitionCostAccess.ts'))
 const actor = permissions => ({ id: 7, username: 'employee', role_code: 'manager', permissions: JSON.stringify({ products: true, inventory: true, sales: true, backup: true, backup_restore: true, ...permissions }) })
 const rows = [{ id: 10, product_id: 1, cost_price_usd: 7, cost_price_khr: null }, { id: 11, product_id: 1, cost_price_usd: 8, cost_price_khr: null }]
@@ -26,14 +26,31 @@ assert.deepEqual(recordedReturnCosts({ sale_item_id: 10, product_id: 1, cost_pri
 assert.throws(() => recordedReturnCosts({ product_id: 1 }, rows, 'sale'), /different recorded costs/)
 assert.throws(() => recordedReturnCosts({ product_id: 2 }, rows, 'sale'), /unavailable/)
 assert.deepEqual(recordedReturnCosts({ product_id: 1 }, [{ id: 1, cost_price_usd: null, cost_price_khr: null }], 'catalog'), { cost_price_usd: null, cost_price_khr: null })
+// These merges run independently of visibility/entry grants: admin and blind
+// editor omissions retain economics just like ordinary cashiers.
+for (const source of ['sale', 'return', 'catalog']) {
+  const sourceRows = [{ id: source === 'catalog' ? 1 : 10, sale_item_id: 10, product_id: 1, cost_price_usd: 7, cost_price_khr: null }]
+  const item = { product_id: 1, ...(source === 'catalog' ? {} : { sale_item_id: 10 }) }
+  assert.deepEqual(fillOmittedReturnCosts(item, sourceRows, source), { cost_price_usd: 7, cost_price_khr: null })
+  assert.deepEqual(fillOmittedReturnCosts({ ...item, cost_price_usd: 0 }, sourceRows, source), { cost_price_usd: 0, cost_price_khr: null })
+  assert.deepEqual(fillOmittedReturnCosts({ ...item, cost_price_usd: null }, sourceRows, source), { cost_price_usd: null, cost_price_khr: null })
+  assert.deepEqual(fillOmittedReturnCosts({ ...item, unit_cost_khr: 28000 }, sourceRows, source), { cost_price_usd: 7, cost_price_khr: 28000 })
+}
 assert.deepEqual(projectAcquisitionCosts({ return_scope: 'supplier', total_refund_usd: 7, items: [{ applied_price_usd: 7, quantity: 1 }] }, actor({})), { return_scope: 'supplier', items: [{ quantity: 1 }] })
 assert.deepEqual(projectAcquisitionCosts({ actual_cost_usd: 3, delivery_actual_cost_usd: 3, cost_price_usd: 7 }, actor({})), { actual_cost_usd: 3, delivery_actual_cost_usd: 3 })
 const app = new Hono()
 app.onError((e, c) => c.json({ error: e.message }, e.message === 'D1 tripwire' ? 598 : 599))
 app.route('/imports', load(path.join(root, 'routes/importJobs.ts')).default)
 app.route('/backups', load(path.join(root, 'routes/backups.ts')).default)
+app.route('/returns', load(path.join(root, 'routes/returns.ts')).default)
 async function post(url, body) { return app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, {}) }
 async function main() {
+  user = actor({ returns: true, product_cost_edit: true })
+  opens = 0
+  const supplier = await post('/returns/supplier', { items: [{ product_id: 1, quantity: 1 }] })
+  assert.equal(supplier.status, 403)
+  assert.equal((await supplier.json()).code, 'product_cost_view_required')
+  assert.equal(opens, 0)
   for (const grant of [{}, { product_cost_view: true }, { product_cost_edit: true }, { all: true }]) {
     user = actor(grant)
     for (const type of ['products', 'inventory', 'sales', 'stock_actions']) {

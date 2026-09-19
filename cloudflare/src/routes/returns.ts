@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
-import { acquisitionCostResponses, canEditAcquisitionCosts, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
-import { recordedReturnCosts } from '../lib/returnCostAccess'
+import { acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
+import { fillOmittedReturnCosts } from '../lib/returnCostAccess'
 import { getDb } from '../lib/db'
 import { selectInChunks } from '../lib/sqlBinding'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
@@ -1456,12 +1456,10 @@ app.post('/', async (c) => {
       selling_price_usd,selling_price_khr,updated_at,is_active FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<ProductMeta>(chunk))
     for (const row of rows) productMap.set(Number(row.id), row)
   }
-  if (!canEditAcquisitionCosts(user)) {
-    try {
-      returnItems = returnItems.map(item => ({ ...item, ...recordedReturnCosts(item, requestedSaleId ? soldLines : [...productMap.values()], requestedSaleId ? 'sale' : 'catalog') }))
-    } catch (error) {
-      return c.json({ error: (error as Error).message, code: 'return_cost_source_review_required' }, 409)
-    }
+  try {
+    returnItems = returnItems.map(item => ({ ...item, ...fillOmittedReturnCosts(item, requestedSaleId ? soldLines : [...productMap.values()], requestedSaleId ? 'sale' : 'catalog') }))
+  } catch (error) {
+    return c.json({ error: (error as Error).message, code: 'return_cost_source_review_required' }, 409)
   }
   if (replacementInputs.some((input) => Number(productMap.get(Number(input.product_id))?.is_active || 0) !== 1)) {
     return c.json({ error: 'Each replacement line needs an active catalog product' }, 400)
@@ -1880,12 +1878,8 @@ app.post('/', async (c) => {
     const itemBranchId = Number(item.branch_id || branchId) || null
     const productName = item.product_name?.trim() || (productId ? productMap.get(productId)?.name : null) || null
     const stockAction = normalizeStockAction(item)
-    const unitCostUsd = isMoneyV1 || !canEditAcquisitionCosts(user)
-      ? item.cost_price_usd == null ? null : Number(item.cost_price_usd)
-      : toNumber(item.cost_price_usd ?? item.unit_cost_usd)
-    const unitCostKhr = isMoneyV1 || !canEditAcquisitionCosts(user)
-      ? item.cost_price_khr == null ? null : Number(item.cost_price_khr)
-      : toNumber(item.cost_price_khr ?? item.unit_cost_khr)
+    const unitCostUsd = item.cost_price_usd == null ? null : Number(item.cost_price_usd)
+    const unitCostKhr = item.cost_price_khr == null ? null : Number(item.cost_price_khr)
     const plan = returnLotPlans[index] || { splits: [], plainQuantity: 0 }
     const returnReceivedDate = new Date(Date.parse(occurredAt) + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
     const fallbackReceive = plan.plainQuantity > 0 && productId && itemBranchId ? planReceiveBatchStock({
@@ -2205,6 +2199,7 @@ app.post('/', async (c) => {
 app.post('/supplier', async (c) => {
   const user = c.get('user')
   if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Cost-entry permission is required to record supplier return costs and settlement.', code: 'product_cost_edit_required' }, 403)
+  if (!canViewAcquisitionCosts(user)) return c.json({ error: 'Cost-view permission is required to review supplier return compensation and settlement.', code: 'product_cost_view_required' }, 403)
   const db = getDb(c.env)
   // Per-action override (Part 546): supplier returns are the same 'add'
   // action as customer returns -- one switch covers both create routes.
@@ -2591,14 +2586,14 @@ app.patch('/:id', async (c) => {
     batch_id: number | null
   }>([id])
   let newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : existingItems
-  if (!canEditAcquisitionCosts(user) && Array.isArray(body.items)) {
+  if (Array.isArray(body.items)) {
     const sourceRows = existing.sale_id
       ? await db.prepare('SELECT id,product_id,branch_id,cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=?').all<Record<string, unknown>>([existing.sale_id])
       : await selectInChunks([...new Set(newItems.map(item => Number(item.product_id)).filter(id => id > 0))], 0, chunk => db.prepare(`SELECT id,cost_price_usd,cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<Record<string, unknown>>(chunk))
     try {
       newItems = newItems.map(item => {
         const previous = existingItems.filter(row => Number(row.product_id) === Number(item.product_id) && (item.branch_id == null || row.branch_id === item.branch_id))
-        const costs = previous.length ? recordedReturnCosts(item, previous, 'return') : recordedReturnCosts(item, sourceRows, existing.sale_id ? 'sale' : 'catalog')
+        const costs = previous.length ? fillOmittedReturnCosts(item, previous, 'return') : fillOmittedReturnCosts(item, sourceRows, existing.sale_id ? 'sale' : 'catalog')
         return { ...item, ...costs }
       })
     } catch (error) {
