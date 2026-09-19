@@ -191,6 +191,8 @@ function pillClass(active: boolean, outOfStock: boolean = false): string {
 }
 
 interface ProductDetailSheetProps {
+  /** POS shows selling prices in USD and never exposes product costs. */
+  posPresentation?: boolean
   product: ProductRecord
   exchangeRate: number
   t: Translate
@@ -258,6 +260,7 @@ interface ProductDetailSheetProps {
 }
 
 export default function ProductDetailSheet({
+  posPresentation = false,
   product,
   exchangeRate,
   t,
@@ -302,7 +305,7 @@ export default function ProductDetailSheet({
   // enforces server-side (productCost.ts's canReadCost), so a cashier with
   // neither grant never sees it even though this sheet itself is reachable
   // by every POS role.
-  const canReadCost = getPermissionTier('products') !== 'none' || getPermissionTier('inventory') !== 'none'
+  const canReadCost = !posPresentation && (getPermissionTier('products') !== 'none' || getPermissionTier('inventory') !== 'none')
   const [costFloatTarget, setCostFloatTarget] = useState<{ id: number | string; name: string } | null>(null)
   const variants = getVariantChoices(product)
   const groupProduct = hasVariantChoices(product)
@@ -782,7 +785,7 @@ export default function ProductDetailSheet({
   const sheet = (
     <>
     <div className={`fixed inset-0 bg-black/50 ${portal ? 'z-[1080]' : 'z-50'} flex items-end sm:items-center justify-center p-0 sm:p-4`} onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-modal-80 flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
+      <div className={`bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-modal-80 flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-0 ${posPresentation ? '[&_.btn-primary]:min-h-9 [&_.btn-primary]:px-2 [&_.btn-primary]:py-1.5 [&_.btn-primary]:text-xs [&_.btn-primary]:whitespace-normal [&_.btn-secondary]:min-h-9 [&_.btn-secondary]:px-2 [&_.btn-secondary]:py-1.5 [&_.btn-secondary]:text-xs [&_.btn-secondary]:whitespace-normal [&_button]:min-w-0 [&_button]:break-words' : ''}`} onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-3 min-w-0">
             <button
@@ -820,9 +823,9 @@ export default function ProductDetailSheet({
           <div className="flex gap-3">
             <span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('selling_price') || 'Selling'}</span>
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-              <span><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</span>
+              <span><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{!posPresentation && asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</span>
               {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
-                <span><span className="text-xs text-gray-400 mr-1">{t('wholesale_price') || 'Wholesale price'}</span><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</span>
+                <span><span className="text-xs text-gray-400 mr-1">{t('wholesale_price') || 'Wholesale price'}</span><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{!posPresentation && asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</span>
               ) : null}
               {/* P10-11 (owner ruling, 2026-09-17): the POS sheet never showed
                   cost at all -- gated to the same products-OR-inventory view
@@ -844,7 +847,7 @@ export default function ProductDetailSheet({
             </div>
           </div>
           {promotion.active ? (
-            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span> : null}</div></div>
+            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{!posPresentation && (promotion.applied_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span> : null}</div></div>
           ) : null}
           {/* One stock number, for the row and branch that Steps 1-2 actually
               resolved to -- the same figure the option pills show and the same
@@ -1183,7 +1186,7 @@ export default function ProductDetailSheet({
         ) : null}
       </div>
     </div>
-    {costFloatTarget ? (
+    {canReadCost && costFloatTarget ? (
       <CostCalculationFloat
         productId={costFloatTarget.id}
         productName={costFloatTarget.name}
