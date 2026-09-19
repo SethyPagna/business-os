@@ -171,7 +171,11 @@ const batchUrls = ['/batches/tracked-product-ids', '/batches?productId=1&branchI
   // Compat Dashboard has its own independent authority; section revocations
   // must not turn it into a Sales/Inventory page gate.
   await reachesData('/dashboard', staff({ dashboard: true }, revoked))
-  await reachesData('/import-jobs', staff({ products: true }, { 'products:view': false }))
+  await reachesData('/import-jobs', staff({ products: true, product_cost_view: true }, { 'products:view': false }))
+  reads = 0
+  const hiddenImports = await request('/import-jobs', staff({ products: true }, { 'products:view': false }))
+  assert.equal(hiddenImports.status, 200)
+  assert.equal(reads, 0, 'financial imports without explicit cost-view grant are not read')
   await reachesData('/system/drive-sync/status', staff({ settings: true }, { 'settings:view': false }))
   assert.equal((await request('/returns', null)).status, 401)
   console.log(`PASS ${checks} real Hono requests: effective read denials, admin matrix, alternate grants, domain isolation and independent writes`)

@@ -37,6 +37,7 @@ function loadTs(relativePath, stubs = {}) {
 }
 
 const permissions = loadTs('lib/permissions.ts')
+const acquisitionCostAccess = loadTs('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const media = loadTs('lib/media.ts')
 const sqlBinding = loadTs('lib/sqlBinding.ts')
 const productImagePermission = loadTs('lib/productImagePermission.ts', { './media': media, './sqlBinding': sqlBinding })
@@ -178,6 +179,7 @@ function loadImportRoute(state) {
     '../lib/auth': { requireAuth },
     '../lib/db': { getDb: () => db },
     '../lib/permissions': permissions,
+    '../lib/acquisitionCostAccess': acquisitionCostAccess,
     '../lib/media': media,
     '../lib/importEngine': importEngine,
     '../lib/productImagePermission': productImagePermission,
@@ -235,7 +237,14 @@ async function request(state, routePath, method = 'POST', body = {}) {
 }
 
 async function main() {
-  const blocked = () => role({ products: true, 'products:image': false })
+  const blocked = () => role({ products: true, product_cost_edit: true, 'products:image': false })
+  {
+    const state = freshState(role({ products: true, 'products:image': true }))
+    const response = await request(state, '/job-1/approve')
+    assert.equal(response.status, 403)
+    assert.equal((await response.json()).code, 'product_cost_edit_required')
+    assert.equal(state.dbWrites + state.queue.length, 0)
+  }
 
   {
     const state = freshState(blocked())
@@ -364,7 +373,7 @@ async function main() {
   }
 
   {
-    const state = freshState(role({ products: true, 'products:image': true }), { status: 'failed', analyzedRows: [resultRow('update', '/uploads/new.png')] })
+    const state = freshState(role({ products: true, product_cost_edit: true, 'products:image': true }), { status: 'failed', analyzedRows: [resultRow('update', '/uploads/new.png')] })
     const response = await request(state, '/job-1/retry')
     assert.equal(response.status, 200)
     assert.equal(JSON.parse(state.job.policy_json).apply_authorized_by_id, state.user.id)
@@ -373,7 +382,7 @@ async function main() {
   }
 
   {
-    const state = freshState(role({ products: true }))
+    const state = freshState(role({ products: true, product_cost_edit: true }))
     const response = await request(state, '/job-1/images/wire')
     assert.equal(response.status, 200)
     assert.equal(state.dbWrites, 1)

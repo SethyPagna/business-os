@@ -13,6 +13,14 @@ const { D1Compat } = require('./harness/d1compat.cjs')
 
 const srcRoot = path.join(__dirname, '..', 'src')
 const routePath = path.join(srcRoot, 'routes', 'importJobs.ts')
+function loadPure(name, dependencies = {}) {
+  const file = path.join(srcRoot, 'lib', name + '.ts')
+  const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const mod = { exports: {} }
+  new Function('require', 'module', 'exports', output)(name => dependencies[name] || require(name), mod, mod.exports)
+  return mod.exports
+}
+const acquisitionCostAccess = loadPure('acquisitionCostAccess', { './permissions': loadPure('permissions') })
 
 function newDb() {
   const raw = new DatabaseSync(':memory:')
@@ -98,6 +106,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === '../lib/db') return { getDb: () => activeDb }
   if (request === '../lib/auth') return auth
   if (request === '../lib/permissions') return permissions
+  if (request === '../lib/acquisitionCostAccess') return acquisitionCostAccess
   if (request === '../index') return {}
   if (request.startsWith('../lib/') || request.startsWith('../durable-objects/')) return fallback
   return originalLoad.call(this, request, parent, isMain)
@@ -181,7 +190,7 @@ async function main() {
     const calls = []
     const listed = [{ id: 'visible', type: 'products', policy_json: '{}', summary_json: '{}' }]
     const env = {
-      TEST_USER: { grants: { products: true } },
+      TEST_USER: { grants: { products: true }, permissions: JSON.stringify({ product_cost_view: true }) },
       DB: rawListBinding({ rows: listed, calls }),
     }
     const response = await app.request('/', {}, env)
@@ -203,7 +212,7 @@ async function main() {
   {
     activeDb = instrumentDb(newDb(), { failProbe: true })
     const response = await app.request('/', {}, {
-      TEST_USER: { grants: { products: true } },
+      TEST_USER: { grants: { products: true }, permissions: JSON.stringify({ product_cost_view: true }) },
       DB: rawListBinding({ fail: true, calls: [] }),
     })
     assert.equal(response.status, 500)

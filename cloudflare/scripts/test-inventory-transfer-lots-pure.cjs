@@ -93,6 +93,7 @@ const taggedLotActions = loadModule('lib/damagedLotActions.ts', (id) => {
   return require(id)
 })
 const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
+  if (id === '../lib/acquisitionCostAccess') return loadModule('lib/acquisitionCostAccess.ts', dep => dep === './permissions' ? loadModule('lib/permissions.ts', require) : require(dep))
   if (id === '../lib/stockCondition') return taggedStockCondition
   if (id === '../lib/damagedLotActions') return taggedLotActions
   if (id === '../lib/moneyPrecision') return moneyPrecision
