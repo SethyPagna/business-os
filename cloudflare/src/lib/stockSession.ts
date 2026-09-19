@@ -7,7 +7,7 @@ import { dateToBatchCode, normalizeTypedDate } from './batchCode'
 import { identityBarcodeKey, barcodeIdentityMatches, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductGroupName } from './productDetailRule'
 import { identityBarcodeMatchSql } from './productIdentity'
 import { barcodeKeysMatch } from './searchMatch'
-import { planReceiveBatchStock, type StockWriteStatement } from './productBatches'
+import { planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate, type ReceiptLotTarget, type StockWriteStatement } from './productBatches'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from './stockReceiptGate'
 import { normalizeMultiValue, planInsertRow, tableColumns, validateProductImageGallery } from './productWrites'
 import { sanitizeMediaList, sanitizeMediaPath } from './media'
@@ -477,6 +477,8 @@ function assertion(predicate: string, params: Row = {}): StockWriteStatement {
 // are resolved with their revisions in that statement. Retained revisions
 // detect ABA; changing the resolved row id also changes the fence. Equal
 // fences prove the preimages and the later commit guards share one state.
+// Auto-receipt resolution can choose any same-date/equal-price eligible lot,
+// so the fence includes every lot of each requested product, not date-key only.
 async function snapshotFence(db: D1Compat, request: StockSessionRequest): Promise<string> {
   const pairs: Array<[string, string]> = []
   const targets: Array<{ product: number; branch: number; batch: number | null; key: string }> = []
@@ -506,7 +508,7 @@ async function snapshotFence(db: D1Compat, request: StockSessionRequest): Promis
     ), lots AS (
       SELECT pb.id,pb.variant_product_id,pb.batch_key,t.branch FROM targets t JOIN product_batches pb
       ON pb.variant_product_id=t.product AND ((t.batch IS NOT NULL AND pb.id=t.batch)
-        OR (t.batch IS NULL AND pb.batch_key=t.batch_key))
+        OR t.batch IS NULL)
     ), revision_sources(groups_json) AS (
       SELECT json_object(
         'requested',json(@pairs),
@@ -721,7 +723,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   // request itself -- fanned into one Promise.all instead of five
   // sequential round trips (dateBatch lookup, memoized schema probe, active
   // branches, duplicate-name candidates, image asset lookup).
-  const [possibleDateBatches, productColumns, activeBranches, duplicateCandidates, assets] = await Promise.all([
+  const [possibleDateBatches, productColumns, activeBranches, duplicateCandidates, assets, costBaselines] = await Promise.all([
     rowsIn<Row>(db, dateBatchLines.map((line) => line.product_id as number), 'variant_product_id', 'SELECT * FROM product_batches'),
     createLines.length ? tableColumns(env, 'products') : Promise.resolve(new Set<string>()),
     stockCreateLines.length ? db.prepare('SELECT id FROM branches WHERE is_active=1 ORDER BY id').all<Row>() : Promise.resolve([] as Row[]),
@@ -729,11 +731,28 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       ? db.prepare(`SELECT id,name,barcode,cost_price_usd,cost_price_khr FROM products WHERE is_active=1 AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' '))) IN (${duplicateNameClause.sql})`).all<Row>(duplicateNameClause.params)
       : Promise.resolve([] as Row[]),
     rowsIn<Row>(db, imagePaths, 'public_path', 'SELECT id,public_path FROM file_assets'),
+    rowsIn<Row>(db, receiveIds, 'p.id', 'SELECT p.id product_id,(SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=p.id ORDER BY id DESC LIMIT 1) baseline_batch_id FROM products p'),
   ])
+  const baselineByProduct = new Map(costBaselines.map(row => [Number(row.product_id), Number(row.baseline_batch_id) || 0]))
+  const receiptTargets = new Map<string, ReceiptLotTarget>()
+  for (const line of request.items.filter(item => item.quantity > 0)) {
+    const rows = line.batch_id != null ? explicitBatches : possibleDateBatches
+    const lots = rows.filter(row => row.variant_product_id === line.product_id).map(row => ({
+      id: Number(row.id), batch_key: String(row.batch_key), received_at: row.received_at == null ? null : String(row.received_at),
+      unit_cost_usd: row.unit_cost_usd == null ? null : Number(row.unit_cost_usd),
+    } satisfies ReceiptLotCandidate))
+    try {
+      receiptTargets.set(line.line_id, resolveReceiptLotTarget(lots, line.received_date, line.unit_cost_usd,
+        baselineByProduct.get(line.product_id as number) || 0, line.batch_id))
+    } catch {
+      fail('Selected batch price or override baseline changed; choose a new receipt batch.', 409, 'batch_cost_mismatch')
+    }
+  }
+  const receiptBatchKey = (line: CanonicalLine) => receiptTargets.get(line.line_id)?.batchKey ?? receivedBatchKey(line.received_date)
   const dateBatchMap = new Map(possibleDateBatches.map((row) => [`${row.variant_product_id}:${row.batch_key}`, row]))
   const relevantBatches = [...explicitBatches]
   for (const line of dateBatchLines) {
-    const key = `${line.product_id}:${receivedBatchKey(line.received_date)}`
+    const key = `${line.product_id}:${receiptBatchKey(line)}`
     const batch = dateBatchMap.get(key)
     if (batch && !relevantBatches.some((row) => row.id === batch.id)) relevantBatches.push(batch)
   }
@@ -799,7 +818,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       ? db.prepare(`SELECT * FROM branch_batch_stock WHERE batch_id IN (${buildInClause('batch', existingBatchIds).sql}) AND branch_id IN (${buildInClause('branch', [...new Set(branchIds)]).sql})`)
         .all<Row>({ ...buildInClause('batch', existingBatchIds).params, ...buildInClause('branch', [...new Set(branchIds)]).params })
         .then((rows) => rows.filter((row) => request.items.some((line) => {
-          const batch = line.batch_id != null ? explicitBatchMap.get(line.batch_id) : dateBatchMap.get(`${line.product_id}:${receivedBatchKey(line.received_date)}`)
+          const batch = line.batch_id != null ? explicitBatchMap.get(line.batch_id) : dateBatchMap.get(`${line.product_id}:${receiptBatchKey(line)}`)
           return batch?.id === row.batch_id && line.branch_id === row.branch_id
         })))
       : Promise.resolve([] as Row[]),
@@ -816,7 +835,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   for (const row of relevantBatches) revisionPairs.push(['batch', String(row.id)])
   for (const line of request.items.filter((item) => item.kind === 'receive')) {
     const explicit = line.batch_id == null ? null : explicitBatchMap.get(line.batch_id)
-    const batchKey = explicit ? String(explicit.batch_key) : receivedBatchKey(line.received_date)
+    const batchKey = explicit ? String(explicit.batch_key) : receiptBatchKey(line)
     revisionPairs.push(['batch_identity', `${line.product_id}:${batchKey}`])
     revisionPairs.push(['branch_stock', `${line.product_id}:${line.branch_id}`])
     const batch = line.batch_id != null ? explicitBatchMap.get(line.batch_id) : dateBatchMap.get(`${line.product_id}:${batchKey}`)
@@ -847,7 +866,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   for (const row of relevantBatches) statements.push(revisionAssertion('batch', String(row.id), 'EXISTS(SELECT 1 FROM product_batches WHERE id=@id AND variant_product_id=@product AND batch_key=@batchKey)', { id: row.id, product: row.variant_product_id, batchKey: row.batch_key }, rev('batch', row.id)))
   for (const line of request.items.filter((item) => item.kind === 'receive')) {
     const explicit = line.batch_id == null ? null : explicitBatchMap.get(line.batch_id)
-    const targetBatchKey = explicit ? String(explicit.batch_key) : receivedBatchKey(line.received_date)
+    const targetBatchKey = explicit ? String(explicit.batch_key) : receiptBatchKey(line)
     const identity = `${line.product_id}:${targetBatchKey}`
     const batch = line.batch_id != null ? explicitBatchMap.get(line.batch_id) : dateBatchMap.get(identity)
     statements.push(revisionAssertion('batch_identity', identity, batch
@@ -980,11 +999,12 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       notes: line.notes, batchId: line.batch_id, supplierId: line.supplier_id,
       supplierName: line.supplier_name, unitCostUsd: line.unit_cost_usd,
       paymentStatus: line.payment_status, creditDueDate: line.credit_due_date,
+      receiptLotTarget: receiptTargets.get(line.line_id),
       receiptCostPreimage: line.unit_cost_usd == null ? undefined : (() => {
         const batch = line.kind === 'receive'
           ? line.batch_id != null
             ? explicitBatchMap.get(line.batch_id)
-            : dateBatchMap.get(`${line.product_id}:${receivedBatchKey(line.received_date)}`)
+            : dateBatchMap.get(`${line.product_id}:${receiptBatchKey(line)}`)
           : null
         return { batchExists: Boolean(batch), receivedCostUsd: batch?.received_cost_usd == null ? null : Number(batch.received_cost_usd) }
       })(),
@@ -1223,11 +1243,20 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
         ? { stock_quantity: row.stock_quantity, is_active: row.is_active, updated_at: row.updated_at, barcode: row.barcode, cost_price_usd: row.cost_price_usd, cost_price_khr: row.cost_price_khr }
         : original ? { stock_quantity: original.stock_quantity, updated_at: original.updated_at, barcode: original.barcode, cost_price_usd: original.cost_price_usd, cost_price_khr: original.cost_price_khr }
           : { stock_quantity: 0, is_active: 0 }
+      if (key === 'products' && target) {
+        const costSource = direction === 'redo' ? row : original
+        // Catalog recomputation also writes the purchase-price mirror. Restore
+        // it from the same durable snapshot, never recalculate history using
+        // today's formula. Older snapshots without a mirror remain untouched.
+        for (const field of ['purchase_price_usd', 'purchase_price_khr']) {
+          if (costSource && Object.prototype.hasOwnProperty.call(costSource, field)) target[field] = costSource[field]
+        }
+      }
       if (key === 'batches' && !target) {
         // Retain the lot identity for immutable members/receipts and exact
         // redo, but remove attribution belonging solely to this undone
-        // receipt. A later same-date receipt reuses the row and fills NULL
-        // first-attribution fields; retaining A/credit would charge B's paid
+        // receipt. A later same-date unknown-cost receipt can reuse the row
+        // and fill NULL fields; retaining A/credit would charge B's paid
         // receipt to A. The saved after postimage still restores A on redo,
         // unless reuse has advanced the retained revision guard.
         target = {

@@ -131,6 +131,65 @@ export type ReceiptCostPreimage = {
   receivedCostUsd: number | null
 }
 
+export type ReceiptLotCandidate = {
+  id: number
+  batch_key: string
+  received_at: string | null
+  unit_cost_usd: number | null
+}
+export type ReceiptLotTarget = {
+  batchKey: string
+  baselineBatchId: number
+  existingBatchId: number | null
+}
+
+/** Prospective receipt identity. Dates remain display labels, not price identity. */
+export function resolveReceiptLotTarget(
+  lots: ReceiptLotCandidate[],
+  receivedAt: string,
+  unitCostUsd: number | null,
+  baselineBatchId: number,
+  explicitBatchId?: number | null,
+): ReceiptLotTarget {
+  // Do not normalize an old recorded cost: a legacy five-place price is
+  // distinct from a newly entered four-place price, never silently rewritten.
+  const sameCost = (lot: ReceiptLotCandidate) => lot.unit_cost_usd === unitCostUsd
+  if (explicitBatchId != null) {
+    const lot = lots.find(candidate => Number(candidate.id) === explicitBatchId)
+    if (!lot || lot.id <= baselineBatchId || !sameCost(lot)) {
+      throw new Error('Selected batch price or override baseline changed; choose a new receipt batch.')
+    }
+    return { batchKey: lot.batch_key, baselineBatchId, existingBatchId: lot.id }
+  }
+  const eligible = lots.filter(lot => lot.id > baselineBatchId
+    && String(lot.received_at || '').slice(0, 10) === receivedAt && sameCost(lot))
+    .sort((a, b) => a.id - b.id)[0]
+  if (eligible) return { batchKey: eligible.batch_key, baselineBatchId, existingBatchId: eligible.id }
+  // Deterministic identity makes competing equal-price receipts collide at
+  // the guarded insert. Explicit zero and unknown cost never share identity.
+  const key = ` receipt:${receivedAt}:cost:${unitCostUsd === null ? 'unknown' : unitCostUsd}:after:${baselineBatchId}`
+  // A later authorized lot correction may have changed the price on a row
+  // originally created under this key. Its durable identity must not move.
+  const batchKey = lots.some(lot => lot.batch_key === key)
+    ? `${key}:next:${Math.max(...lots.map(lot => Number(lot.id)))}` : key
+  return { batchKey,
+    baselineBatchId, existingBatchId: null }
+}
+
+export async function prepareReceiptLotTarget(db: D1Compat, input: {
+  productId: number; receivedDate?: string | null; unitCostUsd?: number | null;
+  batchId?: number | null; preserveHistoricalUnitCost?: boolean;
+}): Promise<ReceiptLotTarget> {
+  const [lots, baseline] = await Promise.all([
+    db.prepare('SELECT id,batch_key,received_at,unit_cost_usd FROM product_batches WHERE variant_product_id=@productId')
+      .all<ReceiptLotCandidate>({ productId: input.productId }),
+    db.prepare('SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@productId ORDER BY id DESC LIMIT 1')
+      .get<{ baseline_batch_id: number }>({ productId: input.productId }),
+  ])
+  return resolveReceiptLotTarget(lots, normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10),
+    unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true), Number(baseline?.baseline_batch_id) || 0, input.batchId)
+}
+
 export type StockWriteStatement = {
   sql: string
   params?: Record<string, unknown> | unknown[]
@@ -158,6 +217,8 @@ export type ReceiveBatchPlanInput = {
    * preimage inside the same D1 batch instead of relying on SQLite REAL math.
    */
   receiptCostPreimage?: ReceiptCostPreimage
+  /** Server-resolved target; never read directly from an operator payload. */
+  receiptLotTarget?: ReceiptLotTarget
   /** Internal provenance key, e.g. a return event; never an operator lot code. */
   provenanceKey?: string
 }
@@ -184,10 +245,9 @@ export type ReceiveBatchStatementPlan = {
 // sold. A lot that is merely zeroed but still "live" (is_active = 1,
 // because stock of it still sits somewhere) is NOT this case and keeps
 // first-attribution-sticks like any other lot.
-// Known limit, not changed here: two same-day receipts from DIFFERENT
-// suppliers share one lot (batch_key is the date code), and the first
-// attribution outlives the receipt it belonged to once a second receipt
-// has topped the lot up. Attribution is per lot, not per receipt.
+// Prospective receipt resolution only reuses equal-cost lots after the
+// latest manual override. Equal-cost same-day receipts from different
+// suppliers can still share attribution; this policy remains per lot.
 // Unqualified names are the stored row both in an UPDATE and in an upsert's
 // DO UPDATE SET, so one fragment serves both receipt shapes below.
 const LOT_ATTRIBUTION_SET_SQL = `
@@ -213,7 +273,7 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   if (!Number.isSafeInteger(branchId) || branchId <= 0) throw new Error('A valid branch is required')
   const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
   const lotCode = dateToBatchCode(receivedAt) as string
-  const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : lotCode
+  const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : input.receiptLotTarget?.batchKey ?? lotCode
   const unitCostUsd = unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true)
   const receivedCost = receiptCostUsd(unitCostUsd, quantity)
   if (unitCostUsd !== null && !input.receiptCostPreimage) {
@@ -248,6 +308,8 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
     receivedCostBefore: input.receiptCostPreimage?.receivedCostUsd ?? null,
     receivedCostAfter,
     receivedCostBatchExists: input.receiptCostPreimage?.batchExists ? 1 : 0,
+    receiptBaseline: input.receiptLotTarget?.baselineBatchId ?? 0,
+    receiptExistingBatchId: input.receiptLotTarget?.existingBatchId ?? null,
   }
   const productIdSql = productClientRequestId
     ? `(SELECT id FROM products WHERE client_request_id = @productClientRequestId AND client_request_id <> '')`
@@ -299,6 +361,16 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
     receivedAt,
     params,
     statements: [
+      ...(input.receiptLotTarget ? [{
+        sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN
+          COALESCE((SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=${productIdSql} ORDER BY id DESC LIMIT 1),0)=@receiptBaseline
+          AND ((@receiptExistingBatchId IS NULL AND NOT EXISTS (
+            SELECT 1 FROM product_batches WHERE variant_product_id=${productIdSql} AND batch_key=@batchKey))
+          OR EXISTS (SELECT 1 FROM product_batches WHERE id=@receiptExistingBatchId
+            AND variant_product_id=${productIdSql} AND batch_key=@batchKey
+            AND id>@receiptBaseline AND unit_cost_usd IS @unitCostUsd))
+          THEN 1 ELSE 0 END`, params,
+      }] : []),
       ...(receivedCost === null ? [] : [{
         sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE
           WHEN @receivedCostBatchExists = 1 THEN EXISTS(
@@ -457,8 +529,9 @@ async function nextBatchNumber(db: D1Compat, productId: number): Promise<number>
 // The batch code is no longer an operator-typed lot code -- "lot code can
 // be removed... batch column is just a translated version of received
 // date" (see lib/batchCode.ts's dateToBatchCode) -- so a receipt on the
-// same calendar date as an existing batch on this product naturally tops
-// that batch up, the same way a matching typed lot code used to.
+// same calendar date and same recorded price can top up an eligible lot.
+// Different prices or a newer manual override need a new internal identity;
+// the visible date code is unchanged. Explicit mismatches fail closed.
 //
 // Also the ONLY place that should ever move branch_batch_stock, since it's
 // the one function that keeps three figures in sync atomically: the
@@ -505,6 +578,8 @@ export async function receiveBatchStock(db: D1Compat, input: {
   creditDueDate?: string | null
   provenanceKey?: string
   preserveHistoricalUnitCost?: boolean
+  /** Internal stock-revert only: replay the recorded lot, not a new purchase. */
+  historicalReceiptReplay?: boolean
   // P4-4a: statements that need this receipt's own resolved batch_id (e.g. an
   // inventory_movements row logging the receipt) but can only be built once
   // batchKey is known -- built here, after that, and folded into the SAME
@@ -516,7 +591,10 @@ export async function receiveBatchStock(db: D1Compat, input: {
   buildBatchStatements?: (ctx: { batchKey: string; lotCode: string; resolvedBatchIdSql: string }) => StockWriteStatement[]
 }): Promise<{ batchId: number; created: boolean; batchNumber: number | null; lotCode: string }> {
   const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
-  const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : dateToBatchCode(receivedAt) as string
+  let receiptLotTarget: ReceiptLotTarget | undefined
+  if (input.historicalReceiptReplay && input.batchId == null) throw new Error('Historical receipt replay requires its recorded batch')
+  if (!input.provenanceKey && !input.historicalReceiptReplay) receiptLotTarget = await prepareReceiptLotTarget(db, input)
+  const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : receiptLotTarget?.batchKey ?? dateToBatchCode(receivedAt) as string
   const before = input.batchId != null
     ? await db.prepare(
       'SELECT id,received_cost_usd FROM product_batches WHERE id = @id AND variant_product_id = @productId',
@@ -528,6 +606,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
   const hasEnteredCost = input.unitCostUsd != null
   const plan = planReceiveBatchStock({
     ...input,
+    receiptLotTarget,
     receiptCostPreimage: hasEnteredCost
       ? { batchExists: Boolean(before), receivedCostUsd: before?.received_cost_usd ?? null }
       : undefined,
@@ -539,7 +618,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
     : []
   await db.batch([
     ...plan.statements,
-    ...(hasEnteredCost ? [{ sql: 'DELETE FROM stock_session_guards', params: {} }] : []),
+    ...(hasEnteredCost || receiptLotTarget ? [{ sql: 'DELETE FROM stock_session_guards', params: {} }] : []),
     ...extraStatements,
   ])
   const batch = await db.prepare(
