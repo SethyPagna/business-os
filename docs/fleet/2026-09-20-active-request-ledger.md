@@ -39,6 +39,28 @@ Received/expiry/due dates and promotion scheduling fields are not implicitly cha
 
 ## Earlier open work retained
 
+### Latest owner decisions and full-ledger reconciliation
+
+- Expenses: timed ranges use entry timestamps; full-day ranges retain booked dates, matching Reports. Cross-layer implementation remains pending.
+- Shift: optional full cash comparison (opening + additions + cash sales - cash refunds - expenses, with existing courier treatment reviewed separately). Differences never require a match or block closing/returns. Existing close-always and reconciliation tests pass; do not remove refund accounting. Owner describes the comparison as an admin view; authorization/UI review remains tracked.
+- Help: concise EN/KM contact/import copy, semantic guide bullets, viewport-constrained scrollable help, long-token wrapping and keyboard/pointer behavior implemented. Responsive native-browser tests pass. Build detected a helper chunk cycle and the helper was relocated; final integrated rebuild pending.
+- Frontend broad run: 490/490 pass, no skips. Worker full rerun pending; customer-return cancellation native test intermittently terminates with no diagnostic output, with one full isolated pass. This is unresolved verification instability, not proof of a return logic defect or a green gate.
+
+Older public work explicitly retained:
+
+| Item | Evidence / remaining work |
+| --- | --- |
+| P9-3 public policy wording | Dirty draft in preserved lane-p9-public-home; verify actual retention before stating definite promises. |
+| P9-4 chat-first assistant | Current UI profile-first. Unmerged 551a42ba is backend history only; implement composer/conversation, optional preferences, consent, bounded context and stale-response fencing. |
+| P9-5 front-page collections | Featured/trending/bestseller badges exist; requested separate collections absent. |
+| P9-6 account recovery | Partial dirty backend/transport draft, no recovery UI. Draft migration0170 conflicts with existing history; requires new append-only migration and security review. |
+
+Preserve all three older lane folders under the Claude scratchpad; no draft is assumed integrated.
+Additional omitted issues: old precision refusal/cancellation/null-snapshot cases need reproduction;
+logged-in tagged-stock smoke, CPU/expression-depth incident provenance, iOS input-size fixme,
+legal identity/markets/image-rights facts and Telegram token rotation require evidence.
+Do not reopen already completed supplier settlement0183, Program11 or sales-lineage fixes.
+
 Account-owned offline replay, logout/stale-read cases, reproduced inline queue loss,
 Free/Paid transfer budgets and quota checks, maintainability cleanup, ambiguous historical
 customer/lot provenance, physical continuous-80mm printing, universal UI consistency,
