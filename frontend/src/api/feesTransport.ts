@@ -2,6 +2,7 @@ import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { dispatchResolvedSyncError } from '../utils/syncProblemLifecycle.ts'
 import { MoneyPrecisionError, nativeChangeAmounts, type DecimalInput } from '../utils/moneyPrecision.ts'
+import { reportUtcBound } from '../components/sales/reports/reportModel.ts'
 
 // Frontend transport for the Fees page (cloudflare/src/routes/fees.ts).
 // No local/offline mirror -- same reasoning as notesTransport.ts: a failed
@@ -55,11 +56,28 @@ export type FeeListParams = {
   fee_type?: string
   from?: string
   to?: string
+  createdFrom?: string
+  createdTo?: string
   sale_id?: number | string
   branch_id?: number | string
   delivery_contact_id?: number | string
   limit?: number
   offset?: number
+}
+
+/** Same continuous Cambodia endpoint semantics as Reports: selected end
+ * minute included; full-day ranges retain the booked fee_date basis. */
+export function feeRangeParams(range: { startDate: string; endDate: string; startTime?: string; endTime?: string }): Pick<FeeListParams, 'from' | 'to' | 'createdFrom' | 'createdTo'> {
+  const params: Pick<FeeListParams, 'from' | 'to' | 'createdFrom' | 'createdTo'> = {
+    from: range.startDate || undefined, to: range.endDate || undefined,
+  }
+  const startTime = range.startTime || '00:00'
+  const endTime = range.endTime || '23:59'
+  if (startTime === '00:00' && endTime === '23:59') return params
+  const createdFrom = reportUtcBound(range.startDate, startTime)
+  const createdTo = reportUtcBound(range.endDate, endTime, 1)
+  if (!createdFrom || !createdTo || createdFrom >= createdTo) throw new RangeError('Expense end date/time must be after the start date/time; both dates are required.')
+  return { ...params, createdFrom, createdTo }
 }
 
 export type FeePayload = {

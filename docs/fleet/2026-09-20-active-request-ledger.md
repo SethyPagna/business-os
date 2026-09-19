@@ -3,6 +3,15 @@
 This supplements, not replaces, earlier issue ledgers and screenshots/video evidence.
 Recorded means tracked; implemented does not mean verified or deployed.
 
+## Latest owner priority and release truth
+
+- Complete remaining admin work first, then public work; retain all historical tasks.
+- Public decision supersedes the temporary hide-all interpretation: retain optional selling-price display and reasonable copy friction. Costs, wholesale prices and internal/personal business data must not reach public responses or the public AI. Visible selling prices cannot be guaranteed uncopiable.
+- Completion requires regression evidence, adversarial review, deployment provenance and real Free/Paid capacity assessment, not merely successful bundle builds. Existing goal-tool state remains blocked from earlier archival work; this does not mean the broadened completion goal was achieved.
+- Deployed checkpoint: fdcee3fe685d / Worker07362be0-f996-4c89-a5e3-1e551c25b8c6. Older status rows below are historical and superseded where this entry or the release report provides newer evidence.
+- Prospective cost candidate through17b610f7 is NOT deployed; migration0184 is NOT remotely applied. Independent bounded review reran20scripts successfully. Final frontend typecheck/i18n/build passed;268emitted chunks, zero cycles. One unused inventory import was removed after the zombie-import gate flagged it; focused rerun follows.
+- Next bounded admin slice: Expenses timed-entry versus full-day booked-date parity. Account-owned offline replay, inline queue loss, remaining date hosts, transfer budgets, Free-tier capacity, old audit findings and safe folder consolidation remain open.
+
 ## Current acceptance checklist
 
 | Request | Current evidence/status | Remaining acceptance |

@@ -23,7 +23,7 @@ const libDir = path.join(__dirname, '..', 'src', 'lib')
 const REAL = new Set([
   'batchCode', 'importNumbers', 'stockActionResolver', 'stockActionImport',
   'stockActionCatalog', 'stockActionCommit', 'sqlBinding', 'productDetailRule',
-  'branchRoles', 'importBranchAuthority',
+  'branchRoles', 'importBranchAuthority', 'stockReceiptGate',
   'phone',
   // productIdentity carries identityBarcodeKeySql -- the ONE SQL spelling of the
   // fold the bounded catalog query uses. Stubbing it would let this test pass
@@ -156,7 +156,7 @@ function seedCatalog(sqlite) {
       { _rowNumber: 7, barcode: 'ZZZ', name: 'Solo Cream', quantity: '5' },
       { _rowNumber: 8, barcode: '', name: 'Solo Cream', quantity: '5' },
     ]
-    const results = await classifyInventory(db, rows, 'add')
+    const results = await classifyInventory(db, rows.map(row => ({ unit_cost_usd: '3.1234', ...row })), 'add')
     const byRow = new Map(results.map((r) => [r.rowNumber, r]))
     assert.strictEqual(byRow.get(2).existingId, 2, 'shared barcode + name attaches to the name-compatible product, not the last-loaded one')
     assert.strictEqual(byRow.get(3).action, 'error', 'shared barcode + a THIRD name errors instead of attaching to either')
@@ -167,6 +167,7 @@ function seedCatalog(sqlite) {
     assert.strictEqual(byRow.get(6).action, 'error', 'name shared by two children with TWO DISTINCT REAL barcodes stays ambiguous without a barcode')
     assert.strictEqual(byRow.get(7).existingId, 5, "a broken/word barcode ('ZZZ') wildcards onto Solo Cream's real barcode instead of erroring as a different identity")
     assert.notStrictEqual(byRow.get(7).action, 'error')
+    assert.strictEqual(byRow.get(7).data.unit_cost_usd, 3.1234, 'identity resolution preserves the explicitly entered four-decimal receipt cost')
     assert.strictEqual(byRow.get(8).existingId, 5, 'an explicitly blank barcode column wildcards the same way as a broken one')
     console.log('PASS classifyInventory attaches by name-compatible identity only')
   }
@@ -225,7 +226,7 @@ function seedCatalog(sqlite) {
     const inventory = await classifyInventory(db, [
       { _rowNumber: 2, barcode: '03614274226546', name: 'Rose Lip Oil', quantity: '5' },
       { _rowNumber: 3, barcode: '12', name: 'Short Code Balm', quantity: '5' },
-    ], 'add')
+    ].map(row => ({ unit_cost_usd: '3.1234', ...row })), 'add')
     const inv = new Map(inventory.map((r) => [r.rowNumber, r]))
     assert.notStrictEqual(inv.get(2).action, 'error', `a zero-padded inventory row must resolve (got: ${inv.get(2).message})`)
     assert.strictEqual(inv.get(2).existingId, 1, 'it is the SAME product, not a missing one')

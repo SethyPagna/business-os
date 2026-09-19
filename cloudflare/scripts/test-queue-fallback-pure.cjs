@@ -178,6 +178,103 @@ check('a redelivery halves the chunk down to the floor and no further', async ()
   assert.equal(chunkRowsForAttempt(10, 9), 10)
 })
 
+function barrier() {
+  let release
+  const promise = new Promise(resolve => { release = resolve })
+  return { promise, release }
+}
+
+for (const sameEnv of [true,false]) for (const failingRoot of [null,'A','B']) {
+  check(`concurrent ${sameEnv ? 'same' : 'different'} env roots wait independently; failure=${failingRoot}`, async () => {
+    __resetQueueDispatchForTests()
+    const gates = { A:barrier(), B:barrier() }
+    const runs = [], wrappers = {}, states = { A:'pending', B:'pending' }
+    const binding = Object.freeze({name:'binding'})
+    const envA = Object.freeze({DB:binding})
+    const envB = sameEnv ? envA : Object.freeze({DB:binding})
+    const failure = new Error(`${failingRoot} failed`)
+    registerInlineImportRunner(async (env,message) => {
+      runs.push(message.jobId)
+      const root = message.jobId[0]
+      assert.equal(env.DB,binding,'binding identity must not change')
+      if (message.jobId.length !== 1) return
+      wrappers[root] = env
+      await dispatchImportWork(env,{jobId:`${root}-continuation`,kind:'apply'})
+      await gates[root].promise
+      if (root === failingRoot) throw failure
+    })
+    const start = (root,env) => dispatchImportWork(env,{jobId:root,kind:'apply'}).then(
+      mode=> { states[root]='fulfilled'; return {mode} },
+      error=> { states[root]='rejected'; return {error} },
+    )
+    const a = start('A',envA), b = start('B',envB)
+    try {
+      await Promise.resolve()
+      assert.deepEqual(runs,['A','B'],'both independent roots begin, neither is misclassified as a continuation')
+      assert.deepEqual(states,{A:'pending',B:'pending'},'neither caller resolves before its own work')
+      assert.notEqual(wrappers.A,wrappers.B)
+      assert.notEqual(wrappers.A,envA)
+      gates.A.release()
+      const outcomeA = await a
+      assert.equal(states.B,'pending','A completion/failure cannot settle B')
+      assert.equal(outcomeA.error,failingRoot==='A' ? failure : undefined)
+      gates.B.release()
+      const outcomeB = await b
+      assert.equal(outcomeB.error,failingRoot==='B' ? failure : undefined)
+      assert.equal(runs.includes('A-continuation'),failingRoot!=='A')
+      assert.equal(runs.includes('B-continuation'),failingRoot!=='B')
+      await assert.rejects(dispatchImportWork(wrappers.A,{jobId:'A-late',kind:'apply'}),/already completed/)
+      await dispatchImportWork(envA,{jobId:'C-independent',kind:'apply'})
+      assert.equal(runs.includes('A-late'),false)
+      assert.equal(runs.filter(id=>id==='A-continuation').length,failingRoot==='A'?0:1)
+      assert.deepEqual(Object.keys(envA),['DB'],'original env is never annotated')
+    } finally {
+      gates.A.release(); gates.B.release()
+      await Promise.all([a,b])
+    }
+  })
+}
+
+check('a failed nested continuation abandons only its root and is never replayed', async () => {
+  __resetQueueDispatchForTests()
+  const runs = []
+  registerInlineImportRunner(async (env,message) => {
+    runs.push(message.jobId)
+    if (message.jobId==='root') await dispatchImportWork(env,{jobId:'nested',kind:'apply'})
+    if (message.jobId==='nested') {
+      await dispatchImportWork(env,{jobId:'abandoned',kind:'apply'})
+      throw new Error('nested failure')
+    }
+  })
+  const env = {}
+  await assert.rejects(dispatchImportWork(env,{jobId:'root',kind:'apply'}),/nested failure/)
+  await dispatchImportWork(env,{jobId:'unrelated',kind:'apply'})
+  assert.deepEqual(runs,['root','nested','unrelated'])
+})
+
+check('private wrapper preserves accessor binding receiver, own keys and nested binding identity', async () => {
+  __resetQueueDispatchForTests()
+  const binding = {}
+  const env = {}
+  Object.defineProperty(env,'DB',{enumerable:true,get(){assert.equal(this,env);return binding}})
+  registerInlineImportRunner(async scoped => {
+    assert.equal(scoped.DB,binding)
+    assert.deepEqual(Object.keys(scoped),['DB'])
+    assert.equal({...scoped}.DB,binding)
+  })
+  await dispatchImportWork(env,{jobId:'accessor',kind:'apply'})
+})
+
+check('queue rejection is propagated unchanged and never falls back inline', async () => {
+  __resetQueueDispatchForTests()
+  let runs = 0
+  registerInlineImportRunner(async()=>{runs++})
+  const failure = new Error('queue send failed')
+  const env = {IMPORT_QUEUE:{async send(){throw failure}}}
+  await assert.rejects(dispatchImportWork(env,{jobId:'queued',kind:'apply'}),error=>error===failure)
+  assert.equal(runs,0)
+})
+
 check('both import runners take the attempt from the queue message', async () => {
   const engine = fs.readFileSync(path.join(srcRoot, 'lib', 'importEngine.ts'), 'utf8')
   const wired = engine.match(/const chunkRows = chunkRowsForAttempt\(limits\.rowsPerImportChunk, attempt\)/g) || []
