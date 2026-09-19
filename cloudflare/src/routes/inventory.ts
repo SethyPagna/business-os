@@ -29,7 +29,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
-import { planReceiveBatchStock, receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, type ReceiptCostPreimage } from '../lib/productBatches'
+import { planReceiveBatchStock, prepareReceiptLotTarget, receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, type ReceiptCostPreimage, type ReceiptLotTarget } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -1600,6 +1600,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   let createdSibling = false
   let preflightAddMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
   let unlockedReceiptCostPreimage: ReceiptCostPreimage | undefined
+  let unlockedReceiptLotTarget: ReceiptLotTarget | undefined
   let mergedPricingStatement: { sql: string; params: Record<string, unknown> } | null = null
   if (unlockPricing) {
     const pricing = body.pricing as Record<string, unknown>
@@ -1651,19 +1652,15 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
           fallbackUnitCostUsd: targetCostUsd,
           fallbackUnitCostKhr: targetCostKhr,
         })
-        if (target.id > 0 && preflightAddMovementCost.totalCostUsd != null) {
-          const batchKey = dateToBatchCode(receivedDate || new Date().toISOString().slice(0, 10)) as string
+        if (target.id > 0) {
+          unlockedReceiptLotTarget = await prepareReceiptLotTarget(db, { productId: target.id, receivedDate,
+            unitCostUsd: unitCostUsd ?? targetCostUsd, preserveHistoricalUnitCost: unitCostUsd == null })
+          const batchKey = unlockedReceiptLotTarget.batchKey
           const existingLot = await db.prepare(
             'SELECT received_cost_usd FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
           ).get<{ received_cost_usd: number | null }>({ productId: target.id, batchKey })
           unlockedReceiptCostPreimage = { batchExists: Boolean(existingLot), receivedCostUsd: existingLot?.received_cost_usd ?? null }
-          if (existingLot) addMoney4(existingLot.received_cost_usd ?? 0, preflightAddMovementCost.totalCostUsd)
-        } else if (target.id > 0) {
-          const batchKey = dateToBatchCode(receivedDate || new Date().toISOString().slice(0, 10)) as string
-          const existingLot = await db.prepare(
-            'SELECT received_cost_usd FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
-          ).get<{ received_cost_usd: number | null }>({ productId: target.id, batchKey })
-          unlockedReceiptCostPreimage = { batchExists: Boolean(existingLot), receivedCostUsd: existingLot?.received_cost_usd ?? null }
+          if (existingLot && preflightAddMovementCost.totalCostUsd != null) addMoney4(existingLot.received_cost_usd ?? 0, preflightAddMovementCost.totalCostUsd)
         }
       })
     } catch (error) {
@@ -1838,6 +1835,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
           paymentStatus,
           creditDueDate,
           receiptCostPreimage: receiptUnitCostUsd == null ? undefined : unlockedReceiptCostPreimage,
+          receiptLotTarget: unlockedReceiptLotTarget,
         })
         await db.batch([
           ...plan.statements,
@@ -1863,7 +1861,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
               batchKey: plan.batchKey,
             },
           },
-          ...(receiptUnitCostUsd == null ? [] : [{ sql: 'DELETE FROM stock_session_guards', params: {} }]),
+          ...(receiptUnitCostUsd == null && !unlockedReceiptLotTarget ? [] : [{ sql: 'DELETE FROM stock_session_guards', params: {} }]),
         ])
         const received = await db.prepare(
           'SELECT id,batch_number,lot_code FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',

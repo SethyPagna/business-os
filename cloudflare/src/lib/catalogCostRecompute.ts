@@ -174,12 +174,12 @@ export function catalogCostRecomputeStatement(productId: number): { sql: string;
       ELSE ROUND(SUM(cost) * 1.0 / COUNT(*), 4)
     END FROM (SELECT DISTINCT unit_cost_usd AS cost FROM product_batches
       WHERE variant_product_id = @productId AND is_active = 1
-        AND unit_cost_usd IS NOT NULL AND unit_cost_usd <> 0
+        AND unit_cost_usd IS NOT NULL AND unit_cost_usd > 0
         AND (id > ${LATEST_MANUAL_COST_ENTRY_BASELINE_SQL} OR ${LATEST_MANUAL_COST_ENTRY_BASELINE_SQL} IS NULL)
       UNION
       SELECT cost_usd AS cost FROM product_cost_entries
       WHERE id = ${LATEST_MANUAL_COST_ENTRY_ID_SQL}
-        AND cost_usd IS NOT NULL AND cost_usd <> 0))`
+        AND cost_usd IS NOT NULL AND cost_usd > 0))`
   return {
     sql: `UPDATE products SET
         cost_price_usd = COALESCE(${derive}, cost_price_usd),

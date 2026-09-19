@@ -132,7 +132,7 @@ async function main() {
     Object.assign(bRequest.items[0], { branch_id: 2, supplier_id: 2, supplier_name: 'Supplier B', unit_cost_usd: 3, payment_status: payment,
       credit_due_date: payment === 'credit' ? '2026-10-15' : null })
     const b = await api.commitStockSession(f.env, user, bRequest)
-    assert.equal(b.items[0].batchId, a.items[0].batchId, 'durable lot identity is retained')
+    assert.notEqual(b.items[0].batchId, a.items[0].batchId, 'a new price gets a new durable lot; the historical lot retains its identity')
     assert.equal(ap(1).credit_open_usd, 0, 'A must not own the new B receipt payable')
     assert.equal(ap(1).cost_usd, 0)
     assert.equal(ap(2).cost_usd, 15)
@@ -141,8 +141,7 @@ async function main() {
     assert.deepEqual([bPostimage.supplier_id, bPostimage.supplier_name, bPostimage.unit_cost_usd, bPostimage.payment_status, bPostimage.credit_due_date, bPostimage.received_branch_id, bPostimage.expiry_date, bPostimage.notes],
       [2, 'Supplier B', 3, payment, payment === 'credit' ? '2026-10-15' : null, 2, null, null])
     const bSnapshot = JSON.parse(f.sql.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(b.snapshotId).payload_json)
-    assert.equal(bSnapshot.before.batches[0].supplier_id, null)
-    assert.equal(bSnapshot.before.batches[0].payment_status, null)
+    assert.deepEqual(bSnapshot.before.batches, [], 'new-priced receipt has no previous lot to overwrite')
     assert.equal(bSnapshot.after.batches[0].supplier_id, 2)
     assert.equal(bSnapshot.after.batches[0].received_cost_usd, 15)
     assert.deepEqual(f.sql.prepare('SELECT * FROM undo_snapshots WHERE id=?').get(a.snapshotId), aSaved, 'new receipt must not rewrite prior saved replay')

@@ -4,8 +4,7 @@
 // /api/products/:id/cost-breakdown (buildCatalogCostBreakdown in
 // lib/catalogCostRecompute.ts) with discriminating fixtures: duplicates and a
 // zero must be excluded from the mean the same way recomputeCatalogCost's own
-// formula excludes them, and a genuine outlier must still be REPORTED, not
-// silently averaged.
+// formula excludes them, and widely separated recorded prices still average.
 //
 // It loads the REAL lib/catalogCostRecompute.ts, lib/productDetailRule.ts and
 // lib/moneyPrecision.ts (transpiled, no D1), so what is asserted is
@@ -83,8 +82,7 @@ check('3, 5, 5(dup), 0(zero) -> distinct [3,5], mean 4.00, result 4.00', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Outlier guard: reported, not silently averaged -- same COST_OUTLIER_RATIO
-// (2x) as resolveMergedCostDetail/recomputeCatalogCost.
+// Catalog observations do not use the unrelated product-merge outlier rule.
 // ---------------------------------------------------------------------------
 check('widely separated real receipt costs are averaged without a merge outlier heuristic', () => {
   const lots = [lot(1, 2), lot(2, 200)]
