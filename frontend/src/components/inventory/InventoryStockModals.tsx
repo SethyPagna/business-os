@@ -21,6 +21,8 @@ import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { markRestoreHandled } from '../../utils/minimizedWork.ts'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
+import { useApp } from '../../AppContext'
+import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 
 type MoneyFormatter = (value: number) => string
 
@@ -224,6 +226,9 @@ export default function InventoryStockModals({
   transferSourceBranchOptions,
   usdSymbol,
 }: InventoryStockModalsProps) {
+  const { user } = useApp() as { user: any }
+  const canViewCosts = canViewAcquisitionCosts(user)
+  const canEditCosts = canEditAcquisitionCosts(user)
   useEffect(() => { if (transferModal) markRestoreHandled('inventory_transfer') }, [transferModal?.id])
   // P10-6: the calculated-cost float, opened from the "Catalog cost" line below.
   const [costFloatOpen, setCostFloatOpen] = useState(false)
@@ -402,14 +407,14 @@ export default function InventoryStockModals({
                 {/* P10-6: the catalog cost price, clickable -- opens the
                     calculated-cost float for the same row adjustCurrentQuantity/
                     adjustCurrentPricing above resolve against. */}
-                <button
+                {canViewCosts ? <button
                   type="button"
                   className="mt-0.5 text-[11px] tabular-nums text-gray-400 decoration-dotted underline-offset-2 hover:underline"
                   onClick={() => setCostFloatOpen(true)}
                   title={t('cost_breakdown_title') || 'Calculated cost price'}
                 >
                   {t('catalog_cost_price') || 'Catalog cost price'}: {fmtUSD(Number(adjustModal.cost_price_usd ?? adjustModal.purchase_price_usd) || 0)}
-                </button>
+                </button> : null}
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {onMinimizeAdjust ? <MinimizeButton disabled={adjustSaving} tr={tr} onMinimize={onMinimizeAdjust} /> : null}
@@ -544,7 +549,7 @@ export default function InventoryStockModals({
                       </button>
                     </div>
                   </div>
-                  {!adjustForm.pricingLocked ? (
+                  {!adjustForm.pricingLocked && canEditCosts ? (
                     <div className="mt-3 space-y-2">
                       <div className="grid grid-cols-2 gap-2">
                         <div>
@@ -665,7 +670,7 @@ export default function InventoryStockModals({
                   the Worker (which falls back to the default branch and gates
                   every add) refused it with supplier_required. A field the gate
                   demands must never be a field the form declines to render. */}
-              {isStockIn ? (
+              {isStockIn && canEditCosts ? (
                 <SupplierPickerField
                   idPrefix="inventory-adjust"
                   value={{ supplierId: adjustForm.supplier_id === '' ? null : adjustForm.supplier_id, supplierName: adjustForm.supplier_name }}
@@ -687,7 +692,7 @@ export default function InventoryStockModals({
                   record the same facts. Deliberately NOT prefilled from the
                   product's stored cost: an unentered cost is reported as
                   unentered rather than guessed. */}
-              {isStockIn ? (
+              {isStockIn && canEditCosts ? (
                 <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
                   <div className="grid grid-cols-2 gap-2">
                     <div>
@@ -796,7 +801,8 @@ export default function InventoryStockModals({
                 without being the last thing behind a scroll. There is no
                 second Save beside the ✕ any more. */}
             <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-              <button type="button" onClick={onAdjust} className={`btn-primary ${TOOLBAR_BUTTON_BASE} flex-1`} disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
+              {isStockIn && !canEditCosts ? <p role="status" className="text-xs text-amber-700">{tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.')}</p> : null}
+              <button type="button" onClick={onAdjust} className={`btn-primary ${TOOLBAR_BUTTON_BASE} flex-1`} disabled={adjustSaving || (isStockIn && !canEditCosts)}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
               <button type="button" onClick={requestCloseAdjust} className={`btn-secondary ${TOOLBAR_BUTTON_BASE}`} disabled={adjustSaving}>{t('cancel')}</button>
             </div>
           </div>
@@ -891,7 +897,7 @@ export default function InventoryStockModals({
         </div>
       ) : null}
 
-      {adjustModal && costFloatOpen ? (
+      {adjustModal && canViewCosts && costFloatOpen ? (
         <CostCalculationFloat
           productId={adjustTargetId as number | string}
           productName={adjustModal.name}

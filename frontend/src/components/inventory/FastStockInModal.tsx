@@ -6,6 +6,8 @@
 // Each outcome stays visible, so a partial failure can be fixed and retried.
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useApp } from '../../AppContext'
+import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { normalizeInternalMoney } from '../../utils/pricing.ts'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
@@ -188,6 +190,9 @@ function normalizeLookupOptions(value: unknown): LookupOption[] {
 }
 
 export default function FastStockInModal({ branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, initialMode, exchangeRate = 4100 }: FastStockInModalProps) {
+  const { user } = useApp() as { user: any }
+  const canViewCosts = canViewAcquisitionCosts(user)
+  const canEditCosts = canEditAcquisitionCosts(user)
   // This modal only receives the fallback-aware tr(); DateEntryInput wants a
   // bare pack lookup, so adapt rather than duplicate its strings.
   const packLookup = (key: string): string | undefined => tr(key, '') || undefined
@@ -239,7 +244,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const [selectedGroup, setSelectedGroup] = useState<ProductGroup | null>(null)
   const [picked, setPicked] = useState<ProductCandidate | null>(draft?.picked || null)
   const [quantity, setQuantity] = useState(draft?.quantity || '1')
-  const [unitCost, setUnitCost] = useState(draft?.unitCost || '')
+  const [unitCost, setUnitCost] = useState(canViewCosts ? draft?.unitCost || '' : '')
   const [freeGoods, setFreeGoods] = useState(Boolean(draft?.freeGoods))
   const [createPriceVariant, setCreatePriceVariant] = useState(Boolean(draft?.createPriceVariant))
   const [expiryDate, setExpiryDate] = useState(draft?.expiryDate || '')
@@ -439,7 +444,8 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       ? candidate.cost_price_usd
       : candidate.purchase_price_usd
     const cost = Number(rawCost)
-    if (rawCost != null && Number.isFinite(cost) && cost >= 0) setUnitCost(String(cost))
+    if (canViewCosts && rawCost != null && Number.isFinite(cost) && cost >= 0) setUnitCost(String(cost))
+    else setUnitCost('')
     setCreatePriceVariant(false)
     setScannedBarcode('')
   }
@@ -533,7 +539,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     // and a branch cannot hold less than nothing.
     if (mode === 'set' && (!rawQuantity || qty < 0)) { notify(tr('fast_stockin_set_qty', 'Quantity must be 0 or more'), 'error'); return }
     // A remove has no receipt: no payment, no supplier, no cost to check.
-    if (mode !== 'remove' && paymentStatus === 'credit' && !creditDueDate.trim()) {
+    if (canEditCosts && mode !== 'remove' && paymentStatus === 'credit' && !creditDueDate.trim()) {
       notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error')
       return
     }
@@ -543,6 +549,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     // a set's direction (and therefore whether it is a receipt) is decided
     // server-side against live stock, and the route gates it there.
     if (mode === 'add') {
+      if (!canEditCosts) { notify(tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.'), 'error'); return }
       const receiptGate = stockReceiptGateCode({
         isStockIn: true,
         supplierName: supplier.supplierName,
@@ -557,7 +564,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     const lineName = String(picked.name || `#${picked.id}`)
     // Unlocked pricing always creates a fresh lot server-side, so a chosen
     // lot must not ride along with it -- same rule the adjust surfaces use.
-    const variantWins = mode === 'add' && costChanged(picked, unitCost) && createPriceVariant
+    const variantWins = canViewCosts && mode === 'add' && costChanged(picked, unitCost) && createPriceVariant
     // A set targets the branch total, not a lot; the server posts the
     // difference itself.
     const effectiveBatchChoice: 'new' | number = variantWins || mode === 'set' ? 'new' : batchChoice
@@ -603,9 +610,9 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     setPicked(line.product)
     setQuery(line.productName)
     setQuantity(String(line.quantity))
-    setUnitCost(line.unitCost)
+    setUnitCost(canViewCosts ? line.unitCost : '')
     setFreeGoods(line.freeGoods)
-    setCreatePriceVariant(line.createPriceVariant)
+    setCreatePriceVariant(canViewCosts && line.createPriceVariant)
     setExpiryDate(line.expiryDate)
     setReason(line.reason)
     // Parked rather than set: the options effect is about to re-key on this
@@ -627,6 +634,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const commitSession = () => {
     if (saving) return
     const pending = received.filter((line) => line.status !== 'saved')
+    if (!canEditCosts && pending.some((line) => line.mode === 'add')) { notify(tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.'), 'error'); return }
     if (!pending.length) {
       if (received.some((line) => line.status === 'saved')) onDone()
       clearWorkDraft(fastStockInDraftKey)
@@ -634,7 +642,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       return
     }
     if (!branchId) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
-    if (pending.some((line) => line.mode !== 'remove') && paymentStatus === 'credit' && !creditDueDate.trim()) { notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error'); return }
+    if (canEditCosts && pending.some((line) => line.mode !== 'remove') && paymentStatus === 'credit' && !creditDueDate.trim()) { notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error'); return }
     setPendingCommit(pending)
   }
 
@@ -669,7 +677,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         // server-side and is gated like one; a set that lowers it ignores them.
         receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
         supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
-        unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
+        ...(canEditCosts ? { unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null } : {}),
         freeGoods: line.freeGoods, paymentStatus,
         creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
         sessionId: sessionIdRef.current,
@@ -761,6 +769,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
 
   const performCommit = async (pending: ReceivedLine[]) => {
     if (saving) return
+    if (!canEditCosts && pending.some((line) => line.mode === 'add')) { notify(tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.'), 'error'); return }
     setSaving(true)
     pending.forEach((line) => setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'saving' } : item)))
     let failed = 0
@@ -829,7 +838,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       { label: tr('set', 'Set'), value: modeCount(pendingCommit, 'set') },
     ]),
     { label: tr('total_units', 'Total units'), value: pendingCommit.reduce((total, line) => total + line.quantity, 0) },
-    { label: tr('total_cost', 'Total cost'), value: `$${pendingCommit.reduce((total, line) => total + (line.mode === 'remove' ? 0 : Math.max(0, line.quantity) * Math.max(0, Number(line.unitCost) || 0)), 0).toFixed(2)}` },
+    ...(canViewCosts ? [{ label: tr('total_cost', 'Total cost'), value: `$${pendingCommit.reduce((total, line) => total + (line.mode === 'remove' ? 0 : Math.max(0, line.quantity) * Math.max(0, Number(line.unitCost) || 0)), 0).toFixed(2)}` }] : []),
     // Receipt fields describe adds (and sets, which may add); a pure
     // remove session has none to review.
     ...(pendingCommit.some((line) => line.mode !== 'remove') ? [
@@ -1026,11 +1035,11 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               ) : null}
               <div className={`mt-2 grid grid-cols-2 gap-2 sm:items-end ${mode === 'remove' ? 'sm:grid-cols-[5rem_1fr]' : 'sm:grid-cols-[5rem_8.5rem_8rem_1fr]'}`}>
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{mode === 'set' ? tr('set_to', 'Set to') : tr('quantity', 'Qty')}</span><input type="number" min={mode === 'set' ? 0 : 1} step="1" className="input text-center text-sm" value={quantity} onChange={(event) => setQuantity(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addLine() }} /></label>
-                {mode !== 'remove' ? <>
+                {mode !== 'remove' && canEditCosts ? <>
                 <label className="block"><span className="mb-1 block whitespace-nowrap text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('cost_price_usd', 'Cost price $')} <span className="text-red-500" aria-hidden="true">*</span></span><input type="number" min="0" step="0.01" className="input text-sm" required disabled={freeGoods} value={freeGoods ? 0 : unitCost} onChange={(event) => {
                   const next = event.target.value
                   setUnitCost(next)
-                  setCreatePriceVariant(costChanged(picked, next))
+                  setCreatePriceVariant(canViewCosts && costChanged(picked, next))
                 }} /></label>
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={expiryDate} onChange={(iso) => setExpiryDate(iso)} /></label>
                 <div className="flex min-w-0 items-end gap-1.5">
@@ -1041,10 +1050,10 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                     cell taller than its siblings, and sm:items-end then lifted the
                     cost input off the line the other inputs sit on. */}
                 <label className={`col-span-2 flex w-fit cursor-pointer items-center gap-1.5 rounded text-[11px] text-gray-600 sm:col-span-4 dark:text-gray-400 ${zeroCostNeedsDeclaration ? 'bg-amber-50 px-1 py-0.5 font-medium text-amber-900 ring-1 ring-amber-300 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-700' : ''}`} title={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')}>
-                  <input type="checkbox" className="h-3.5 w-3.5" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) { setUnitCost('0'); setCreatePriceVariant(costChanged(picked, '0')) } }} />
+                  <input type="checkbox" className="h-3.5 w-3.5" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) { setUnitCost('0'); setCreatePriceVariant(canViewCosts && costChanged(picked, '0')) } }} />
                   {tr('stock_receipt_free_goods', 'Free')}
                 </label>
-                {mode === 'add' && costChanged(picked, unitCost) ? (
+                {mode === 'add' && canViewCosts && costChanged(picked, unitCost) ? (
                   <label className="col-span-2 flex cursor-pointer items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:col-span-4 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
                     <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0" checked={createPriceVariant} onChange={(event) => setCreatePriceVariant(event.target.checked)} />
                     <span><strong>{tr('create_price_variant', 'Create/use a price variant')}</strong><br />{tr('create_price_variant_hint', `The cost changed from $${currentCost(picked).toFixed(2)} to $${Number(unitCost || 0).toFixed(2)}. Keep this on a separate product row with the same name and details.`)}</span>
@@ -1138,7 +1147,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
             <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
               <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 <span>{tr('fast_stockin_received', 'Received this session')} ({successCount})</span>
-                <span className="shrink-0 tabular-nums normal-case">{tr('total_cost', 'Total cost')}: ${sessionCostTotal.toFixed(2)}</span>
+                {canViewCosts ? <span className="shrink-0 tabular-nums normal-case">{tr('total_cost', 'Total cost')}: ${sessionCostTotal.toFixed(2)}</span> : null}
               </div>
               <div className="max-h-40 space-y-1 overflow-y-auto">
                 {received.map((line) => (
@@ -1172,7 +1181,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
             out of reach behind a long queue. */}
         <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
           <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
-            {received.length} {tr('lines_queued', 'queued')} · ${sessionCostTotal.toFixed(2)}
+            {received.length} {tr('lines_queued', 'queued')}{canViewCosts ? ` · $${sessionCostTotal.toFixed(2)}` : ''}
           </span>
           <button type="button" tabIndex={-1}
             title={tr('add_next_hint', 'Add & next queues this line; nothing is written until Complete.')}

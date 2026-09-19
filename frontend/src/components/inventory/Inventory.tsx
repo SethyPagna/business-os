@@ -9,6 +9,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
+import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { fmtTime } from '../../utils/formatters'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
@@ -384,6 +385,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   onDateRangeChange?: (range: DateTimeRange) => void
 } = {}) {
   const { can, t, user, notify, fmtUSD, fmtKHR, usdSymbol, exchangeRate, navigateTo } = useApp() as InventoryAppContext
+  const canViewCosts = canViewAcquisitionCosts(user)
+  const canEditCosts = canEditAcquisitionCosts(user)
   // Every stock-moving action here mutates live batch/stock state that could
   // go stale between a Review Required user's request and an admin's
   // approval, so routes/inventory.ts blocks them outright for that tier
@@ -1307,6 +1310,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
     }
     const isStockIn = isStockInSubmission(adjustForm.type, qty, previousQuantity)
+    if (isStockIn && !canEditCosts) {
+      notify(tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.'), 'error')
+      return
+    }
     if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
       notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error')
       return
@@ -1396,8 +1403,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         discount_type: adjustForm.discount_type,
         discount_percent: parseFloat(String(adjustForm.discount_percent)) || 0,
         discount_amount_usd: parseFloat(String(adjustForm.discount_amount_usd)) || 0,
-        cost_usd: parseFloat(String(adjustForm.cost_usd)) || 0,
-        cost_khr: parseFloat(String(adjustForm.cost_khr)) || 0,
+        ...(canEditCosts && String(adjustForm.cost_usd).trim() !== '' ? { cost_usd: parseFloat(String(adjustForm.cost_usd)) || 0 } : {}),
+        ...(canEditCosts && String(adjustForm.cost_khr).trim() !== '' ? { cost_khr: parseFloat(String(adjustForm.cost_khr)) || 0 } : {}),
         barcode: adjustForm.barcode || null,
       } : undefined,
     }
@@ -1608,8 +1615,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       discount_type: p.discount_type || 'percent',
       discount_percent: p.discount_percent || 0,
       discount_amount_usd: p.discount_amount_usd || 0,
-      cost_usd: p.cost_price_usd || p.purchase_price_usd || 0,
-      cost_khr: p.cost_price_khr || p.purchase_price_khr || 0,
+      cost_usd: canViewCosts ? p.cost_price_usd || p.purchase_price_usd || 0 : '',
+      cost_khr: canViewCosts ? p.cost_price_khr || p.purchase_price_khr || 0 : '',
       barcode: p.barcode || '',
       batch_id: '',
       // Reset to today on every open -- a historical date from the last
@@ -2219,13 +2226,15 @@ ${inventoryStockValueFormulaText}`,
 ${tr('gross_profit', 'Gross profit')} = ${String(inventoryStatLabels.revenue)} − ${String(inventoryStatLabels.cogs)}`,
       value: stripMoney(stripRevenue),
       tone: 'ok',
-      sub: stripLoading ? undefined : `${tr('gross_profit', 'Gross profit')} ${fmtUSD(stripProfit)}`,
+      sub: stripLoading || !canViewCosts ? undefined : `${tr('gross_profit', 'Gross profit')} ${fmtUSD(stripProfit)}`,
       details: [
         { label: tr('stats_gross', 'Gross sales'), value: fmtUSD(stripGross) },
         { label: String(inventoryStatLabels.revenue), value: fmtUSD(stripRevenue) },
-        { label: String(inventoryStatLabels.cogs), value: fmtUSD(stripCogs) },
-        { label: tr('gross_profit', 'Gross profit'), value: fmtUSD(stripProfit), tone: 'ok' },
-        { label: marginShortLabel, value: stripRevenue > 0 ? `${((stripProfit / stripRevenue) * 100).toFixed(1)}%` : '—' },
+        ...(canViewCosts ? [
+          { label: String(inventoryStatLabels.cogs), value: fmtUSD(stripCogs) },
+          { label: tr('gross_profit', 'Gross profit'), value: fmtUSD(stripProfit), tone: 'ok' as const },
+          { label: marginShortLabel, value: stripRevenue > 0 ? `${((stripProfit / stripRevenue) * 100).toFixed(1)}%` : '—' },
+        ] : []),
       ],
     },
   ]
@@ -2270,13 +2279,13 @@ ${inventoryFeesFormulaText}`,
         { label: tr('customer_returns', 'Customer returns'), value: stripCustomerReturnCount },
         { label: String(inventoryStatLabels.refunded), value: fmtUSD(stripRefunded), tone: stripRefunded > 0 ? 'crit' : undefined },
         { label: t('restocked_to_inventory') || 'Restocked', value: stripRestocked },
-        { label: `${t('supplier_returns') || 'Supplier returns'} (${stripSupplierReturnCount})`, value: fmtUSD(stripSupplierLoss), tone: stripSupplierLoss > 0 ? 'crit' : undefined },
+        ...(canViewCosts ? [{ label: `${t('supplier_returns') || 'Supplier returns'} (${stripSupplierReturnCount})`, value: fmtUSD(stripSupplierLoss), tone: stripSupplierLoss > 0 ? 'crit' as const : undefined }] : []),
       ],
     },
   )
   // The sales kernel requires concrete endpoints. Mask the whole flow card,
   // including an already-open detail, immediately when All time is selected.
-  const displayedStripCards = stripCards.map((card) => stripHasRange || ['products', 'stock-value'].includes(card.key)
+  const displayedStripCards = stripCards.filter((card) => canViewCosts || card.key !== 'stock-value').map((card) => stripHasRange || ['products', 'stock-value'].includes(card.key)
     ? card
     : { ...card, value: '—', sub: undefined, details: undefined, tone: undefined })
   const selectedMovementGroups = useMemo(
@@ -2385,9 +2394,9 @@ ${inventoryFeesFormulaText}`,
       { metric: 'customer_refund_usd', value: Number(cust.refund_usd) || 0 },
       { metric: 'supplier_returns', value: Number(supp.count) || 0 },
       { metric: 'supplier_loss_usd', value: Number(supp.loss_usd) || 0 },
-    ].map((row) => !hasRange && !row.metric.endsWith('_current') && !row.metric.startsWith('range_')
+    ].filter((row) => canViewCosts || !['stock_value_usd_current', 'cogs_usd', 'profit_usd', 'supplier_loss_usd'].includes(row.metric)).map((row) => !hasRange && !row.metric.endsWith('_current') && !row.metric.startsWith('range_')
       ? { ...row, value: '—' } : row))
-  }, [inStockCount, lowStockCount, outStockCount, stripRange.endDate, stripRange.startDate, totalProducts, totalValue])
+  }, [canViewCosts, inStockCount, lowStockCount, outStockCount, stripRange.endDate, stripRange.startDate, totalProducts, totalValue])
 
   const inventoryExportItems = useMemo<any[]>(() => {
     if (tab !== 'movements') return []
