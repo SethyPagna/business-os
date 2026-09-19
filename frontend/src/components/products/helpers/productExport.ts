@@ -77,6 +77,7 @@ export const EXPORT_FIELD_GROUPS: Array<{ key: ExportFieldGroup; columns: string
 const ALWAYS_INCLUDED_COLUMNS = new Set(['Name'])
 
 export type BuildProductExportRowsOptions = {
+  canViewCosts?: boolean
   groups?: ExportFieldGroup[]
   // When set (a branch id, as the export scope's own branch filter -- see
   // Products.tsx's exportProductsCsv), Stock_Quantity and Branch reflect
@@ -188,6 +189,8 @@ export function buildProductExportRows(products: ProductRecord[] = [], options: 
       Is_Group: product.is_group ? 'Yes' : 'No',
       Active: product.is_active ? 'Yes' : 'No',
     }
+    if (options.canViewCosts === false || product.cost_price_usd == null) delete row.Cost_Price_USD
+    if (options.canViewCosts === false || product.cost_price_khr == null) delete row.Cost_Price_KHR
     if (!allowedColumns) return row
     const filtered: ProductExportRow = {}
     for (const key of Object.keys(row)) {

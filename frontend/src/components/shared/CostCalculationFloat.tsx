@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { useApp } from '../../AppContext'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import type { PermissionUser } from '../../utils/permissions.ts'
 import Modal from './Modal'
 import TruncatedText from './TruncatedText.tsx'
 import { getProductCostBreakdown } from '../../api/productReadTransport.ts'
@@ -31,6 +34,8 @@ export type CostCalculationFloatProps = {
 // rule): it fetches on mount and shows a loading state, never a shell that
 // waits on some prior action.
 export default function CostCalculationFloat({ productId, productName, onClose, fmtUSD, fmtKHR, t }: CostCalculationFloatProps) {
+  const { user } = useApp() as { user: PermissionUser }
+  const canViewCosts = canViewAcquisitionCosts(user)
   const tr = (key: string, fallback: string): string => t(key, fallback) || fallback
   const [breakdown, setBreakdown] = useState<CostBreakdown | null>(null)
   const [error, setError] = useState('')
@@ -38,27 +43,30 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
   const aliveRef = useRef(true)
 
   useEffect(() => {
+    if (!canViewCosts) return
+    let cancelled = false
     aliveRef.current = true
     setLoading(true)
     setError('')
     getProductCostBreakdown(productId)
       .then((result) => {
-        if (!aliveRef.current) return
+        if (cancelled || !aliveRef.current) return
         const normalized = normalizeCostBreakdown(result)
         if (!normalized) throw new Error('empty')
         setBreakdown(normalized)
       })
       .catch(() => {
-        if (aliveRef.current) setError(tr('cost_breakdown_failed', 'Could not load the cost calculation'))
+        if (!cancelled && aliveRef.current) setError(tr('cost_breakdown_failed', 'Could not load the cost calculation'))
       })
       .finally(() => {
-        if (aliveRef.current) setLoading(false)
+        if (!cancelled && aliveRef.current) setLoading(false)
       })
-    return () => { aliveRef.current = false }
+    return () => { cancelled = true; aliveRef.current = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId])
+  }, [productId, canViewCosts, user])
 
   const formula = breakdown ? formatCostFormula(breakdown.distinct_usd, breakdown.mean_usd) : ''
+  if (!canViewCosts) return null
 
   return (
     <Modal title={tr('cost_breakdown_title', 'Calculated cost price')} onClose={onClose} size="sm" unsavedChanges="read-only">

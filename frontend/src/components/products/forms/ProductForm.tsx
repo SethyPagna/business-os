@@ -38,6 +38,7 @@ import {
 } from '../../../utils/loaders.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES, MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
 import { effectivePermissions, isAdminControlUser } from '../../../utils/permissions.ts'
+import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../../utils/acquisitionCostAccess.ts'
 
 const importBarcodeScannerModal = () => import('../scanning/BarcodeScannerModal')
 const BarcodeScannerModal = lazyRetry(importBarcodeScannerModal, 'product-form-barcode-scanner-modal')
@@ -150,8 +151,8 @@ interface ProductSavePayload extends ProductFormState {
   discount_badge_color: string
   discount_starts_at: string | null
   discount_ends_at: string | null
-  cost_price_usd: number
-  cost_price_khr: number
+  cost_price_usd?: number
+  cost_price_khr?: number
   stock_quantity: number
   received_date?: string | null
   low_stock_threshold: number
@@ -494,10 +495,14 @@ export default function ProductForm({
   user,
   initialTab = 'basic',
 }: ProductFormProps) {
+  const canViewCosts = canViewAcquisitionCosts(user)
+  const canEditCosts = canEditAcquisitionCosts(user)
+  const [blindCostInputs, setBlindCostInputs] = useState({ usd: '', khr: '' })
   const defaultBranchId = branches.find((branch) => branch.is_default)?.id?.toString()
     || branches[0]?.id?.toString()
     || ''
   const currentProductId = Number(product?.id || 0)
+  useEffect(() => { setBlindCostInputs({ usd: '', khr: '' }) }, [currentProductId, canViewCosts])
   const isCreateMode = !product?.id
   const isEditMode = !isCreateMode
   const imageLimit = isAdminControlUser(user) ? ADMIN_MAX_PRODUCT_GALLERY_IMAGES : MAX_PRODUCT_GALLERY_IMAGES
@@ -507,7 +512,7 @@ export default function ProductForm({
 
   const initialForm = useMemo<ProductFormState>(() => {
     if (product?.id) {
-      return { ...product }
+      return { ...product, ...(!canViewCosts ? { cost_price_usd: '', cost_price_khr: '', purchase_price_usd: '', purchase_price_khr: '' } : {}) }
     }
     return {
       name: '',
@@ -561,7 +566,7 @@ export default function ProductForm({
       // it is still CREATE mode and must retain all normal create defaults.
       ...(product || {}),
     }
-  }, [product, units, defaultBranchId, createDefaults, showReceivedDate])
+  }, [product, units, defaultBranchId, createDefaults, showReceivedDate, canViewCosts])
 
   const hydratedInitialForm = useMemo(() => editableInitialForm(initialForm), [initialForm])
   const [form, setForm] = useStableHydratedState<ProductFormState>(hydratedInitialForm, draftKey)
@@ -898,7 +903,7 @@ export default function ProductForm({
   const saveReviewItems = (): ConfirmReviewItem[] => {
     const items: ConfirmReviewItem[] = [
       { label: tr('label_selling_price', 'Selling price'), value: `${usdSymbol}${Number(form.selling_price_usd || 0).toFixed(2)}` },
-      { label: tr('label_cost', 'Cost'), value: `${usdSymbol}${Number(form.cost_price_usd || 0).toFixed(2)}` },
+      ...(canViewCosts ? [{ label: tr('label_cost', 'Cost'), value: `${usdSymbol}${Number(form.cost_price_usd || 0).toFixed(2)}` }] : []),
     ]
     const barcode = String(form.barcode || '').trim()
     if (barcode) items.push({ label: tr('barcode', 'Barcode'), value: barcode })
@@ -992,7 +997,7 @@ export default function ProductForm({
       const restoredDraft = draft || legacyDraft
       if (restoredDraft?.data) {
         const restored = normalizeProductFormDraft(restoredDraft.data)
-        setForm((current) => ({ ...current, ...restored.form }))
+        setForm((current) => ({ ...current, ...restored.form, ...(!canViewCosts ? { cost_price_usd: '', cost_price_khr: '', purchase_price_usd: '', purchase_price_khr: '' } : {}) }))
         if (canManageImages && restored.imageList) {
           imageListRef.current = restored.imageList
           setImageList(restored.imageList)
@@ -1225,7 +1230,7 @@ export default function ProductForm({
     const savableImageList = canManageImages
       ? imageListRef.current
       : normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES)
-    const payload: ProductSavePayload = {
+    const payload: ProductSavePayload = omitUnauthorizedCatalogCosts<ProductSavePayload>({
       ...manualForm,
       selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
       selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
@@ -1243,8 +1248,8 @@ export default function ProductForm({
       discount_badge_color: /^#[0-9a-f]{6}$/i.test(String(form.discount_badge_color || '')) ? String(form.discount_badge_color) : '#e11d48',
       discount_starts_at: form.discount_starts_at || null,
       discount_ends_at: form.discount_ends_at || null,
-      cost_price_usd: normalizeInternalMoney(parseNumericInput(form.cost_price_usd)),
-      cost_price_khr: normalizeInternalMoney(parseNumericInput(form.cost_price_khr)),
+      cost_price_usd: normalizeInternalMoney(parseNumericInput(canViewCosts ? form.cost_price_usd : blindCostInputs.usd)),
+      cost_price_khr: normalizeInternalMoney(parseNumericInput(canViewCosts ? form.cost_price_khr : blindCostInputs.khr)),
       stock_quantity: parseNumericInput(form.stock_quantity),
       ...(showReceivedDate ? { received_date: form.received_date || null } : {}),
       low_stock_threshold: parseNumericInput(form.low_stock_threshold, 10),
@@ -1256,6 +1261,16 @@ export default function ProductForm({
       // caller's 3/5 action limit.
       image_gallery: savableImageList.map((path) => canonicalizePersistedMediaPath(path)).filter(Boolean).slice(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES),
       image_path: canonicalizePersistedMediaPath(savableImageList[0]),
+    }, user)
+    // An edit-only user can enter a new amount without reading the saved one.
+    // Leaving either hidden existing amount blank must preserve it.
+    if (!canViewCosts && product?.id) {
+      if (!blindCostInputs.usd.trim()) delete payload.cost_price_usd
+      if (!blindCostInputs.khr.trim()) delete payload.cost_price_khr
+    }
+    if (!canViewCosts) {
+      delete (payload as unknown as Record<string, unknown>).purchase_price_usd
+      delete (payload as unknown as Record<string, unknown>).purchase_price_khr
     }
     // D6: renaming an EXISTING product that shares its name with siblings
     // asks whether the whole group carries (9.1's regroup) or only this
@@ -1768,7 +1783,7 @@ export default function ProductForm({
         <div className="space-y-3">
           {activeTab === 'pricing' ? <>
           <div data-testid="product-pricing-grid" className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
-          <div className="min-w-0 rounded-xl border border-red-100 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/10">
+          {canViewCosts || canEditCosts ? <fieldset disabled={!canEditCosts} className="min-w-0 rounded-xl border border-red-100 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/10">
             <div className="mb-2">
               <p className="text-sm font-bold text-red-700 dark:text-red-400">{t('cost')}</p>
               <p className="text-xs text-red-500 dark:text-red-500">{t('what_you_pay_supplier')}</p>
@@ -1776,9 +1791,10 @@ export default function ProductForm({
             <DualPriceInput
               labelUsd={t('cost_in_usd_label')}
               labelKhr={t('cost_in_khr_label')}
-              valueUsd={form.cost_price_usd}
-              valueKhr={form.cost_price_khr}
+              valueUsd={canViewCosts ? form.cost_price_usd : blindCostInputs.usd}
+              valueKhr={canViewCosts ? form.cost_price_khr : blindCostInputs.khr}
                 onUsdChange={(value) => {
+                  if (!canViewCosts) { formDirtyRef.current = true; setBlindCostInputs(current => ({ ...current, usd: value, khr: current.khr || (value === '' ? '' : editableMoneyValue(parseNumericInput(value) * exchangeRate)) })); return }
                   setField('cost_price_usd', value)
                   if (!String(form.cost_price_khr ?? '').trim()) {
                     const converted = parseNumericInput(value) * exchangeRate
@@ -1786,6 +1802,7 @@ export default function ProductForm({
                   }
                 }}
               onKhrChange={(value) => {
+                if (!canViewCosts) { formDirtyRef.current = true; setBlindCostInputs(current => ({ ...current, khr: value })); return }
                 setField('cost_price_khr', value)
               }}
               usdSymbol={usdSymbol}
@@ -1793,7 +1810,7 @@ export default function ProductForm({
               exchangeRate={exchangeRate}
               t={t}
             />
-          </div>
+          </fieldset> : null}
 
           <div className="min-w-0 rounded-xl border border-green-100 bg-green-50 p-3 dark:border-green-800 dark:bg-green-900/10">
             <div className="mb-2">
@@ -1862,7 +1879,7 @@ export default function ProductForm({
           <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/20 dark:text-rose-200">
             {tr('discounts_moved_note', 'Discounts are managed on the Promotions page now (Promotions › Per-product discounts).', 'ការបញ្ចុះតម្លៃត្រូវបានគ្រប់គ្រងនៅទំព័រប្រូម៉ូសិនឥឡូវនេះ (ប្រូម៉ូសិន › បញ្ចុះតម្លៃតាមផលិតផល)។')}
           </div>
-          {activeTab === 'pricing' && Number(form.selling_price_usd || 0) > 0 && Number(form.cost_price_usd || 0) > 0 ? (
+          {canViewCosts && activeTab === 'pricing' && Number(form.selling_price_usd || 0) > 0 && Number(form.cost_price_usd || 0) > 0 ? (
             <MarginCard
               costUsd={Number(form.cost_price_usd || 0)}
               sellingUsd={Number(form.selling_price_usd || 0)}

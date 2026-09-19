@@ -1,4 +1,7 @@
 import ProductNameRail from '../../shared/ProductNameRail'
+import { useApp } from '../../../AppContext'
+import { canViewAcquisitionCosts } from '../../../utils/acquisitionCostAccess.ts'
+import type { PermissionUser } from '../../../utils/permissions.ts'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import PlusCircle from 'lucide-react/dist/esm/icons/plus-circle.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -136,6 +139,8 @@ export default function ProductDetailModal({
   navigateTo,
   t,
 }: ProductDetailModalProps) {
+  const { user } = useApp() as { user: PermissionUser }
+  const canViewCosts = canViewAcquisitionCosts(user)
   const [descriptionDetailOpen, setDescriptionDetailOpen] = useState(false)
   // P10-6: the calculated-cost float.
   const [costFloatOpen, setCostFloatOpen] = useState(false)
@@ -388,10 +393,10 @@ export default function ProductDetailModal({
                 ) : null}
 
                 <div className="grid grid-cols-2 gap-2" data-detail-price-row="cost-wholesale">
-                  <PriceCell label={T('label_cost', 'Cost')}>
+                  {canViewCosts ? <PriceCell label={T('label_cost', 'Cost')}>
                     <button type="button" onClick={() => setCostFloatOpen(true)} className="text-left text-red-600 decoration-dotted underline-offset-2 hover:underline" title={T('cost_breakdown_title', 'Calculated cost price')}>{fmtUSD(purchaseUsd)}</button>
                     {purchaseKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
-                  </PriceCell>
+                  </PriceCell> : null}
                   <PriceCell label={T('wholesale_price', 'Wholesale price')}>
                     {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (
                       <>
@@ -406,14 +411,14 @@ export default function ProductDetailModal({
                     <span className="text-green-600">{fmtUSD(sellingUsd)}</span>
                     {sellingKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
                   </PriceCell>
-                  <PriceCell label={T('label_margin', 'Margin')}>
+                  {canViewCosts ? <PriceCell label={T('label_margin', 'Margin')}>
                     {purchaseUsd > 0 && sellingUsd > 0 ? (
                       <>
                         <span className={marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}>{fmtUSD(marginUsd)}</span>
                         <span className="ml-2 text-xs font-normal text-gray-400">{marginPct.toFixed(1)}%</span>
                       </>
                     ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
-                  </PriceCell>
+                  </PriceCell> : null}
                 </div>
                 {/* Stock + Status directly after Margin (Aug 30 ask). */}
                 <Row label={T('label_stock', 'Stock')}>
@@ -536,7 +541,7 @@ export default function ProductDetailModal({
           />
         </Suspense>
       ) : null}
-      {costFloatOpen ? (
+      {canViewCosts && costFloatOpen ? (
         <CostCalculationFloat
           productId={Number((p as { id?: unknown }).id) || 0}
           productName={productName}
