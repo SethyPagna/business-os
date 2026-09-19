@@ -1,3 +1,14 @@
+## Checkout cleanup dependency-link batch — September 19
+
+219 redundant checkouts removed total; 377 registered remain. Latest160 removals
+preserve all recovery commits and20 shared dependency targets; only212 junctions
+were unlinked nonrecursively before non-force Git removal. Frontend and Worker
+typecheck pass. Primary73 tracked changes and common Git preserved. Evidence:
+outputs/checkout-cleanup-20260919/link-removed.json and newest cleanup report.
+bos-stock-lot-backend-20260912 retained for inbound dependency.13 unregistered
+matching folders need inspection. Unique-local-data archival choice pending.
+Goal active; no runtime changes/deploy; device/tier audit findings still OPEN.
+
 ## Checkout cleanup second verified batch — September 19
 
 59 redundant checkouts removed total (3 + 56); 537 registered remain. Exact second

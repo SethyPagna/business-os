@@ -1,0 +1,2450 @@
+﻿[
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-auditlog-i18n",
+        "head":  "2811fb6fc05c9fc28cc3a055bc04abeff61a6e23",
+        "branch":  "refs/heads/claude/a2-auditlog-i18n-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-auditlog-i18n-2026-09-06",
+        "remoteSha":  "2811fb6fc05c9fc28cc3a055bc04abeff61a6e23",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-auditlog-i18n\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-auditlog-i18n\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-bulkedit-i18n",
+        "head":  "a30b2a212e539fb79d83b87cbf2124bc40838b67",
+        "branch":  "refs/heads/claude/a2-bulkedit-i18n-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-bulkedit-i18n-2026-09-06",
+        "remoteSha":  "a30b2a212e539fb79d83b87cbf2124bc40838b67",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-bulkedit-i18n\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-bulkedit-i18n\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-contacts-i18n",
+        "head":  "1bc280f4a2551d14ee97292beede82e943d27c26",
+        "branch":  "refs/heads/claude/a2-contacts-i18n-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-codex-delivery-2026-09-07",
+        "remoteSha":  "60b7a681b68fcd639131f702a97a8a8ef19436da",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-contacts-i18n\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-contacts-i18n\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-contacts-invoices",
+        "head":  "32819d0b1d877d1de9ab228ac45a99885100e96e",
+        "branch":  "refs/heads/claude/a2-contacts-invoices-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-codex-delivery-2026-09-07",
+        "remoteSha":  "60b7a681b68fcd639131f702a97a8a8ef19436da",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-contacts-invoices\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-contacts-invoices\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-manage-lists-i18n",
+        "head":  "c01d60e791e2c4fb9fc8e66259e03a4fe454a577",
+        "branch":  "refs/heads/claude/a2-manage-lists-i18n-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-codex-delivery-2026-09-07",
+        "remoteSha":  "60b7a681b68fcd639131f702a97a8a8ef19436da",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-manage-lists-i18n\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-manage-lists-i18n\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-modal-close-label",
+        "head":  "7859b1ca4630e0561dfd1700c2dd042da5bc47a7",
+        "branch":  "refs/heads/claude/a2-modal-close-label-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-codex-delivery-2026-09-07",
+        "remoteSha":  "60b7a681b68fcd639131f702a97a8a8ef19436da",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-modal-close-label\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-modal-close-label\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-navchrome",
+        "head":  "4c157cbdfe15df1a8c7ab00c77fea76d1e048419",
+        "branch":  "refs/heads/claude/a2-navchrome-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-datefmt-2026-09-06",
+        "remoteSha":  "8e835ba6c3f3c0d5e8264ff8a7d1c29f8c784984",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-navchrome\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-navchrome\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-parity-tests",
+        "head":  "336e11bfe7b468c1f9057f0eb08ddce65863aa00",
+        "branch":  "refs/heads/claude/a2-parity-tests-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-codex-delivery-2026-09-07",
+        "remoteSha":  "60b7a681b68fcd639131f702a97a8a8ef19436da",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-parity-tests\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-parity-tests\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-promotions-i18n",
+        "head":  "f81d5321bc93c615c0a5b9a37605aa94b6596ae8",
+        "branch":  "refs/heads/claude/a2-promotions-i18n-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-datefmt-2026-09-06",
+        "remoteSha":  "8e835ba6c3f3c0d5e8264ff8a7d1c29f8c784984",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-promotions-i18n\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-promotions-i18n\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-receipt-a11y",
+        "head":  "83b81a512a30dfd19a2fc5611b99b05bffbaab3a",
+        "branch":  "refs/heads/claude/a2-receipt-a11y-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-codex-delivery-2026-09-07",
+        "remoteSha":  "60b7a681b68fcd639131f702a97a8a8ef19436da",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-receipt-a11y\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-receipt-a11y\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-receipt2",
+        "head":  "48bb114b4bc74891c5963c4f3594522ae7e344ea",
+        "branch":  "refs/heads/claude/a2-receipt2-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-codex-delivery-2026-09-07",
+        "remoteSha":  "60b7a681b68fcd639131f702a97a8a8ef19436da",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-receipt2\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-receipt2\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-settings-i18n",
+        "head":  "b1111f72b97854de8e6b6662df7e74cc6c0f3ae7",
+        "branch":  "refs/heads/claude/a2-settings-i18n-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-datefmt-2026-09-06",
+        "remoteSha":  "8e835ba6c3f3c0d5e8264ff8a7d1c29f8c784984",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-settings-i18n\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-settings-i18n\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-sheet-safe-area",
+        "head":  "c6477c01b5e7b05e6ea4a673ec6deaca0f764145",
+        "branch":  "refs/heads/claude/a2-sheet-safe-area-2026-09-06",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-codex-delivery-2026-09-07",
+        "remoteSha":  "60b7a681b68fcd639131f702a97a8a8ef19436da",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-sheet-safe-area\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-sheet-safe-area\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-storefront2",
+        "head":  "1c6e80ba09fe4e559f31f8930c94db08fceb1e48",
+        "branch":  "refs/heads/claude/a2-storefront2-2026-09-07",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-storefront2-2026-09-07",
+        "remoteSha":  "1c6e80ba09fe4e559f31f8930c94db08fceb1e48",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-storefront2\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-a2-storefront2\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-apihh-supplier-contract-20260908",
+        "head":  "10bbf5fb0cc55297efa5d6f960d784a76b9451af",
+        "branch":  "refs/heads/codex/apihh-supplier-contract-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/apihh-supplier-contract-20260908",
+        "remoteSha":  "10bbf5fb0cc55297efa5d6f960d784a76b9451af",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-apihh-supplier-contract-20260908\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-audit-stockin",
+        "head":  "ed9ccc0bca8954054309436f30d02265e568a9aa",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-codex-delivery-2026-09-07",
+        "remoteSha":  "60b7a681b68fcd639131f702a97a8a8ef19436da",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-audit-stockin\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-audit-stockin\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-a2\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-backend-cert-1f8ee2d3",
+        "head":  "1f8ee2d35a1d52da920c21ee18c7e616cfae0ac9",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/active-data-completeness-20260908",
+        "remoteSha":  "e4d9e0b71a0b13afbbe0fa5a2a0f1059405d1972",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-backend-cert-1f8ee2d3\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-backend-cert-1f8ee2d3\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-branch-guard-stale-tests-20260908",
+        "head":  "d955e518e20bc9cba8553e9f65088054b26f48ad",
+        "branch":  "refs/heads/codex/branch-guard-stale-tests-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/branch-guard-stale-tests-20260908",
+        "remoteSha":  "d955e518e20bc9cba8553e9f65088054b26f48ad",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-branch-guard-stale-tests-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-broad-gate-harness-fix-20260911",
+        "head":  "d05165c8928e72885b2177ff5fe5c8e7391e33c1",
+        "branch":  "refs/heads/codex/broad-gate-harness-fix-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/broad-gate-harness-fix-20260911",
+        "remoteSha":  "d05165c8928e72885b2177ff5fe5c8e7391e33c1",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-broad-gate-harness-fix-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-broad-gate-harness-fix-20260911\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-bulk-lot-restore-20260911",
+        "head":  "0e7469fd4b4d4c0fb73ecd5b745e6fe3eb874ff5",
+        "branch":  "refs/heads/codex/bulk-lot-restore-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/bulk-lot-restore-20260911",
+        "remoteSha":  "0e7469fd4b4d4c0fb73ecd5b745e6fe3eb874ff5",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-bulk-lot-restore-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-consistency-20260911\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-cert-ee",
+        "head":  "2c497564b1ee9bda1a88bab83de80e6a9c8d807d",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-additems-2026-09-06",
+        "remoteSha":  "957fd6e09421c75659eee030f33023b84fd7caad",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-cert-ee\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-cert-ee\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-cleanup-general-ui-20260909",
+        "head":  "af3bb857aac8f137365f5320487ccd2adc3c1d7d",
+        "branch":  "refs/heads/codex/cleanup-general-ui-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/cleanup-general-ui-20260909",
+        "remoteSha":  "af3bb857aac8f137365f5320487ccd2adc3c1d7d",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-cleanup-general-ui-20260909\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-contact-display-address-gate-20260908",
+        "head":  "0985a49895d5fa0db6a778bd7f697efe24d7f73c",
+        "branch":  "refs/heads/codex/contact-display-address-gate-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/contact-display-address-gate-20260908",
+        "remoteSha":  "0985a49895d5fa0db6a778bd7f697efe24d7f73c",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-contact-display-address-gate-20260908\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-contact-merge-atomic-20260908",
+        "head":  "11c1590b92094d1c4803ca1d5804335dc3033627",
+        "branch":  "refs/heads/codex/contact-merge-atomic-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/contact-merge-atomic-20260908",
+        "remoteSha":  "11c1590b92094d1c4803ca1d5804335dc3033627",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-contact-merge-atomic-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-contacts-canonical-20260907",
+        "head":  "9026869affd91b915c85bbd5216f1cd5505b480a",
+        "branch":  "refs/heads/codex/contacts-canonical-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/contacts-canonical-20260907",
+        "remoteSha":  "9026869affd91b915c85bbd5216f1cd5505b480a",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-contacts-canonical-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-customer-permission-appselect-20260912",
+        "head":  "763035bcd5f8b80313597c61cc9cc39294839bc9",
+        "branch":  "refs/heads/codex/customer-permission-appselect-20260912",
+        "remote":  "refs/heads/archive/local-20260916/codex/customer-permission-appselect-20260912",
+        "remoteSha":  "763035bcd5f8b80313597c61cc9cc39294839bc9",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-customer-permission-appselect-20260912\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-customer-search-receipt-followup-20260912\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f32-record-rhythm-20260907",
+        "head":  "5eeb5119d52d56c9a22f36675ffdd8b7b3d22af4",
+        "branch":  "refs/heads/codex/f32-record-rhythm-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/f32-record-rhythm-20260907",
+        "remoteSha":  "5eeb5119d52d56c9a22f36675ffdd8b7b3d22af4",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f32-record-rhythm-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f32-accounting-tests-20260907",
+        "head":  "489312883f0dd1cc442f76eb2e88bf85a4990894",
+        "branch":  "refs/heads/codex/f32-accounting-tests-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/f32-accounting-tests-20260907",
+        "remoteSha":  "489312883f0dd1cc442f76eb2e88bf85a4990894",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f32-accounting-tests-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f32-accounting-tests-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f33-backend-harness-20260907",
+        "head":  "851000c254f8d1372de65cf07a3f03201346c0c2",
+        "branch":  "refs/heads/codex/f33-backend-harness-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/f33-backend-harness-20260907",
+        "remoteSha":  "851000c254f8d1372de65cf07a3f03201346c0c2",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f33-backend-harness-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f33-sale-creation-snapshot-20260907",
+        "head":  "a8081a3750f20b30a4ec6b8b764e9587bb677fd6",
+        "branch":  "refs/heads/codex/f33-sale-creation-snapshot-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/f33-sale-creation-snapshot-20260907",
+        "remoteSha":  "a8081a3750f20b30a4ec6b8b764e9587bb677fd6",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f33-sale-creation-snapshot-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f38-confirmed-status-followup-20260907",
+        "head":  "ec1641c7e97bd987ec38778f22256c823d096c7e",
+        "branch":  "refs/heads/codex/f38-confirmed-status-followup-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/f38-confirmed-status-followup-20260907",
+        "remoteSha":  "ec1641c7e97bd987ec38778f22256c823d096c7e",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f38-confirmed-status-followup-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f38-confirmed-status-followup-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f38-status-payment-version-20260907",
+        "head":  "1217c85a2b774b6a5d73160dd4d27ceddad41cd8",
+        "branch":  "refs/heads/codex/f38-status-payment-version-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/f38-status-payment-version-20260907",
+        "remoteSha":  "1217c85a2b774b6a5d73160dd4d27ceddad41cd8",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f38-status-payment-version-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f38-status-payment-version-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f38-status-lifecycle-20260907",
+        "head":  "a1e26612b0daadf6a3ecca6244199b28b301e292",
+        "branch":  "refs/heads/codex/f38-status-lifecycle-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/f38-status-lifecycle-20260907",
+        "remoteSha":  "a1e26612b0daadf6a3ecca6244199b28b301e292",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f38-status-lifecycle-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f41-d1-overload-20260907",
+        "head":  "3c84415dbb14ea6662884a067d1f5ac2af09ea8c",
+        "branch":  "refs/heads/codex/f41-d1-overload-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/f41-d1-overload-20260907",
+        "remoteSha":  "3c84415dbb14ea6662884a067d1f5ac2af09ea8c",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f41-d1-overload-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f46-backend-20260908",
+        "head":  "d7775ee8aa53952e02e33eabbb06df67fefc2167",
+        "branch":  "refs/heads/codex/f46-selected-conflict-backend",
+        "remote":  "refs/heads/archive/local-20260916/codex/f46-selected-conflict-backend",
+        "remoteSha":  "d7775ee8aa53952e02e33eabbb06df67fefc2167",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f46-backend-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f47b-i18n-20260908",
+        "head":  "b98eb0a19461072dc0e0b41cfe8bbea1b2e95726",
+        "branch":  "refs/heads/codex/f47b-contact-import-i18n-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f47b-contact-import-i18n-20260908",
+        "remoteSha":  "b98eb0a19461072dc0e0b41cfe8bbea1b2e95726",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f47b-i18n-20260908\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f47bc-import-supplier-20260908",
+        "head":  "f294aa813451bb311100b4c9be2056fb23c88f72",
+        "branch":  "refs/heads/codex/f47bc-import-supplier-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f47bc-import-supplier-20260908",
+        "remoteSha":  "f294aa813451bb311100b4c9be2056fb23c88f72",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f47bc-import-supplier-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f47bc-import-supplier-20260908\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f47d-portal-account-race-20260908",
+        "head":  "c87eb4ad087b4739e2cb3646b66e581420624496",
+        "branch":  "refs/heads/codex/f47d-portal-account-race-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f47d-portal-account-race-20260908",
+        "remoteSha":  "c87eb4ad087b4739e2cb3646b66e581420624496",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f47d-portal-account-race-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f51-sales-lot-identity-20260908",
+        "head":  "c950581a1fc136c9290f1299f6c5d254f90724db",
+        "branch":  "refs/heads/codex/f51-sales-lot-identity-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f51-sales-lot-identity-20260908",
+        "remoteSha":  "c950581a1fc136c9290f1299f6c5d254f90724db",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f51-sales-lot-identity-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f51-sales-export-preview-20260908",
+        "head":  "9074f3e12e330c9f73b8741d588d3b2a4a5bdfd5",
+        "branch":  "refs/heads/codex/f51-sales-export-preview-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f51-sales-export-preview-20260908",
+        "remoteSha":  "9074f3e12e330c9f73b8741d588d3b2a4a5bdfd5",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f51-sales-export-preview-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f56-expense-version-guard-20260908",
+        "head":  "c851dba8de29760c62974bb8fc326dfe09509a5e",
+        "branch":  "refs/heads/codex/f56-expense-version-guard-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f56-expense-version-guard-20260908",
+        "remoteSha":  "c851dba8de29760c62974bb8fc326dfe09509a5e",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f56-expense-version-guard-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f57-promotion-image-reference-20260908",
+        "head":  "513b57f1553a5b872b4493380f88c1d565dc2d2c",
+        "branch":  "refs/heads/codex/f57-promotion-image-reference-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f57-native-query-bound-20260908",
+        "remoteSha":  "90f6769a01bfbee16d1aed20d264064af1d27faf",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f57-promotion-image-reference-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f57-promotion-image-reference-20260908\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f62-save-clean-20260908",
+        "head":  "719893b448a2e854b1bf857211a604ba078d10d7",
+        "branch":  "refs/heads/codex/f62-save-clean-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f62-save-clean-20260908",
+        "remoteSha":  "719893b448a2e854b1bf857211a604ba078d10d7",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f62-save-clean-20260908\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f70-product-name-key-siblings-20260908",
+        "head":  "8920e80234ecf349e03b18cf256a94db912bc632",
+        "branch":  "refs/heads/codex/f70-product-name-key-siblings-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f70-product-name-key-siblings-20260908",
+        "remoteSha":  "8920e80234ecf349e03b18cf256a94db912bc632",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f70-product-name-key-siblings-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f72-anonymous-customer-20260909",
+        "head":  "c56f1c0f688b3ce74e4d791219ec0fb14632d291",
+        "branch":  "refs/heads/codex/f72-anonymous-customer-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/f72-anonymous-customer-20260909",
+        "remoteSha":  "c56f1c0f688b3ce74e4d791219ec0fb14632d291",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f72-anonymous-customer-20260909\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f72-anonymous-customer-20260909\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f72-general-customer-repair-20260909",
+        "head":  "124eb57ae0f4bb4e6a950a19a80545731cb56a66",
+        "branch":  "refs/heads/codex/f72-general-customer-repair-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/f72-general-customer-repair-20260909",
+        "remoteSha":  "124eb57ae0f4bb4e6a950a19a80545731cb56a66",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f72-general-customer-repair-20260909\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f74-return-create-20260909",
+        "head":  "bc11475783088135c0c4ef3d6c24c7508e327db5",
+        "branch":  "refs/heads/codex/f74-return-create-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/f74-return-create-20260909",
+        "remoteSha":  "bc11475783088135c0c4ef3d6c24c7508e327db5",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f74-return-create-20260909\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f74-wide-cascades-20260909",
+        "head":  "7716f5e28bd17ca808e0b51739da048680f359cd",
+        "branch":  "refs/heads/codex/f74-wide-cascades-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/f74-wide-cascades-20260909",
+        "remoteSha":  "7716f5e28bd17ca808e0b51739da048680f359cd",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f74-wide-cascades-20260909\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f75-employee-permissions-20260909",
+        "head":  "e6a80e1604736d6651c2c8547f5224dbf1d9c11e",
+        "branch":  "refs/heads/codex/f75-employee-permissions-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/f75-employee-permissions-20260909",
+        "remoteSha":  "e6a80e1604736d6651c2c8547f5224dbf1d9c11e",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f75-employee-permissions-20260909\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f75-employee-permissions-20260909\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-faststock-restore-host-20260907",
+        "head":  "b1d65ef35d1b20376b65b59e15d8760541494702",
+        "branch":  "refs/heads/codex/faststock-restore-host-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/faststock-restore-host-20260907",
+        "remoteSha":  "b1d65ef35d1b20376b65b59e15d8760541494702",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-faststock-restore-host-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-fee-native-money-input-20260913",
+        "head":  "390aaa511aba8c00723b809edab155b8acaba19a",
+        "branch":  "refs/heads/codex/fee-native-money-input-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/fee-native-money-input-20260913",
+        "remoteSha":  "390aaa511aba8c00723b809edab155b8acaba19a",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-fee-native-money-input-20260913\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-precision-mobile-20260913\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-final-backend-contracts-20260907",
+        "head":  "a215a766c7bca3525100625c12aa4c629415fb90",
+        "branch":  "refs/heads/codex/final-backend-contracts-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/final-backend-contracts-20260907",
+        "remoteSha":  "a215a766c7bca3525100625c12aa4c629415fb90",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-final-backend-contracts-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-frontend-harness-repair-20260907",
+        "head":  "8c3c58ef6958c6d00a18ea6e4b37802242333569",
+        "branch":  "refs/heads/codex/frontend-harness-repair-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/frontend-harness-repair-20260907",
+        "remoteSha":  "8c3c58ef6958c6d00a18ea6e4b37802242333569",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-frontend-harness-repair-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-frontend-money-precision-20260913",
+        "head":  "0661ff37daf469304aaf8c98898ffff69e43dd18",
+        "branch":  "refs/heads/codex/frontend-money-precision-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/frontend-money-precision-20260913",
+        "remoteSha":  "0661ff37daf469304aaf8c98898ffff69e43dd18",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-frontend-money-precision-20260913\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-barcode-stock-history-20260912\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-full-sweep-reconciler-20260911",
+        "head":  "7ce963be03c8f47d021441abae4bfa6a4d1c95a3",
+        "branch":  "refs/heads/codex/full-sweep-reconciler-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/full-sweep-reconciler-20260911",
+        "remoteSha":  "7ce963be03c8f47d021441abae4bfa6a4d1c95a3",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-full-sweep-reconciler-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-future-f75-returncreate-20260909",
+        "head":  "c8d3cfec268506caffc0ff3abf4c1f4c593f7975",
+        "branch":  "refs/heads/codex/future-f75-returncreate-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/f72-general-customer-repair-20260909",
+        "remoteSha":  "124eb57ae0f4bb4e6a950a19a80545731cb56a66",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-future-f75-returncreate-20260909\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-future-f75-returncreate-20260909\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-gate-harness3-20260908",
+        "head":  "5a7ad7af3ab06eff828e1b7d755033e137aeffec",
+        "branch":  "refs/heads/codex/gate-harness3-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/gate-harness3-20260908",
+        "remoteSha":  "5a7ad7af3ab06eff828e1b7d755033e137aeffec",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-gate-harness3-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-gate-harness3-20260908\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-general-crosslayer-20260911",
+        "head":  "974e52f0e8332ec1a239e67e5b3b51acad108097",
+        "branch":  "refs/heads/codex/general-crosslayer-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/general-crosslayer-20260911",
+        "remoteSha":  "974e52f0e8332ec1a239e67e5b3b51acad108097",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-general-crosslayer-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-general-crosslayer-20260911\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-historical-sale-edit-20260913",
+        "head":  "46bbce57093ce63fd73e8d439e9611ed03722e90",
+        "branch":  "refs/heads/codex/historical-sale-edit-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/historical-sale-edit-20260913",
+        "remoteSha":  "46bbce57093ce63fd73e8d439e9611ed03722e90",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-historical-sale-edit-20260913\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-money-writers-20260913\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-import-apply-authority-20260907",
+        "head":  "1aae81d3f94d4187ec4ac3a916c6e719a9471ba8",
+        "branch":  "refs/heads/codex/import-apply-authority-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/import-apply-authority-20260907",
+        "remoteSha":  "1aae81d3f94d4187ec4ac3a916c6e719a9471ba8",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-import-apply-authority-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-import-apply-authority-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-import-lot-activation-20260911",
+        "head":  "611302939f631a899f9d509ed3f85348781620af",
+        "branch":  "refs/heads/codex/import-creation-lot-activation-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/import-creation-lot-activation-20260911",
+        "remoteSha":  "611302939f631a899f9d509ed3f85348781620af",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-import-lot-activation-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-received-date-pos-20260911\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-inactive-lot-fix-20260911",
+        "head":  "781c4b9aed8794df87bfa952a2df47c0a8281171",
+        "branch":  "refs/heads/codex/inactive-lot-fix-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/inactive-lot-fix-20260911",
+        "remoteSha":  "781c4b9aed8794df87bfa952a2df47c0a8281171",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-inactive-lot-fix-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-received-date-pos-20260911\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-inactive-lot-guards-20260911",
+        "head":  "90061a2a70f0a37acc07ef0e8a61723b7eadf15c",
+        "branch":  "refs/heads/codex/inactive-lot-guards-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/inactive-lot-guards-20260911",
+        "remoteSha":  "90061a2a70f0a37acc07ef0e8a61723b7eadf15c",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-inactive-lot-guards-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-leang-gallery-20260908",
+        "head":  "9fae6a2701252b6a4c80fe780a73c31b48c6c471",
+        "branch":  "refs/heads/codex/leang-gallery-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/leang-gallery-20260908",
+        "remoteSha":  "9fae6a2701252b6a4c80fe780a73c31b48c6c471",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-leang-gallery-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-legacy-subtotal-fixture-fix-20260911",
+        "head":  "5c8d9f32b7893272ec988cb4ba45249f61cbf778",
+        "branch":  "refs/heads/codex/legacy-subtotal-fixture-fix-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/legacy-subtotal-fixture-fix-20260911",
+        "remoteSha":  "5c8d9f32b7893272ec988cb4ba45249f61cbf778",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-legacy-subtotal-fixture-fix-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-m4-report-v1-refund-20260913",
+        "head":  "002e4b7c4594b2d14e96bb20198ea2c4b62dbb21",
+        "branch":  "refs/heads/codex/m4-report-v1-refund-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/m4-report-v1-refund-20260913",
+        "remoteSha":  "002e4b7c4594b2d14e96bb20198ea2c4b62dbb21",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-m4-report-v1-refund-20260913\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-membership-readonly-20260908",
+        "head":  "585ef3c7bc20fc40f477e9381f8d01a73d6edd1e",
+        "branch":  "refs/heads/codex/membership-readonly-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/membership-readonly-20260908",
+        "remoteSha":  "585ef3c7bc20fc40f477e9381f8d01a73d6edd1e",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-membership-readonly-20260908\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-merge-active-lots-20260911",
+        "head":  "9e79b2fd4223dd28d829796136c63dda7c9674aa",
+        "branch":  "refs/heads/codex/merge-active-lots-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/merge-active-lots-20260911",
+        "remoteSha":  "9e79b2fd4223dd28d829796136c63dda7c9674aa",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-merge-active-lots-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-merge-gate-harnesses-20260908",
+        "head":  "ca917a7e3154a3901c1e244cc339fac5d5b005e0",
+        "branch":  "refs/heads/codex/merge-gate-harnesses-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/merge-gate-harnesses-20260908",
+        "remoteSha":  "ca917a7e3154a3901c1e244cc339fac5d5b005e0",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-merge-gate-harnesses-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-merge-parent-continuation-20260911",
+        "head":  "16a0d7678ebf39e8722017b847ba1911d49c0603",
+        "branch":  "refs/heads/codex/merge-parent-continuation-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/merge-parent-continuation-20260911",
+        "remoteSha":  "16a0d7678ebf39e8722017b847ba1911d49c0603",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-merge-parent-continuation-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-merge-redo-economics-20260908",
+        "head":  "5e3c252d44f28f0761d3430f9da2fe5f28bfb0cd",
+        "branch":  "refs/heads/codex/merge-redo-economics-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/merge-redo-economics-20260908",
+        "remoteSha":  "5e3c252d44f28f0761d3430f9da2fe5f28bfb0cd",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-merge-redo-economics-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-native-fixture-repairs-20260913",
+        "head":  "3f30bb89d591a31257bdaf03ef50d9f256d4a170",
+        "branch":  "refs/heads/codex/native-fixture-repairs-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/native-fixture-repairs-20260913",
+        "remoteSha":  "3f30bb89d591a31257bdaf03ef50d9f256d4a170",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-native-fixture-repairs-20260913\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-not-paid-stock-recovery-ui-20260909",
+        "head":  "20f988170e11daa2c20db3191435a901163a7f7b",
+        "branch":  "refs/heads/codex/not-paid-stock-recovery-ui-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/not-paid-stock-recovery-ui-20260909",
+        "remoteSha":  "20f988170e11daa2c20db3191435a901163a7f7b",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-not-paid-stock-recovery-ui-20260909\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-notpaid-20260907",
+        "head":  "28b82989243d047e6c38e62e5ea6d25b894711d5",
+        "branch":  "refs/heads/codex/notpaid-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/notpaid-20260907",
+        "remoteSha":  "28b82989243d047e6c38e62e5ea6d25b894711d5",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-notpaid-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-notpaid-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-permission-transfer-bridge-20260911",
+        "head":  "9b8e7a1972d064ed3337ab33eee7483bd847abdb",
+        "branch":  "refs/heads/codex/permission-transfer-bridge-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/permission-transfer-bridge-20260911",
+        "remoteSha":  "9b8e7a1972d064ed3337ab33eee7483bd847abdb",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-permission-transfer-bridge-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-portal-harness-20260907",
+        "head":  "5a2ad5cd455c5b2c71899c06a664a0ad88aa9e2c",
+        "branch":  "refs/heads/codex/portal-harness-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/portal-harness-20260907",
+        "remoteSha":  "5a2ad5cd455c5b2c71899c06a664a0ad88aa9e2c",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-portal-harness-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-portal-phone-loader-20260908",
+        "head":  "6f9d776e50bef9fe5f383124d9c199aa1d9e0877",
+        "branch":  "refs/heads/codex/portal-phone-loader-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/portal-phone-loader-20260908",
+        "remoteSha":  "6f9d776e50bef9fe5f383124d9c199aa1d9e0877",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-portal-phone-loader-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-product-cost-wavea-20260913",
+        "head":  "7c06631b26d29a09b0124e911e145124038ba496",
+        "branch":  "refs/heads/codex/product-cost-wavea-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/product-cost-wavea-20260913",
+        "remoteSha":  "7c06631b26d29a09b0124e911e145124038ba496",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-product-cost-wavea-20260913\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-precision-mobile-20260913\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-product-cost-wavea-20260913\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-product-merge-read-batching-20260907",
+        "head":  "0a83c0e32e04c728e208c208556c2a19e8ff069f",
+        "branch":  "refs/heads/codex/product-merge-read-batching-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/product-merge-read-batching-20260907",
+        "remoteSha":  "0a83c0e32e04c728e208c208556c2a19e8ff069f",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-product-merge-read-batching-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-product-name-adoption-20260913",
+        "head":  "397ba994fb3fdb69bf3a02b45722dd6efe9fdf41",
+        "branch":  "refs/heads/codex/product-name-adoption-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/product-name-adoption-20260913",
+        "remoteSha":  "397ba994fb3fdb69bf3a02b45722dd6efe9fdf41",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-product-name-adoption-20260913\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-product-name-rail-20260913",
+        "head":  "3a0d7e8588991e18f6d9c7121aeb55db6c210523",
+        "branch":  "refs/heads/codex/product-name-rail-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/product-name-rail-20260913",
+        "remoteSha":  "3a0d7e8588991e18f6d9c7121aeb55db6c210523",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-product-name-rail-20260913\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-product-remove-replay-20260911",
+        "head":  "b8edf589dd63832ead0e1f43caf30ed3938b877c",
+        "branch":  "refs/heads/codex/product-remove-replay-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/product-remove-replay-20260911",
+        "remoteSha":  "b8edf589dd63832ead0e1f43caf30ed3938b877c",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-product-remove-replay-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-products-preview-scale-20260907",
+        "head":  "fe6794ebf05366bf886972f2c143ae14761bfa7a",
+        "branch":  "refs/heads/codex/products-preview-scale-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/products-preview-scale-20260907",
+        "remoteSha":  "fe6794ebf05366bf886972f2c143ae14761bfa7a",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-products-preview-scale-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-promotion-policy-twin-20260913",
+        "head":  "70e26acaacbf3e62a6d49b18ea0f499d4c4cf95f",
+        "branch":  "refs/heads/codex/promotion-policy-twin-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/promotion-policy-twin-20260913",
+        "remoteSha":  "70e26acaacbf3e62a6d49b18ea0f499d4c4cf95f",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-promotion-policy-twin-20260913\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-promotion-policy-twin-20260913\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rail-test-contracts-20260913",
+        "head":  "a1b30eed00b6e3c94e2b0a27509302b79daba598",
+        "branch":  "refs/heads/codex/rail-test-contracts-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/rail-test-contracts-20260913",
+        "remoteSha":  "a1b30eed00b6e3c94e2b0a27509302b79daba598",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-rail-test-contracts-20260913\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-receipt-number-guard-20260908",
+        "head":  "ed3cd78dd4e0641f542711ffa686d541f30625fb",
+        "branch":  "refs/heads/codex/receipt-number-guard-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/receipt-number-guard-20260908",
+        "remoteSha":  "ed3cd78dd4e0641f542711ffa686d541f30625fb",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-receipt-number-guard-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-receipt-roll-preview-20260912",
+        "head":  "09bb14168e20d1b35bb80a62b7f3cacf095d2443",
+        "branch":  "refs/heads/codex/receipt-roll-preview-20260912",
+        "remote":  "refs/heads/archive/local-20260916/codex/receipt-roll-preview-20260912",
+        "remoteSha":  "09bb14168e20d1b35bb80a62b7f3cacf095d2443",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-receipt-roll-preview-20260912\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-account-cache-sale-flash-20260912\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-received-data-repair-20260911",
+        "head":  "c8e1bf5ef1f891a45da74749dc10fe8571edd75d",
+        "branch":  "refs/heads/codex/received-data-repair-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/received-data-repair-20260911",
+        "remoteSha":  "c8e1bf5ef1f891a45da74749dc10fe8571edd75d",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-received-data-repair-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-records-history-20260907",
+        "head":  "7117bc92022bd0b4d8f4054ad493b0d3369bbcdd",
+        "branch":  "refs/heads/codex/records-history-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/records-history-20260907",
+        "remoteSha":  "7117bc92022bd0b4d8f4054ad493b0d3369bbcdd",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-records-history-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-records-history-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-records-retention-20260907",
+        "head":  "c52256622cbc3bedf1772ede008ac8c7b96a36c4",
+        "branch":  "refs/heads/codex/records-retention-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/records-retention-20260907",
+        "remoteSha":  "c52256622cbc3bedf1772ede008ac8c7b96a36c4",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-records-retention-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-records-retention-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-role-update-guard-20260909",
+        "head":  "99910afbfba82bfdc591fddf450f110f60bb311a",
+        "branch":  "refs/heads/codex/role-update-guard-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/role-update-guard-20260909",
+        "remoteSha":  "99910afbfba82bfdc591fddf450f110f60bb311a",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-role-update-guard-20260909\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-reports-single-picker-20260911",
+        "head":  "b5163f80ff3d36f16f43dc681961cff89f85a8f8",
+        "branch":  "refs/heads/codex/reports-single-picker-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/reports-single-picker-20260911",
+        "remoteSha":  "b5163f80ff3d36f16f43dc681961cff89f85a8f8",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-reports-single-picker-20260911\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-consistency-20260911\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-lot-null-active-20260911",
+        "head":  "9ca2f797eb131bb880a4544a10ef5ea87101dc4f",
+        "branch":  "refs/heads/codex/sale-lot-null-active-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/sale-lot-null-active-20260911",
+        "remoteSha":  "9ca2f797eb131bb880a4544a10ef5ea87101dc4f",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-lot-null-active-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-lot-restore-20260911",
+        "head":  "5761ed5bae99e142f4061155b7b9dd28d7af2ad8",
+        "branch":  "refs/heads/codex/sale-lot-restore-activation-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/sale-lot-restore-activation-20260911",
+        "remoteSha":  "5761ed5bae99e142f4061155b7b9dd28d7af2ad8",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-lot-restore-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-records-money-precision-20260913",
+        "head":  "0d2dc26b5a755b28df038b675512d9084964fffc",
+        "branch":  "refs/heads/codex/sale-records-money-precision-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/sale-records-money-precision-20260913",
+        "remoteSha":  "0d2dc26b5a755b28df038b675512d9084964fffc",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-records-money-precision-20260913\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-account-cache-sale-flash-20260912\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-recovery-confirmation-ids-20260909",
+        "head":  "18ddf73a979d1c93131294da6d9ed4567135c58e",
+        "branch":  "refs/heads/codex/sale-recovery-confirmation-ids-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/sale-recovery-confirmation-ids-20260909",
+        "remoteSha":  "18ddf73a979d1c93131294da6d9ed4567135c58e",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-recovery-confirmation-ids-20260909\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-records-recovery-display-20260909",
+        "head":  "074d030c685a01ac169eb2fe3f20c7ebb73254e3",
+        "branch":  "refs/heads/codex/sale-records-recovery-display-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/sale-records-recovery-display-20260909",
+        "remoteSha":  "074d030c685a01ac169eb2fe3f20c7ebb73254e3",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-records-recovery-display-20260909\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-zero-items-recovery-20260909",
+        "head":  "a9aa26ee167ede502d5a0e63e7f9ac910ba8fe74",
+        "branch":  "refs/heads/codex/sale-zero-items-recovery-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/sale-zero-items-recovery-20260909",
+        "remoteSha":  "a9aa26ee167ede502d5a0e63e7f9ac910ba8fe74",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-zero-items-recovery-20260909\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-zero-items-recovery-v2-20260909",
+        "head":  "7ef164fe6a052cea6a701d0600c1cfa4189a418b",
+        "branch":  "refs/heads/codex/sale-zero-items-recovery-v2-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/sale-zero-items-recovery-v2-20260909",
+        "remoteSha":  "7ef164fe6a052cea6a701d0600c1cfa4189a418b",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sale-zero-items-recovery-v2-20260909\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-add-delivery-20260907",
+        "head":  "eb7c2ff580edaadd76083743e0e75aceb73c3b36",
+        "branch":  "refs/heads/codex/sales-add-delivery-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/sales-add-delivery-20260907",
+        "remoteSha":  "eb7c2ff580edaadd76083743e0e75aceb73c3b36",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-add-delivery-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-add-delivery-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-delivery-route-test-20260907",
+        "head":  "7778b89142cf720ea778364a17814173762d22a6",
+        "branch":  "refs/heads/codex/sales-delivery-route-test-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/sales-delivery-route-test-20260907",
+        "remoteSha":  "7778b89142cf720ea778364a17814173762d22a6",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-delivery-route-test-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-lot-fixture-reconcile-20260911",
+        "head":  "99f34d3b225020672c39a650813520ab89f27268",
+        "branch":  "refs/heads/codex/sales-lot-fixture-reconcile-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/sales-lot-fixture-reconcile-20260911",
+        "remoteSha":  "99f34d3b225020672c39a650813520ab89f27268",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-lot-fixture-reconcile-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-lot-fixture-reconcile-20260911\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-record-count-d1-20260907",
+        "head":  "96fd1bb4a96bd13f45cb2f70816f9795f4de20fe",
+        "branch":  "refs/heads/codex/sales-record-count-d1-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/sales-record-count-d1-20260907",
+        "remoteSha":  "96fd1bb4a96bd13f45cb2f70816f9795f4de20fe",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-record-count-d1-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-records-render-20260907",
+        "head":  "fdd13c38ac3c5bbdfb8ed746e21e6455b5fd5bd2",
+        "branch":  "refs/heads/codex/records-structured-render-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/records-structured-render-20260907",
+        "remoteSha":  "fdd13c38ac3c5bbdfb8ed746e21e6455b5fd5bd2",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-records-render-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-session-barcode-guard-20260907",
+        "head":  "b895a735ffc2f68e69d407b04cefff02c08043a6",
+        "branch":  "refs/heads/codex/session-barcode-guard-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/session-barcode-guard-20260907",
+        "remoteSha":  "b895a735ffc2f68e69d407b04cefff02c08043a6",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-session-barcode-guard-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-session-barcode-guard-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-shift-lifecycle-gate-20260908",
+        "head":  "4d0c476169ce05216b36f98a069662f5aeee72e7",
+        "branch":  "refs/heads/codex/shift-lifecycle-gate-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/shift-lifecycle-gate-20260908",
+        "remoteSha":  "4d0c476169ce05216b36f98a069662f5aeee72e7",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-shift-lifecycle-gate-20260908\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-action-cost-writers-20260912",
+        "head":  "103dc2b315ac45f1af378cf83b2d85de4ce447e7",
+        "branch":  "refs/heads/codex/stock-action-cost-writers-20260912",
+        "remote":  "refs/heads/archive/local-20260916/codex/stock-action-cost-writers-20260912",
+        "remoteSha":  "103dc2b315ac45f1af378cf83b2d85de4ce447e7",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-action-cost-writers-20260912\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-receipt-pos-contacts-followup-20260912\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-cost-receipts-20260913",
+        "head":  "c953160129b784a1246ced161be58d2efc41afb9",
+        "branch":  "refs/heads/codex/stock-cost-receipts-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/stock-cost-receipts-20260913",
+        "remoteSha":  "c953160129b784a1246ced161be58d2efc41afb9",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-cost-receipts-20260913\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-lot-testfix-20260912",
+        "head":  "33ee14b627a015b444d8b1c50b7cd2f0e94985d2",
+        "branch":  "refs/heads/codex/stock-lot-testfix-20260912",
+        "remote":  "refs/heads/archive/local-20260916/codex/stock-lot-testfix-20260912",
+        "remoteSha":  "33ee14b627a015b444d8b1c50b7cd2f0e94985d2",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-lot-testfix-20260912\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-session-lot-order-20260911",
+        "head":  "3dd76cf71d10cfc86d332d56e144602411926e17",
+        "branch":  "refs/heads/codex/stock-session-lot-order-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/stock-session-lot-order-20260911",
+        "remoteSha":  "3dd76cf71d10cfc86d332d56e144602411926e17",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-session-lot-order-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-received-date-pos-20260911\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-set-contract-test-20260912",
+        "head":  "287397d9cf29bb15308e722d3c7939c133dd836a",
+        "branch":  "refs/heads/codex/stock-set-contract-test-20260912",
+        "remote":  "refs/heads/archive/local-20260916/codex/stock-set-contract-test-20260912",
+        "remoteSha":  "287397d9cf29bb15308e722d3c7939c133dd836a",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-set-contract-test-20260912\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-lot-backend-20260912\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stockchange-composed-responsive-test-20260913",
+        "head":  "6c19de80450db362f722c48f1bec5127a074d386",
+        "branch":  "refs/heads/codex/stockchange-composed-responsive-test-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/stockchange-composed-responsive-test-20260913",
+        "remoteSha":  "6c19de80450db362f722c48f1bec5127a074d386",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stockchange-composed-responsive-test-20260913\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-barcode-stock-history-20260912\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-accounting-20260907",
+        "head":  "468ae067c9882ef3789d175394b06e1f08cdc2ff",
+        "branch":  "refs/heads/codex/takeover-accounting-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/takeover-accounting-20260907",
+        "remoteSha":  "468ae067c9882ef3789d175394b06e1f08cdc2ff",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-accounting-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-accounting-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-image-gate-repair-20260907",
+        "head":  "96abe402c0ef90e544628b65351976239d924b2a",
+        "branch":  "refs/heads/codex/takeover-image-gate-repair-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/takeover-image-gate-repair-20260907",
+        "remoteSha":  "96abe402c0ef90e544628b65351976239d924b2a",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-image-gate-repair-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-image-permission-20260907",
+        "head":  "e776bb6fad9c027d94d0077bdd6f462e74136c8a",
+        "branch":  "refs/heads/codex/takeover-image-permission-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/takeover-image-permission-20260907",
+        "remoteSha":  "e776bb6fad9c027d94d0077bdd6f462e74136c8a",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-image-permission-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-legacy-tests-20260907",
+        "head":  "3738d3506212050a107238ef688f567d2543be99",
+        "branch":  "refs/heads/codex/takeover-legacy-tests-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/takeover-legacy-tests-20260907",
+        "remoteSha":  "3738d3506212050a107238ef688f567d2543be99",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-legacy-tests-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-media-followup-20260907",
+        "head":  "d7a47bc9d587436d813e926fcbf9f31ec089ce9c",
+        "branch":  "refs/heads/codex/takeover-media-followup-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/takeover-media-followup-20260907",
+        "remoteSha":  "d7a47bc9d587436d813e926fcbf9f31ec089ce9c",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-media-followup-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-media-followup-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-portal-gates-20260907",
+        "head":  "2d3492b658a966e22fc349e8491e49c6fda9d384",
+        "branch":  "refs/heads/codex/takeover-portal-gates-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/takeover-portal-gates-20260907",
+        "remoteSha":  "2d3492b658a966e22fc349e8491e49c6fda9d384",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-portal-gates-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-portal-gates-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-product-minimize-20260907",
+        "head":  "27f24bfe6c14c81b781aa3863aa1687098b3fc0e",
+        "branch":  "refs/heads/codex/takeover-product-minimize-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/takeover-product-minimize-20260907",
+        "remoteSha":  "27f24bfe6c14c81b781aa3863aa1687098b3fc0e",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-product-minimize-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-product-perms-20260907",
+        "head":  "1335309fcb6c7f43eb0b4ad667cace6bf15cd221",
+        "branch":  "refs/heads/codex/takeover-product-perms-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/takeover-product-perms-20260907",
+        "remoteSha":  "1335309fcb6c7f43eb0b4ad667cace6bf15cd221",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-product-perms-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-remainder-20260907",
+        "head":  "45d39b5ff8a9bceafd726974bea33c542f11d0de",
+        "branch":  "refs/heads/codex/takeover-remainder-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/takeover-remainder-20260907",
+        "remoteSha":  "45d39b5ff8a9bceafd726974bea33c542f11d0de",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-remainder-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-remainder-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-stock-image-permission-20260907",
+        "head":  "f02f5bf935ec48874fe9357943adf3c425a9f225",
+        "branch":  "refs/heads/codex/takeover-stock-image-permission-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/takeover-stock-image-permission-20260907",
+        "remoteSha":  "f02f5bf935ec48874fe9357943adf3c425a9f225",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-takeover-stock-image-permission-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-test-maintenance-sales-20260913",
+        "head":  "c966ba0be3f91944331a228917c93699707d4bf8",
+        "branch":  "refs/heads/codex/test-maintenance-sales-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/test-maintenance-sales-20260913",
+        "remoteSha":  "c966ba0be3f91944331a228917c93699707d4bf8",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-test-maintenance-sales-20260913\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-account-cache-sale-flash-20260912\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-transfer-cost-snapshot-20260912",
+        "head":  "046985c078a70ece3861c753543b402020b702ab",
+        "branch":  "refs/heads/codex/transfer-cost-snapshot-20260912",
+        "remote":  "refs/heads/archive/local-20260916/codex/transfer-cost-snapshot-20260912",
+        "remoteSha":  "046985c078a70ece3861c753543b402020b702ab",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-transfer-cost-snapshot-20260912\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-account-cache-sale-flash-20260912\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-transfer-lot-aggregate-cap-20260909",
+        "head":  "59a48f417c83b63eb7f79914bafdde2464315aa9",
+        "branch":  "refs/heads/codex/transfer-lot-aggregate-cap-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/transfer-lot-aggregate-cap-20260909",
+        "remoteSha":  "59a48f417c83b63eb7f79914bafdde2464315aa9",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-transfer-lot-aggregate-cap-20260909\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-transfer-replay-fixture-reconcile-20260911",
+        "head":  "3becf943e6f72b7cf3b1991cd7df5299c2e7b30e",
+        "branch":  "refs/heads/codex/transfer-replay-fixture-reconcile-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/transfer-replay-fixture-reconcile-20260911",
+        "remoteSha":  "3becf943e6f72b7cf3b1991cd7df5299c2e7b30e",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-transfer-replay-fixture-reconcile-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-transfer-replay-fixture-reconcile-20260911\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-permission-backend-20260911",
+        "head":  "95062476794abb8c472727a137caac80b77be781",
+        "branch":  "refs/heads/codex/ui-permission-backend-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/ui-permission-backend-20260911",
+        "remoteSha":  "95062476794abb8c472727a137caac80b77be781",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-permission-backend-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-permission-backend-20260911\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-shift-20260911",
+        "head":  "ef8a5d468c31e9fe2a25ea863a9ccffeac3d0b25",
+        "branch":  "refs/heads/codex/ui-shift-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/ui-shift-20260911",
+        "remoteSha":  "ef8a5d468c31e9fe2a25ea863a9ccffeac3d0b25",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-shift-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-shift-20260911\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-shift-close-20260911",
+        "head":  "201cd565d31b7aa67ceb7c9cfb4220a6e27abe1a",
+        "branch":  "refs/heads/codex/ui-shift-close-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/ui-shift-close-20260911",
+        "remoteSha":  "201cd565d31b7aa67ceb7c9cfb4220a6e27abe1a",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-shift-close-20260911\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-transfer-backend-20260911",
+        "head":  "1b2d6e5736b84c55228f3f0bf30cbf6029701f59",
+        "branch":  "refs/heads/codex/ui-transfer-backend-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/ui-transfer-backend-20260911",
+        "remoteSha":  "1b2d6e5736b84c55228f3f0bf30cbf6029701f59",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-transfer-backend-20260911\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-identity-20260907",
+        "head":  "6eb666256c543a4237017423e851cd4b61053e0f",
+        "branch":  "refs/heads/codex/verify-identity-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/active-data-completeness-20260908",
+        "remoteSha":  "e4d9e0b71a0b13afbbe0fa5a2a0f1059405d1972",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-identity-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-identity-20260907\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-media-f747",
+        "head":  "f747ce0f8eea5b87cc3504bd91400e5b4c715b6a",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/active-data-completeness-20260908",
+        "remoteSha":  "e4d9e0b71a0b13afbbe0fa5a2a0f1059405d1972",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-media-f747\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-media-f747\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-migrations-20260907",
+        "head":  "436761e9c0a1b8cd5b31d48f8118a97013278879",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/active-data-completeness-20260908",
+        "remoteSha":  "e4d9e0b71a0b13afbbe0fa5a2a0f1059405d1972",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-migrations-20260907\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-portal-2e",
+        "head":  "2e063c99e2161e097ac489f4ad6c35784d52d7e6",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/takeover-portal-20260907",
+        "remoteSha":  "70b63c5e53df0bb109210ebf36cfcbca8de9af03",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-portal-2e\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-portal-cdbd",
+        "head":  "cdbd218a39fc85ec2da937b53a5900516c2f4817",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/active-data-completeness-20260908",
+        "remoteSha":  "e4d9e0b71a0b13afbbe0fa5a2a0f1059405d1972",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-portal-cdbd\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-portal-cdbd\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-portal-f78",
+        "head":  "f78f4b3e8bf589e71ea04368c07048ccc612c331",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/takeover-portal-20260907",
+        "remoteSha":  "70b63c5e53df0bb109210ebf36cfcbca8de9af03",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-verify-portal-f78\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-takeover-20260907\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-write-timeout-outcome-20260909",
+        "head":  "c9f82145b4470833c442d901767a8de24cf9ca0b",
+        "branch":  "refs/heads/codex/write-timeout-outcome-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/write-timeout-outcome-20260909",
+        "remoteSha":  "c9f82145b4470833c442d901767a8de24cf9ca0b",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\bos-write-timeout-outcome-20260909\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-cashier-foundation-20260905b",
+        "head":  "389244dc4253e5e14a0e821d4e25dc303032f7f3",
+        "branch":  "refs/heads/codex/cashier-foundation-20260905b",
+        "remote":  "refs/heads/archive/local-20260916/codex/cashier-foundation-20260905b",
+        "remoteSha":  "389244dc4253e5e14a0e821d4e25dc303032f7f3",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-cashier-foundation-20260905b\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-cashier-foundation-20260905b\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-date-presets-20260905",
+        "head":  "4d01d9fb3969c040082275839dc37cb04c2f6c25",
+        "branch":  "refs/heads/codex/date-presets-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/date-presets-20260905",
+        "remoteSha":  "4d01d9fb3969c040082275839dc37cb04c2f6c25",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-date-presets-20260905\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-inventory-loader-fix-20260905",
+        "head":  "46bdcb9ded76d1e59773013f771a5b3641e5a347",
+        "branch":  "refs/heads/codex/inventory-loader-fix-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/inventory-loader-fix-20260905",
+        "remoteSha":  "46bdcb9ded76d1e59773013f771a5b3641e5a347",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-inventory-loader-fix-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-f2-report-expense",
+        "head":  "14587b4d204bda7f2ea23bafb390b18d2969c8cf",
+        "branch":  "refs/heads/codex/f2-canonical-expense-statement",
+        "remote":  "refs/heads/archive/local-20260916/codex/f2-canonical-expense-statement",
+        "remoteSha":  "14587b4d204bda7f2ea23bafb390b18d2969c8cf",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-f2-report-expense\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-f2-report-expense\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-inventory-product-metrics-20260905",
+        "head":  "6a3ba7915551dbcd60c1fb68a7587054100f0f19",
+        "branch":  "refs/heads/codex/inventory-product-metrics-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/inventory-product-metrics-20260905",
+        "remoteSha":  "6a3ba7915551dbcd60c1fb68a7587054100f0f19",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-inventory-product-metrics-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-legacy-restore-20260905",
+        "head":  "c324bc4599ce4721d3d00468b421073e868cd053",
+        "branch":  "refs/heads/codex/legacy-restore-guard-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/legacy-restore-guard-20260905",
+        "remoteSha":  "c324bc4599ce4721d3d00468b421073e868cd053",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-legacy-restore-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-legacy-subtotal-runtime-20260905",
+        "head":  "61e5a48f05a681923173bee6feb7e7242611e90d",
+        "branch":  "refs/heads/codex/legacy-subtotal-runtime-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/legacy-subtotal-runtime-20260905",
+        "remoteSha":  "61e5a48f05a681923173bee6feb7e7242611e90d",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-legacy-subtotal-runtime-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-native-change",
+        "head":  "26de021c13f3cd4c2da515dddfe28b2e592d46d0",
+        "branch":  "refs/heads/codex/native-change-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/native-change-20260905",
+        "remoteSha":  "26de021c13f3cd4c2da515dddfe28b2e592d46d0",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-native-change\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-payment-method-route",
+        "head":  "7a485fe4626a488587a972e89778820be4a15e26",
+        "branch":  "refs/heads/codex/payment-method-route-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/payment-method-route-20260905",
+        "remoteSha":  "7a485fe4626a488587a972e89778820be4a15e26",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-payment-method-route\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-payment-ui",
+        "head":  "fed3ab0d3df6d2ca71df16fdd4059d7fe297030c",
+        "branch":  "refs/heads/codex/payment-ui-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/payment-ui-20260905",
+        "remoteSha":  "fed3ab0d3df6d2ca71df16fdd4059d7fe297030c",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-payment-ui\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-payment-ui\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-product-image-permission-20260905",
+        "head":  "5586549f405c7f182125e4fc80d84a6e7fa89767",
+        "branch":  "refs/heads/codex/product-image-permission-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/product-image-permission-20260905",
+        "remoteSha":  "5586549f405c7f182125e4fc80d84a6e7fa89767",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-product-image-permission-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-report-rounding-20260905b",
+        "head":  "6a2e6536f3eebecde42f1d9455909ed9570fbf7e",
+        "branch":  "refs/heads/codex/report-rounding-20260905b",
+        "remote":  "refs/heads/archive/local-20260916/codex/report-rounding-20260905b",
+        "remoteSha":  "6a2e6536f3eebecde42f1d9455909ed9570fbf7e",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-report-rounding-20260905b\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-request-guards-20260905",
+        "head":  "dfb65b30bf91d5f04491c3092760098ca156ebda",
+        "branch":  "refs/heads/codex/request-guards-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/request-guards-20260905",
+        "remoteSha":  "dfb65b30bf91d5f04491c3092760098ca156ebda",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-request-guards-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-sale-picker-popup-20260905",
+        "head":  "5db40e9fafdbeae003f1d3fdf5c5ca188a21b2ae",
+        "branch":  "refs/heads/codex/sale-picker-popup-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/sale-picker-popup-20260905",
+        "remoteSha":  "5db40e9fafdbeae003f1d3fdf5c5ca188a21b2ae",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-sale-picker-popup-20260905\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-security-20260905",
+        "head":  "c8397a99e6d1030647fe2a3dee0a3a611b151c9e",
+        "branch":  "refs/heads/codex/security-bounds-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/security-bounds-20260905",
+        "remoteSha":  "c8397a99e6d1030647fe2a3dee0a3a611b151c9e",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-security-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-shift-cancel-notification-20260905",
+        "head":  "1fc2fc906533bcc98f083620a40a9c84db62764b",
+        "branch":  "refs/heads/codex/shift-cancel-notification-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/shift-cancel-notification-20260905",
+        "remoteSha":  "1fc2fc906533bcc98f083620a40a9c84db62764b",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-shift-cancel-notification-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-shift-lifecycle-20260905",
+        "head":  "c8f9d296c2265afba770a98aa4cda6ecafb6012e",
+        "branch":  "refs/heads/codex/shift-lifecycle-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/shift-lifecycle-20260905",
+        "remoteSha":  "c8f9d296c2265afba770a98aa4cda6ecafb6012e",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-shift-lifecycle-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-single-status-damaged-20260905",
+        "head":  "5c5c19a9c26164aff20e9736ef78c016dc3f8361",
+        "branch":  "refs/heads/codex/single-status-damaged-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/single-status-damaged-20260905",
+        "remoteSha":  "5c5c19a9c26164aff20e9736ef78c016dc3f8361",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-single-status-damaged-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-single-status-damaged-20260905\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-stock-session-20260905",
+        "head":  "e87d562a0c5e8cb7066322522d798aea437cf15d",
+        "branch":  "refs/heads/codex/stock-session-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/stock-session-20260905",
+        "remoteSha":  "e87d562a0c5e8cb7066322522d798aea437cf15d",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-stock-session-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-stock-session-undo-20260905",
+        "head":  "0704bae21dc8b42ed6a67ceaacf7cc0015be35b7",
+        "branch":  "refs/heads/codex/stock-session-undo-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/stock-session-undo-20260905",
+        "remoteSha":  "0704bae21dc8b42ed6a67ceaacf7cc0015be35b7",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-stock-session-undo-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-subtotal-verify-20260905",
+        "head":  "61e5a48f05a681923173bee6feb7e7242611e90d",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/legacy-subtotal-runtime-20260905",
+        "remoteSha":  "61e5a48f05a681923173bee6feb7e7242611e90d",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-subtotal-verify-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-telegram-equations-20260905",
+        "head":  "27a088881676ceb639dfe246e4788b8715538836",
+        "branch":  "refs/heads/codex/telegram-equations-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/telegram-equations-20260905",
+        "remoteSha":  "27a088881676ceb639dfe246e4788b8715538836",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-telegram-equations-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-integration\\cloudflare\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-vis1-helper-20260905",
+        "head":  "c82abf64eadfc6c0a4e3466a1d5d71e25298fcb1",
+        "branch":  "refs/heads/codex/vis1-helper-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/vis1-helper-20260905",
+        "remoteSha":  "c82abf64eadfc6c0a4e3466a1d5d71e25298fcb1",
+        "links":  [
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-vis1-helper-20260905\\cloudflare\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\cloudflare\\node_modules"
+                      },
+                      {
+                          "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-vis1-helper-20260905\\frontend\\node_modules",
+                          "target":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1\\frontend\\node_modules"
+                      }
+                  ],
+        "removed":  true
+    }
+]

@@ -2,6 +2,31 @@
 
 ## Newest execution checkpoint
 
+### Dependency-link batch — newest
+
+Removed 160 more verified clean, remotely backed direct-child Downloads worktrees:
+**219 removed total, 377 registered remain.** The 212 ignored entries were ordinary
+dependency junctions, not real dependency directories. A disposable junction test
+first proved nonrecursive .NET Directory.Delete removes only the link and preserves
+the target sentinel hash. Each production cleanup path was resolved and confined
+to its checked worktree, each target verified outside it, and each worktree removed
+without Git force after unlinking. No dependency target was deleted.
+
+Evidence: `outputs/checkout-cleanup-20260919/link-removed.json` records all 160
+paths, original branches/HEADs, live remote refs and junction targets. All removed
+paths are absent; all recovery commits resolve; all 20 shared dependency targets
+exist. `link-skipped.json` retains bos-stock-lot-backend-20260912 because an inbound
+dependency link still points into it. No active agent/process reference was found
+for accepted paths. Both frontend and Worker npm run typecheck pass after cleanup.
+Primary checkout still has its 73 tracked changes; its common Git is preserved.
+
+Found 13 matching Downloads folders outside the worktree registry, including
+backups and local test-state folders. These are not authorized as disposable by
+name alone and remain untouched pending inspection. Local archival choice for
+unique material is still pending. Goal remains active; no runtime code or deploy.
+
+### Prior clean-only batch
+
 Second batch completed: **56 additional direct-child Downloads worktrees removed,
 59 total, 537 registered remain.** Exact paths/branches/commit hashes and live
 remote archive refs are in `outputs/checkout-cleanup-20260919/removed-batch-two.json`.
