@@ -10,6 +10,7 @@ import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerM
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog'
 import { type AppSelectOption } from '../../shared/AppSelect'
 import { useApp } from '../../../AppContext'
+import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../../utils/acquisitionCostAccess.ts'
 import { getProductsByIds, searchProducts } from '../../../api/productReadTransport.ts'
 import { adjustStock } from '../../../api/inventoryWriteTransport.ts'
 import { getBranches } from '../../../api/branchTransport.ts'
@@ -190,6 +191,8 @@ function stockQtyOf(product?: Record<string, any> | null): number {
 
 export default function StockAdjustModal({ initialType = 'add', initialProduct = null, resumeRow = null, resumeAttemptId = null, onClose, onDone, onMinimize, restoreDraftKey = null, t }: StockAdjustModalProps) {
   const { fmtUSD, fmtKHR, usdSymbol, user, notify } = useApp() as AppContextSlice
+  const canEditCosts = canEditAcquisitionCosts(user)
+  const canViewCosts = canViewAcquisitionCosts(user)
 
   const isKhmer = /[ក-៿]/.test(t('cancel') || '')
   const tr = useCallback((key: string, fallbackEn?: string, fallbackKm?: string): string => {
@@ -326,7 +329,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   }, [inventoryReasons, saveReasonCatalog, tr])
 
   // --- adjust form (step 2) ---
-  const [adjustForm, setAdjustForm] = useState<AdjustForm>(() => restoredDraft ? restoredDraft.form as unknown as AdjustForm : ({
+  const [adjustForm, setAdjustForm] = useState<AdjustForm>(() => restoredDraft ? { ...restoredDraft.form, ...(!canViewCosts ? { cost_usd: '', cost_khr: '', unit_cost_usd: '' } : {}) } as unknown as AdjustForm : ({
     type: openingType,
     quantity: 1,
     reason: '',
@@ -415,8 +418,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       discount_type: product.discount_type || 'percent',
       discount_percent: product.discount_percent || 0,
       discount_amount_usd: product.discount_amount_usd || 0,
-      cost_usd: product.cost_price_usd || product.purchase_price_usd || 0,
-      cost_khr: product.cost_price_khr || product.purchase_price_khr || 0,
+      cost_usd: canViewCosts ? product.cost_price_usd || product.purchase_price_usd || 0 : '',
+      cost_khr: canViewCosts ? product.cost_price_khr || product.purchase_price_khr || 0 : '',
       barcode: product.barcode || '',
       batch_id: picked?.batchId != null ? String(picked.batchId) : '',
       received_date: todayIsoDate(),
@@ -511,6 +514,10 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     // row this answered 0 while the prop below answered the product total.)
     const currentQuantity = adjustBranchQuantity(product.branch_stock, numericBranchId, stockQtyOf(product))
     const isStockIn = isStockInSubmission(adjustForm.type, qty, currentQuantity)
+    if (isStockIn && !canEditCosts) {
+      notify(tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.'), 'error')
+      return
+    }
     if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
       notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error')
       return
@@ -587,8 +594,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         discount_type: adjustForm.discount_type,
         discount_percent: parseFloat(String(adjustForm.discount_percent)) || 0,
         discount_amount_usd: parseFloat(String(adjustForm.discount_amount_usd)) || 0,
-        cost_usd: parseFloat(String(adjustForm.cost_usd)) || 0,
-        cost_khr: parseFloat(String(adjustForm.cost_khr)) || 0,
+        ...(canEditCosts && String(adjustForm.cost_usd).trim() !== '' ? { cost_usd: parseFloat(String(adjustForm.cost_usd)) || 0 } : {}),
+        ...(canEditCosts && String(adjustForm.cost_khr).trim() !== '' ? { cost_khr: parseFloat(String(adjustForm.cost_khr)) || 0 } : {}),
         barcode: adjustForm.barcode || null,
       } : undefined,
     }

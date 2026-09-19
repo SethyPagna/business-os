@@ -91,7 +91,7 @@ runTest('changed cost offers and uses the existing price-variant path', () => {
   // P4-B: the same import now also brings in the batched fast-stock-in
   // commit transport (commitFastStockIn) alongside adjustStock.
   assert.match(modalSource, /import \{ adjustStock[^}]*\} from '\.\.\/\.\.\/api\/inventoryWriteTransport\.tsx?'/)
-  assert.match(modalSource, /setCreatePriceVariant\(costChanged\(picked, next\)\)/, 'a changed cost enables the safe variant choice by default')
+  assert.match(modalSource, /setCreatePriceVariant\(canViewCosts && costChanged\(picked, next\)\)/, 'a visible changed cost enables the safe variant choice; a redacted cost is never compared as zero')
   assert.match(modalSource, /create_price_variant.*Create\/use a price variant/, 'the choice is visible beside the edited cost')
   assert.match(modalSource, /unlockPricing: true/)
   assert.match(modalSource, /pricing: pricingForVariant\(line\.product, Number\(line\.unitCost\)\)/)

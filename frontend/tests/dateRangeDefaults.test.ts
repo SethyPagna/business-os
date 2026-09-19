@@ -193,7 +193,7 @@ function todayPair(file: string, fromState: string, toState: string) {
 const stockLedger = todayPair('products/StockChangeSection.tsx', '[startDate, setStartDate]', '[endDate, setEndDate]')
 const stockLedgerRequest = evaluate(requestArgs(stockLedger.source, 'getStockLedger')[0], {
   view: 'all', page: 1, PAGE_SIZE: 20, debouncedSearch: '', branchId: 0,
-  startDate: stockLedger.from, endDate: stockLedger.to, supplierId: 0,
+  startDate: stockLedger.from, endDate: stockLedger.to, startTime: '', endTime: '', supplierId: 0,
 })
 assert.deepEqual([stockLedgerRequest.startDate, stockLedgerRequest.endDate], [day1, day1])
 
@@ -364,7 +364,7 @@ assert.deepEqual([lineRequest.day, lineRequest.page], ['2026-08-31', 3], 'expand
 // change attribute is `onRangeChange`; the rest still pass `onChange` straight
 // to DateTimeRangePicker. Either way the handler must clear to All time.
 for (const [file, fromSetter, toSetter, attribute] of [
-  ['products/StockChangeSection.tsx', 'setStartDate', 'setEndDate', 'onChange'],
+  ['products/StockChangeSection.tsx', 'setStartDate', 'setEndDate', 'onRangeChange'],
   ['contacts/ArInvoicesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
   ['contacts/ApInvoicesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
   ['contacts/StockInInvoicesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
@@ -376,6 +376,7 @@ for (const [file, fromSetter, toSetter, attribute] of [
   let to = day1
   const handler = evaluate(jsxHandler(source, attribute, fromSetter), {
     changeFilter: (apply: () => void) => apply(),
+    setStartTime: () => {}, setEndTime: () => {},
     [fromSetter]: (value: string) => { from = value },
     [toSetter]: (value: string) => { to = value },
   })
@@ -443,7 +444,7 @@ assert.equal(helpers.dashboardPrefsForSelection(selection.range, selection.sourc
 const inventory = read('inventory/Inventory.tsx')
 const cards = [{ key: 'products', value: 17 }, { key: 'stock-value', value: 80 },
   { key: 'revenue', value: 100, sub: 'Profit 20', details: [{ value: 100 }] }]
-const masked = evaluate(variable(inventory, 'displayedStripCards'), { stripCards: cards, stripHasRange: false })
+const masked = evaluate(variable(inventory, 'displayedStripCards'), { stripCards: cards, stripHasRange: false, canViewCosts: true })
 assert.equal(masked[0].value, 17)
 assert.equal(masked[1].value, 80)
 assert.equal(masked[2].value, '—')
@@ -459,7 +460,7 @@ assert.equal(cleared, 3)
 assert.equal(requested, 0)
 const csvCall = find(inventory, (node) => ts.isCallExpression(node) && node.expression.getText() === 'downloadCSV'
   && node.arguments[0]?.getText().includes('inventory-stats-'))[0] as ts.CallExpression
-const exportRows = evaluate(csvCall.arguments[1].getText(), { hasRange: false, startDate: '', endDate: '',
+const exportRows = evaluate(csvCall.arguments[1].getText(), { hasRange: false, canViewCosts: true, startDate: '', endDate: '',
   totalProducts: 17, inStockCount: 10, lowStockCount: 3, outStockCount: 4, totalValue: 80,
   totals: { revenue_usd: 999 }, cust: { count: 999 }, supp: { count: 999 },
 })

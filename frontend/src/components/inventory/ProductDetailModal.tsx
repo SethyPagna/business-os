@@ -1,3 +1,5 @@
+import { useApp } from '../../AppContext'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import ProductNameRail from '../shared/ProductNameRail'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import { createPortal } from 'react-dom'
@@ -89,6 +91,8 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   // added this component's first hook below `if (!p) return null`, which was
   // unreachable from every current call site but a latent violation.
   const lowStockConfig = useLowStockConfig()
+  const { user } = useApp() as { user: any }
+  const canViewCosts = canViewAcquisitionCosts(user)
   // Same four copyable product fields as the Products-side detail modal
   // (name, brand, supplier, barcode), same shared float. Declared with the
   // other hooks, above the early return.
@@ -208,7 +212,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 Price" / VIP tier) is deleted by the 2026-09-04 ruling -- the
                 grid used to widen to three whenever that tier had a value. */}
             <div className="grid grid-cols-2 gap-2 sm:gap-3" data-detail-price-row="cost-wholesale">
-              <button
+              {canViewCosts ? <button
                 type="button"
                 onClick={() => setCostFloatOpen(true)}
                 className="rounded-xl bg-red-50 p-3 text-left dark:bg-red-900/20"
@@ -217,7 +221,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 <div className="mb-1 text-xs font-semibold text-red-600 dark:text-red-400">{T('label_cost_purchase', 'Cost Price')}</div>
                 <div className="text-sm font-semibold tabular-nums text-red-700 decoration-dotted underline-offset-2 hover:underline dark:text-red-300">{fmtUSD(costPriceUsd)}</div>
                 {costPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(costPriceKhr)}</div> : null}
-              </button>
+              </button> : null}
               <div className="rounded-xl bg-indigo-50 p-3 dark:bg-indigo-900/20">
                 <div className="mb-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400">{T('wholesale_price', 'Wholesale price')}</div>
                 <div className="text-sm font-semibold tabular-nums text-indigo-700 dark:text-indigo-300">{wholesalePriceUsd > 0 ? fmtUSD(wholesalePriceUsd) : '—'}</div>
@@ -230,18 +234,18 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 <div className="text-sm font-semibold tabular-nums text-green-700 dark:text-green-300">{fmtUSD(sellingPriceUsd)}</div>
                 {sellingPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(sellingPriceKhr)}</div> : null}
               </div>
-              <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/20">
+              {canViewCosts ? <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/20">
                 <div className="mb-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">{T('margin', 'Margin')}</div>
                 <div className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
                   {fmtUSD(marginUsd)}{costPriceUsd > 0 ? <span className="ml-1 text-xs font-normal text-gray-400">{Math.round(marginPct)}%</span> : null}
                 </div>
-              </div>
+              </div> : null}
             </div>
             <div className="grid grid-cols-4 gap-1.5 text-center sm:gap-2">
               {[
-                { label: T('stock_val', 'Stock Value'), value: fmtUSD(stockValueUsd), tone: 'text-slate-700 dark:text-slate-200', bg: 'bg-slate-50 dark:bg-slate-700/40' },
+                ...(canViewCosts ? [{ label: T('stock_val', 'Stock Value'), value: fmtUSD(stockValueUsd), tone: 'text-slate-700 dark:text-slate-200', bg: 'bg-slate-50 dark:bg-slate-700/40' }] : []),
                 { label: T('active_price', 'Active Price'), value: fmtUSD(activePriceUsd), tone: 'text-blue-700 dark:text-blue-300', bg: 'bg-blue-50 dark:bg-blue-900/20' },
-                { label: T('margin', 'Margin'), value: `${fmtUSD(marginUsd)}${costPriceUsd > 0 ? ` - ${Math.round(marginPct)}%` : ''}`, tone: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
+                ...(canViewCosts ? [{ label: T('margin', 'Margin'), value: `${fmtUSD(marginUsd)}${costPriceUsd > 0 ? ` - ${Math.round(marginPct)}%` : ''}`, tone: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20' }] : []),
                 { label: T('branches', 'Branches'), value: String(branchCount || 0), tone: 'text-violet-700 dark:text-violet-300', bg: 'bg-violet-50 dark:bg-violet-900/20' },
               ].map((item) => (
                 <div key={item.label} className={`${item.bg} rounded-xl px-2.5 py-2`}>
@@ -284,8 +288,8 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 {[
                   { value: Math.max(0, p.qty_sold || 0), label: T('net_sold', 'Net Sold'), className: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20' },
                   { value: fmtUSD(Math.max(0, p.revenue_usd || 0)), label: T('revenue', 'Revenue'), className: 'text-green-600', bg: 'bg-green-50 dark:bg-green-900/20' },
-                  { value: fmtUSD(Math.max(0, p.cogs_usd || 0)), label: T('cogs', 'COGS'), className: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-900/20' },
-                  { value: fmtUSD(profit), label: T('profit', 'Profit'), className: profit >= 0 ? 'text-purple-600' : 'text-red-600', bg: 'bg-purple-50 dark:bg-purple-900/20' },
+                  ...(canViewCosts ? [{ value: fmtUSD(Math.max(0, p.cogs_usd || 0)), label: T('cogs', 'COGS'), className: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-900/20' }] : []),
+                  ...(canViewCosts ? [{ value: fmtUSD(profit), label: T('profit', 'Profit'), className: profit >= 0 ? 'text-purple-600' : 'text-red-600', bg: 'bg-purple-50 dark:bg-purple-900/20' }] : []),
                 ].map((item) => (
                   <div key={item.label} className={`${item.bg} rounded-xl px-2 py-2`}>
                     <div className={`text-xs font-bold ${item.className}`}>{item.value}</div>
@@ -389,7 +393,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
         </div>
       </div>
     </div>
-    {costFloatOpen ? (
+    {canViewCosts && costFloatOpen ? (
       <CostCalculationFloat
         productId={Number((p as { id?: unknown }).id) || 0}
         productName={String(p.name || '')}
