@@ -27,11 +27,13 @@ function load(filename) {
   }, mod, mod.exports)
   return mod.exports
 }
-const { projectAcquisitionCosts, acquisitionCostResponses, hasCatalogCostWrite, hasAcquisitionCostInput } = load(path.join(root, 'lib/acquisitionCostAccess.ts'))
+const { projectAcquisitionCosts, acquisitionCostResponses, hasCatalogCostWrite, hasAcquisitionCostInput, canViewAcquisitionCosts, canEditAcquisitionCosts } = load(path.join(root, 'lib/acquisitionCostAccess.ts'))
 const actor = (role_code, permissions = {}, role_permissions = {}) => ({ id: 7, username: 'staff', role_code, permissions: JSON.stringify(permissions), role_permissions: JSON.stringify(role_permissions) })
 const manager = actor('manager', { products: true, inventory: true, pos: true, sales: true })
 const admins = [actor('admin'), { ...actor('staff'), username: ' ADMIN ' }, actor('manager', { all: true }), actor('staff', {}, { all: true })]
 const staff = [manager, actor('cashier', { pos: true }), actor('staff', { products: true, inventory: true }), actor('manager', { all: false }, { all: true })]
+const viewer = actor('manager', { products: true, inventory: true, product_cost_view: true })
+const editor = actor('manager', { products: true, inventory: true, product_cost_edit: true })
 const cached = {
   items: [{ id: 1, name: 'Product', quantity: 2, selling_price_usd: 15, wholesale_price_usd: 12,
     cost_price_usd: 7, cost_price_khr: 28000, purchase_price_usd: 7,
@@ -75,6 +77,19 @@ const supplier = { line_total_usd: 70, total_usd: 70, paid_usd: 50, outstanding_
 assert.deepEqual(projectAcquisitionCosts(supplier, manager, true), { units_received: 10 })
 assert.equal(projectAcquisitionCosts(supplier, manager).total_usd, 70, 'customer/sales revenue is retained')
 checks += 4
+assert.equal(canViewAcquisitionCosts(viewer), true)
+assert.equal(canEditAcquisitionCosts(viewer), false)
+assert.equal(projectAcquisitionCosts(cached, viewer), cached)
+assert.equal(hasCatalogCostWrite({ cost_price_usd: 0 }, viewer), true)
+assert.equal(canViewAcquisitionCosts(editor), false)
+assert.equal(canEditAcquisitionCosts(editor), true)
+assert.equal(projectAcquisitionCosts(cached, editor).items[0].cost_price_usd, undefined)
+assert.equal(hasCatalogCostWrite({ cost_price_usd: 0 }, editor), false)
+assert.equal(hasAcquisitionCostInput({ items: [{ unit_cost_usd: 0 }] }, editor), false)
+assert.equal(canViewAcquisitionCosts(actor('manager', { product_cost_view: false }, { product_cost_view: true })), false)
+assert.equal(canEditAcquisitionCosts(actor('manager', {}, { product_cost_edit: true })), true)
+assert.equal(canViewAcquisitionCosts(actor('admin', { product_cost_view: false, product_cost_edit: false })), true)
+checks += 12
 
 const app = new Hono()
 app.onError((error, c) => error.message === 'D1 tripwire' ? c.json({ reached: true }, 598) : (() => { throw error })())
@@ -115,7 +130,7 @@ async function main() {
     assert.equal(res.headers.get('Cache-Control'), 'private, no-store')
     assert.equal((await res.json()).items[0].cost_price_usd, undefined)
     checks++
-    await assert.rejects(() => commitStockSession({}, actor, {}), error => error.statusCode === 403 && error.code === 'catalog_cost_admin_required')
+    await assert.rejects(() => commitStockSession({}, actor, { items: [{ unit_cost_usd: 0 }] }), error => error.statusCode === 403 && error.code === 'product_cost_edit_required')
     assert.equal(dbOpens, 0)
     assert.equal(hasAcquisitionCostInput({ pricing: { cost_usd: 0 } }, actor), true)
     assert.equal(hasAcquisitionCostInput({ type: 'remove', quantity: 1 }, actor), false)
@@ -128,6 +143,13 @@ async function main() {
     assert.equal((await full.json()).items[0].cost_price_usd, 7)
     checks++
   }
+  assert.equal((await request('/api/products/1/cost-breakdown', viewer)).status, 598)
+  assert.equal((await request('/api/products/1/cost-breakdown', editor)).status, 403)
+  assert.equal((await request('/api/products/1', editor, 'PUT', { cost_price_usd: 7 })).status, 598)
+  assert.equal((await request('/api/products/1', viewer, 'PUT', { cost_price_usd: 7 })).status, 403)
+  assert.equal((await request('/api/inventory/adjust', manager, 'POST', { productId: 1, type: 'add', quantity: 1, attribution: 'correction', reason: 'Restore previous quantity' })).status, 598, 'server-derived correction is not blocked by cost permission')
+  await assert.rejects(() => commitStockSession({}, manager, {}), error => error.statusCode === 400, 'cost-free request reaches existing validation')
+  checks += 6
   assert.equal((await request('/api/products/1/cost-breakdown', null)).status, 401)
   assert.equal(JSON.stringify(cached), original, 'alternating authority never poisons shared cache')
   console.log(`${checks} acquisition-cost checks passed`)

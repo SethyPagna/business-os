@@ -1,8 +1,16 @@
 import type { Context, MiddlewareHandler } from 'hono'
-import { isAdminControlUser, type PermissionUser } from './permissions'
+import { getMergedPermissions, isAdminControlUser, type PermissionUser } from './permissions'
 
-// Product acquisition money is administrator-only. Courier/delivery expenses
-// retain their separate amendment policy.
+// Separate explicit grants: legacy product/inventory/sales access grants neither.
+// Administrator-control actors retain both, even if a stored override is false.
+export function canViewAcquisitionCosts(user: PermissionUser): boolean {
+  return isAdminControlUser(user) || getMergedPermissions(user).product_cost_view === true
+}
+export function canEditAcquisitionCosts(user: PermissionUser): boolean {
+  return isAdminControlUser(user) || getMergedPermissions(user).product_cost_edit === true
+}
+
+// Courier/delivery expenses retain their separate amendment policy.
 export function isAcquisitionCostKey(key: string): boolean {
   const normalized = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
   if (/(^|_)(delivery|courier)(_|$)/.test(normalized)) return false
@@ -12,12 +20,12 @@ export function isAcquisitionCostKey(key: string): boolean {
 
 const CATALOG_COST_FIELDS = new Set(['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'])
 export function hasCatalogCostWrite(body: Record<string, unknown>, user: PermissionUser): boolean {
-  return !isAdminControlUser(user) && Object.keys(body).some(key => CATALOG_COST_FIELDS.has(key))
+  return !canEditAcquisitionCosts(user) && Object.keys(body).some(key => CATALOG_COST_FIELDS.has(key))
 }
 
 /** Incoming money fields must be omitted, never replaced with redacted zeroes. */
 export function hasAcquisitionCostInput(value: unknown, user: PermissionUser): boolean {
-  if (isAdminControlUser(user)) return false
+  if (canEditAcquisitionCosts(user)) return false
   function contains(input: unknown, depth: number): boolean {
     if (depth > 32) return true
     if (Array.isArray(input)) return input.some(item => contains(item, depth + 1))
@@ -35,7 +43,7 @@ const SUPPLIER_MONEY_FIELDS = new Set(['line_total_usd', 'total_usd', 'paid_usd'
 
 /** Response-only projection: never mutate DB snapshots or actor-neutral caches. */
 export function projectAcquisitionCosts(value: unknown, user: PermissionUser, supplierMoney = false): unknown {
-  if (isAdminControlUser(user)) return value
+  if (canViewAcquisitionCosts(user)) return value
   function project(input: unknown, depth: number): unknown {
     if (depth > MAX_DEPTH) return null
     if (Array.isArray(input)) return input.map(item => project(item, depth + 1))

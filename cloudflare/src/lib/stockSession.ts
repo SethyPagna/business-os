@@ -2,6 +2,7 @@ import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier, isAdminControlUser } from './permissions'
+import { hasAcquisitionCostInput } from './acquisitionCostAccess'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
 import { identityBarcodeKey, barcodeIdentityMatches, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductGroupName } from './productDetailRule'
 import { identityBarcodeMatchSql } from './productIdentity'
@@ -549,7 +550,7 @@ function parseStoredReceipt(row: Row, replayed: boolean): StockSessionReceipt {
 }
 
 export async function commitStockSession(env: Env, user: SessionUser, raw: unknown): Promise<StockSessionReceipt> {
-  if (!isAdminControlUser(user)) fail('Administrator access is required to enter receipt costs and commit stock sessions.', 403, 'catalog_cost_admin_required')
+  if (hasAcquisitionCostInput(raw, user)) fail('Cost-entry permission is required to enter receipt costs.', 403, 'product_cost_edit_required')
   let request = parseRequest(raw, isAdminControlUser(user) ? ADMIN_MAX_IMAGES_PER_PRODUCT : MAX_IMAGES_PER_PRODUCT)
   const requiresInventoryAdjust = request.items.some((line) => line.quantity > 0)
   const requiresProductImage = stockSessionChangesProductImages(request)
