@@ -321,6 +321,33 @@ async function main() {
       assert.equal(costEntries(id)[0].previous_cost_usd,previous)
     }
   })
+  await check('actual NULL-to-zero and legacy precision changes record override; exact resaves do not', async () => {
+    for (const [previous,next] of [[null,0],[3.123456,3.1235]]) {
+      const id = seedProduct(`ExactTransition-${previous}`)
+      raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(previous,id)
+      const baseline = seedLot(id,7)
+      assert.equal((await request('PUT',`/${id}`,{cost_price_usd:next})).status,200)
+      assert.equal(row(id).cost_price_usd,next)
+      assert.equal(costEntries(id).length,1)
+      assert.equal(costEntries(id)[0].previous_cost_usd,previous)
+      assert.equal(costEntries(id)[0].cost_usd,next)
+      assert.equal(costEntries(id)[0].baseline_batch_id,baseline)
+      const audit = raw.prepare("SELECT * FROM audit_logs WHERE action='cost_override' AND entity_id=?").all(String(id))
+      assert.equal(audit.length,1)
+      assert.equal(JSON.parse(audit[0].old_value).cost_price_usd,previous)
+      assert.equal(JSON.parse(audit[0].new_value).cost_price_usd,next)
+      assert.equal((await request('PUT',`/${id}`,{cost_price_usd:next})).status,200)
+      assert.equal(costEntries(id).length,1)
+    }
+    for (const same of [null,0,3.123456]) {
+      const id = seedProduct(`ExactNoOp-${same}`)
+      raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(same,id)
+      assert.equal((await request('PUT',`/${id}`,{cost_price_usd:same})).status,200)
+      assert.equal(row(id).cost_price_usd,same)
+      assert.equal(costEntries(id).length,0)
+      assert.equal(raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='cost_override' AND entity_id=?").get(String(id)).n,0)
+    }
+  })
   console.log(`\n${checks} checks passed`)
 }
 

@@ -1,6 +1,6 @@
 import type { D1Compat } from './db'
 import type { MergedCostOutlier } from './productDetailRule'
-import { meanMoney4, roundMoney4 } from './moneyPrecision'
+import { meanMoney4 } from './moneyPrecision'
 
 // Catalog receipts are observed purchase prices, not an identity-merge
 // heuristic. Every distinct positive recorded price contributes equally,
@@ -386,8 +386,9 @@ export async function getCatalogCostBreakdown(db: D1Compat, productId: number): 
  * writer, see product_cost_entries's own migration doc, 0177) whenever the
  * request body carries `cost_price_usd` and/or `cost_price_khr` AND the
  * resulting stored value actually differs from what was there before
- * (compared at the same 4dp precision every catalog money figure uses --
- * see moneyPrecision.ts). A same-value resave (the editor re-POSTs the whole
+ * (exact nullable values after productWrites applies its precision policy).
+ * Never round the historical preimage or conflate NULL with zero here.
+ * A same-value resave (the editor re-POSTs the whole
  * form on every save) must not create a fresh history row.
  *
  * `before`/`after` are the product's OWN before/after cost figures (the
@@ -424,10 +425,17 @@ export function planManualCostEntry(
   const hasKhr = Object.prototype.hasOwnProperty.call(body, 'cost_price_khr')
   if (!hasUsd && !hasKhr) return null
 
-  const beforeUsd = roundMoney4(Number(before.cost_price_usd) || 0)
-  const beforeKhr = roundMoney4(Number(before.cost_price_khr) || 0)
-  const afterUsd = hasUsd ? roundMoney4(Number(body.cost_price_usd) || 0) : beforeUsd
-  const afterKhr = hasKhr ? roundMoney4(Number(body.cost_price_khr) || 0) : beforeKhr
+  // The caller supplies the exact guarded preimage and already-normalized
+  // values actually written to products (including preserved legacy precision).
+  const canonicalCost = (value: unknown): number | null => {
+    if (value == null) return null
+    if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError('Expected a canonical nullable cost')
+    return value
+  }
+  const beforeUsd = canonicalCost(before.cost_price_usd)
+  const beforeKhr = canonicalCost(before.cost_price_khr)
+  const afterUsd = hasUsd ? canonicalCost(body.cost_price_usd) : beforeUsd
+  const afterKhr = hasKhr ? canonicalCost(body.cost_price_khr) : beforeKhr
   const changed = (hasUsd && afterUsd !== beforeUsd) || (hasKhr && afterKhr !== beforeKhr)
   if (!changed) return null
 
@@ -435,7 +443,7 @@ export function planManualCostEntry(
     INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
     VALUES (@productId, @costUsd, @costKhr, @previousCostUsd, 'manual', @userId, @userName,
       (SELECT COALESCE(MAX(id),0) FROM product_batches WHERE variant_product_id=@productId))
-  `, params: { productId, costUsd: afterUsd, costKhr: hasKhr ? afterKhr : null,
+  `, params: { productId, costUsd: afterUsd ?? 0, costKhr: hasKhr ? afterKhr : null,
     previousCostUsd: before.cost_price_usd, userId: actor.id, userName: actor.name } }
 }
 
