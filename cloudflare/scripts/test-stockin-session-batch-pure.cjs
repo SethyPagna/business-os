@@ -44,14 +44,15 @@ check('stockSession.ts commitStockSession: products/branches/suppliers/explicitB
 
 // Before: possibleDateBatches, productColumns, activeBranches,
 // duplicateCandidates and assets were five separate sequential/conditional
-// awaits. After: one Promise.all fan-out (skipped branches resolve via
+// awaits. The override baseline is now a sixth independent read in the same
+// Promise.all fan-out (skipped branches resolve via
 // Promise.resolve() so the condition is still respected).
 check('stockSession.ts commitStockSession: dateBatch/schema/branches/duplicates/assets resolve in one Promise.all', () => {
   const block = sliceBetween(stockSessionSource, 'const dateBatchLines = request.items.filter', 'const assetByPath = new Map', 'commitStockSession five-way fan-out block')
   assert.match(
     block,
-    /const \[possibleDateBatches, productColumns, activeBranches, duplicateCandidates, assets\] = await Promise\.all\(\[/,
-    'the five independent reads must be fanned out together, not five sequential/conditional awaits',
+    /const \[possibleDateBatches, productColumns, activeBranches, duplicateCandidates, assets, costBaselines\] = await Promise\.all\(\[/,
+    'all six independent reads including override baselines must fan out together',
   )
 })
 

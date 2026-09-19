@@ -10,6 +10,12 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const libRoot = path.resolve(__dirname, '../src/lib')
 const importSource = fs.readFileSync(path.join(libRoot, 'importEngine.ts'), 'utf8')
+const catalogCostModule = { exports: {} }
+new Function('exports', 'require', 'module', ts.transpileModule(
+  fs.readFileSync(path.join(libRoot, 'catalogCostRecompute.ts'), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+).outputText)(catalogCostModule.exports,
+  request => request === './moneyPrecision' ? moneyPrecision : require(request), catalogCostModule)
 
 function compileNamedFunctions(source, names) {
   const ast = ts.createSourceFile('source.ts', source, ts.ScriptTarget.Latest, true)
@@ -31,6 +37,7 @@ function loadProductWrites(db) {
   }).outputText
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './catalogCostRecompute') return catalogCostModule.exports
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (request === './db') return { getDb: () => db }
     if (request === './media') return { sanitizeMediaList: (value) => Array.isArray(value) ? value : [] }
@@ -58,7 +65,7 @@ function loadProductWrites(db) {
 }
 
 function extractMatchedImportStatements(source) {
-  const start = source.indexOf('const matchedBatch = findImportRestockBatch(')
+  const start = source.indexOf('if (matchedBatch) {', source.indexOf('const matchedBatch = plannedLots.find('))
   const end = source.indexOf('\n              } else {', start)
   assert.ok(start >= 0 && end > start, 'matched import-restock branch must exist')
   const block = source.slice(start, end)
@@ -102,8 +109,13 @@ async function main() {
   assert.equal(findImportRestockBatch(index, 1, 'lot-1').id, 5, 'normalized fallback should prefer the active representative')
   assert.equal(findImportRestockBatch(index, 2, ' SAME LOT ').id, 3, 'inactive-only normalized fallback should choose the stable lowest id')
   assert.equal(findImportRestockBatch(index, 2, ''), null)
-  assert.match(importSource, /SELECT id, variant_product_id, batch_key, lot_code, received_at, is_active FROM product_batches`/,
+  assert.match(importSource, /SELECT id, variant_product_id, batch_key, received_at, unit_cost_usd\s+FROM product_batches WHERE variant_product_id IN/,
     'additive import lookup must include inactive rows rather than filtering is_active=1')
+  const { resolveReceiptLotTarget } = compileNamedFunctions(fs.readFileSync(path.join(libRoot, 'productBatches.ts'), 'utf8'), ['resolveReceiptLotTarget'])
+  const candidate = { id: 90, batch_key: 'LOT-1', received_at: '2025-01-02', unit_cost_usd: 7.5, is_active: 0 }
+  assert.equal(resolveReceiptLotTarget([candidate], '2025-01-02', 7.5, 0).existingBatchId, 90, 'equal-price inactive lot is eligible for reactivation')
+  assert.equal(resolveReceiptLotTarget([candidate], '2025-01-02', 99, 0).existingBatchId, null, 'different receipt price cannot be pooled into that inactive lot')
+  assert.equal(resolveReceiptLotTarget([candidate], '2025-01-02', 7.5, 90).existingBatchId, null, 'manual override excludes the old lot even at the same price')
 
   const db = openDb(loadAll())
   db.exec(`
@@ -120,14 +132,14 @@ async function main() {
 
   const [metadataSql, lotStockSql] = extractMatchedImportStatements(importSource)
   const importParams = {
-    id: 90, receivedAt: '2026-09-11', updatedAt: '2026-09-11T07:00:00.000Z',
-    unitCostUsd: 99, qty: 2, branchId: 1, batchId: 90,
+    id: 90, receivedAt: '2025-01-02', updatedAt: '2026-09-11T07:00:00.000Z',
+    unitCostUsd: 7.5, receiptTotalCostUsd: 15, qty: 2, branchId: 1, batchId: 90,
   }
   await db.batch([{ sql: metadataSql, params: importParams }, { sql: lotStockSql, params: importParams }])
   const importedLot = { ...db.prepare(`SELECT lot_code,received_at,is_active,notes,batch_number,unit_cost_usd,received_quantity,received_cost_usd,received_branch_id FROM product_batches WHERE id=90`).get() }
   assert.deepEqual(importedLot, {
     lot_code: 'Original label', received_at: '2025-01-02', is_active: 1, notes: 'Original import receipt',
-    batch_number: 4, unit_cost_usd: 7.5, received_quantity: 6, received_cost_usd: 228, received_branch_id: 1,
+    batch_number: 4, unit_cost_usd: 7.5, received_quantity: 6, received_cost_usd: 45, received_branch_id: 1,
   }, 'reactivation must preserve the original date, label, notes, number and established unit cost')
   assert.equal(db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=90 AND branch_id=1').get().quantity, 2)
 
