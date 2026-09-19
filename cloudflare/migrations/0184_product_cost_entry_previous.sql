@@ -1,0 +1,13 @@
+-- Preserve the canonical USD cost immediately before a prospective manual
+-- override. Existing entries remain NULL: no historical value is inferred.
+-- PRE: SELECT COUNT(*) FROM pragma_table_info('product_cost_entries')
+--      WHERE name='previous_cost_usd'; -- 0
+-- Capture the existing row count and existing columns before applying.
+-- POST: the column count above is 1; existing row count and columns match;
+--       all pre-existing entries have previous_cost_usd IS NULL.
+-- Apply through the migration ledger exactly once. A raw repeat deliberately
+-- fails with duplicate-column error and cannot overwrite existing values.
+-- Deployment: apply 0184 before the Worker that writes/reads this field.
+-- Recovery: roll back the Worker only; retain this nullable additive column
+-- and all records. Do not drop/recreate the table or backfill old entries.
+ALTER TABLE product_cost_entries ADD COLUMN previous_cost_usd REAL;
