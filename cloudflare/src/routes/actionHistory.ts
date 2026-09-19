@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
@@ -38,6 +39,7 @@ const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+app.use('*', acquisitionCostResponses)
 
 type ActionHistoryRow = Record<string, unknown> & {
   id: number
@@ -129,6 +131,7 @@ function isServerManagedPayload(value: unknown): boolean {
 }
 
 function canRecordHistory(user: SessionUser, body: Record<string, unknown>): boolean {
+  if (hasAcquisitionCostInput([body.undo_payload, body.redo_payload], user)) return false
   if ([body.undo_payload, body.redo_payload].some(isServerManagedPayload)) return false
   if (isAdminControlUser(user)) return true
   if (!canUseNamedAppliers(user, [body.undo_payload, body.redo_payload])) return false

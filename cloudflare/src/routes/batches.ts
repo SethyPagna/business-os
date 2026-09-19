@@ -1,8 +1,9 @@
 import { Hono, type Context } from 'hono'
+import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from '../lib/permissions'
+import { hasPermission, getActionTier, getPermissionTier, isActionBlocked, isAdminControlUser } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, receiveBatchStock } from '../lib/productBatches'
@@ -41,6 +42,7 @@ function activeBatchStockError(quantity: number): string {
 }
 
 app.use('*', requireAuth)
+app.use('*', acquisitionCostResponses)
 // Deliberately before the general batch gate: return creators need stock
 // provenance, not the supplier/cost/payment metadata on inventory reads.
 // This handler terminates only its exact GET/HEAD route; other reads and all
@@ -201,8 +203,9 @@ export type ReceiveBody = {
 // validation/write kernel per line instead of re-implementing it -- the body
 // only, no logic changed.
 export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody): Promise<Response> {
-  const db = getDb(c.env)
   const user = c.get('user')
+  if (!isAdminControlUser(user)) return c.json({ error: 'Administrator access is required to enter receipt costs and receive stock.', code: 'catalog_cost_admin_required' }, 403)
+  const db = getDb(c.env)
 
   const productId = Number(body.product_id)
   const branchId = Number(body.branch_id)
@@ -372,6 +375,9 @@ app.patch('/:id', async (c) => {
   const body = await c.req.json<{ expiry_date?: string | null; notes?: string | null; is_active?: boolean; received_at?: string | null }>()
     .catch(() => ({} as { expiry_date?: string | null; notes?: string | null; is_active?: boolean; received_at?: string | null }))
 
+  if (!isAdminControlUser(user) && Object.prototype.hasOwnProperty.call(body, 'unit_cost_usd')) {
+    return c.json({ error: 'Administrator access is required to change stored receipt costs.', code: 'catalog_cost_admin_required' }, 403)
+  }
   const existing = await db.prepare('SELECT id, updated_at FROM product_batches WHERE id = ?').get<{ id: number; updated_at: string | null }>([id])
   if (!existing) return c.json({ error: 'Received date not found' }, 404)
 
