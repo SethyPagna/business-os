@@ -122,12 +122,12 @@ async function main() {
     assert.equal(response.status, 400, `${section}: view denial must not revoke independently authorized transfer`)
     assert.equal(opens, 0)
   }
-  // Action-specific reads remain independent of view denial. Stock sessions
-  // now require administrator authority because every session can enter costs.
+  // Action-specific reads and cost-free product session requests remain
+  // independent of view denial; explicit cost input has its own capability.
   await reachesData('/products/merge-duplicates/preview', staff({ products: true }, revoked))
   await denied('/products/merge-duplicates/preview', staff({ products: true }, { 'products:merge_duplicates': false }))
   const sessionResponse = await request('/inventory/sessions', staff({ products: true }, revoked), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-  assert.equal(sessionResponse.status, 403)
+  assert.equal(sessionResponse.status, 400)
   assert.equal(opens, 0)
   await denied('/inventory/sessions', staff({ products: true }, { 'products:add': false }), 'POST')
   await denied('/inventory/summary', staff({ products: true }))

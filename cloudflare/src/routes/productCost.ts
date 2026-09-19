@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { isAdminControlUser } from '../lib/permissions'
+import { canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getCatalogCostBreakdown } from '../lib/catalogCostRecompute'
 import type { Env } from '../index'
 
@@ -13,9 +13,9 @@ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
 app.use('*', requireAuth)
 
-// Only administrators may read acquisition costs, including the calculation.
+// The explicit cost-view capability governs the complete calculation too.
 function canReadCost(user: SessionUser): boolean {
-  return isAdminControlUser(user)
+  return canViewAcquisitionCosts(user)
 }
 
 app.get('/:id/cost-breakdown', async (c) => {
