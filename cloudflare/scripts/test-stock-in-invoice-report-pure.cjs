@@ -51,6 +51,7 @@ const saleCreationSnapshot = compile('saleCreationSnapshot.ts', {
 })
 const productDetailRule = compile('productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const stockActionCommit = compile('stockActionCommit.ts', {
+  './productBatches': productBatches,
   './db': {},
   './batchCode': batchCode,
   './searchMatch': searchMatch,
@@ -206,11 +207,12 @@ const GROUPS_SQL = (where) => `
     await stockActionCommit.applyUnifiedStockAdd(db, { ...base, rowNumber: 2, quantity: 4, costPriceUsd: 10 })
     await stockActionCommit.applyUnifiedStockAdd(db, { ...base, rowNumber: 3, quantity: 6, costPriceUsd: 30 })
     let row = sqlite.prepare('SELECT COUNT(*) AS lots, SUM(received_quantity) AS qty, SUM(unit_cost_usd) AS unit, SUM(received_cost_usd) AS money FROM product_batches').get()
-    assert.strictEqual(row.lots, 1, 'same product + same day is one lot')
+    assert.strictEqual(row.lots, 2, 'same product/day at different receipt prices has two price-aware lots')
     assert.strictEqual(row.qty, 10, 'received_quantity still accumulates (0067 unchanged)')
-    assert.strictEqual(row.unit, 10, 'unit_cost_usd still keeps the FIRST attribution')
+    assert.strictEqual(row.unit, 40, 'each lot retains its own price, 10 and 30')
+    assert.deepStrictEqual(sqlite.prepare('SELECT unit_cost_usd FROM product_batches ORDER BY unit_cost_usd').all().map(lot => lot.unit_cost_usd), [10, 30])
     assert.strictEqual(row.money, 4 * 10 + 6 * 30, 'received_cost_usd is each receipt at its OWN cost')
-    assert.notStrictEqual(row.money, row.qty * row.unit, 'and is NOT quantity x the first unit cost -- the bug')
+    assert.notStrictEqual(row.money, row.qty * 10, 'and is NOT quantity x the first receipt unit cost -- the bug')
 
     // A receipt with no recorded price never borrows the lot's existing cost.
     // 0080 achieved that by contributing 0; N14-D's gate now goes further and
@@ -224,7 +226,7 @@ const GROUPS_SQL = (where) => `
       /must carry its unit cost/,
       'a priceless import receipt is refused, not written as an unpriceable unit',
     )
-    row = sqlite.prepare('SELECT received_quantity AS qty, received_cost_usd AS money FROM product_batches').get()
+    row = sqlite.prepare('SELECT SUM(received_quantity) AS qty, SUM(received_cost_usd) AS money FROM product_batches').get()
     assert.strictEqual(row.qty, 10, 'the refused receipt added no units')
     assert.strictEqual(row.money, 220, 'and no money it never recorded')
 
@@ -233,9 +235,10 @@ const GROUPS_SQL = (where) => `
     sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (11, 'Toner', 1)`).run()
     await productBatches.receiveBatchStock(db, { productId: 11, branchId: 1, quantity: 2, receivedDate: '2026-08-20', unitCostUsd: 7 })
     await productBatches.receiveBatchStock(db, { productId: 11, branchId: 1, quantity: 3, receivedDate: '2026-08-20', unitCostUsd: 11 })
-    row = sqlite.prepare('SELECT received_quantity AS qty, unit_cost_usd AS unit, received_cost_usd AS money FROM product_batches WHERE variant_product_id = 11').get()
+    row = sqlite.prepare('SELECT COUNT(*) AS lots,SUM(received_quantity) AS qty, SUM(unit_cost_usd) AS unit, SUM(received_cost_usd) AS money FROM product_batches WHERE variant_product_id = 11').get()
     assert.strictEqual(row.qty, 5, 'manual top-up accumulates units')
-    assert.strictEqual(row.unit, 7, 'manual top-up keeps first-attribution unit cost')
+    assert.strictEqual(row.lots, 2, 'manual receive uses the same distinct-price lot identity')
+    assert.strictEqual(row.unit, 18, 'manual lots retain receipt prices 7 and 11')
     assert.strictEqual(row.money, 2 * 7 + 3 * 11, 'manual top-up accumulates its own money')
     console.log('PASS 0080: a lot records the money each receipt carried, not quantity x the first unit cost')
   }

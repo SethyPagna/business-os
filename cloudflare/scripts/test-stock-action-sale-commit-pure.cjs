@@ -28,6 +28,7 @@ const saleCreationSnapshot = compile('saleCreationSnapshot.ts', {
   './saleMoneyPrecision': saleMoneyPrecision,
 })
 const subject = compile('stockActionCommit.ts', {
+  './productBatches': compile('productBatches.ts', { './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': compile('sqlBinding.ts') }),
   './moneyPrecision': moneyPrecision,
   './db': {},
   './batchCode': batchCode,
