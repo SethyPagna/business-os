@@ -25,7 +25,10 @@ assert.equal(requests[0][3], 8000)
 assert.equal(requests[0][4].signal, ctrl.signal)
 
 const source = readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-const actorCode = source.slice(source.indexOf('  const { user, authReady, getPermissionTier } = useApp()'), source.indexOf('  // The cost price is only ever shown'))
+const actorStart = source.indexOf('  const { user, authReady } = useApp()')
+const actorEnd = source.indexOf('\n', source.indexOf('  const actorScope =', actorStart))
+assert.ok(actorStart >= 0 && actorEnd > actorStart, 'execute the real authenticated identity and generation scope')
+const actorCode = source.slice(actorStart, actorEnd)
 let actorRef: any
 const actorUser = { id: 7 }
 const actorKey = (user: { id: number } | null, authReady = true) => compile(actorCode, {
@@ -35,6 +38,11 @@ const actorKey = (user: { id: number } | null, authReady = true) => compile(acto
 const initialActorScope = actorKey(actorUser)
 assert.equal(actorKey(actorUser), initialActorScope, 'unrelated renders retain the same verification scope')
 assert.notEqual(actorKey({ id: 7 }), initialActorScope, 'same-user authenticated session replacement increments actual generation')
+const permissionSnapshot = { id: 7, permissions: { product_cost_view: true } }
+const permissionScope = actorKey(permissionSnapshot)
+assert.equal(actorKey(permissionSnapshot), permissionScope, 'stable permission snapshot retains verification scope')
+assert.notEqual(actorKey({ ...permissionSnapshot, permissions: { product_cost_view: false } }), permissionScope,
+  'same-user permission snapshot replacement invalidates prior selectable proof')
 assert.notEqual(actorKey(null, false), initialActorScope, 'sign-out invalidates authenticated scope')
 assert.match(source, /requireFreshLots, actorScope\]\)/, 'lot effect reloads on actor generation changes')
 const deriveCode = source.slice(source.indexOf('const requireFreshLots ='), source.indexOf('  const branchOptions = sheetState.branchOptions'))
