@@ -101,6 +101,7 @@ async function main() {
       ['/api/products/1', 'PUT', { name: 'Product', cost_price_usd: 0 }],
       ['/api/products/1', 'PUT', { purchase_price_khr: null }],
       ['/api/products', 'POST', { name: 'Product', cost_price_usd: 0 }],
+      ['/api/products/variant', 'POST', { name: 'Variant', purchase_price_usd: 0 }],
       ['/api/products/bulk-price-adjust', 'POST', { fields: ['cost_price_usd'], amount: 1 }],
       ['/api/inventory/adjust', 'POST', { type: 'add', productId: 1, quantity: 1, unitCostUsd: 0 }],
       ['/api/batches', 'POST', { product_id: 1, branch_id: 1, quantity: 1, unit_cost_usd: 0 }],
