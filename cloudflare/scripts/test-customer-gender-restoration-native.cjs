@@ -55,6 +55,7 @@ async function fixture() {
     './db': { getDb: () => db },
   })
   const common = {
+    '../lib/acquisitionCostAccess': load('lib/acquisitionCostAccess.ts', { './permissions': permissions }),
     '../lib/db': { getDb: () => db }, '../lib/permissions': permissions, '../lib/actorSnapshot': actor,
     '../lib/customerGenderRestoration': restoration,
     '../lib/auth': { requireAuth: async (c,next) => { if (!user) return c.json({error:'Unauthorized'},401); c.set('user',user); return next() } },

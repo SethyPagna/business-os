@@ -100,6 +100,7 @@ const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding })
 const productDetailRule = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
+const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRoles = loadReal('lib/branchRoles.ts')
 const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
   './db': loadReal('lib/db.ts'),
@@ -133,7 +134,7 @@ const conflictControl = loadReal('lib/conflictControl.ts')
 const movementCostSnapshot = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision })
 let capturedRevertMovement = null
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 
 // Only the /adjust path is driven here -- the list/search/dated-count
 // endpoints' dependencies are stubbed inert (never called by these checks).
@@ -173,6 +174,7 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   './sqlBinding': sqlBinding,
 })
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/stockCondition': stockCondition,
   '../lib/damagedLotActions': damagedLotActions,
   // inventory.ts imports this TypeScript-only helper; load it through the
@@ -272,6 +274,7 @@ const app = inventoryRoute.default
 // D4b: the Receive Batch route grows the same explicit-lot pick every
 // adjust surface has -- loaded with the same real kernel + real batchCode.
 const batchesRoute = loadReal('routes/batches.ts', {
+  '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
@@ -959,9 +962,9 @@ async function main() {
       { unit_cost_usd: 3.5, unit_cost_khr: 14000, total_cost_usd: 7, total_cost_khr: 28000 },
     )
     capturedRevertMovement = null
-    FAKE_USER.permissions = JSON.stringify({ inventory: 'review' })
+    FAKE_USER.permissions = JSON.stringify({ inventory: 'review', product_cost_edit: true, product_cost_view: true })
     const denied = await req('POST', `/movements/${id}/revert`, {})
-    FAKE_USER.permissions = JSON.stringify({ inventory: true })
+    FAKE_USER.permissions = JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true })
     assert.strictEqual(denied.status, 403)
     assert.strictEqual(capturedRevertMovement, null, 'permission refusal happens before the revert kernel')
   })
