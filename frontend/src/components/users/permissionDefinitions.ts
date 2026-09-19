@@ -225,6 +225,8 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // by source (components/products/import/BulkImportModal.tsx) that
       // this only gates the bulk-import "replace all" action on Products,
       // nothing settings-related. See this file's header comment.
+      { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high' },
+      { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high' },
       { key: 'destructive_delete', tKey: 'perm_destructive_delete', label: 'Bulk import: "replace all" (destructive)', sensitivity: 'critical' },
       // Part 241: a genuinely different SHAPE of access than the
       // Full/Review/None tier above (field-restricted, not a gradient on

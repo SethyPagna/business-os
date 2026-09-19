@@ -1,4 +1,5 @@
 import ProductNameRail from '../shared/ProductNameRail'
+import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
 // Products
 // Main Products page; all sub-modals are imported from sibling files.
 
@@ -439,7 +440,7 @@ type ProductsAppContext = {
   settings: Record<string, unknown>
   t: (key: string) => string
   usdSymbol: string
-  user: { id?: EntityId; name?: string } | null
+  user: { id?: EntityId; name?: string; username?: string; role_code?: string; permissions?: Record<string, unknown> | string; role_permissions?: Record<string, unknown> | string } | null
 }
 
 type ProductsSyncContext = {
@@ -735,6 +736,7 @@ type ProductRowCtx = {
 }
 
 function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { product: ProductRecord; indented?: boolean; ctx: ProductRowCtx }) {
+  const canViewCosts = canViewAcquisitionCosts(useProductsApp().user)
   const {
     branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD,
     getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState,
@@ -986,8 +988,8 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
           />
         </td>
         <td className="px-3 py-2 text-right col-highlight-red">
-          <div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</div>
-          {costKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(costKhr)}</div>}
+          {canViewCosts ? <><div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</div>
+          {costKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(costKhr)}</div>}</> : <span>—</span>}
         </td>
         <td className="px-3 py-2 text-right col-highlight-green">
           <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>
@@ -1005,7 +1007,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
           ) : null}
         </td>
         <td className="px-3 py-2 text-right">
-          {costUsd > 0 && sellingUsd > 0
+          {canViewCosts && costUsd > 0 && sellingUsd > 0
             ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-blue-500/80 dark:text-blue-400/80">{marginPct.toFixed(1)}%</div></div>
             : <span className="text-gray-300">N/A</span>}
         </td>
@@ -1036,6 +1038,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
 const ProductDesktopRow = memo(ProductDesktopRowComponent)
 
 function ProductMobileCardComponent({ product: p, indented = false, ctx }: { product: ProductRecord; indented?: boolean; ctx: ProductRowCtx }) {
+  const canViewCosts = canViewAcquisitionCosts(useProductsApp().user)
   const {
     branchFilter, copy, exchangeRate, fmtUSD,
     getBranchQty, getBrandColor, getLongPressState,
@@ -1292,7 +1295,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
                 </span>
               ) : null}
               <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
-              <span className="text-red-600">{fmtUSD(costUsd)}</span>
+              {canViewCosts ? <span className="text-red-600">{fmtUSD(costUsd)}</span> : null}
               <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
               {/* Colored by stock status (red/yellow/green) instead of the
                   separate "In"/"Low"/"Out" badge this row used to show up
@@ -1325,6 +1328,8 @@ const ProductMobileCard = memo(ProductMobileCardComponent)
 
 function ProductsFullEditor() {
   const { can, t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate, getPermissionTier, hasPermission, navigateTo } = useProductsApp()
+  const canViewCosts = canViewAcquisitionCosts(user)
+  const canEditCosts = canEditAcquisitionCosts(user)
   // Settings > Stock Alerts. One config for the badges on every row, the Low
   // filter pill and the same-page re-filter -- so the pill and the badge can
   // never disagree about which rows are low.
@@ -2308,6 +2313,7 @@ function ProductsFullEditor() {
   }
 
   const handleSaveWithGallery = async (form: ProductRecord) => {
+    form = omitUnauthorizedCatalogCosts(form, user)
     if (!form.name?.trim()) throw new Error(t('name') + ' required')
     if (!beginSingleAction(productSaveInFlightRef)) throw new Error(t('saving_label') || 'Saving…')
     try {
@@ -3424,7 +3430,7 @@ function ProductsFullEditor() {
   // shared print view; CSV exists for re-import/machine use.
   const exportProductsCsv = useCallback(async (rowsToExport = filtered, filePrefix = 'products', groups?: import('./helpers/productExport.ts').ExportFieldGroup[], branchId?: string, format: 'csv' | 'xlsx' | 'pdf' = 'xlsx') => {
     const { buildProductExportRows } = await import('./helpers/productExport.ts')
-    const rows = buildProductExportRows(rowsToExport, { ...(groups ? { groups } : {}), ...(branchId ? { branchId } : {}) })
+    const rows = buildProductExportRows(rowsToExport, { canViewCosts, ...(groups ? { groups } : {}), ...(branchId ? { branchId } : {}) })
     const filename = `${filePrefix}-${new Date().toISOString().slice(0,10)}`
     if (format === 'csv') {
       const { downloadCSV } = await import('../../utils/csv.ts')
@@ -4063,7 +4069,7 @@ function ProductsFullEditor() {
       buildDefinedProductUpdates,
       buildProductBulkUpdatePayload,
     } = await loadProductWriteHelpers()
-    const nextUpdates = buildDefinedProductUpdates(updates)
+    const nextUpdates = buildDefinedProductUpdates(omitUnauthorizedCatalogCosts(updates, user))
     if (!Object.keys(nextUpdates).length) {
       notify('No changes specified', 'warning')
       return
@@ -4166,7 +4172,7 @@ function ProductsFullEditor() {
     // Was `special_price_${currency}`: re-pointed at wholesale by the
     // 2026-09-04 ruling, which deleted the "VIP" tier those columns backed.
     if (bulkEditForm.adjust_wholesale) fields.push(`wholesale_price_${currency}`)
-    if (bulkEditForm.adjust_cost) fields.push(`cost_price_${currency}`)
+    if (canEditCosts && canViewCosts && bulkEditForm.adjust_cost) fields.push(`cost_price_${currency}`)
     if (!fields.length) {
       notify(tr('bulk_price_no_change', 'Nothing to change with those settings'), 'warning')
       return
@@ -4212,7 +4218,7 @@ function ProductsFullEditor() {
     if (bulkEditForm.adjust_wholesale) {
       fields.push(bulkEditForm.adjust_currency === 'khr' ? 'wholesale_price_khr' : 'wholesale_price_usd')
     }
-    if (bulkEditForm.adjust_cost) {
+    if (canEditCosts && canViewCosts && bulkEditForm.adjust_cost) {
       fields.push(bulkEditForm.adjust_currency === 'khr' ? 'purchase_price_khr' : 'purchase_price_usd')
     }
 
@@ -4946,10 +4952,10 @@ function ProductsFullEditor() {
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
             <div><label className="text-xs text-gray-500 block mb-1">{tr('wholesale_price_khr_full', 'Wholesale (KHR)', 'តម្លៃបោះដុំ (KHR)')}</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_usd', 'Purchase price (USD)')}</label>
+            {canEditCosts ? <><div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_usd', 'Purchase price (USD)')}</label>
               <input className="input text-xs py-1" type="number" step="0.0001" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
             <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_khr', 'Purchase price (KHR)')}</label>
-              <input className="input text-xs py-1" type="number" step="0.0001" min="0" value={bulkEditForm.purchase_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+              <input className="input text-xs py-1" type="number" step="0.0001" min="0" value={bulkEditForm.purchase_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div></> : null}
           </div>
           <p className="text-xs text-gray-400 mt-1">{tr('bulk_price_khr_auto_note', 'KHR prices will auto-calculate at current exchange rate')}</p>
           <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
@@ -5017,7 +5023,7 @@ function ProductsFullEditor() {
                 // the catalog-wide one), so the toggle keeps working.
                 ['adjust_wholesale', tr('wholesale_price', 'Wholesale price', 'តម្លៃបោះដុំ'), false],
                 ['adjust_cost', tr('cost_price', 'Cost price'), false],
-              ] as const).map(([key, label, defaultOn]) => (
+              ] as const).filter(([key]) => key !== 'adjust_cost' || (canEditCosts && canViewCosts)).map(([key, label, defaultOn]) => (
                 <label key={key} className="inline-flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
                   <input
                     type="checkbox"
