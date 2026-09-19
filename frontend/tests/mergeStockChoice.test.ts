@@ -139,7 +139,7 @@ test('a merge that AVERAGES a real cost stops for confirmation', () => {
   // other.
   assert.deepEqual(costAverageRows(N15_IDENTITY), [{ field: 'cost_price_usd', from: 5, to: 6.45 }])
   assert.match(dialog, /const costAverages = costAverageRows\(identity\)/)
-  assert.match(dialog, /\{costAverages\.length \? \(/, 'the averaged cost must be rendered before -> after')
+  assert.match(dialog, /\{canViewCosts && costAverages\.length \? \(/, 'before/after cost rendering requires the independent view grant; confirmation still uses the same cost rule')
 })
 
 test('a merge that changes nothing but the row count still needs no dialog', () => {
@@ -317,7 +317,7 @@ test('the whole-catalog dry run shows the cost it will write, and what it will r
     'a fold that lands on the kept cost is not a change to announce')
   assert.deepEqual(costMoveRows(undefined, undefined), [], 'an older Worker sends no cost -- show nothing, not NaN')
   assert.match(reviewModal, /return costMoveRows\(group\.costBefore, group\.costAfter\)/)
-  assert.match(reviewModal, /\{costMoves\(group\)\.map\(\(move\) =>/, 'each group must render its cost before -> after')
+  assert.match(reviewModal, /\{\(canViewCosts \? costMoves\(group\) : \[\]\)\.map\(\(move\) =>/, 'each group renders cost before/after only with the independent view grant')
   assert.match(reviewModal, /group\.costRefusals \|\| \[\]/, 'and the rows this run will skip')
   assert.match(reviewModal, /const costRefusalCount = preview\?\.costRefusalCount \|\| 0/)
   assert.match(reviewModal, /merge_duplicates_preview_cost_refused/)

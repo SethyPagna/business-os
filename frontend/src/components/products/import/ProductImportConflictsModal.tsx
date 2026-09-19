@@ -11,6 +11,7 @@
 // contacts_import_conflicts_* names, and productImportReviewSurfaces.test.ts
 // pins both the lookups and the pack entries.
 import { useEffect, useState } from 'react'
+import { useApp } from '../../../AppContext'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
@@ -41,13 +42,20 @@ type ReviewPayload = {
   unresolvedProductConflicts?: number
 }
 
-export default function ProductImportConflictsModal({ jobId, t, notify, onClose, onAllResolved }: {
+export default function ProductImportConflictsModal(props: Parameters<typeof ProductImportConflictsBody>[0]) {
+  const { hasPermission } = useApp() as { hasPermission: (key: string) => boolean }
+  if (!hasPermission('product_cost_view')) return <Modal title={props.t?.('product_cost_import_view_required') || 'Cost view permission is required to review financial import data.'} onClose={props.onClose} unsavedChanges="read-only"><p role="status">{props.t?.('product_cost_import_view_required') || 'Cost view permission is required to review financial import data.'}</p></Modal>
+  return <ProductImportConflictsBody {...props} />
+}
+
+function ProductImportConflictsBody({ jobId, t, notify, onClose, onAllResolved }: {
   jobId: string | number
   t?: TranslateFn
   notify: (message: string, tone?: string) => void
   onClose: () => void
   onAllResolved?: () => void
 }) {
+  const canEditCosts = (useApp() as { hasPermission: (key: string) => boolean }).hasPermission('product_cost_edit')
   const tr = (key: string, fallbackEn: string): string => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallbackEn
@@ -89,6 +97,7 @@ export default function ProductImportConflictsModal({ jobId, t, notify, onClose,
   useEffect(() => { void load() }, [jobId, page, query]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const decide = async (rowNumber: number, action: 'apply' | 'skip') => {
+    if (!canEditCosts) return
     if (savingRow !== null) return
     setSavingRow(rowNumber)
     try {
@@ -140,8 +149,8 @@ export default function ProductImportConflictsModal({ jobId, t, notify, onClose,
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0"><p className="text-sm font-semibold">{tr('products_import_conflicts_row', 'Row {row}: {name}').replace('{row}', String(row.rowNumber)).replace('{name}', rowName)}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{details || tr('products_import_conflicts_review_required', 'Review required')}</p></div>
                 <div className="flex shrink-0 gap-2">
-                  <button type="button" className={choice === 'apply' ? 'btn-primary text-xs' : 'btn-secondary text-xs'} disabled={savingRow !== null} onClick={() => void decide(row.rowNumber, 'apply')}><CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />{applyLabel}</button>
-                  <button type="button" className={choice === 'skip' ? 'btn-primary text-xs' : 'btn-secondary text-xs'} disabled={savingRow !== null} onClick={() => void decide(row.rowNumber, 'skip')}>{skipLabel}</button>
+                  <button type="button" className={choice === 'apply' ? 'btn-primary text-xs' : 'btn-secondary text-xs'} disabled={!canEditCosts || savingRow !== null} onClick={() => void decide(row.rowNumber, 'apply')}><CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />{applyLabel}</button>
+                  <button type="button" className={choice === 'skip' ? 'btn-primary text-xs' : 'btn-secondary text-xs'} disabled={!canEditCosts || savingRow !== null} onClick={() => void decide(row.rowNumber, 'skip')}>{skipLabel}</button>
                 </div>
               </div>
             </div>

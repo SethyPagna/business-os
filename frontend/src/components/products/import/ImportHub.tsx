@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { useApp } from '../../../AppContext'
 import UploadCloud from 'lucide-react/dist/esm/icons/upload-cloud.js'
 import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
 import AppSelect from '../../shared/AppSelect.tsx'
@@ -65,6 +66,8 @@ export default function ImportHub({
   onClose: () => void
 }) {
   const [plan, setPlan] = useState<PlanEntry[]>([])
+  const canEditCosts = (useApp() as { hasPermission: (key: string) => boolean }).hasPermission('product_cost_edit')
+  const needsCostEdit = (type: string) => ['products', 'inventory', 'sales', 'stock_actions'].includes(type)
   const [reading, setReading] = useState(false)
   const [dispatching, setDispatching] = useState(false)
   const [done, setDone] = useState(false)
@@ -121,6 +124,7 @@ export default function ImportHub({
         if (entry.chosen === 'skip' || entry.detected === 'deferred_ledger' || entry.status === 'queued' || entry.status === 'error') continue
         const update = (patch: Partial<PlanEntry>) => setPlan((previous) => previous.map((row, i) => i === index ? { ...row, ...patch } : row))
         try {
+          if (needsCostEdit(entry.chosen) && !canEditCosts) throw new Error(T('product_cost_import_required', 'Cost edit permission is required for this import format.'))
           update({ status: 'creating' })
           const created = await createImportJob({
             type: entry.chosen,
@@ -147,7 +151,7 @@ export default function ImportHub({
   }
 
   const queuedCount = plan.filter((entry) => entry.status === 'queued').length
-  const actionable = plan.some((entry) => entry.chosen !== 'skip' && entry.status === 'planned')
+  const actionable = plan.some((entry) => entry.chosen !== 'skip' && entry.status === 'planned' && (canEditCosts || !needsCostEdit(entry.chosen)))
   const hasSales = plan.some((entry) => entry.chosen === 'sales' && entry.status !== 'queued')
 
   // Review before importing: a few rows of each routed file so the operator can
@@ -169,6 +173,7 @@ export default function ImportHub({
   // renders body content only.
   return (
     <div className="space-y-4">
+      {!canEditCosts && plan.some(entry => needsCostEdit(entry.chosen)) ? <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{T('product_cost_import_required', 'Cost edit permission is required for this import format.')}</p> : null}
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
