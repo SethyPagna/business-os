@@ -14,6 +14,22 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Current acceptance checklist
 
+### Continuation evidence and release challenge
+
+- c409abf7: Expenses timestamp/full-day parity implemented; independent native and boundary checks pass. Other date hosts remain open.
+- f26ff13d +1fe5a392: concurrent inline queue roots isolated.20pure checks and7actual workerd D1/R2 cases pass; old implementation fails concurrency controls. Bound queue behavior unchanged.
+- Integrated frontend typecheck/i18n/build passes; Worker typecheck and52plan-tier/config/queue/surface checks pass. These are not live Free capacity certification.
+- Independent actual-function probes reproduce cross-account offline sale replay in foreground and SW. Fix assigned; mismatched/ownerless records must remain recoverable, not silently submitted or deleted. This blocks the next release.
+
+AI Council release decision (one lead simulating five perspectives, not five independent advisors):
+1. Skeptic: a green costing suite does not protect an offline sale from wrong-actor replay; release confidence is overstated without that boundary.
+2. Engineer: durable write identity, authorization and queue ownership must agree at dispatch and server admission; cookie identity alone is insufficient.
+3. Expansionist: eventually exercise an end-to-end device/account/failure matrix automatically on every release. Aspirational, not current coverage.
+4. Outsider: a user changing accounts must not unknowingly inherit another person's pending actions; retained recovery must be understandable.
+5. Executor: first make the observed A-to-B replay fail safely in both paths, with tests demonstrating the old failure.
+Anonymous cross-critique: A's strongest point is the concrete release risk but does not prescribe recovery; B supplies the invariant but needs legacy treatment; C broadens coverage but cannot delay the minimal repair indefinitely; D protects user comprehension but needs server proof; E is actionable but must include SW as well as foreground.
+Chairman: within the next release decision, prioritize ownership enforcement and retained quarantine; biggest risk is silent wrong-account writes or lost queued work. Number-one step is the failing-then-passing replay regression. Keep cost migration/deployment pending this check.
+
 | Request | Current evidence/status | Remaining acceptance |
 | --- | --- | --- |
 | Separate cost viewing and entry permissions; non-admin defaults off | Implemented frontend and Worker, including imports, exports, supplier totals, audit and revocation surfaces. POS always hides costs. Focused security checks pass. | Integrated broad certification and deployment. |
