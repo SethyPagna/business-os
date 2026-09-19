@@ -193,6 +193,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   const { fmtUSD, fmtKHR, usdSymbol, user, notify } = useApp() as AppContextSlice
   const canEditCosts = canEditAcquisitionCosts(user)
   const canViewCosts = canViewAcquisitionCosts(user)
+  const costViewRef = useRef(canViewCosts)
+  costViewRef.current = canViewCosts
 
   const isKhmer = /[ក-៿]/.test(t('cancel') || '')
   const tr = useCallback((key: string, fallbackEn?: string, fallbackKm?: string): string => {
@@ -389,11 +391,14 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   // Initialize adjustForm exactly like Inventory.openAdjust once a product
   // is picked (pricingLocked true, prices from the product, branch = default).
   const selectProduct = useCallback((product: PickedProduct, picked?: { branchId?: string | null; batchId?: number | null }) => {
+    const canViewCosts = costViewRef.current
     const restore = restoredDraftRef.current
     if (restore && String(restore.product.id) === String(product.id)) {
       restoredDraftRef.current = null
       setSelectedProduct(product)
-      setAdjustForm({ ...(restore.form as unknown as AdjustForm), product_id: product.id })
+      setAdjustForm({ ...(restore.form as unknown as AdjustForm), product_id: product.id,
+        ...(!canViewCosts ? { cost_usd: '', cost_khr: '', unit_cost_usd: '' } : {}),
+      })
       return
     }
     setSelectedProduct(product)
@@ -418,14 +423,14 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       discount_type: product.discount_type || 'percent',
       discount_percent: product.discount_percent || 0,
       discount_amount_usd: product.discount_amount_usd || 0,
-      cost_usd: canViewCosts ? product.cost_price_usd || product.purchase_price_usd || 0 : '',
-      cost_khr: canViewCosts ? product.cost_price_khr || product.purchase_price_khr || 0 : '',
+      cost_usd: canViewCosts ? product.cost_price_usd ?? product.purchase_price_usd ?? '' : '',
+      cost_khr: canViewCosts ? product.cost_price_khr ?? product.purchase_price_khr ?? '' : '',
       barcode: product.barcode || '',
       batch_id: picked?.batchId != null ? String(picked.batchId) : '',
       received_date: todayIsoDate(),
       supplier_id: '',
       supplier_name: '',
-      unit_cost_usd: '',
+      unit_cost_usd: canViewCosts ? product.cost_price_usd ?? product.purchase_price_usd ?? '' : '',
       free_goods: false,
       payment_status: 'paid',
       credit_due_date: '',

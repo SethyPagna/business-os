@@ -87,14 +87,14 @@ runTest('the same product cannot be added twice in one stock session', () => {
     'nested scanned-product creation sees saved and queued session lines too')
 })
 
-runTest('changed cost offers and uses the existing price-variant path', () => {
+runTest('changed receipt cost retains the original product instead of offering a price-only variant', () => {
   // P4-B: the same import now also brings in the batched fast-stock-in
   // commit transport (commitFastStockIn) alongside adjustStock.
   assert.match(modalSource, /import \{ adjustStock[^}]*\} from '\.\.\/\.\.\/api\/inventoryWriteTransport\.tsx?'/)
-  assert.match(modalSource, /setCreatePriceVariant\(canViewCosts && costChanged\(picked, next\)\)/, 'a visible changed cost enables the safe variant choice; a redacted cost is never compared as zero')
-  assert.match(modalSource, /create_price_variant.*Create\/use a price variant/, 'the choice is visible beside the edited cost')
-  assert.match(modalSource, /unlockPricing: true/)
-  assert.match(modalSource, /pricing: pricingForVariant\(line\.product, Number\(line\.unitCost\)\)/)
+  assert.doesNotMatch(modalSource, /setCreatePriceVariant\(canViewCosts && costChanged/)
+  assert.doesNotMatch(modalSource, /create_price_variant.*Create\/use a price variant/)
+  assert.doesNotMatch(modalSource, /unlockPricing: true|pricingForVariant/)
+  assert.match(modalSource, /createPriceVariant: false/, 'legacy draft shape stays compatible without requesting a new product')
   assert.match(modalSource, /sessionId: sessionIdRef\.current/, 'variant receipts remain in the same stock-in session')
   assert.match(modalSource, /const sessionCostTotal = received\.reduce/, 'the shipment exposes its total recorded cost')
   assert.match(modalSource, /Total cost'\)}: \$\{sessionCostTotal\.toFixed\(2\)\}/, 'session cost stays visible above the received rows')
@@ -218,7 +218,7 @@ runTest('the lot picker matches the sibling add-stock surfaces', () => {
   // The choice reaches the server, and unlocked pricing never carries one.
   assert.match(modalSource, /batchId: typeof line\.batchChoice === 'number' \? line\.batchChoice : null/)
   assert.match(modalSource, /receivedDate: line\.batchChoice === 'new' \? \(receivedDate\.trim\(\) \|\| null\) : null/)
-  assert.match(modalSource, /batch_auto_new_unlocked/, 'a price variant always creates a fresh lot, and says so')
+  assert.doesNotMatch(modalSource, /batch_auto_new_unlocked/, 'receipt cost editing does not pretend to unlock product identity')
   // The lot is frozen onto the queued line and stays visible.
   assert.match(modalSource, /batchChoice: effectiveBatchChoice/)
   assert.match(modalSource, /\{line\.batchLabel\}/, 'what was chosen is visible before and after Complete')
