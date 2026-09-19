@@ -56,8 +56,11 @@ export function registerInlineImportRunner(runner: InlineImportRunner): void {
   inlineRunner = runner
 }
 
-const pending: Array<{ env: Env; message: ImportQueueMessage }> = []
-let draining = false
+type InlineScope = { pending: ImportQueueMessage[]; active: boolean }
+// Only private runner-facing wrappers are keys, never the shared Worker Env.
+// Thus two requests with the same Env still own independent completion/error.
+// Weak keys do not retain an invocation after its runner releases the wrapper.
+let inlineScopes = new WeakMap<Env, InlineScope>()
 
 /**
  * Dispatch one unit of import work. Never throws for a missing binding; the
@@ -79,25 +82,34 @@ export async function dispatchImportWork(env: Env, message: ImportQueueMessage):
     throw new Error('No IMPORT_QUEUE binding and no inline import runner registered; import work cannot be dispatched.')
   }
 
-  pending.push({ env, message })
-  // Already inside the loop below -- the running chunk's continuation just
-  // got appended, and the loop will reach it. Returning here is what keeps
-  // the stack flat.
-  if (draining) return 'inline'
+  const inherited = env && inlineScopes.get(env)
+  if (inherited) {
+    if (!inherited.active) throw new Error('The inline import dispatch scope has already completed.')
+    inherited.pending.push(message)
+    // Only continuations carrying THIS root's private wrapper may return
+    // early. The root caller awaits the entire flat drain, including errors.
+    return 'inline'
+  }
 
-  draining = true
+  const scope: InlineScope = { pending: [message], active: true }
+  // Forward bindings without copying, rebinding or annotating the shared Env.
+  // Reflect with the original receiver also preserves accessor-backed bindings;
+  // own keys/descriptors and binding object identity remain unchanged.
+  const scopedEnv = new Proxy(env ?? {} as Env, {
+    get: (target, property) => Reflect.get(target, property, target),
+  })
+  inlineScopes.set(scopedEnv, scope)
+  const runner = inlineRunner
   try {
-    while (pending.length) {
-      const next = pending.shift() as { env: Env; message: ImportQueueMessage }
-      await inlineRunner(next.env, next.message)
+    while (scope.pending.length) {
+      const next = scope.pending.shift() as ImportQueueMessage
+      await runner(scopedEnv, next)
     }
   } finally {
-    draining = false
-    // A throw abandons whatever continuations were queued behind it; they
-    // belong to a job that just failed, and the cursor they would have
-    // resumed from is already persisted. Leaving them here would run them on
-    // the NEXT unrelated dispatch.
-    pending.length = 0
+    scope.active = false
+    // Abandon only this root's continuations. Keep the closed scope associated
+    // with a retained wrapper so a late callback cannot resurrect failed work.
+    scope.pending.length = 0
   }
   return 'inline'
 }
@@ -140,9 +152,8 @@ export function chunkRowsForAttempt(limit: number, attempt?: number): number {
   return Math.max(Math.min(limit, MIN_IMPORT_CHUNK_ROWS), scaled)
 }
 
-/** Test seam: the trampoline is module state, same as planTier's tier cache. */
+/** Test seam; use only when no dispatch is in flight. */
 export function __resetQueueDispatchForTests(): void {
   inlineRunner = null
-  pending.length = 0
-  draining = false
+  inlineScopes = new WeakMap()
 }
