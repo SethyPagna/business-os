@@ -91,6 +91,10 @@ const buildInClause = (prefix, values) => ({
 })
 const selectInChunks = async (values, _reserved, query) => values.length ? query(values) : []
 const branchRoute = loadModule('routes/branches.ts', (id) => {
+  if (id === '../lib/acquisitionCostAccess') return loadModule('lib/acquisitionCostAccess.ts', dep => {
+    if (dep === './permissions') return loadModule('lib/permissions.ts', require)
+    return require(dep)
+  })
   if (id === 'hono') return require('hono')
   if (id === '../lib/db') return { getDb: dbCompat }
   if (id === '../lib/sqlBinding') return { buildInClause, chunkForBinding: (values) => [values], selectInChunks }
